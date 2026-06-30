@@ -2734,6 +2734,26 @@ pub struct UserInitProcess {
     syscall_dispatch_bound: bool,
     syscall_arguments_extracted: bool,
     runtime_entered: bool,
+    credentials_inherited: bool,
+    root_credentials_bound: bool,
+    credentials_capability_model_deferred: bool,
+    uid: usize,
+    gid: usize,
+    euid: usize,
+    egid: usize,
+    suid: usize,
+    sgid: usize,
+    fsuid: usize,
+    fsgid: usize,
+    uid_read_observed: bool,
+    gid_read_observed: bool,
+    uid_set_observed: bool,
+    gid_set_observed: bool,
+    signal_state_inherited: bool,
+    blocked_signal_mask_bound: bool,
+    signal_delivery_deferred: bool,
+    blocked_signal_mask: usize,
+    rt_sigprocmask_observed: bool,
     clear_child_tid_bound: bool,
     clear_child_tid: usize,
 }
@@ -2767,6 +2787,26 @@ impl UserInitProcess {
             syscall_dispatch_bound: false,
             syscall_arguments_extracted: false,
             runtime_entered: false,
+            credentials_inherited: false,
+            root_credentials_bound: false,
+            credentials_capability_model_deferred: false,
+            uid: 0,
+            gid: 0,
+            euid: 0,
+            egid: 0,
+            suid: 0,
+            sgid: 0,
+            fsuid: 0,
+            fsgid: 0,
+            uid_read_observed: false,
+            gid_read_observed: false,
+            uid_set_observed: false,
+            gid_set_observed: false,
+            signal_state_inherited: false,
+            blocked_signal_mask_bound: false,
+            signal_delivery_deferred: false,
+            blocked_signal_mask: 0,
+            rt_sigprocmask_observed: false,
             clear_child_tid_bound: false,
             clear_child_tid: 0,
         }
@@ -2872,6 +2912,98 @@ impl UserInitProcess {
         self.runtime_entered
     }
 
+    pub const fn credentials_inherited(&self) -> bool {
+        self.credentials_inherited
+    }
+
+    pub const fn root_credentials_bound(&self) -> bool {
+        self.root_credentials_bound
+    }
+
+    pub const fn credentials_capability_model_deferred(&self) -> bool {
+        self.credentials_capability_model_deferred
+    }
+
+    pub const fn uid(&self) -> usize {
+        self.uid
+    }
+
+    pub const fn gid(&self) -> usize {
+        self.gid
+    }
+
+    pub const fn euid(&self) -> usize {
+        self.euid
+    }
+
+    pub const fn egid(&self) -> usize {
+        self.egid
+    }
+
+    pub const fn suid(&self) -> usize {
+        self.suid
+    }
+
+    pub const fn sgid(&self) -> usize {
+        self.sgid
+    }
+
+    pub const fn fsuid(&self) -> usize {
+        self.fsuid
+    }
+
+    pub const fn fsgid(&self) -> usize {
+        self.fsgid
+    }
+
+    pub const fn uid_read_observed(&self) -> bool {
+        self.uid_read_observed
+    }
+
+    pub const fn gid_read_observed(&self) -> bool {
+        self.gid_read_observed
+    }
+
+    pub const fn uid_set_observed(&self) -> bool {
+        self.uid_set_observed
+    }
+
+    pub const fn gid_set_observed(&self) -> bool {
+        self.gid_set_observed
+    }
+
+    pub const fn signal_state_inherited(&self) -> bool {
+        self.signal_state_inherited
+    }
+
+    pub const fn blocked_signal_mask_bound(&self) -> bool {
+        self.blocked_signal_mask_bound
+    }
+
+    pub const fn signal_delivery_deferred(&self) -> bool {
+        self.signal_delivery_deferred
+    }
+
+    pub const fn blocked_signal_mask(&self) -> usize {
+        self.blocked_signal_mask
+    }
+
+    pub const fn rt_sigprocmask_observed(&self) -> bool {
+        self.rt_sigprocmask_observed
+    }
+
+    pub fn credentials_syscall_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.credentials_inherited
+            && self.root_credentials_bound
+    }
+
+    pub fn signal_mask_syscall_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.signal_state_inherited
+            && self.blocked_signal_mask_bound
+    }
+
     pub const fn clear_child_tid_bound(&self) -> bool {
         self.clear_child_tid_bound
     }
@@ -2924,6 +3056,21 @@ impl UserInitProcess {
         self.kernel_init_pid1_identity_preserved = true;
         self.kernel_init_user_mm_attached = true;
         self.kernel_init_user_trap_frame_attached = true;
+        self.credentials_inherited = true;
+        self.root_credentials_bound = true;
+        self.credentials_capability_model_deferred = true;
+        self.uid = 0;
+        self.gid = 0;
+        self.euid = 0;
+        self.egid = 0;
+        self.suid = 0;
+        self.sgid = 0;
+        self.fsuid = 0;
+        self.fsgid = 0;
+        self.signal_state_inherited = true;
+        self.blocked_signal_mask_bound = true;
+        self.signal_delivery_deferred = true;
+        self.blocked_signal_mask = 0;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -2989,6 +3136,62 @@ impl UserInitProcess {
         self.clear_child_tid = tidptr;
         self.clear_child_tid_bound = true;
         super::rest_init::KERNEL_INIT_PID
+    }
+
+    pub fn read_uid(&mut self) -> Option<usize> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.uid_read_observed = true;
+        Some(self.uid)
+    }
+
+    pub fn read_gid(&mut self) -> Option<usize> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.gid_read_observed = true;
+        Some(self.gid)
+    }
+
+    pub fn set_uid_root_slice(&mut self, uid: usize) -> bool {
+        if !self.credentials_syscall_ready() || uid != 0 {
+            return false;
+        }
+        self.uid = uid;
+        self.euid = uid;
+        self.suid = uid;
+        self.fsuid = uid;
+        self.uid_set_observed = true;
+        true
+    }
+
+    pub fn set_gid_root_slice(&mut self, gid: usize) -> bool {
+        if !self.credentials_syscall_ready() || gid != 0 {
+            return false;
+        }
+        self.gid = gid;
+        self.egid = gid;
+        self.sgid = gid;
+        self.fsgid = gid;
+        self.gid_set_observed = true;
+        true
+    }
+
+    pub fn set_blocked_signal_mask(&mut self, mask: usize) -> bool {
+        if !self.signal_mask_syscall_ready() {
+            return false;
+        }
+        self.blocked_signal_mask = mask;
+        true
+    }
+
+    pub fn observe_rt_sigprocmask(&mut self) -> bool {
+        if !self.signal_mask_syscall_ready() {
+            return false;
+        }
+        self.rt_sigprocmask_observed = true;
+        true
     }
 }
 

@@ -66,6 +66,11 @@ const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_RT_SIGPROCMASK: usize = 135;
+const SYSCALL_SETGID: usize = 144;
+const SYSCALL_SETUID: usize = 146;
+const SYSCALL_GETUID: usize = 174;
+const SYSCALL_GETGID: usize = 176;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_MMAP: usize = 222;
@@ -85,6 +90,14 @@ const F_GETFL: usize = 3;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
+const RT_SIGSET_SIZE: usize = core::mem::size_of::<usize>();
+const SIG_BLOCK: usize = 0;
+const SIG_UNBLOCK: usize = 1;
+const SIG_SETMASK: usize = 2;
+const SIGKILL: usize = 9;
+const SIGSTOP: usize = 19;
+const UNBLOCKABLE_SIGNAL_MASK: usize = (1usize << (SIGKILL - 1)) | (1usize << (SIGSTOP - 1));
+const EPERM: usize = 1;
 const EACCES: usize = 13;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
@@ -114,6 +127,11 @@ pub struct SyscallTable {
     newfstatat_supported: bool,
     readlinkat_supported: bool,
     getrandom_supported: bool,
+    getuid_supported: bool,
+    getgid_supported: bool,
+    setuid_supported: bool,
+    setgid_supported: bool,
+    rt_sigprocmask_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
@@ -133,6 +151,7 @@ pub struct SyscallTable {
     path_usercopy_ready: bool,
     stat_usercopy_ready: bool,
     getrandom_usercopy_ready: bool,
+    signal_mask_usercopy_ready: bool,
     ioctl_usercopy_ready: bool,
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
@@ -146,6 +165,15 @@ pub struct SyscallTable {
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
     getrandom_full_random_core_deferred: bool,
+    getuid_routes_to_user_init_process: bool,
+    getgid_routes_to_user_init_process: bool,
+    setuid_routes_to_user_init_process: bool,
+    setgid_routes_to_user_init_process: bool,
+    credentials_full_linux_model_deferred: bool,
+    rt_sigprocmask_routes_to_user_init_process: bool,
+    rt_sigprocmask_sigsetsize_bound: bool,
+    rt_sigprocmask_unblockable_signals_cleared: bool,
+    signal_delivery_deferred: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     ioctl_routes_to_files_struct: bool,
@@ -161,6 +189,11 @@ pub struct SyscallTable {
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
     getrandom_observed: AtomicU8,
+    getuid_observed: AtomicU8,
+    getgid_observed: AtomicU8,
+    setuid_observed: AtomicU8,
+    setgid_observed: AtomicU8,
+    rt_sigprocmask_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -184,6 +217,11 @@ impl SyscallTable {
             newfstatat_supported: false,
             readlinkat_supported: false,
             getrandom_supported: false,
+            getuid_supported: false,
+            getgid_supported: false,
+            setuid_supported: false,
+            setgid_supported: false,
+            rt_sigprocmask_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
@@ -203,6 +241,7 @@ impl SyscallTable {
             path_usercopy_ready: false,
             stat_usercopy_ready: false,
             getrandom_usercopy_ready: false,
+            signal_mask_usercopy_ready: false,
             ioctl_usercopy_ready: false,
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
@@ -216,6 +255,15 @@ impl SyscallTable {
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
             getrandom_full_random_core_deferred: false,
+            getuid_routes_to_user_init_process: false,
+            getgid_routes_to_user_init_process: false,
+            setuid_routes_to_user_init_process: false,
+            setgid_routes_to_user_init_process: false,
+            credentials_full_linux_model_deferred: false,
+            rt_sigprocmask_routes_to_user_init_process: false,
+            rt_sigprocmask_sigsetsize_bound: false,
+            rt_sigprocmask_unblockable_signals_cleared: false,
+            signal_delivery_deferred: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             ioctl_routes_to_files_struct: false,
@@ -231,6 +279,11 @@ impl SyscallTable {
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
             getrandom_observed: AtomicU8::new(0),
+            getuid_observed: AtomicU8::new(0),
+            getgid_observed: AtomicU8::new(0),
+            setuid_observed: AtomicU8::new(0),
+            setgid_observed: AtomicU8::new(0),
+            rt_sigprocmask_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -294,6 +347,31 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn getrandom_supported(&self) -> bool {
         self.getrandom_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn getuid_supported(&self) -> bool {
+        self.getuid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn getgid_supported(&self) -> bool {
+        self.getgid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn setuid_supported(&self) -> bool {
+        self.setuid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgid_supported(&self) -> bool {
+        self.setgid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigprocmask_supported(&self) -> bool {
+        self.rt_sigprocmask_supported
     }
 
     #[allow(dead_code)]
@@ -392,6 +470,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn signal_mask_usercopy_ready(&self) -> bool {
+        self.signal_mask_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn ioctl_usercopy_ready(&self) -> bool {
         self.ioctl_usercopy_ready
     }
@@ -454,6 +537,51 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn getrandom_full_random_core_deferred(&self) -> bool {
         self.getrandom_full_random_core_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn getuid_routes_to_user_init_process(&self) -> bool {
+        self.getuid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn getgid_routes_to_user_init_process(&self) -> bool {
+        self.getgid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn setuid_routes_to_user_init_process(&self) -> bool {
+        self.setuid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgid_routes_to_user_init_process(&self) -> bool {
+        self.setgid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn credentials_full_linux_model_deferred(&self) -> bool {
+        self.credentials_full_linux_model_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigprocmask_routes_to_user_init_process(&self) -> bool {
+        self.rt_sigprocmask_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigprocmask_sigsetsize_bound(&self) -> bool {
+        self.rt_sigprocmask_sigsetsize_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigprocmask_unblockable_signals_cleared(&self) -> bool {
+        self.rt_sigprocmask_unblockable_signals_cleared
+    }
+
+    #[allow(dead_code)]
+    pub const fn signal_delivery_deferred(&self) -> bool {
+        self.signal_delivery_deferred
     }
 
     #[allow(dead_code)]
@@ -532,6 +660,31 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn getuid_observed(&self) -> bool {
+        self.getuid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn getgid_observed(&self) -> bool {
+        self.getgid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn setuid_observed(&self) -> bool {
+        self.setuid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn setgid_observed(&self) -> bool {
+        self.setgid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn rt_sigprocmask_observed(&self) -> bool {
+        self.rt_sigprocmask_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fstat_observed(&self) -> bool {
         self.fstat_observed.load(Ordering::Acquire) != 0
     }
@@ -587,6 +740,11 @@ impl SyscallTable {
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
         self.getrandom_supported = true;
+        self.getuid_supported = true;
+        self.getgid_supported = true;
+        self.setuid_supported = true;
+        self.setgid_supported = true;
+        self.rt_sigprocmask_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
@@ -606,6 +764,7 @@ impl SyscallTable {
         self.path_usercopy_ready = true;
         self.stat_usercopy_ready = true;
         self.getrandom_usercopy_ready = true;
+        self.signal_mask_usercopy_ready = true;
         self.ioctl_usercopy_ready = true;
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
@@ -619,6 +778,15 @@ impl SyscallTable {
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
         self.getrandom_full_random_core_deferred = true;
+        self.getuid_routes_to_user_init_process = true;
+        self.getgid_routes_to_user_init_process = true;
+        self.setuid_routes_to_user_init_process = true;
+        self.setgid_routes_to_user_init_process = true;
+        self.credentials_full_linux_model_deferred = true;
+        self.rt_sigprocmask_routes_to_user_init_process = true;
+        self.rt_sigprocmask_sigsetsize_bound = true;
+        self.rt_sigprocmask_unblockable_signals_cleared = true;
+        self.signal_delivery_deferred = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.ioctl_routes_to_files_struct = true;
@@ -753,6 +921,72 @@ impl SyscallTable {
         }
 
         syscall_table_getrandom(self, frame);
+    }
+
+    pub fn getuid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getuid_supported
+            || !self.getuid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getuid(self, frame);
+    }
+
+    pub fn getgid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getgid_supported
+            || !self.getgid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getgid(self, frame);
+    }
+
+    pub fn setuid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setuid_supported
+            || !self.setuid_routes_to_user_init_process
+            || !self.credentials_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setuid(self, frame);
+    }
+
+    pub fn setgid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setgid_supported
+            || !self.setgid_routes_to_user_init_process
+            || !self.credentials_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setgid(self, frame);
+    }
+
+    pub fn rt_sigprocmask(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.rt_sigprocmask_supported
+            || !self.rt_sigprocmask_routes_to_user_init_process
+            || !self.rt_sigprocmask_sigsetsize_bound
+            || !self.rt_sigprocmask_unblockable_signals_cleared
+            || !self.signal_delivery_deferred
+            || !self.signal_mask_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_rt_sigprocmask(self, frame);
     }
 
     pub fn fstat(&self, frame: &mut TrapFrame) {
@@ -1193,6 +1427,11 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
+        SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
+        SYSCALL_SETGID => table.setgid(frame),
+        SYSCALL_SETUID => table.setuid(frame),
+        SYSCALL_GETUID => table.getuid(frame),
+        SYSCALL_GETGID => table.getgid(frame),
         SYSCALL_BRK => table.brk(frame),
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
@@ -1504,6 +1743,111 @@ fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.getrandom_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, read);
+}
+
+fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(uid) = crate::context::context().user_init_process.read_uid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.getuid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, uid);
+}
+
+fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(gid) = crate::context::context().user_init_process.read_gid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.getgid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, gid);
+}
+
+fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let uid = frame.reg(10);
+    if !crate::context::context()
+        .user_init_process
+        .set_uid_root_slice(uid)
+    {
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+
+    table.setuid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let gid = frame.reg(10);
+    if !crate::context::context()
+        .user_init_process
+        .set_gid_root_slice(gid)
+    {
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+
+    table.setgid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
+    let how = frame.reg(10);
+    let new_set_ptr = frame.reg(11);
+    let old_set_ptr = frame.reg(12);
+    let sigset_size = frame.reg(13);
+    if sigset_size != RT_SIGSET_SIZE {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let old_mask = crate::context::context_ref()
+        .user_init_process
+        .blocked_signal_mask();
+    if new_set_ptr != 0 {
+        let Some(mut new_mask) = read_user_usize(new_set_ptr) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        new_mask &= !UNBLOCKABLE_SIGNAL_MASK;
+
+        let current_mask = crate::context::context_ref()
+            .user_init_process
+            .blocked_signal_mask();
+        let next_mask = match how {
+            SIG_BLOCK => current_mask | new_mask,
+            SIG_UNBLOCK => current_mask & !new_mask,
+            SIG_SETMASK => new_mask,
+            _ => {
+                complete_error_syscall(frame, EINVAL);
+                return;
+            }
+        };
+        if !crate::context::context()
+            .user_init_process
+            .set_blocked_signal_mask(next_mask)
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    }
+
+    if old_set_ptr != 0 && !write_user_usize(old_set_ptr, old_mask) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+    if !crate::context::context()
+        .user_init_process
+        .observe_rt_sigprocmask()
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.rt_sigprocmask_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
 }
 
 fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -1852,6 +2196,10 @@ fn read_user_usize(user_ptr: usize) -> Option<usize> {
     } else {
         None
     }
+}
+
+fn write_user_usize(user_ptr: usize, value: usize) -> bool {
+    copy_to_user(user_ptr, &value.to_le_bytes())
 }
 
 fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {

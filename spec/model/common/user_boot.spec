@@ -223,6 +223,11 @@ predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
+predicate syscall_table_getuid_supported<T>(table: T) -> bool;
+predicate syscall_table_getgid_supported<T>(table: T) -> bool;
+predicate syscall_table_setuid_supported<T>(table: T) -> bool;
+predicate syscall_table_setgid_supported<T>(table: T) -> bool;
+predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
@@ -234,6 +239,7 @@ predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_signal_mask_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
@@ -247,6 +253,15 @@ predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bo
 predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
 predicate syscall_getrandom_flags_first_slice_bound<T>(table: T) -> bool;
 predicate syscall_getrandom_full_random_core_deferred<T>(table: T) -> bool;
+predicate syscall_getuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_getgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
+predicate syscall_rt_sigprocmask_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigprocmask_sigsetsize_bound<T>(table: T) -> bool;
+predicate syscall_rt_sigprocmask_unblockable_signals_cleared<T>(table: T) -> bool;
+predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -269,6 +284,11 @@ predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
+predicate syscall_table_getuid_observed<T>(table: T) -> bool;
+predicate syscall_table_getgid_observed<T>(table: T) -> bool;
+predicate syscall_table_setuid_observed<T>(table: T) -> bool;
+predicate syscall_table_setgid_observed<T>(table: T) -> bool;
+predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -285,7 +305,18 @@ predicate user_init_process_fs_struct_inherited<T, F>(process: T, fs: F) -> bool
 predicate user_init_process_files_struct_inherited<T, F>(process: T, files: F) -> bool;
 predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
 predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
+predicate user_init_process_credentials_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_root_credentials_bound<T>(process: T) -> bool;
+predicate user_init_process_credentials_capability_model_deferred<T>(process: T) -> bool;
+predicate user_init_process_signal_state_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_blocked_signal_mask_bound<T>(process: T) -> bool;
+predicate user_init_process_signal_delivery_deferred<T>(process: T) -> bool;
 predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
+predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
+predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
+predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
+predicate user_init_process_gid_set_observed<T>(process: T) -> bool;
+predicate user_init_process_rt_sigprocmask_observed<T>(process: T) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
 predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
 predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
@@ -781,6 +812,11 @@ object SyscallTable: ResourceObject {
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
                     syscall_table_getrandom_supported(self);
+                    syscall_table_getuid_supported(self);
+                    syscall_table_getgid_supported(self);
+                    syscall_table_setuid_supported(self);
+                    syscall_table_setgid_supported(self);
+                    syscall_table_rt_sigprocmask_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
                     syscall_table_mprotect_supported(self);
@@ -792,6 +828,7 @@ object SyscallTable: ResourceObject {
                     syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
+                    syscall_signal_mask_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
@@ -813,6 +850,11 @@ object SyscallTable: ResourceObject {
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
             syscall_table_getrandom_supported(self);
+            syscall_table_getuid_supported(self);
+            syscall_table_getgid_supported(self);
+            syscall_table_setuid_supported(self);
+            syscall_table_setgid_supported(self);
+            syscall_table_rt_sigprocmask_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
             syscall_table_mprotect_supported(self);
@@ -824,6 +866,7 @@ object SyscallTable: ResourceObject {
             syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
+            syscall_signal_mask_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
@@ -1027,6 +1070,137 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::GetUid {
+                /*
+                 * Linux 6.12 RISC-V exposes getuid(2) as syscall number 174
+                 * in include/uapi/asm-generic/unistd.h; the implementation in
+                 * kernel/sys.c::sys_getuid() reads current_uid() from the
+                 * current task credentials.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadUid;
+                }
+
+                ensures {
+                    syscall_getuid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_uid_read_observed(UserInitProcess);
+                    syscall_table_getuid_observed(self);
+                }
+            }
+
+            on Action::GetGid {
+                /*
+                 * Linux 6.12 RISC-V exposes getgid(2) as syscall number 176;
+                 * kernel/sys.c::sys_getgid() reads current_gid() from current
+                 * task credentials.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadGid;
+                }
+
+                ensures {
+                    syscall_getgid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_gid_read_observed(UserInitProcess);
+                    syscall_table_getgid_observed(self);
+                }
+            }
+
+            on Action::SetUid {
+                /*
+                 * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
+                 * new credentials for current. The current first slice keeps a
+                 * root PID1 credential object on UserInitProcess and accepts
+                 * the no-op/root setuid path required by BusyBox startup;
+                 * namespaces, capability checks, LSM hooks, user accounting and
+                 * credential COW/RCU are explicit deferred facts.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::SetUid;
+                }
+
+                ensures {
+                    syscall_setuid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_credentials_full_linux_model_deferred(self);
+                    user_init_process_uid_set_observed(UserInitProcess);
+                    syscall_table_setuid_observed(self);
+                }
+            }
+
+            on Action::SetGid {
+                /*
+                 * Linux 6.12 kernel/sys.c::__sys_setgid() mirrors setuid for
+                 * group credentials. The current first slice only preserves
+                 * the root/no-op path and records the remaining credential
+                 * machinery as deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::SetGid;
+                }
+
+                ensures {
+                    syscall_setgid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_credentials_full_linux_model_deferred(self);
+                    user_init_process_gid_set_observed(UserInitProcess);
+                    syscall_table_setgid_observed(self);
+                }
+            }
+
+            on Action::RtSigprocmask {
+                /*
+                 * Linux 6.12 RISC-V exposes rt_sigprocmask(2) as syscall
+                 * number 135. kernel/signal.c::sys_rt_sigprocmask() checks
+                 * sigsetsize == sizeof(sigset_t), snapshots current->blocked,
+                 * copies an optional new mask, clears SIGKILL/SIGSTOP from it,
+                 * applies SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK via sigprocmask(),
+                 * and finally copies the old mask to user memory when oset is
+                 * non-null.
+                 *
+                 * The current slice stores the blocked mask on UserInitProcess
+                 * because the PID1 task is the exec-transformed
+                 * KernelInitTask. Full signal delivery, shared sighand,
+                 * pending queues, restart, thread-group semantics and
+                 * siglock/IRQ locking are deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_signal_mask_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::RtSigprocmask;
+                }
+
+                ensures {
+                    syscall_rt_sigprocmask_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_rt_sigprocmask_sigsetsize_bound(self);
+                    syscall_rt_sigprocmask_unblockable_signals_cleared(self);
+                    syscall_signal_delivery_deferred(self);
+                    user_init_process_rt_sigprocmask_observed(UserInitProcess);
+                    syscall_table_rt_sigprocmask_observed(self);
+                }
+            }
+
             on Action::Brk {
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1159,6 +1333,12 @@ object UserInitProcess: ResourceObject {
                     user_init_process_fs_struct_inherited(self, FsStruct);
                     user_init_process_files_struct_inherited(self, FilesStruct);
                     user_init_process_trap_frame_bound(self, UserTrapFrame);
+                    user_init_process_credentials_inherited(self, KernelInitTask);
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_credentials_capability_model_deferred(self);
+                    user_init_process_signal_state_inherited(self, KernelInitTask);
+                    user_init_process_blocked_signal_mask_bound(self);
+                    user_init_process_signal_delivery_deferred(self);
                     kernel_init_task_execve_to_user_init(KernelInitTask, self);
                     kernel_init_task_pid1_identity_preserved(KernelInitTask);
                     kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
@@ -1180,6 +1360,12 @@ object UserInitProcess: ResourceObject {
             user_init_process_fs_struct_inherited(self, FsStruct);
             user_init_process_files_struct_inherited(self, FilesStruct);
             user_init_process_trap_frame_bound(self, UserTrapFrame);
+            user_init_process_credentials_inherited(self, KernelInitTask);
+            user_init_process_root_credentials_bound(self);
+            user_init_process_credentials_capability_model_deferred(self);
+            user_init_process_signal_state_inherited(self, KernelInitTask);
+            user_init_process_blocked_signal_mask_bound(self);
+            user_init_process_signal_delivery_deferred(self);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
             kernel_init_task_pid1_identity_preserved(KernelInitTask);
             kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
@@ -1201,6 +1387,10 @@ object UserInitProcess: ResourceObject {
                     user_init_process_address_space_bound(self, UserAddressSpace);
                     user_init_process_fs_struct_inherited(self, FsStruct);
                     user_init_process_trap_frame_bound(self, UserTrapFrame);
+                    user_init_process_credentials_inherited(self, KernelInitTask);
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_signal_state_inherited(self, KernelInitTask);
+                    user_init_process_blocked_signal_mask_bound(self);
                     user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
                     kernel_init_task_execve_to_user_init(KernelInitTask, self);
                     kernel_init_task_pid1_identity_preserved(KernelInitTask);
@@ -1227,6 +1417,12 @@ object UserInitProcess: ResourceObject {
             user_init_process_files_struct_inherited(self, FilesStruct);
             user_init_process_trap_frame_bound(self, UserTrapFrame);
             user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
+            user_init_process_credentials_inherited(self, KernelInitTask);
+            user_init_process_root_credentials_bound(self);
+            user_init_process_credentials_capability_model_deferred(self);
+            user_init_process_signal_state_inherited(self, KernelInitTask);
+            user_init_process_blocked_signal_mask_bound(self);
+            user_init_process_signal_delivery_deferred(self);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
             kernel_init_task_pid1_identity_preserved(KernelInitTask);
             kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
@@ -1264,6 +1460,69 @@ object UserInitProcess: ResourceObject {
 
                 ensures {
                     user_init_process_clear_child_tid_bound(self);
+                }
+            }
+
+            on Action::ReadUid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_uid_read_observed(self);
+                }
+            }
+
+            on Action::ReadGid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_gid_read_observed(self);
+                }
+            }
+
+            on Action::SetUid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_credentials_capability_model_deferred(self);
+                    user_init_process_uid_set_observed(self);
+                }
+            }
+
+            on Action::SetGid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_credentials_capability_model_deferred(self);
+                    user_init_process_gid_set_observed(self);
+                }
+            }
+
+            on Action::RtSigprocmask {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_blocked_signal_mask_bound(self);
+                    user_init_process_signal_delivery_deferred(self);
+                    user_init_process_rt_sigprocmask_observed(self);
                 }
             }
 

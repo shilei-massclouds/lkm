@@ -123,6 +123,9 @@ predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bo
 predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
 predicate arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> bool;
+predicate arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask() -> bool;
+predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_kunit_observe_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug() -> bool;
@@ -1542,6 +1545,9 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
         arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice();
         arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core();
+        arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask();
+        arceos_ex_must_syscall_table_support_credentials_first_slice();
+        arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
