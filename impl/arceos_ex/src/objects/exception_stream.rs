@@ -59,6 +59,7 @@ const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_WRITEV: usize = 66;
+const SYSCALL_READLINKAT: usize = 78;
 const SYSCALL_NEWFSTATAT: usize = 79;
 const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_EXIT: usize = 93;
@@ -108,6 +109,7 @@ pub struct SyscallTable {
     read_supported: bool,
     close_supported: bool,
     newfstatat_supported: bool,
+    readlinkat_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
@@ -134,6 +136,7 @@ pub struct SyscallTable {
     read_routes_to_files_struct: bool,
     close_routes_to_files_struct: bool,
     newfstatat_routes_to_files_struct: bool,
+    readlinkat_routes_to_files_struct: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     ioctl_routes_to_files_struct: bool,
@@ -147,6 +150,7 @@ pub struct SyscallTable {
     read_observed: AtomicU8,
     close_observed: AtomicU8,
     newfstatat_observed: AtomicU8,
+    readlinkat_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -168,6 +172,7 @@ impl SyscallTable {
             read_supported: false,
             close_supported: false,
             newfstatat_supported: false,
+            readlinkat_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
@@ -194,6 +199,7 @@ impl SyscallTable {
             read_routes_to_files_struct: false,
             close_routes_to_files_struct: false,
             newfstatat_routes_to_files_struct: false,
+            readlinkat_routes_to_files_struct: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             ioctl_routes_to_files_struct: false,
@@ -207,6 +213,7 @@ impl SyscallTable {
             read_observed: AtomicU8::new(0),
             close_observed: AtomicU8::new(0),
             newfstatat_observed: AtomicU8::new(0),
+            readlinkat_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -260,6 +267,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn newfstatat_supported(&self) -> bool {
         self.newfstatat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn readlinkat_supported(&self) -> bool {
+        self.readlinkat_supported
     }
 
     #[allow(dead_code)]
@@ -393,6 +405,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn readlinkat_routes_to_files_struct(&self) -> bool {
+        self.readlinkat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
     pub const fn fstat_routes_to_files_struct(&self) -> bool {
         self.fstat_routes_to_files_struct
     }
@@ -458,6 +475,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn readlinkat_observed(&self) -> bool {
+        self.readlinkat_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fstat_observed(&self) -> bool {
         self.fstat_observed.load(Ordering::Acquire) != 0
     }
@@ -511,6 +533,7 @@ impl SyscallTable {
         self.read_supported = true;
         self.close_supported = true;
         self.newfstatat_supported = true;
+        self.readlinkat_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
@@ -537,6 +560,7 @@ impl SyscallTable {
         self.read_routes_to_files_struct = true;
         self.close_routes_to_files_struct = true;
         self.newfstatat_routes_to_files_struct = true;
+        self.readlinkat_routes_to_files_struct = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.ioctl_routes_to_files_struct = true;
@@ -642,6 +666,20 @@ impl SyscallTable {
         }
 
         syscall_table_newfstatat(self, frame);
+    }
+
+    pub fn readlinkat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.readlinkat_supported
+            || !self.path_usercopy_ready
+            || !self.read_usercopy_ready
+            || !self.readlinkat_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_readlinkat(self, frame);
     }
 
     pub fn fstat(&self, frame: &mut TrapFrame) {
@@ -1078,6 +1116,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_READ => table.read(frame),
         SYSCALL_WRITE => table.write(frame),
         SYSCALL_WRITEV => table.writev(frame),
+        SYSCALL_READLINKAT => table.readlinkat(frame),
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
@@ -1298,6 +1337,53 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_readlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let user_buf = frame.reg(12);
+    let bufsiz = frame.reg(13);
+    if bufsiz == 0 || bufsiz > isize::MAX as usize {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if dirfd != AT_FDCWD {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+
+    let len = core::cmp::min(bufsiz, USER_COPY_MAX);
+    let mut buffer = [0u8; USER_COPY_MAX];
+    let ctx = crate::context::context();
+    let read = match ctx.files_struct.readlink_path(
+        &ctx.fs_struct,
+        &mut ctx.vfs_core,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+        &path[..path_len],
+        &mut buffer[..len],
+    ) {
+        Ok(read) => read,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+    if !copy_to_user(user_buf, &buffer[..read]) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.readlinkat_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, read);
 }
 
 fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {

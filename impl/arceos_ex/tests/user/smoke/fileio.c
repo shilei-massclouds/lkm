@@ -130,6 +130,34 @@ static int smoke_directory_fileio(void)
 	return 0;
 }
 
+static int smoke_readlinkat(void)
+{
+	char link_buf[64];
+	ssize_t link_len = syscall(SYS_readlinkat, AT_FDCWD, "/bin/cat",
+				   link_buf, sizeof(link_buf));
+
+	if (link_len <= 0 || link_len >= (ssize_t)sizeof(link_buf)) {
+		return 60;
+	}
+	if (link_len < 7) {
+		return 61;
+	}
+	if (link_buf[link_len - 7] != 'b' ||
+	    link_buf[link_len - 6] != 'u' ||
+	    link_buf[link_len - 5] != 's' ||
+	    link_buf[link_len - 4] != 'y' ||
+	    link_buf[link_len - 3] != 'b' ||
+	    link_buf[link_len - 2] != 'o' ||
+	    link_buf[link_len - 1] != 'x') {
+		return 62;
+	}
+	if (SAY_LITERAL("syscall readlinkat symlink ok\n") < 0) {
+		return 63;
+	}
+
+	return 0;
+}
+
 int smoke_fileio(void)
 {
 	static const char path[] = "/etc/alpine-release";
@@ -225,6 +253,11 @@ int smoke_fileio(void)
 	int dir_status = smoke_directory_fileio();
 	if (dir_status != 0) {
 		return dir_status;
+	}
+
+	int readlink_status = smoke_readlinkat();
+	if (readlink_status != 0) {
+		return readlink_status;
 	}
 
 	if (SAY_LITERAL("syscall write ok\n") < 0) {

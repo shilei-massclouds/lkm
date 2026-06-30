@@ -3,7 +3,14 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
-use super::{block_device::BlockDeviceRegistry, ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk};
+use super::{
+    boot_param::BootParam,
+    block_device::BlockDeviceRegistry,
+    command_line::StaticCommandLine,
+    ext2::Ext2FileSystem,
+    vfs::VfsCore,
+    virtio_blk,
+};
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
     files::FilesStruct,
@@ -66,6 +73,7 @@ const ELF_PF_W: u32 = 2;
 const ELF_PF_R: u32 = 4;
 const ELF64_PHDR_SIZE: usize = 56;
 const ELF_INTERP_PATH_MAX: usize = 128;
+const USER_SELECTED_PATH_MAX: usize = 128;
 const MAX_LOAD_SEGMENTS: usize = 8;
 const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
@@ -307,6 +315,7 @@ pub enum UserInitPathRef {
     EtcInit,
     BinInit,
     BinSh,
+    RequestedInit,
 }
 
 impl UserInitPathRef {
@@ -317,6 +326,7 @@ impl UserInitPathRef {
             Self::EtcInit => 1,
             Self::BinInit => 2,
             Self::BinSh => 3,
+            Self::RequestedInit => 4,
         }
     }
 
@@ -326,6 +336,7 @@ impl UserInitPathRef {
             Self::EtcInit => USER_ETC_INIT_PATH,
             Self::BinInit => USER_BIN_INIT_PATH,
             Self::BinSh => USER_BIN_SH_PATH,
+            Self::RequestedInit => b"",
         }
     }
 }
@@ -749,7 +760,7 @@ impl UserStack {
         address_space: &UserAddressSpace,
         elf: &ElfObject,
         interpreter: Option<&ElfObject>,
-        selected_path: UserInitPathRef,
+        selected_path: &[u8],
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
@@ -837,10 +848,10 @@ impl UserStack {
         &mut self,
         elf: &ElfObject,
         interpreter: Option<&ElfObject>,
-        selected_path: UserInitPathRef,
+        selected_path: &[u8],
         page_metadata_map: &PageMetadataMap,
     ) -> Option<usize> {
-        let arg0 = selected_path.path();
+        let arg0 = selected_path;
         let arg0_len = arg0.len().checked_add(1)?;
         let arg0_ptr = align_down(self.top.checked_sub(arg0_len)?, 8);
         write_stack_bytes(self, page_metadata_map, arg0_ptr, arg0)?;
@@ -2725,7 +2736,10 @@ pub struct UserBootPayload {
     driven_by_kernel_init_task: bool,
     try_candidate_bound: bool,
     selected_path: UserInitPathRef,
+    selected_path_bytes: [u8; USER_SELECTED_PATH_MAX],
+    selected_path_len: usize,
     selected_path_bound: bool,
+    selected_argv0_path_bound: bool,
     reads_init_from_vfs: bool,
     enters_user_mode: bool,
     no_return_handoff: bool,
@@ -2752,7 +2766,10 @@ impl UserBootPayload {
             driven_by_kernel_init_task: false,
             try_candidate_bound: false,
             selected_path: UserInitPathRef::DefaultInit,
+            selected_path_bytes: [0; USER_SELECTED_PATH_MAX],
+            selected_path_len: 0,
             selected_path_bound: false,
+            selected_argv0_path_bound: false,
             reads_init_from_vfs: false,
             enters_user_mode: false,
             no_return_handoff: false,
@@ -2827,8 +2844,16 @@ impl UserBootPayload {
         self.selected_path
     }
 
+    pub fn selected_path_bytes(&self) -> &[u8] {
+        &self.selected_path_bytes[..self.selected_path_len]
+    }
+
     pub const fn selected_path_bound(&self) -> bool {
         self.selected_path_bound
+    }
+
+    pub const fn selected_argv0_path_bound(&self) -> bool {
+        self.selected_argv0_path_bound
     }
 
     pub const fn reads_init_from_vfs(&self) -> bool {
@@ -2879,8 +2904,16 @@ impl UserBootPayload {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
-    pub fn try_candidate(&mut self, path: UserInitPathRef, elf: &ElfObject) -> EventResult {
-        if self.lifecycle.state() != State::Ready || elf.state() != State::Ready {
+    pub fn try_candidate(
+        &mut self,
+        path: UserInitPathRef,
+        actual_path: &[u8],
+        elf: &ElfObject,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || elf.state() != State::Ready
+            || !valid_selected_path(actual_path)
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -2890,7 +2923,11 @@ impl UserBootPayload {
         }
 
         self.selected_path = path;
+        self.selected_path_bytes = [0; USER_SELECTED_PATH_MAX];
+        self.selected_path_bytes[..actual_path.len()].copy_from_slice(actual_path);
+        self.selected_path_len = actual_path.len();
         self.selected_path_bound = true;
+        self.selected_argv0_path_bound = true;
         self.first_successful_candidate_selected = true;
         self.reads_init_from_vfs = true;
         Ok(())
@@ -2951,6 +2988,8 @@ pub fn run_first_user_init(
     kernel_global_allocator: &KernelGlobalAllocator,
     exception_stream: &mut ExceptionStream,
     syscall_table: &mut SyscallTable,
+    boot_param: &BootParam,
+    static_command_line: &StaticCommandLine,
 ) -> ! {
     if payload.setup(kernel_init_task, exec_sync).is_err() {
         user_boot_panic("user payload setup failed\n");
@@ -2962,6 +3001,8 @@ pub fn run_first_user_init(
         ext2_filesystem,
         block_device_registry,
         kernel_image,
+        boot_param,
+        static_command_line,
     );
     let image = selected.image;
     if elf.preset_from_vfs(image).is_err() || elf.setup(image).is_err() {
@@ -2996,7 +3037,10 @@ pub fn run_first_user_init(
         None
     };
     let interpreter_ref = interpreter_image.map(|_| &*interpreter);
-    if payload.try_candidate(selected.path, elf).is_err() {
+    if payload
+        .try_candidate(selected.path, selected.actual_path(), elf)
+        .is_err()
+    {
         user_boot_panic("user init candidate failed\n");
     }
     if address_space
@@ -3015,7 +3059,7 @@ pub fn run_first_user_init(
             address_space,
             elf,
             interpreter_ref,
-            selected.path,
+            selected.actual_path(),
             page_allocator,
             page_metadata_map,
         )
@@ -3126,7 +3170,27 @@ pub fn run_first_user_init(
 #[cfg(app_user_boot)]
 struct SelectedUserInit {
     path: UserInitPathRef,
+    actual_path: [u8; USER_SELECTED_PATH_MAX],
+    actual_path_len: usize,
     image: &'static [u8],
+}
+
+#[cfg(app_user_boot)]
+impl SelectedUserInit {
+    fn new(path: UserInitPathRef, actual_path: &[u8], image: &'static [u8]) -> Self {
+        let mut path_buffer = [0u8; USER_SELECTED_PATH_MAX];
+        path_buffer[..actual_path.len()].copy_from_slice(actual_path);
+        Self {
+            path,
+            actual_path: path_buffer,
+            actual_path_len: actual_path.len(),
+            image,
+        }
+    }
+
+    fn actual_path(&self) -> &[u8] {
+        &self.actual_path[..self.actual_path_len]
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -3136,7 +3200,29 @@ fn select_user_init_candidate(
     ext2_filesystem: &mut Ext2FileSystem,
     block_device_registry: &mut BlockDeviceRegistry,
     kernel_image: &KernelImage,
+    boot_param: &BootParam,
+    static_command_line: &StaticCommandLine,
 ) -> SelectedUserInit {
+    if let Some(requested) = boot_param.init_value(static_command_line.as_bytes()) {
+        if !valid_selected_path(requested) {
+            user_boot_panic("requested init failed\n");
+        }
+        match try_read_user_path_image(
+            vfs_core,
+            fs_struct,
+            ext2_filesystem,
+            block_device_registry,
+            kernel_image,
+            requested,
+            false,
+        ) {
+            Ok(image) if elf_candidate_supported(image) => {
+                return SelectedUserInit::new(UserInitPathRef::RequestedInit, requested, image);
+            }
+            _ => user_boot_panic("requested init failed\n"),
+        }
+    }
+
     let mut index = 0usize;
     while index < USER_INIT_CANDIDATES.len() {
         let path = USER_INIT_CANDIDATES[index];
@@ -3150,13 +3236,17 @@ fn select_user_init_candidate(
             false,
         ) {
             if elf_candidate_supported(image) {
-                return SelectedUserInit { path, image };
+                return SelectedUserInit::new(path, path.path(), image);
             }
         }
         index += 1;
     }
 
     user_boot_panic("no working init found\n")
+}
+
+fn valid_selected_path(path: &[u8]) -> bool {
+    !path.is_empty() && path.len() <= USER_SELECTED_PATH_MAX && path[0] == b'/'
 }
 
 #[cfg(app_user_boot)]

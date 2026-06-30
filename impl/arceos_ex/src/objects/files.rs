@@ -111,6 +111,17 @@ fn vfs_error_to_file_error(error: VfsError) -> FileError {
     }
 }
 
+fn vfs_readlink_error_to_file_error(error: VfsError) -> FileError {
+    match error {
+        VfsError::NotFound => FileError::PathUnavailable,
+        VfsError::UnsupportedPath | VfsError::NotFile => FileError::InvalidArgument,
+        VfsError::ShortBuffer => FileError::BufferTooSmall,
+        VfsError::Backend => FileError::VfsBackendUnavailable,
+        VfsError::SymlinkLoop => FileError::TooManySymlinks,
+        _ => FileError::BackendUnavailable,
+    }
+}
+
 #[derive(Clone, Copy)]
 struct FileDescriptorEntry {
     ofd: OpenFileDescriptionRef,
@@ -756,6 +767,7 @@ pub struct FilesStruct {
     read_fd_routes_to_table: AtomicUsize,
     close_fd_routes_to_table: AtomicUsize,
     stat_path_routes_to_vfs: AtomicUsize,
+    readlink_path_routes_to_vfs: AtomicUsize,
     regular_fd_installed: AtomicUsize,
     regular_file_read_observed: AtomicUsize,
     regular_file_closed: AtomicUsize,
@@ -800,6 +812,7 @@ impl FilesStruct {
             read_fd_routes_to_table: AtomicUsize::new(0),
             close_fd_routes_to_table: AtomicUsize::new(0),
             stat_path_routes_to_vfs: AtomicUsize::new(0),
+            readlink_path_routes_to_vfs: AtomicUsize::new(0),
             regular_fd_installed: AtomicUsize::new(0),
             regular_file_read_observed: AtomicUsize::new(0),
             regular_file_closed: AtomicUsize::new(0),
@@ -863,6 +876,10 @@ impl FilesStruct {
 
     pub fn stat_path_routes_to_vfs(&self) -> bool {
         self.stat_path_routes_to_vfs.load(Ordering::Acquire) != 0
+    }
+
+    pub fn readlink_path_routes_to_vfs(&self) -> bool {
+        self.readlink_path_routes_to_vfs.load(Ordering::Acquire) != 0
     }
 
     pub fn regular_fd_installed(&self) -> bool {
@@ -1413,6 +1430,42 @@ impl FilesStruct {
         } else {
             Err(FileError::PermissionDenied)
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn readlink_path(
+        &mut self,
+        fs_struct: &FsStruct,
+        vfs_core: &mut VfsCore,
+        ext2_filesystem: &mut Ext2FileSystem,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+        path: &[u8],
+        buffer: &mut [u8],
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+            || buffer.is_empty()
+        {
+            return Err(FileError::InvalidArgument);
+        }
+
+        let mut provider = virtio_blk::live_provider(kernel_image);
+        let len = vfs_core
+            .readlink_path(
+                fs_struct,
+                ext2_filesystem,
+                block_device_registry,
+                &mut provider,
+                path,
+                buffer,
+            )
+            .map_err(vfs_readlink_error_to_file_error)?;
+        self.readlink_path_routes_to_vfs
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(len)
     }
 }
 

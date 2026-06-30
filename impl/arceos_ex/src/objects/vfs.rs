@@ -142,6 +142,12 @@ pub enum VfsError {
     SymlinkLoop,
 }
 
+struct PathFinal {
+    parent: DentryRef,
+    name: [u8; VFS_NAME_MAX],
+    name_len: usize,
+}
+
 pub struct FsStruct {
     lifecycle: Lifecycle,
     root_dentry: Option<DentryRef>,
@@ -1551,6 +1557,39 @@ impl VfsCore {
         Ok(VfsNodeStat::new(inode.size(), inode.kind()))
     }
 
+    pub fn readlink_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        if buffer.is_empty() {
+            return Err(VfsError::ShortBuffer);
+        }
+        let path_final = self.walk_path_parent(fs_struct, fs, registry, provider, path)?;
+        let dentry_ref = self.lookup_component(
+            fs,
+            registry,
+            provider,
+            path_final.parent,
+            &path_final.name[..path_final.name_len],
+        )?;
+        if !self.dentry_is_symlink(dentry_ref)? {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let mut target_buf = [0u8; VFS_PATH_MAX];
+        let target_len =
+            self.read_symlink_target(fs, registry, provider, dentry_ref, &mut target_buf)?;
+        let copied = core::cmp::min(buffer.len(), target_len);
+        buffer[..copied].copy_from_slice(&target_buf[..copied]);
+        self.read_count = self.read_count.saturating_add(1);
+        self.ext2_read_dispatched = true;
+        Ok(copied)
+    }
+
     pub fn file_stat(&self, file_ref: FileRef) -> Result<VfsNodeStat, VfsError> {
         let file = self.file(file_ref).ok_or(VfsError::InvalidRef)?;
         let inode = self.inode(file.inode_ref()).ok_or(VfsError::InvalidRef)?;
@@ -1864,6 +1903,44 @@ impl VfsCore {
             return self.lookup_ext2_child(fs, registry, provider, parent_ref, name);
         }
         self.lookup_child(parent_ref, name)
+    }
+
+    fn walk_path_parent<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<PathFinal, VfsError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VfsError::CoreNotReady);
+        }
+        if !path.starts_with(b"/") || path.len() > VFS_PATH_MAX {
+            return Err(VfsError::UnsupportedPath);
+        }
+
+        let end = path.len();
+        let mut start = end;
+        while start > 0 && path[start - 1] != b'/' {
+            start -= 1;
+        }
+        if start == end {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let (name, name_len) = copy_name(&path[start..end])?;
+
+        let parent = if start == 0 || start == 1 {
+            fs_struct.root_dentry().ok_or(VfsError::MountMissing)?
+        } else {
+            self.walk_path(fs_struct, fs, registry, provider, &path[..start - 1])?
+        };
+
+        Ok(PathFinal {
+            parent,
+            name,
+            name_len,
+        })
     }
 
     fn dentry_is_symlink(&self, dentry_ref: DentryRef) -> Result<bool, VfsError> {

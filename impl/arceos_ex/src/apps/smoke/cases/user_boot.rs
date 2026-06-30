@@ -127,6 +127,7 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_boot_payload
                 .try_candidate(
                     crate::objects::user_boot::UserInitPathRef::DefaultInit,
+                    USER_INIT_PATH,
                     &ctx.elf_object,
                 )
                 .is_ok(),
@@ -149,7 +150,7 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.user_address_space,
                     &ctx.elf_object,
                     interpreter_ref,
-                    crate::objects::user_boot::UserInitPathRef::DefaultInit,
+                    USER_INIT_PATH,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -313,6 +314,8 @@ impl SmokeScenario for UserBootElfScenario {
             "payload try candidate",
             ctx.user_boot_payload.try_candidate_bound()
                 && ctx.user_boot_payload.selected_path_bound()
+                && ctx.user_boot_payload.selected_argv0_path_bound()
+                && bytes_eq(ctx.user_boot_payload.selected_path_bytes(), USER_INIT_PATH)
                 && ctx.user_boot_payload.reads_init_from_vfs(),
         );
         assertions.assert(
@@ -822,6 +825,20 @@ fn stack_contains_at(
         };
         let byte = unsafe { *((linear + page_offset) as *const u8) };
         if byte != expected[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn bytes_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0usize;
+    while index < left.len() {
+        if left[index] != right[index] {
             return false;
         }
         index += 1;

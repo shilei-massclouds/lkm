@@ -3,13 +3,18 @@
  *
  * This slice models the shortest Linux-like path from PayloadPhase to the
  * first user-mode program. The selected payload variant is UserBootPayload.
- * It follows Linux init/main.c::kernel_init() after do_sysctl_args(): the
- * ramdisk init and explicit init= branches are handled by their existing
- * trimmed/deferred boundary facts, CONFIG_DEFAULT_INIT is empty in the current
- * configuration, and the default fallback list is tried in Linux order:
- * /sbin/init, /etc/init, /bin/init, then /bin/sh. The first candidate that can
- * be read from the current VFS root and accepted by the current executable
- * loader becomes the selected path. The selected file is treated as an
+ * It follows Linux 6.12 init/main.c::kernel_init() after do_sysctl_args(): the
+ * ramdisk init branch is trimmed because CONFIG_BLK_DEV_INITRD is disabled;
+ * execute_command from init= is a requested-init branch that runs before
+ * CONFIG_DEFAULT_INIT and before the default fallback list. If init= is
+ * present, the requested path is tried once; success stops the startup
+ * orchestration, and failure is the Linux requested-init panic boundary rather
+ * than a fallthrough to /sbin/init. If init= is absent, CONFIG_DEFAULT_INIT is
+ * empty in the current configuration, and the default fallback list is tried in
+ * Linux order: /sbin/init, /etc/init, /bin/init, then /bin/sh. The first
+ * candidate that can be read from the current VFS root and accepted by the
+ * current executable loader becomes the selected path. The selected file is
+ * treated as an
  * ElfObject, mapped into a UserAddressSpace, paired with a UserStack and
  * UserTrapFrame, then entered in U-mode. Syscalls remain under the existing
  * SyscallException branch of ExceptionStream. SyscallException owns syscall
@@ -31,6 +36,7 @@ enum UserInitPathRef {
     EtcInit,
     BinInit,
     BinSh,
+    RequestedInit,
 }
 
 enum ElfObjectRole {
@@ -43,6 +49,10 @@ predicate user_boot_payload_candidates_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_fallback_order_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_candidate_bound<T, P>(payload: T, path: P) -> bool;
+predicate user_boot_payload_requested_init_branch_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_requested_init_before_default_fallback<T>(payload: T) -> bool;
+predicate user_boot_payload_requested_init_failure_panic_terminal_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_requested_init_no_default_fallback<T>(payload: T) -> bool;
 predicate user_boot_payload_candidate_failure_nonfatal_for_fallback<T>(payload: T) -> bool;
 predicate user_boot_payload_first_successful_candidate_selected<T>(payload: T) -> bool;
 predicate user_boot_payload_success_stops_fallback_chain<T>(payload: T) -> bool;
@@ -55,6 +65,7 @@ predicate user_boot_payload_partition_objects_deferred<T>(payload: T) -> bool;
 predicate user_boot_payload_driven_by_kernel_init_task<T, K>(payload: T, task: K) -> bool;
 predicate user_boot_payload_try_candidate_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_selected_argv0_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_enters_user_mode<T>(payload: T) -> bool;
@@ -184,6 +195,7 @@ predicate syscall_table_openat_supported<T>(table: T) -> bool;
 predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
+predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
@@ -202,6 +214,7 @@ predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -222,6 +235,7 @@ predicate syscall_table_openat_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
+predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -718,6 +732,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_read_supported(self);
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
+                    syscall_table_readlinkat_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
                     syscall_table_mprotect_supported(self);
@@ -747,6 +762,7 @@ object SyscallTable: ResourceObject {
             syscall_table_read_supported(self);
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
+            syscall_table_readlinkat_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
             syscall_table_mprotect_supported(self);
@@ -899,6 +915,27 @@ object SyscallTable: ResourceObject {
                     files_struct_regular_file_stat_observed(FilesStruct);
                     file_backend_regular_file_stat_returns_metadata(FileBackend);
                     syscall_table_newfstatat_observed(self);
+                }
+            }
+
+            on Action::ReadlinkAt {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                    syscall_read_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::ReadlinkPath;
+                }
+
+                ensures {
+                    syscall_readlinkat_routes_to_files_struct(self, FilesStruct);
+                    files_struct_readlink_path_routes_to_vfs(FilesStruct, VfsCore);
+                    syscall_table_readlinkat_observed(self);
                 }
             }
 
@@ -1154,6 +1191,7 @@ object UserBootPayload: ResourceObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     PayloadParam.state == State::Ready;
+                    BootParam.state == State::Ready;
                     RootFS.state == State::Online;
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
@@ -1170,6 +1208,10 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::EtcInit);
                     user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
                     user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
+                    user_boot_payload_requested_init_branch_bound(self);
+                    user_boot_payload_requested_init_before_default_fallback(self);
+                    user_boot_payload_requested_init_failure_panic_terminal_bound(self);
+                    user_boot_payload_requested_init_no_default_fallback(self);
                     user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
                     user_boot_payload_success_stops_fallback_chain(self);
                     user_boot_payload_success_no_return_to_startup_orchestration(self);
@@ -1196,6 +1238,10 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::EtcInit);
             user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
             user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
+            user_boot_payload_requested_init_branch_bound(self);
+            user_boot_payload_requested_init_before_default_fallback(self);
+            user_boot_payload_requested_init_failure_panic_terminal_bound(self);
+            user_boot_payload_requested_init_no_default_fallback(self);
             user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
             user_boot_payload_success_stops_fallback_chain(self);
             user_boot_payload_success_no_return_to_startup_orchestration(self);
@@ -1228,10 +1274,40 @@ object UserBootPayload: ResourceObject {
             }
 
             /*
+             * Linux 6.12 requested init= branch. init_setup() stores
+             * execute_command; kernel_init() tries it before CONFIG_DEFAULT_INIT
+             * and before the default fallback list. A successful
+             * kernel_execve()-equivalent result stops startup orchestration.
+             * A failed requested init panics as "Requested init ... failed" and
+             * does not continue into /sbin/init, /etc/init, /bin/init or
+             * /bin/sh. The current implementation only supports a non-empty
+             * absolute requested path that fits its fixed selected-path buffer;
+             * full argv_init/envp_init derivation remains outside this slice.
+             */
+            on Action::TryRequestedInit(path: Path) {
+                depends_on {
+                    BootParam.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                }
+
+                ensures {
+                    user_boot_payload_requested_init_branch_bound(self);
+                    user_boot_payload_requested_init_before_default_fallback(self);
+                    user_boot_payload_requested_init_failure_panic_terminal_bound(self);
+                    user_boot_payload_requested_init_no_default_fallback(self);
+                    user_boot_payload_success_stops_fallback_chain(self);
+                    user_boot_payload_success_no_return_to_startup_orchestration(self);
+                    user_boot_payload_selected_path_bound(self);
+                    user_boot_payload_selected_argv0_path_bound(self);
+                }
+            }
+
+            /*
              * Linux 6.12 default fallback list selection. This action models
              * the ordered try_to_run_init_process() chain in init/main.c after
-             * CONFIG_DEFAULT_INIT is skipped because it is empty in the
-             * current configuration.
+             * init= is absent and CONFIG_DEFAULT_INIT is skipped because it is
+             * empty in the current configuration.
              * Candidate failures are nonfatal while later candidates remain;
              * a successful kernel_execve()-equivalent result stops the
              * fallback chain even though Linux returns integer 0 to
@@ -1253,6 +1329,7 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_success_stops_fallback_chain(self);
                     user_boot_payload_success_no_return_to_startup_orchestration(self);
                     user_boot_payload_selected_path_bound(self);
+                    user_boot_payload_selected_argv0_path_bound(self);
                     user_boot_payload_no_working_init_panic_terminal_bound(self);
                 }
             }
@@ -1262,6 +1339,7 @@ object UserBootPayload: ResourceObject {
             on Transition::Enable -> State::Online {
                 depends_on {
                     PayloadParam.state == State::Ready;
+                    BootParam.state == State::Ready;
                     RootFS.state == State::Online;
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
@@ -1300,6 +1378,7 @@ object UserBootPayload: ResourceObject {
                     UserInitProcess.state == State::Online;
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);
                     user_boot_payload_selected_path_bound(self);
+                    user_boot_payload_selected_argv0_path_bound(self);
                     user_boot_payload_enters_user_mode(self);
                     user_boot_payload_no_return_handoff(self);
                     selected_payload_no_return_handoff();
@@ -1313,6 +1392,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_selected(self);
             user_boot_payload_reads_init_from_vfs(self, VfsCore);
             user_boot_payload_selected_path_bound(self);
+            user_boot_payload_selected_argv0_path_bound(self);
             user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_enters_user_mode(self);
             user_boot_payload_no_return_handoff(self);

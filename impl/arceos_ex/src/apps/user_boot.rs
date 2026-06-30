@@ -26,5 +26,7 @@ pub fn run() -> ! {
         &ctx.kernel_global_allocator,
         &mut ctx.exception_stream,
         &mut ctx.syscall_table,
+        &ctx.boot_param,
+        &ctx.static_command_line,
     )
 }

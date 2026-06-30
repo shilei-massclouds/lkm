@@ -36,6 +36,9 @@
  *   SyscallTable.Action::NewFstatAt
  *     -> FilesStruct.Action::StatPath
  *     -> VfsCore.Action::ReadPath(Path, FsStruct)
+ *   SyscallTable.Action::ReadlinkAt
+ *     -> FilesStruct.Action::ReadlinkPath
+ *     -> VfsCore.Action::ReadlinkPath(Path, FsStruct)
  */
 
 enum FileBackendKind {
@@ -66,6 +69,7 @@ predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_stat_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
+predicate files_struct_readlink_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_file_read_observed<T>(files: T) -> bool;
 predicate files_struct_regular_file_closed<T>(files: T) -> bool;
 predicate files_struct_regular_file_stat_observed<T>(files: T) -> bool;
@@ -245,6 +249,22 @@ object FilesStruct: ResourceObject {
                     files_struct_stat_path_routes_to_vfs(self, VfsCore);
                     files_struct_regular_file_stat_observed(self);
                     file_backend_regular_file_stat_returns_metadata(FileBackend);
+                }
+            }
+
+            on Action::ReadlinkPath {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                }
+
+                drives {
+                    VfsCore.Action::ReadlinkPath(Path, FsStruct);
+                }
+
+                ensures {
+                    files_struct_readlink_path_routes_to_vfs(self, VfsCore);
                 }
             }
         }

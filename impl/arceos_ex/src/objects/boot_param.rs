@@ -10,6 +10,7 @@ pub struct BootParamSummary {
     pub boot_arg_count: usize,
     pub unknown_count: usize,
     pub payload_boundary: Option<usize>,
+    pub init_value: Option<(usize, usize)>,
 }
 
 pub struct BootParam {
@@ -25,6 +26,7 @@ impl BootParam {
                 boot_arg_count: 0,
                 unknown_count: 0,
                 payload_boundary: None,
+                init_value: None,
             },
         }
     }
@@ -43,6 +45,19 @@ impl BootParam {
 
     pub const fn payload_boundary(&self) -> Option<usize> {
         self.summary.payload_boundary
+    }
+
+    pub const fn init_value_range(&self) -> Option<(usize, usize)> {
+        self.summary.init_value
+    }
+
+    pub fn init_value<'a>(&self, cmdline: &'a [u8]) -> Option<&'a [u8]> {
+        let (start, end) = self.summary.init_value?;
+        if start <= end && end <= cmdline.len() {
+            Some(&cmdline[start..end])
+        } else {
+            None
+        }
     }
 
     pub fn boot_arg<'a>(&self, cmdline: &'a [u8], index: usize) -> Option<&'a [u8]> {
@@ -93,6 +108,7 @@ fn parse_boot_params(cmdline: &[u8]) -> BootParamSummary {
         boot_arg_count: 0,
         unknown_count: 0,
         payload_boundary: None,
+        init_value: None,
     };
 
     let mut cursor = 0usize;
@@ -103,6 +119,9 @@ fn parse_boot_params(cmdline: &[u8]) -> BootParamSummary {
         }
 
         summary.boot_arg_count += 1;
+        if token_starts_with(&cmdline[token_start..token_end], b"init=") {
+            summary.init_value = Some((token_start + b"init=".len(), token_end));
+        }
         if !is_known_boot_param(&cmdline[token_start..token_end]) {
             summary.unknown_count += 1;
         }

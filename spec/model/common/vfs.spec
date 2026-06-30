@@ -13,9 +13,11 @@
  * FsStruct carries the task-visible root and pwd dentry references. The
  * current path-walk slice supports absolute paths from FsStruct.root, direct
  * child lookup, mount crossing and Linux-like symlink restart semantics for
- * the modeled read-only ext2 subset. Page cache, mount namespace, permissions,
- * credentials, full relative dirfd/cwd walking, rename, hardlink, open flags
- * and complete file descriptor tables stay deferred.
+ * the modeled read-only ext2 subset. Readlink-style lookup is a separate
+ * operation: it walks all parent components normally, does not follow the
+ * final symlink, and copies that symlink body. Page cache, mount namespace,
+ * permissions, credentials, full relative dirfd/cwd walking, rename, hardlink,
+ * open flags and complete file descriptor tables stay deferred.
  */
 
 enum VfsInodeKind {
@@ -68,6 +70,9 @@ predicate vfs_symlink_absolute_target_restarts_at_root<T>(core: T) -> bool;
 predicate vfs_symlink_relative_target_restarts_at_parent<T>(core: T) -> bool;
 predicate vfs_symlink_remaining_path_preserved<T>(core: T) -> bool;
 predicate vfs_symlink_loop_returns_eloop<T>(core: T) -> bool;
+predicate vfs_readlink_final_symlink_not_followed<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_readlink_returns_symlink_target<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_readlink_truncates_to_user_buffer<T>(core: T) -> bool;
 predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
 predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
 predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
@@ -666,6 +671,26 @@ object VfsCore: ResourceObject {
                     vfs_path_read_start_checkpoint(VfsCore, path);
                     vfs_read_path_returns_data(VfsCore, File);
                     vfs_path_read_resolved_checkpoint(VfsCore, Dentry);
+                }
+            }
+
+            Action::ReadlinkPath(path: Path, fs: FsStruct) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    vfs_path_absolute(path);
+                    inode_kind_is(Inode, VfsInodeKind::Symlink);
+                    inode_symlink_target_ready(Inode);
+                }
+                drives {
+                    VfsCore.Action::Lookup;
+                    VfsCore.Action::FollowMount;
+                }
+                ensures {
+                    vfs_readlink_final_symlink_not_followed(VfsCore, Dentry);
+                    vfs_readlink_returns_symlink_target(VfsCore, Dentry);
+                    vfs_readlink_truncates_to_user_buffer(VfsCore);
                 }
             }
 

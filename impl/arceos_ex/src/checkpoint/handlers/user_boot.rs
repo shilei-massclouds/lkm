@@ -321,17 +321,20 @@ fn run_user_address_space_ready(
     let space = &ctx.user_address_space;
     let stack = &ctx.user_stack;
     let selected_path = ctx.user_boot_payload.selected_path();
+    let selected_path_bytes = ctx.user_boot_payload.selected_path_bytes();
     let argv0_matches_selected =
-        stack_contains_at(stack, ctx, stack.arg0_ptr(), selected_path.path(), true);
+        stack_contains_at(stack, ctx, stack.arg0_ptr(), selected_path_bytes, true);
     let mut valid = space.state() == State::Ready
         && space.page_table_view_ready()
         && space.elf_segments_mapped()
         && space.stack_mapped()
         && space.heap_mapped()
         && ctx.user_boot_payload.selected_path_bound()
+        && ctx.user_boot_payload.selected_argv0_path_bound()
         && argv0_matches_selected;
 
     sink.diag_usize("selected_path_index", selected_path.index());
+    sink.diag_usize("selected_path_len", selected_path_bytes.len());
     sink.diag_usize("user_stack_arg0_ptr", stack.arg0_ptr());
     sink.diag_usize(
         "user_stack_arg0_matches_selected",

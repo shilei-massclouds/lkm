@@ -1149,19 +1149,22 @@ object BootParam: KernelObject {
                     boot_params_dispatched(BootParam, StaticCommandLine);
                     unknown_boot_options_collected(BootParam);
                     payload_param_boundary_ready(BootParam);
+                    boot_param_init_value_parsed(BootParam, StaticCommandLine);
                 }
             }
         }
     }
 
     /*
-     * Ready 表示普通启动参数已经解析，未知参数和 "--" 边界已经被记录。
+     * Ready 表示普通启动参数已经解析，未知参数、"--" 边界和 Linux init= execute_command
+     * 值已经被记录；没有 init= 时该值允许为空。
      */
     state State::Ready {
         invariant {
             boot_params_dispatched(BootParam, StaticCommandLine);
             unknown_boot_options_collected(BootParam);
             payload_param_boundary_ready(BootParam);
+            boot_param_init_value_parsed(BootParam, StaticCommandLine);
         }
     }
 }

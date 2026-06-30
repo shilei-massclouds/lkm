@@ -76,6 +76,22 @@ make run APP=user-boot PROBE=announce
 
 `LOG=trace` 目前仍作为兼容入口保留，等价于启用 `PROBE=announce`；新用法应优先使用 `PROBE=announce`。
 
+### Kernel Command Line
+
+`impl/arceos_ex/Makefile` 默认设置：
+
+```text
+QEMU_APPEND ?= earlycon=sbi
+```
+
+`make run` 会把该值原样传给 QEMU 的 `-append`。需要指定 Linux-like requested init 时，可以覆盖：
+
+```sh
+make run APP=user-boot QEMU_APPEND='earlycon=sbi init=/bin/ls' FORCE=1
+```
+
+`init=` 只改变内核命令行下的 init 选择语义；rootfs overlay 仍用于构造测试 disk 时注入稳定 fixture。
+
 ## Provider 机制
 
 Provider 是构建时选择机制，用于决定内核镜像链接哪一组底层实现对象。当前已经接入的是 PLIC provider：默认 `PLIC_PROVIDER=native` 使用仓库内实现，`PLIC_PROVIDER=linux-object` 会把 Linux 构建出的 `drivers/irqchip/irq-sifive-plic.o` 直接作为 linker input 组成新的 kernel image。这个变量影响 `make build` 产物，不是运行期动态切换开关。

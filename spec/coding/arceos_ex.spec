@@ -1434,8 +1434,9 @@ type ArceosExStartupPhaseCodingMust {
          * writev, the dynamic loader memory actions brk, mmap, mprotect and
          * munmap by routing them to UserAddressSpace, directory-capable
          * openat plus getdents64 by routing through FilesStruct fd position
-         * and Ext2/VFS directory records, and set_tid_address by recording
-         * the current PID1 UserInitProcess clear_child_tid pointer.
+         * and Ext2/VFS directory records, readlinkat through the VFS no-follow
+         * final symlink path, and set_tid_address by recording the current PID1
+         * UserInitProcess clear_child_tid pointer.
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
@@ -1451,6 +1452,19 @@ type ArceosExStartupPhaseCodingMust {
          * directory fd, getdents64 serializes linux_dirent64 records from the
          * ext2 directory data, returns copied bytes, and advances the fd
          * offset only at complete record boundaries.
+         *
+         * The first readlinkat slice must reference local Linux 6.12
+         * fs/stat.c::do_readlinkat()/sys_readlinkat(),
+         * fs/namei.c::vfs_readlink()/readlink_copy(), and
+         * include/uapi/asm-generic/unistd.h::__NR_readlinkat=78. It must
+         * preserve the Linux core order: reject bufsiz <= 0 with EINVAL,
+         * copy the user pathname, look up the path without following the final
+         * symlink, reject a non-symlink final dentry with EINVAL, copy at most
+         * bufsiz target bytes without appending NUL, and return the copied
+         * byte count. The current slice may support only AT_FDCWD plus
+         * absolute paths on read-only ext2 fast symlinks; relative dirfd,
+         * AT_EMPTY_PATH, slow symlink page/block bodies, security hooks,
+         * atime, RCU/retry_estale and complete errno details remain trimmed.
          *
          * APP=user-boot validation in make test must not treat QEMU/SBI
          * shutdown success as sufficient. The host harness must parse the
@@ -2399,6 +2413,13 @@ type ArceosExBlockIoCodingMust {
          * default; overlay configuration changes must not silently rebuild an
          * existing disk image. Explicit rebuild remains a command decision
          * through FORCE=1 or disk-clean.
+         *
+         * QEMU_APPEND defaults to "earlycon=sbi", and the run target must pass
+         * it through to QEMU as -append "$(QEMU_APPEND)". Overriding
+         * QEMU_APPEND, for example with "earlycon=sbi init=/bin/ls", changes
+         * the Linux-like kernel command line and init selection. It is not a
+         * substitute for rootfs overlay, which remains the stable fixture
+         * injection mechanism for default user_smoke and staged probes.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
@@ -2413,6 +2434,8 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_user_syscall_analysis_mark_busybox_candidates_conservative();
         arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12();
         arceos_ex_must_disk_build_default_not_rebuild_existing_image();
+        arceos_ex_must_qemu_append_default_to_earlycon_sbi_and_passthrough();
+        arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support();
 
         /*
          * Directory path lookup:
@@ -2449,9 +2472,12 @@ type ArceosExBlockIoCodingMust {
          * and cap follow count at MAXSYMLINKS == 40 with an ELOOP-like error.
          * The current implementation slice may limit the backend to read-only
          * ext2 fast symlinks whose target lives in raw i_block bytes and is
-         * truncated by inode size; slow symlink page/block reads, readlinkat,
-         * nofollow flags, magic links, RCU walk, permissions, mount namespace,
-         * full dotdot and complete errno semantics remain trimmed/deferred.
+         * truncated by inode size. readlinkat is the separate no-follow final
+         * symlink operation and may use the same fast-symlink target source
+         * while preserving the Linux 6.12 copy/truncate contract; slow symlink
+         * page/block reads, nofollow flags beyond readlinkat's final component,
+         * magic links, RCU walk, permissions, mount namespace, full dotdot and
+         * complete errno semantics remain trimmed/deferred.
          * Relative dirfd/cwd paths, permissions, fd tables and page cache
          * remain deferred.
          */

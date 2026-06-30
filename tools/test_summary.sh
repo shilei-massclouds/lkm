@@ -102,6 +102,18 @@ run_user_boot_overlay_case() {
         ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1
 }
 
+run_user_boot_overlay_append_case() {
+    local name=$1
+    local provider=$2
+    local overlay_map=$3
+    local append=$4
+    local log=$5
+    local image=$6
+
+    run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
+}
+
 run_kunit_case() {
     local name=$1
     local provider=$2
@@ -184,11 +196,19 @@ summary_total=0
 summary_pass=0
 summary_fail=0
 
+requested_init_overlay_map="$tmpdir/init-bin-ls-overlay.map"
+cat > "$requested_init_overlay_map" <<'EOF'
+# target      test        toolchain  link
+/bin/ls       user_smoke  musl       dynamic
+EOF
+
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
 run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
     "$tmpdir/run-user-native.log" "$tmpdir/user-native-default.raw"
+run_user_boot_overlay_append_case "run init=ls native" native "$requested_init_overlay_map" \
+    "earlycon=sbi init=/bin/ls" "$tmpdir/run-init-ls-native.log" "$tmpdir/user-native-init-ls.raw"
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
 
@@ -196,6 +216,8 @@ for provider in $test_plic_providers; do
     run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run PLIC_PROVIDER="$provider"
     run_user_boot_overlay_case "run user $provider" "$provider" "$default_overlay_map" \
         "$tmpdir/run-user-$provider.log" "$tmpdir/user-$provider-default.raw"
+    run_user_boot_overlay_append_case "run init=ls $provider" "$provider" "$requested_init_overlay_map" \
+        "earlycon=sbi init=/bin/ls" "$tmpdir/run-init-ls-$provider.log" "$tmpdir/user-$provider-init-ls.raw"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"
 done
