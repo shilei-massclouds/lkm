@@ -4,12 +4,15 @@ use super::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ};
 
 #[allow(dead_code)]
 pub const SSTATUS_SIE: usize = 1 << 1;
+pub const SSTATUS_SPIE: usize = 1 << 5;
 pub const SSTATUS_SPP: usize = 1 << 8;
 pub const SSTATUS_SUM: usize = 1 << 18;
 const SIE_STIE: usize = 1 << SUPERVISOR_TIMER_IRQ;
 const SIE_SEIE: usize = 1 << SUPERVISOR_EXTERNAL_IRQ;
-const SSTATUS_VS: usize = 0b11 << 9;
-const SSTATUS_FS: usize = 0b11 << 13;
+pub const SSTATUS_VS: usize = 0b11 << 9;
+pub const SSTATUS_FS: usize = 0b11 << 13;
+pub const SSTATUS_FS_INITIAL: usize = 0b01 << 13;
+pub const SSTATUS_FS_VS: usize = SSTATUS_FS | SSTATUS_VS;
 
 pub const SATP_MODE_SV39: usize = 8usize << 60;
 
@@ -88,7 +91,7 @@ unsafe extern "C" {
 }
 
 pub fn kernel_fpu_vector_disabled() -> bool {
-    read_sstatus() & (SSTATUS_FS | SSTATUS_VS) == 0
+    read_sstatus() & SSTATUS_FS_VS == 0
 }
 
 pub fn read_sie() -> usize {

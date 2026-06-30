@@ -209,6 +209,8 @@ predicate user_trap_frame_entry_bound<T, E>(frame: T, elf: E) -> bool;
 predicate user_trap_frame_entry_uses_interpreter_when_present<T, E, I>(frame: T, elf: E, interpreter: I) -> bool;
 predicate user_trap_frame_sp_bound<T, S>(frame: T, stack: S) -> bool;
 predicate user_trap_frame_sstatus_user_mode<T>(frame: T) -> bool;
+predicate user_trap_frame_fpu_initial<T>(frame: T) -> bool;
+predicate user_trap_frame_fpu_context_switch_deferred<T>(frame: T) -> bool;
 predicate user_trap_frame_sret_ready<T>(frame: T) -> bool;
 predicate user_trap_frame_address_space_bound<T, A>(frame: T, space: A) -> bool;
 predicate user_trap_frame_prepared_but_not_entered<T>(frame: T) -> bool;
@@ -780,6 +782,8 @@ object UserTrapFrame: ResourceObject {
                     user_trap_frame_entry_bound(self, ElfObject);
                     user_trap_frame_sp_bound(self, UserStack);
                     user_trap_frame_sstatus_user_mode(self);
+                    user_trap_frame_fpu_initial(self);
+                    user_trap_frame_fpu_context_switch_deferred(self);
                     user_trap_frame_sret_ready(self);
                     user_trap_frame_address_space_bound(self, UserAddressSpace);
                     user_trap_frame_prepared_but_not_entered(self);
@@ -795,6 +799,8 @@ object UserTrapFrame: ResourceObject {
             user_trap_frame_entry_bound(self, ElfObject);
             user_trap_frame_sp_bound(self, UserStack);
             user_trap_frame_sstatus_user_mode(self);
+            user_trap_frame_fpu_initial(self);
+            user_trap_frame_fpu_context_switch_deferred(self);
             user_trap_frame_sret_ready(self);
             user_trap_frame_address_space_bound(self, UserAddressSpace);
             user_trap_frame_prepared_but_not_entered(self);

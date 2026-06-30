@@ -2119,7 +2119,10 @@ fn total_mapping_page_count(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: 
 }
 
 pub const SSTATUS_SPP_USER_CLEAR: usize = 0;
-pub const SSTATUS_SPIE_SET: usize = 1 << 5;
+pub const SSTATUS_SPIE_SET: usize = csr::SSTATUS_SPIE;
+pub const SSTATUS_USER_FPU_INITIAL: usize = csr::SSTATUS_FS_INITIAL;
+pub const USER_SSTATUS_INITIAL: usize =
+    SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR | SSTATUS_USER_FPU_INITIAL;
 
 #[cfg(app_user_boot)]
 #[repr(align(16))]
@@ -2145,6 +2148,8 @@ pub struct UserTrapFrame {
     entry_bound: bool,
     sp_bound: bool,
     sstatus_user_mode: bool,
+    user_fpu_initial: bool,
+    fpu_context_switch_deferred: bool,
     sret_ready: bool,
     address_space_bound: bool,
     prepared_but_not_entered: bool,
@@ -2162,6 +2167,8 @@ impl UserTrapFrame {
             entry_bound: false,
             sp_bound: false,
             sstatus_user_mode: false,
+            user_fpu_initial: false,
+            fpu_context_switch_deferred: false,
             sret_ready: false,
             address_space_bound: false,
             prepared_but_not_entered: false,
@@ -2200,6 +2207,14 @@ impl UserTrapFrame {
         self.sstatus_user_mode
     }
 
+    pub const fn user_fpu_initial(&self) -> bool {
+        self.user_fpu_initial
+    }
+
+    pub const fn fpu_context_switch_deferred(&self) -> bool {
+        self.fpu_context_switch_deferred
+    }
+
     pub const fn sret_ready(&self) -> bool {
         self.sret_ready
     }
@@ -2236,11 +2251,13 @@ impl UserTrapFrame {
 
         self.entry = elf.runtime_entry();
         self.sp = stack.initial_sp();
-        self.sstatus = SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR;
+        self.sstatus = USER_SSTATUS_INITIAL;
         self.allocated = true;
         self.entry_bound = true;
         self.sp_bound = true;
         self.sstatus_user_mode = true;
+        self.user_fpu_initial = true;
+        self.fpu_context_switch_deferred = true;
         self.sret_ready = true;
         self.address_space_bound = true;
         self.prepared_but_not_entered = true;

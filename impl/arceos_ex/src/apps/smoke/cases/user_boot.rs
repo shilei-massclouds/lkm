@@ -504,6 +504,8 @@ impl SmokeScenario for UserBootElfScenario {
                 && trap.entry_bound()
                 && trap.sp_bound()
                 && trap.sstatus_user_mode()
+                && trap.user_fpu_initial()
+                && trap.fpu_context_switch_deferred()
                 && trap.sret_ready()
                 && trap.address_space_bound()
                 && trap.prepared_but_not_entered(),
@@ -512,7 +514,7 @@ impl SmokeScenario for UserBootElfScenario {
             "trap frame registers",
             trap.entry() == elf.runtime_entry()
                 && trap.sp() == stack.initial_sp()
-                && trap.sstatus() == crate::objects::user_boot::SSTATUS_SPIE_SET,
+                && trap.sstatus() == crate::objects::user_boot::USER_SSTATUS_INITIAL,
         );
         assertions.assert(
             "syscall setup",

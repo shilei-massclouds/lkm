@@ -16,6 +16,29 @@ static int say(const char *message, size_t len)
 
 #define FIRST_SIG_WORD(sig) (1UL << ((sig) - 1))
 
+static int smoke_user_fpu(void)
+{
+#if defined(__riscv) && defined(__riscv_flen) && __riscv_flen >= 64
+	unsigned long pattern = 0x3ff0000000000000UL;
+	unsigned long out = 0;
+
+	__asm__ volatile("fmv.d.x ft0, %1\n\t"
+			 "fmv.x.d %0, ft0\n\t"
+			 : "=r"(out)
+			 : "r"(pattern)
+			 : "ft0");
+	if (out != pattern) {
+		return 62;
+	}
+	if (SAY_LITERAL("user fpu ok\n") < 0) {
+		return 63;
+	}
+	return 0;
+#else
+	return 64;
+#endif
+}
+
 static int smoke_credentials(void)
 {
 	long rc;
@@ -153,6 +176,10 @@ int smoke_sh_probe(void)
 
 	if (SAY_LITERAL("sh_probe entry ok\n") < 0) {
 		return 41;
+	}
+	status = smoke_user_fpu();
+	if (status != 0) {
+		return status;
 	}
 	if (smoke_credentials() != 0) {
 		return 44;

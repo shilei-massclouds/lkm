@@ -419,6 +419,8 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && ctx.user_address_space.state() == State::Online
         && ctx.user_address_space.runtime_ready()
         && ctx.user_trap_frame.state() == State::Ready
+        && ctx.user_trap_frame.user_fpu_initial()
+        && ctx.user_trap_frame.fpu_context_switch_deferred()
         && ctx.user_trap_frame.sret_ready()
         && ctx.files_struct.state() == State::Ready
         && ctx.files_struct.stdio_bound()
@@ -428,6 +430,14 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     sink.diag_usize(
         "user_init_runtime_entered",
         process.runtime_entered() as usize,
+    );
+    sink.diag_usize(
+        "user_trap_frame_fpu_initial",
+        ctx.user_trap_frame.user_fpu_initial() as usize,
+    );
+    sink.diag_usize(
+        "user_trap_frame_fpu_context_switch_deferred",
+        ctx.user_trap_frame.fpu_context_switch_deferred() as usize,
     );
     sink.diag_usize("user_entry_ready", process.user_entry_ready() as usize);
     sink.diag_usize(

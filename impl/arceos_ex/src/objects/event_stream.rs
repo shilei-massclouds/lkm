@@ -67,6 +67,8 @@ formal_event_entry:
     sd      t6, 248(sp)
     csrr    t0, sstatus
     sd      t0, 256(sp)
+    li      t1, {sstatus_kernel_trap_clear}
+    csrrc   zero, sstatus, t1
     csrr    t0, sepc
     sd      t0, 264(sp)
     csrr    t0, scause
@@ -130,6 +132,7 @@ bss_anchor:
     .space 8
 "#,
     sstatus_spp = const csr::SSTATUS_SPP,
+    sstatus_kernel_trap_clear = const (csr::SSTATUS_SUM | csr::SSTATUS_FS_VS),
 );
 
 unsafe extern "C" {

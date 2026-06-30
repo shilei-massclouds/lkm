@@ -114,8 +114,10 @@ predicate arceos_ex_must_user_address_space_enable_build_real_page_table() -> bo
 predicate arceos_ex_must_user_address_space_enable_prepare_satp_without_switch() -> bool;
 predicate arceos_ex_must_user_address_space_round_not_enter_user_mode() -> bool;
 predicate arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret() -> bool;
+predicate arceos_ex_must_user_trap_frame_enable_fpu_initial_like_linux_start_thread() -> bool;
 predicate arceos_ex_must_user_mode_entry_use_existing_trap_return_path() -> bool;
 predicate arceos_ex_must_user_trap_entry_switch_to_kernel_stack() -> bool;
+predicate arceos_ex_must_user_trap_entry_clear_live_fpu_vector_before_kernel_handling() -> bool;
 predicate arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch() -> bool;
 predicate arceos_ex_must_not_generate_syscall_dispatcher_object() -> bool;
 predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
@@ -1450,6 +1452,19 @@ type ArceosExStartupPhaseCodingMust {
          * a kernel-owned trap stack, for example through sscratch, before
          * saving the full trap frame.
          *
+         * RISC-V user FPU support is a first-slice user-mode status contract
+         * based on local Linux 6.12 arch/riscv/kernel/process.c::start_thread(),
+         * arch/riscv/include/asm/csr.h and arch/riscv/include/asm/switch_to.h.
+         * UserTrapFrame setup must set the user status to SR_PIE with
+         * SR_FS_INITIAL and SPP clear so hard-float musl/BusyBox code can
+         * execute ordinary user FPU instructions. The corresponding trap entry
+         * must save the user status first, then clear live sstatus FS/VS
+         * before entering kernel/Rust handling, and restore the saved user
+         * status only for sret back to user mode. Full thread.fstate storage,
+         * fstate_save()/fstate_restore(), lazy/clean/dirty optimization,
+         * fork/signal/ptrace fpstate and multitask FPU/vector context switch
+         * remain deferred.
+         *
          * User ecall must enter the existing ExceptionStream ->
          * SyscallException branch and install a concrete syscall policy there.
          * Code generation MUST NOT create a new root Syscall object or bypass
@@ -1539,9 +1554,11 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_stack_setup_initial_argc_argv_envp_auxv();
         arceos_ex_must_user_stack_provide_dynamic_linker_auxv_fields();
         arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
+        arceos_ex_must_user_trap_frame_enable_fpu_initial_like_linux_start_thread();
         arceos_ex_must_user_trap_frame_enter_interpreter_when_present();
         arceos_ex_must_user_mode_entry_use_existing_trap_return_path();
         arceos_ex_must_user_trap_entry_switch_to_kernel_stack();
+        arceos_ex_must_user_trap_entry_clear_live_fpu_vector_before_kernel_handling();
         arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch();
         arceos_ex_must_not_generate_syscall_dispatcher_object();
         arceos_ex_must_syscall_table_hold_concrete_syscall_actions();
