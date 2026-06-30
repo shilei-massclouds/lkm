@@ -128,6 +128,8 @@ predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
+predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
+predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
 predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_kunit_observe_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug() -> bool;
@@ -1550,6 +1552,10 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask();
         arceos_ex_must_syscall_table_support_credentials_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
+        arceos_ex_must_syscall_table_support_time_read_first_slice();
+        arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
+        arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();
+        arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice();
         arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
@@ -2530,12 +2536,15 @@ type ArceosExBlockIoCodingMust {
          * ext2 fast symlinks whose target lives in raw i_block bytes and is
          * truncated by inode size. readlinkat is the separate no-follow final
          * symlink operation and may use the same fast-symlink target source
-         * while preserving the Linux 6.12 copy/truncate contract; slow symlink
-         * page/block reads, nofollow flags beyond readlinkat's final component,
-         * magic links, RCU walk, permissions, mount namespace, full dotdot and
-         * complete errno semantics remain trimmed/deferred.
-         * Relative dirfd/cwd paths, permissions, fd tables and page cache
-         * remain deferred.
+         * while preserving the Linux 6.12 copy/truncate contract. The current
+         * cwd-relative slice also supports FsStruct.pwd starts for ".", single
+         * relative components, and "./component"; newfstatat must accept
+         * AT_SYMLINK_NOFOLLOW for the final component and return fast symlink
+         * metadata without following it. Slow symlink page/block reads, magic
+         * links, RCU walk, permissions, mount namespace, full dotdot, arbitrary
+         * multi-component relative paths and complete errno semantics remain
+         * trimmed/deferred. Relative dirfd paths, permissions, full fd tables
+         * and page cache remain deferred.
          */
         arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read();
 

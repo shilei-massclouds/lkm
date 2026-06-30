@@ -82,6 +82,8 @@ predicate fd_table_stdio_fds_bound<T>(table: T) -> bool;
 predicate fd_table_fd_installed<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
 predicate fd_table_cloexec_bit_set_on_install<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_cloexec_not_reported_by_fgetfl<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_cloexec_bit_returned_by_fgetfd<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_cloexec_bit_updated_by_fsetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
 
 predicate open_file_description_allocated<T>(ofd: T) -> bool;
@@ -235,6 +237,40 @@ object FilesStruct: ResourceObject {
                 }
             }
 
+            on Action::GetFdFlags(fd: FdRef) {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, fd, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::GetFdFlags(fd);
+                }
+
+                ensures {
+                    files_struct_fd_lookup_routes_to_table(self, FileDescriptorTable);
+                    fd_table_cloexec_bit_returned_by_fgetfd(FileDescriptorTable, fd);
+                }
+            }
+
+            on Action::SetFdFlags(fd: FdRef) {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, fd, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::SetFdFlags(fd);
+                }
+
+                ensures {
+                    files_struct_fd_lookup_routes_to_table(self, FileDescriptorTable);
+                    fd_table_cloexec_bit_updated_by_fsetfd(FileDescriptorTable, fd);
+                }
+            }
+
             on Action::StatPath {
                 depends_on {
                     FilesStruct.state == State::Ready;
@@ -319,6 +355,28 @@ object FileDescriptorTable: ResourceObject {
 
                 ensures {
                     fd_table_lookup_returns(self, fd, OpenFileDescription);
+                }
+            }
+
+            on Action::GetFdFlags(fd: FdRef) {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(self, fd, OpenFileDescription);
+                }
+
+                ensures {
+                    fd_table_cloexec_bit_returned_by_fgetfd(self, fd);
+                }
+            }
+
+            on Action::SetFdFlags(fd: FdRef) {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(self, fd, OpenFileDescription);
+                }
+
+                ensures {
+                    fd_table_cloexec_bit_updated_by_fsetfd(self, fd);
                 }
             }
 

@@ -630,6 +630,7 @@ impl SmokeScenario for UserBootElfScenario {
             &mut ctx.block_device_registry,
             &ctx.kernel_image,
             b"/etc/alpine-release",
+            false,
         ) {
             Ok(stat) => stat,
             Err(_) => {

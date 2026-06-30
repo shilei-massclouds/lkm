@@ -69,6 +69,16 @@ static int smoke_directory_fileio(void)
 		return 66;
 	}
 
+	if (fstatat(AT_FDCWD, "./bin", &st, AT_SYMLINK_NOFOLLOW) < 0) {
+		return 71;
+	}
+	if (!S_ISDIR(st.st_mode) || st.st_size <= 0) {
+		return 72;
+	}
+	if (SAY_LITERAL("syscall newfstatat cwd dot component ok\n") < 0) {
+		return 73;
+	}
+
 	if (syscall(SYS_fstat, dir_fd, &st) < 0) {
 		return 52;
 	}
@@ -147,6 +157,27 @@ static int smoke_directory_fileio(void)
 	    (dot_flags & O_CLOEXEC) != 0) {
 		return 68;
 	}
+	int dot_fd_flags = fcntl(dot_dir_fd, F_GETFD, 0);
+	if (dot_fd_flags < 0 || (dot_fd_flags & FD_CLOEXEC) == 0) {
+		return 74;
+	}
+	if (fcntl(dot_dir_fd, F_SETFD, 0) < 0) {
+		return 75;
+	}
+	dot_fd_flags = fcntl(dot_dir_fd, F_GETFD, 0);
+	if (dot_fd_flags < 0 || (dot_fd_flags & FD_CLOEXEC) != 0) {
+		return 76;
+	}
+	if (fcntl(dot_dir_fd, F_SETFD, FD_CLOEXEC) < 0) {
+		return 77;
+	}
+	dot_fd_flags = fcntl(dot_dir_fd, F_GETFD, 0);
+	if (dot_fd_flags < 0 || (dot_fd_flags & FD_CLOEXEC) == 0) {
+		return 78;
+	}
+	if (SAY_LITERAL("syscall fcntl F_GETFD F_SETFD cloexec ok\n") < 0) {
+		return 79;
+	}
 	if (close(dot_dir_fd) < 0) {
 		return 69;
 	}
@@ -160,6 +191,7 @@ static int smoke_directory_fileio(void)
 static int smoke_readlinkat(void)
 {
 	char link_buf[64];
+	struct stat st;
 	ssize_t link_len = syscall(SYS_readlinkat, AT_FDCWD, "/bin/cat",
 				   link_buf, sizeof(link_buf));
 
@@ -180,6 +212,16 @@ static int smoke_readlinkat(void)
 	}
 	if (SAY_LITERAL("syscall readlinkat symlink ok\n") < 0) {
 		return 63;
+	}
+
+	if (fstatat(AT_FDCWD, "/bin/cat", &st, AT_SYMLINK_NOFOLLOW) < 0) {
+		return 80;
+	}
+	if (!S_ISLNK(st.st_mode) || st.st_size <= 0) {
+		return 81;
+	}
+	if (SAY_LITERAL("syscall newfstatat symlink nofollow ok\n") < 0) {
+		return 82;
 	}
 
 	return 0;

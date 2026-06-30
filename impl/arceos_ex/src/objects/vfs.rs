@@ -1409,7 +1409,7 @@ impl VfsCore {
             return Err(VfsError::UnsupportedPath);
         }
         let absolute = path.starts_with(b"/");
-        if !absolute && path.iter().any(|byte| *byte == b'/') {
+        if !absolute && !relative_path_supported(path) {
             return Err(VfsError::UnsupportedPath);
         }
         let start_dentry = if absolute {
@@ -1553,14 +1553,44 @@ impl VfsCore {
         registry: &mut BlockDeviceRegistry,
         provider: &mut P,
         path: &[u8],
+        nofollow_final_symlink: bool,
     ) -> Result<VfsNodeStat, VfsError> {
-        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let dentry_ref = if nofollow_final_symlink {
+            self.walk_path_no_follow_final(fs_struct, fs, registry, provider, path)?
+        } else {
+            self.walk_path(fs_struct, fs, registry, provider, path)?
+        };
         let dentry = self.positive_dentry(dentry_ref)?;
         let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
         if inode.removed() {
             return Err(VfsError::NotFound);
         }
         Ok(VfsNodeStat::new(inode.size(), inode.kind()))
+    }
+
+    fn walk_path_no_follow_final<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        let path_final = self.walk_path_parent(fs_struct, fs, registry, provider, path)?;
+        let dentry_ref = self.lookup_component(
+            fs,
+            registry,
+            provider,
+            path_final.parent,
+            &path_final.name[..path_final.name_len],
+        )?;
+        let before_mount = dentry_ref;
+        let resolved = self.follow_mount(dentry_ref)?;
+        if resolved != before_mount {
+            self.path_walk_crossed_mount = true;
+        }
+        self.path_walk_resolved = true;
+        Ok(resolved)
     }
 
     pub fn readlink_path<P: BlockDeviceProvider>(
@@ -1932,8 +1962,20 @@ impl VfsCore {
             return Err(VfsError::UnsupportedPath);
         }
         if !path.starts_with(b"/") {
-            if path.is_empty() || path.iter().any(|byte| *byte == b'/') {
+            if !relative_path_supported(path) {
                 return Err(VfsError::UnsupportedPath);
+            }
+            if let Some(slash) = path.iter().rposition(|byte| *byte == b'/') {
+                if slash + 1 >= path.len() {
+                    return Err(VfsError::UnsupportedPath);
+                }
+                let (name, name_len) = copy_name(&path[slash + 1..])?;
+                let parent = self.walk_path(fs_struct, fs, registry, provider, &path[..slash])?;
+                return Ok(PathFinal {
+                    parent,
+                    name,
+                    name_len,
+                });
             }
             let (name, name_len) = copy_name(path)?;
             let parent = fs_struct.pwd_dentry().ok_or(VfsError::MountMissing)?;
@@ -2122,6 +2164,16 @@ fn validate_name(name: &[u8]) -> Result<(), VfsError> {
         return Err(VfsError::NameTooLong);
     }
     Ok(())
+}
+
+fn relative_path_supported(path: &[u8]) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    if !path.contains(&b'/') {
+        return true;
+    }
+    path.starts_with(b"./") && path.len() > 2 && !path[2..].contains(&b'/')
 }
 
 fn copy_name(name: &[u8]) -> Result<([u8; VFS_NAME_MAX], usize), VfsError> {

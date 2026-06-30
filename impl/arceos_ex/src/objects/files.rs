@@ -29,6 +29,7 @@ const FILE_O_ACCMODE: u32 = 0o3;
 const FILE_O_LARGEFILE: u32 = 0o100000;
 const FILE_O_DIRECTORY: u32 = 0o200000;
 const FILE_O_CLOEXEC: u32 = 0o2000000;
+const FILE_FD_CLOEXEC: u32 = 1;
 const SEEK_SET: usize = 0;
 const SEEK_CUR: usize = 1;
 const SEEK_END: usize = 2;
@@ -129,6 +130,7 @@ struct FileDescriptorEntry {
     readable: bool,
     writable: bool,
     flags: u32,
+    close_on_exec: bool,
 }
 
 impl FileDescriptorEntry {
@@ -145,15 +147,17 @@ impl FileDescriptorEntry {
             readable,
             writable,
             flags: access_mode,
+            close_on_exec: false,
         }
     }
 
-    const fn regular(ofd: OpenFileDescriptionRef, flags: u32) -> Self {
+    const fn regular(ofd: OpenFileDescriptionRef, flags: u32, close_on_exec: bool) -> Self {
         Self {
             ofd,
             readable: true,
             writable: false,
             flags,
+            close_on_exec,
         }
     }
 }
@@ -699,7 +703,12 @@ impl FileDescriptorTable {
         Ok(entry)
     }
 
-    fn install_regular(&mut self, ofd: &OpenFileDescription, flags: u32) -> FileResult<usize> {
+    fn install_regular(
+        &mut self,
+        ofd: &OpenFileDescription,
+        flags: u32,
+        close_on_exec: bool,
+    ) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || ofd.state() != State::Ready || !ofd.readable()
         {
             return Err(FileError::NotReady);
@@ -711,9 +720,33 @@ impl FileDescriptorTable {
         self.entries[FdRef::Regular0.index()] = Some(FileDescriptorEntry::regular(
             OpenFileDescriptionRef::Regular0,
             flags,
+            close_on_exec,
         ));
         self.fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(REGULAR0_FD)
+    }
+
+    fn get_fd_flags(&self, fd: usize) -> FileResult<u32> {
+        let entry = self.lookup(fd)?;
+        Ok(if entry.close_on_exec {
+            FILE_FD_CLOEXEC
+        } else {
+            0
+        })
+    }
+
+    fn set_fd_flags(&mut self, fd: usize, flags: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+
+        let fd_ref = FdRef::from_fd(fd).ok_or(FileError::BadFd)?;
+        let entry = self.entries[fd_ref.index()]
+            .as_mut()
+            .ok_or(FileError::BadFd)?;
+        entry.close_on_exec = flags & FILE_FD_CLOEXEC != 0;
+        self.lookup_returns.fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
 
     fn close(&mut self, fd: usize) -> FileResult<()> {
@@ -1046,9 +1079,11 @@ impl FilesStruct {
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self
-            .fd_table
-            .install_regular(&self.regular0, persistent_open_flags(open_flags))?;
+        let fd = self.fd_table.install_regular(
+            &self.regular0,
+            persistent_open_flags(open_flags),
+            open_flags & FILE_O_CLOEXEC != 0,
+        )?;
         self.regular0_len = len;
         self.regular0_offset = 0;
         self.filesystem0_kind = FilesystemFdKind::RegularFile;
@@ -1111,6 +1146,7 @@ impl FilesStruct {
         let fd = self.fd_table.install_regular(
             &self.regular0,
             persistent_open_flags(open_flags) | FILE_O_DIRECTORY,
+            open_flags & FILE_O_CLOEXEC != 0,
         )?;
         self.regular0_len = 0;
         self.regular0_offset = 0;
@@ -1226,6 +1262,22 @@ impl FilesStruct {
         Ok(entry.flags)
     }
 
+    pub fn fcntl_getfd_fd(&self, fd: usize) -> FileResult<u32> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.get_fd_flags(fd)
+    }
+
+    pub fn fcntl_setfd_fd(&mut self, fd: usize, flags: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.set_fd_flags(fd, flags)
+    }
+
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -1315,6 +1367,7 @@ impl FilesStruct {
         block_device_registry: &mut BlockDeviceRegistry,
         kernel_image: &KernelImage,
         path: &[u8],
+        nofollow_final_symlink: bool,
     ) -> FileResult<FileStat> {
         if self.lifecycle.state() != State::Ready
             || !self.fd_table_bound
@@ -1332,6 +1385,7 @@ impl FilesStruct {
                 block_device_registry,
                 &mut provider,
                 path,
+                nofollow_final_symlink,
             )
             .map_err(vfs_error_to_file_error)?;
 
@@ -1425,6 +1479,7 @@ impl FilesStruct {
             block_device_registry,
             kernel_image,
             path,
+            false,
         )?;
         if file_mode_allows_access(stat.mode(), mode) {
             Ok(())

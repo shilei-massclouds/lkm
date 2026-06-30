@@ -87,7 +87,11 @@ const O_ACCMODE: usize = 0o3;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
+const AT_SYMLINK_NOFOLLOW: usize = 0x100;
+const F_GETFD: usize = 1;
+const F_SETFD: usize = 2;
 const F_GETFL: usize = 3;
+const FD_CLOEXEC: usize = 1;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
@@ -1624,7 +1628,7 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
     let path_ptr = frame.reg(11);
     let stat_ptr = frame.reg(12);
     let flags = frame.reg(13);
-    if dirfd != AT_FDCWD || flags != 0 {
+    if dirfd != AT_FDCWD || flags & !AT_SYMLINK_NOFOLLOW != 0 {
         complete_error_syscall(frame, EINVAL);
         return;
     }
@@ -1643,6 +1647,7 @@ fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
         &mut ctx.block_device_registry,
         &ctx.kernel_image,
         &path[..path_len],
+        flags & AT_SYMLINK_NOFOLLOW != 0,
     ) {
         Ok(stat) => stat,
         Err(error) => {
@@ -1881,22 +1886,49 @@ fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let cmd = frame.reg(11);
-    if cmd != F_GETFL {
-        complete_error_syscall(frame, EINVAL);
-        return;
-    }
+    let arg = frame.reg(12);
+    match cmd {
+        F_GETFL => {
+            let ctx = crate::context::context_ref();
+            let flags = match ctx.files_struct.fcntl_getfl_fd(fd) {
+                Ok(flags) => flags,
+                Err(error) => {
+                    complete_error_syscall(frame, file_error_to_errno(error));
+                    return;
+                }
+            };
 
-    let ctx = crate::context::context_ref();
-    let flags = match ctx.files_struct.fcntl_getfl_fd(fd) {
-        Ok(flags) => flags,
-        Err(error) => {
-            complete_error_syscall(frame, file_error_to_errno(error));
-            return;
+            table.fcntl_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, flags as usize);
         }
-    };
+        F_GETFD => {
+            let ctx = crate::context::context_ref();
+            let flags = match ctx.files_struct.fcntl_getfd_fd(fd) {
+                Ok(flags) => flags,
+                Err(error) => {
+                    complete_error_syscall(frame, file_error_to_errno(error));
+                    return;
+                }
+            };
 
-    table.fcntl_observed.store(1, Ordering::Release);
-    complete_successful_syscall(frame, flags as usize);
+            table.fcntl_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, flags as usize);
+        }
+        F_SETFD => {
+            let ctx = crate::context::context();
+            if let Err(error) = ctx
+                .files_struct
+                .fcntl_setfd_fd(fd, (arg & FD_CLOEXEC) as u32)
+            {
+                complete_error_syscall(frame, file_error_to_errno(error));
+                return;
+            }
+
+            table.fcntl_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        _ => complete_error_syscall(frame, EINVAL),
+    }
 }
 
 fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {

@@ -222,6 +222,7 @@ predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
+predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
 predicate syscall_table_getuid_supported<T>(table: T) -> bool;
 predicate syscall_table_getgid_supported<T>(table: T) -> bool;
@@ -252,6 +253,7 @@ predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bool;
 predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
 predicate syscall_getrandom_flags_first_slice_bound<T>(table: T) -> bool;
@@ -291,6 +293,7 @@ predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
+predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
 predicate syscall_table_getuid_observed<T>(table: T) -> bool;
 predicate syscall_table_getgid_observed<T>(table: T) -> bool;
@@ -821,6 +824,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
+                    syscall_table_fcntl_supported(self);
                     syscall_table_getrandom_supported(self);
                     syscall_table_getuid_supported(self);
                     syscall_table_getgid_supported(self);
@@ -862,6 +866,7 @@ object SyscallTable: ResourceObject {
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
+            syscall_table_fcntl_supported(self);
             syscall_table_getrandom_supported(self);
             syscall_table_getuid_supported(self);
             syscall_table_getgid_supported(self);
@@ -1046,6 +1051,34 @@ object SyscallTable: ResourceObject {
                     syscall_readlinkat_routes_to_files_struct(self, FilesStruct);
                     files_struct_readlink_path_routes_to_vfs(FilesStruct, VfsCore);
                     syscall_table_readlinkat_observed(self);
+                }
+            }
+
+            on Action::Fcntl {
+                /*
+                 * Linux 6.12 routes fcntl(2) through fs/fcntl.c::do_fcntl().
+                 * This first slice covers F_GETFL, F_GETFD and F_SETFD. The
+                 * close-on-exec bit lives in FileDescriptorTable state, not in
+                 * struct file status flags.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::LookupFd(FdRef::Regular0);
+                    FilesStruct.Action::GetFdFlags(FdRef::Regular0);
+                    FilesStruct.Action::SetFdFlags(FdRef::Regular0);
+                }
+
+                ensures {
+                    syscall_fcntl_routes_to_files_struct(self, FilesStruct);
+                    files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
+                    fd_table_cloexec_bit_returned_by_fgetfd(FileDescriptorTable, FdRef::Regular0);
+                    fd_table_cloexec_bit_updated_by_fsetfd(FileDescriptorTable, FdRef::Regular0);
+                    syscall_table_fcntl_observed(self);
                 }
             }
 

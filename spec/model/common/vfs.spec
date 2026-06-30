@@ -12,8 +12,8 @@
  * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
  * FsStruct carries the task-visible root and pwd dentry references. The
  * current path-walk slice supports absolute paths from FsStruct.root, the
- * first cwd-relative AT_FDCWD subset from FsStruct.pwd for "." and single
- * relative components, direct child lookup, mount crossing and Linux-like
+ * first cwd-relative AT_FDCWD subset from FsStruct.pwd for ".", single
+ * relative components and "./component", direct child lookup, mount crossing and Linux-like
  * symlink restart semantics for the modeled read-only ext2 subset.
  * Readlink-style lookup is a separate
  * operation: it walks all parent components normally, does not follow the
@@ -65,6 +65,7 @@ predicate vfs_mount_moved_to_root<T, M, D>(core: T, mount: M, root_dentry: D) ->
 predicate vfs_absolute_path_walk_supported<T>(core: T) -> bool;
 predicate vfs_at_fdcwd_relative_dot_supported<T>(core: T) -> bool;
 predicate vfs_at_fdcwd_relative_single_component_supported<T>(core: T) -> bool;
+predicate vfs_at_fdcwd_relative_dot_component_supported<T>(core: T) -> bool;
 predicate vfs_relative_path_walk_full_linux_model_deferred<T>(core: T) -> bool;
 predicate vfs_path_absolute<T>(path: T) -> bool;
 predicate vfs_path_components_bound<T>(path: T) -> bool;
@@ -79,6 +80,8 @@ predicate vfs_symlink_loop_returns_eloop<T>(core: T) -> bool;
 predicate vfs_readlink_final_symlink_not_followed<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_readlink_returns_symlink_target<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_readlink_truncates_to_user_buffer<T>(core: T) -> bool;
+predicate vfs_stat_final_symlink_nofollow_supported<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_stat_follows_final_symlink_by_default<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
 predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
 predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
@@ -196,6 +199,9 @@ object VfsCore: ResourceObject {
                     vfs_core_file_table_ready(VfsCore);
                     vfs_absolute_path_walk_supported(VfsCore);
                     vfs_path_walk_symlink_budget_matches_linux_6_12(VfsCore);
+                    vfs_at_fdcwd_relative_dot_supported(VfsCore);
+                    vfs_at_fdcwd_relative_single_component_supported(VfsCore);
+                    vfs_at_fdcwd_relative_dot_component_supported(VfsCore);
                     vfs_core_page_cache_deferred(VfsCore);
                     vfs_core_permissions_deferred(VfsCore);
                     vfs_core_mount_namespace_deferred(VfsCore);
@@ -408,6 +414,7 @@ object VfsCore: ResourceObject {
                     vfs_absolute_path_walk_supported(VfsCore);
                     vfs_at_fdcwd_relative_dot_supported(VfsCore);
                     vfs_at_fdcwd_relative_single_component_supported(VfsCore);
+                    vfs_at_fdcwd_relative_dot_component_supported(VfsCore);
                 }
                 drives {
                     PathWalk.Transition::Setup;
@@ -418,6 +425,26 @@ object VfsCore: ResourceObject {
                 ensures {
                     vfs_path_walk_resolves(VfsCore, Dentry);
                     vfs_relative_path_walk_full_linux_model_deferred(VfsCore);
+                }
+            }
+
+            Action::StatPathNoFollow(path: Path, fs: FsStruct) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    fs_struct_root_dentry_set(fs, Dentry);
+                    fs_struct_pwd_dentry_set(fs, Dentry);
+                    dentry_positive(Dentry);
+                    vfs_path_components_bound(path);
+                }
+                drives {
+                    VfsCore.Action::Lookup;
+                    VfsCore.Action::FollowMount;
+                }
+                ensures {
+                    vfs_stat_final_symlink_nofollow_supported(VfsCore, Dentry);
+                    vfs_stat_follows_final_symlink_by_default(VfsCore, Dentry);
                 }
             }
 
@@ -602,7 +629,7 @@ object VfsCore: ResourceObject {
                 depends_on {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
-                    vfs_path_absolute(path);
+                    vfs_path_components_bound(path);
                     vfs_path_walk_resolves(VfsCore, Dentry);
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                 }
