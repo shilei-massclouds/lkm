@@ -188,15 +188,28 @@ fn emit_user_boot_phase_diag(ctx: &Context, sink: &mut dyn Sink) {
     let elf = &ctx.elf_object;
     let interpreter = &ctx.elf_interpreter_object;
     sink.diag_usize("main_elf_state", elf.state() as usize);
+    sink.diag_usize("main_elf_type", elf.elf_type_index());
     sink.diag_usize("main_elf_input_len", elf.input_len());
+    sink.diag_usize("main_elf_load_bias", elf.load_bias());
+    sink.diag_usize(
+        "main_elf_pie_supported",
+        elf.et_dyn_pie_main_supported() as usize,
+    );
+    sink.diag_usize(
+        "main_elf_pie_load_bias_bound",
+        elf.main_pie_load_bias_bound() as usize,
+    );
     sink.diag_usize("main_elf_segments", elf.load_segment_count());
     sink.diag_usize(
         "main_elf_interpreter_required",
         elf.interpreter_required() as usize,
     );
+    sink.diag_usize("main_elf_entry", elf.entry());
+    sink.diag_usize("main_elf_phdr", elf.phdr_vaddr());
     sink.diag_usize("main_elf_runtime_entry", elf.runtime_entry());
     sink.diag_usize("interpreter_state", interpreter.state() as usize);
     sink.diag_usize("interpreter_input_len", interpreter.input_len());
+    sink.diag_usize("interpreter_load_bias", interpreter.load_bias());
     sink.diag_usize("interpreter_segments", interpreter.load_segment_count());
     sink.diag_usize("interpreter_entry", interpreter.entry());
     emit_queue_diag(

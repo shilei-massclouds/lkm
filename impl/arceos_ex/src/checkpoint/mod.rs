@@ -13,6 +13,7 @@ pub mod handlers;
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
     checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure,
     checkpoint_handler_of_platform
 ))]
 mod kunit;

@@ -4,12 +4,8 @@ use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
 use super::{
-    boot_param::BootParam,
-    block_device::BlockDeviceRegistry,
-    command_line::StaticCommandLine,
-    ext2::Ext2FileSystem,
-    vfs::VfsCore,
-    virtio_blk,
+    block_device::BlockDeviceRegistry, boot_param::BootParam, command_line::StaticCommandLine,
+    ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk,
 };
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
@@ -42,6 +38,7 @@ pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
+pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
 pub const USER_INTERPRETER_LOAD_BIAS: usize = 0x2000_0000;
 const USER_INITIAL_STACK_WORDS: usize = 18;
 #[cfg(app_user_boot)]
@@ -319,7 +316,6 @@ pub enum UserInitPathRef {
 }
 
 impl UserInitPathRef {
-    #[cfg(app_user_boot)]
     pub const fn index(self) -> usize {
         match self {
             Self::DefaultInit => 0,
@@ -342,6 +338,171 @@ impl UserInitPathRef {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UserInitAttemptStage {
+    None,
+    ValidatePath,
+    ReadImage,
+    PresetElf,
+    SetupElf,
+    UnsupportedCandidate,
+}
+
+impl UserInitAttemptStage {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::ValidatePath => 1,
+            Self::ReadImage => 2,
+            Self::PresetElf => 3,
+            Self::SetupElf => 4,
+            Self::UnsupportedCandidate => 5,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ValidatePath => "validate_path",
+            Self::ReadImage => "read_image",
+            Self::PresetElf => "preset_elf",
+            Self::SetupElf => "setup_elf",
+            Self::UnsupportedCandidate => "unsupported_candidate",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UserInitAttemptReason {
+    None,
+    InvalidPath,
+    ReadFailed,
+    ElfPresetFailed,
+    ElfSetupFailed,
+    CandidateUnsupported,
+}
+
+impl UserInitAttemptReason {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::InvalidPath => 1,
+            Self::ReadFailed => 2,
+            Self::ElfPresetFailed => 3,
+            Self::ElfSetupFailed => 4,
+            Self::CandidateUnsupported => 5,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::InvalidPath => "invalid_path",
+            Self::ReadFailed => "read_failed",
+            Self::ElfPresetFailed => "elf_preset_failed",
+            Self::ElfSetupFailed => "elf_setup_failed",
+            Self::CandidateUnsupported => "candidate_unsupported",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UserInitAttemptFailure {
+    path: UserInitPathRef,
+    path_bytes: [u8; USER_SELECTED_PATH_MAX],
+    path_len: usize,
+    path_actual_len: usize,
+    path_truncated: bool,
+    stage: UserInitAttemptStage,
+    reason: UserInitAttemptReason,
+    requested_terminal: bool,
+    default_nonfatal: bool,
+    elf_error: Option<ElfError>,
+}
+
+impl UserInitAttemptFailure {
+    pub const fn empty() -> Self {
+        Self {
+            path: UserInitPathRef::DefaultInit,
+            path_bytes: [0; USER_SELECTED_PATH_MAX],
+            path_len: 0,
+            path_actual_len: 0,
+            path_truncated: false,
+            stage: UserInitAttemptStage::None,
+            reason: UserInitAttemptReason::None,
+            requested_terminal: false,
+            default_nonfatal: false,
+            elf_error: None,
+        }
+    }
+
+    pub fn new(
+        path: UserInitPathRef,
+        actual_path: &[u8],
+        stage: UserInitAttemptStage,
+        reason: UserInitAttemptReason,
+        requested_terminal: bool,
+        default_nonfatal: bool,
+        elf_error: Option<ElfError>,
+    ) -> Self {
+        let mut path_bytes = [0u8; USER_SELECTED_PATH_MAX];
+        let path_len = min_usize(actual_path.len(), USER_SELECTED_PATH_MAX);
+        path_bytes[..path_len].copy_from_slice(&actual_path[..path_len]);
+        Self {
+            path,
+            path_bytes,
+            path_len,
+            path_actual_len: actual_path.len(),
+            path_truncated: actual_path.len() > USER_SELECTED_PATH_MAX,
+            stage,
+            reason,
+            requested_terminal,
+            default_nonfatal,
+            elf_error,
+        }
+    }
+
+    pub const fn path(&self) -> UserInitPathRef {
+        self.path
+    }
+
+    pub fn path_bytes(&self) -> &[u8] {
+        &self.path_bytes[..self.path_len]
+    }
+
+    pub const fn path_len(&self) -> usize {
+        self.path_len
+    }
+
+    pub const fn path_actual_len(&self) -> usize {
+        self.path_actual_len
+    }
+
+    pub const fn path_truncated(&self) -> bool {
+        self.path_truncated
+    }
+
+    pub const fn stage(&self) -> UserInitAttemptStage {
+        self.stage
+    }
+
+    pub const fn reason(&self) -> UserInitAttemptReason {
+        self.reason
+    }
+
+    pub const fn requested_terminal(&self) -> bool {
+        self.requested_terminal
+    }
+
+    pub const fn default_nonfatal(&self) -> bool {
+        self.default_nonfatal
+    }
+
+    pub const fn elf_error(&self) -> Option<ElfError> {
+        self.elf_error
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfObjectRole {
     MainExecutable,
     Interpreter,
@@ -351,6 +512,15 @@ pub enum ElfObjectRole {
 enum ElfType {
     Exec,
     Dyn,
+}
+
+impl ElfType {
+    const fn index(self) -> usize {
+        match self {
+            Self::Exec => 2,
+            Self::Dyn => 3,
+        }
+    }
 }
 
 static USER_INIT_RUNTIME_ENTERED: AtomicU8 = AtomicU8::new(0);
@@ -378,6 +548,60 @@ pub enum ElfError {
     PageTableAllocationFailed,
     PageTableInstallFailed,
     UserCopyOutOfRange,
+}
+
+impl ElfError {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::InvalidState => 1,
+            Self::ShortInput => 2,
+            Self::BadMagic => 3,
+            Self::UnsupportedClass => 4,
+            Self::UnsupportedEndian => 5,
+            Self::UnsupportedVersion => 6,
+            Self::UnsupportedType => 7,
+            Self::UnsupportedMachine => 8,
+            Self::InvalidHeader => 9,
+            Self::InvalidProgramHeader => 10,
+            Self::TooManyLoadSegments => 11,
+            Self::MissingLoadSegment => 12,
+            Self::EntryOutsideExecutableSegment => 13,
+            Self::TooManyMappings => 14,
+            Self::TooManyMappingPages => 15,
+            Self::MissingExecutableEntryMapping => 16,
+            Self::InvalidStack => 17,
+            Self::BackingAllocationFailed => 18,
+            Self::PageTableAllocationFailed => 19,
+            Self::PageTableInstallFailed => 20,
+            Self::UserCopyOutOfRange => 21,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::InvalidState => "invalid_state",
+            Self::ShortInput => "short_input",
+            Self::BadMagic => "bad_magic",
+            Self::UnsupportedClass => "unsupported_class",
+            Self::UnsupportedEndian => "unsupported_endian",
+            Self::UnsupportedVersion => "unsupported_version",
+            Self::UnsupportedType => "unsupported_type",
+            Self::UnsupportedMachine => "unsupported_machine",
+            Self::InvalidHeader => "invalid_header",
+            Self::InvalidProgramHeader => "invalid_program_header",
+            Self::TooManyLoadSegments => "too_many_load_segments",
+            Self::MissingLoadSegment => "missing_load_segment",
+            Self::EntryOutsideExecutableSegment => "entry_outside_executable_segment",
+            Self::TooManyMappings => "too_many_mappings",
+            Self::TooManyMappingPages => "too_many_mapping_pages",
+            Self::MissingExecutableEntryMapping => "missing_executable_entry_mapping",
+            Self::InvalidStack => "invalid_stack",
+            Self::BackingAllocationFailed => "backing_allocation_failed",
+            Self::PageTableAllocationFailed => "page_table_allocation_failed",
+            Self::PageTableInstallFailed => "page_table_install_failed",
+            Self::UserCopyOutOfRange => "user_copy_out_of_range",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2051,7 +2275,10 @@ pub struct ElfObject {
     dynamic_executable: bool,
     interpreter_required: bool,
     interpreter_path_bound: bool,
+    et_dyn_pie_main_supported: bool,
+    main_pie_load_bias_bound: bool,
     et_dyn_interpreter_supported: bool,
+    et_dyn_loader_without_interp_deferred: bool,
     runtime_entry_bound: bool,
     auxv_exec_fields_bound: bool,
     no_separate_loader: bool,
@@ -2096,7 +2323,10 @@ impl ElfObject {
             dynamic_executable: false,
             interpreter_required: false,
             interpreter_path_bound: false,
+            et_dyn_pie_main_supported: false,
+            main_pie_load_bias_bound: false,
             et_dyn_interpreter_supported: false,
+            et_dyn_loader_without_interp_deferred: false,
             runtime_entry_bound: false,
             auxv_exec_fields_bound: false,
             no_separate_loader: false,
@@ -2123,6 +2353,10 @@ impl ElfObject {
 
     pub const fn role(&self) -> ElfObjectRole {
         self.role
+    }
+
+    pub const fn elf_type_index(&self) -> usize {
+        self.elf_type.index()
     }
 
     pub const fn entry(&self) -> usize {
@@ -2213,8 +2447,20 @@ impl ElfObject {
         self.interpreter_path_bound
     }
 
+    pub const fn et_dyn_pie_main_supported(&self) -> bool {
+        self.et_dyn_pie_main_supported
+    }
+
+    pub const fn main_pie_load_bias_bound(&self) -> bool {
+        self.main_pie_load_bias_bound
+    }
+
     pub const fn et_dyn_interpreter_supported(&self) -> bool {
         self.et_dyn_interpreter_supported
+    }
+
+    pub const fn et_dyn_loader_without_interp_deferred(&self) -> bool {
+        self.et_dyn_loader_without_interp_deferred
     }
 
     pub const fn runtime_entry_bound(&self) -> bool {
@@ -2270,7 +2516,9 @@ impl ElfObject {
     }
 
     pub fn preset_from_vfs(&mut self, input: &[u8]) -> Result<(), ElfError> {
-        self.preset_with_role(input, ElfObjectRole::MainExecutable, 0)
+        let header = parse_header(input)?;
+        let load_bias = main_executable_load_bias(&header)?;
+        self.preset_with_header(input, header, ElfObjectRole::MainExecutable, load_bias)
     }
 
     pub fn preset_interpreter_from_vfs(&mut self, input: &[u8]) -> Result<(), ElfError> {
@@ -2291,6 +2539,19 @@ impl ElfObject {
             return Err(ElfError::InvalidState);
         }
         let header = parse_header(input)?;
+        self.preset_with_header(input, header, role, load_bias)
+    }
+
+    fn preset_with_header(
+        &mut self,
+        input: &[u8],
+        header: ElfHeader,
+        role: ElfObjectRole,
+        load_bias: usize,
+    ) -> Result<(), ElfError> {
+        if self.lifecycle.state() != State::Base {
+            return Err(ElfError::InvalidState);
+        }
         if !elf_type_allowed_for_role(header.elf_type, role) {
             return Err(ElfError::UnsupportedType);
         }
@@ -2310,12 +2571,20 @@ impl ElfObject {
             && header.elf_type == ElfType::Exec
             && !header.interpreter_required;
         self.dynamic_executable = role == ElfObjectRole::MainExecutable
-            && header.elf_type == ElfType::Exec
+            && (header.elf_type == ElfType::Exec || header.elf_type == ElfType::Dyn)
             && header.interpreter_required;
         self.interpreter_required =
             role == ElfObjectRole::MainExecutable && header.interpreter_required;
+        self.et_dyn_pie_main_supported = role == ElfObjectRole::MainExecutable
+            && header.elf_type == ElfType::Dyn
+            && header.interpreter_required;
+        self.main_pie_load_bias_bound =
+            self.et_dyn_pie_main_supported && self.load_bias == USER_MAIN_PIE_LOAD_BIAS;
         self.et_dyn_interpreter_supported =
             role == ElfObjectRole::Interpreter && header.elf_type == ElfType::Dyn;
+        self.et_dyn_loader_without_interp_deferred = role == ElfObjectRole::MainExecutable
+            && header.elf_type == ElfType::Dyn
+            && !header.interpreter_required;
         self.no_separate_loader = !self.interpreter_required;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
@@ -2330,6 +2599,11 @@ impl ElfObject {
         let header = parse_header(input)?;
         if !elf_type_allowed_for_role(header.elf_type, self.role) {
             return Err(ElfError::UnsupportedType);
+        }
+        if self.role == ElfObjectRole::MainExecutable
+            && main_executable_load_bias(&header)? != self.load_bias
+        {
+            return Err(ElfError::InvalidState);
         }
         let parsed = parse_load_segments(input, &header, self.load_bias)?;
         if parsed.load_segment_count == 0 {
@@ -2730,6 +3004,10 @@ pub struct UserBootPayload {
     success_stops_fallback_chain: bool,
     success_no_return_to_startup_orchestration: bool,
     no_working_init_panic_terminal_bound: bool,
+    init_attempt_failure_trace_defined: bool,
+    init_attempt_failure_recorded: bool,
+    init_attempt_failure_checkpoint_bound: bool,
+    init_attempt_failure: UserInitAttemptFailure,
     uses_current_fs_struct: bool,
     no_partition_dependency: bool,
     partition_objects_deferred: bool,
@@ -2760,6 +3038,10 @@ impl UserBootPayload {
             success_stops_fallback_chain: false,
             success_no_return_to_startup_orchestration: false,
             no_working_init_panic_terminal_bound: false,
+            init_attempt_failure_trace_defined: false,
+            init_attempt_failure_recorded: false,
+            init_attempt_failure_checkpoint_bound: false,
+            init_attempt_failure: UserInitAttemptFailure::empty(),
             uses_current_fs_struct: false,
             no_partition_dependency: false,
             partition_objects_deferred: false,
@@ -2818,6 +3100,22 @@ impl UserBootPayload {
 
     pub const fn no_working_init_panic_terminal_bound(&self) -> bool {
         self.no_working_init_panic_terminal_bound
+    }
+
+    pub const fn init_attempt_failure_trace_defined(&self) -> bool {
+        self.init_attempt_failure_trace_defined
+    }
+
+    pub const fn init_attempt_failure_recorded(&self) -> bool {
+        self.init_attempt_failure_recorded
+    }
+
+    pub const fn init_attempt_failure_checkpoint_bound(&self) -> bool {
+        self.init_attempt_failure_checkpoint_bound
+    }
+
+    pub const fn last_init_attempt_failure(&self) -> UserInitAttemptFailure {
+        self.init_attempt_failure
     }
 
     pub const fn uses_current_fs_struct(&self) -> bool {
@@ -2895,6 +3193,7 @@ impl UserBootPayload {
         self.success_stops_fallback_chain = true;
         self.success_no_return_to_startup_orchestration = true;
         self.no_working_init_panic_terminal_bound = true;
+        self.init_attempt_failure_trace_defined = true;
         self.uses_current_fs_struct = true;
         self.no_partition_dependency = true;
         self.partition_objects_deferred = true;
@@ -2930,6 +3229,26 @@ impl UserBootPayload {
         self.selected_argv0_path_bound = true;
         self.first_successful_candidate_selected = true;
         self.reads_init_from_vfs = true;
+        Ok(())
+    }
+
+    #[cfg(app_user_boot)]
+    pub fn record_init_attempt_failure(&mut self, failure: UserInitAttemptFailure) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || failure.stage() == UserInitAttemptStage::None
+            || failure.reason() == UserInitAttemptReason::None
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.init_attempt_failure = failure;
+        self.init_attempt_failure_recorded = true;
+        self.init_attempt_failure_checkpoint_bound = true;
         Ok(())
     }
 
@@ -2996,6 +3315,7 @@ pub fn run_first_user_init(
     }
 
     let selected = select_user_init_candidate(
+        payload,
         vfs_core,
         fs_struct,
         ext2_filesystem,
@@ -3195,6 +3515,7 @@ impl SelectedUserInit {
 
 #[cfg(app_user_boot)]
 fn select_user_init_candidate(
+    payload: &mut UserBootPayload,
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
     ext2_filesystem: &mut Ext2FileSystem,
@@ -3205,6 +3526,18 @@ fn select_user_init_candidate(
 ) -> SelectedUserInit {
     if let Some(requested) = boot_param.init_value(static_command_line.as_bytes()) {
         if !valid_selected_path(requested) {
+            emit_init_attempt_failure(
+                payload,
+                UserInitAttemptFailure::new(
+                    UserInitPathRef::RequestedInit,
+                    requested,
+                    UserInitAttemptStage::ValidatePath,
+                    UserInitAttemptReason::InvalidPath,
+                    true,
+                    false,
+                    None,
+                ),
+            );
             user_boot_panic("requested init failed\n");
         }
         match try_read_user_path_image(
@@ -3216,17 +3549,48 @@ fn select_user_init_candidate(
             requested,
             false,
         ) {
-            Ok(image) if elf_candidate_supported(image) => {
-                return SelectedUserInit::new(UserInitPathRef::RequestedInit, requested, image);
+            Ok(image) => match inspect_elf_candidate(image) {
+                Ok(()) => {
+                    return SelectedUserInit::new(UserInitPathRef::RequestedInit, requested, image);
+                }
+                Err((stage, reason, elf_error)) => {
+                    emit_init_attempt_failure(
+                        payload,
+                        UserInitAttemptFailure::new(
+                            UserInitPathRef::RequestedInit,
+                            requested,
+                            stage,
+                            reason,
+                            true,
+                            false,
+                            elf_error,
+                        ),
+                    );
+                    user_boot_panic("requested init failed\n");
+                }
+            },
+            Err(()) => {
+                emit_init_attempt_failure(
+                    payload,
+                    UserInitAttemptFailure::new(
+                        UserInitPathRef::RequestedInit,
+                        requested,
+                        UserInitAttemptStage::ReadImage,
+                        UserInitAttemptReason::ReadFailed,
+                        true,
+                        false,
+                        None,
+                    ),
+                );
+                user_boot_panic("requested init failed\n");
             }
-            _ => user_boot_panic("requested init failed\n"),
         }
     }
 
     let mut index = 0usize;
     while index < USER_INIT_CANDIDATES.len() {
         let path = USER_INIT_CANDIDATES[index];
-        if let Ok(image) = try_read_user_path_image(
+        match try_read_user_path_image(
             vfs_core,
             fs_struct,
             ext2_filesystem,
@@ -3235,9 +3599,35 @@ fn select_user_init_candidate(
             path.path(),
             false,
         ) {
-            if elf_candidate_supported(image) {
-                return SelectedUserInit::new(path, path.path(), image);
-            }
+            Ok(image) => match inspect_elf_candidate(image) {
+                Ok(()) => {
+                    return SelectedUserInit::new(path, path.path(), image);
+                }
+                Err((stage, reason, elf_error)) => emit_init_attempt_failure(
+                    payload,
+                    UserInitAttemptFailure::new(
+                        path,
+                        path.path(),
+                        stage,
+                        reason,
+                        false,
+                        true,
+                        elf_error,
+                    ),
+                ),
+            },
+            Err(()) => emit_init_attempt_failure(
+                payload,
+                UserInitAttemptFailure::new(
+                    path,
+                    path.path(),
+                    UserInitAttemptStage::ReadImage,
+                    UserInitAttemptReason::ReadFailed,
+                    false,
+                    true,
+                    None,
+                ),
+            ),
         }
         index += 1;
     }
@@ -3308,23 +3698,121 @@ fn try_read_user_path_image(
 }
 
 #[cfg(app_user_boot)]
-fn elf_candidate_supported(input: &[u8]) -> bool {
-    let Ok(header) = parse_header(input) else {
-        return false;
-    };
+fn inspect_elf_candidate(
+    input: &[u8],
+) -> Result<
+    (),
+    (
+        UserInitAttemptStage,
+        UserInitAttemptReason,
+        Option<ElfError>,
+    ),
+> {
+    let header = parse_header(input).map_err(|error| {
+        (
+            UserInitAttemptStage::PresetElf,
+            UserInitAttemptReason::ElfPresetFailed,
+            Some(error),
+        )
+    })?;
     if !elf_type_allowed_for_role(header.elf_type, ElfObjectRole::MainExecutable) {
-        return false;
+        return Err((
+            UserInitAttemptStage::PresetElf,
+            UserInitAttemptReason::ElfPresetFailed,
+            Some(ElfError::UnsupportedType),
+        ));
     }
-    let Ok(parsed) = parse_load_segments(input, &header, 0) else {
-        return false;
-    };
+    let load_bias = main_executable_load_bias(&header).map_err(|error| {
+        (
+            UserInitAttemptStage::PresetElf,
+            UserInitAttemptReason::ElfPresetFailed,
+            Some(error),
+        )
+    })?;
+    let parsed = parse_load_segments(input, &header, load_bias).map_err(|error| {
+        (
+            UserInitAttemptStage::SetupElf,
+            UserInitAttemptReason::ElfSetupFailed,
+            Some(error),
+        )
+    })?;
     if parsed.load_segment_count == 0 {
-        return false;
+        return Err((
+            UserInitAttemptStage::SetupElf,
+            UserInitAttemptReason::ElfSetupFailed,
+            Some(ElfError::MissingLoadSegment),
+        ));
     }
-    let Some(entry) = header.entry.checked_add(0) else {
-        return false;
+    let Some(entry) = header.entry.checked_add(load_bias) else {
+        return Err((
+            UserInitAttemptStage::SetupElf,
+            UserInitAttemptReason::ElfSetupFailed,
+            Some(ElfError::InvalidHeader),
+        ));
     };
-    entry_in_executable_segment(entry, &parsed.load_segments, parsed.load_segment_count)
+    if !entry_in_executable_segment(entry, &parsed.load_segments, parsed.load_segment_count) {
+        return Err((
+            UserInitAttemptStage::UnsupportedCandidate,
+            UserInitAttemptReason::CandidateUnsupported,
+            Some(ElfError::EntryOutsideExecutableSegment),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(app_user_boot)]
+fn emit_init_attempt_failure(payload: &mut UserBootPayload, failure: UserInitAttemptFailure) {
+    if payload.record_init_attempt_failure(failure).is_err() {
+        user_boot_panic("user init failure record failed\n");
+    }
+    print_init_attempt_failure(failure);
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::UserBootInitAttemptFailed,
+        crate::context::context_ref(),
+    );
+}
+
+#[cfg(app_user_boot)]
+fn print_init_attempt_failure(failure: UserInitAttemptFailure) {
+    crate::arch::riscv64::sbi::putstr("user init attempt failed path_index=");
+    sbi_put_usize(failure.path().index());
+    crate::arch::riscv64::sbi::putstr(" path_len=");
+    sbi_put_usize(failure.path_actual_len());
+    crate::arch::riscv64::sbi::putstr(" stage=");
+    crate::arch::riscv64::sbi::putstr(failure.stage().name());
+    crate::arch::riscv64::sbi::putstr(" reason=");
+    crate::arch::riscv64::sbi::putstr(failure.reason().name());
+    crate::arch::riscv64::sbi::putstr(" requested_terminal=");
+    sbi_put_usize(failure.requested_terminal() as usize);
+    crate::arch::riscv64::sbi::putstr(" default_nonfatal=");
+    sbi_put_usize(failure.default_nonfatal() as usize);
+    if let Some(error) = failure.elf_error() {
+        crate::arch::riscv64::sbi::putstr(" elf_error=");
+        crate::arch::riscv64::sbi::putstr(error.name());
+    }
+    crate::arch::riscv64::sbi::putstr("\n");
+}
+
+#[cfg(app_user_boot)]
+fn sbi_put_usize(mut value: usize) {
+    let mut digits = [0u8; 20];
+    let mut len = 0usize;
+
+    if value == 0 {
+        crate::arch::riscv64::sbi::putchar(b'0');
+        return;
+    }
+
+    while value != 0 {
+        digits[len] = b'0' + (value % 10) as u8;
+        value /= 10;
+        len += 1;
+    }
+
+    while len != 0 {
+        len -= 1;
+        crate::arch::riscv64::sbi::putchar(digits[len]);
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -3444,8 +3932,16 @@ fn parse_header(input: &[u8]) -> Result<ElfHeader, ElfError> {
 
 fn elf_type_allowed_for_role(elf_type: ElfType, role: ElfObjectRole) -> bool {
     match role {
-        ElfObjectRole::MainExecutable => elf_type == ElfType::Exec,
+        ElfObjectRole::MainExecutable => elf_type == ElfType::Exec || elf_type == ElfType::Dyn,
         ElfObjectRole::Interpreter => elf_type == ElfType::Dyn,
+    }
+}
+
+fn main_executable_load_bias(header: &ElfHeader) -> Result<usize, ElfError> {
+    match header.elf_type {
+        ElfType::Exec => Ok(0),
+        ElfType::Dyn if header.interpreter_required => Ok(USER_MAIN_PIE_LOAD_BIAS),
+        ElfType::Dyn => Err(ElfError::UnsupportedType),
     }
 }
 

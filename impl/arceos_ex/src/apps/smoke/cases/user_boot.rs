@@ -213,6 +213,12 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert("elf main role", elf.role() == ElfObjectRole::MainExecutable);
         assertions.assert(
+            "elf main pie bias",
+            !elf.et_dyn_pie_main_supported()
+                || (elf.main_pie_load_bias_bound()
+                    && elf.load_bias() == crate::objects::user_boot::USER_MAIN_PIE_LOAD_BIAS),
+        );
+        assertions.assert(
             "elf loader mode",
             elf.no_separate_loader()
                 || (elf.interpreter_required()

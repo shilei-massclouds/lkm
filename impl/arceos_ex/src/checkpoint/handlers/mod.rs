@@ -30,6 +30,8 @@ mod slub;
 mod uart_irq_chain;
 #[cfg(checkpoint_handler_user_boot)]
 mod user_boot;
+#[cfg(all(checkpoint_handler_user_boot_failure, app_user_boot))]
+mod user_boot_failure;
 #[cfg(checkpoint_handler_virtio_blk)]
 mod virtio_blk;
 #[cfg(checkpoint_handler_virtio_bus)]
@@ -51,7 +53,8 @@ mod virtio_rng;
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
-    checkpoint_handler_user_boot
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
 ))]
 use crate::checkpoint::kunit::{KtapSink, Sink};
 use crate::{context::Context, trace::Checkpoint};
@@ -89,7 +92,8 @@ pub enum HandlerScope {
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
-    checkpoint_handler_user_boot
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
 ))]
 #[allow(dead_code)]
 pub enum HandlerRun {
@@ -115,7 +119,8 @@ pub struct Handler {
         checkpoint_handler_virtio_bus,
         checkpoint_handler_virtio_blk,
         checkpoint_handler_virtio_rng,
-        checkpoint_handler_user_boot
+        checkpoint_handler_user_boot,
+        checkpoint_handler_user_boot_failure
     ))]
     pub run: HandlerRun,
 }
@@ -149,6 +154,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     virtio_rng::HANDLER,
     #[cfg(checkpoint_handler_user_boot)]
     user_boot::HANDLER,
+    #[cfg(all(checkpoint_handler_user_boot_failure, app_user_boot))]
+    user_boot_failure::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
@@ -168,7 +175,8 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
-    checkpoint_handler_user_boot
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
 ))]
 pub const fn kunit_case_count() -> usize {
     let mut count = 0usize;
@@ -224,6 +232,10 @@ pub const fn kunit_case_count() -> usize {
     {
         count += user_boot::KUNIT_CASE_COUNT;
     }
+    #[cfg(all(checkpoint_handler_user_boot_failure, app_user_boot))]
+    {
+        count += user_boot_failure::KUNIT_CASE_COUNT;
+    }
     count
 }
 
@@ -241,7 +253,8 @@ pub const fn kunit_case_count() -> usize {
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
-    checkpoint_handler_user_boot
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
 ))]
 pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     let mut current_priority = next_priority(checkpoint, None);
@@ -282,7 +295,8 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
     checkpoint_handler_virtio_rng,
-    checkpoint_handler_user_boot
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
 )))]
 pub fn dispatch(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
     CheckpointOutcome::Continue

@@ -98,6 +98,8 @@ predicate arceos_ex_must_user_boot_use_existing_syscall_exception() -> bool;
 predicate arceos_ex_must_not_generate_elf_loader_object() -> bool;
 predicate arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan() -> bool;
 predicate arceos_ex_must_elf_object_support_pt_interp_without_elf_loader_object() -> bool;
+predicate arceos_ex_must_elf_object_support_et_dyn_pie_main_with_fixed_bias() -> bool;
+predicate arceos_ex_must_elf_object_defer_et_dyn_loader_main() -> bool;
 predicate arceos_ex_must_user_address_space_map_main_and_interpreter_elfs() -> bool;
 predicate arceos_ex_must_user_address_space_provide_dynamic_linker_heap_arena() -> bool;
 predicate arceos_ex_must_user_stack_setup_initial_argc_argv_envp_auxv() -> bool;
@@ -121,6 +123,9 @@ predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bo
 predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
 predicate arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> bool;
+predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
+predicate arceos_ex_must_user_boot_kunit_observe_init_attempt_failure_trace() -> bool;
+predicate arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug() -> bool;
 predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
@@ -1360,10 +1365,21 @@ type ArceosExStartupPhaseCodingMust {
          * to read the interpreter as another ElfObject role. That interpreter
          * may be ET_DYN, but it is not an ElfLoader resource object and it does
          * not introduce a separate Load lifecycle stage.
+         *
+         * ELF type handling follows Linux 6.12 fs/binfmt_elf.c
+         * load_elf_binary(): ET_DYN is not synonymous with dynamic linking,
+         * and ET_EXEC is not synonymous with static linking. PT_INTERP is the
+         * current dynamic/interpreter-path discriminator. Main executables must
+         * support ET_EXEC and must also support ET_DYN + PT_INTERP as PIE main
+         * with a fixed non-overlapping load bias for this first slice. Linux's
+         * ELF_ET_DYN_BASE + ASLR + mmap search is trimmed for now. ET_DYN main
+         * without PT_INTERP is the direct-loader form and remains deferred.
          */
         arceos_ex_must_not_generate_elf_loader_object();
         arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan();
         arceos_ex_must_elf_object_support_pt_interp_without_elf_loader_object();
+        arceos_ex_must_elf_object_support_et_dyn_pie_main_with_fixed_bias();
+        arceos_ex_must_elf_object_defer_et_dyn_loader_main();
 
         /*
          * User init ELF validation boundary:
@@ -1399,12 +1415,16 @@ type ArceosExStartupPhaseCodingMust {
          * the main executable ElfObject and the interpreter ElfObject mapping
          * plans into the same user address space. It must also provide a
          * minimal user heap/anonymous mapping arena for the dynamic loader's
-         * early brk/mmap-style allocations. It may allocate backing pages,
-         * copy ELF file bytes, zero .bss/stack/heap bytes and build a
-         * page-table-shaped view. ELF segment backing and low-half user leaf
-         * PTEs are page-granular over align_down(p_vaddr)..align_up(p_vaddr +
-         * p_memsz); mprotect/munmap mapped-range checks must use that same
-         * page range so GNU_RELRO whole-page protection requests are accepted.
+         * early brk/mmap-style allocations. If the main executable is
+         * ET_DYN + PT_INTERP PIE, ElfObject.Setup must bind a fixed
+         * non-overlapping main load bias before UserAddressSpace.Setup
+         * consumes the load plan, so the main PIE, interpreter, heap and stack
+         * windows do not overlap. It may allocate backing pages, copy ELF file
+         * bytes, zero .bss/stack/heap bytes and build a page-table-shaped
+         * view. ELF segment backing and low-half user leaf PTEs are
+         * page-granular over align_down(p_vaddr)..align_up(p_vaddr + p_memsz);
+         * mprotect/munmap mapped-range checks must use that same page range so
+         * GNU_RELRO whole-page protection requests are accepted.
          *
          * UserAddressSpace.Enable is the real pre-switch satp-ready boundary.
          * It may allocate real Sv39 user page-table pages, install low-half
@@ -1490,6 +1510,15 @@ type ArceosExStartupPhaseCodingMust {
          * map must install the combined user_smoke fixture as /sbin/init, and
          * the harness must use a case-local disk image so the result cannot
          * pass by reusing stale build/virtio-blk.raw contents.
+         *
+         * Long-term user-boot checkpoints should be expanded when they support
+         * future Linux differential debugging. Existing boundaries such as
+         * UserBoot.InitAttemptFailed, UserBoot.MainElfReady,
+         * UserBoot.InterpreterReady and UserAddressSpace.Ready should expose
+         * stable ELF/load-bias/mapping diagnostics before adding another
+         * checkpoint. New checkpoints are appropriate only when a real distro
+         * path reaches a stable behavior boundary not covered by the existing
+         * set.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
@@ -1513,6 +1542,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
         arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice();
         arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core();
+        arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();

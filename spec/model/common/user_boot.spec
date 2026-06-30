@@ -39,6 +39,22 @@ enum UserInitPathRef {
     RequestedInit,
 }
 
+enum UserInitAttemptStage {
+    ValidatePath,
+    ReadImage,
+    PresetElf,
+    SetupElf,
+    UnsupportedCandidate,
+}
+
+enum UserInitAttemptReason {
+    InvalidPath,
+    ReadFailed,
+    ElfPresetFailed,
+    ElfSetupFailed,
+    CandidateUnsupported,
+}
+
 enum ElfObjectRole {
     MainExecutable,
     Interpreter,
@@ -68,6 +84,13 @@ predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_argv0_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
+predicate user_boot_payload_init_attempt_failure_trace_defined<T>(payload: T) -> bool;
+predicate user_boot_payload_init_attempt_failure_stage_bound<T, S>(payload: T, stage: S) -> bool;
+predicate user_boot_payload_init_attempt_failure_reason_bound<T, R>(payload: T, reason: R) -> bool;
+predicate user_boot_payload_init_attempt_failure_path_bound<T, P>(payload: T, path: P) -> bool;
+predicate user_boot_payload_init_attempt_failure_requested_terminal<T>(payload: T) -> bool;
+predicate user_boot_payload_init_attempt_failure_default_nonfatal<T>(payload: T) -> bool;
+predicate user_boot_init_attempt_failure_checkpoint<T>(payload: T) -> bool;
 predicate user_boot_payload_enters_user_mode<T>(payload: T) -> bool;
 predicate user_boot_payload_no_return_handoff<T>(payload: T) -> bool;
 predicate payload_image_read_start_checkpoint<T, P>(payload: T, path: P) -> bool;
@@ -114,10 +137,13 @@ predicate elf_object_type_supported<T>(elf: T) -> bool;
 predicate elf_object_static_executable<T>(elf: T) -> bool;
 predicate elf_object_role_bound<T, R>(elf: T, role: R) -> bool;
 predicate elf_object_dynamic_executable<T>(elf: T) -> bool;
+predicate elf_object_et_dyn_pie_main_supported<T>(elf: T) -> bool;
+predicate elf_object_main_pie_load_bias_bound<T>(elf: T) -> bool;
 predicate elf_object_interpreter_required<T>(elf: T) -> bool;
 predicate elf_object_interpreter_path_bound<T>(elf: T) -> bool;
 predicate elf_object_interpreter_elf_bound<T, I>(elf: T, interpreter: I) -> bool;
 predicate elf_object_et_dyn_interpreter_supported<T>(elf: T) -> bool;
+predicate elf_object_et_dyn_loader_without_interp_deferred<T>(elf: T) -> bool;
 predicate elf_object_runtime_entry_bound<T>(elf: T) -> bool;
 predicate elf_object_auxv_exec_fields_bound<T>(elf: T) -> bool;
 predicate elf_object_program_headers_parsed<T>(elf: T) -> bool;
@@ -632,8 +658,20 @@ object ElfObject: ResourceObject {
                      * a second ElfObject role, Interpreter. The interpreter is
                      * not an ElfLoader resource object and load remains merged
                      * into ElfObject.Setup / UserAddressSpace.Setup.
+                     *
+                     * Linux 6.12 fs/binfmt_elf.c::load_elf_binary() accepts
+                     * both ET_EXEC and ET_DYN. It distinguishes ET_DYN PIE
+                     * programs by the presence of PT_INTERP and loads them away
+                     * from the interpreter/loader using a load_bias derived
+                     * from ELF_ET_DYN_BASE plus ASLR. This model keeps the same
+                     * classification but trims ASLR/VMA search to a fixed,
+                     * non-overlapping main PIE load bias for the first slice.
+                     * ET_DYN without PT_INTERP is the direct-loader form and is
+                     * explicitly deferred here.
                      */
                     elf_object_static_executable(self) || elf_object_dynamic_executable(self);
+                    elf_object_et_dyn_pie_main_supported(self);
+                    elf_object_et_dyn_loader_without_interp_deferred(self);
                     elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
                 }
             }
@@ -653,6 +691,8 @@ object ElfObject: ResourceObject {
             elf_object_load_merged_into_setup(self);
             elf_object_runtime_entry_bound(self);
             elf_object_static_executable(self) || elf_object_dynamic_executable(self);
+            elf_object_et_dyn_pie_main_supported(self);
+            elf_object_et_dyn_loader_without_interp_deferred(self);
             elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
         }
 
@@ -1269,6 +1309,7 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_partition_objects_deferred(self);
                     user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
                     user_boot_payload_try_candidate_bound(self);
+                    user_boot_payload_init_attempt_failure_trace_defined(self);
                     payload_image_read_failed_checkpoint_defined(self);
                     payload_image_read_error_classification_contract_ready(self);
                 }
@@ -1299,6 +1340,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_partition_objects_deferred(self);
             user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_try_candidate_bound(self);
+            user_boot_payload_init_attempt_failure_trace_defined(self);
             payload_image_read_failed_checkpoint_defined(self);
             payload_image_read_error_classification_contract_ready(self);
             PayloadExecSyncBoundaries.state == State::Ready;
@@ -1318,6 +1360,33 @@ object UserBootPayload: ResourceObject {
                     payload_image_read_complete_checkpoint(self, VfsCore);
                     user_boot_payload_try_candidate_elf_ready(self, ElfObject);
                     user_boot_payload_selected_path_bound(self);
+                }
+            }
+
+            /*
+             * Linux 6.12 init/main.c::run_init_process() returns only when
+             * kernel_execve() failed; try_to_run_init_process() reports
+             * non-ENOENT default-candidate failures and continues to the next
+             * fallback. The requested init= branch treats the same failed
+             * kernel_execve()-equivalent result as terminal and panics instead
+             * of falling through to the default list. The implementation must
+             * expose a stable failure observation for each failed init attempt:
+             * path kind, stable stage, stable reason and whether the failure is
+             * terminal or fallback-nonfatal. The observation is a general trace
+             * checkpoint, with KUnit as one possible consumer; it is not a
+             * test-only API and must not change successful startup sequencing.
+             */
+            on Action::RecordInitAttemptFailure(
+                path: UserInitPathRef,
+                stage: UserInitAttemptStage,
+                reason: UserInitAttemptReason
+            ) {
+                ensures {
+                    user_boot_payload_init_attempt_failure_trace_defined(self);
+                    user_boot_payload_init_attempt_failure_path_bound(self, path);
+                    user_boot_payload_init_attempt_failure_stage_bound(self, stage);
+                    user_boot_payload_init_attempt_failure_reason_bound(self, reason);
+                    user_boot_init_attempt_failure_checkpoint(self);
                 }
             }
 
@@ -1344,6 +1413,7 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_requested_init_before_default_fallback(self);
                     user_boot_payload_requested_init_failure_panic_terminal_bound(self);
                     user_boot_payload_requested_init_no_default_fallback(self);
+                    user_boot_payload_init_attempt_failure_requested_terminal(self);
                     user_boot_payload_success_stops_fallback_chain(self);
                     user_boot_payload_success_no_return_to_startup_orchestration(self);
                     user_boot_payload_selected_path_bound(self);
@@ -1373,6 +1443,7 @@ object UserBootPayload: ResourceObject {
                 ensures {
                     user_boot_payload_default_init_fallback_order_bound(self);
                     user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+                    user_boot_payload_init_attempt_failure_default_nonfatal(self);
                     user_boot_payload_first_successful_candidate_selected(self);
                     user_boot_payload_success_stops_fallback_chain(self);
                     user_boot_payload_success_no_return_to_startup_orchestration(self);
