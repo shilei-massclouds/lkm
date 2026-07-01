@@ -129,11 +129,13 @@ predicate arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mas
 predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_getpgid_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_setpgid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
 predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
@@ -1547,7 +1549,7 @@ type ArceosExStartupPhaseCodingMust {
          * fs/fcntl.c::do_fcntl()/f_dupfd(),
          * drivers/tty/tty_io.c::tty_ioctl()/tiocgwinsz(),
          * drivers/tty/tty_ioctl.c::tty_mode_ioctl(),
-         * drivers/tty/tty_jobctrl.c::tty_jobctrl_ioctl()/tiocgpgrp() and the
+         * drivers/tty/tty_jobctrl.c::tty_jobctrl_ioctl()/tiocgpgrp()/tiocspgrp() and the
          * asm-generic fcntl/ioctls/termbits UAPI headers. O_RDWR is a valid open access
          * mode and must not be rejected as an invalid flag before pathname
          * copy. The current slice may special-case
@@ -1579,9 +1581,18 @@ type ArceosExStartupPhaseCodingMust {
          * leader and foreground pgrp of the console-like controlling tty, so
          * success writes 1; if the foreground pgrp fact is absent, it should
          * follow Linux pid_vnr(NULL) shape and write 0 rather than inventing a
-         * new errno. This is not full TTY job control: TIOCSPGRP, TIOCGSID,
-         * setsid/setpgid, pty, orphan pgrp and job-control signal delivery
-         * remain trimmed.
+         * new errno.
+         *
+         * ioctl(TIOCSPGRP) must follow the Linux tiocspgrp() user-visible
+         * order for the current first slice: validate the fd as the current
+         * console-like controlling tty, copy a riscv64 pid_t/int pgrp number
+         * from the user pointer, reject negative pgrp with EINVAL, reject
+         * unknown pgrp with ESRCH, reject a pgrp outside the current session
+         * with EPERM, then update the foreground pgrp fact. The current
+         * single-PID slice only has pgrp 1 in the current session, so
+         * TIOCSPGRP(pid_t=1) succeeds and records foreground pgrp 1. This is
+         * not full TTY job control: TIOCGSID, setsid, pty, orphan pgrp,
+         * termios mutation and job-control signal delivery remain trimmed.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -1598,11 +1609,11 @@ type ArceosExStartupPhaseCodingMust {
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
          * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS, TIOCGWINSZ and
-         * TIOCGPGRP.
+         * TIOCGPGRP/TIOCSPGRP.
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
-         * do_getpgid()/sys_getpgid()/sys_geteuid()/sys_getegid()/
+         * do_getpgid()/sys_getpgid()/sys_setpgid()/sys_geteuid()/sys_getegid()/
          * sys_getresuid()/sys_getresgid()/sys_newuname(),
          * fs/d_path.c::sys_getcwd(), init/main.c::rest_init(),
          * init/version-timestamp.c::init_uts_ns and
@@ -1613,8 +1624,16 @@ type ArceosExStartupPhaseCodingMust {
          * and return PID1's pgrp. The first single-PID slice may also accept
          * getpgid(1) as the same task and return 1; unknown or negative pid
          * values must follow Linux's failed lookup shape and return ESRCH.
-         * Full tasklist lookup, RCU protection, security_task_getpgid(), pid
-         * namespaces and multi-process process-group state remain trimmed.
+         * setpgid(154) must preserve Linux sys_setpgid() argument
+         * normalization for pid/pgid zero: pid 0 means current PID1 and pgid
+         * 0 means the selected pid. The current single-PID slice may accept
+         * setpgid(0,0), setpgid(0,1), setpgid(1,0) and setpgid(1,1), all
+         * leaving PID1 in pgrp 1. Negative pgid must return EINVAL; unknown
+         * pid must return ESRCH; unknown target pgrp in the current single
+         * session must return EPERM. Full tasklist lookup, RCU protection,
+         * security_task_getpgid()/security_task_setpgid(), pid namespaces,
+         * PF_FORKNOEXEC/EACCES and multi-process process-group state remain
+         * trimmed.
          * geteuid/getegid/getresuid/getresgid must read the existing root
          * credential substate and write uid_t/gid_t user results for getres*.
          * uname must copy the six-field 65-byte new_utsname layout using the
@@ -1711,10 +1730,13 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_credentials_first_slice();
         arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice();
         arceos_ex_must_syscall_table_support_getpgid_first_slice();
+        arceos_ex_must_syscall_table_support_setpgid_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();
         arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice();
+        arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice();
+        arceos_ex_must_syscall_table_support_tiocspgrp_first_slice();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();
         arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice();

@@ -8,7 +8,9 @@ use super::{
     hwrng::HwRngError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    user_boot::{UserProcessGroupLookup, UserSignalAction, USER_SIGNAL_COUNT},
+    user_boot::{
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
+    },
 };
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
@@ -75,6 +77,7 @@ const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
 const SYSCALL_GETRESUID: usize = 148;
 const SYSCALL_GETRESGID: usize = 150;
+const SYSCALL_SETPGID: usize = 154;
 const SYSCALL_GETPGID: usize = 155;
 const SYSCALL_UNAME: usize = 160;
 const SYSCALL_GETTIMEOFDAY: usize = 169;
@@ -110,6 +113,7 @@ const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
 const TCGETS: usize = 0x5401;
 const TIOCGPGRP: usize = 0x540f;
+const TIOCSPGRP: usize = 0x5410;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
@@ -171,6 +175,7 @@ pub struct SyscallTable {
     getcwd_supported: bool,
     getpid_supported: bool,
     getpgid_supported: bool,
+    setpgid_supported: bool,
     getppid_supported: bool,
     getuid_supported: bool,
     geteuid_supported: bool,
@@ -227,6 +232,7 @@ pub struct SyscallTable {
     getcwd_root_first_slice_bound: bool,
     getpid_routes_to_user_init_process: bool,
     getpgid_routes_to_user_init_process: bool,
+    setpgid_routes_to_user_init_process: bool,
     getppid_routes_to_user_init_process: bool,
     getuid_routes_to_user_init_process: bool,
     geteuid_routes_to_user_init_process: bool,
@@ -273,6 +279,7 @@ pub struct SyscallTable {
     getcwd_observed: AtomicU8,
     getpid_observed: AtomicU8,
     getpgid_observed: AtomicU8,
+    setpgid_observed: AtomicU8,
     getppid_observed: AtomicU8,
     getuid_observed: AtomicU8,
     geteuid_observed: AtomicU8,
@@ -313,6 +320,7 @@ impl SyscallTable {
             getcwd_supported: false,
             getpid_supported: false,
             getpgid_supported: false,
+            setpgid_supported: false,
             getppid_supported: false,
             getuid_supported: false,
             geteuid_supported: false,
@@ -369,6 +377,7 @@ impl SyscallTable {
             getcwd_root_first_slice_bound: false,
             getpid_routes_to_user_init_process: false,
             getpgid_routes_to_user_init_process: false,
+            setpgid_routes_to_user_init_process: false,
             getppid_routes_to_user_init_process: false,
             getuid_routes_to_user_init_process: false,
             geteuid_routes_to_user_init_process: false,
@@ -415,6 +424,7 @@ impl SyscallTable {
             getcwd_observed: AtomicU8::new(0),
             getpid_observed: AtomicU8::new(0),
             getpgid_observed: AtomicU8::new(0),
+            setpgid_observed: AtomicU8::new(0),
             getppid_observed: AtomicU8::new(0),
             getuid_observed: AtomicU8::new(0),
             geteuid_observed: AtomicU8::new(0),
@@ -885,6 +895,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn setpgid_observed(&self) -> bool {
+        self.setpgid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn getuid_observed(&self) -> bool {
         self.getuid_observed.load(Ordering::Acquire) != 0
     }
@@ -983,6 +998,7 @@ impl SyscallTable {
         self.getcwd_supported = true;
         self.getpid_supported = true;
         self.getpgid_supported = true;
+        self.setpgid_supported = true;
         self.getppid_supported = true;
         self.getuid_supported = true;
         self.geteuid_supported = true;
@@ -1039,6 +1055,7 @@ impl SyscallTable {
         self.getcwd_root_first_slice_bound = true;
         self.getpid_routes_to_user_init_process = true;
         self.getpgid_routes_to_user_init_process = true;
+        self.setpgid_routes_to_user_init_process = true;
         self.getppid_routes_to_user_init_process = true;
         self.getuid_routes_to_user_init_process = true;
         self.geteuid_routes_to_user_init_process = true;
@@ -1239,6 +1256,18 @@ impl SyscallTable {
         }
 
         syscall_table_getpgid(self, frame);
+    }
+
+    pub fn setpgid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setpgid_supported
+            || !self.setpgid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setpgid(self, frame);
     }
 
     pub fn getppid(&self, frame: &mut TrapFrame) {
@@ -1880,6 +1909,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_SETUID => table.setuid(frame),
         SYSCALL_GETRESUID => table.getresuid(frame),
         SYSCALL_GETRESGID => table.getresgid(frame),
+        SYSCALL_SETPGID => table.setpgid(frame),
         SYSCALL_UNAME => table.uname(frame),
         SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
         SYSCALL_GETPID => table.getpid(frame),
@@ -2273,6 +2303,24 @@ fn syscall_table_getpgid(table: &SyscallTable, frame: &mut TrapFrame) {
         }
         UserProcessGroupLookup::NoSuchProcess => complete_error_syscall(frame, ESRCH),
         UserProcessGroupLookup::NotReady => complete_unsupported_syscall(frame),
+    }
+}
+
+fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let pid = frame.reg(10);
+    let pgid = frame.reg(11);
+    let update = crate::context::context()
+        .user_init_process
+        .set_process_group_first_slice(pid, pgid);
+    match update {
+        UserProcessGroupUpdate::Updated(_) => {
+            table.setpgid_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        UserProcessGroupUpdate::Invalid => complete_error_syscall(frame, EINVAL),
+        UserProcessGroupUpdate::NoSuchProcess => complete_error_syscall(frame, ESRCH),
+        UserProcessGroupUpdate::PermissionDenied => complete_error_syscall(frame, EPERM),
+        UserProcessGroupUpdate::NotReady => complete_unsupported_syscall(frame),
     }
 }
 
@@ -2801,6 +2849,48 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             }
         }
+        TIOCSPGRP => {
+            if let Err(error) = crate::context::context_ref()
+                .files_struct
+                .ioctl_tiocspgrp_fd(fd)
+            {
+                let errno = file_error_to_errno(error);
+                print_ioctl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+            let Some(pgrp) = read_user_u32(arg) else {
+                print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                complete_error_syscall(frame, EFAULT);
+                return;
+            };
+            let update = crate::context::context()
+                .user_init_process
+                .set_foreground_pgrp_first_slice(pgrp);
+            match update {
+                UserProcessGroupUpdate::Updated(_) => {}
+                UserProcessGroupUpdate::Invalid => {
+                    print_ioctl_error_detail(fd, cmd, arg, EINVAL);
+                    complete_error_syscall(frame, EINVAL);
+                    return;
+                }
+                UserProcessGroupUpdate::NoSuchProcess => {
+                    print_ioctl_error_detail(fd, cmd, arg, ESRCH);
+                    complete_error_syscall(frame, ESRCH);
+                    return;
+                }
+                UserProcessGroupUpdate::PermissionDenied => {
+                    print_ioctl_error_detail(fd, cmd, arg, EPERM);
+                    complete_error_syscall(frame, EPERM);
+                    return;
+                }
+                UserProcessGroupUpdate::NotReady => {
+                    print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+                    complete_error_syscall(frame, ENOTTY);
+                    return;
+                }
+            }
+        }
         _ => {
             print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
             complete_error_syscall(frame, ENOTTY);
@@ -3083,6 +3173,15 @@ fn read_user_usize(user_ptr: usize) -> Option<usize> {
     }
 }
 
+fn read_user_u32(user_ptr: usize) -> Option<u32> {
+    let mut bytes = [0u8; core::mem::size_of::<u32>()];
+    if copy_from_user(user_ptr, &mut bytes) {
+        Some(u32::from_le_bytes(bytes))
+    } else {
+        None
+    }
+}
+
 fn write_user_usize(user_ptr: usize, value: usize) -> bool {
     copy_to_user(user_ptr, &value.to_le_bytes())
 }
@@ -3339,6 +3438,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_SETUID => "setuid",
         SYSCALL_GETRESUID => "getresuid",
         SYSCALL_GETRESGID => "getresgid",
+        SYSCALL_SETPGID => "setpgid",
         SYSCALL_UNAME => "uname",
         SYSCALL_GETTIMEOFDAY => "gettimeofday",
         SYSCALL_GETPID => "getpid",
@@ -3507,6 +3607,7 @@ fn print_ioctl_cmd_name(cmd: usize) {
     let name = match cmd {
         TCGETS => "TCGETS",
         TIOCGPGRP => "TIOCGPGRP",
+        TIOCSPGRP => "TIOCSPGRP",
         TIOCGWINSZ => "TIOCGWINSZ",
         _ => "unknown",
     };

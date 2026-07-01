@@ -1590,6 +1590,11 @@ impl FilesStruct {
         Ok(())
     }
 
+    pub fn ioctl_tiocspgrp_fd(&self, fd: usize) -> FileResult<()> {
+        self.char_backend_for_fd(fd)?;
+        Ok(())
+    }
+
     pub fn lseek_fd(
         &mut self,
         fd: usize,

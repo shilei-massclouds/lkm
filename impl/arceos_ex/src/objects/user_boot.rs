@@ -79,6 +79,19 @@ pub enum UserProcessGroupLookup {
     NotReady,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserProcessGroupUpdate {
+    Updated(usize),
+    Invalid,
+    NoSuchProcess,
+    PermissionDenied,
+    NotReady,
+}
+
+fn pid_t_arg(value: usize) -> i32 {
+    value as u32 as i32
+}
+
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
@@ -2812,10 +2825,12 @@ pub struct UserInitProcess {
     process_group_leader_first_slice: bool,
     process_group: usize,
     process_group_read_observed: bool,
+    process_group_set_observed: bool,
     controlling_tty_bound: bool,
     foreground_pgrp_bound: bool,
     foreground_pgrp: usize,
     foreground_pgrp_read_observed: bool,
+    foreground_pgrp_set_observed: bool,
     uid_read_observed: bool,
     euid_read_observed: bool,
     gid_read_observed: bool,
@@ -2889,10 +2904,12 @@ impl UserInitProcess {
             process_group_leader_first_slice: false,
             process_group: 0,
             process_group_read_observed: false,
+            process_group_set_observed: false,
             controlling_tty_bound: false,
             foreground_pgrp_bound: false,
             foreground_pgrp: 0,
             foreground_pgrp_read_observed: false,
+            foreground_pgrp_set_observed: false,
             uid_read_observed: false,
             euid_read_observed: false,
             gid_read_observed: false,
@@ -3092,6 +3109,10 @@ impl UserInitProcess {
         self.process_group_read_observed
     }
 
+    pub const fn process_group_set_observed(&self) -> bool {
+        self.process_group_set_observed
+    }
+
     pub const fn controlling_tty_bound(&self) -> bool {
         self.controlling_tty_bound
     }
@@ -3106,6 +3127,10 @@ impl UserInitProcess {
 
     pub const fn foreground_pgrp_read_observed(&self) -> bool {
         self.foreground_pgrp_read_observed
+    }
+
+    pub const fn foreground_pgrp_set_observed(&self) -> bool {
+        self.foreground_pgrp_set_observed
     }
 
     pub const fn uid_read_observed(&self) -> bool {
@@ -3400,6 +3425,50 @@ impl UserInitProcess {
         UserProcessGroupLookup::Found(self.process_group)
     }
 
+    pub fn set_process_group_first_slice(
+        &mut self,
+        pid_arg: usize,
+        pgid_arg: usize,
+    ) -> UserProcessGroupUpdate {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || !self.process_group_leader_first_slice
+            || self.process_group == 0
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+
+        let pid = pid_t_arg(pid_arg);
+        let pgid = pid_t_arg(pgid_arg);
+        if pgid < 0 {
+            return UserProcessGroupUpdate::Invalid;
+        }
+        let normalized_pid = if pid == 0 {
+            super::rest_init::KERNEL_INIT_PID
+        } else if pid < 0 {
+            return UserProcessGroupUpdate::NoSuchProcess;
+        } else {
+            pid as usize
+        };
+        if normalized_pid != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupUpdate::NoSuchProcess;
+        }
+
+        let normalized_pgid = if pgid == 0 {
+            normalized_pid
+        } else {
+            pgid as usize
+        };
+        if normalized_pgid != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupUpdate::PermissionDenied;
+        }
+
+        self.process_group = normalized_pgid;
+        self.process_group_set_observed = true;
+        UserProcessGroupUpdate::Updated(self.process_group)
+    }
+
     pub fn read_foreground_pgrp(&mut self) -> Option<usize> {
         if self.lifecycle.state() != State::Online
             || !self.pid1_preserved
@@ -3415,6 +3484,33 @@ impl UserInitProcess {
         } else {
             Some(0)
         }
+    }
+
+    pub fn set_foreground_pgrp_first_slice(&mut self, pgrp_arg: u32) -> UserProcessGroupUpdate {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || !self.process_group_leader_first_slice
+            || !self.controlling_tty_bound
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+
+        let pgrp = pgrp_arg as i32;
+        if pgrp < 0 {
+            return UserProcessGroupUpdate::Invalid;
+        }
+        if pgrp as usize != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupUpdate::NoSuchProcess;
+        }
+        if self.process_group != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupUpdate::PermissionDenied;
+        }
+
+        self.foreground_pgrp = pgrp as usize;
+        self.foreground_pgrp_bound = true;
+        self.foreground_pgrp_set_observed = true;
+        UserProcessGroupUpdate::Updated(self.foreground_pgrp)
     }
 
     pub fn read_euid(&mut self) -> Option<usize> {
