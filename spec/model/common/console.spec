@@ -272,6 +272,11 @@ predicate serial8250_rx_kunit_observer_does_not_claim_or_complete<T>(observer: T
 predicate serial8250_rx_kunit_observer_reads_loopback_probe<T, P>(observer: T, probe: P) -> bool;
 predicate serial8250_rx_kunit_observer_reads_flip_buffer_result<T, F>(observer: T, flip_buffer: F) -> bool;
 
+predicate tty_flip_buffer_push_publishes_ready_data_first_slice<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_probe_bytes_not_user_stdin<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_ready_data_cleared<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_user_smoke_fixture_ready_data_bound<T>(flip_buffer: T) -> bool;
+
 predicate serial8250_console_registered<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_real_console<T>(console: T) -> bool;
 predicate serial8250_console_consdev<T>(console: T) -> bool;
@@ -823,8 +828,10 @@ object TtyPort: ConsoleObject {
 
 /*
  * TtyFlipBuffer is the RX staging boundary reached by serial8250 RX interrupt
- * handling. The first RX round should validate insert/push, not full N_TTY or
- * userspace read semantics.
+ * handling. The first RX round validates insert/push and publishes a bounded
+ * raw ready-data slice for the current stdin/read first slice. This is still
+ * not full N_TTY; canonical processing, wait queues, hangup, signal restart
+ * and job-control semantics remain outside this object.
  */
 object TtyFlipBuffer: ConsoleObject {
     initial_state: State::Base;
@@ -851,6 +858,33 @@ object TtyFlipBuffer: ConsoleObject {
             ensures {
                 tty_flip_buffer_push_committed(self, record);
                 tty_flip_buffer_push_after_rx_insert(self, record);
+                tty_flip_buffer_push_publishes_ready_data_first_slice(self);
+                tty_flip_buffer_probe_bytes_not_user_stdin(self);
+                tty_flip_buffer_no_overflow(self);
+            }
+        }
+
+        Action::ClearReadyData {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+            }
+            ensures {
+                tty_flip_buffer_ready_data_cleared(self);
+                tty_flip_buffer_probe_bytes_not_user_stdin(self);
+                tty_flip_buffer_no_overflow(self);
+            }
+        }
+
+        Action::SeedUserSmokeReadyDataFixture {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                tty_flip_buffer_ready_data_cleared(self);
+            }
+            ensures {
+                tty_flip_buffer_user_smoke_fixture_ready_data_bound(self);
+                tty_flip_buffer_push_publishes_ready_data_first_slice(self);
                 tty_flip_buffer_no_overflow(self);
             }
         }
@@ -880,6 +914,8 @@ object TtyFlipBuffer: ConsoleObject {
             tty_flip_buffer_bound_to_tty_port(TtyFlipBuffer, TtyPort);
             tty_flip_buffer_rx_staging_only(TtyFlipBuffer);
             tty_flip_buffer_push_is_rx_observation_boundary(TtyFlipBuffer);
+            tty_flip_buffer_push_publishes_ready_data_first_slice(TtyFlipBuffer);
+            tty_flip_buffer_probe_bytes_not_user_stdin(TtyFlipBuffer);
             tty_flip_buffer_does_not_model_full_n_tty_read(TtyFlipBuffer);
             tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
         }

@@ -301,13 +301,34 @@ impl TtyFlipBuffer {
             && self.n_tty_read_deferred
     }
 
+    fn compact_ready_prefix(&mut self) {
+        if self.read_offset == 0 || self.pending_len != 0 {
+            return;
+        }
+
+        let unread = self.read_ready_len.saturating_sub(self.read_offset);
+        if unread != 0 {
+            self.buffer
+                .copy_within(self.read_offset..self.read_ready_len, 0);
+        }
+        self.read_ready_len = unread;
+        self.read_offset = 0;
+    }
+
     fn insert_char(&mut self, byte: u8) -> bool {
-        if !self.ready || self.pending_len >= TTY_FLIP_BUFFER_SIZE {
+        if !self.ready {
             self.overflowed = true;
             return false;
         }
 
-        self.buffer[self.pending_len] = byte;
+        self.compact_ready_prefix();
+        let write_index = self.read_ready_len + self.pending_len;
+        if write_index >= TTY_FLIP_BUFFER_SIZE {
+            self.overflowed = true;
+            return false;
+        }
+
+        self.buffer[write_index] = byte;
         self.pending_len += 1;
         self.total_inserted = self.total_inserted.saturating_add(1);
         self.last_byte = byte;
@@ -321,6 +342,7 @@ impl TtyFlipBuffer {
 
         self.last_pushed_len = self.pending_len;
         self.push_count = self.push_count.saturating_add(1);
+        self.read_ready_len += self.pending_len;
         self.pending_len = 0;
         true
     }
@@ -355,6 +377,19 @@ impl TtyFlipBuffer {
         Some(self.read_offset < self.read_ready_len)
     }
 
+    fn clear_ready_data(&mut self) -> bool {
+        if !self.ready {
+            return false;
+        }
+
+        self.buffer = [0; TTY_FLIP_BUFFER_SIZE];
+        self.pending_len = 0;
+        self.read_ready_len = 0;
+        self.read_offset = 0;
+        self.last_read_len = 0;
+        true
+    }
+
     fn seed_ready_data_fixture(&mut self, bytes: &[u8]) -> bool {
         if !self.ready
             || bytes.is_empty()
@@ -366,18 +401,14 @@ impl TtyFlipBuffer {
         }
 
         self.buffer = [0; TTY_FLIP_BUFFER_SIZE];
+        self.buffer[..bytes.len()].copy_from_slice(bytes);
         self.pending_len = 0;
-        self.read_offset = 0;
-        for byte in bytes {
-            if !self.insert_char(*byte) {
-                return false;
-            }
-        }
-        if !self.push() {
-            return false;
-        }
         self.read_ready_len = bytes.len();
         self.read_offset = 0;
+        self.last_read_len = 0;
+        if let Some(last) = bytes.last() {
+            self.last_byte = *last;
+        }
         true
     }
 }
@@ -1578,6 +1609,11 @@ pub fn tty_flip_buffer_ready_data_consumed() -> bool {
 pub fn seed_tty_ready_data_fixture(bytes: &[u8]) -> bool {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
     state.tty_flip_buffer.seed_ready_data_fixture(bytes)
+}
+
+pub fn clear_tty_ready_data() -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    state.tty_flip_buffer.clear_ready_data()
 }
 
 pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {

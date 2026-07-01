@@ -73,6 +73,8 @@ predicate files_struct_readlink_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bo
 predicate files_struct_regular_file_read_observed<T>(files: T) -> bool;
 predicate files_struct_regular_file_closed<T>(files: T) -> bool;
 predicate files_struct_regular_file_stat_observed<T>(files: T) -> bool;
+predicate files_struct_stdin_probe_ready_data_cleared<T>(files: T) -> bool;
+predicate files_struct_user_smoke_stdin_fixture_bound<T>(files: T) -> bool;
 
 predicate fd_table_allocated<T>(table: T) -> bool;
 predicate fd_table_capacity_bound<T>(table: T) -> bool;
@@ -303,6 +305,46 @@ object FilesStruct: ResourceObject {
 
                 ensures {
                     files_struct_readlink_path_routes_to_vfs(self, VfsCore);
+                }
+            }
+
+            on Action::ClearStdinReadyData {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_fd_table_bound(self, FileDescriptorTable);
+                    files_struct_stdio_bound(self);
+                    TtyFlipBuffer.state == State::Ready;
+                }
+
+                drives {
+                    TtyFlipBuffer.Action::ClearReadyData;
+                }
+
+                ensures {
+                    files_struct_stdin_probe_ready_data_cleared(self);
+                    tty_flip_buffer_ready_data_cleared(TtyFlipBuffer);
+                    tty_flip_buffer_probe_bytes_not_user_stdin(TtyFlipBuffer);
+                }
+            }
+
+            on Action::PrepareDefaultStdinReadyData {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_fd_table_bound(self, FileDescriptorTable);
+                    files_struct_stdio_bound(self);
+                    files_struct_stdin_probe_ready_data_cleared(self);
+                    TtyFlipBuffer.state == State::Ready;
+                }
+
+                drives {
+                    TtyFlipBuffer.Action::SeedUserSmokeReadyDataFixture;
+                }
+
+                ensures {
+                    files_struct_user_smoke_stdin_fixture_bound(self);
+                    tty_flip_buffer_user_smoke_fixture_ready_data_bound(TtyFlipBuffer);
                 }
             }
         }

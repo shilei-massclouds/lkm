@@ -967,6 +967,7 @@ pub struct FilesStruct {
     next_fd_ready: bool,
     close_on_exec_ready: bool,
     shared_deferred: bool,
+    stdin_probe_ready_data_cleared: bool,
     stdin_ready_data_bound: bool,
     fd_lookup_routes_to_table: AtomicUsize,
     regular_file_slot_ready: bool,
@@ -1018,6 +1019,7 @@ impl FilesStruct {
             next_fd_ready: false,
             close_on_exec_ready: false,
             shared_deferred: false,
+            stdin_probe_ready_data_cleared: false,
             stdin_ready_data_bound: false,
             fd_lookup_routes_to_table: AtomicUsize::new(0),
             regular_file_slot_ready: false,
@@ -1067,6 +1069,10 @@ impl FilesStruct {
 
     pub const fn shared_deferred(&self) -> bool {
         self.shared_deferred
+    }
+
+    pub const fn stdin_probe_ready_data_cleared(&self) -> bool {
+        self.stdin_probe_ready_data_cleared
     }
 
     pub const fn stdin_ready_data_bound(&self) -> bool {
@@ -1240,10 +1246,31 @@ impl FilesStruct {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
+    pub fn clear_stdin_ready_data(&mut self) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound || !self.stdio_bound {
+            return Err(FileError::NotReady);
+        }
+        if !self.fd_table.fd_bound(FdRef::Stdin)
+            || self.stdin.state() != State::Ready
+            || self.stdin_backend.state() != State::Ready
+            || !self.stdin_backend.char_device_read_supported()
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+        if !crate::objects::ns16550a::clear_tty_ready_data() {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        self.stdin_probe_ready_data_cleared = true;
+        self.stdin_ready_data_bound = false;
+        Ok(())
+    }
+
     pub fn prepare_default_stdin_ready_data(&mut self, bytes: &[u8]) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready
             || !self.fd_table_bound
             || !self.stdio_bound
+            || !self.stdin_probe_ready_data_cleared
             || bytes.is_empty()
         {
             return Err(FileError::NotReady);

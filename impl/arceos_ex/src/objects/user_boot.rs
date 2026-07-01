@@ -4109,6 +4109,9 @@ pub fn run_first_user_init(
     if files_struct.setup(kernel_init_task).is_err() {
         user_boot_panic("user files struct setup failed\n");
     }
+    if files_struct.clear_stdin_ready_data().is_err() {
+        user_boot_panic("user stdin ready data clear failed\n");
+    }
     if selected_user_init_needs_stdin_fixture(&selected)
         && files_struct
             .prepare_default_stdin_ready_data(STDIN_READY_FIXTURE)

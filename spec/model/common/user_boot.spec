@@ -82,6 +82,7 @@ predicate user_boot_payload_driven_by_kernel_init_task<T, K>(payload: T, task: K
 predicate user_boot_payload_try_candidate_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_argv0_path_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_stdin_probe_ready_data_cleared<T>(payload: T) -> bool;
 predicate user_boot_payload_user_smoke_stdin_fixture_only<T>(payload: T) -> bool;
 predicate user_boot_payload_distro_init_no_stdin_fixture<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
@@ -2468,6 +2469,7 @@ object UserBootPayload: ResourceObject {
                     SyscallTable.Transition::Setup;
                     SyscallException.Transition::Enable;
                     FilesStruct.Transition::Setup;
+                    FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
                     UserInitProcess.Transition::Setup;
                     UserInitProcess.Transition::Enable;
@@ -2484,10 +2486,10 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);
                     user_boot_payload_selected_path_bound(self);
                     user_boot_payload_selected_argv0_path_bound(self);
+                    user_boot_payload_stdin_probe_ready_data_cleared(self);
+                    files_struct_stdin_probe_ready_data_cleared(FilesStruct);
                     user_boot_payload_user_smoke_stdin_fixture_only(self);
                     user_boot_payload_distro_init_no_stdin_fixture(self);
-                    files_struct_stdin_ready_data_bound(FilesStruct);
-                    tty_flip_buffer_ready_data_bound(TtyFlipBuffer);
                     user_boot_payload_enters_user_mode(self);
                     user_boot_payload_no_return_handoff(self);
                     selected_payload_no_return_handoff();
