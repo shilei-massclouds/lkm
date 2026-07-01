@@ -69,5 +69,14 @@ int smoke_stdin(void)
 		return 88;
 	}
 
+	errno = 0;
+	read_len = read(STDIN_FILENO, buffer, 1);
+	if (read_len != -1 || errno != ENOSYS) {
+		return 89;
+	}
+	if (SAY_LITERAL("syscall read stdin no-ready out-of-slice ok\n") < 0) {
+		return 90;
+	}
+
 	return 0;
 }

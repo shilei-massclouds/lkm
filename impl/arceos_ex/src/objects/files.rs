@@ -457,6 +457,9 @@ impl FileBackend {
 
         let len = crate::objects::ns16550a::read_tty_ready_data(buffer)
             .ok_or(FileError::BackendUnavailable)?;
+        if len == 0 && !buffer.is_empty() {
+            return Err(FileError::NotReady);
+        }
         self.last_read_len.store(len, Ordering::Release);
         if len != 0 {
             self.char_device_read_returns_data

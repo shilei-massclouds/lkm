@@ -261,6 +261,7 @@ predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
+predicate syscall_read_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
@@ -922,6 +923,7 @@ object SyscallTable: ResourceObject {
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
+                    syscall_read_no_ready_blocking_out_of_slice(self);
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_no_ready_blocking_out_of_slice(self);
@@ -979,6 +981,7 @@ object SyscallTable: ResourceObject {
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
+            syscall_read_no_ready_blocking_out_of_slice(self);
             syscall_ppoll_timeout_parse_first_slice(self);
             syscall_ppoll_sigmask_deferred(self);
             syscall_ppoll_no_ready_blocking_out_of_slice(self);
@@ -1070,13 +1073,17 @@ object SyscallTable: ResourceObject {
                  *
                  * This slice supports two already-open fd classes: the existing
                  * Regular0 read-only file, and fd0 char-device stdin only when
-                 * the TTY side already contains bounded ready data. Blocking
-                 * wait queues, canonical line discipline, job control, signal
-                 * interruption/restart, poll/ppoll and real RX wakeup remain
-                 * deferred. A user-read-trace probe may observe fd, requested
-                 * length and the returned read result for distro debugging, but
-                 * must not alter this action's return value, errno path,
-                 * checkpoint ordering or smoke pass/fail policy.
+                 * the TTY side already contains bounded ready data. For a
+                 * nonzero read request on fd0 with no ready data, Linux would
+                 * wait unless nonblocking, hangup, signal or another terminal
+                 * condition applies; this slice has no wait queue yet, so that
+                 * path is explicitly out of slice and must not be reported as
+                 * EOF. Blocking wait queues, canonical line discipline, job
+                 * control, signal interruption/restart, poll/ppoll and real RX
+                 * wakeup remain deferred. A user-read-trace probe may observe
+                 * fd, requested length and the returned read result for distro
+                 * debugging, but must not alter this action's return value,
+                 * errno path, checkpoint ordering or smoke pass/fail policy.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1100,6 +1107,7 @@ object SyscallTable: ResourceObject {
                     file_backend_regular_file_read_returns_data(FileBackend);
                     file_backend_char_device_read_returns_ready_data(FileBackend);
                     tty_flip_buffer_ready_data_consumed(TtyFlipBuffer);
+                    syscall_read_no_ready_blocking_out_of_slice(self);
                     syscall_read_tty_blocking_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_read_trace_probe_observes_result_without_side_effect(self);
