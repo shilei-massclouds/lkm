@@ -1,4 +1,7 @@
 #include <stddef.h>
+#include <poll.h>
+#include <sys/syscall.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "smoke.h"
@@ -14,8 +17,25 @@ int smoke_stdin(void)
 {
 	char buffer[16];
 	static const char expected[] = "stdin\n";
+	struct pollfd pfd;
+	struct timespec timeout;
+	long poll_rc;
 	ssize_t read_len;
 	size_t i;
+
+	pfd.fd = STDIN_FILENO;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	timeout.tv_sec = 0;
+	timeout.tv_nsec = 0;
+	poll_rc = syscall(SYS_ppoll, &pfd, 1, &timeout, NULL,
+			  sizeof(unsigned long));
+	if (poll_rc != 1 || (pfd.revents & POLLIN) == 0) {
+		return 84;
+	}
+	if (SAY_LITERAL("syscall ppoll stdin ok\n") < 0) {
+		return 85;
+	}
 
 	read_len = read(STDIN_FILENO, buffer, sizeof(buffer));
 	if (read_len != (ssize_t)(sizeof(expected) - 1)) {

@@ -20,6 +20,12 @@ pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
 pub const STDIN_READY_FIXTURE: &[u8] = b"stdin\n";
 const FILE_FD_COUNT: usize = 16;
+pub const FILE_POLLIN: u16 = 0x0001;
+pub const FILE_POLLOUT: u16 = 0x0004;
+pub const FILE_POLLERR: u16 = 0x0008;
+pub const FILE_POLLHUP: u16 = 0x0010;
+pub const FILE_POLLRDNORM: u16 = 0x0040;
+pub const FILE_POLLWRNORM: u16 = 0x0100;
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
@@ -457,6 +463,28 @@ impl FileBackend {
                 .fetch_add(1, Ordering::AcqRel);
         }
         Ok(len)
+    }
+
+    fn char_device_read_ready(&self) -> FileResult<bool> {
+        if self.lifecycle.state() != State::Ready
+            || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_read_supported
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        crate::objects::ns16550a::tty_ready_data_available().ok_or(FileError::BackendUnavailable)
+    }
+
+    fn char_device_write_ready(&self) -> FileResult<bool> {
+        if self.lifecycle.state() != State::Ready
+            || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_write_supported
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        Ok(true)
     }
 
     fn stat_regular_file(&self, stat: FileStat) -> FileResult<FileStat> {
@@ -1438,6 +1466,49 @@ impl FilesStruct {
         }
     }
 
+    pub fn poll_fd(&self, fd: usize, events: u16) -> FileResult<u16> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        self.fd_lookup_routes_to_table
+            .fetch_add(1, Ordering::AcqRel);
+        let mut ready = 0u16;
+        if entry.readable {
+            match entry.ofd {
+                OpenFileDescriptionRef::Regular0 => match self.filesystem0_kind {
+                    FilesystemFdKind::RegularFile | FilesystemFdKind::Directory => {
+                        ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                    }
+                    FilesystemFdKind::None => return Err(FileError::BadFd),
+                },
+                OpenFileDescriptionRef::Stdin | OpenFileDescriptionRef::Tty0 => {
+                    let backend = self.char_backend_for_entry(entry)?;
+                    if backend.char_device_read_ready()? {
+                        ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                    }
+                }
+                OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {}
+            }
+        }
+        if entry.writable {
+            match entry.ofd {
+                OpenFileDescriptionRef::Stdout
+                | OpenFileDescriptionRef::Stderr
+                | OpenFileDescriptionRef::Tty0 => {
+                    let backend = self.char_backend_for_entry(entry)?;
+                    if backend.char_device_write_ready()? {
+                        ready |= FILE_POLLOUT | FILE_POLLWRNORM;
+                    }
+                }
+                OpenFileDescriptionRef::Stdin | OpenFileDescriptionRef::Regular0 => {}
+            }
+        }
+
+        Ok(ready & (events | FILE_POLLERR | FILE_POLLHUP))
+    }
+
     pub fn getdents64_fd(
         &mut self,
         fd: usize,
@@ -1554,6 +1625,10 @@ impl FilesStruct {
         }
 
         let entry = self.fd_table.lookup(fd)?;
+        self.char_backend_for_entry(entry)
+    }
+
+    fn char_backend_for_entry(&self, entry: FileDescriptorEntry) -> FileResult<&FileBackend> {
         let backend = match entry.ofd {
             OpenFileDescriptionRef::Stdin => &self.stdin_backend,
             OpenFileDescriptionRef::Stdout => &self.stdout_backend,

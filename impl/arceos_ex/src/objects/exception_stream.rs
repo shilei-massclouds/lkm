@@ -64,6 +64,7 @@ const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_WRITEV: usize = 66;
+const SYSCALL_PPOLL: usize = 73;
 const SYSCALL_READLINKAT: usize = 78;
 const SYSCALL_NEWFSTATAT: usize = 79;
 const SYSCALL_FSTAT: usize = 80;
@@ -120,6 +121,9 @@ const STAT_SIZE: usize = 128;
 const TIMESPEC_SIZE: usize = 16;
 const TIMEVAL_SIZE: usize = 16;
 const TIMEZONE_SIZE: usize = 8;
+const POLLFD_SIZE: usize = 8;
+const USER_PPOLL_MAX: usize = 8;
+const POLLNVAL: u16 = 0x0020;
 const RT_SIGACTION_SIZE: usize = core::mem::size_of::<usize>() * 3;
 const UID_T_SIZE: usize = 4;
 const GID_T_SIZE: usize = 4;
@@ -168,6 +172,7 @@ pub struct SyscallTable {
     openat_supported: bool,
     getdents64_supported: bool,
     read_supported: bool,
+    ppoll_supported: bool,
     close_supported: bool,
     newfstatat_supported: bool,
     readlinkat_supported: bool,
@@ -205,6 +210,7 @@ pub struct SyscallTable {
     write_usercopy_ready: bool,
     writev_usercopy_ready: bool,
     read_usercopy_ready: bool,
+    ppoll_usercopy_ready: bool,
     getdents64_usercopy_ready: bool,
     path_usercopy_ready: bool,
     stat_usercopy_ready: bool,
@@ -221,6 +227,11 @@ pub struct SyscallTable {
     openat_routes_to_files_struct: bool,
     getdents64_routes_to_files_struct: bool,
     read_routes_to_files_struct: bool,
+    ppoll_routes_to_files_struct: bool,
+    ppoll_ready_data_first_slice: bool,
+    ppoll_timeout_parse_first_slice: bool,
+    ppoll_sigmask_deferred: bool,
+    ppoll_blocking_wait_deferred: bool,
     close_routes_to_files_struct: bool,
     newfstatat_routes_to_files_struct: bool,
     readlinkat_routes_to_files_struct: bool,
@@ -272,6 +283,7 @@ pub struct SyscallTable {
     openat_observed: AtomicU8,
     getdents64_observed: AtomicU8,
     read_observed: AtomicU8,
+    ppoll_observed: AtomicU8,
     close_observed: AtomicU8,
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
@@ -313,6 +325,7 @@ impl SyscallTable {
             openat_supported: false,
             getdents64_supported: false,
             read_supported: false,
+            ppoll_supported: false,
             close_supported: false,
             newfstatat_supported: false,
             readlinkat_supported: false,
@@ -350,6 +363,7 @@ impl SyscallTable {
             write_usercopy_ready: false,
             writev_usercopy_ready: false,
             read_usercopy_ready: false,
+            ppoll_usercopy_ready: false,
             getdents64_usercopy_ready: false,
             path_usercopy_ready: false,
             stat_usercopy_ready: false,
@@ -366,6 +380,11 @@ impl SyscallTable {
             openat_routes_to_files_struct: false,
             getdents64_routes_to_files_struct: false,
             read_routes_to_files_struct: false,
+            ppoll_routes_to_files_struct: false,
+            ppoll_ready_data_first_slice: false,
+            ppoll_timeout_parse_first_slice: false,
+            ppoll_sigmask_deferred: false,
+            ppoll_blocking_wait_deferred: false,
             close_routes_to_files_struct: false,
             newfstatat_routes_to_files_struct: false,
             readlinkat_routes_to_files_struct: false,
@@ -417,6 +436,7 @@ impl SyscallTable {
             openat_observed: AtomicU8::new(0),
             getdents64_observed: AtomicU8::new(0),
             read_observed: AtomicU8::new(0),
+            ppoll_observed: AtomicU8::new(0),
             close_observed: AtomicU8::new(0),
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
@@ -482,6 +502,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn read_supported(&self) -> bool {
         self.read_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn ppoll_supported(&self) -> bool {
+        self.ppoll_supported
     }
 
     #[allow(dead_code)]
@@ -620,6 +645,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn ppoll_usercopy_ready(&self) -> bool {
+        self.ppoll_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn getdents64_usercopy_ready(&self) -> bool {
         self.getdents64_usercopy_ready
     }
@@ -682,6 +712,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn read_routes_to_files_struct(&self) -> bool {
         self.read_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn ppoll_routes_to_files_struct(&self) -> bool {
+        self.ppoll_routes_to_files_struct
     }
 
     #[allow(dead_code)]
@@ -875,6 +910,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn ppoll_observed(&self) -> bool {
+        self.ppoll_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn close_observed(&self) -> bool {
         self.close_observed.load(Ordering::Acquire) != 0
     }
@@ -991,6 +1031,7 @@ impl SyscallTable {
         self.openat_supported = true;
         self.getdents64_supported = true;
         self.read_supported = true;
+        self.ppoll_supported = true;
         self.close_supported = true;
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
@@ -1028,6 +1069,7 @@ impl SyscallTable {
         self.write_usercopy_ready = true;
         self.writev_usercopy_ready = true;
         self.read_usercopy_ready = true;
+        self.ppoll_usercopy_ready = true;
         self.getdents64_usercopy_ready = true;
         self.path_usercopy_ready = true;
         self.stat_usercopy_ready = true;
@@ -1044,6 +1086,11 @@ impl SyscallTable {
         self.openat_routes_to_files_struct = true;
         self.getdents64_routes_to_files_struct = true;
         self.read_routes_to_files_struct = true;
+        self.ppoll_routes_to_files_struct = true;
+        self.ppoll_ready_data_first_slice = true;
+        self.ppoll_timeout_parse_first_slice = true;
+        self.ppoll_sigmask_deferred = true;
+        self.ppoll_blocking_wait_deferred = true;
         self.close_routes_to_files_struct = true;
         self.newfstatat_routes_to_files_struct = true;
         self.readlinkat_routes_to_files_struct = true;
@@ -1119,6 +1166,23 @@ impl SyscallTable {
         }
 
         syscall_table_read(self, frame);
+    }
+
+    pub fn ppoll(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.ppoll_supported
+            || !self.ppoll_usercopy_ready
+            || !self.ppoll_routes_to_files_struct
+            || !self.ppoll_ready_data_first_slice
+            || !self.ppoll_timeout_parse_first_slice
+            || !self.ppoll_sigmask_deferred
+            || !self.ppoll_blocking_wait_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_ppoll(self, frame);
     }
 
     pub fn close(&self, frame: &mut TrapFrame) {
@@ -1898,6 +1962,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_READ => table.read(frame),
         SYSCALL_WRITE => table.write(frame),
         SYSCALL_WRITEV => table.writev(frame),
+        SYSCALL_PPOLL => table.ppoll(frame),
         SYSCALL_READLINKAT => table.readlinkat(frame),
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
@@ -2097,6 +2162,83 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
     table.read_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableRead, crate::context::context_ref());
     complete_successful_syscall(frame, read);
+}
+
+#[derive(Clone, Copy)]
+struct UserPollFd {
+    fd: i32,
+    events: u16,
+}
+
+fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fds_ptr = frame.reg(10);
+    let nfds = frame.reg(11);
+    let timeout_ptr = frame.reg(12);
+    let sigmask_ptr = frame.reg(13);
+
+    if nfds > USER_PPOLL_MAX {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if timeout_ptr != 0 {
+        let Some((sec, nsec)) = read_user_timespec_i64(timeout_ptr) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        if sec < 0 || nsec < 0 || nsec >= NSEC_PER_SEC as i64 {
+            complete_error_syscall(frame, EINVAL);
+            return;
+        }
+    }
+    if sigmask_ptr != 0 {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let mut ready_count = 0usize;
+    let mut index = 0usize;
+    while index < nfds {
+        let Some(entry_offset) = index.checked_mul(POLLFD_SIZE) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        let Some(entry_ptr) = fds_ptr.checked_add(entry_offset) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        let Some(pollfd) = read_user_pollfd(entry_ptr) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+
+        let revents = if pollfd.fd < 0 {
+            0
+        } else {
+            match crate::context::context_ref()
+                .files_struct
+                .poll_fd(pollfd.fd as usize, pollfd.events)
+            {
+                Ok(revents) => revents,
+                Err(FileError::BadFd) => POLLNVAL,
+                Err(FileError::NotReady) | Err(FileError::BackendUnavailable) => {
+                    complete_unsupported_syscall(frame);
+                    return;
+                }
+                Err(_) => 0,
+            }
+        };
+        if !write_user_pollfd_revents(entry_ptr, revents) {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        if revents != 0 {
+            ready_count += 1;
+        }
+        index += 1;
+    }
+
+    table.ppoll_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, ready_count);
 }
 
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -3182,6 +3324,40 @@ fn read_user_u32(user_ptr: usize) -> Option<u32> {
     }
 }
 
+fn read_user_timespec_i64(user_ptr: usize) -> Option<(i64, i64)> {
+    let mut bytes = [0u8; TIMESPEC_SIZE];
+    if !copy_from_user(user_ptr, &mut bytes) {
+        return None;
+    }
+    let mut sec = [0u8; 8];
+    let mut nsec = [0u8; 8];
+    sec.copy_from_slice(&bytes[0..8]);
+    nsec.copy_from_slice(&bytes[8..16]);
+    Some((i64::from_le_bytes(sec), i64::from_le_bytes(nsec)))
+}
+
+fn read_user_pollfd(user_ptr: usize) -> Option<UserPollFd> {
+    let mut bytes = [0u8; POLLFD_SIZE];
+    if !copy_from_user(user_ptr, &mut bytes) {
+        return None;
+    }
+    let mut fd = [0u8; 4];
+    let mut events = [0u8; 2];
+    fd.copy_from_slice(&bytes[0..4]);
+    events.copy_from_slice(&bytes[4..6]);
+    Some(UserPollFd {
+        fd: i32::from_le_bytes(fd),
+        events: u16::from_le_bytes(events),
+    })
+}
+
+fn write_user_pollfd_revents(user_ptr: usize, revents: u16) -> bool {
+    let Some(revents_ptr) = user_ptr.checked_add(6) else {
+        return false;
+    };
+    copy_to_user(revents_ptr, &revents.to_le_bytes())
+}
+
 fn write_user_usize(user_ptr: usize, value: usize) -> bool {
     copy_to_user(user_ptr, &value.to_le_bytes())
 }
@@ -3427,6 +3603,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_READ => "read",
         SYSCALL_WRITE => "write",
         SYSCALL_WRITEV => "writev",
+        SYSCALL_PPOLL => "ppoll",
         SYSCALL_READLINKAT => "readlinkat",
         SYSCALL_NEWFSTATAT => "newfstatat",
         SYSCALL_FSTAT => "fstat",

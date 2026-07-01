@@ -347,6 +347,14 @@ impl TtyFlipBuffer {
         Some(len)
     }
 
+    fn read_ready_available(self) -> Option<bool> {
+        if !self.ready {
+            return None;
+        }
+
+        Some(self.read_offset < self.read_ready_len)
+    }
+
     fn seed_ready_data_fixture(&mut self, bytes: &[u8]) -> bool {
         if !self.ready
             || bytes.is_empty()
@@ -1575,6 +1583,11 @@ pub fn seed_tty_ready_data_fixture(bytes: &[u8]) -> bool {
 pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
     state.tty_flip_buffer.read_ready_data(buffer)
+}
+
+pub fn tty_ready_data_available() -> Option<bool> {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.read_ready_available()
 }
 
 pub fn tty_xmit_fifo_ready() -> bool {

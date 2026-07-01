@@ -223,6 +223,7 @@ predicate syscall_table_write_supported<T>(table: T) -> bool;
 predicate syscall_table_writev_supported<T>(table: T) -> bool;
 predicate syscall_table_openat_supported<T>(table: T) -> bool;
 predicate syscall_table_read_supported<T>(table: T) -> bool;
+predicate syscall_table_ppoll_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
@@ -258,6 +259,12 @@ predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
+predicate syscall_ppoll_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_ppoll_ready_data_first_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_timeout_parse_first_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_sigmask_deferred<T>(table: T) -> bool;
+predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -304,6 +311,7 @@ predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
+predicate syscall_table_ppoll_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
@@ -853,6 +861,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_writev_supported(self);
                     syscall_table_openat_supported(self);
                     syscall_table_read_supported(self);
+                    syscall_table_ppoll_supported(self);
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
@@ -876,6 +885,7 @@ object SyscallTable: ResourceObject {
                     syscall_write_usercopy_ready(self);
                     syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
+                    syscall_ppoll_pollfd_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
                     syscall_signal_mask_usercopy_ready(self);
                     syscall_signal_action_usercopy_ready(self);
@@ -883,6 +893,9 @@ object SyscallTable: ResourceObject {
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
+                    syscall_ppoll_timeout_parse_first_slice(self);
+                    syscall_ppoll_sigmask_deferred(self);
+                    syscall_ppoll_blocking_wait_deferred(self);
                     syscall_exit_records_status(self);
                 }
             }
@@ -897,6 +910,7 @@ object SyscallTable: ResourceObject {
             syscall_table_writev_supported(self);
             syscall_table_openat_supported(self);
             syscall_table_read_supported(self);
+            syscall_table_ppoll_supported(self);
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
@@ -920,6 +934,7 @@ object SyscallTable: ResourceObject {
             syscall_write_usercopy_ready(self);
             syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
+            syscall_ppoll_pollfd_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
             syscall_signal_mask_usercopy_ready(self);
             syscall_signal_action_usercopy_ready(self);
@@ -927,6 +942,9 @@ object SyscallTable: ResourceObject {
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
+            syscall_ppoll_timeout_parse_first_slice(self);
+            syscall_ppoll_sigmask_deferred(self);
+            syscall_ppoll_blocking_wait_deferred(self);
             syscall_exit_records_status(self);
         }
 
@@ -1042,6 +1060,46 @@ object SyscallTable: ResourceObject {
                     syscall_read_tty_blocking_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_table_read_observed(self);
+                }
+            }
+
+            on Action::Ppoll {
+                /*
+                 * Linux 6.12 routes ppoll(2) through
+                 * fs/select.c::sys_ppoll()/do_sys_poll()/do_pollfd().
+                 * The core shape copies an array of struct pollfd, treats
+                 * negative fd entries as ignored, reports POLLNVAL for invalid
+                 * fd entries, filters readiness with events|POLLERR|POLLHUP,
+                 * writes back revents, and returns the number of ready entries.
+                 *
+                 * This first slice only observes immediately available
+                 * readiness from the existing fd table and char-device ready
+                 * data. It parses and validates the optional timeout but does
+                 * not sleep, update a remaining timeout, install a temporary
+                 * signal mask, restart after signal delivery, or implement
+                 * N_TTY wait queues / real RX wakeup.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    syscall_ppoll_pollfd_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::LookupFd(FdRef::Stdin);
+                    FileDescriptorTable.Action::Lookup(FdRef::Stdin);
+                }
+
+                ensures {
+                    syscall_ppoll_routes_to_files_struct(self, FilesStruct);
+                    files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
+                    syscall_ppoll_ready_data_first_slice(self);
+                    syscall_ppoll_timeout_parse_first_slice(self);
+                    syscall_ppoll_sigmask_deferred(self);
+                    syscall_ppoll_blocking_wait_deferred(self);
+                    tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
+                    syscall_table_ppoll_observed(self);
                 }
             }
 
