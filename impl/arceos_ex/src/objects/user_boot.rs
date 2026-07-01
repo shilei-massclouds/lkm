@@ -1818,7 +1818,7 @@ impl UserAddressSpace {
         self.user_range_mapped(addr, len)
     }
 
-    fn user_range_mapped(&self, addr: usize, len: usize) -> bool {
+    pub fn user_range_mapped(&self, addr: usize, len: usize) -> bool {
         if self.lifecycle.state() != State::Online || len == 0 {
             return false;
         }

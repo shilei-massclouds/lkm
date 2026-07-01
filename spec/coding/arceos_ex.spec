@@ -1540,6 +1540,22 @@ type ArceosExStartupPhaseCodingMust {
          * line discipline, job control, poll/ppoll, signal interruption/restart,
          * controlling tty state and real IRQ wakeup remain deferred.
          *
+         * The supported-syscall error diagnostic must stay behind the explicit
+         * PROBE=user-syscall-error path. It observes supported syscall error
+         * returns and must not change return values, errno mapping,
+         * checkpoint ordering or user-smoke pass/fail policy. Path syscalls
+         * that fail after a pathname has already been copied should print the
+         * internal FileError class and printable path bytes. If a syscall such
+         * as openat rejects dirfd, access mode or out-of-slice flags before
+         * normal pathname copy, the diagnostic may print dirfd, flags,
+         * unsupported flag bits, access mode and a best-effort pathname only
+         * after the errno decision has been made. That best-effort copy must
+         * be guarded by UserAddressSpace mapped-range facts; skipped or
+         * failed copies are diagnostic output, not alternate errno behavior.
+         * fcntl and ioctl error diagnostics should decode command names using
+         * the local Linux 6.12 UAPI constants, including F_DUPFD,
+         * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS and TIOCGWINSZ.
+         *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
          * sys_geteuid()/sys_getegid()/sys_getresuid()/sys_getresgid()/

@@ -100,10 +100,18 @@ const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
 const AT_SYMLINK_NOFOLLOW: usize = 0x100;
+#[cfg(checkpoint_handler_user_syscall_error)]
+const F_DUPFD: usize = 0;
 const F_GETFD: usize = 1;
 const F_SETFD: usize = 2;
 const F_GETFL: usize = 3;
+#[cfg(checkpoint_handler_user_syscall_error)]
+const F_LINUX_SPECIFIC_BASE: usize = 1024;
+#[cfg(checkpoint_handler_user_syscall_error)]
+const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
+#[cfg(checkpoint_handler_user_syscall_error)]
+const TCGETS: usize = 0x5401;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
@@ -1922,6 +1930,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let flags = frame.reg(12);
     let supported_flags = O_LARGEFILE | O_DIRECTORY | O_CLOEXEC;
     if dirfd != AT_FDCWD || flags & !supported_flags != 0 || flags & O_ACCMODE != 0 {
+        print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
         return;
     }
@@ -2602,7 +2611,9 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             let flags = match ctx.files_struct.fcntl_getfl_fd(fd) {
                 Ok(flags) => flags,
                 Err(error) => {
-                    complete_error_syscall(frame, file_error_to_errno(error));
+                    let errno = file_error_to_errno(error);
+                    print_fcntl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
                     return;
                 }
             };
@@ -2615,7 +2626,9 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             let flags = match ctx.files_struct.fcntl_getfd_fd(fd) {
                 Ok(flags) => flags,
                 Err(error) => {
-                    complete_error_syscall(frame, file_error_to_errno(error));
+                    let errno = file_error_to_errno(error);
+                    print_fcntl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
                     return;
                 }
             };
@@ -2629,14 +2642,19 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
                 .files_struct
                 .fcntl_setfd_fd(fd, (arg & FD_CLOEXEC) as u32)
             {
-                complete_error_syscall(frame, file_error_to_errno(error));
+                let errno = file_error_to_errno(error);
+                print_fcntl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
                 return;
             }
 
             table.fcntl_observed.store(1, Ordering::Release);
             complete_successful_syscall(frame, 0);
         }
-        _ => complete_error_syscall(frame, EINVAL),
+        _ => {
+            print_fcntl_error_detail(fd, cmd, arg, EINVAL);
+            complete_error_syscall(frame, EINVAL);
+        }
     }
 }
 
@@ -2646,10 +2664,13 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     let arg = frame.reg(12);
     let ctx = crate::context::context_ref();
     if let Err(error) = ctx.files_struct.ioctl_validate_fd(fd) {
-        complete_error_syscall(frame, file_error_to_errno(error));
+        let errno = file_error_to_errno(error);
+        print_ioctl_error_detail(fd, cmd, arg, errno);
+        complete_error_syscall(frame, errno);
         return;
     }
     if cmd != TIOCGWINSZ {
+        print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
         complete_error_syscall(frame, ENOTTY);
         return;
     }
@@ -2657,7 +2678,9 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     let winsize = match ctx.files_struct.ioctl_tiocgwinsz_fd(fd) {
         Ok(winsize) => winsize,
         Err(error) => {
-            complete_error_syscall(frame, file_error_to_errno(error));
+            let errno = file_error_to_errno(error);
+            print_ioctl_error_detail(fd, cmd, arg, errno);
+            complete_error_syscall(frame, errno);
             return;
         }
     };
@@ -2668,6 +2691,7 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     write_u16(&mut buffer, 4, winsize.2);
     write_u16(&mut buffer, 6, winsize.3);
     if !copy_to_user(arg, &buffer) {
+        print_ioctl_error_detail(fd, cmd, arg, EFAULT);
         complete_error_syscall(frame, EFAULT);
         return;
     }
@@ -3223,11 +3247,169 @@ fn print_syscall_name(nr: usize) {
 }
 
 #[cfg(checkpoint_handler_user_syscall_error)]
+fn print_openat_reject_detail(dirfd: usize, path_ptr: usize, flags: usize, supported_flags: usize) {
+    let unsupported_flags = flags & !(supported_flags | O_ACCMODE);
+    let access_mode = flags & O_ACCMODE;
+    crate::arch::riscv64::sbi::putstr("syscall openat reject");
+    crate::arch::riscv64::sbi::putstr(" reason=");
+    print_openat_reject_reason(dirfd, unsupported_flags, access_mode);
+    crate::arch::riscv64::sbi::putstr(" dirfd=");
+    print_dirfd(dirfd);
+    crate::arch::riscv64::sbi::putstr(" flags=0x");
+    print_hex(flags);
+    crate::arch::riscv64::sbi::putstr(" unsupported_flags=0x");
+    print_hex(unsupported_flags);
+    crate::arch::riscv64::sbi::putstr(" access_mode=0x");
+    print_hex(access_mode);
+    crate::arch::riscv64::sbi::putstr(" path_ptr=0x");
+    print_hex(path_ptr);
+    print_probe_path_copy(path_ptr);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_openat_reject_detail(
+    _dirfd: usize,
+    _path_ptr: usize,
+    _flags: usize,
+    _supported_flags: usize,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_fcntl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall fcntl detail");
+    crate::arch::riscv64::sbi::putstr(" fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" cmd=0x");
+    print_hex(cmd);
+    crate::arch::riscv64::sbi::putstr(" cmd_name=");
+    print_fcntl_cmd_name(cmd);
+    crate::arch::riscv64::sbi::putstr(" arg=0x");
+    print_hex(arg);
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_fcntl_error_detail(_fd: usize, _cmd: usize, _arg: usize, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall ioctl detail");
+    crate::arch::riscv64::sbi::putstr(" fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" cmd=0x");
+    print_hex(cmd);
+    crate::arch::riscv64::sbi::putstr(" cmd_name=");
+    print_ioctl_cmd_name(cmd);
+    crate::arch::riscv64::sbi::putstr(" arg=0x");
+    print_hex(arg);
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_ioctl_error_detail(_fd: usize, _cmd: usize, _arg: usize, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_dirfd(dirfd: usize) {
+    if dirfd == AT_FDCWD {
+        crate::arch::riscv64::sbi::putstr("AT_FDCWD(-100)");
+    } else {
+        crate::arch::riscv64::sbi::putstr("0x");
+        print_hex(dirfd);
+    }
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_openat_reject_reason(dirfd: usize, unsupported_flags: usize, access_mode: usize) {
+    let mut printed = false;
+    if dirfd != AT_FDCWD {
+        crate::arch::riscv64::sbi::putstr("dirfd");
+        printed = true;
+    }
+    if access_mode != 0 {
+        if printed {
+            crate::arch::riscv64::sbi::putchar(b'+');
+        }
+        crate::arch::riscv64::sbi::putstr("access_mode");
+        printed = true;
+    }
+    if unsupported_flags != 0 {
+        if printed {
+            crate::arch::riscv64::sbi::putchar(b'+');
+        }
+        crate::arch::riscv64::sbi::putstr("unsupported_flags");
+        printed = true;
+    }
+    if !printed {
+        crate::arch::riscv64::sbi::putstr("unknown");
+    }
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_probe_path_copy(path_ptr: usize) {
+    crate::arch::riscv64::sbi::putstr(" path_copy=");
+    if path_ptr == 0 {
+        crate::arch::riscv64::sbi::putstr("failed");
+        return;
+    }
+    if !crate::context::context_ref()
+        .user_address_space
+        .user_range_mapped(path_ptr, USER_PATH_MAX)
+    {
+        crate::arch::riscv64::sbi::putstr("skipped");
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    if let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) {
+        crate::arch::riscv64::sbi::putstr("ok path=\"");
+        print_path_bytes(&path[..path_len]);
+        crate::arch::riscv64::sbi::putchar(b'"');
+    } else {
+        crate::arch::riscv64::sbi::putstr("failed");
+    }
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_fcntl_cmd_name(cmd: usize) {
+    let name = match cmd {
+        F_DUPFD => "F_DUPFD",
+        F_GETFD => "F_GETFD",
+        F_SETFD => "F_SETFD",
+        F_GETFL => "F_GETFL",
+        F_DUPFD_CLOEXEC => "F_DUPFD_CLOEXEC",
+        _ => "unknown",
+    };
+    crate::arch::riscv64::sbi::putstr(name);
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_ioctl_cmd_name(cmd: usize) {
+    let name = match cmd {
+        TCGETS => "TCGETS",
+        TIOCGWINSZ => "TIOCGWINSZ",
+        _ => "unknown",
+    };
+    crate::arch::riscv64::sbi::putstr(name);
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
 fn print_path_syscall_error_detail(error: FileError, path: &[u8]) {
     crate::arch::riscv64::sbi::putstr("syscall path error");
     crate::arch::riscv64::sbi::putstr(" file_error=");
     print_file_error_name(error);
     crate::arch::riscv64::sbi::putstr(" path=\"");
+    print_path_bytes(path);
+    crate::arch::riscv64::sbi::putstr("\"\n");
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_path_bytes(path: &[u8]) {
     for &byte in path {
         if byte.is_ascii_graphic() || byte == b' ' {
             crate::arch::riscv64::sbi::putchar(byte);
@@ -3235,7 +3417,6 @@ fn print_path_syscall_error_detail(error: FileError, path: &[u8]) {
             crate::arch::riscv64::sbi::putchar(b'?');
         }
     }
-    crate::arch::riscv64::sbi::putstr("\"\n");
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
