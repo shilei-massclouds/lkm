@@ -113,6 +113,7 @@ const F_LINUX_SPECIFIC_BASE: usize = 1024;
 const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
 const TCGETS: usize = 0x5401;
+const TCSETS: usize = 0x5402;
 const TIOCGPGRP: usize = 0x540f;
 const TIOCSPGRP: usize = 0x5410;
 const TIOCGWINSZ: usize = 0x5413;
@@ -2967,6 +2968,23 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             }
         }
+        TCSETS => {
+            let mut termios = [0u8; TERMIOS_SIZE];
+            if !copy_from_user(arg, &mut termios) {
+                print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                complete_error_syscall(frame, EFAULT);
+                return;
+            }
+            if let Err(error) = crate::context::context()
+                .files_struct
+                .ioctl_tcsets_fd(fd, termios)
+            {
+                let errno = file_error_to_errno(error);
+                print_ioctl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+        }
         TIOCGPGRP => {
             if let Err(error) = crate::context::context_ref()
                 .files_struct
@@ -3783,6 +3801,7 @@ fn print_fcntl_cmd_name(cmd: usize) {
 fn print_ioctl_cmd_name(cmd: usize) {
     let name = match cmd {
         TCGETS => "TCGETS",
+        TCSETS => "TCSETS",
         TIOCGPGRP => "TIOCGPGRP",
         TIOCSPGRP => "TIOCSPGRP",
         TIOCGWINSZ => "TIOCGWINSZ",

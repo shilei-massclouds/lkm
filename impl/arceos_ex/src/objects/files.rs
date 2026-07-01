@@ -956,6 +956,7 @@ pub struct FilesStruct {
     directory0_file_ref: Option<FileRef>,
     directory0_offset: usize,
     directory0_last_getdents_len: usize,
+    tty_termios: [u8; TERMIOS_SIZE],
     allocated: bool,
     owned_by_kernel_init_task: bool,
     fd_table_bound: bool,
@@ -978,6 +979,7 @@ pub struct FilesStruct {
     regular_file_stat_observed: AtomicUsize,
     directory_fd_installed: AtomicUsize,
     directory_getdents_observed: AtomicUsize,
+    tty_termios_mutation_observed: AtomicUsize,
 }
 
 #[allow(dead_code)]
@@ -1005,6 +1007,7 @@ impl FilesStruct {
             directory0_file_ref: None,
             directory0_offset: 0,
             directory0_last_getdents_len: 0,
+            tty_termios: [0; TERMIOS_SIZE],
             allocated: false,
             owned_by_kernel_init_task: false,
             fd_table_bound: false,
@@ -1027,6 +1030,7 @@ impl FilesStruct {
             regular_file_stat_observed: AtomicUsize::new(0),
             directory_fd_installed: AtomicUsize::new(0),
             directory_getdents_observed: AtomicUsize::new(0),
+            tty_termios_mutation_observed: AtomicUsize::new(0),
         }
     }
 
@@ -1122,6 +1126,14 @@ impl FilesStruct {
         self.directory_getdents_observed.load(Ordering::Acquire) != 0
     }
 
+    pub fn tty_termios_state_bound(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+    }
+
+    pub fn tty_termios_mutation_observed(&self) -> bool {
+        self.tty_termios_mutation_observed.load(Ordering::Acquire) != 0
+    }
+
     pub const fn regular0_len(&self) -> usize {
         self.regular0_len
     }
@@ -1211,6 +1223,7 @@ impl FilesStruct {
         self.tty0.setup_stdio(&self.tty0_backend, true, true)?;
         self.fd_table
             .install_stdio(&self.stdin, &self.stdout, &self.stderr)?;
+        self.tty_termios = linux_std_termios();
 
         self.allocated = true;
         self.owned_by_kernel_init_task = true;
@@ -1657,7 +1670,16 @@ impl FilesStruct {
     pub fn ioctl_tcgets_fd(&self, fd: usize) -> FileResult<[u8; TERMIOS_SIZE]> {
         self.char_backend_for_fd(fd)?;
 
-        Ok(linux_std_termios())
+        Ok(self.tty_termios)
+    }
+
+    pub fn ioctl_tcsets_fd(&mut self, fd: usize, termios: [u8; TERMIOS_SIZE]) -> FileResult<()> {
+        self.char_backend_for_fd(fd)?;
+
+        self.tty_termios = termios;
+        self.tty_termios_mutation_observed
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
 
     pub fn ioctl_tiocgpgrp_fd(&self, fd: usize) -> FileResult<()> {

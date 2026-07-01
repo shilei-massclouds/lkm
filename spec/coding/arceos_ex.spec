@@ -1568,11 +1568,20 @@ type ArceosExStartupPhaseCodingMust {
          * file refcounts, fork inheritance and concurrent fdtable locking
          * remain trimmed.
          *
-         * ioctl(TCGETS) must be accepted only on char-device fds and copy the
-         * riscv64/generic 36-byte struct termios described by
-         * include/uapi/asm-generic/termbits.h. The first slice returns a
-         * Linux tty_std_termios-like read-only snapshot and does not implement
-         * termios mutation, line-discipline behavior or isatty.
+         * ioctl(TCGETS/TCSETS) must be accepted only on char-device fds and
+         * use the riscv64/generic 36-byte struct termios described by
+         * include/uapi/asm-generic/termbits.h. The first slice initializes a
+         * console-like current termios from a Linux tty_std_termios-like
+         * snapshot. TCGETS copies that current value to the user pointer.
+         * TCSETS follows Linux 6.12 tty_mode_ioctl(TCSETS) /
+         * set_termios(..., TERMIOS_OLD) user-visible shape for the immediate
+         * path: copy one old struct termios from user memory, update the
+         * current console-like termios state, and return 0. User copy failure
+         * returns EFAULT; non char-device fds and unknown tty ioctls return
+         * ENOTTY. The next TCGETS must observe the updated value. TCSETSW,
+         * TCSETSF, output drain/wait, flush, driver and line-discipline
+         * set_termios callbacks, locked termios, real TTY locking,
+         * line-discipline behavior and isatty remain trimmed.
          *
          * ioctl(TIOCGPGRP) must be accepted only on char-device fds that match
          * the current UserInitProcess controlling tty facts. It copies a
@@ -1592,7 +1601,8 @@ type ArceosExStartupPhaseCodingMust {
          * single-PID slice only has pgrp 1 in the current session, so
          * TIOCSPGRP(pid_t=1) succeeds and records foreground pgrp 1. This is
          * not full TTY job control: TIOCGSID, setsid, pty, orphan pgrp,
-         * termios mutation and job-control signal delivery remain trimmed.
+         * canonical N_TTY behavior and job-control signal delivery remain
+         * trimmed.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -1608,8 +1618,8 @@ type ArceosExStartupPhaseCodingMust {
          * failed copies are diagnostic output, not alternate errno behavior.
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
-         * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS, TIOCGWINSZ and
-         * TIOCGPGRP/TIOCSPGRP.
+         * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS/TCSETS,
+         * TIOCGWINSZ and TIOCGPGRP/TIOCSPGRP.
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/

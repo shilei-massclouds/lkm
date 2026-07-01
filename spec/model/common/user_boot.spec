@@ -228,6 +228,7 @@ predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
 predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
+predicate syscall_table_ioctl_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
 predicate syscall_table_getuid_supported<T>(table: T) -> bool;
 predicate syscall_table_getgid_supported<T>(table: T) -> bool;
@@ -269,6 +270,11 @@ predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_ioctl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_ioctl_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_ioctl_tcgets_termios_first_slice<T>(table: T) -> bool;
+predicate syscall_ioctl_tcsets_termios_mutation_first_slice<T>(table: T) -> bool;
+predicate syscall_ioctl_tty_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bool;
 predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
 predicate syscall_getrandom_flags_first_slice_bound<T>(table: T) -> bool;
@@ -316,6 +322,7 @@ predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
+predicate syscall_table_ioctl_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
 predicate syscall_table_getuid_observed<T>(table: T) -> bool;
 predicate syscall_table_getgid_observed<T>(table: T) -> bool;
@@ -368,6 +375,8 @@ predicate kernel_init_task_user_trap_frame_attached<K, R>(task: K, frame: R) -> 
 
 predicate files_struct_stdin_ready_data_bound<T>(files: T) -> bool;
 predicate files_struct_stdin_char_device_read_observed<T>(files: T) -> bool;
+predicate files_struct_tty_termios_state_bound<T>(files: T) -> bool;
+predicate files_struct_tty_termios_mutation_observed<T>(files: T) -> bool;
 predicate file_backend_char_device_read_returns_ready_data<T>(backend: T) -> bool;
 predicate tty_flip_buffer_ready_data_bound<T>(buffer: T) -> bool;
 predicate tty_flip_buffer_ready_data_consumed<T>(buffer: T) -> bool;
@@ -866,6 +875,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
                     syscall_table_fcntl_supported(self);
+                    syscall_table_ioctl_supported(self);
                     syscall_table_getrandom_supported(self);
                     syscall_table_getuid_supported(self);
                     syscall_table_getgid_supported(self);
@@ -890,12 +900,14 @@ object SyscallTable: ResourceObject {
                     syscall_signal_mask_usercopy_ready(self);
                     syscall_signal_action_usercopy_ready(self);
                     syscall_time_usercopy_ready(self);
+                    syscall_ioctl_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_blocking_wait_deferred(self);
+                    syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_exit_records_status(self);
                 }
             }
@@ -915,6 +927,7 @@ object SyscallTable: ResourceObject {
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
             syscall_table_fcntl_supported(self);
+            syscall_table_ioctl_supported(self);
             syscall_table_getrandom_supported(self);
             syscall_table_getuid_supported(self);
             syscall_table_getgid_supported(self);
@@ -939,12 +952,14 @@ object SyscallTable: ResourceObject {
             syscall_signal_mask_usercopy_ready(self);
             syscall_signal_action_usercopy_ready(self);
             syscall_time_usercopy_ready(self);
+            syscall_ioctl_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
             syscall_ppoll_timeout_parse_first_slice(self);
             syscall_ppoll_sigmask_deferred(self);
             syscall_ppoll_blocking_wait_deferred(self);
+            syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_exit_records_status(self);
         }
 
@@ -1193,6 +1208,48 @@ object SyscallTable: ResourceObject {
                     fd_table_cloexec_bit_returned_by_fgetfd(FileDescriptorTable, FdRef::Regular0);
                     fd_table_cloexec_bit_updated_by_fsetfd(FileDescriptorTable, FdRef::Regular0);
                     syscall_table_fcntl_observed(self);
+                }
+            }
+
+            on Action::Ioctl {
+                /*
+                 * Linux 6.12 routes ioctl(2) through fs/ioctl.c before
+                 * dispatching tty fds to drivers/tty/tty_io.c::tty_ioctl().
+                 * TCGETS and TCSETS are handled by
+                 * drivers/tty/tty_ioctl.c::tty_mode_ioctl(); TCSETS copies a
+                 * user struct termios and updates the tty's current termios
+                 * via set_termios(..., TERMIOS_OLD), while TCGETS copies the
+                 * current termios back to user memory.
+                 *
+                 * The current slice only covers console-like char-device fds,
+                 * the riscv64/generic 36-byte old struct termios, TCGETS
+                 * readback and TCSETS immediate mutation. TCSETSW/TCSETSF,
+                 * drain/flush, driver and line-discipline set_termios hooks,
+                 * canonical N_TTY behavior and real TTY locking remain
+                 * deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    syscall_ioctl_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::LookupFd(FdRef::Stdout);
+                    FilesStruct.Action::ReadTermios(FdRef::Stdout);
+                    FilesStruct.Action::SetTermios(FdRef::Stdout);
+                }
+
+                ensures {
+                    syscall_ioctl_routes_to_files_struct(self, FilesStruct);
+                    files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
+                    syscall_ioctl_tcgets_termios_first_slice(self);
+                    syscall_ioctl_tcsets_termios_mutation_first_slice(self);
+                    files_struct_tty_termios_state_bound(FilesStruct);
+                    files_struct_tty_termios_mutation_observed(FilesStruct);
+                    syscall_ioctl_tty_full_linux_model_deferred(self);
+                    syscall_table_ioctl_observed(self);
                 }
             }
 

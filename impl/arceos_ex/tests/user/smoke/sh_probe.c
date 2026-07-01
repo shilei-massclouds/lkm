@@ -3,6 +3,7 @@
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/utsname.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -182,6 +183,44 @@ static int smoke_process_identity(void)
 	return 0;
 }
 
+static int smoke_tty_termios(void)
+{
+	struct termios original;
+	struct termios updated;
+	struct termios observed;
+	long rc;
+
+	rc = ioctl(STDOUT_FILENO, TCGETS, &original);
+	if (rc != 0) {
+		return 87;
+	}
+
+	updated = original;
+	updated.c_lflag ^= ECHO;
+	rc = ioctl(STDOUT_FILENO, TCSETS, &updated);
+	if (rc != 0) {
+		return 88;
+	}
+
+	rc = ioctl(STDOUT_FILENO, TCGETS, &observed);
+	if (rc != 0) {
+		return 89;
+	}
+	if ((observed.c_lflag & ECHO) != (updated.c_lflag & ECHO)) {
+		return 90;
+	}
+
+	rc = ioctl(STDOUT_FILENO, TCSETS, &original);
+	if (rc != 0) {
+		return 91;
+	}
+	if (SAY_LITERAL("syscall ioctl TCSETS ok\n") < 0) {
+		return 92;
+	}
+
+	return 0;
+}
+
 static int smoke_uts_and_cwd(void)
 {
 	struct utsname uts;
@@ -281,6 +320,10 @@ int smoke_sh_probe(void)
 		return status;
 	}
 	status = smoke_process_identity();
+	if (status != 0) {
+		return status;
+	}
+	status = smoke_tty_termios();
 	if (status != 0) {
 		return status;
 	}
