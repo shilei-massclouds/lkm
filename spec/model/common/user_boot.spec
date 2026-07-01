@@ -267,6 +267,7 @@ predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_ppoll_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_timeout_parse_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_sigmask_deferred<T>(table: T) -> bool;
+predicate syscall_ppoll_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -923,6 +924,7 @@ object SyscallTable: ResourceObject {
                     syscall_write_routes_to_console(self);
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
+                    syscall_ppoll_no_ready_blocking_out_of_slice(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
@@ -979,6 +981,7 @@ object SyscallTable: ResourceObject {
             syscall_write_routes_to_console(self);
             syscall_ppoll_timeout_parse_first_slice(self);
             syscall_ppoll_sigmask_deferred(self);
+            syscall_ppoll_no_ready_blocking_out_of_slice(self);
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_nanosleep_full_hrtimer_deferred(self);
@@ -1113,12 +1116,15 @@ object SyscallTable: ResourceObject {
                  * fd entries, filters readiness with events|POLLERR|POLLHUP,
                  * writes back revents, and returns the number of ready entries.
                  *
-                 * This first slice only observes immediately available
-                 * readiness from the existing fd table and char-device ready
-                 * data. It parses and validates the optional timeout but does
-                 * not sleep, update a remaining timeout, install a temporary
-                 * signal mask, restart after signal delivery, or implement
-                 * N_TTY wait queues / real RX wakeup.
+                 * This first slice observes immediately available readiness
+                 * from the existing fd table and char-device ready data. It
+                 * parses and validates the optional timeout. If no entry is
+                 * ready, timeout={0,0} returns 0 as an immediate timeout, but
+                 * timeout=NULL or a positive timeout is explicitly out of
+                 * slice and must not be reported as successful timeout.
+                 * Sleeping poll_table wait, remaining timeout update,
+                 * temporary signal masks, restart after signal delivery, and
+                 * N_TTY wait queues / real RX wakeup remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1138,6 +1144,7 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_ready_data_first_slice(self);
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
+                    syscall_ppoll_no_ready_blocking_out_of_slice(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_table_ppoll_observed(self);

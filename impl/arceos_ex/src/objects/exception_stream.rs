@@ -2283,6 +2283,8 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
 
     let mut ready_count = 0usize;
     let mut index = 0usize;
+    let mut entry_ptrs = [0usize; USER_PPOLL_MAX];
+    let mut revents_values = [0u16; USER_PPOLL_MAX];
     while index < nfds {
         let Some(entry_offset) = index.checked_mul(POLLFD_SIZE) else {
             complete_error_syscall(frame, EFAULT);
@@ -2313,10 +2315,8 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
                 Err(_) => 0,
             }
         };
-        if !write_user_pollfd_revents(entry_ptr, revents) {
-            complete_error_syscall(frame, EFAULT);
-            return;
-        }
+        entry_ptrs[index] = entry_ptr;
+        revents_values[index] = revents;
         print_ppoll_trace_entry(frame, index, pollfd, revents);
         if revents != 0 {
             ready_count += 1;
@@ -2324,7 +2324,6 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
         index += 1;
     }
 
-    table.ppoll_observed.store(1, Ordering::Release);
     print_ppoll_trace_summary(
         frame,
         nfds,
@@ -2333,7 +2332,27 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
         sigmask_ptr,
         ready_count,
     );
+
+    if ready_count == 0 && !ppoll_timeout_allows_immediate_zero(timeout_value) {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let mut copy_index = 0usize;
+    while copy_index < nfds {
+        if !write_user_pollfd_revents(entry_ptrs[copy_index], revents_values[copy_index]) {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        copy_index += 1;
+    }
+
+    table.ppoll_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, ready_count);
+}
+
+fn ppoll_timeout_allows_immediate_zero(timeout_value: Option<(i64, i64)>) -> bool {
+    matches!(timeout_value, Some((0, 0)))
 }
 
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {

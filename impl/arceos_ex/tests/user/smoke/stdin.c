@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stddef.h>
 #include <poll.h>
 #include <sys/syscall.h>
@@ -50,6 +51,22 @@ int smoke_stdin(void)
 
 	if (SAY_LITERAL("syscall read stdin ok\n") < 0) {
 		return 83;
+	}
+
+	pfd.fd = STDIN_FILENO;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	errno = 0;
+	poll_rc = syscall(SYS_ppoll, &pfd, 1, NULL, NULL,
+			  sizeof(unsigned long));
+	if (poll_rc != -1 || errno != ENOSYS) {
+		return 86;
+	}
+	if (pfd.revents != 0) {
+		return 87;
+	}
+	if (SAY_LITERAL("syscall ppoll stdin no-ready out-of-slice ok\n") < 0) {
+		return 88;
 	}
 
 	return 0;
