@@ -71,6 +71,7 @@ const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_NANOSLEEP: usize = 101;
 const SYSCALL_CLOCK_GETTIME: usize = 113;
 const SYSCALL_RT_SIGACTION: usize = 134;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
@@ -136,6 +137,7 @@ const CLOCK_REALTIME: usize = 0;
 const CLOCK_MONOTONIC: usize = 1;
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 const USEC_PER_SEC: u64 = 1_000_000;
+const NANOSLEEP_FIRST_SLICE_MAX_NS: u64 = 100_000_000;
 const RT_SIGSET_SIZE: usize = core::mem::size_of::<usize>();
 const SIG_BLOCK: usize = 0;
 const SIG_UNBLOCK: usize = 1;
@@ -196,6 +198,7 @@ pub struct SyscallTable {
     rt_sigaction_supported: bool,
     clock_gettime_supported: bool,
     gettimeofday_supported: bool,
+    nanosleep_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
@@ -219,6 +222,7 @@ pub struct SyscallTable {
     signal_mask_usercopy_ready: bool,
     signal_action_usercopy_ready: bool,
     time_usercopy_ready: bool,
+    nanosleep_usercopy_ready: bool,
     credentials_usercopy_ready: bool,
     utsname_usercopy_ready: bool,
     getcwd_usercopy_ready: bool,
@@ -270,8 +274,12 @@ pub struct SyscallTable {
     signal_delivery_deferred: bool,
     clock_gettime_routes_to_timer_provider: bool,
     gettimeofday_routes_to_timer_provider: bool,
+    nanosleep_routes_to_timer_provider: bool,
     clock_gettime_clockid_first_slice_bound: bool,
     time_struct_layout_bound: bool,
+    nanosleep_timespec_validated: bool,
+    nanosleep_short_relative_first_slice: bool,
+    nanosleep_full_hrtimer_deferred: bool,
     time_full_linux_model_deferred: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
@@ -307,6 +315,7 @@ pub struct SyscallTable {
     rt_sigaction_observed: AtomicU8,
     clock_gettime_observed: AtomicU8,
     gettimeofday_observed: AtomicU8,
+    nanosleep_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -349,6 +358,7 @@ impl SyscallTable {
             rt_sigaction_supported: false,
             clock_gettime_supported: false,
             gettimeofday_supported: false,
+            nanosleep_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
@@ -372,6 +382,7 @@ impl SyscallTable {
             signal_mask_usercopy_ready: false,
             signal_action_usercopy_ready: false,
             time_usercopy_ready: false,
+            nanosleep_usercopy_ready: false,
             credentials_usercopy_ready: false,
             utsname_usercopy_ready: false,
             getcwd_usercopy_ready: false,
@@ -423,8 +434,12 @@ impl SyscallTable {
             signal_delivery_deferred: false,
             clock_gettime_routes_to_timer_provider: false,
             gettimeofday_routes_to_timer_provider: false,
+            nanosleep_routes_to_timer_provider: false,
             clock_gettime_clockid_first_slice_bound: false,
             time_struct_layout_bound: false,
+            nanosleep_timespec_validated: false,
+            nanosleep_short_relative_first_slice: false,
+            nanosleep_full_hrtimer_deferred: false,
             time_full_linux_model_deferred: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
@@ -460,6 +475,7 @@ impl SyscallTable {
             rt_sigaction_observed: AtomicU8::new(0),
             clock_gettime_observed: AtomicU8::new(0),
             gettimeofday_observed: AtomicU8::new(0),
+            nanosleep_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -568,6 +584,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn gettimeofday_supported(&self) -> bool {
         self.gettimeofday_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn nanosleep_supported(&self) -> bool {
+        self.nanosleep_supported
     }
 
     #[allow(dead_code)]
@@ -683,6 +704,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn time_usercopy_ready(&self) -> bool {
         self.time_usercopy_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn nanosleep_usercopy_ready(&self) -> bool {
+        self.nanosleep_usercopy_ready
     }
 
     #[allow(dead_code)]
@@ -841,6 +867,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn nanosleep_routes_to_timer_provider(&self) -> bool {
+        self.nanosleep_routes_to_timer_provider
+    }
+
+    #[allow(dead_code)]
     pub const fn clock_gettime_clockid_first_slice_bound(&self) -> bool {
         self.clock_gettime_clockid_first_slice_bound
     }
@@ -848,6 +879,21 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn time_struct_layout_bound(&self) -> bool {
         self.time_struct_layout_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn nanosleep_timespec_validated(&self) -> bool {
+        self.nanosleep_timespec_validated
+    }
+
+    #[allow(dead_code)]
+    pub const fn nanosleep_short_relative_first_slice(&self) -> bool {
+        self.nanosleep_short_relative_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn nanosleep_full_hrtimer_deferred(&self) -> bool {
+        self.nanosleep_full_hrtimer_deferred
     }
 
     #[allow(dead_code)]
@@ -981,6 +1027,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn nanosleep_observed(&self) -> bool {
+        self.nanosleep_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fstat_observed(&self) -> bool {
         self.fstat_observed.load(Ordering::Acquire) != 0
     }
@@ -1055,6 +1106,7 @@ impl SyscallTable {
         self.rt_sigaction_supported = true;
         self.clock_gettime_supported = true;
         self.gettimeofday_supported = true;
+        self.nanosleep_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
@@ -1078,6 +1130,7 @@ impl SyscallTable {
         self.signal_mask_usercopy_ready = true;
         self.signal_action_usercopy_ready = true;
         self.time_usercopy_ready = true;
+        self.nanosleep_usercopy_ready = true;
         self.credentials_usercopy_ready = true;
         self.utsname_usercopy_ready = true;
         self.getcwd_usercopy_ready = true;
@@ -1129,8 +1182,12 @@ impl SyscallTable {
         self.signal_delivery_deferred = true;
         self.clock_gettime_routes_to_timer_provider = true;
         self.gettimeofday_routes_to_timer_provider = true;
+        self.nanosleep_routes_to_timer_provider = true;
         self.clock_gettime_clockid_first_slice_bound = true;
         self.time_struct_layout_bound = true;
+        self.nanosleep_timespec_validated = true;
+        self.nanosleep_short_relative_first_slice = true;
+        self.nanosleep_full_hrtimer_deferred = true;
         self.time_full_linux_model_deferred = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
@@ -1526,6 +1583,22 @@ impl SyscallTable {
         }
 
         syscall_table_gettimeofday(self, frame);
+    }
+
+    pub fn nanosleep(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.nanosleep_supported
+            || !self.nanosleep_usercopy_ready
+            || !self.nanosleep_routes_to_timer_provider
+            || !self.nanosleep_timespec_validated
+            || !self.nanosleep_short_relative_first_slice
+            || !self.nanosleep_full_hrtimer_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_nanosleep(self, frame);
     }
 
     pub fn fstat(&self, frame: &mut TrapFrame) {
@@ -1968,6 +2041,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
+        SYSCALL_NANOSLEEP => table.nanosleep(frame),
         SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
         SYSCALL_RT_SIGACTION => table.rt_sigaction(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
@@ -2785,6 +2859,71 @@ fn syscall_table_gettimeofday(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, 0);
 }
 
+fn syscall_table_nanosleep(table: &SyscallTable, frame: &mut TrapFrame) {
+    let rqtp = frame.reg(10);
+    let Some((sec, nsec)) = read_user_timespec_i64(rqtp) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+    if sec < 0 || nsec < 0 || nsec >= NSEC_PER_SEC as i64 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let Some(duration_ns) = timespec_duration_ns(sec, nsec) else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if duration_ns > NANOSLEEP_FIRST_SLICE_MAX_NS
+        || (duration_ns != 0 && !nanosleep_busy_wait(duration_ns))
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.nanosleep_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn timespec_duration_ns(sec: i64, nsec: i64) -> Option<u64> {
+    let sec = sec as u64;
+    let nsec = nsec as u64;
+    sec.checked_mul(NSEC_PER_SEC)?.checked_add(nsec)
+}
+
+fn nanosleep_busy_wait(duration_ns: u64) -> bool {
+    let ctx = crate::context::context_ref();
+    if ctx.timekeeper.state() != State::Ready || !ctx.timekeeper.monotonic_time_ready() {
+        return false;
+    }
+
+    let timebase_hz = ctx.riscv_timer_provider.timebase_hz();
+    if timebase_hz == 0 {
+        return false;
+    }
+    let Some(start) = ctx.riscv_timer_provider.read_time() else {
+        return false;
+    };
+    let delta_ticks = ((duration_ns as u128 * timebase_hz as u128) + (NSEC_PER_SEC as u128 - 1))
+        / NSEC_PER_SEC as u128;
+    if delta_ticks == 0 || delta_ticks > u64::MAX as u128 {
+        return false;
+    }
+    let Some(deadline) = start.checked_add(delta_ticks as u64) else {
+        return false;
+    };
+
+    loop {
+        let Some(now) = ctx.riscv_timer_provider.read_time() else {
+            return false;
+        };
+        if now >= deadline {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+}
+
 fn time_clockid_supported(clockid: usize) -> bool {
     matches!(clockid, CLOCK_REALTIME | CLOCK_MONOTONIC)
 }
@@ -3582,7 +3721,39 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
     print_hex(frame.stval);
+    print_unsupported_syscall_detail(frame);
     crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn print_unsupported_syscall_detail(frame: &TrapFrame) {
+    if frame.reg(17) != SYSCALL_NANOSLEEP {
+        return;
+    }
+
+    let rqtp = frame.reg(10);
+    let rmtp = frame.reg(11);
+    crate::arch::riscv64::sbi::putstr(" name=nanosleep rqtp=0x");
+    print_hex(rqtp);
+    crate::arch::riscv64::sbi::putstr(" rmtp=0x");
+    print_hex(rmtp);
+    crate::arch::riscv64::sbi::putstr(" req_copy=");
+    if rqtp == 0
+        || !crate::context::context_ref()
+            .user_address_space
+            .user_range_mapped(rqtp, TIMESPEC_SIZE)
+    {
+        crate::arch::riscv64::sbi::putstr("failed");
+        return;
+    }
+
+    if let Some((sec, nsec)) = read_user_timespec_i64(rqtp) {
+        crate::arch::riscv64::sbi::putstr("ok req_sec=");
+        print_i64(sec);
+        crate::arch::riscv64::sbi::putstr(" req_nsec=");
+        print_i64(nsec);
+    } else {
+        crate::arch::riscv64::sbi::putstr("failed");
+    }
 }
 
 #[cfg(checkpoint_handler_user_syscall_error)]
@@ -3626,6 +3797,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_NEWFSTATAT => "newfstatat",
         SYSCALL_FSTAT => "fstat",
         SYSCALL_SET_TID_ADDRESS => "set_tid_address",
+        SYSCALL_NANOSLEEP => "nanosleep",
         SYSCALL_CLOCK_GETTIME => "clock_gettime",
         SYSCALL_RT_SIGACTION => "rt_sigaction",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
@@ -3904,5 +4076,14 @@ fn print_decimal(mut value: usize) {
     while len != 0 {
         len -= 1;
         crate::arch::riscv64::sbi::putchar(digits[len]);
+    }
+}
+
+fn print_i64(value: i64) {
+    if value < 0 {
+        crate::arch::riscv64::sbi::putchar(b'-');
+        print_decimal(value.unsigned_abs() as usize);
+    } else {
+        print_decimal(value as usize);
     }
 }

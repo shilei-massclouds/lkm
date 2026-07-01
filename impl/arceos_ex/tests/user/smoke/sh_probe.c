@@ -286,6 +286,16 @@ static int smoke_time_syscalls(void)
 		return 61;
 	}
 
+	ts.tv_sec = 0;
+	ts.tv_nsec = 1000000L;
+	rc = syscall(SYS_nanosleep, &ts, &ts);
+	if (rc != 0) {
+		return 93;
+	}
+	if (SAY_LITERAL("syscall nanosleep ok\n") < 0) {
+		return 94;
+	}
+
 	return 0;
 }
 

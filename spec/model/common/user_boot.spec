@@ -238,6 +238,7 @@ predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_supported<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_supported<T>(table: T) -> bool;
+predicate syscall_table_nanosleep_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
@@ -296,8 +297,13 @@ predicate syscall_rt_sigaction_kernel_only_signals_rejected<T>(table: T) -> bool
 predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
 predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
+predicate syscall_nanosleep_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_clock_gettime_clockid_first_slice_bound<T>(table: T) -> bool;
 predicate syscall_time_struct_layout_bound<T>(table: T) -> bool;
+predicate syscall_nanosleep_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_nanosleep_timespec_validated<T>(table: T) -> bool;
+predicate syscall_nanosleep_short_relative_first_slice<T>(table: T) -> bool;
+predicate syscall_nanosleep_full_hrtimer_deferred<T>(table: T) -> bool;
 predicate syscall_time_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -332,6 +338,7 @@ predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
+predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -885,6 +892,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_rt_sigaction_supported(self);
                     syscall_table_clock_gettime_supported(self);
                     syscall_table_gettimeofday_supported(self);
+                    syscall_table_nanosleep_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
                     syscall_table_mprotect_supported(self);
@@ -900,6 +908,7 @@ object SyscallTable: ResourceObject {
                     syscall_signal_mask_usercopy_ready(self);
                     syscall_signal_action_usercopy_ready(self);
                     syscall_time_usercopy_ready(self);
+                    syscall_nanosleep_usercopy_ready(self);
                     syscall_ioctl_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
@@ -908,6 +917,7 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
+                    syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_exit_records_status(self);
                 }
             }
@@ -937,6 +947,7 @@ object SyscallTable: ResourceObject {
             syscall_table_rt_sigaction_supported(self);
             syscall_table_clock_gettime_supported(self);
             syscall_table_gettimeofday_supported(self);
+            syscall_table_nanosleep_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
             syscall_table_mprotect_supported(self);
@@ -952,6 +963,7 @@ object SyscallTable: ResourceObject {
             syscall_signal_mask_usercopy_ready(self);
             syscall_signal_action_usercopy_ready(self);
             syscall_time_usercopy_ready(self);
+            syscall_nanosleep_usercopy_ready(self);
             syscall_ioctl_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
@@ -960,6 +972,7 @@ object SyscallTable: ResourceObject {
             syscall_ppoll_sigmask_deferred(self);
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
+            syscall_nanosleep_full_hrtimer_deferred(self);
             syscall_exit_records_status(self);
         }
 
@@ -1721,6 +1734,44 @@ object SyscallTable: ResourceObject {
                     syscall_time_struct_layout_bound(self);
                     syscall_time_full_linux_model_deferred(self);
                     syscall_table_gettimeofday_observed(self);
+                }
+            }
+
+            on Action::Nanosleep {
+                /*
+                 * Linux 6.12 RISC-V exposes nanosleep(2) as syscall number
+                 * 101. kernel/time/hrtimer.c::sys_nanosleep() copies a
+                 * 64-bit struct __kernel_timespec from rqtp, validates
+                 * timespec64, sets restart-block state and enters
+                 * hrtimer_nanosleep() against CLOCK_MONOTONIC in relative
+                 * mode.
+                 *
+                 * The current slice is driven by observed BusyBox /bin/sh
+                 * evidence: rqtp={0, 20ms}. It supports bounded short
+                 * relative sleeps by polling the existing RiscvTimerProvider
+                 * time counter until the target tick is reached. rmtp is not
+                 * written on success, matching Linux's completed-sleep path.
+                 * Signal interruption, remaining-time copyout, restart blocks,
+                 * timer slack, wait queues, scheduler sleep and clock_nanosleep
+                 * remain deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    Timekeeper.state == State::Ready;
+                    RiscvTimerProvider.state == State::Ready;
+                    syscall_nanosleep_usercopy_ready(self);
+                }
+
+                drives {
+                    RiscvTimerProvider.Action::ReadTime;
+                }
+
+                ensures {
+                    syscall_nanosleep_routes_to_timer_provider(self, RiscvTimerProvider);
+                    syscall_nanosleep_timespec_validated(self);
+                    syscall_nanosleep_short_relative_first_slice(self);
+                    syscall_nanosleep_full_hrtimer_deferred(self);
+                    syscall_table_nanosleep_observed(self);
                 }
             }
 

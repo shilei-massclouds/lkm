@@ -1604,6 +1604,38 @@ type ArceosExStartupPhaseCodingMust {
          * canonical N_TTY behavior and job-control signal delivery remain
          * trimmed.
          *
+         * nanosleep(101) must reference local Linux 6.12
+         * kernel/time/hrtimer.c::sys_nanosleep(),
+         * kernel/time/time.c::get_timespec64(), include/linux/time64.h and
+         * include/uapi/asm-generic/unistd.h. The implementation must first
+         * copy the 64-bit struct __kernel_timespec from rqtp and return
+         * EFAULT on copy failure, then validate tv_sec >= 0 and
+         * 0 <= tv_nsec < 1e9 and return EINVAL on invalid values. The current
+         * first slice is evidence driven by BusyBox /bin/sh's observed
+         * req={0, 20ms}; it may support only bounded short relative sleeps
+         * with duration <= 100ms by reading RiscvTimerProvider time until the
+         * computed CLOCK_MONOTONIC-relative target tick is reached. Successful
+         * completion returns 0 and does not write rmtp, matching Linux's
+         * completed-sleep path. Longer sleeps, unavailable timer provider,
+         * tick conversion overflow, signal interruption, rmtp remaining-time
+         * copyout, restart blocks, timer slack, scheduler wait queues,
+         * clock_nanosleep and multi-task sleep remain out of slice and must
+         * not be presented as complete hrtimer semantics.
+         *
+         * Unsupported syscall diagnostics must remain Linux-like and
+         * low-side-effect: unknown or not-yet-supported syscall numbers return
+         * ENOSYS and must not create successful-path checkpoints or mutate
+         * user-visible state. When a real distro path reaches
+         * nanosleep(101), the diagnostic may use the already captured user
+         * argument registers to best-effort copy the 64-bit
+         * struct __kernel_timespec at rqtp and print rqtp, rmtp, req_sec and
+         * req_nsec, or req_copy=failed. This follows Linux 6.12
+         * kernel/time/hrtimer.c::sys_nanosleep() argument layout and is
+         * diagnostic evidence only; it must not change the ENOSYS return,
+         * advance sepc differently, treat the syscall as supported, or guess
+         * whether zero-duration, short sleep or full hrtimer/scheduler sleep
+         * is required before the observed values are reviewed.
+         *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
          * returns and must not change return values, errno mapping,
