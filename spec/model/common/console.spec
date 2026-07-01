@@ -159,6 +159,15 @@ predicate tty_flip_buffer_batch_push_committed<T, R, B>(flip_buffer: T, record: 
 predicate tty_flip_buffer_batch_push_len_matches<T, B>(flip_buffer: T, batch: B) -> bool;
 predicate tty_flip_buffer_no_overflow<T>(flip_buffer: T) -> bool;
 
+predicate n_tty_bound_to_tty_port<T, P>(n_tty: T, tty_port: P) -> bool;
+predicate n_tty_bound_to_flip_buffer<T, F>(n_tty: T, flip_buffer: F) -> bool;
+predicate n_tty_observes_termios_lflag<T>(n_tty: T) -> bool;
+predicate n_tty_canonical_line_readiness_first_slice<T>(n_tty: T) -> bool;
+predicate n_tty_canonical_read_returns_through_newline<T>(n_tty: T) -> bool;
+predicate n_tty_noncanonical_byte_readiness_first_slice<T>(n_tty: T) -> bool;
+predicate n_tty_echo_and_erase_deferred<T>(n_tty: T) -> bool;
+predicate n_tty_full_waitqueue_deferred<T>(n_tty: T) -> bool;
+
 predicate tty_xmit_fifo_bound_to_tty_port<T, P>(xmit_fifo: T, tty_port: P) -> bool;
 predicate tty_xmit_fifo_for_ordinary_tty_write<T>(xmit_fifo: T) -> bool;
 predicate tty_xmit_fifo_distinct_from_printk_console_tx<T, C>(xmit_fifo: T, console: C) -> bool;
@@ -925,10 +934,91 @@ object TtyFlipBuffer: ConsoleObject {
 }
 
 /*
+ * NTtyLineDiscipline is the first N_TTY boundary above TtyFlipBuffer. The
+ * current slice observes termios ICANON and turns bounded RX ready-data into
+ * Linux-like read/readiness decisions: canonical mode is readable only through
+ * a newline-terminated slice; noncanonical mode keeps byte readiness. Echo,
+ * erase, special characters, signal generation, hangup and real wait queues
+ * remain outside this first slice.
+ */
+object NTtyLineDiscipline: ConsoleObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::EvaluateReadiness {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                TtyFlipBuffer.state == State::Ready;
+                n_tty_bound_to_flip_buffer(self, TtyFlipBuffer);
+            }
+            ensures {
+                n_tty_observes_termios_lflag(self);
+                n_tty_canonical_line_readiness_first_slice(self);
+                n_tty_noncanonical_byte_readiness_first_slice(self);
+                n_tty_echo_and_erase_deferred(self);
+                n_tty_full_waitqueue_deferred(self);
+            }
+        }
+
+        Action::ReadLineOrBytes {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                TtyFlipBuffer.state == State::Ready;
+                n_tty_bound_to_flip_buffer(self, TtyFlipBuffer);
+            }
+            ensures {
+                n_tty_observes_termios_lflag(self);
+                n_tty_canonical_read_returns_through_newline(self);
+                n_tty_noncanonical_byte_readiness_first_slice(self);
+                n_tty_echo_and_erase_deferred(self);
+                n_tty_full_waitqueue_deferred(self);
+            }
+        }
+    }
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    TtyPort.state == State::Ready;
+                    TtyFlipBuffer.state == State::Ready;
+                    TtyLineDisciplineRegistry.state == State::Prepared;
+                }
+
+                ensures {
+                    n_tty_bound_to_tty_port(NTtyLineDiscipline, TtyPort);
+                    n_tty_bound_to_flip_buffer(NTtyLineDiscipline, TtyFlipBuffer);
+                    n_tty_observes_termios_lflag(NTtyLineDiscipline);
+                    n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+                    n_tty_echo_and_erase_deferred(NTtyLineDiscipline);
+                    n_tty_full_waitqueue_deferred(NTtyLineDiscipline);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            n_tty_bound_to_tty_port(NTtyLineDiscipline, TtyPort);
+            n_tty_bound_to_flip_buffer(NTtyLineDiscipline, TtyFlipBuffer);
+            n_tty_observes_termios_lflag(NTtyLineDiscipline);
+            n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
+            n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+            n_tty_echo_and_erase_deferred(NTtyLineDiscipline);
+            n_tty_full_waitqueue_deferred(NTtyLineDiscipline);
+        }
+    }
+}
+
+/*
  * TtyInputWait is the minimal stdin wait boundary used by read/ppoll before a
- * full Linux wait_queue_head_t / poll_table / N_TTY implementation exists. It
- * waits for the existing serial8250 IRQ RX path to publish TtyFlipBuffer
- * ready-data; it does not read UART RX directly.
+ * full Linux wait_queue_head_t / poll_table implementation exists. It waits
+ * for the existing serial8250 IRQ RX path to publish data that
+ * NTtyLineDiscipline can later report as readable; it does not read UART RX
+ * directly.
  */
 object TtyInputWait: ConsoleObject {
     initial_state: State::Base;
@@ -938,8 +1028,11 @@ object TtyInputWait: ConsoleObject {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
-                TtyFlipBuffer.state == State::Ready;
-                tty_input_wait_bound_to_flip_buffer(self, TtyFlipBuffer);
+                NTtyLineDiscipline.state == State::Ready;
+                n_tty_bound_to_flip_buffer(NTtyLineDiscipline, TtyFlipBuffer);
+            }
+            drives {
+                NTtyLineDiscipline.Action::EvaluateReadiness;
             }
             ensures {
                 tty_input_wait_irq_rx_wakeup_first_slice(self);
@@ -953,7 +1046,7 @@ object TtyInputWait: ConsoleObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    TtyFlipBuffer.state == State::Ready;
+                    NTtyLineDiscipline.state == State::Ready;
                 }
 
                 ensures {

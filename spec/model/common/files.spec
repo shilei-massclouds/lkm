@@ -39,6 +39,16 @@
  *   SyscallTable.Action::ReadlinkAt
  *     -> FilesStruct.Action::ReadlinkPath
  *     -> VfsCore.Action::ReadlinkPath(Path, FsStruct)
+ *
+ * Character-device stdin/readiness path goes:
+ *
+ *   SyscallTable.Action::Read / Ppoll
+ *     -> FilesStruct.Action::ReadFd / LookupFd
+ *     -> FileDescriptorTable.Action::Lookup
+ *     -> OpenFileDescription.Action::ReadCharDevice
+ *     -> FileBackend.Action::ReadCharDevice
+ *     -> NTtyLineDiscipline.Action::ReadLineOrBytes / EvaluateReadiness
+ *     -> TtyFlipBuffer bounded ready-data
  */
 
 enum FileBackendKind {
@@ -106,6 +116,7 @@ predicate file_backend_char_device_console_bound<T>(backend: T) -> bool;
 predicate file_backend_regular_file_deferred<T>(backend: T) -> bool;
 predicate file_backend_block_device_deferred<T>(backend: T) -> bool;
 predicate file_backend_char_device_write_supported<T>(backend: T) -> bool;
+predicate file_backend_char_device_read_supported<T>(backend: T) -> bool;
 predicate file_backend_write_to_console<T>(backend: T) -> bool;
 predicate file_backend_regular_file_bound<T>(backend: T) -> bool;
 predicate file_backend_regular_file_read_supported<T>(backend: T) -> bool;
@@ -212,14 +223,21 @@ object FilesStruct: ResourceObject {
                 drives {
                     FileDescriptorTable.Action::Lookup(fd);
                     OpenFileDescription.Action::Read;
+                    OpenFileDescription.Action::ReadCharDevice;
                     FileBackend.Action::ReadRegularFile;
+                    FileBackend.Action::ReadCharDevice;
+                    NTtyLineDiscipline.Action::ReadLineOrBytes;
                 }
 
                 ensures {
                     files_struct_read_fd_routes_to_table(self, FileDescriptorTable);
                     files_struct_regular_file_read_observed(self);
+                    files_struct_stdin_char_device_read_observed(self);
                     open_file_description_read_observed(OpenFileDescription);
                     file_backend_regular_file_read_returns_data(FileBackend);
+                    file_backend_char_device_read_returns_ready_data(FileBackend);
+                    n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
                 }
             }
 
@@ -359,12 +377,14 @@ object FilesStruct: ResourceObject {
                     files_struct_stdio_bound(self);
                     files_struct_stdin_probe_ready_data_cleared(self);
                     TtyInputWait.state == State::Ready;
+                    NTtyLineDiscipline.state == State::Ready;
                 }
 
                 ensures {
                     files_struct_stdin_blocking_wait_enabled(self);
                     tty_input_wait_bound_to_flip_buffer(TtyInputWait, TtyFlipBuffer);
                     tty_input_wait_irq_rx_wakeup_first_slice(TtyInputWait);
+                    n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
                 }
             }
         }
@@ -540,6 +560,31 @@ object OpenFileDescription: ResourceObject {
                     file_backend_regular_file_read_returns_data(FileBackend);
                 }
             }
+
+            on Action::ReadCharDevice {
+                depends_on {
+                    OpenFileDescription.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    open_file_description_backend_bound(self, FileBackend);
+                    open_file_description_readable(self);
+                    file_backend_kind_bound(FileBackend, FileBackendKind::CharDevice);
+                    file_backend_char_device_read_supported(FileBackend);
+                    NTtyLineDiscipline.state == State::Ready;
+                }
+
+                drives {
+                    FileBackend.Action::ReadCharDevice;
+                    NTtyLineDiscipline.Action::ReadLineOrBytes;
+                }
+
+                ensures {
+                    open_file_description_read_dispatches_backend(self, FileBackend);
+                    open_file_description_read_observed(self);
+                    file_backend_char_device_read_returns_ready_data(FileBackend);
+                    n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+                }
+            }
         }
     }
 }
@@ -559,6 +604,7 @@ object FileBackend: ResourceObject {
                     file_backend_kind_bound(self, FileBackendKind::CharDevice);
                     file_backend_char_device_console_bound(self);
                     file_backend_char_device_write_supported(self);
+                    file_backend_char_device_read_supported(self);
                     file_backend_regular_file_deferred(self);
                     file_backend_block_device_deferred(self);
                 }
@@ -572,6 +618,7 @@ object FileBackend: ResourceObject {
             file_backend_kind_bound(self, FileBackendKind::CharDevice);
             file_backend_char_device_console_bound(self);
             file_backend_char_device_write_supported(self);
+            file_backend_char_device_read_supported(self);
         }
 
         actions {
@@ -584,6 +631,25 @@ object FileBackend: ResourceObject {
 
                 ensures {
                     file_backend_write_to_console(self);
+                }
+            }
+
+            on Action::ReadCharDevice {
+                depends_on {
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(self, FileBackendKind::CharDevice);
+                    file_backend_char_device_read_supported(self);
+                    NTtyLineDiscipline.state == State::Ready;
+                }
+
+                drives {
+                    NTtyLineDiscipline.Action::ReadLineOrBytes;
+                }
+
+                ensures {
+                    file_backend_char_device_read_returns_ready_data(self);
+                    n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
                 }
             }
 

@@ -447,7 +447,7 @@ impl FileBackend {
         Ok(len)
     }
 
-    fn read_char_device(&self, buffer: &mut [u8]) -> FileResult<usize> {
+    fn read_char_device(&self, buffer: &mut [u8], canonical: bool) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
             || !self.char_device_read_supported
@@ -455,7 +455,7 @@ impl FileBackend {
             return Err(FileError::BackendUnavailable);
         }
 
-        let len = crate::objects::ns16550a::read_tty_ready_data(buffer)
+        let len = crate::objects::ns16550a::read_tty_ready_data_with_mode(buffer, canonical)
             .ok_or(FileError::BackendUnavailable)?;
         if len == 0 && !buffer.is_empty() {
             return Err(FileError::NotReady);
@@ -468,7 +468,7 @@ impl FileBackend {
         Ok(len)
     }
 
-    fn char_device_read_ready(&self) -> FileResult<bool> {
+    fn char_device_read_ready(&self, canonical: bool) -> FileResult<bool> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
             || !self.char_device_read_supported
@@ -476,7 +476,8 @@ impl FileBackend {
             return Err(FileError::BackendUnavailable);
         }
 
-        crate::objects::ns16550a::tty_ready_data_available().ok_or(FileError::BackendUnavailable)
+        crate::objects::ns16550a::tty_ready_data_available_with_mode(canonical)
+            .ok_or(FileError::BackendUnavailable)
     }
 
     fn char_device_write_ready(&self) -> FileResult<bool> {
@@ -676,7 +677,12 @@ impl OpenFileDescription {
         Ok(read)
     }
 
-    fn read_char_device(&self, backend: &FileBackend, buffer: &mut [u8]) -> FileResult<usize> {
+    fn read_char_device(
+        &self,
+        backend: &FileBackend,
+        buffer: &mut [u8],
+        canonical: bool,
+    ) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.backend_bound {
             return Err(FileError::NotReady);
         }
@@ -684,7 +690,7 @@ impl OpenFileDescription {
             return Err(FileError::NotReadable);
         }
 
-        let read = backend.read_char_device(buffer)?;
+        let read = backend.read_char_device(buffer, canonical)?;
         self.last_read_len.store(read, Ordering::Release);
         self.read_dispatches_backend.fetch_add(1, Ordering::AcqRel);
         self.read_observed.fetch_add(1, Ordering::AcqRel);
@@ -1149,6 +1155,10 @@ impl FilesStruct {
         self.tty_termios_mutation_observed.load(Ordering::Acquire) != 0
     }
 
+    fn tty_canonical_mode(&self) -> bool {
+        read_u32_raw(&self.tty_termios, 12) & TERMIOS_ICANON != 0
+    }
+
     pub const fn regular0_len(&self) -> usize {
         self.regular0_len
     }
@@ -1502,14 +1512,20 @@ impl FilesStruct {
 
         match entry.ofd {
             OpenFileDescriptionRef::Stdin => {
-                let read = self.stdin.read_char_device(&self.stdin_backend, buffer)?;
+                let canonical = self.tty_canonical_mode();
+                let read = self
+                    .stdin
+                    .read_char_device(&self.stdin_backend, buffer, canonical)?;
                 if read != 0 {
                     self.stdin_char_read_observed.fetch_add(1, Ordering::AcqRel);
                 }
                 Ok(read)
             }
             OpenFileDescriptionRef::Tty0 => {
-                let read = self.tty0.read_char_device(&self.tty0_backend, buffer)?;
+                let canonical = self.tty_canonical_mode();
+                let read = self
+                    .tty0
+                    .read_char_device(&self.tty0_backend, buffer, canonical)?;
                 if read != 0 {
                     self.stdin_char_read_observed.fetch_add(1, Ordering::AcqRel);
                 }
@@ -1554,7 +1570,7 @@ impl FilesStruct {
                 },
                 OpenFileDescriptionRef::Stdin | OpenFileDescriptionRef::Tty0 => {
                     let backend = self.char_backend_for_entry(entry)?;
-                    if backend.char_device_read_ready()? {
+                    if backend.char_device_read_ready(self.tty_canonical_mode())? {
                         ready |= FILE_POLLIN | FILE_POLLRDNORM;
                     }
                 }
@@ -2011,6 +2027,13 @@ fn linux_std_termios() -> [u8; TERMIOS_SIZE] {
 
 fn write_u32_raw(buffer: &mut [u8], offset: usize, value: u32) {
     buffer[offset..offset + core::mem::size_of::<u32>()].copy_from_slice(&value.to_le_bytes());
+}
+
+fn read_u32_raw(buffer: &[u8], offset: usize) -> u32 {
+    let len = core::mem::size_of::<u32>();
+    let mut bytes = [0u8; core::mem::size_of::<u32>()];
+    bytes.copy_from_slice(&buffer[offset..offset + len]);
+    u32::from_le_bytes(bytes)
 }
 
 fn serialize_linux_dirents64<'a>(

@@ -266,6 +266,7 @@ predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_read_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_input_wait_first_slice<T>(table: T) -> bool;
+predicate syscall_read_n_tty_line_discipline_first_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
@@ -274,6 +275,7 @@ predicate syscall_ppoll_timeout_parse_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_sigmask_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_tty_input_wait_first_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_n_tty_readiness_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -1077,18 +1079,22 @@ object SyscallTable: ResourceObject {
                  * the N_TTY line discipline read path in drivers/tty/n_tty.c.
                  *
                  * This slice supports two already-open fd classes: the existing
-                 * Regular0 read-only file, and fd0 char-device stdin only when
-                 * the TTY side already contains bounded ready data. For a
-                 * nonzero read request on fd0 with no ready data, Linux would
-                 * wait unless nonblocking, hangup, signal or another terminal
-                 * condition applies; this slice has no wait queue yet, so that
-                 * path is explicitly out of slice and must not be reported as
-                 * EOF. Blocking wait queues, canonical line discipline, job
-                 * control, signal interruption/restart, poll/ppoll and real RX
-                 * wakeup remain deferred. A user-read-trace probe may observe
-                 * fd, requested length and the returned read result for distro
-                 * debugging, but must not alter this action's return value,
-                 * errno path, checkpoint ordering or smoke pass/fail policy.
+                 * Regular0 read-only file, and fd0 char-device stdin through
+                 * the minimal N_TTY line discipline. In canonical mode,
+                 * NTtyLineDiscipline only reports a line readable once bounded
+                 * TtyFlipBuffer ready data contains a newline and read returns
+                 * at most through that newline. In noncanonical mode, existing
+                 * byte readiness is preserved. For a nonzero read request on
+                 * fd0 with no N_TTY-readable data, Linux would wait unless
+                 * nonblocking, hangup, signal or another terminal condition
+                 * applies; the current wait boundary only opens a supervisor
+                 * interruptible window for real RX and still does not model the
+                 * full wait queue. Job control, signal interruption/restart,
+                 * echo/erase, special input characters and full poll/ppoll
+                 * integration remain deferred. A user-read-trace probe may
+                 * observe fd, requested length and the returned read result for
+                 * distro debugging, but must not alter this action's return
+                 * value, errno path, checkpoint ordering or smoke policy.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1101,6 +1107,7 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::ReadFd(FdRef::Regular0);
                     FilesStruct.Action::ReadFd(FdRef::Stdin);
                     FileBackend.Action::ReadCharDevice;
+                    NTtyLineDiscipline.Action::ReadLineOrBytes;
                     TtyInputWait.Action::WaitReadable;
                 }
 
@@ -1115,8 +1122,12 @@ object SyscallTable: ResourceObject {
                     tty_flip_buffer_ready_data_consumed(TtyFlipBuffer);
                     syscall_read_no_ready_blocking_out_of_slice(self);
                     syscall_read_tty_input_wait_first_slice(self);
+                    syscall_read_n_tty_line_discipline_first_slice(self);
+                    n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+                    n_tty_echo_and_erase_deferred(NTtyLineDiscipline);
                     syscall_read_tty_blocking_deferred(self);
-                    tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
+                    n_tty_full_waitqueue_deferred(NTtyLineDiscipline);
                     syscall_read_trace_probe_observes_result_without_side_effect(self);
                     syscall_table_read_observed(self);
                 }
@@ -1132,14 +1143,16 @@ object SyscallTable: ResourceObject {
                  * writes back revents, and returns the number of ready entries.
                  *
                  * This first slice observes immediately available readiness
-                 * from the existing fd table and char-device ready data. It
-                 * parses and validates the optional timeout. If no entry is
-                 * ready, timeout={0,0} returns 0 as an immediate timeout, but
-                 * timeout=NULL or a positive timeout is explicitly out of
-                 * slice and must not be reported as successful timeout.
-                 * Sleeping poll_table wait, remaining timeout update,
-                 * temporary signal masks, restart after signal delivery, and
-                 * N_TTY wait queues / real RX wakeup remain deferred.
+                 * from the existing fd table and char-device N_TTY readiness.
+                 * Canonical mode requires a newline-terminated bounded input
+                 * slice before fd0 reports POLLIN; noncanonical mode preserves
+                 * byte readiness. It parses and validates the optional timeout.
+                 * If no entry is ready, timeout={0,0} returns 0 as an immediate
+                 * timeout, but timeout=NULL or a positive timeout must not be
+                 * reported as successful timeout without an event. Sleeping
+                 * poll_table wait, remaining timeout update, temporary signal
+                 * masks, restart after signal delivery, echo/erase and full
+                 * N_TTY wait queues remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1151,6 +1164,7 @@ object SyscallTable: ResourceObject {
                 drives {
                     FilesStruct.Action::LookupFd(FdRef::Stdin);
                     FileDescriptorTable.Action::Lookup(FdRef::Stdin);
+                    NTtyLineDiscipline.Action::EvaluateReadiness;
                     TtyInputWait.Action::WaitReadable;
                 }
 
@@ -1162,8 +1176,12 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_no_ready_blocking_out_of_slice(self);
                     syscall_ppoll_tty_input_wait_first_slice(self);
+                    syscall_ppoll_n_tty_readiness_first_slice(self);
+                    n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
+                    n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+                    n_tty_echo_and_erase_deferred(NTtyLineDiscipline);
                     syscall_ppoll_blocking_wait_deferred(self);
-                    tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
+                    n_tty_full_waitqueue_deferred(NTtyLineDiscipline);
                     syscall_table_ppoll_observed(self);
                 }
             }

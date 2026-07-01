@@ -369,12 +369,65 @@ impl TtyFlipBuffer {
         Some(len)
     }
 
+    fn canonical_readable_len(self) -> Option<usize> {
+        if !self.ready {
+            return None;
+        }
+        if self.read_offset >= self.read_ready_len {
+            return Some(0);
+        }
+
+        let ready = &self.buffer[self.read_offset..self.read_ready_len];
+        ready
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|index| index + 1)
+            .or(Some(0))
+    }
+
+    fn read_ready_data_with_mode(&mut self, buffer: &mut [u8], canonical: bool) -> Option<usize> {
+        if !canonical {
+            return self.read_ready_data(buffer);
+        }
+        if !self.ready {
+            return None;
+        }
+        if buffer.is_empty() {
+            return Some(0);
+        }
+
+        let readable = self.canonical_readable_len()?;
+        if readable == 0 {
+            return Some(0);
+        }
+
+        let len = core::cmp::min(buffer.len(), readable);
+        let end = self.read_offset + len;
+        buffer[..len].copy_from_slice(&self.buffer[self.read_offset..end]);
+        self.read_offset = end;
+        self.last_read_len = len;
+        self.read_count = self.read_count.saturating_add(1);
+        if self.read_offset == self.read_ready_len {
+            self.read_ready_len = 0;
+            self.read_offset = 0;
+        }
+        Some(len)
+    }
+
     fn read_ready_available(self) -> Option<bool> {
         if !self.ready {
             return None;
         }
 
         Some(self.read_offset < self.read_ready_len)
+    }
+
+    fn read_ready_available_with_mode(self, canonical: bool) -> Option<bool> {
+        if !canonical {
+            return self.read_ready_available();
+        }
+
+        Some(self.canonical_readable_len()? != 0)
     }
 
     fn clear_ready_data(&mut self) -> bool {
@@ -1621,9 +1674,23 @@ pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {
     state.tty_flip_buffer.read_ready_data(buffer)
 }
 
+pub fn read_tty_ready_data_with_mode(buffer: &mut [u8], canonical: bool) -> Option<usize> {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    state
+        .tty_flip_buffer
+        .read_ready_data_with_mode(buffer, canonical)
+}
+
 pub fn tty_ready_data_available() -> Option<bool> {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.read_ready_available()
+}
+
+pub fn tty_ready_data_available_with_mode(canonical: bool) -> Option<bool> {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state
+        .tty_flip_buffer
+        .read_ready_available_with_mode(canonical)
 }
 
 pub fn tty_xmit_fifo_ready() -> bool {
