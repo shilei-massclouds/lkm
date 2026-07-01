@@ -2769,8 +2769,28 @@ type ArceosExBlockIoCodingMust {
          * must pass a case-local disk image, the default overlay map, FORCE=1,
          * and QEMU_APPEND="earlycon=sbi" explicitly so they exercise the
          * overlay-installed /sbin/init fixture and remain non-interactive.
-         * init= is not a substitute for rootfs overlay, which remains the
-         * stable fixture injection mechanism for user_smoke and staged probes.
+         *
+         * make test MUST also include distro rootfs smoke entries that are
+         * separate from overlay fixtures. The first distro smoke runs
+         * ROOTFS_OVERLAY=none with QEMU_APPEND="earlycon=sbi init=/bin/ls" on
+         * a case-local disk and treats user exit status 0 as success. A second
+         * distro smoke may run ROOTFS_OVERLAY=none with init=/bin/sh by waiting
+         * for a visible shell-ready marker and then feeding a bounded host-side
+         * stdin script such as "echo OK\nexit\n"; this input belongs to the host
+         * harness, not to kernel-side ready-data fixtures, and it must not be
+         * injected before early serial diagnostics and initcalls have finished.
+         * The case must require both user exit status 0 and the expected output
+         * marker. init= is not a substitute for rootfs overlay, which remains
+         * the stable fixture injection mechanism for user_smoke and staged
+         * probes.
+         *
+         * Shell external-command closure and native /sbin/init/OpenRC are
+         * separate rollout stages. Until clone/vfork/fork, child execve,
+         * wait4, pipe/dup inheritance, close-on-exec propagation and
+         * job-control/signal requirements are located by reproducible guest
+         * diagnostics and specified against Linux 6.12, they must remain
+         * explicit diagnostic/manual entries rather than mandatory make test
+         * pass criteria.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
@@ -2787,6 +2807,9 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_disk_build_default_not_rebuild_existing_image();
         arceos_ex_must_qemu_append_default_user_boot_to_bin_sh_and_passthrough();
         arceos_ex_must_test_harness_pin_user_smoke_qemu_append();
+        arceos_ex_must_test_harness_cover_no_overlay_bin_ls();
+        arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input();
+        arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified();
         arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support();
 
         /*
