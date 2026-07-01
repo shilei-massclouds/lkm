@@ -3616,3 +3616,11 @@ model/coding 规格应允许同一 block request 的 completion 来源不同：�
 ## 未决问题
 
 - 待补充
+
+
+
+# 新版准备
+
+## 内核系统规格
+
+待补充。

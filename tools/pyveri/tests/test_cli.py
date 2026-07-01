@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pyveri.__main__ import main
+from pyveri.__main__ import _derive_ok_summary, main
 
 
 class CliTests(unittest.TestCase):
@@ -36,6 +36,18 @@ class CliTests(unittest.TestCase):
             exit_code = main([str(self.spec), "--derive", "--strict"])
 
         self.assertEqual(exit_code, 0)
+
+    def test_strict_derivation_rejects_open_obligations(self) -> None:
+        self.assertFalse(
+            _derive_ok_summary(
+                {
+                    "target_reached": True,
+                    "blocked": 0,
+                    "contradiction": 0,
+                    "obligation": 1,
+                }
+            )
+        )
 
     def test_model_main_has_no_open_obligations(self) -> None:
         stdout = io.StringIO()

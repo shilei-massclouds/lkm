@@ -906,6 +906,8 @@ object TtyFlipBuffer: ConsoleObject {
                     tty_flip_buffer_bound_to_tty_port(TtyFlipBuffer, TtyPort);
                     tty_flip_buffer_rx_staging_only(TtyFlipBuffer);
                     tty_flip_buffer_push_is_rx_observation_boundary(TtyFlipBuffer);
+                    tty_flip_buffer_push_publishes_ready_data_first_slice(TtyFlipBuffer);
+                    tty_flip_buffer_probe_bytes_not_user_stdin(TtyFlipBuffer);
                     tty_flip_buffer_does_not_model_full_n_tty_read(TtyFlipBuffer);
                     tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
                 }

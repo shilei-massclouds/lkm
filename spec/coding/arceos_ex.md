@@ -1069,9 +1069,9 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 ## `make verify` obligation 分类
 
-`80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象 transition前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象 transition中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。
+`80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象 transition前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象 transition中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。`make verify` 的通过口径必须包含 `obligation == 0`；`check: passed` 或进程退出码为 0 不能在仍有 unresolved obligation 时被解释为规格验证通过。
 
-当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 3 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现。
+当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 3 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现；工具层必须让 `make verify` 在 `obligation > 0` 时返回失败。
 
 | 分类 | 条目 | 影响范围 | 当前处理策略 |
 | --- | --- | --- | --- |

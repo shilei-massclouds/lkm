@@ -91,7 +91,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     derive_parser.add_argument(
         "--strict",
         action="store_true",
-        help="return a non-zero exit code when derivation does not reach the target",
+        help="return a non-zero exit code when derivation has unresolved proof obligations",
     )
     derive_parser.add_argument("-o", "--output", type=Path, help="write the derivation report")
     _add_work_dir_argument(derive_parser)
@@ -213,7 +213,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="return a non-zero exit code when derivation does not reach the target",
+        help="return a non-zero exit code when derivation has unresolved proof obligations",
     )
     parser.add_argument(
         "-T",
@@ -767,7 +767,12 @@ def _derive_ok(data: dict[str, Any]) -> bool:
 
 
 def _derive_ok_summary(summary: dict[str, Any]) -> bool:
-    return bool(summary["target_reached"]) and not summary["blocked"] and not summary["contradiction"]
+    return (
+        bool(summary["target_reached"])
+        and not summary["blocked"]
+        and not summary["contradiction"]
+        and not summary["obligation"]
+    )
 
 
 def _format_record(record: dict[str, Any]) -> str:

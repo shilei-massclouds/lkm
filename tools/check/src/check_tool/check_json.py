@@ -34,6 +34,17 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
         reasons.extend(_record_reasons(data, "blocked"))
     if contradiction:
         reasons.extend(_record_reasons(data, "contradiction"))
+    if obligation:
+        obligation_reasons = _record_reasons(data, "obligation")
+        if obligation_reasons:
+            reasons.extend(obligation_reasons)
+        else:
+            reasons.append(
+                {
+                    "kind": "obligation",
+                    "message": f"unresolved obligations: {obligation}",
+                }
+            )
 
     verdict = "passed" if not reasons else "failed"
     exit_code = 0 if verdict == "passed" else 1
@@ -57,7 +68,7 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
             "deferred": deferred,
         },
         "allowed": {
-            "obligation": True,
+            "obligation": False,
             "deferred": True,
         },
         "reasons": reasons,

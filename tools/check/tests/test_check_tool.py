@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,7 +61,7 @@ class CheckToolTests(unittest.TestCase):
             data = read_json(derive)
             data["summary"]["target_reached"] = False
             data["target"]["reached"] = False
-            derive.write_text(__import__("json").dumps(data), encoding="utf-8")
+            derive.write_text(json.dumps(data), encoding="utf-8")
             check = Path(tmp) / "failed.check.json"
 
             stdout = io.StringIO()
@@ -72,6 +73,37 @@ class CheckToolTests(unittest.TestCase):
             result = read_json(check)
             self.assertEqual(result["verdict"], "failed")
             self.assertEqual(result["reasons"][0]["kind"], "target_not_reached")
+
+    def test_check_fails_when_obligations_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            derive = self._build_derive_json(tmp)
+            data = read_json(derive)
+            data["summary"]["obligation"] = 1
+            data["records"].append(
+                {
+                    "status": "obligation",
+                    "message": "unresolved invariant: demo_fact(Demo)",
+                    "span": None,
+                    "object": "Demo",
+                    "transition": "Transition::Setup",
+                    "state": "Ready",
+                    "expression": "demo_fact(Demo)",
+                }
+            )
+            derive.write_text(json.dumps(data), encoding="utf-8")
+            check = Path(tmp) / "obligation.check.json"
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = check_main([str(derive), "-o", str(check)])
+
+            self.assertEqual(exit_code, 1)
+            result = read_json(check)
+            self.assertEqual(result["verdict"], "failed")
+            self.assertFalse(result["allowed"]["obligation"])
+            self.assertEqual(result["summary"]["obligation"], 1)
+            self.assertEqual(result["reasons"][0]["kind"], "obligation")
 
     def test_invalid_derive_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
