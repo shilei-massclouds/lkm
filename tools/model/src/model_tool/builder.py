@@ -615,6 +615,116 @@ def _check_context_guard_references(
         )
     _check_lock_event_blocks(model, guard.entered_by, diagnostics, context=context)
     _check_lock_event_blocks(model, guard.exited_by, diagnostics, context=context)
+    _check_context_guard_owner_pairing(context, diagnostics)
+
+
+def _check_context_guard_owner_pairing(
+    context: ExclusiveContextDef,
+    diagnostics: list[Diagnostic],
+) -> None:
+    guard = context.guard
+    if context.kind != "ResourceExclusiveContext" or guard is None or guard.lock_ref is None:
+        return
+
+    entered_owners = _guard_boundary_owner_args(guard.entered_by, guard.lock_ref)
+    exited_owners = _guard_boundary_owner_args(guard.exited_by, guard.lock_ref)
+    if not entered_owners and not exited_owners:
+        return
+    if not entered_owners or not exited_owners:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "context guard owner arguments must appear on both entered_by and exited_by: "
+                f"{context.name}",
+                guard.span,
+            )
+        )
+        return
+    if len(entered_owners) > 1:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "context guard entered_by must not mix owner arguments: "
+                f"{context.name}",
+                guard.span,
+            )
+        )
+    if len(exited_owners) > 1:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "context guard exited_by must not mix owner arguments: "
+                f"{context.name}",
+                guard.span,
+            )
+        )
+    if len(entered_owners) == 1 and len(exited_owners) == 1 and entered_owners != exited_owners:
+        entered = _format_owner_args(next(iter(entered_owners)))
+        exited = _format_owner_args(next(iter(exited_owners)))
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "context guard entered_by/exited_by owner arguments must match: "
+                f"{context.name} entered_by({entered}) exited_by({exited})",
+                guard.span,
+            )
+        )
+
+
+def _guard_boundary_owner_args(blocks: list[Block], lock_ref: str) -> set[tuple[str, ...]]:
+    owners: set[tuple[str, ...]] = set()
+    for block in blocks:
+        if _is_never_guard_block(block):
+            continue
+        for entry, _span in block.entry_spans:
+            parsed = _parse_guard_boundary_expr(entry)
+            if parsed is None:
+                continue
+            receiver, args = parsed
+            if receiver != lock_ref or args is None:
+                continue
+            owner_args = _split_top_level_args(args)
+            if owner_args:
+                owners.add(owner_args)
+    return owners
+
+
+def _parse_guard_boundary_expr(entry: str) -> tuple[str, str | None] | None:
+    match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
+    if match is not None:
+        return match.group(1), match.group(3)
+    match = _OBJECT_ACTION_EXPR_RE.match(entry)
+    if match is not None:
+        return match.group(1), match.group(3)
+    return None
+
+
+def _split_top_level_args(args: str) -> tuple[str, ...]:
+    entries: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(args):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(depth - 1, 0)
+        elif char == "," and depth == 0:
+            arg = _normalize_guard_arg(args[start:index])
+            if arg:
+                entries.append(arg)
+            start = index + 1
+    arg = _normalize_guard_arg(args[start:])
+    if arg:
+        entries.append(arg)
+    return tuple(entries)
+
+
+def _normalize_guard_arg(arg: str) -> str:
+    return re.sub(r"\s+", " ", arg.strip())
+
+
+def _format_owner_args(args: tuple[str, ...]) -> str:
+    return ", ".join(args)
 
 
 def _check_event_blocks(

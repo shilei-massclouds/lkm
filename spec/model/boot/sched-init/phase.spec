@@ -166,28 +166,49 @@ context BitWaitQueueTableInitContext: Context {
     }
 }
 
-context WorkqueuePoolMutexContext: ResourceExclusiveContext {
+context BootInitWorkqueuePoolMutexContext: ResourceExclusiveContext {
     /*
      * workqueue_init_early() reaches alloc_workqueue(), which takes
      * wq_pool_mutex while allocating/linking PWQs and adding each system
-     * workqueue to the global workqueues list. The guard is still modeled even
-     * though boot concurrency is otherwise closed. PreSmpInitPhase reuses this
-     * same mutex context for workqueue_init() on the KernelInitTask execution
-     * line while fixing node hints, creating rescuers and publishing initial
-     * workers. RuntimeCorePhase reuses it for workqueue_init_topology() while
-     * rebinding unbound pool workqueues. This mutex owns the Linux
-     * workqueue/pool publication protocol.
+     * workqueue to the global workqueues list. The guard is owner-specific:
+     * BootInitTaskRef enters and exits this context so mutex owner pairing is
+     * explicit even though boot concurrency is otherwise closed.
      */
     guard {
         lock_ref: WorkqueuePoolMutex;
 
         entered_by {
             WorkqueuePoolMutex.Transition::Lock(BootInitTaskRef);
-            WorkqueuePoolMutex.Transition::Lock(KernelInitTaskRef);
         }
 
         exited_by {
             WorkqueuePoolMutex.Transition::Unlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        Workqueue;
+        WorkqueuePoolMutex;
+    }
+}
+
+context KernelInitWorkqueuePoolMutexContext: ResourceExclusiveContext {
+    /*
+     * workqueue_init() and workqueue_init_topology() reuse wq_pool_mutex on
+     * the KernelInitTask execution line while fixing node hints, creating
+     * rescuers, publishing initial workers and rebinding unbound pool
+     * workqueues. This context deliberately pairs only KernelInitTaskRef lock
+     * and unlock operations; the protected mutex object is still the same
+     * Linux wq_pool_mutex fact.
+     */
+    guard {
+        lock_ref: WorkqueuePoolMutex;
+
+        entered_by {
+            WorkqueuePoolMutex.Transition::Lock(KernelInitTaskRef);
+        }
+
+        exited_by {
             WorkqueuePoolMutex.Transition::Unlock(KernelInitTaskRef);
         }
     }
@@ -198,13 +219,13 @@ context WorkqueuePoolMutexContext: ResourceExclusiveContext {
     }
 }
 
-context WorkqueueStructMutexContext: ResourceExclusiveContext {
+context BootInitWorkqueueStructMutexContext: ResourceExclusiveContext {
     /*
      * alloc_workqueue() initializes each workqueue_struct mutex and takes it
-     * while linking pool_workqueue entries and adjusting max_active. RuntimeCorePhase
-     * reuses the aggregate guard for workqueue_init_topology() when it updates
-     * max_active on existing unbound workqueues. The current model aggregates
-     * the system workqueue set behind one WorkqueueStructMutex fact rather than
+     * while linking pool_workqueue entries and adjusting max_active during
+     * workqueue_init_early(). This BootInitTaskRef context keeps lock/unlock
+     * owner pairing explicit while the current model still aggregates the
+     * system workqueue set behind one WorkqueueStructMutex fact rather than
      * naming every system queue mutex.
      */
     guard {
@@ -212,11 +233,34 @@ context WorkqueueStructMutexContext: ResourceExclusiveContext {
 
         entered_by {
             WorkqueueStructMutex.Transition::Lock(BootInitTaskRef);
-            WorkqueueStructMutex.Transition::Lock(KernelInitTaskRef);
         }
 
         exited_by {
             WorkqueueStructMutex.Transition::Unlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        Workqueue;
+        WorkqueueStructMutex;
+    }
+}
+
+context KernelInitWorkqueueStructMutexContext: ResourceExclusiveContext {
+    /*
+     * RuntimeCorePhase reuses the aggregate workqueue_struct->mutex guard for
+     * workqueue_init_topology() when it updates max_active on existing unbound
+     * workqueues. This KernelInitTaskRef context pairs the same owner across
+     * Lock and Unlock while retaining the aggregate WorkqueueStructMutex fact.
+     */
+    guard {
+        lock_ref: WorkqueueStructMutex;
+
+        entered_by {
+            WorkqueueStructMutex.Transition::Lock(KernelInitTaskRef);
+        }
+
+        exited_by {
             WorkqueueStructMutex.Transition::Unlock(KernelInitTaskRef);
         }
     }
@@ -1068,7 +1112,7 @@ object Workqueue: TaskObject {
                     WorkqueueStructMutex.Transition::Setup;
                 }
 
-                within WorkqueuePoolMutexContext {
+                within BootInitWorkqueuePoolMutexContext {
                     ensures {
                         workqueue_pool_mutex_guard_used(
                             Workqueue,
@@ -1086,7 +1130,7 @@ object Workqueue: TaskObject {
                         workqueue_system_affinity_pods_ready(Workqueue);
                     }
 
-                    within WorkqueueStructMutexContext {
+                    within BootInitWorkqueueStructMutexContext {
                         ensures {
                             workqueue_struct_mutex_guard_used(
                                 Workqueue,
@@ -1191,7 +1235,7 @@ object Workqueue: TaskObject {
                     CpuGroup.state == State::Ready;
                 }
 
-                within WorkqueuePoolMutexContext {
+                within KernelInitWorkqueuePoolMutexContext {
                     ensures {
                         workqueue_init_pool_mutex_guard_used(
                             Workqueue,

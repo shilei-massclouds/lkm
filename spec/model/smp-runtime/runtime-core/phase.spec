@@ -164,7 +164,7 @@ object WorkqueueTopology: KernelObject {
                     scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
                 }
 
-                within WorkqueuePoolMutexContext {
+                within KernelInitWorkqueuePoolMutexContext {
                     ensures {
                         mutex_lock_acquired(WorkqueuePoolMutex, KernelInitTaskRef);
                         mutex_unlock_released(WorkqueuePoolMutex, KernelInitTaskRef);
@@ -174,7 +174,7 @@ object WorkqueueTopology: KernelObject {
                         );
                     }
 
-                    within WorkqueueStructMutexContext {
+                    within KernelInitWorkqueueStructMutexContext {
                         ensures {
                             mutex_lock_acquired(WorkqueueStructMutex, KernelInitTaskRef);
                             mutex_unlock_released(WorkqueueStructMutex, KernelInitTaskRef);

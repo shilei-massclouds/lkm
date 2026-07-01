@@ -382,6 +382,14 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
 - 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`RawSpinLock.Action::Acquire` / `Release` 可作为普通 raw spin lock 的 guard 边界，只贡献该 `ResourceExclusiveContext` 的锁保护和 `obj_refs` 独占范围，不额外推导 irqsave、抢占关闭或主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`LocalInterruptControl.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
+- ResourceExclusiveContext 的锁 guard 如果边界事件带有 owner/current-task
+  实参，例如 `Mutex.Transition::Lock(TaskRef)` / `Unlock(TaskRef)`，则同一个
+  context 的 `guard.entered_by` 内只能出现一个 owner 实参集合，
+  `guard.exited_by` 内也只能出现一个 owner 实参集合，且二者必须完全一致。
+  同一把 mutex 在不同执行 owner 线上复用时，必须拆成多个 owner-specific
+  context；不得在一个 guard 中同时列出 `Lock(BootInitTaskRef)` 和
+  `Lock(KernelInitTaskRef)`，否则无法从规格上保证 unlock 释放的是同一 owner
+  获取的锁。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
 - `within ContextName { ... }` 是唯一标准形态；`within` 不声明、不接收、不转发、不重命名实参。

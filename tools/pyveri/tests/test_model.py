@@ -479,6 +479,114 @@ class ModelBuilderTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_context_guard_mixed_enter_owners(self) -> None:
+        document = parse_text(
+            """
+            type Mutex {
+                processes {
+                    Transition::Lock(current_task: TaskRef) {
+                    }
+
+                    Transition::Unlock(current_task: TaskRef) {
+                    }
+                }
+            }
+
+            lock TaskMutex: Mutex;
+
+            context BadContext: ResourceExclusiveContext {
+                guard {
+                    lock_ref: TaskMutex;
+
+                    entered_by {
+                        TaskMutex.Transition::Lock(BootInitTaskRef);
+                        TaskMutex.Transition::Lock(KernelInitTaskRef);
+                    }
+
+                    exited_by {
+                        TaskMutex.Transition::Unlock(BootInitTaskRef);
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "context guard entered_by must not mix owner arguments" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
+    def test_rejects_context_guard_mismatched_enter_exit_owner(self) -> None:
+        document = parse_text(
+            """
+            type Mutex {
+                processes {
+                    Transition::Lock(current_task: TaskRef) {
+                    }
+
+                    Transition::Unlock(current_task: TaskRef) {
+                    }
+                }
+            }
+
+            lock TaskMutex: Mutex;
+
+            context BadContext: ResourceExclusiveContext {
+                guard {
+                    lock_ref: TaskMutex;
+
+                    entered_by {
+                        TaskMutex.Transition::Lock(BootInitTaskRef);
+                    }
+
+                    exited_by {
+                        TaskMutex.Transition::Unlock(KernelInitTaskRef);
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "context guard entered_by/exited_by owner arguments must match"
+                in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
     def test_rejects_within_boundary_for_non_context_lock(self) -> None:
         document = parse_text(
             """
