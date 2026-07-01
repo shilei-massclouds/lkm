@@ -17,12 +17,14 @@ pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
+pub const TERMIOS_SIZE: usize = 36;
 pub const STDIN_READY_FIXTURE: &[u8] = b"stdin\n";
-const FILE_FD_COUNT: usize = 4;
+const FILE_FD_COUNT: usize = 16;
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
 const DT_LNK: u8 = 10;
+const DEV_TTY_PATH: &[u8] = b"/dev/tty";
 const FILE_O_RDONLY: u32 = 0;
 const FILE_O_WRONLY: u32 = 1;
 const FILE_O_RDWR: u32 = 2;
@@ -31,6 +33,22 @@ const FILE_O_LARGEFILE: u32 = 0o100000;
 const FILE_O_DIRECTORY: u32 = 0o200000;
 const FILE_O_CLOEXEC: u32 = 0o2000000;
 const FILE_FD_CLOEXEC: u32 = 1;
+const TERMIOS_ICRNL: u32 = 0x100;
+const TERMIOS_IXON: u32 = 0x400;
+const TERMIOS_OPOST: u32 = 0x1;
+const TERMIOS_ONLCR: u32 = 0x4;
+const TERMIOS_B38400: u32 = 0x0000000f;
+const TERMIOS_CS8: u32 = 0x00000030;
+const TERMIOS_CREAD: u32 = 0x00000080;
+const TERMIOS_HUPCL: u32 = 0x00000400;
+const TERMIOS_ISIG: u32 = 0x00001;
+const TERMIOS_ICANON: u32 = 0x00002;
+const TERMIOS_ECHO: u32 = 0x00008;
+const TERMIOS_ECHOE: u32 = 0x00010;
+const TERMIOS_ECHOK: u32 = 0x00020;
+const TERMIOS_ECHOCTL: u32 = 0x00200;
+const TERMIOS_ECHOKE: u32 = 0x00800;
+const TERMIOS_IEXTEN: u32 = 0x08000;
 const SEEK_SET: usize = 0;
 const SEEK_CUR: usize = 1;
 const SEEK_END: usize = 2;
@@ -93,6 +111,7 @@ pub enum FileError {
     NotTty,
     PermissionDenied,
     TooManySymlinks,
+    TooManyOpenFiles,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -161,6 +180,22 @@ impl FileDescriptorEntry {
             close_on_exec,
         }
     }
+
+    const fn opened(
+        ofd: OpenFileDescriptionRef,
+        readable: bool,
+        writable: bool,
+        flags: u32,
+        close_on_exec: bool,
+    ) -> Self {
+        Self {
+            ofd,
+            readable,
+            writable,
+            flags,
+            close_on_exec,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -169,6 +204,7 @@ pub enum OpenFileDescriptionRef {
     Stdout,
     Stderr,
     Regular0,
+    Tty0,
 }
 
 #[derive(Clone, Copy)]
@@ -744,8 +780,10 @@ impl FileDescriptorTable {
             return Err(FileError::NotReady);
         }
 
-        let fd_ref = FdRef::from_fd(fd).ok_or(FileError::BadFd)?;
-        let entry = self.entries[fd_ref.index()].ok_or(FileError::BadFd)?;
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        let entry = self.entries[fd].ok_or(FileError::BadFd)?;
         self.lookup_returns.fetch_add(1, Ordering::AcqRel);
         Ok(entry)
     }
@@ -773,6 +811,59 @@ impl FileDescriptorTable {
         Ok(REGULAR0_FD)
     }
 
+    fn install_opened(
+        &mut self,
+        ofd: &OpenFileDescription,
+        ofd_ref: OpenFileDescriptionRef,
+        readable: bool,
+        writable: bool,
+        flags: u32,
+        close_on_exec: bool,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || ofd.state() != State::Ready
+            || (!readable && !writable)
+        {
+            return Err(FileError::NotReady);
+        }
+        if self.entries[FdRef::Regular0.index()].is_some() {
+            return Err(FileError::AlreadyOpen);
+        }
+
+        self.entries[FdRef::Regular0.index()] = Some(FileDescriptorEntry::opened(
+            ofd_ref,
+            readable,
+            writable,
+            flags,
+            close_on_exec,
+        ));
+        self.fd_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(REGULAR0_FD)
+    }
+
+    fn dup_fd(&mut self, fd: usize, min_fd: usize, close_on_exec: bool) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+        if min_fd >= FILE_FD_COUNT {
+            return Err(FileError::InvalidArgument);
+        }
+
+        let source = self.lookup(fd)?;
+        let mut candidate = min_fd;
+        while candidate < FILE_FD_COUNT {
+            if self.entries[candidate].is_none() {
+                let mut duplicate = source;
+                duplicate.close_on_exec = close_on_exec;
+                self.entries[candidate] = Some(duplicate);
+                self.fd_installed.fetch_add(1, Ordering::AcqRel);
+                return Ok(candidate);
+            }
+            candidate += 1;
+        }
+        Err(FileError::TooManyOpenFiles)
+    }
+
     fn get_fd_flags(&self, fd: usize) -> FileResult<u32> {
         let entry = self.lookup(fd)?;
         Ok(if entry.close_on_exec {
@@ -787,31 +878,31 @@ impl FileDescriptorTable {
             return Err(FileError::NotReady);
         }
 
-        let fd_ref = FdRef::from_fd(fd).ok_or(FileError::BadFd)?;
-        let entry = self.entries[fd_ref.index()]
-            .as_mut()
-            .ok_or(FileError::BadFd)?;
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        let entry = self.entries[fd].as_mut().ok_or(FileError::BadFd)?;
         entry.close_on_exec = flags & FILE_FD_CLOEXEC != 0;
         self.lookup_returns.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
-    fn close(&mut self, fd: usize) -> FileResult<()> {
+    fn close(&mut self, fd: usize) -> FileResult<FileDescriptorEntry> {
         if self.lifecycle.state() != State::Ready {
             return Err(FileError::NotReady);
         }
 
-        let fd_ref = FdRef::from_fd(fd).ok_or(FileError::BadFd)?;
-        if matches!(fd_ref, FdRef::Stdin | FdRef::Stdout | FdRef::Stderr) {
-            return Err(FileError::Unsupported);
-        }
-        if self.entries[fd_ref.index()].is_none() {
+        if fd >= FILE_FD_COUNT {
             return Err(FileError::BadFd);
         }
+        if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
+            return Err(FileError::Unsupported);
+        }
+        let entry = self.entries[fd].ok_or(FileError::BadFd)?;
 
-        self.entries[fd_ref.index()] = None;
+        self.entries[fd] = None;
         self.fd_closed.fetch_add(1, Ordering::AcqRel);
-        Ok(())
+        Ok(entry)
     }
 }
 
@@ -822,10 +913,12 @@ pub struct FilesStruct {
     stdout: OpenFileDescription,
     stderr: OpenFileDescription,
     regular0: OpenFileDescription,
+    tty0: OpenFileDescription,
     stdin_backend: FileBackend,
     stdout_backend: FileBackend,
     stderr_backend: FileBackend,
     regular0_backend: FileBackend,
+    tty0_backend: FileBackend,
     regular0_buffer: [u8; REGULAR_FILE_BUFFER_SIZE],
     regular0_len: usize,
     regular0_offset: usize,
@@ -869,10 +962,12 @@ impl FilesStruct {
             stdout: OpenFileDescription::new(),
             stderr: OpenFileDescription::new(),
             regular0: OpenFileDescription::new(),
+            tty0: OpenFileDescription::new(),
             stdin_backend: FileBackend::new(FileBackendKind::CharDevice),
             stdout_backend: FileBackend::new(FileBackendKind::CharDevice),
             stderr_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_backend: FileBackend::new(FileBackendKind::RegularFile),
+            tty0_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_buffer: [0; REGULAR_FILE_BUFFER_SIZE],
             regular0_len: 0,
             regular0_offset: 0,
@@ -1035,6 +1130,10 @@ impl FilesStruct {
         &self.regular0
     }
 
+    pub const fn tty0(&self) -> &OpenFileDescription {
+        &self.tty0
+    }
+
     pub const fn stdin_backend(&self) -> &FileBackend {
         &self.stdin_backend
     }
@@ -1049,6 +1148,10 @@ impl FilesStruct {
 
     pub const fn regular0_backend(&self) -> &FileBackend {
         &self.regular0_backend
+    }
+
+    pub const fn tty0_backend(&self) -> &FileBackend {
+        &self.tty0_backend
     }
 
     pub const fn fd_bound(&self, fd: FdRef) -> bool {
@@ -1073,9 +1176,11 @@ impl FilesStruct {
         self.stdin_backend.setup()?;
         self.stdout_backend.setup()?;
         self.stderr_backend.setup()?;
+        self.tty0_backend.setup()?;
         self.stdin.setup_stdio(&self.stdin_backend, true, false)?;
         self.stdout.setup_stdio(&self.stdout_backend, false, true)?;
         self.stderr.setup_stdio(&self.stderr_backend, false, true)?;
+        self.tty0.setup_stdio(&self.tty0_backend, true, true)?;
         self.fd_table
             .install_stdio(&self.stdin, &self.stdout, &self.stderr)?;
 
@@ -1135,6 +1240,9 @@ impl FilesStruct {
         }
         if self.fd_table.fd_bound(FdRef::Regular0) {
             return Err(FileError::AlreadyOpen);
+        }
+        if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
+            return Err(FileError::PermissionDenied);
         }
 
         let mut provider = virtio_blk::live_provider(kernel_image);
@@ -1202,6 +1310,9 @@ impl FilesStruct {
         if self.fd_table.fd_bound(FdRef::Regular0) {
             return Err(FileError::AlreadyOpen);
         }
+        if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
+            return Err(FileError::PermissionDenied);
+        }
 
         let mut provider = virtio_blk::live_provider(kernel_image);
         let file_ref = vfs_core
@@ -1244,6 +1355,43 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    pub fn open_tty_path(&mut self, path: &[u8], open_flags: u32) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.regular_file_slot_ready
+            || path != DEV_TTY_PATH
+        {
+            return Err(FileError::PathUnavailable);
+        }
+        if self.fd_table.fd_bound(FdRef::Regular0) {
+            return Err(FileError::AlreadyOpen);
+        }
+        if open_flags & FILE_O_DIRECTORY != 0 {
+            return Err(FileError::InvalidArgument);
+        }
+        if open_flags & FILE_O_ACCMODE != FILE_O_RDWR {
+            return Err(FileError::PermissionDenied);
+        }
+
+        let fd = self.fd_table.install_opened(
+            &self.tty0,
+            OpenFileDescriptionRef::Tty0,
+            true,
+            true,
+            persistent_open_flags(open_flags),
+            open_flags & FILE_O_CLOEXEC != 0,
+        )?;
+        self.filesystem0_kind = FilesystemFdKind::None;
+        self.directory0_file_ref = None;
+        self.directory0_offset = 0;
+        self.directory0_last_getdents_len = 0;
+        self.regular0_path.fill(0);
+        self.regular0_path[..path.len()].copy_from_slice(path);
+        self.regular0_path_len = path.len();
+        self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
     pub fn read_fd(&mut self, fd: usize, buffer: &mut [u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -1258,6 +1406,13 @@ impl FilesStruct {
         match entry.ofd {
             OpenFileDescriptionRef::Stdin => {
                 let read = self.stdin.read_char_device(&self.stdin_backend, buffer)?;
+                if read != 0 {
+                    self.stdin_char_read_observed.fetch_add(1, Ordering::AcqRel);
+                }
+                Ok(read)
+            }
+            OpenFileDescriptionRef::Tty0 => {
+                let read = self.tty0.read_char_device(&self.tty0_backend, buffer)?;
                 if read != 0 {
                     self.stdin_char_read_observed.fetch_add(1, Ordering::AcqRel);
                 }
@@ -1332,13 +1487,17 @@ impl FilesStruct {
             return Err(FileError::NotReady);
         }
 
-        self.fd_table.close(fd)?;
-        self.regular0_offset = 0;
-        self.directory0_offset = 0;
-        self.directory0_file_ref = None;
-        self.filesystem0_kind = FilesystemFdKind::None;
+        let entry = self.fd_table.close(fd)?;
+        if fd == REGULAR0_FD && entry.ofd == OpenFileDescriptionRef::Regular0 {
+            self.regular0_offset = 0;
+            self.directory0_offset = 0;
+            self.directory0_file_ref = None;
+            self.filesystem0_kind = FilesystemFdKind::None;
+        }
         self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
-        self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
+        if entry.ofd == OpenFileDescriptionRef::Regular0 {
+            self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
+        }
         Ok(())
     }
 
@@ -1367,6 +1526,19 @@ impl FilesStruct {
         self.fd_table.set_fd_flags(fd, flags)
     }
 
+    pub fn fcntl_dupfd_fd(
+        &mut self,
+        fd: usize,
+        min_fd: usize,
+        close_on_exec: bool,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.dup_fd(fd, min_fd, close_on_exec)
+    }
+
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -1387,6 +1559,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stdout => &self.stdout_backend,
             OpenFileDescriptionRef::Stderr => &self.stderr_backend,
             OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
+            OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
         };
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
             return Err(FileError::NotTty);
@@ -1398,6 +1571,26 @@ impl FilesStruct {
             TTY_WINSIZE_XPIXEL,
             TTY_WINSIZE_YPIXEL,
         ))
+    }
+
+    pub fn ioctl_tcgets_fd(&self, fd: usize) -> FileResult<[u8; TERMIOS_SIZE]> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        let backend = match entry.ofd {
+            OpenFileDescriptionRef::Stdin => &self.stdin_backend,
+            OpenFileDescriptionRef::Stdout => &self.stdout_backend,
+            OpenFileDescriptionRef::Stderr => &self.stderr_backend,
+            OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
+            OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
+        };
+        if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
+            return Err(FileError::NotTty);
+        }
+
+        Ok(linux_std_termios())
     }
 
     pub fn lseek_fd(
@@ -1526,7 +1719,10 @@ impl FilesStruct {
                 }
                 Ok(stat)
             }
-            _ => Err(FileError::Unsupported),
+            OpenFileDescriptionRef::Stdin
+            | OpenFileDescriptionRef::Stdout
+            | OpenFileDescriptionRef::Stderr
+            | OpenFileDescriptionRef::Tty0 => Ok(FileStat::new(0, VfsInodeKind::DeviceNode)),
         }
     }
 
@@ -1547,6 +1743,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stdout => self.stdout.write(&self.stdout_backend, bytes),
             OpenFileDescriptionRef::Stderr => self.stderr.write(&self.stderr_backend, bytes),
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
+            OpenFileDescriptionRef::Tty0 => self.tty0.write(&self.tty0_backend, bytes),
         }
     }
 
@@ -1617,6 +1814,48 @@ impl FilesStruct {
 fn file_mode_allows_access(file_mode: u32, access_mode: usize) -> bool {
     let permission_bits = (file_mode & 0o777) as usize;
     access_mode & !permission_bits == 0
+}
+
+fn linux_std_termios() -> [u8; TERMIOS_SIZE] {
+    let mut termios = [0u8; TERMIOS_SIZE];
+    write_u32_raw(&mut termios, 0, TERMIOS_ICRNL | TERMIOS_IXON);
+    write_u32_raw(&mut termios, 4, TERMIOS_OPOST | TERMIOS_ONLCR);
+    write_u32_raw(
+        &mut termios,
+        8,
+        TERMIOS_B38400 | TERMIOS_CS8 | TERMIOS_CREAD | TERMIOS_HUPCL,
+    );
+    write_u32_raw(
+        &mut termios,
+        12,
+        TERMIOS_ISIG
+            | TERMIOS_ICANON
+            | TERMIOS_ECHO
+            | TERMIOS_ECHOE
+            | TERMIOS_ECHOK
+            | TERMIOS_ECHOCTL
+            | TERMIOS_ECHOKE
+            | TERMIOS_IEXTEN,
+    );
+    termios[16] = 0;
+    termios[17] = b'C' - 0x40;
+    termios[18] = b'\\' - 0x40;
+    termios[19] = 0x7f;
+    termios[20] = b'U' - 0x40;
+    termios[21] = b'D' - 0x40;
+    termios[23] = 1;
+    termios[25] = b'Q' - 0x40;
+    termios[26] = b'S' - 0x40;
+    termios[27] = b'Z' - 0x40;
+    termios[29] = b'R' - 0x40;
+    termios[30] = b'O' - 0x40;
+    termios[31] = b'W' - 0x40;
+    termios[32] = b'V' - 0x40;
+    termios
+}
+
+fn write_u32_raw(buffer: &mut [u8], offset: usize, value: u32) {
+    buffer[offset..offset + core::mem::size_of::<u32>()].copy_from_slice(&value.to_le_bytes());
 }
 
 fn serialize_linux_dirents64<'a>(

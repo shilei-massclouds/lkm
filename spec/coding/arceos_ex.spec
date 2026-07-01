@@ -1540,6 +1540,36 @@ type ArceosExStartupPhaseCodingMust {
          * line discipline, job control, poll/ppoll, signal interruption/restart,
          * controlling tty state and real IRQ wakeup remain deferred.
          *
+         * The /dev/tty, fd-dup and termios slice must reference local Linux
+         * 6.12 fs/open.c::build_open_flags()/do_sys_openat2(),
+         * fs/fcntl.c::do_fcntl()/f_dupfd(),
+         * drivers/tty/tty_io.c::tty_ioctl()/tiocgwinsz(),
+         * drivers/tty/tty_ioctl.c::tty_mode_ioctl() and the asm-generic
+         * fcntl/ioctls/termbits UAPI headers. O_RDWR is a valid open access
+         * mode and must not be rejected as an invalid flag before pathname
+         * copy. The current slice may special-case
+         * openat(AT_FDCWD, "/dev/tty", O_RDWR|O_LARGEFILE) to install a
+         * console-like FileBackend::CharDevice fd; it must still route
+         * through FilesStruct, FileDescriptorTable and OpenFileDescription.
+         * This is not devtmpfs, /dev/console, major/minor device lookup,
+         * controlling tty allocation or canonical N_TTY readiness.
+         *
+         * fcntl(F_DUPFD) and fcntl(F_DUPFD_CLOEXEC) must duplicate the fd
+         * entry to the lowest free fixed-capacity slot at or above arg,
+         * keeping the same OpenFileDescription and setting the new fd's
+         * close-on-exec bit only for F_DUPFD_CLOEXEC. Invalid source fd
+         * returns EBADF; arg outside the fixed fdtable range returns EINVAL;
+         * no free slot returns EMFILE. Dynamic fdtable growth, dup2/dup3,
+         * file refcounts, fork inheritance and concurrent fdtable locking
+         * remain trimmed.
+         *
+         * ioctl(TCGETS) must be accepted only on char-device fds and copy the
+         * riscv64/generic 36-byte struct termios described by
+         * include/uapi/asm-generic/termbits.h. The first slice returns a
+         * Linux tty_std_termios-like read-only snapshot and does not implement
+         * termios mutation, line-discipline behavior, isatty, session/process
+         * group or job-control semantics.
+         *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
          * returns and must not change return values, errno mapping,

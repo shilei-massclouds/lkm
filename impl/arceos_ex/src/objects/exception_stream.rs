@@ -4,7 +4,7 @@ use crate::trace::{self, Checkpoint};
 
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::FileError,
+    files::{FileError, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -100,17 +100,13 @@ const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
 const AT_SYMLINK_NOFOLLOW: usize = 0x100;
-#[cfg(checkpoint_handler_user_syscall_error)]
 const F_DUPFD: usize = 0;
 const F_GETFD: usize = 1;
 const F_SETFD: usize = 2;
 const F_GETFL: usize = 3;
-#[cfg(checkpoint_handler_user_syscall_error)]
 const F_LINUX_SPECIFIC_BASE: usize = 1024;
-#[cfg(checkpoint_handler_user_syscall_error)]
 const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
-#[cfg(checkpoint_handler_user_syscall_error)]
 const TCGETS: usize = 0x5401;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
@@ -151,6 +147,7 @@ const EREMOTEIO: usize = 121;
 const ESPIPE: usize = 29;
 const ENOTTY: usize = 25;
 const ELOOP: usize = 40;
+const EMFILE: usize = 24;
 
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
@@ -1905,6 +1902,7 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::NotTty => ENOTTY,
         FileError::PermissionDenied => EACCES,
         FileError::TooManySymlinks => ELOOP,
+        FileError::TooManyOpenFiles => EMFILE,
         FileError::NotReady
         | FileError::NotReadable
         | FileError::NotWritable
@@ -1928,8 +1926,8 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
-    let supported_flags = O_LARGEFILE | O_DIRECTORY | O_CLOEXEC;
-    if dirfd != AT_FDCWD || flags & !supported_flags != 0 || flags & O_ACCMODE != 0 {
+    let supported_flags = O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_ACCMODE;
+    if dirfd != AT_FDCWD || flags & !supported_flags != 0 {
         print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
         return;
@@ -1942,7 +1940,12 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     let ctx = crate::context::context();
-    let fd_result = if flags & O_DIRECTORY != 0 {
+    let fd_result = if &path[..path_len] == b"/dev/tty" {
+        ctx.files_struct
+            .open_tty_path(&path[..path_len], flags as u32)
+    } else if flags & O_ACCMODE != 0 {
+        Err(FileError::PermissionDenied)
+    } else if flags & O_DIRECTORY != 0 {
         ctx.files_struct.open_directory_path(
             &ctx.fs_struct,
             &mut ctx.vfs_core,
@@ -2606,6 +2609,24 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
     let cmd = frame.reg(11);
     let arg = frame.reg(12);
     match cmd {
+        F_DUPFD | F_DUPFD_CLOEXEC => {
+            let ctx = crate::context::context();
+            let new_fd = match ctx
+                .files_struct
+                .fcntl_dupfd_fd(fd, arg, cmd == F_DUPFD_CLOEXEC)
+            {
+                Ok(new_fd) => new_fd,
+                Err(error) => {
+                    let errno = file_error_to_errno(error);
+                    print_fcntl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
+                    return;
+                }
+            };
+
+            table.fcntl_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, new_fd);
+        }
         F_GETFL => {
             let ctx = crate::context::context_ref();
             let flags = match ctx.files_struct.fcntl_getfl_fd(fd) {
@@ -2669,31 +2690,50 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, errno);
         return;
     }
-    if cmd != TIOCGWINSZ {
-        print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
-        complete_error_syscall(frame, ENOTTY);
-        return;
-    }
+    match cmd {
+        TIOCGWINSZ => {
+            let winsize = match ctx.files_struct.ioctl_tiocgwinsz_fd(fd) {
+                Ok(winsize) => winsize,
+                Err(error) => {
+                    let errno = file_error_to_errno(error);
+                    print_ioctl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
+                    return;
+                }
+            };
 
-    let winsize = match ctx.files_struct.ioctl_tiocgwinsz_fd(fd) {
-        Ok(winsize) => winsize,
-        Err(error) => {
-            let errno = file_error_to_errno(error);
-            print_ioctl_error_detail(fd, cmd, arg, errno);
-            complete_error_syscall(frame, errno);
+            let mut buffer = [0u8; WINSIZE_SIZE];
+            write_u16(&mut buffer, 0, winsize.0);
+            write_u16(&mut buffer, 2, winsize.1);
+            write_u16(&mut buffer, 4, winsize.2);
+            write_u16(&mut buffer, 6, winsize.3);
+            if !copy_to_user(arg, &buffer) {
+                print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                complete_error_syscall(frame, EFAULT);
+                return;
+            }
+        }
+        TCGETS => {
+            let termios = match ctx.files_struct.ioctl_tcgets_fd(fd) {
+                Ok(termios) => termios,
+                Err(error) => {
+                    let errno = file_error_to_errno(error);
+                    print_ioctl_error_detail(fd, cmd, arg, errno);
+                    complete_error_syscall(frame, errno);
+                    return;
+                }
+            };
+            if !copy_to_user(arg, &termios[..TERMIOS_SIZE]) {
+                print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                complete_error_syscall(frame, EFAULT);
+                return;
+            }
+        }
+        _ => {
+            print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+            complete_error_syscall(frame, ENOTTY);
             return;
         }
-    };
-
-    let mut buffer = [0u8; WINSIZE_SIZE];
-    write_u16(&mut buffer, 0, winsize.0);
-    write_u16(&mut buffer, 2, winsize.1);
-    write_u16(&mut buffer, 4, winsize.2);
-    write_u16(&mut buffer, 6, winsize.3);
-    if !copy_to_user(arg, &buffer) {
-        print_ioctl_error_detail(fd, cmd, arg, EFAULT);
-        complete_error_syscall(frame, EFAULT);
-        return;
     }
 
     table.ioctl_observed.store(1, Ordering::Release);
@@ -3440,6 +3480,7 @@ fn print_file_error_name(error: FileError) {
         FileError::NotTty => "NotTty",
         FileError::PermissionDenied => "PermissionDenied",
         FileError::TooManySymlinks => "TooManySymlinks",
+        FileError::TooManyOpenFiles => "TooManyOpenFiles",
     };
     crate::arch::riscv64::sbi::putstr(name);
 }
