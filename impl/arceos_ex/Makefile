@@ -31,7 +31,7 @@ LOG_TRACE_PROBE := $(if $(filter trace,$(LOG)),announce,)
 RUN_PROBE := $(strip $(PROBE) $(LOG_TRACE_PROBE))
 PROBE_LIST_RAW := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST) $(LOG_TRACE_PROBE))
 PROBE_LIST := $(strip $(sort $(PROBE_LIST_RAW)))
-KNOWN_PROBES := announce memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot user-boot-failure user-syscall-error user-read-trace vmalloc-mapping linux-plic smoke stress-mem
+KNOWN_PROBES := announce memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot user-boot-failure user-syscall-error user-read-trace user-syscall-trace vmalloc-mapping linux-plic smoke stress-mem
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))

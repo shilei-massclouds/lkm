@@ -2077,6 +2077,7 @@ fn complete_unsupported_syscall(frame: &mut TrapFrame) {
 }
 
 fn complete_successful_syscall(frame: &mut TrapFrame, value: usize) {
+    print_syscall_trace_return(frame, value);
     frame.set_reg(10, value);
     frame.sepc = frame.sepc.wrapping_add(4);
 }
@@ -2258,6 +2259,7 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
     let nfds = frame.reg(11);
     let timeout_ptr = frame.reg(12);
     let sigmask_ptr = frame.reg(13);
+    let mut timeout_value = None;
 
     if nfds > USER_PPOLL_MAX {
         complete_error_syscall(frame, EINVAL);
@@ -2272,6 +2274,7 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, EINVAL);
             return;
         }
+        timeout_value = Some((sec, nsec));
     }
     if sigmask_ptr != 0 {
         complete_unsupported_syscall(frame);
@@ -2314,6 +2317,7 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, EFAULT);
             return;
         }
+        print_ppoll_trace_entry(frame, index, pollfd, revents);
         if revents != 0 {
             ready_count += 1;
         }
@@ -2321,6 +2325,14 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     table.ppoll_observed.store(1, Ordering::Release);
+    print_ppoll_trace_summary(
+        frame,
+        nfds,
+        timeout_ptr,
+        timeout_value,
+        sigmask_ptr,
+        ready_count,
+    );
     complete_successful_syscall(frame, ready_count);
 }
 
@@ -3436,6 +3448,7 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) -> ! {
     table.exit_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
+    print_syscall_trace_exit(frame, status);
     crate::arch::riscv64::sbi::putstr("user exit status=");
     print_decimal(status);
     crate::arch::riscv64::sbi::putchar(b'\n');
@@ -3871,6 +3884,125 @@ fn print_read_trace_prefix(frame: &TrapFrame, fd: usize, requested: usize, cappe
     print_hex(frame.stval);
 }
 
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_syscall_trace_return(frame: &TrapFrame, value: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall trace nr=");
+    print_decimal(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" name=");
+    print_syscall_name(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" ret=");
+    print_syscall_trace_value(value);
+    crate::arch::riscv64::sbi::putstr(" ret_hex=0x");
+    print_hex(value);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    print_syscall_arg_registers(frame);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_syscall_trace_return(_frame: &TrapFrame, _value: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_syscall_trace_exit(frame: &TrapFrame, status: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall trace nr=");
+    print_decimal(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" name=");
+    print_syscall_name(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" exit_status=");
+    print_decimal(status);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    print_syscall_arg_registers(frame);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_syscall_trace_exit(_frame: &TrapFrame, _status: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_ppoll_trace_summary(
+    frame: &TrapFrame,
+    nfds: usize,
+    timeout_ptr: usize,
+    timeout_value: Option<(i64, i64)>,
+    sigmask_ptr: usize,
+    ready_count: usize,
+) {
+    crate::arch::riscv64::sbi::putstr("syscall ppoll trace nfds=");
+    print_decimal(nfds);
+    crate::arch::riscv64::sbi::putstr(" timeout_ptr=0x");
+    print_hex(timeout_ptr);
+    crate::arch::riscv64::sbi::putstr(" timeout=");
+    if let Some((sec, nsec)) = timeout_value {
+        crate::arch::riscv64::sbi::putstr("{sec=");
+        print_i64(sec);
+        crate::arch::riscv64::sbi::putstr(",nsec=");
+        print_i64(nsec);
+        crate::arch::riscv64::sbi::putchar(b'}');
+    } else {
+        crate::arch::riscv64::sbi::putstr("NULL");
+    }
+    crate::arch::riscv64::sbi::putstr(" sigmask_ptr=0x");
+    print_hex(sigmask_ptr);
+    crate::arch::riscv64::sbi::putstr(" ready=");
+    print_decimal(ready_count);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_ppoll_trace_summary(
+    _frame: &TrapFrame,
+    _nfds: usize,
+    _timeout_ptr: usize,
+    _timeout_value: Option<(i64, i64)>,
+    _sigmask_ptr: usize,
+    _ready_count: usize,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_ppoll_trace_entry(frame: &TrapFrame, index: usize, pollfd: UserPollFd, revents: u16) {
+    crate::arch::riscv64::sbi::putstr("syscall ppoll trace entry=");
+    print_decimal(index);
+    crate::arch::riscv64::sbi::putstr(" fd=");
+    print_i64(pollfd.fd as i64);
+    crate::arch::riscv64::sbi::putstr(" events=0x");
+    print_hex(pollfd.events as usize);
+    crate::arch::riscv64::sbi::putstr(" revents=0x");
+    print_hex(revents as usize);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_ppoll_trace_entry(_frame: &TrapFrame, _index: usize, _pollfd: UserPollFd, _revents: u16) {}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_syscall_trace_value(value: usize) {
+    if value > usize::MAX - 4095 {
+        crate::arch::riscv64::sbi::putchar(b'-');
+        print_decimal(0usize.wrapping_sub(value));
+    } else {
+        print_decimal(value);
+    }
+}
+
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
     crate::arch::riscv64::sbi::putstr("syscall error");
@@ -3893,7 +4025,10 @@ fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_syscall_error_diagnostic(_frame: &TrapFrame, _errno: usize) {}
 
-#[cfg(checkpoint_handler_user_syscall_error)]
+#[cfg(any(
+    checkpoint_handler_user_syscall_error,
+    checkpoint_handler_user_syscall_trace
+))]
 fn print_syscall_name(nr: usize) {
     let name = match nr {
         SYSCALL_GETCWD => "getcwd",

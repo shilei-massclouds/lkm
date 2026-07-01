@@ -139,6 +139,7 @@ predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free() -> bool;
+predicate arceos_ex_must_user_syscall_trace_probe_be_explicit_and_side_effect_free() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
 predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
 predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
@@ -1686,6 +1687,20 @@ type ArceosExStartupPhaseCodingMust {
          * returning 0 and making /bin/sh treat stdin as EOF. Such a probe must
          * remain explicit, low noise and side-effect free.
          *
+         * PROBE=user-syscall-trace is the explicit syscall return/exit order
+         * diagnostic for distro paths that have no visible error return. It
+         * may print nr, decoded syscall name, return value, trap mode, a0..a5,
+         * sepc and stval for syscall returns, and must separately print
+         * exit/exit_group status before shutdown because those calls do not
+         * return to the normal syscall return path. The trace may observe
+         * unsupported or error returns, but it must not replace the
+         * user-syscall-error detail probe, read or write user memory for
+         * diagnostics, change return values, errno mapping, checkpoint
+         * ordering, user-smoke pass/fail policy or default make test output.
+         * Syscall-specific details such as ppoll nfds, timeout, sigmask,
+         * ready count and bounded pollfd fd/events/revents may be printed only
+         * from local facts already copied by the normal syscall path.
+         *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
          * do_getpgid()/sys_getpgid()/sys_setpgid()/sys_geteuid()/sys_getegid()/
@@ -1815,6 +1830,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free();
+        arceos_ex_must_user_syscall_trace_probe_be_explicit_and_side_effect_free();
         arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();
         arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice();
         arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug();

@@ -327,6 +327,7 @@ predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_read_trace_probe_observes_result_without_side_effect<T>(table: T) -> bool;
+predicate syscall_trace_probe_observes_returns_without_side_effect<T>(table: T) -> bool;
 predicate syscall_table_ppoll_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
@@ -926,6 +927,7 @@ object SyscallTable: ResourceObject {
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_exit_records_status(self);
+                    syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
             }
         }
