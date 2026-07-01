@@ -75,6 +75,8 @@ predicate files_struct_regular_file_closed<T>(files: T) -> bool;
 predicate files_struct_regular_file_stat_observed<T>(files: T) -> bool;
 predicate files_struct_stdin_probe_ready_data_cleared<T>(files: T) -> bool;
 predicate files_struct_user_smoke_stdin_fixture_bound<T>(files: T) -> bool;
+predicate files_struct_stdin_blocking_wait_enabled<T>(files: T) -> bool;
+predicate files_struct_stdin_blocking_wait_fixture_opt_out<T>(files: T) -> bool;
 
 predicate fd_table_allocated<T>(table: T) -> bool;
 predicate fd_table_capacity_bound<T>(table: T) -> bool;
@@ -344,7 +346,25 @@ object FilesStruct: ResourceObject {
 
                 ensures {
                     files_struct_user_smoke_stdin_fixture_bound(self);
+                    files_struct_stdin_blocking_wait_fixture_opt_out(self);
                     tty_flip_buffer_user_smoke_fixture_ready_data_bound(TtyFlipBuffer);
+                }
+            }
+
+            on Action::EnableStdinBlockingWait {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_fd_table_bound(self, FileDescriptorTable);
+                    files_struct_stdio_bound(self);
+                    files_struct_stdin_probe_ready_data_cleared(self);
+                    TtyInputWait.state == State::Ready;
+                }
+
+                ensures {
+                    files_struct_stdin_blocking_wait_enabled(self);
+                    tty_input_wait_bound_to_flip_buffer(TtyInputWait, TtyFlipBuffer);
+                    tty_input_wait_irq_rx_wakeup_first_slice(TtyInputWait);
                 }
             }
         }

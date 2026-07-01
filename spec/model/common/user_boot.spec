@@ -85,6 +85,8 @@ predicate user_boot_payload_selected_argv0_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_stdin_probe_ready_data_cleared<T>(payload: T) -> bool;
 predicate user_boot_payload_user_smoke_stdin_fixture_only<T>(payload: T) -> bool;
 predicate user_boot_payload_distro_init_no_stdin_fixture<T>(payload: T) -> bool;
+predicate user_boot_payload_distro_stdin_blocking_wait_enabled<T>(payload: T) -> bool;
+predicate user_boot_payload_user_smoke_stdin_blocking_wait_opt_out<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_init_attempt_failure_trace_defined<T>(payload: T) -> bool;
@@ -263,6 +265,7 @@ predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_read_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
+predicate syscall_read_tty_input_wait_first_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
@@ -270,6 +273,7 @@ predicate syscall_ppoll_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_timeout_parse_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_sigmask_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_tty_input_wait_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -1097,6 +1101,7 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::ReadFd(FdRef::Regular0);
                     FilesStruct.Action::ReadFd(FdRef::Stdin);
                     FileBackend.Action::ReadCharDevice;
+                    TtyInputWait.Action::WaitReadable;
                 }
 
                 ensures {
@@ -1109,6 +1114,7 @@ object SyscallTable: ResourceObject {
                     file_backend_char_device_read_returns_ready_data(FileBackend);
                     tty_flip_buffer_ready_data_consumed(TtyFlipBuffer);
                     syscall_read_no_ready_blocking_out_of_slice(self);
+                    syscall_read_tty_input_wait_first_slice(self);
                     syscall_read_tty_blocking_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_read_trace_probe_observes_result_without_side_effect(self);
@@ -1145,6 +1151,7 @@ object SyscallTable: ResourceObject {
                 drives {
                     FilesStruct.Action::LookupFd(FdRef::Stdin);
                     FileDescriptorTable.Action::Lookup(FdRef::Stdin);
+                    TtyInputWait.Action::WaitReadable;
                 }
 
                 ensures {
@@ -1154,6 +1161,7 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_no_ready_blocking_out_of_slice(self);
+                    syscall_ppoll_tty_input_wait_first_slice(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_table_ppoll_observed(self);
@@ -2471,6 +2479,7 @@ object UserBootPayload: ResourceObject {
                     FilesStruct.Transition::Setup;
                     FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
+                    FilesStruct.Action::EnableStdinBlockingWait;
                     UserInitProcess.Transition::Setup;
                     UserInitProcess.Transition::Enable;
                     UserInitProcess.Action::EnterUserMode;
@@ -2490,6 +2499,8 @@ object UserBootPayload: ResourceObject {
                     files_struct_stdin_probe_ready_data_cleared(FilesStruct);
                     user_boot_payload_user_smoke_stdin_fixture_only(self);
                     user_boot_payload_distro_init_no_stdin_fixture(self);
+                    user_boot_payload_distro_stdin_blocking_wait_enabled(self);
+                    user_boot_payload_user_smoke_stdin_blocking_wait_opt_out(self);
                     user_boot_payload_enters_user_mode(self);
                     user_boot_payload_no_return_handoff(self);
                     selected_payload_no_return_handoff();

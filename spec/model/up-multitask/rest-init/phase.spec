@@ -5,8 +5,8 @@
  * BootInitRestInitPhase creates PID 1/kthreadd and completes kthreadd_done,
  * BootInitScheduleHandoffPhase commits the first schedule handoff, and
  * BootIdleEntryPhase enters the BootIdleTask cpu_startup_entry()/idle-loop
- * continuation. RestInitPhase remains only as a compatibility wrapper over
- * those three subphases.
+ * continuation. No RestInitPhase wrapper object is modeled; rest_init() stays
+ * only as the Linux control-flow name for this owner-split path.
  */
 
 /*
@@ -1608,46 +1608,6 @@ object BootIdleEntryPhase: PhaseObject {
             boot_idle_loop_continues(BootIdleRuntime);
             task_concurrency_open();
             smp_concurrency_closed();
-        }
-    }
-}
-
-/*
- * RestInitPhase 是历史兼容 wrapper，表示三个最小子阶段都已 Ready。
- * 它不再作为 UP MultitaskPhase 的最小子阶段，也不驱动跨 owner 行为。
- */
-object RestInitPhase: PhaseObject {
-    initial_state: State::Base;
-    parent: UpMultitaskPhase;
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    BootInitRestInitPhase.state == State::Ready;
-                    BootInitScheduleHandoffPhase.state == State::Ready;
-                    BootIdleEntryPhase.state == State::Ready;
-                }
-
-                ensures {
-                    rest_init_ready(RestInitPhase);
-                    up_multitask_runtime_ready(
-                        RestInitPhase,
-                        KernelInitTask,
-                        KthreaddTask,
-                        BootIdleRuntime
-                    );
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            BootInitRestInitPhase.state == State::Ready;
-            BootInitScheduleHandoffPhase.state == State::Ready;
-            BootIdleEntryPhase.state == State::Ready;
-            rest_init_ready(RestInitPhase);
         }
     }
 }

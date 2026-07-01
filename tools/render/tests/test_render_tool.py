@@ -414,7 +414,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Transition::Preset",
+                        label="BootInitRestInitPhase.Transition::Preset",
                         row_span=3,
                     ),
                     TraceCell(
@@ -464,7 +464,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Transition::Preset",
+                        label="BootInitRestInitPhase.Transition::Preset",
                         row_span=4,
                     ),
                     TraceCell(
@@ -599,10 +599,10 @@ class RenderToolTests(unittest.TestCase):
 
     def test_render_svg_from_trace_view_does_not_overlap_phase_actions(self) -> None:
         rows = [
-            {"index": 0, "kind": "gap", "label": "RestInitPhase.Transition::Preset.body.start"},
-            {"index": 1, "kind": "action", "label": "RestInitPhase.Transition::Preset.action.1"},
-            {"index": 2, "kind": "action", "label": "RestInitPhase.Transition::Preset.action.2"},
-            {"index": 3, "kind": "gap", "label": "RestInitPhase.Transition::Preset.body.end"},
+            {"index": 0, "kind": "gap", "label": "BootInitRestInitPhase.Transition::Preset.body.start"},
+            {"index": 1, "kind": "action", "label": "BootInitRestInitPhase.Transition::Preset.action.1"},
+            {"index": 2, "kind": "action", "label": "BootInitRestInitPhase.Transition::Preset.action.2"},
+            {"index": 3, "kind": "gap", "label": "BootInitRestInitPhase.Transition::Preset.body.end"},
         ]
         view = ViewModel(
             name="trace",
@@ -622,7 +622,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Transition::Preset",
+                        label="BootInitRestInitPhase.Transition::Preset",
                         row_span=4,
                     ),
                     TraceCell(

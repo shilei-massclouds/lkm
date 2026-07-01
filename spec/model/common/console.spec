@@ -276,6 +276,10 @@ predicate tty_flip_buffer_push_publishes_ready_data_first_slice<T>(flip_buffer: 
 predicate tty_flip_buffer_probe_bytes_not_user_stdin<T>(flip_buffer: T) -> bool;
 predicate tty_flip_buffer_ready_data_cleared<T>(flip_buffer: T) -> bool;
 predicate tty_flip_buffer_user_smoke_fixture_ready_data_bound<T>(flip_buffer: T) -> bool;
+predicate tty_input_wait_bound_to_flip_buffer<T, F>(wait: T, flip_buffer: F) -> bool;
+predicate tty_input_wait_irq_rx_wakeup_first_slice<T>(wait: T) -> bool;
+predicate tty_input_wait_does_not_poll_uart_rx<T>(wait: T) -> bool;
+predicate tty_input_wait_full_waitqueue_deferred<T>(wait: T) -> bool;
 
 predicate serial8250_console_registered<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_real_console<T>(console: T) -> bool;
@@ -918,6 +922,58 @@ object TtyFlipBuffer: ConsoleObject {
             tty_flip_buffer_probe_bytes_not_user_stdin(TtyFlipBuffer);
             tty_flip_buffer_does_not_model_full_n_tty_read(TtyFlipBuffer);
             tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
+        }
+    }
+}
+
+/*
+ * TtyInputWait is the minimal stdin wait boundary used by read/ppoll before a
+ * full Linux wait_queue_head_t / poll_table / N_TTY implementation exists. It
+ * waits for the existing serial8250 IRQ RX path to publish TtyFlipBuffer
+ * ready-data; it does not read UART RX directly.
+ */
+object TtyInputWait: ConsoleObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::WaitReadable {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                TtyFlipBuffer.state == State::Ready;
+                tty_input_wait_bound_to_flip_buffer(self, TtyFlipBuffer);
+            }
+            ensures {
+                tty_input_wait_irq_rx_wakeup_first_slice(self);
+                tty_input_wait_does_not_poll_uart_rx(self);
+                tty_input_wait_full_waitqueue_deferred(self);
+            }
+        }
+    }
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    TtyFlipBuffer.state == State::Ready;
+                }
+
+                ensures {
+                    tty_input_wait_bound_to_flip_buffer(self, TtyFlipBuffer);
+                    tty_input_wait_irq_rx_wakeup_first_slice(self);
+                    tty_input_wait_does_not_poll_uart_rx(self);
+                    tty_input_wait_full_waitqueue_deferred(self);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_input_wait_bound_to_flip_buffer(TtyInputWait, TtyFlipBuffer);
+            tty_input_wait_irq_rx_wakeup_first_slice(TtyInputWait);
+            tty_input_wait_does_not_poll_uart_rx(TtyInputWait);
+            tty_input_wait_full_waitqueue_deferred(TtyInputWait);
         }
     }
 }

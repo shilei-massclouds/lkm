@@ -969,6 +969,7 @@ pub struct FilesStruct {
     shared_deferred: bool,
     stdin_probe_ready_data_cleared: bool,
     stdin_ready_data_bound: bool,
+    stdin_blocking_wait_enabled: bool,
     fd_lookup_routes_to_table: AtomicUsize,
     regular_file_slot_ready: bool,
     open_path_routes_to_vfs: AtomicUsize,
@@ -1021,6 +1022,7 @@ impl FilesStruct {
             shared_deferred: false,
             stdin_probe_ready_data_cleared: false,
             stdin_ready_data_bound: false,
+            stdin_blocking_wait_enabled: false,
             fd_lookup_routes_to_table: AtomicUsize::new(0),
             regular_file_slot_ready: false,
             open_path_routes_to_vfs: AtomicUsize::new(0),
@@ -1077,6 +1079,10 @@ impl FilesStruct {
 
     pub const fn stdin_ready_data_bound(&self) -> bool {
         self.stdin_ready_data_bound
+    }
+
+    pub const fn stdin_blocking_wait_enabled(&self) -> bool {
+        self.stdin_blocking_wait_enabled
     }
 
     pub fn fd_lookup_routes_to_table(&self) -> bool {
@@ -1263,6 +1269,26 @@ impl FilesStruct {
 
         self.stdin_probe_ready_data_cleared = true;
         self.stdin_ready_data_bound = false;
+        Ok(())
+    }
+
+    pub fn enable_stdin_blocking_wait(&mut self) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.stdio_bound
+            || !self.stdin_probe_ready_data_cleared
+        {
+            return Err(FileError::NotReady);
+        }
+        if !self.fd_table.fd_bound(FdRef::Stdin)
+            || self.stdin.state() != State::Ready
+            || self.stdin_backend.state() != State::Ready
+            || !self.stdin_backend.char_device_read_supported()
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        self.stdin_blocking_wait_enabled = true;
         Ok(())
     }
 

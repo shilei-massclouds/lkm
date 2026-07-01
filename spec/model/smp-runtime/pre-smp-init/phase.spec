@@ -204,7 +204,7 @@ object PreSmpInitBoundary: KernelObject {
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
  * 绑定为 TaskEntry::KernelInit 并指向 SmpRuntimePhase 入口；它不由
- * RestInitPhase.Ready 作为普通 sibling 顺序启动。
+ * UP Multitask 的任何聚合 wrapper 顺序启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;

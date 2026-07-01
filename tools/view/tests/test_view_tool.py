@@ -465,7 +465,7 @@ class ViewToolTests(unittest.TestCase):
             {
                 "trace": [
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_state": "Ready",
                         "target_state": "Prepared",
@@ -499,7 +499,7 @@ class ViewToolTests(unittest.TestCase):
                 "records": [
                     {
                         "status": "proved",
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
@@ -507,7 +507,7 @@ class ViewToolTests(unittest.TestCase):
                         "expression": "Scheduler.Action::Schedule",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
@@ -515,7 +515,7 @@ class ViewToolTests(unittest.TestCase):
                         "process_parent": "Scheduler.Action::Schedule",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_result_binding",
@@ -525,7 +525,7 @@ class ViewToolTests(unittest.TestCase):
                         "process_parent": "Scheduler.Action::Schedule",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "proof_class": "action_commit",
                         "proof_provider": "within_context",
@@ -533,7 +533,7 @@ class ViewToolTests(unittest.TestCase):
                         "process_parent": "Scheduler.Action::Schedule",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
@@ -541,7 +541,7 @@ class ViewToolTests(unittest.TestCase):
                         "process_parent": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
@@ -549,7 +549,7 @@ class ViewToolTests(unittest.TestCase):
                         "process_parent": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                     },
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
@@ -566,7 +566,7 @@ class ViewToolTests(unittest.TestCase):
             cell
             for cell in cells
             if cell.kind == "transition_span"
-            and cell.label == "RestInitPhase.Transition::Preset"
+            and cell.label == "BootInitRestInitPhase.Transition::Preset"
         )
         context_cell = next(
             cell
@@ -1172,7 +1172,7 @@ class ViewToolTests(unittest.TestCase):
             {
                 "trace": [
                     {
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_state": "Ready",
                         "target_state": "Prepared",
@@ -1204,7 +1204,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "status": "proved",
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
@@ -1214,7 +1214,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "status": "proved",
-                        "object": "RestInitPhase",
+                        "object": "BootInitRestInitPhase",
                         "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
@@ -1245,7 +1245,7 @@ class ViewToolTests(unittest.TestCase):
             cell
             for cell in cells
             if cell.kind == "transition_span"
-            and cell.label == "RestInitPhase.Transition::Preset"
+            and cell.label == "BootInitRestInitPhase.Transition::Preset"
         )
         kernel_enable_cell = next(
             cell

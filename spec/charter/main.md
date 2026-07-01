@@ -322,7 +322,7 @@ context SingleTaskContext: Context {
 
 ### Completion 类型
 
-`Completion` 是本规格第一个归档的运行期对象 Type，可作为 Type/Instance、扩展状态和条件型事件建模的典型类型。Linux 6.12 中它对应 `struct completion`，核心属性包括 `done` 计数和 `wait` 等待队列。`RestInitPhase` 中的 `KthreaddReadyGate` 是该 Type 的典型实例，对应 Linux 静态 completion `kthreadd_done`。
+`Completion` 是本规格第一个归档的运行期对象 Type，可作为 Type/Instance、扩展状态和条件型事件建模的典型类型。Linux 6.12 中它对应 `struct completion`，核心属性包括 `done` 计数和 `wait` 等待队列。`rest_init()` 路径中的 `KthreaddReadyGate` 是该 Type 的典型实例，对应 Linux 静态 completion `kthreadd_done`。
 
 `Completion` 的标准生命周期暂定如下：
 
@@ -2283,8 +2283,8 @@ flowchart LR
 
 当前 `UP Multitask Phase` 正式展开三个按执行主体划分的子阶段：
 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
-`BootIdleEntryPhase`。历史 `RestInitPhase` 名称只保留为兼容 wrapper，表示这三个子阶段都已
-Ready。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
+`BootIdleEntryPhase`。不再建立 `RestInitPhase` 兼容 wrapper；`UpMultitaskPhase.Ready`
+直接由这三个具体子阶段 Ready 构成。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
 `KernelInitTask` 驱动的执行线：
 
 - `BootInitTask` 继续执行 `rest_init()`，在调度交接后完成
@@ -2292,8 +2292,8 @@ Ready。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
   然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
   `PreSmpInitPhase`。
-- 因此 `PreSmpInitPhase.Started` 不是 `RestInitPhase.Ready` 或
-  `BootIdleEntryPhase.Ready` 后的普通 sibling；它依赖 PID 1 release/dispatch 和
+- 因此 `PreSmpInitPhase.Started` 不是 `BootIdleEntryPhase.Ready` 或任何
+  UP multitask 聚合 wrapper 后的普通 sibling；它依赖 PID 1 release/dispatch 和
   scheduler first handoff facts。
 - `SmpRuntimePhase` 由 `TaskEntry::KernelInit` 启动，而不是由
   `UpMultitaskPhase` 的最后子阶段顺序衔接启动。
@@ -2321,14 +2321,14 @@ preemption guard 边界和调度分界组成的通用 helper。
 
 `SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `KernelInitTask`
 release/dispatch facts 和 Scheduler first-schedule fact，不作为
-`UpMultitaskPhase` 的普通 sibling，也不直接依赖 `RestInitPhase.Ready` 或
-`BootIdleEntryPhase.Ready`。
+`UpMultitaskPhase` 的普通 sibling，也不直接依赖 `BootIdleEntryPhase.Ready` 或任何
+UP multitask 聚合 wrapper。
 
 实现层应拆分 `rest_init`：`BootInitRestInitPhase` 创建 PID 1/kthreadd 并完成
 `kthreadd_done`；`BootInitScheduleHandoffPhase` 退出 boot 初始 preempt-disabled 上下文并调用
 `Scheduler.schedule()`；`BootIdleEntryPhase` 进入 post-schedule boot idle context 并完成
 `BootIdleRuntime`。测试应验证 PID 1 的下一阶段
-启动条件来自 release/dispatch 与 scheduler facts，而不是来自 `RestInitPhase.Ready`。
+启动条件来自 release/dispatch 与 scheduler facts，而不是来自某个 `RestInitPhase` wrapper。
 
 #### UP Multitask Phase 子阶段 1-3：rest_init 三段
 
@@ -2426,7 +2426,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 当前先将 `PreSmpInitPhase` 的对象和边界记录如下：
 
-1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后，由 `KernelInitTask` 先在 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已 complete，再经 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootIdleTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
+1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 UP multitask 聚合 wrapper 串行接续，而是在 Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后，由 `KernelInitTask` 先在 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已 complete，再经 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootIdleTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。

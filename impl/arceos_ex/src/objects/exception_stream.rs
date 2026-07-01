@@ -4,7 +4,7 @@ use crate::trace::{self, Checkpoint};
 
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{FileError, TERMIOS_SIZE},
+    files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -2227,9 +2227,23 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let mut buffer = [0u8; USER_COPY_MAX];
-    let ctx = crate::context::context();
-    let read = match ctx.files_struct.read_fd(fd, &mut buffer[..len]) {
+    let first_read = {
+        let ctx = crate::context::context();
+        ctx.files_struct.read_fd(fd, &mut buffer[..len])
+    };
+    let read = match first_read {
         Ok(read) => read,
+        Err(FileError::NotReady) if tty_input_wait_for_fd_read_ready(fd) => {
+            let ctx = crate::context::context();
+            match ctx.files_struct.read_fd(fd, &mut buffer[..len]) {
+                Ok(read) => read,
+                Err(error) => {
+                    print_read_trace_file_error(frame, fd, requested, len, error);
+                    complete_unsupported_syscall(frame);
+                    return;
+                }
+            }
+        }
         Err(error) => {
             print_read_trace_file_error(frame, fd, requested, len, error);
             complete_unsupported_syscall(frame);
@@ -2281,8 +2295,8 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let mut ready_count = 0usize;
     let mut index = 0usize;
+    let mut pollfds = [UserPollFd { fd: -1, events: 0 }; USER_PPOLL_MAX];
     let mut entry_ptrs = [0usize; USER_PPOLL_MAX];
     let mut revents_values = [0u16; USER_PPOLL_MAX];
     while index < nfds {
@@ -2299,29 +2313,35 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         };
 
-        let revents = if pollfd.fd < 0 {
-            0
-        } else {
-            match crate::context::context_ref()
-                .files_struct
-                .poll_fd(pollfd.fd as usize, pollfd.events)
-            {
-                Ok(revents) => revents,
-                Err(FileError::BadFd) => POLLNVAL,
-                Err(FileError::NotReady) | Err(FileError::BackendUnavailable) => {
-                    complete_unsupported_syscall(frame);
-                    return;
-                }
-                Err(_) => 0,
-            }
-        };
+        pollfds[index] = pollfd;
         entry_ptrs[index] = entry_ptr;
-        revents_values[index] = revents;
-        print_ppoll_trace_entry(frame, index, pollfd, revents);
-        if revents != 0 {
-            ready_count += 1;
-        }
         index += 1;
+    }
+
+    let mut ready_count = match poll_user_fds_once(&pollfds, nfds, &mut revents_values) {
+        Ok(count) => count,
+        Err(()) => {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    };
+
+    if ready_count == 0
+        && timeout_value.is_none()
+        && tty_input_wait_for_poll_ready(&pollfds, nfds, &mut revents_values)
+    {
+        ready_count = count_ready_revents(&revents_values, nfds);
+    }
+
+    let mut trace_index = 0usize;
+    while trace_index < nfds {
+        print_ppoll_trace_entry(
+            frame,
+            trace_index,
+            pollfds[trace_index],
+            revents_values[trace_index],
+        );
+        trace_index += 1;
     }
 
     print_ppoll_trace_summary(
@@ -2353,6 +2373,120 @@ fn syscall_table_ppoll(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn ppoll_timeout_allows_immediate_zero(timeout_value: Option<(i64, i64)>) -> bool {
     matches!(timeout_value, Some((0, 0)))
+}
+
+fn poll_user_fds_once(
+    pollfds: &[UserPollFd; USER_PPOLL_MAX],
+    nfds: usize,
+    revents_values: &mut [u16; USER_PPOLL_MAX],
+) -> Result<usize, ()> {
+    let mut ready_count = 0usize;
+    let mut index = 0usize;
+    while index < nfds {
+        let pollfd = pollfds[index];
+        let revents = if pollfd.fd < 0 {
+            0
+        } else {
+            match crate::context::context_ref()
+                .files_struct
+                .poll_fd(pollfd.fd as usize, pollfd.events)
+            {
+                Ok(revents) => revents,
+                Err(FileError::BadFd) => POLLNVAL,
+                Err(FileError::NotReady) | Err(FileError::BackendUnavailable) => return Err(()),
+                Err(_) => 0,
+            }
+        };
+        revents_values[index] = revents;
+        if revents != 0 {
+            ready_count += 1;
+        }
+        index += 1;
+    }
+    Ok(ready_count)
+}
+
+fn count_ready_revents(revents_values: &[u16; USER_PPOLL_MAX], nfds: usize) -> usize {
+    let mut ready_count = 0usize;
+    let mut index = 0usize;
+    while index < nfds {
+        if revents_values[index] != 0 {
+            ready_count += 1;
+        }
+        index += 1;
+    }
+    ready_count
+}
+
+fn tty_input_wait_enabled() -> bool {
+    crate::context::context_ref()
+        .files_struct
+        .stdin_blocking_wait_enabled()
+}
+
+fn tty_input_wait_for_fd_read_ready(fd: usize) -> bool {
+    if !tty_input_wait_enabled() {
+        return false;
+    }
+
+    let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
+    crate::arch::riscv64::csr::enable_supervisor_interrupts();
+    loop {
+        match crate::context::context_ref()
+            .files_struct
+            .poll_fd(fd, FILE_POLLIN)
+        {
+            Ok(revents) if revents & FILE_POLLIN != 0 => {
+                crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                return true;
+            }
+            Ok(_) => {}
+            Err(_) => {
+                crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                return false;
+            }
+        }
+        core::hint::spin_loop();
+    }
+}
+
+fn tty_input_wait_for_poll_ready(
+    pollfds: &[UserPollFd; USER_PPOLL_MAX],
+    nfds: usize,
+    revents_values: &mut [u16; USER_PPOLL_MAX],
+) -> bool {
+    if !tty_input_wait_enabled() || !pollfds_include_read_interest(pollfds, nfds) {
+        return false;
+    }
+
+    let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
+    crate::arch::riscv64::csr::enable_supervisor_interrupts();
+    loop {
+        match poll_user_fds_once(pollfds, nfds, revents_values) {
+            Ok(ready_count) if ready_count != 0 => {
+                crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                return true;
+            }
+            Ok(_) => {}
+            Err(()) => {
+                crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                return false;
+            }
+        }
+        core::hint::spin_loop();
+    }
+}
+
+fn pollfds_include_read_interest(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -> bool {
+    let mut index = 0usize;
+    while index < nfds {
+        let pollfd = pollfds[index];
+        if pollfd.fd >= 0 && pollfd.events & FILE_POLLIN != 0 {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {

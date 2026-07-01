@@ -19,11 +19,8 @@ static BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE: AtomicU8 =
 #[unsafe(link_section = ".data.phase")]
 static BOOT_IDLE_ENTRY_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
-#[unsafe(link_section = ".data.phase")]
-static REST_INIT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::RestInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_boot_init_rest_init(ctx).and_then(|()| checkpoint_boot_init_rest_init_ready(ctx)),
         "arceos_ex rest init event failed\n",
@@ -39,8 +36,7 @@ pub fn setup(ctx: &mut Context) -> ! {
             .and_then(|()| setup_boot_idle_runtime(ctx))
             .and_then(|()| prepare_boot_idle_entry(ctx))
             .and_then(|()| run_boot_idle_loop(ctx))
-            .and_then(|()| checkpoint_boot_idle_entry_ready(ctx))
-            .and_then(|()| checkpoint_ready(ctx)),
+            .and_then(|()| checkpoint_boot_idle_entry_ready(ctx)),
         "arceos_ex rest init tail event failed\n",
     );
     handoff()
@@ -256,25 +252,6 @@ fn handoff() -> ! {
     crate::phases::up_multitask::setup_after_children()
 }
 
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !rest_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&REST_INIT_PHASE_STATE),
-            State::Base,
-            State::Ready,
-        );
-    }
-
-    crate::phases::state::mark(
-        &REST_INIT_PHASE_STATE,
-        LifecycleEvent::Setup,
-        State::Base,
-        State::Ready,
-        Checkpoint::RestInitPhaseReady,
-    )
-}
-
 fn checkpoint_boot_init_rest_init_ready(ctx: &Context) -> EventResult {
     if !boot_init_rest_init_phase_ready(ctx) {
         return failed_condition(
@@ -323,7 +300,7 @@ fn checkpoint_boot_idle_entry_ready(ctx: &Context) -> EventResult {
 }
 
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&REST_INIT_PHASE_STATE) == State::Ready
+    boot_init_rest_init_ready() && boot_init_schedule_handoff_ready() && boot_idle_entry_ready()
 }
 
 pub fn boot_init_rest_init_ready() -> bool {
@@ -340,15 +317,6 @@ pub fn boot_idle_entry_ready() -> bool {
 
 pub fn dispatch_ready() -> bool {
     boot_init_schedule_handoff_ready()
-}
-
-fn rest_init_phase_ready(ctx: &Context) -> bool {
-    crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE) == State::Ready
-        && crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE) == State::Ready
-        && crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE) == State::Ready
-        && boot_init_rest_init_phase_ready_after_handoff(ctx)
-        && boot_init_schedule_handoff_phase_ready(ctx)
-        && boot_idle_entry_phase_ready(ctx)
 }
 
 fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {

@@ -292,6 +292,7 @@ predicate arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actio
 predicate arceos_ex_must_rootfs_classify_prepare_namespace_paths() -> bool;
 predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
+predicate arceos_ex_must_not_model_rest_init_phase_wrapper() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
 predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bool;
@@ -324,7 +325,7 @@ predicate arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_acti
 predicate arceos_ex_must_scheduler_schedule_smoke_use_payload_cooperative_switch() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
-predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
+predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_up_multitask_wrapper() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
 predicate arceos_ex_must_pre_smp_init_model_path_under_smp_runtime_phase() -> bool;
@@ -2915,11 +2916,12 @@ type ArceosExRestInitCodingMust {
          *
          * The rest_init path is split into BootInitRestInitPhase,
          * BootInitScheduleHandoffPhase and BootIdleEntryPhase under
-         * spec/model/up-multitask/rest-init/. RestInitPhase is only a
-         * compatibility wrapper over those three concrete owner-scoped
-         * subphases.
+         * spec/model/up-multitask/rest-init/. No RestInitPhase wrapper object,
+         * state or checkpoint may be modeled; rest_init() remains only the
+         * Linux control-flow name for the owner-split path.
          */
         arceos_ex_must_rest_init_model_path_under_up_multitask_phase();
+        arceos_ex_must_not_model_rest_init_phase_wrapper();
 
         /*
          * Code path:
@@ -2936,8 +2938,9 @@ type ArceosExRestInitCodingMust {
          * BootInitRestInitPhase must run after ProcessPreparePhase.Ready;
          * BootInitScheduleHandoffPhase then opens task-concurrency through the
          * first scheduler handoff; BootIdleEntryPhase records the boot idle
-         * continuation. The wrapper RestInitPhase may only report that all
-         * three subphases are ready.
+         * continuation. UpMultitaskPhase.Ready is the direct aggregate over
+         * those concrete subphases; no extra RestInitPhase wrapper reports
+         * their readiness.
          */
         arceos_ex_must_rest_init_run_after_process_prepare();
 
@@ -3506,11 +3509,10 @@ type ArceosExRestInitCodingMust {
          * Fork dependency:
          *
          * PreSmpInitPhase must depend on the KernelInitTask release/dispatch
-         * facts and Scheduler first-schedule fact, not on RestInitPhase.Ready
-         * or BootIdleEntryPhase.Ready. RestInitPhase.Ready is only a wrapper
-         * fact after the three UP multitask subphases are ready.
+         * facts and Scheduler first-schedule fact, not on BootIdleEntryPhase.Ready
+         * or any UP multitask aggregate wrapper.
          */
-        arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready();
+        arceos_ex_must_rest_init_not_make_pre_smp_depend_on_up_multitask_wrapper();
 
         /*
          * No real task switch:
@@ -3553,8 +3555,8 @@ type ArceosExPreSmpInitCodingMust {
          * Entry facts:
          *
          * This phase must run from the KernelInitTask release/dispatch facts
-         * and Scheduler first-schedule fact, not from RestInitPhase.Ready or
-         * BootIdleEntryPhase.Ready.
+         * and Scheduler first-schedule fact, not from BootIdleEntryPhase.Ready
+         * or any UP multitask aggregate wrapper.
          */
         arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts();
 
@@ -4432,7 +4434,7 @@ type ArceosExFinalizeCodingMust {
          * pti_finalize() and numa_default_policy() must be recorded as
          * trimmed/no-op under the current RISC-V/default configuration.
          * The numa_default_policy() checkpoint belongs after SYSTEM_RUNNING
-         * in FinalizePhase, not in RestInitPhase.
+         * in FinalizePhase, not in the rest_init() path.
          */
         arceos_ex_must_finalize_record_trimmed_config_paths();
 
