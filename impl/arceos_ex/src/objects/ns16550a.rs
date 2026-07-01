@@ -233,9 +233,13 @@ pub struct TtyFlipBuffer {
     n_tty_read_deferred: bool,
     buffer: [u8; TTY_FLIP_BUFFER_SIZE],
     pending_len: usize,
+    read_ready_len: usize,
+    read_offset: usize,
+    read_count: usize,
     push_count: usize,
     total_inserted: usize,
     last_pushed_len: usize,
+    last_read_len: usize,
     last_byte: u8,
     overflowed: bool,
 }
@@ -250,9 +254,13 @@ impl TtyFlipBuffer {
             n_tty_read_deferred: true,
             buffer: [0; TTY_FLIP_BUFFER_SIZE],
             pending_len: 0,
+            read_ready_len: 0,
+            read_offset: 0,
+            read_count: 0,
             push_count: 0,
             total_inserted: 0,
             last_pushed_len: 0,
+            last_read_len: 0,
             last_byte: 0,
             overflowed: false,
         }
@@ -271,9 +279,13 @@ impl TtyFlipBuffer {
             n_tty_read_deferred: true,
             buffer: [0; TTY_FLIP_BUFFER_SIZE],
             pending_len: 0,
+            read_ready_len: 0,
+            read_offset: 0,
+            read_count: 0,
             push_count: 0,
             total_inserted: 0,
             last_pushed_len: 0,
+            last_read_len: 0,
             last_byte: 0,
             overflowed: false,
         }
@@ -310,6 +322,54 @@ impl TtyFlipBuffer {
         self.last_pushed_len = self.pending_len;
         self.push_count = self.push_count.saturating_add(1);
         self.pending_len = 0;
+        true
+    }
+
+    fn read_ready_data(&mut self, buffer: &mut [u8]) -> Option<usize> {
+        if !self.ready {
+            return None;
+        }
+        if buffer.is_empty() || self.read_offset >= self.read_ready_len {
+            return Some(0);
+        }
+
+        let available = self.read_ready_len - self.read_offset;
+        let len = core::cmp::min(buffer.len(), available);
+        let end = self.read_offset + len;
+        buffer[..len].copy_from_slice(&self.buffer[self.read_offset..end]);
+        self.read_offset = end;
+        self.last_read_len = len;
+        self.read_count = self.read_count.saturating_add(1);
+        if self.read_offset == self.read_ready_len {
+            self.read_ready_len = 0;
+            self.read_offset = 0;
+        }
+        Some(len)
+    }
+
+    fn seed_ready_data_fixture(&mut self, bytes: &[u8]) -> bool {
+        if !self.ready
+            || bytes.is_empty()
+            || bytes.len() > TTY_FLIP_BUFFER_SIZE
+            || self.pending_len != 0
+            || self.read_ready_len != 0
+        {
+            return false;
+        }
+
+        self.buffer = [0; TTY_FLIP_BUFFER_SIZE];
+        self.pending_len = 0;
+        self.read_offset = 0;
+        for byte in bytes {
+            if !self.insert_char(*byte) {
+                return false;
+            }
+        }
+        if !self.push() {
+            return false;
+        }
+        self.read_ready_len = bytes.len();
+        self.read_offset = 0;
         true
     }
 }
@@ -1417,9 +1477,13 @@ pub fn tty_flip_buffer_empty() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.ready
         && state.tty_flip_buffer.pending_len == 0
+        && state.tty_flip_buffer.read_ready_len == 0
+        && state.tty_flip_buffer.read_offset == 0
+        && state.tty_flip_buffer.read_count == 0
         && state.tty_flip_buffer.push_count == 0
         && state.tty_flip_buffer.total_inserted == 0
         && state.tty_flip_buffer.last_pushed_len == 0
+        && state.tty_flip_buffer.last_read_len == 0
         && state.tty_flip_buffer.last_byte == 0
         && !state.tty_flip_buffer.overflowed
         && state.tty_flip_buffer.buffer[0] == 0
@@ -1483,6 +1547,34 @@ pub fn tty_flip_buffer_overflowed() -> bool {
             .tty_flip_buffer
             .overflowed
     }
+}
+
+pub fn tty_flip_buffer_ready_data_bound() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.ready
+        && state.tty_flip_buffer.read_ready_len != 0
+        && state.tty_flip_buffer.read_offset == 0
+        && !state.tty_flip_buffer.overflowed
+}
+
+pub fn tty_flip_buffer_ready_data_consumed() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.ready
+        && state.tty_flip_buffer.read_count != 0
+        && state.tty_flip_buffer.last_read_len != 0
+        && state.tty_flip_buffer.read_ready_len == 0
+        && state.tty_flip_buffer.read_offset == 0
+        && !state.tty_flip_buffer.overflowed
+}
+
+pub fn seed_tty_ready_data_fixture(bytes: &[u8]) -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    state.tty_flip_buffer.seed_ready_data_fixture(bytes)
+}
+
+pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    state.tty_flip_buffer.read_ready_data(buffer)
 }
 
 pub fn tty_xmit_fifo_ready() -> bool {

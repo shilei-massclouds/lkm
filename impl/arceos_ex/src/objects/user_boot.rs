@@ -9,7 +9,7 @@ use super::{
 };
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
-    files::FilesStruct,
+    files::{FilesStruct, STDIN_READY_FIXTURE},
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
@@ -28,6 +28,7 @@ pub const USER_ETC_INIT_PATH: &[u8] = b"/etc/init";
 pub const USER_BIN_INIT_PATH: &[u8] = b"/bin/init";
 pub const USER_BIN_SH_PATH: &[u8] = b"/bin/sh";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
+const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
 
 pub const ELF_HEADER_LEN: usize = 64;
@@ -3880,6 +3881,13 @@ pub fn run_first_user_init(
     if files_struct.setup(kernel_init_task).is_err() {
         user_boot_panic("user files struct setup failed\n");
     }
+    if selected_user_init_needs_stdin_fixture(&selected)
+        && files_struct
+            .prepare_default_stdin_ready_data(STDIN_READY_FIXTURE)
+            .is_err()
+    {
+        user_boot_panic("user stdin ready data setup failed\n");
+    }
     if user_init_process
         .setup(
             kernel_init_task,
@@ -4081,6 +4089,11 @@ fn select_user_init_candidate(
 
 fn valid_selected_path(path: &[u8]) -> bool {
     !path.is_empty() && path.len() <= USER_SELECTED_PATH_MAX && path[0] == b'/'
+}
+
+#[cfg(app_user_boot)]
+fn selected_user_init_needs_stdin_fixture(selected: &SelectedUserInit) -> bool {
+    contains_bytes(selected.image, USER_SMOKE_STDIN_MARKER)
 }
 
 #[cfg(app_user_boot)]

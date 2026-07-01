@@ -82,6 +82,8 @@ predicate user_boot_payload_driven_by_kernel_init_task<T, K>(payload: T, task: K
 predicate user_boot_payload_try_candidate_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_argv0_path_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_user_smoke_stdin_fixture_only<T>(payload: T) -> bool;
+predicate user_boot_payload_distro_init_no_stdin_fixture<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_init_attempt_failure_trace_defined<T>(payload: T) -> bool;
@@ -254,6 +256,8 @@ predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
+predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -353,6 +357,13 @@ predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> boo
 predicate kernel_init_task_pid1_identity_preserved<K>(task: K) -> bool;
 predicate kernel_init_task_user_mm_attached<K, A>(task: K, space: A) -> bool;
 predicate kernel_init_task_user_trap_frame_attached<K, R>(task: K, frame: R) -> bool;
+
+predicate files_struct_stdin_ready_data_bound<T>(files: T) -> bool;
+predicate files_struct_stdin_char_device_read_observed<T>(files: T) -> bool;
+predicate file_backend_char_device_read_returns_ready_data<T>(backend: T) -> bool;
+predicate tty_flip_buffer_ready_data_bound<T>(buffer: T) -> bool;
+predicate tty_flip_buffer_ready_data_consumed<T>(buffer: T) -> bool;
+predicate tty_n_tty_blocking_read_deferred<T>(buffer: T) -> bool;
 
 context UserModeTrapReturnContext: Context {
     /*
@@ -993,23 +1004,43 @@ object SyscallTable: ResourceObject {
             }
 
             on Action::Read {
+                /*
+                 * Linux 6.12 routes read(2) through fs/read_write.c::ksys_read()
+                 * / vfs_read() after fs/file.c fd lookup. For a tty fd, the
+                 * file operation enters drivers/tty/tty_io.c::tty_read() and
+                 * the N_TTY line discipline read path in drivers/tty/n_tty.c.
+                 *
+                 * This slice supports two already-open fd classes: the existing
+                 * Regular0 read-only file, and fd0 char-device stdin only when
+                 * the TTY side already contains bounded ready data. Blocking
+                 * wait queues, canonical line discipline, job control, signal
+                 * interruption/restart, poll/ppoll and real RX wakeup remain
+                 * deferred.
+                 */
                 depends_on {
                     SyscallException.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
-                    fd_table_fd_bound(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
                     syscall_read_usercopy_ready(self);
                 }
 
                 drives {
                     FilesStruct.Action::ReadFd(FdRef::Regular0);
+                    FilesStruct.Action::ReadFd(FdRef::Stdin);
+                    FileBackend.Action::ReadCharDevice;
                 }
 
                 ensures {
                     syscall_read_routes_to_files_struct(self, FilesStruct);
                     files_struct_regular_file_read_observed(FilesStruct);
+                    syscall_read_stdin_ready_data_first_slice(self);
+                    files_struct_stdin_char_device_read_observed(FilesStruct);
                     open_file_description_read_observed(OpenFileDescription);
                     file_backend_regular_file_read_returns_data(FileBackend);
+                    file_backend_char_device_read_returns_ready_data(FileBackend);
+                    tty_flip_buffer_ready_data_consumed(TtyFlipBuffer);
+                    syscall_read_tty_blocking_deferred(self);
+                    tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
                     syscall_table_read_observed(self);
                 }
             }
@@ -2241,6 +2272,7 @@ object UserBootPayload: ResourceObject {
                     SyscallTable.Transition::Setup;
                     SyscallException.Transition::Enable;
                     FilesStruct.Transition::Setup;
+                    FilesStruct.Action::PrepareDefaultStdinReadyData;
                     UserInitProcess.Transition::Setup;
                     UserInitProcess.Transition::Enable;
                     UserInitProcess.Action::EnterUserMode;
@@ -2256,6 +2288,10 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);
                     user_boot_payload_selected_path_bound(self);
                     user_boot_payload_selected_argv0_path_bound(self);
+                    user_boot_payload_user_smoke_stdin_fixture_only(self);
+                    user_boot_payload_distro_init_no_stdin_fixture(self);
+                    files_struct_stdin_ready_data_bound(FilesStruct);
+                    tty_flip_buffer_ready_data_bound(TtyFlipBuffer);
                     user_boot_payload_enters_user_mode(self);
                     user_boot_payload_no_return_handoff(self);
                     selected_payload_no_return_handoff();

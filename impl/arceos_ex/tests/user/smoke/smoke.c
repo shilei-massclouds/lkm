@@ -88,6 +88,12 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
+	rc = RUN_CASE("stdin", smoke_stdin);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
 	rc = RUN_CASE("sh_probe", smoke_sh_probe);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");

@@ -17,6 +17,7 @@ pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
+pub const STDIN_READY_FIXTURE: &[u8] = b"stdin\n";
 const FILE_FD_COUNT: usize = 4;
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
@@ -221,6 +222,7 @@ pub struct FileBackend {
     allocated: bool,
     char_device_console_bound: bool,
     char_device_write_supported: bool,
+    char_device_read_supported: bool,
     regular_file_bound: bool,
     regular_file_read_supported: bool,
     regular_file_stat_supported: bool,
@@ -228,6 +230,7 @@ pub struct FileBackend {
     block_device_deferred: bool,
     write_to_console: AtomicUsize,
     last_write_len: AtomicUsize,
+    char_device_read_returns_data: AtomicUsize,
     regular_file_read_returns_data: AtomicUsize,
     regular_file_stat_returns_metadata: AtomicUsize,
     last_read_len: AtomicUsize,
@@ -243,6 +246,7 @@ impl FileBackend {
             allocated: false,
             char_device_console_bound: false,
             char_device_write_supported: false,
+            char_device_read_supported: false,
             regular_file_bound: false,
             regular_file_read_supported: false,
             regular_file_stat_supported: false,
@@ -250,6 +254,7 @@ impl FileBackend {
             block_device_deferred: false,
             write_to_console: AtomicUsize::new(0),
             last_write_len: AtomicUsize::new(0),
+            char_device_read_returns_data: AtomicUsize::new(0),
             regular_file_read_returns_data: AtomicUsize::new(0),
             regular_file_stat_returns_metadata: AtomicUsize::new(0),
             last_read_len: AtomicUsize::new(0),
@@ -275,6 +280,10 @@ impl FileBackend {
 
     pub const fn char_device_write_supported(&self) -> bool {
         self.char_device_write_supported
+    }
+
+    pub const fn char_device_read_supported(&self) -> bool {
+        self.char_device_read_supported
     }
 
     pub const fn regular_file_bound(&self) -> bool {
@@ -309,6 +318,10 @@ impl FileBackend {
         self.regular_file_read_returns_data.load(Ordering::Acquire) != 0
     }
 
+    pub fn char_device_read_returns_data(&self) -> bool {
+        self.char_device_read_returns_data.load(Ordering::Acquire) != 0
+    }
+
     pub fn regular_file_stat_returns_metadata(&self) -> bool {
         self.regular_file_stat_returns_metadata
             .load(Ordering::Acquire)
@@ -336,6 +349,7 @@ impl FileBackend {
         self.allocated = true;
         self.char_device_console_bound = true;
         self.char_device_write_supported = true;
+        self.char_device_read_supported = true;
         self.regular_file_deferred = true;
         self.block_device_deferred = true;
         self.lifecycle
@@ -386,6 +400,24 @@ impl FileBackend {
         self.last_read_len.store(len, Ordering::Release);
         if len != 0 {
             self.regular_file_read_returns_data
+                .fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(len)
+    }
+
+    fn read_char_device(&self, buffer: &mut [u8]) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_read_supported
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        let len = crate::objects::ns16550a::read_tty_ready_data(buffer)
+            .ok_or(FileError::BackendUnavailable)?;
+        self.last_read_len.store(len, Ordering::Release);
+        if len != 0 {
+            self.char_device_read_returns_data
                 .fetch_add(1, Ordering::AcqRel);
         }
         Ok(len)
@@ -571,6 +603,21 @@ impl OpenFileDescription {
         }
 
         let read = backend.read_regular_file(len)?;
+        self.last_read_len.store(read, Ordering::Release);
+        self.read_dispatches_backend.fetch_add(1, Ordering::AcqRel);
+        self.read_observed.fetch_add(1, Ordering::AcqRel);
+        Ok(read)
+    }
+
+    fn read_char_device(&self, backend: &FileBackend, buffer: &mut [u8]) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.backend_bound {
+            return Err(FileError::NotReady);
+        }
+        if !self.readable {
+            return Err(FileError::NotReadable);
+        }
+
+        let read = backend.read_char_device(buffer)?;
         self.last_read_len.store(read, Ordering::Release);
         self.read_dispatches_backend.fetch_add(1, Ordering::AcqRel);
         self.read_observed.fetch_add(1, Ordering::AcqRel);
@@ -795,6 +842,7 @@ pub struct FilesStruct {
     next_fd_ready: bool,
     close_on_exec_ready: bool,
     shared_deferred: bool,
+    stdin_ready_data_bound: bool,
     fd_lookup_routes_to_table: AtomicUsize,
     regular_file_slot_ready: bool,
     open_path_routes_to_vfs: AtomicUsize,
@@ -804,6 +852,7 @@ pub struct FilesStruct {
     readlink_path_routes_to_vfs: AtomicUsize,
     regular_fd_installed: AtomicUsize,
     regular_file_read_observed: AtomicUsize,
+    stdin_char_read_observed: AtomicUsize,
     regular_file_closed: AtomicUsize,
     regular_file_stat_observed: AtomicUsize,
     directory_fd_installed: AtomicUsize,
@@ -840,6 +889,7 @@ impl FilesStruct {
             next_fd_ready: false,
             close_on_exec_ready: false,
             shared_deferred: false,
+            stdin_ready_data_bound: false,
             fd_lookup_routes_to_table: AtomicUsize::new(0),
             regular_file_slot_ready: false,
             open_path_routes_to_vfs: AtomicUsize::new(0),
@@ -849,6 +899,7 @@ impl FilesStruct {
             readlink_path_routes_to_vfs: AtomicUsize::new(0),
             regular_fd_installed: AtomicUsize::new(0),
             regular_file_read_observed: AtomicUsize::new(0),
+            stdin_char_read_observed: AtomicUsize::new(0),
             regular_file_closed: AtomicUsize::new(0),
             regular_file_stat_observed: AtomicUsize::new(0),
             directory_fd_installed: AtomicUsize::new(0),
@@ -888,6 +939,10 @@ impl FilesStruct {
         self.shared_deferred
     }
 
+    pub const fn stdin_ready_data_bound(&self) -> bool {
+        self.stdin_ready_data_bound
+    }
+
     pub fn fd_lookup_routes_to_table(&self) -> bool {
         self.fd_lookup_routes_to_table.load(Ordering::Acquire) != 0
     }
@@ -922,6 +977,10 @@ impl FilesStruct {
 
     pub fn regular_file_read_observed(&self) -> bool {
         self.regular_file_read_observed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn stdin_char_read_observed(&self) -> bool {
+        self.stdin_char_read_observed.load(Ordering::Acquire) != 0
     }
 
     pub fn regular_file_closed(&self) -> bool {
@@ -1030,6 +1089,29 @@ impl FilesStruct {
         self.regular_file_slot_ready = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn prepare_default_stdin_ready_data(&mut self, bytes: &[u8]) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.stdio_bound
+            || bytes.is_empty()
+        {
+            return Err(FileError::NotReady);
+        }
+        if !self.fd_table.fd_bound(FdRef::Stdin)
+            || self.stdin.state() != State::Ready
+            || self.stdin_backend.state() != State::Ready
+            || !self.stdin_backend.char_device_read_supported()
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+        if !crate::objects::ns16550a::seed_tty_ready_data_fixture(bytes) {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        self.stdin_ready_data_bound = true;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1174,6 +1256,13 @@ impl FilesStruct {
         }
 
         match entry.ofd {
+            OpenFileDescriptionRef::Stdin => {
+                let read = self.stdin.read_char_device(&self.stdin_backend, buffer)?;
+                if read != 0 {
+                    self.stdin_char_read_observed.fetch_add(1, Ordering::AcqRel);
+                }
+                Ok(read)
+            }
             OpenFileDescriptionRef::Regular0 => {
                 if self.filesystem0_kind != FilesystemFdKind::RegularFile {
                     return Err(FileError::NotReadable);

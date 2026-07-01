@@ -131,6 +131,7 @@ predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> b
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
 predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
@@ -1524,6 +1525,21 @@ type ArceosExStartupPhaseCodingMust {
          * GRND_NONBLOCK, GRND_RANDOM, GRND_INSECURE, signal interruption,
          * large-buffer iteration and random-quality policy remain trimmed.
          *
+         * The first stdin read slice must reference local Linux 6.12
+         * fs/read_write.c::ksys_read()/vfs_read(), fs/file.c::fdget_pos(),
+         * drivers/tty/tty_io.c::tty_read(), drivers/tty/n_tty.c::n_tty_read()
+         * and include/uapi/asm-generic/unistd.h::__NR_read=63. It may only
+         * support fd0 char-device reads when bounded TTY ready data already
+         * exists. The path must still go through FilesStruct, FileDescriptorTable,
+         * OpenFileDescription and FileBackend::CharDevice; SyscallTable must
+         * not copy a test string directly. The ready-data fixture is allowed
+         * only when the selected ELF is the controlled user_smoke fixture,
+         * including make test's temporary requested-init overlay case; it must
+         * not be injected for distro init/sh/ls images. Blocking wait queues,
+         * canonical N_TTY
+         * line discipline, job control, poll/ppoll, signal interruption/restart,
+         * controlling tty state and real IRQ wakeup remain deferred.
+         *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
          * sys_geteuid()/sys_getegid()/sys_getresuid()/sys_getresgid()/
@@ -1630,6 +1646,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();
+        arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();
         arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice();
