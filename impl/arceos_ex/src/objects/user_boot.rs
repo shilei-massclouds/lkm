@@ -28,6 +28,7 @@ pub const USER_ETC_INIT_PATH: &[u8] = b"/etc/init";
 pub const USER_BIN_INIT_PATH: &[u8] = b"/bin/init";
 pub const USER_BIN_SH_PATH: &[u8] = b"/bin/sh";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
+pub const USER_SIGNAL_COUNT: usize = 64;
 
 pub const ELF_HEADER_LEN: usize = 64;
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
@@ -36,6 +37,40 @@ pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_HEAP_BASE: usize = 0x3000_0000;
 pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
+
+#[derive(Clone, Copy)]
+pub struct UserSignalAction {
+    handler: usize,
+    flags: usize,
+    mask: usize,
+}
+
+impl UserSignalAction {
+    pub const fn new(handler: usize, flags: usize, mask: usize) -> Self {
+        Self {
+            handler,
+            flags,
+            mask,
+        }
+    }
+
+    pub const fn default() -> Self {
+        Self::new(0, 0, 0)
+    }
+
+    pub const fn handler(&self) -> usize {
+        self.handler
+    }
+
+    pub const fn flags(&self) -> usize {
+        self.flags
+    }
+
+    pub const fn mask(&self) -> usize {
+        self.mask
+    }
+}
+
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
@@ -2774,10 +2809,17 @@ pub struct UserInitProcess {
     uid_set_observed: bool,
     gid_set_observed: bool,
     signal_state_inherited: bool,
+    signal_runtime_bound: bool,
+    thread_signal_state_bound: bool,
+    process_signal_state_deferred: bool,
+    signal_action_table_bound: bool,
+    signal_action_table_layout_bound: bool,
     blocked_signal_mask_bound: bool,
     signal_delivery_deferred: bool,
     blocked_signal_mask: usize,
+    signal_actions: [UserSignalAction; USER_SIGNAL_COUNT],
     rt_sigprocmask_observed: bool,
+    rt_sigaction_observed: bool,
     clear_child_tid_bound: bool,
     clear_child_tid: usize,
     root_cwd_first_slice: bool,
@@ -2836,10 +2878,17 @@ impl UserInitProcess {
             uid_set_observed: false,
             gid_set_observed: false,
             signal_state_inherited: false,
+            signal_runtime_bound: false,
+            thread_signal_state_bound: false,
+            process_signal_state_deferred: false,
+            signal_action_table_bound: false,
+            signal_action_table_layout_bound: false,
             blocked_signal_mask_bound: false,
             signal_delivery_deferred: false,
             blocked_signal_mask: 0,
+            signal_actions: [UserSignalAction::default(); USER_SIGNAL_COUNT],
             rt_sigprocmask_observed: false,
+            rt_sigaction_observed: false,
             clear_child_tid_bound: false,
             clear_child_tid: 0,
             root_cwd_first_slice: false,
@@ -3039,6 +3088,26 @@ impl UserInitProcess {
         self.signal_state_inherited
     }
 
+    pub const fn signal_runtime_bound(&self) -> bool {
+        self.signal_runtime_bound
+    }
+
+    pub const fn thread_signal_state_bound(&self) -> bool {
+        self.thread_signal_state_bound
+    }
+
+    pub const fn process_signal_state_deferred(&self) -> bool {
+        self.process_signal_state_deferred
+    }
+
+    pub const fn signal_action_table_bound(&self) -> bool {
+        self.signal_action_table_bound
+    }
+
+    pub const fn signal_action_table_layout_bound(&self) -> bool {
+        self.signal_action_table_layout_bound
+    }
+
     pub const fn blocked_signal_mask_bound(&self) -> bool {
         self.blocked_signal_mask_bound
     }
@@ -3055,6 +3124,10 @@ impl UserInitProcess {
         self.rt_sigprocmask_observed
     }
 
+    pub const fn rt_sigaction_observed(&self) -> bool {
+        self.rt_sigaction_observed
+    }
+
     pub fn credentials_syscall_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
             && self.credentials_inherited
@@ -3064,7 +3137,17 @@ impl UserInitProcess {
     pub fn signal_mask_syscall_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
             && self.signal_state_inherited
+            && self.signal_runtime_bound
+            && self.thread_signal_state_bound
             && self.blocked_signal_mask_bound
+    }
+
+    pub fn signal_action_syscall_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.signal_state_inherited
+            && self.signal_runtime_bound
+            && self.signal_action_table_bound
+            && self.signal_action_table_layout_bound
     }
 
     pub const fn clear_child_tid_bound(&self) -> bool {
@@ -3139,9 +3222,15 @@ impl UserInitProcess {
         self.fsuid = 0;
         self.fsgid = 0;
         self.signal_state_inherited = true;
+        self.signal_runtime_bound = true;
+        self.thread_signal_state_bound = true;
+        self.process_signal_state_deferred = true;
+        self.signal_action_table_bound = true;
+        self.signal_action_table_layout_bound = true;
         self.blocked_signal_mask_bound = true;
         self.signal_delivery_deferred = true;
         self.blocked_signal_mask = 0;
+        self.signal_actions = [UserSignalAction::default(); USER_SIGNAL_COUNT];
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -3311,6 +3400,29 @@ impl UserInitProcess {
             return false;
         }
         self.rt_sigprocmask_observed = true;
+        true
+    }
+
+    pub fn read_signal_action(&self, signal: usize) -> Option<UserSignalAction> {
+        if !self.signal_action_syscall_ready() || signal == 0 || signal > USER_SIGNAL_COUNT {
+            return None;
+        }
+        Some(self.signal_actions[signal - 1])
+    }
+
+    pub fn set_signal_action(&mut self, signal: usize, action: UserSignalAction) -> bool {
+        if !self.signal_action_syscall_ready() || signal == 0 || signal > USER_SIGNAL_COUNT {
+            return false;
+        }
+        self.signal_actions[signal - 1] = action;
+        true
+    }
+
+    pub fn observe_rt_sigaction(&mut self) -> bool {
+        if !self.signal_action_syscall_ready() {
+            return false;
+        }
+        self.rt_sigaction_observed = true;
         true
     }
 

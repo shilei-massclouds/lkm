@@ -8,6 +8,7 @@ use super::{
     hwrng::HwRngError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    user_boot::{UserSignalAction, USER_SIGNAL_COUNT},
 };
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
@@ -68,6 +69,7 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
 const SYSCALL_CLOCK_GETTIME: usize = 113;
+const SYSCALL_RT_SIGACTION: usize = 134;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
@@ -108,6 +110,7 @@ const STAT_SIZE: usize = 128;
 const TIMESPEC_SIZE: usize = 16;
 const TIMEVAL_SIZE: usize = 16;
 const TIMEZONE_SIZE: usize = 8;
+const RT_SIGACTION_SIZE: usize = core::mem::size_of::<usize>() * 3;
 const UID_T_SIZE: usize = 4;
 const GID_T_SIZE: usize = 4;
 const UTS_FIELD_SIZE: usize = 65;
@@ -124,6 +127,7 @@ const SIG_SETMASK: usize = 2;
 const SIGKILL: usize = 9;
 const SIGSTOP: usize = 19;
 const UNBLOCKABLE_SIGNAL_MASK: usize = (1usize << (SIGKILL - 1)) | (1usize << (SIGSTOP - 1));
+const UAPI_SA_FLAGS: usize = 0xd800_0807;
 const EPERM: usize = 1;
 const EACCES: usize = 13;
 const EFAULT: usize = 14;
@@ -168,6 +172,7 @@ pub struct SyscallTable {
     setuid_supported: bool,
     setgid_supported: bool,
     rt_sigprocmask_supported: bool,
+    rt_sigaction_supported: bool,
     clock_gettime_supported: bool,
     gettimeofday_supported: bool,
     fstat_supported: bool,
@@ -190,6 +195,7 @@ pub struct SyscallTable {
     stat_usercopy_ready: bool,
     getrandom_usercopy_ready: bool,
     signal_mask_usercopy_ready: bool,
+    signal_action_usercopy_ready: bool,
     time_usercopy_ready: bool,
     credentials_usercopy_ready: bool,
     utsname_usercopy_ready: bool,
@@ -226,6 +232,12 @@ pub struct SyscallTable {
     rt_sigprocmask_routes_to_user_init_process: bool,
     rt_sigprocmask_sigsetsize_bound: bool,
     rt_sigprocmask_unblockable_signals_cleared: bool,
+    rt_sigaction_routes_to_user_init_process: bool,
+    rt_sigaction_routes_to_signal_action_table: bool,
+    rt_sigaction_sigsetsize_bound: bool,
+    rt_sigaction_layout_bound: bool,
+    rt_sigaction_unblockable_signals_cleared: bool,
+    rt_sigaction_kernel_only_signals_rejected: bool,
     signal_delivery_deferred: bool,
     clock_gettime_routes_to_timer_provider: bool,
     gettimeofday_routes_to_timer_provider: bool,
@@ -260,6 +272,7 @@ pub struct SyscallTable {
     setuid_observed: AtomicU8,
     setgid_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
+    rt_sigaction_observed: AtomicU8,
     clock_gettime_observed: AtomicU8,
     gettimeofday_observed: AtomicU8,
     fstat_observed: AtomicU8,
@@ -298,6 +311,7 @@ impl SyscallTable {
             setuid_supported: false,
             setgid_supported: false,
             rt_sigprocmask_supported: false,
+            rt_sigaction_supported: false,
             clock_gettime_supported: false,
             gettimeofday_supported: false,
             fstat_supported: false,
@@ -320,6 +334,7 @@ impl SyscallTable {
             stat_usercopy_ready: false,
             getrandom_usercopy_ready: false,
             signal_mask_usercopy_ready: false,
+            signal_action_usercopy_ready: false,
             time_usercopy_ready: false,
             credentials_usercopy_ready: false,
             utsname_usercopy_ready: false,
@@ -356,6 +371,12 @@ impl SyscallTable {
             rt_sigprocmask_routes_to_user_init_process: false,
             rt_sigprocmask_sigsetsize_bound: false,
             rt_sigprocmask_unblockable_signals_cleared: false,
+            rt_sigaction_routes_to_user_init_process: false,
+            rt_sigaction_routes_to_signal_action_table: false,
+            rt_sigaction_sigsetsize_bound: false,
+            rt_sigaction_layout_bound: false,
+            rt_sigaction_unblockable_signals_cleared: false,
+            rt_sigaction_kernel_only_signals_rejected: false,
             signal_delivery_deferred: false,
             clock_gettime_routes_to_timer_provider: false,
             gettimeofday_routes_to_timer_provider: false,
@@ -390,6 +411,7 @@ impl SyscallTable {
             setuid_observed: AtomicU8::new(0),
             setgid_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
+            rt_sigaction_observed: AtomicU8::new(0),
             clock_gettime_observed: AtomicU8::new(0),
             gettimeofday_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
@@ -480,6 +502,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn rt_sigprocmask_supported(&self) -> bool {
         self.rt_sigprocmask_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_supported(&self) -> bool {
+        self.rt_sigaction_supported
     }
 
     #[allow(dead_code)]
@@ -593,6 +620,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn signal_action_usercopy_ready(&self) -> bool {
+        self.signal_action_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn time_usercopy_ready(&self) -> bool {
         self.time_usercopy_ready
     }
@@ -700,6 +732,36 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn rt_sigprocmask_unblockable_signals_cleared(&self) -> bool {
         self.rt_sigprocmask_unblockable_signals_cleared
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_routes_to_user_init_process(&self) -> bool {
+        self.rt_sigaction_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_routes_to_signal_action_table(&self) -> bool {
+        self.rt_sigaction_routes_to_signal_action_table
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_sigsetsize_bound(&self) -> bool {
+        self.rt_sigaction_sigsetsize_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_layout_bound(&self) -> bool {
+        self.rt_sigaction_layout_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_unblockable_signals_cleared(&self) -> bool {
+        self.rt_sigaction_unblockable_signals_cleared
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigaction_kernel_only_signals_rejected(&self) -> bool {
+        self.rt_sigaction_kernel_only_signals_rejected
     }
 
     #[allow(dead_code)]
@@ -833,6 +895,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn rt_sigaction_observed(&self) -> bool {
+        self.rt_sigaction_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn clock_gettime_observed(&self) -> bool {
         self.clock_gettime_observed.load(Ordering::Acquire) != 0
     }
@@ -911,6 +978,7 @@ impl SyscallTable {
         self.setuid_supported = true;
         self.setgid_supported = true;
         self.rt_sigprocmask_supported = true;
+        self.rt_sigaction_supported = true;
         self.clock_gettime_supported = true;
         self.gettimeofday_supported = true;
         self.fstat_supported = true;
@@ -933,6 +1001,7 @@ impl SyscallTable {
         self.stat_usercopy_ready = true;
         self.getrandom_usercopy_ready = true;
         self.signal_mask_usercopy_ready = true;
+        self.signal_action_usercopy_ready = true;
         self.time_usercopy_ready = true;
         self.credentials_usercopy_ready = true;
         self.utsname_usercopy_ready = true;
@@ -969,6 +1038,12 @@ impl SyscallTable {
         self.rt_sigprocmask_routes_to_user_init_process = true;
         self.rt_sigprocmask_sigsetsize_bound = true;
         self.rt_sigprocmask_unblockable_signals_cleared = true;
+        self.rt_sigaction_routes_to_user_init_process = true;
+        self.rt_sigaction_routes_to_signal_action_table = true;
+        self.rt_sigaction_sigsetsize_bound = true;
+        self.rt_sigaction_layout_bound = true;
+        self.rt_sigaction_unblockable_signals_cleared = true;
+        self.rt_sigaction_kernel_only_signals_rejected = true;
         self.signal_delivery_deferred = true;
         self.clock_gettime_routes_to_timer_provider = true;
         self.gettimeofday_routes_to_timer_provider = true;
@@ -1278,6 +1353,25 @@ impl SyscallTable {
         }
 
         syscall_table_rt_sigprocmask(self, frame);
+    }
+
+    pub fn rt_sigaction(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.rt_sigaction_supported
+            || !self.rt_sigaction_routes_to_user_init_process
+            || !self.rt_sigaction_routes_to_signal_action_table
+            || !self.rt_sigaction_sigsetsize_bound
+            || !self.rt_sigaction_layout_bound
+            || !self.rt_sigaction_unblockable_signals_cleared
+            || !self.rt_sigaction_kernel_only_signals_rejected
+            || !self.signal_delivery_deferred
+            || !self.signal_action_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_rt_sigaction(self, frame);
     }
 
     pub fn clock_gettime(&self, frame: &mut TrapFrame) {
@@ -1751,6 +1845,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_FSTAT => table.fstat(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
         SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
+        SYSCALL_RT_SIGACTION => table.rt_sigaction(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
@@ -2330,6 +2425,71 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, 0);
 }
 
+fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
+    let signal = frame.reg(10);
+    let action_ptr = frame.reg(11);
+    let old_action_ptr = frame.reg(12);
+    let sigset_size = frame.reg(13);
+    if sigset_size != RT_SIGSET_SIZE {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let new_action = if action_ptr != 0 {
+        let Some(action) = read_user_signal_action(action_ptr) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        Some(action)
+    } else {
+        None
+    };
+
+    if !valid_rt_signal(signal) || (new_action.is_some() && kernel_only_signal(signal)) {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let Some(old_action) = crate::context::context_ref()
+        .user_init_process
+        .read_signal_action(signal)
+    else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    if let Some(action) = new_action {
+        let stored_action = UserSignalAction::new(
+            action.handler(),
+            action.flags() & UAPI_SA_FLAGS,
+            action.mask() & !UNBLOCKABLE_SIGNAL_MASK,
+        );
+        if !crate::context::context()
+            .user_init_process
+            .set_signal_action(signal, stored_action)
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    }
+
+    if old_action_ptr != 0 && !write_user_signal_action(old_action_ptr, old_action) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    if !crate::context::context()
+        .user_init_process
+        .observe_rt_sigaction()
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.rt_sigaction_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
 fn syscall_table_clock_gettime(table: &SyscallTable, frame: &mut TrapFrame) {
     let clockid = frame.reg(10);
     let timespec_ptr = frame.reg(11);
@@ -2791,6 +2951,44 @@ fn write_user_usize(user_ptr: usize, value: usize) -> bool {
     copy_to_user(user_ptr, &value.to_le_bytes())
 }
 
+fn read_user_signal_action(user_ptr: usize) -> Option<UserSignalAction> {
+    let mut bytes = [0u8; RT_SIGACTION_SIZE];
+    if !copy_from_user(user_ptr, &mut bytes) {
+        return None;
+    }
+    Some(UserSignalAction::new(
+        read_usize_field(&bytes, 0),
+        read_usize_field(&bytes, core::mem::size_of::<usize>()),
+        read_usize_field(&bytes, core::mem::size_of::<usize>() * 2),
+    ))
+}
+
+fn write_user_signal_action(user_ptr: usize, action: UserSignalAction) -> bool {
+    let mut bytes = [0u8; RT_SIGACTION_SIZE];
+    write_usize_field(&mut bytes, 0, action.handler());
+    write_usize_field(&mut bytes, core::mem::size_of::<usize>(), action.flags());
+    write_usize_field(&mut bytes, core::mem::size_of::<usize>() * 2, action.mask());
+    copy_to_user(user_ptr, &bytes)
+}
+
+fn read_usize_field(bytes: &[u8], offset: usize) -> usize {
+    let mut field = [0u8; core::mem::size_of::<usize>()];
+    field.copy_from_slice(&bytes[offset..offset + core::mem::size_of::<usize>()]);
+    usize::from_le_bytes(field)
+}
+
+fn write_usize_field(bytes: &mut [u8], offset: usize, value: usize) {
+    bytes[offset..offset + core::mem::size_of::<usize>()].copy_from_slice(&value.to_le_bytes());
+}
+
+fn valid_rt_signal(signal: usize) -> bool {
+    signal >= 1 && signal <= USER_SIGNAL_COUNT
+}
+
+fn kernel_only_signal(signal: usize) -> bool {
+    signal == SIGKILL || signal == SIGSTOP
+}
+
 fn write_user_u32(user_ptr: usize, value: u32) -> bool {
     debug_assert_eq!(UID_T_SIZE, core::mem::size_of::<u32>());
     debug_assert_eq!(GID_T_SIZE, core::mem::size_of::<u32>());
@@ -2998,6 +3196,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_FSTAT => "fstat",
         SYSCALL_SET_TID_ADDRESS => "set_tid_address",
         SYSCALL_CLOCK_GETTIME => "clock_gettime",
+        SYSCALL_RT_SIGACTION => "rt_sigaction",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",

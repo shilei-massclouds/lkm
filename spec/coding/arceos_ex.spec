@@ -129,6 +129,7 @@ predicate arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mas
 predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
@@ -1543,6 +1544,42 @@ type ArceosExStartupPhaseCodingMust {
          * mutation, full parent/child task graph, pid namespaces and non-root
          * credential/user namespace semantics remain trimmed.
          *
+         * Signal runtime first slices must reference local Linux 6.12
+         * kernel/signal.c::sys_rt_sigprocmask(),
+         * kernel/signal.c::sys_rt_sigaction()/do_sigaction(),
+         * include/uapi/asm-generic/signal.h and
+         * arch/riscv/include/uapi/asm/signal.h. The model boundary is Task ->
+         * SignalRuntime, with ProcessSignalState for process/thread-group
+         * shared signal state, ThreadSignalState for per-thread blocked and
+         * pending state, and SignalActionTable for sighand-style
+         * action[sig - 1] entries. The current single PID1 implementation may
+         * fold these fields into UserInitProcess, but it must preserve the
+         * separate facts so later clone/fork/thread-group support can split
+         * them without changing syscall semantics. rt_sigprocmask(135)
+         * updates ThreadSignalState.blocked; rt_sigaction(134) reads and
+         * writes SignalActionTable entries.
+         *
+         * rt_sigaction(134) must follow the Linux 6.12 order: reject
+         * sigsetsize values other than riscv64 sizeof(sigset_t) == 8; copy the
+         * optional user sigaction using the riscv64 kernel ABI layout
+         * { handler: usize, flags: usize, mask: usize }; reject invalid signal
+         * numbers and attempts to install actions for SIGKILL or SIGSTOP;
+         * snapshot the old action before applying the new action; clear
+         * unsupported userspace flags and remove SIGKILL/SIGSTOP from the
+         * stored action mask; then copy the old action to user memory when the
+         * old-action pointer is non-null. User copy failures must return
+         * EFAULT, invalid signal/sigsetsize/kernel-only set attempts must
+         * return EINVAL. Full signal delivery, shared pending queues,
+         * sighand/siglock/RCU locking, restartable syscalls, signal frame
+         * construction, handler entry and rt_sigreturn remain trimmed.
+         *
+         * user-smoke should keep signal syscall coverage as a dedicated
+         * syscall-level case rather than embedding all signal checks in the
+         * /bin/sh probe. That case may cover rt_sigprocmask and rt_sigaction
+         * ABI, success, old-value writeback and first-slice error handling,
+         * but it must not assert real handler delivery until SignalRuntime
+         * delivery, frame and rt_sigreturn are specified.
+         *
          * APP=user-boot validation in make test must not treat QEMU/SBI
          * shutdown success as sufficient. The host harness must parse the
          * ordinary guest output line "user exit status=N" and require N == 0
@@ -1591,6 +1628,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_credentials_first_slice();
         arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
+        arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();

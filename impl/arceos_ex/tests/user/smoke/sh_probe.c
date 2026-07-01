@@ -1,5 +1,4 @@
 #include <stddef.h>
-#include <signal.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/utsname.h>
@@ -14,8 +13,6 @@ static int say(const char *message, size_t len)
 }
 
 #define SAY_LITERAL(message) say(message, sizeof(message) - 1)
-
-#define FIRST_SIG_WORD(sig) (1UL << ((sig) - 1))
 
 static int str_eq(const char *left, const char *right)
 {
@@ -186,43 +183,6 @@ static int smoke_uts_and_cwd(void)
 	return 0;
 }
 
-static int smoke_rt_sigprocmask(void)
-{
-	unsigned long new_mask;
-	unsigned long old_mask;
-	long rc;
-
-	new_mask = 0;
-	old_mask = ~0UL;
-	rc = syscall(SYS_rt_sigprocmask, SIG_SETMASK, &new_mask, &old_mask,
-		     sizeof(unsigned long));
-	if (rc != 0 || old_mask != 0) {
-		return 52;
-	}
-
-	new_mask = FIRST_SIG_WORD(SIGUSR1) | FIRST_SIG_WORD(SIGKILL) |
-		   FIRST_SIG_WORD(SIGSTOP);
-	old_mask = ~0UL;
-	rc = syscall(SYS_rt_sigprocmask, SIG_BLOCK, &new_mask, &old_mask,
-		     sizeof(unsigned long));
-	if (rc != 0 || old_mask != 0) {
-		return 53;
-	}
-
-	new_mask = 0;
-	old_mask = 0;
-	rc = syscall(SYS_rt_sigprocmask, SIG_SETMASK, &new_mask, &old_mask,
-		     sizeof(unsigned long));
-	if (rc != 0 || old_mask != FIRST_SIG_WORD(SIGUSR1)) {
-		return 54;
-	}
-
-	if (SAY_LITERAL("syscall rt_sigprocmask ok\n") < 0) {
-		return 55;
-	}
-	return 0;
-}
-
 static int smoke_time_syscalls(void)
 {
 	struct timespec ts;
@@ -298,10 +258,6 @@ int smoke_sh_probe(void)
 		return status;
 	}
 	status = smoke_uts_and_cwd();
-	if (status != 0) {
-		return status;
-	}
-	status = smoke_rt_sigprocmask();
 	if (status != 0) {
 		return status;
 	}

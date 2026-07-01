@@ -231,6 +231,7 @@ predicate syscall_table_getgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
+predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_supported<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
@@ -245,6 +246,7 @@ predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_mask_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_signal_action_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_time_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
@@ -268,6 +270,12 @@ predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_rt_sigprocmask_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigprocmask_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigprocmask_unblockable_signals_cleared<T>(table: T) -> bool;
+predicate syscall_rt_sigaction_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigaction_routes_to_signal_action_table<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigaction_sigsetsize_bound<T>(table: T) -> bool;
+predicate syscall_rt_sigaction_layout_bound<T>(table: T) -> bool;
+predicate syscall_rt_sigaction_unblockable_signals_cleared<T>(table: T) -> bool;
+predicate syscall_rt_sigaction_kernel_only_signals_rejected<T>(table: T) -> bool;
 predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
 predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
@@ -302,6 +310,7 @@ predicate syscall_table_getgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
+predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
@@ -324,6 +333,11 @@ predicate user_init_process_credentials_inherited<T, K>(process: T, task: K) -> 
 predicate user_init_process_root_credentials_bound<T>(process: T) -> bool;
 predicate user_init_process_credentials_capability_model_deferred<T>(process: T) -> bool;
 predicate user_init_process_signal_state_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_signal_runtime_bound<T>(process: T) -> bool;
+predicate user_init_process_thread_signal_state_bound<T>(process: T) -> bool;
+predicate user_init_process_process_signal_state_deferred<T>(process: T) -> bool;
+predicate user_init_process_signal_action_table_bound<T>(process: T) -> bool;
+predicate user_init_process_signal_action_table_layout_bound<T>(process: T) -> bool;
 predicate user_init_process_blocked_signal_mask_bound<T>(process: T) -> bool;
 predicate user_init_process_signal_delivery_deferred<T>(process: T) -> bool;
 predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
@@ -332,6 +346,7 @@ predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_set_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigprocmask_observed<T>(process: T) -> bool;
+predicate user_init_process_rt_sigaction_observed<T>(process: T) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
 predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
 predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
@@ -837,6 +852,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_setuid_supported(self);
                     syscall_table_setgid_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
+                    syscall_table_rt_sigaction_supported(self);
                     syscall_table_clock_gettime_supported(self);
                     syscall_table_gettimeofday_supported(self);
                     syscall_table_brk_supported(self);
@@ -851,6 +867,7 @@ object SyscallTable: ResourceObject {
                     syscall_read_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
                     syscall_signal_mask_usercopy_ready(self);
+                    syscall_signal_action_usercopy_ready(self);
                     syscall_time_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
@@ -879,6 +896,7 @@ object SyscallTable: ResourceObject {
             syscall_table_setuid_supported(self);
             syscall_table_setgid_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
+            syscall_table_rt_sigaction_supported(self);
             syscall_table_clock_gettime_supported(self);
             syscall_table_gettimeofday_supported(self);
             syscall_table_brk_supported(self);
@@ -893,6 +911,7 @@ object SyscallTable: ResourceObject {
             syscall_read_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
             syscall_signal_mask_usercopy_ready(self);
+            syscall_signal_action_usercopy_ready(self);
             syscall_time_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
@@ -1448,6 +1467,51 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::RtSigaction {
+                /*
+                 * Linux 6.12 RISC-V exposes rt_sigaction(2) as syscall
+                 * number 134. kernel/signal.c::sys_rt_sigaction() first
+                 * checks sigsetsize == sizeof(sigset_t), copies the optional
+                 * user struct sigaction into a kernel k_sigaction, delegates
+                 * validation and table update to do_sigaction(), and copies
+                 * the old action back to user memory when oact is non-null.
+                 *
+                 * do_sigaction() rejects invalid signal numbers and attempts
+                 * to install handlers for kernel-only signals such as SIGKILL
+                 * and SIGSTOP. For an accepted new action it clears unsupported
+                 * userspace flags and removes SIGKILL/SIGSTOP from the stored
+                 * action mask before updating sighand->action[sig - 1].
+                 *
+                 * The current slice models this as Task -> SignalRuntime ->
+                 * SignalActionTable, folded into the current UserInitProcess
+                 * implementation for single PID1/single-thread execution.
+                 * ProcessSignalState shared pending queues, ThreadSignalState
+                 * pending delivery, siglock/RCU, restart handling, signal
+                 * frame construction and rt_sigreturn remain deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_signal_action_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::RtSigaction;
+                }
+
+                ensures {
+                    syscall_rt_sigaction_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_rt_sigaction_routes_to_signal_action_table(self, UserInitProcess);
+                    syscall_rt_sigaction_sigsetsize_bound(self);
+                    syscall_rt_sigaction_layout_bound(self);
+                    syscall_rt_sigaction_unblockable_signals_cleared(self);
+                    syscall_rt_sigaction_kernel_only_signals_rejected(self);
+                    syscall_signal_delivery_deferred(self);
+                    user_init_process_rt_sigaction_observed(UserInitProcess);
+                    syscall_table_rt_sigaction_observed(self);
+                }
+            }
+
             on Action::ClockGettime {
                 /*
                  * Linux 6.12 RISC-V exposes clock_gettime(2) as syscall
@@ -1650,6 +1714,11 @@ object UserInitProcess: ResourceObject {
                     user_init_process_root_credentials_bound(self);
                     user_init_process_credentials_capability_model_deferred(self);
                     user_init_process_signal_state_inherited(self, KernelInitTask);
+                    user_init_process_signal_runtime_bound(self);
+                    user_init_process_thread_signal_state_bound(self);
+                    user_init_process_process_signal_state_deferred(self);
+                    user_init_process_signal_action_table_bound(self);
+                    user_init_process_signal_action_table_layout_bound(self);
                     user_init_process_blocked_signal_mask_bound(self);
                     user_init_process_signal_delivery_deferred(self);
                     kernel_init_task_execve_to_user_init(KernelInitTask, self);
@@ -1677,6 +1746,11 @@ object UserInitProcess: ResourceObject {
             user_init_process_root_credentials_bound(self);
             user_init_process_credentials_capability_model_deferred(self);
             user_init_process_signal_state_inherited(self, KernelInitTask);
+            user_init_process_signal_runtime_bound(self);
+            user_init_process_thread_signal_state_bound(self);
+            user_init_process_process_signal_state_deferred(self);
+            user_init_process_signal_action_table_bound(self);
+            user_init_process_signal_action_table_layout_bound(self);
             user_init_process_blocked_signal_mask_bound(self);
             user_init_process_signal_delivery_deferred(self);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
@@ -1703,6 +1777,11 @@ object UserInitProcess: ResourceObject {
                     user_init_process_credentials_inherited(self, KernelInitTask);
                     user_init_process_root_credentials_bound(self);
                     user_init_process_signal_state_inherited(self, KernelInitTask);
+                    user_init_process_signal_runtime_bound(self);
+                    user_init_process_thread_signal_state_bound(self);
+                    user_init_process_process_signal_state_deferred(self);
+                    user_init_process_signal_action_table_bound(self);
+                    user_init_process_signal_action_table_layout_bound(self);
                     user_init_process_blocked_signal_mask_bound(self);
                     user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
                     kernel_init_task_execve_to_user_init(KernelInitTask, self);
@@ -1734,6 +1813,11 @@ object UserInitProcess: ResourceObject {
             user_init_process_root_credentials_bound(self);
             user_init_process_credentials_capability_model_deferred(self);
             user_init_process_signal_state_inherited(self, KernelInitTask);
+            user_init_process_signal_runtime_bound(self);
+            user_init_process_thread_signal_state_bound(self);
+            user_init_process_process_signal_state_deferred(self);
+            user_init_process_signal_action_table_bound(self);
+            user_init_process_signal_action_table_layout_bound(self);
             user_init_process_blocked_signal_mask_bound(self);
             user_init_process_signal_delivery_deferred(self);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
@@ -1923,6 +2007,21 @@ object UserInitProcess: ResourceObject {
                     user_init_process_blocked_signal_mask_bound(self);
                     user_init_process_signal_delivery_deferred(self);
                     user_init_process_rt_sigprocmask_observed(self);
+                }
+            }
+
+            on Action::RtSigaction {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_signal_runtime_bound(self);
+                    user_init_process_signal_action_table_bound(self);
+                    user_init_process_signal_action_table_layout_bound(self);
+                    user_init_process_signal_delivery_deferred(self);
+                    user_init_process_rt_sigaction_observed(self);
                 }
             }
 
