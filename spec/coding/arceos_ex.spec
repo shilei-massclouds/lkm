@@ -132,6 +132,7 @@ predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> b
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
 predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
@@ -1540,12 +1541,13 @@ type ArceosExStartupPhaseCodingMust {
          * line discipline, job control, poll/ppoll, signal interruption/restart,
          * controlling tty state and real IRQ wakeup remain deferred.
          *
-         * The /dev/tty, fd-dup and termios slice must reference local Linux
+         * The /dev/tty, fd-dup, termios and foreground-pgrp slice must reference local Linux
          * 6.12 fs/open.c::build_open_flags()/do_sys_openat2(),
          * fs/fcntl.c::do_fcntl()/f_dupfd(),
          * drivers/tty/tty_io.c::tty_ioctl()/tiocgwinsz(),
-         * drivers/tty/tty_ioctl.c::tty_mode_ioctl() and the asm-generic
-         * fcntl/ioctls/termbits UAPI headers. O_RDWR is a valid open access
+         * drivers/tty/tty_ioctl.c::tty_mode_ioctl(),
+         * drivers/tty/tty_jobctrl.c::tty_jobctrl_ioctl()/tiocgpgrp() and the
+         * asm-generic fcntl/ioctls/termbits UAPI headers. O_RDWR is a valid open access
          * mode and must not be rejected as an invalid flag before pathname
          * copy. The current slice may special-case
          * openat(AT_FDCWD, "/dev/tty", O_RDWR|O_LARGEFILE) to install a
@@ -1567,8 +1569,18 @@ type ArceosExStartupPhaseCodingMust {
          * riscv64/generic 36-byte struct termios described by
          * include/uapi/asm-generic/termbits.h. The first slice returns a
          * Linux tty_std_termios-like read-only snapshot and does not implement
-         * termios mutation, line-discipline behavior, isatty, session/process
-         * group or job-control semantics.
+         * termios mutation, line-discipline behavior or isatty.
+         *
+         * ioctl(TIOCGPGRP) must be accepted only on char-device fds that match
+         * the current UserInitProcess controlling tty facts. It copies a
+         * riscv64 pid_t/int foreground process-group id to the user pointer.
+         * The first slice records PID1 as session leader, process-group
+         * leader and foreground pgrp of the console-like controlling tty, so
+         * success writes 1; if the foreground pgrp fact is absent, it should
+         * follow Linux pid_vnr(NULL) shape and write 0 rather than inventing a
+         * new errno. This is not full TTY job control: TIOCSPGRP, TIOCGSID,
+         * setsid/setpgid, pty, orphan pgrp and job-control signal delivery
+         * remain trimmed.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -1584,7 +1596,8 @@ type ArceosExStartupPhaseCodingMust {
          * failed copies are diagnostic output, not alternate errno behavior.
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
-         * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS and TIOCGWINSZ.
+         * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS, TIOCGWINSZ and
+         * TIOCGPGRP.
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/

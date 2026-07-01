@@ -1548,7 +1548,7 @@ impl FilesStruct {
         Ok(())
     }
 
-    pub fn ioctl_tiocgwinsz_fd(&self, fd: usize) -> FileResult<(u16, u16, u16, u16)> {
+    fn char_backend_for_fd(&self, fd: usize) -> FileResult<&FileBackend> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
         }
@@ -1564,6 +1564,12 @@ impl FilesStruct {
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
             return Err(FileError::NotTty);
         }
+
+        Ok(backend)
+    }
+
+    pub fn ioctl_tiocgwinsz_fd(&self, fd: usize) -> FileResult<(u16, u16, u16, u16)> {
+        self.char_backend_for_fd(fd)?;
 
         Ok((
             TTY_WINSIZE_ROW,
@@ -1574,23 +1580,14 @@ impl FilesStruct {
     }
 
     pub fn ioctl_tcgets_fd(&self, fd: usize) -> FileResult<[u8; TERMIOS_SIZE]> {
-        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
-            return Err(FileError::NotReady);
-        }
-
-        let entry = self.fd_table.lookup(fd)?;
-        let backend = match entry.ofd {
-            OpenFileDescriptionRef::Stdin => &self.stdin_backend,
-            OpenFileDescriptionRef::Stdout => &self.stdout_backend,
-            OpenFileDescriptionRef::Stderr => &self.stderr_backend,
-            OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
-            OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
-        };
-        if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
-            return Err(FileError::NotTty);
-        }
+        self.char_backend_for_fd(fd)?;
 
         Ok(linux_std_termios())
+    }
+
+    pub fn ioctl_tiocgpgrp_fd(&self, fd: usize) -> FileResult<()> {
+        self.char_backend_for_fd(fd)?;
+        Ok(())
     }
 
     pub fn lseek_fd(

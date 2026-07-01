@@ -2801,6 +2801,12 @@ pub struct UserInitProcess {
     pid_read_observed: bool,
     ppid_zero_first_slice: bool,
     ppid_read_observed: bool,
+    session_leader_first_slice: bool,
+    process_group_leader_first_slice: bool,
+    controlling_tty_bound: bool,
+    foreground_pgrp_bound: bool,
+    foreground_pgrp: usize,
+    foreground_pgrp_read_observed: bool,
     uid_read_observed: bool,
     euid_read_observed: bool,
     gid_read_observed: bool,
@@ -2870,6 +2876,12 @@ impl UserInitProcess {
             pid_read_observed: false,
             ppid_zero_first_slice: false,
             ppid_read_observed: false,
+            session_leader_first_slice: false,
+            process_group_leader_first_slice: false,
+            controlling_tty_bound: false,
+            foreground_pgrp_bound: false,
+            foreground_pgrp: 0,
+            foreground_pgrp_read_observed: false,
             uid_read_observed: false,
             euid_read_observed: false,
             gid_read_observed: false,
@@ -3053,6 +3065,30 @@ impl UserInitProcess {
         self.ppid_read_observed
     }
 
+    pub const fn session_leader_first_slice(&self) -> bool {
+        self.session_leader_first_slice
+    }
+
+    pub const fn process_group_leader_first_slice(&self) -> bool {
+        self.process_group_leader_first_slice
+    }
+
+    pub const fn controlling_tty_bound(&self) -> bool {
+        self.controlling_tty_bound
+    }
+
+    pub const fn foreground_pgrp_bound(&self) -> bool {
+        self.foreground_pgrp_bound
+    }
+
+    pub const fn foreground_pgrp(&self) -> usize {
+        self.foreground_pgrp
+    }
+
+    pub const fn foreground_pgrp_read_observed(&self) -> bool {
+        self.foreground_pgrp_read_observed
+    }
+
     pub const fn uid_read_observed(&self) -> bool {
         self.uid_read_observed
     }
@@ -3222,6 +3258,11 @@ impl UserInitProcess {
         self.sgid = 0;
         self.fsuid = 0;
         self.fsgid = 0;
+        self.session_leader_first_slice = true;
+        self.process_group_leader_first_slice = true;
+        self.controlling_tty_bound = true;
+        self.foreground_pgrp_bound = true;
+        self.foreground_pgrp = super::rest_init::KERNEL_INIT_PID;
         self.signal_state_inherited = true;
         self.signal_runtime_bound = true;
         self.thread_signal_state_bound = true;
@@ -3322,6 +3363,23 @@ impl UserInitProcess {
         self.ppid_zero_first_slice = true;
         self.ppid_read_observed = true;
         Some(0)
+    }
+
+    pub fn read_foreground_pgrp(&mut self) -> Option<usize> {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || !self.process_group_leader_first_slice
+            || !self.controlling_tty_bound
+        {
+            return None;
+        }
+        self.foreground_pgrp_read_observed = true;
+        if self.foreground_pgrp_bound {
+            Some(self.foreground_pgrp)
+        } else {
+            Some(0)
+        }
     }
 
     pub fn read_euid(&mut self) -> Option<usize> {

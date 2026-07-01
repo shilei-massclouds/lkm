@@ -108,6 +108,7 @@ const F_LINUX_SPECIFIC_BASE: usize = 1024;
 const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
 const TCGETS: usize = 0x5401;
+const TIOCGPGRP: usize = 0x540f;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
@@ -117,6 +118,7 @@ const TIMEZONE_SIZE: usize = 8;
 const RT_SIGACTION_SIZE: usize = core::mem::size_of::<usize>() * 3;
 const UID_T_SIZE: usize = 4;
 const GID_T_SIZE: usize = 4;
+const PID_T_SIZE: usize = 4;
 const UTS_FIELD_SIZE: usize = 65;
 const NEW_UTSNAME_FIELDS: usize = 6;
 const NEW_UTSNAME_SIZE: usize = UTS_FIELD_SIZE * NEW_UTSNAME_FIELDS;
@@ -2683,8 +2685,10 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let cmd = frame.reg(11);
     let arg = frame.reg(12);
-    let ctx = crate::context::context_ref();
-    if let Err(error) = ctx.files_struct.ioctl_validate_fd(fd) {
+    if let Err(error) = crate::context::context_ref()
+        .files_struct
+        .ioctl_validate_fd(fd)
+    {
         let errno = file_error_to_errno(error);
         print_ioctl_error_detail(fd, cmd, arg, errno);
         complete_error_syscall(frame, errno);
@@ -2692,7 +2696,10 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
     }
     match cmd {
         TIOCGWINSZ => {
-            let winsize = match ctx.files_struct.ioctl_tiocgwinsz_fd(fd) {
+            let winsize = match crate::context::context_ref()
+                .files_struct
+                .ioctl_tiocgwinsz_fd(fd)
+            {
                 Ok(winsize) => winsize,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -2714,7 +2721,10 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         }
         TCGETS => {
-            let termios = match ctx.files_struct.ioctl_tcgets_fd(fd) {
+            let termios = match crate::context::context_ref()
+                .files_struct
+                .ioctl_tcgets_fd(fd)
+            {
                 Ok(termios) => termios,
                 Err(error) => {
                     let errno = file_error_to_errno(error);
@@ -2724,6 +2734,30 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 }
             };
             if !copy_to_user(arg, &termios[..TERMIOS_SIZE]) {
+                print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                complete_error_syscall(frame, EFAULT);
+                return;
+            }
+        }
+        TIOCGPGRP => {
+            if let Err(error) = crate::context::context_ref()
+                .files_struct
+                .ioctl_tiocgpgrp_fd(fd)
+            {
+                let errno = file_error_to_errno(error);
+                print_ioctl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+            let Some(pgrp) = crate::context::context()
+                .user_init_process
+                .read_foreground_pgrp()
+            else {
+                print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+                complete_error_syscall(frame, ENOTTY);
+                return;
+            };
+            if !write_user_u32(arg, pgrp as u32) {
                 print_ioctl_error_detail(fd, cmd, arg, EFAULT);
                 complete_error_syscall(frame, EFAULT);
                 return;
@@ -3056,6 +3090,7 @@ fn kernel_only_signal(signal: usize) -> bool {
 fn write_user_u32(user_ptr: usize, value: u32) -> bool {
     debug_assert_eq!(UID_T_SIZE, core::mem::size_of::<u32>());
     debug_assert_eq!(GID_T_SIZE, core::mem::size_of::<u32>());
+    debug_assert_eq!(PID_T_SIZE, core::mem::size_of::<u32>());
     copy_to_user(user_ptr, &value.to_le_bytes())
 }
 
@@ -3432,6 +3467,7 @@ fn print_fcntl_cmd_name(cmd: usize) {
 fn print_ioctl_cmd_name(cmd: usize) {
     let name = match cmd {
         TCGETS => "TCGETS",
+        TIOCGPGRP => "TIOCGPGRP",
         TIOCGWINSZ => "TIOCGWINSZ",
         _ => "unknown",
     };
