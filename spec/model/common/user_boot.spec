@@ -267,6 +267,8 @@ predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_read_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_input_wait_first_slice<T>(table: T) -> bool;
 predicate syscall_read_n_tty_line_discipline_first_slice<T>(table: T) -> bool;
+predicate syscall_read_tty_read_wait_entry_first_slice<T>(table: T) -> bool;
+predicate syscall_read_tty_read_wait_finish_first_slice<T>(table: T) -> bool;
 predicate syscall_read_tty_blocking_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ppoll_pollfd_usercopy_ready<T>(table: T) -> bool;
@@ -276,6 +278,8 @@ predicate syscall_ppoll_sigmask_deferred<T>(table: T) -> bool;
 predicate syscall_ppoll_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_tty_input_wait_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_n_tty_readiness_first_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_poll_table_first_slice<T>(table: T) -> bool;
+predicate syscall_ppoll_poll_freewait_first_slice<T>(table: T) -> bool;
 predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -931,9 +935,13 @@ object SyscallTable: ResourceObject {
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
                     syscall_read_no_ready_blocking_out_of_slice(self);
+                    syscall_read_tty_read_wait_entry_first_slice(self);
+                    syscall_read_tty_read_wait_finish_first_slice(self);
                     syscall_ppoll_timeout_parse_first_slice(self);
                     syscall_ppoll_sigmask_deferred(self);
                     syscall_ppoll_no_ready_blocking_out_of_slice(self);
+                    syscall_ppoll_poll_table_first_slice(self);
+                    syscall_ppoll_poll_freewait_first_slice(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
@@ -989,9 +997,13 @@ object SyscallTable: ResourceObject {
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
             syscall_read_no_ready_blocking_out_of_slice(self);
+            syscall_read_tty_read_wait_entry_first_slice(self);
+            syscall_read_tty_read_wait_finish_first_slice(self);
             syscall_ppoll_timeout_parse_first_slice(self);
             syscall_ppoll_sigmask_deferred(self);
             syscall_ppoll_no_ready_blocking_out_of_slice(self);
+            syscall_ppoll_poll_table_first_slice(self);
+            syscall_ppoll_poll_freewait_first_slice(self);
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_nanosleep_full_hrtimer_deferred(self);
@@ -1087,9 +1099,11 @@ object SyscallTable: ResourceObject {
                  * byte readiness is preserved. For a nonzero read request on
                  * fd0 with no N_TTY-readable data, Linux would wait unless
                  * nonblocking, hangup, signal or another terminal condition
-                 * applies; the current wait boundary only opens a supervisor
-                 * interruptible window for real RX and still does not model the
-                 * full wait queue. Job control, signal interruption/restart,
+                 * applies. The current wait boundary mirrors the Linux
+                 * n_tty_read() registration shape by making a tty read_wait
+                 * entry/finish pair observable, then opens a supervisor
+                 * interruptible window for real RX. It still does not model the
+                 * scheduler sleep behind wait_woken(). Job control, signal interruption/restart,
                  * echo/erase, special input characters and full poll/ppoll
                  * integration remain deferred. A user-read-trace probe may
                  * observe fd, requested length and the returned read result for
@@ -1123,6 +1137,11 @@ object SyscallTable: ResourceObject {
                     syscall_read_no_ready_blocking_out_of_slice(self);
                     syscall_read_tty_input_wait_first_slice(self);
                     syscall_read_n_tty_line_discipline_first_slice(self);
+                    syscall_read_tty_read_wait_entry_first_slice(self);
+                    syscall_read_tty_read_wait_finish_first_slice(self);
+                    tty_input_wait_read_wait_entry_first_slice(TtyInputWait);
+                    tty_input_wait_read_wait_finish_first_slice(TtyInputWait);
+                    tty_input_wait_scheduler_sleep_deferred(TtyInputWait);
                     n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
                     n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
                     n_tty_echo_and_erase_deferred(NTtyLineDiscipline);
@@ -1150,9 +1169,12 @@ object SyscallTable: ResourceObject {
                  * If no entry is ready, timeout={0,0} returns 0 as an immediate
                  * timeout, but timeout=NULL or a positive timeout must not be
                  * reported as successful timeout without an event. Sleeping
-                 * poll_table wait, remaining timeout update, temporary signal
-                 * masks, restart after signal delivery, echo/erase and full
-                 * N_TTY wait queues remain deferred.
+                 * The current wait boundary mirrors Linux poll_wqueues by
+                 * making poll_table registration and poll_freewait observable,
+                 * then opens the same supervisor interruptible window for real
+                 * RX. The scheduler sleep, remaining timeout update, temporary
+                 * signal masks, restart after signal delivery, echo/erase and
+                 * full N_TTY wait queues remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1177,6 +1199,11 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_no_ready_blocking_out_of_slice(self);
                     syscall_ppoll_tty_input_wait_first_slice(self);
                     syscall_ppoll_n_tty_readiness_first_slice(self);
+                    syscall_ppoll_poll_table_first_slice(self);
+                    syscall_ppoll_poll_freewait_first_slice(self);
+                    tty_input_wait_poll_table_first_slice(TtyInputWait);
+                    tty_input_wait_poll_freewait_first_slice(TtyInputWait);
+                    tty_input_wait_scheduler_sleep_deferred(TtyInputWait);
                     n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
                     n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
                     n_tty_echo_and_erase_deferred(NTtyLineDiscipline);

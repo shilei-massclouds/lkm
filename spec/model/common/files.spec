@@ -384,6 +384,11 @@ object FilesStruct: ResourceObject {
                     files_struct_stdin_blocking_wait_enabled(self);
                     tty_input_wait_bound_to_flip_buffer(TtyInputWait, TtyFlipBuffer);
                     tty_input_wait_irq_rx_wakeup_first_slice(TtyInputWait);
+                    tty_input_wait_read_wait_entry_first_slice(TtyInputWait);
+                    tty_input_wait_read_wait_finish_first_slice(TtyInputWait);
+                    tty_input_wait_poll_table_first_slice(TtyInputWait);
+                    tty_input_wait_poll_freewait_first_slice(TtyInputWait);
+                    tty_input_wait_scheduler_sleep_deferred(TtyInputWait);
                     n_tty_canonical_line_readiness_first_slice(NTtyLineDiscipline);
                 }
             }

@@ -289,6 +289,11 @@ predicate tty_input_wait_bound_to_flip_buffer<T, F>(wait: T, flip_buffer: F) -> 
 predicate tty_input_wait_irq_rx_wakeup_first_slice<T>(wait: T) -> bool;
 predicate tty_input_wait_does_not_poll_uart_rx<T>(wait: T) -> bool;
 predicate tty_input_wait_full_waitqueue_deferred<T>(wait: T) -> bool;
+predicate tty_input_wait_read_wait_entry_first_slice<T>(wait: T) -> bool;
+predicate tty_input_wait_read_wait_finish_first_slice<T>(wait: T) -> bool;
+predicate tty_input_wait_poll_table_first_slice<T>(wait: T) -> bool;
+predicate tty_input_wait_poll_freewait_first_slice<T>(wait: T) -> bool;
+predicate tty_input_wait_scheduler_sleep_deferred<T>(wait: T) -> bool;
 
 predicate serial8250_console_registered<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_real_console<T>(console: T) -> bool;
@@ -1014,11 +1019,15 @@ object NTtyLineDiscipline: ConsoleObject {
 }
 
 /*
- * TtyInputWait is the minimal stdin wait boundary used by read/ppoll before a
- * full Linux wait_queue_head_t / poll_table implementation exists. It waits
- * for the existing serial8250 IRQ RX path to publish data that
- * NTtyLineDiscipline can later report as readable; it does not read UART RX
- * directly.
+ * TtyInputWait is the minimal stdin wait boundary used by read/ppoll while
+ * converging toward Linux 6.12 semantics. Linux n_tty_read() registers a wait
+ * entry on tty->read_wait and removes it on exit. Linux ppoll() builds
+ * poll_wqueues, lets tty_poll()/n_tty_poll() register the same read_wait through
+ * poll_wait(), and then poll_freewait() removes those entries. This slice makes
+ * those registration/freeing boundaries explicit and waits for the existing
+ * serial8250 IRQ RX path to publish data that NTtyLineDiscipline can later
+ * report as readable. It still does not model true task state transitions,
+ * schedule_hrtimeout_range(), signal interruption or restart.
  */
 object TtyInputWait: ConsoleObject {
     initial_state: State::Base;
@@ -1037,6 +1046,11 @@ object TtyInputWait: ConsoleObject {
             ensures {
                 tty_input_wait_irq_rx_wakeup_first_slice(self);
                 tty_input_wait_does_not_poll_uart_rx(self);
+                tty_input_wait_read_wait_entry_first_slice(self);
+                tty_input_wait_read_wait_finish_first_slice(self);
+                tty_input_wait_poll_table_first_slice(self);
+                tty_input_wait_poll_freewait_first_slice(self);
+                tty_input_wait_scheduler_sleep_deferred(self);
                 tty_input_wait_full_waitqueue_deferred(self);
             }
         }
@@ -1053,6 +1067,11 @@ object TtyInputWait: ConsoleObject {
                     tty_input_wait_bound_to_flip_buffer(self, TtyFlipBuffer);
                     tty_input_wait_irq_rx_wakeup_first_slice(self);
                     tty_input_wait_does_not_poll_uart_rx(self);
+                    tty_input_wait_read_wait_entry_first_slice(self);
+                    tty_input_wait_read_wait_finish_first_slice(self);
+                    tty_input_wait_poll_table_first_slice(self);
+                    tty_input_wait_poll_freewait_first_slice(self);
+                    tty_input_wait_scheduler_sleep_deferred(self);
                     tty_input_wait_full_waitqueue_deferred(self);
                 }
             }
@@ -1064,6 +1083,11 @@ object TtyInputWait: ConsoleObject {
             tty_input_wait_bound_to_flip_buffer(TtyInputWait, TtyFlipBuffer);
             tty_input_wait_irq_rx_wakeup_first_slice(TtyInputWait);
             tty_input_wait_does_not_poll_uart_rx(TtyInputWait);
+            tty_input_wait_read_wait_entry_first_slice(TtyInputWait);
+            tty_input_wait_read_wait_finish_first_slice(TtyInputWait);
+            tty_input_wait_poll_table_first_slice(TtyInputWait);
+            tty_input_wait_poll_freewait_first_slice(TtyInputWait);
+            tty_input_wait_scheduler_sleep_deferred(TtyInputWait);
             tty_input_wait_full_waitqueue_deferred(TtyInputWait);
         }
     }

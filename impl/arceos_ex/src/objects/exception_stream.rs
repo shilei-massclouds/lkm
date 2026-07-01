@@ -2429,6 +2429,10 @@ fn tty_input_wait_for_fd_read_ready(fd: usize) -> bool {
         return false;
     }
 
+    crate::context::context_ref()
+        .files_struct
+        .record_tty_read_wait_entry();
+    print_tty_wait_trace("read", "enter", fd, None);
     let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
     crate::arch::riscv64::csr::enable_supervisor_interrupts();
     loop {
@@ -2438,11 +2442,19 @@ fn tty_input_wait_for_fd_read_ready(fd: usize) -> bool {
         {
             Ok(revents) if revents & FILE_POLLIN != 0 => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                crate::context::context_ref()
+                    .files_struct
+                    .record_tty_read_wait_finish(true);
+                print_tty_wait_trace("read", "finish", fd, Some(true));
                 return true;
             }
             Ok(_) => {}
             Err(_) => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                crate::context::context_ref()
+                    .files_struct
+                    .record_tty_read_wait_finish(false);
+                print_tty_wait_trace("read", "finish", fd, Some(false));
                 return false;
             }
         }
@@ -2459,17 +2471,44 @@ fn tty_input_wait_for_poll_ready(
         return false;
     }
 
+    crate::context::context_ref()
+        .files_struct
+        .record_tty_poll_wait_table();
+    print_tty_wait_trace(
+        "ppoll",
+        "enter",
+        first_read_interest_fd(pollfds, nfds),
+        None,
+    );
     let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
     crate::arch::riscv64::csr::enable_supervisor_interrupts();
     loop {
         match poll_user_fds_once(pollfds, nfds, revents_values) {
             Ok(ready_count) if ready_count != 0 => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                crate::context::context_ref()
+                    .files_struct
+                    .record_tty_poll_freewait(true);
+                print_tty_wait_trace(
+                    "ppoll",
+                    "freewait",
+                    first_read_interest_fd(pollfds, nfds),
+                    Some(true),
+                );
                 return true;
             }
             Ok(_) => {}
             Err(()) => {
                 crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+                crate::context::context_ref()
+                    .files_struct
+                    .record_tty_poll_freewait(false);
+                print_tty_wait_trace(
+                    "ppoll",
+                    "freewait",
+                    first_read_interest_fd(pollfds, nfds),
+                    Some(false),
+                );
                 return false;
             }
         }
@@ -2487,6 +2526,18 @@ fn pollfds_include_read_interest(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: u
         index += 1;
     }
     false
+}
+
+fn first_read_interest_fd(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -> usize {
+    let mut index = 0usize;
+    while index < nfds {
+        let pollfd = pollfds[index];
+        if pollfd.fd >= 0 && pollfd.events & FILE_POLLIN != 0 {
+            return pollfd.fd as usize;
+        }
+        index += 1;
+    }
+    usize::MAX
 }
 
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -4145,6 +4196,30 @@ fn print_ppoll_trace_entry(frame: &TrapFrame, index: usize, pollfd: UserPollFd, 
 
 #[cfg(not(checkpoint_handler_user_syscall_trace))]
 fn print_ppoll_trace_entry(_frame: &TrapFrame, _index: usize, _pollfd: UserPollFd, _revents: u16) {}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_tty_wait_trace(kind: &str, event: &str, fd: usize, ready: Option<bool>) {
+    crate::arch::riscv64::sbi::putstr("tty wait trace kind=");
+    crate::arch::riscv64::sbi::putstr(kind);
+    crate::arch::riscv64::sbi::putstr(" event=");
+    crate::arch::riscv64::sbi::putstr(event);
+    crate::arch::riscv64::sbi::putstr(" fd=");
+    if fd == usize::MAX {
+        crate::arch::riscv64::sbi::putstr("none");
+    } else {
+        print_decimal(fd);
+    }
+    crate::arch::riscv64::sbi::putstr(" ready=");
+    match ready {
+        Some(true) => crate::arch::riscv64::sbi::putstr("1"),
+        Some(false) => crate::arch::riscv64::sbi::putstr("0"),
+        None => crate::arch::riscv64::sbi::putstr("pending"),
+    }
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_tty_wait_trace(_kind: &str, _event: &str, _fd: usize, _ready: Option<bool>) {}
 
 #[cfg(checkpoint_handler_user_syscall_trace)]
 fn print_syscall_trace_value(value: usize) {

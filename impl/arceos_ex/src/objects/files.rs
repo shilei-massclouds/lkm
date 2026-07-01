@@ -976,6 +976,12 @@ pub struct FilesStruct {
     stdin_probe_ready_data_cleared: bool,
     stdin_ready_data_bound: bool,
     stdin_blocking_wait_enabled: bool,
+    tty_read_wait_entries: AtomicUsize,
+    tty_read_wait_finishes: AtomicUsize,
+    tty_poll_wait_tables: AtomicUsize,
+    tty_poll_freewaits: AtomicUsize,
+    tty_wait_interruptible_windows: AtomicUsize,
+    tty_wait_ready_wakeups: AtomicUsize,
     fd_lookup_routes_to_table: AtomicUsize,
     regular_file_slot_ready: bool,
     open_path_routes_to_vfs: AtomicUsize,
@@ -1029,6 +1035,12 @@ impl FilesStruct {
             stdin_probe_ready_data_cleared: false,
             stdin_ready_data_bound: false,
             stdin_blocking_wait_enabled: false,
+            tty_read_wait_entries: AtomicUsize::new(0),
+            tty_read_wait_finishes: AtomicUsize::new(0),
+            tty_poll_wait_tables: AtomicUsize::new(0),
+            tty_poll_freewaits: AtomicUsize::new(0),
+            tty_wait_interruptible_windows: AtomicUsize::new(0),
+            tty_wait_ready_wakeups: AtomicUsize::new(0),
             fd_lookup_routes_to_table: AtomicUsize::new(0),
             regular_file_slot_ready: false,
             open_path_routes_to_vfs: AtomicUsize::new(0),
@@ -1089,6 +1101,30 @@ impl FilesStruct {
 
     pub const fn stdin_blocking_wait_enabled(&self) -> bool {
         self.stdin_blocking_wait_enabled
+    }
+
+    pub fn tty_read_wait_entry_observed(&self) -> bool {
+        self.tty_read_wait_entries.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_read_wait_finish_observed(&self) -> bool {
+        self.tty_read_wait_finishes.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_poll_wait_table_observed(&self) -> bool {
+        self.tty_poll_wait_tables.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_poll_freewait_observed(&self) -> bool {
+        self.tty_poll_freewaits.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_wait_interruptible_window_observed(&self) -> bool {
+        self.tty_wait_interruptible_windows.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_wait_ready_wakeup_observed(&self) -> bool {
+        self.tty_wait_ready_wakeups.load(Ordering::Acquire) != 0
     }
 
     pub fn fd_lookup_routes_to_table(&self) -> bool {
@@ -1300,6 +1336,32 @@ impl FilesStruct {
 
         self.stdin_blocking_wait_enabled = true;
         Ok(())
+    }
+
+    pub fn record_tty_read_wait_entry(&self) {
+        self.tty_read_wait_entries.fetch_add(1, Ordering::AcqRel);
+        self.tty_wait_interruptible_windows
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn record_tty_read_wait_finish(&self, ready: bool) {
+        self.tty_read_wait_finishes.fetch_add(1, Ordering::AcqRel);
+        if ready {
+            self.tty_wait_ready_wakeups.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    pub fn record_tty_poll_wait_table(&self) {
+        self.tty_poll_wait_tables.fetch_add(1, Ordering::AcqRel);
+        self.tty_wait_interruptible_windows
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn record_tty_poll_freewait(&self, ready: bool) {
+        self.tty_poll_freewaits.fetch_add(1, Ordering::AcqRel);
+        if ready {
+            self.tty_wait_ready_wakeups.fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     pub fn prepare_default_stdin_ready_data(&mut self, bytes: &[u8]) -> FileResult<()> {
