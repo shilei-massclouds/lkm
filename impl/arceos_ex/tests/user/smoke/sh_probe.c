@@ -152,6 +152,14 @@ static int smoke_process_identity(void)
 		return 76;
 	}
 
+	rc = syscall(SYS_getpgid, 0);
+	if (rc != 1) {
+		return 81;
+	}
+	if (SAY_LITERAL("syscall getpgid ok\n") < 0) {
+		return 82;
+	}
+
 	return 0;
 }
 

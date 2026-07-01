@@ -72,6 +72,13 @@ impl UserSignalAction {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserProcessGroupLookup {
+    Found(usize),
+    NoSuchProcess,
+    NotReady,
+}
+
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
@@ -2803,6 +2810,8 @@ pub struct UserInitProcess {
     ppid_read_observed: bool,
     session_leader_first_slice: bool,
     process_group_leader_first_slice: bool,
+    process_group: usize,
+    process_group_read_observed: bool,
     controlling_tty_bound: bool,
     foreground_pgrp_bound: bool,
     foreground_pgrp: usize,
@@ -2878,6 +2887,8 @@ impl UserInitProcess {
             ppid_read_observed: false,
             session_leader_first_slice: false,
             process_group_leader_first_slice: false,
+            process_group: 0,
+            process_group_read_observed: false,
             controlling_tty_bound: false,
             foreground_pgrp_bound: false,
             foreground_pgrp: 0,
@@ -3073,6 +3084,14 @@ impl UserInitProcess {
         self.process_group_leader_first_slice
     }
 
+    pub const fn process_group(&self) -> usize {
+        self.process_group
+    }
+
+    pub const fn process_group_read_observed(&self) -> bool {
+        self.process_group_read_observed
+    }
+
     pub const fn controlling_tty_bound(&self) -> bool {
         self.controlling_tty_bound
     }
@@ -3260,6 +3279,7 @@ impl UserInitProcess {
         self.fsgid = 0;
         self.session_leader_first_slice = true;
         self.process_group_leader_first_slice = true;
+        self.process_group = super::rest_init::KERNEL_INIT_PID;
         self.controlling_tty_bound = true;
         self.foreground_pgrp_bound = true;
         self.foreground_pgrp = super::rest_init::KERNEL_INIT_PID;
@@ -3363,6 +3383,21 @@ impl UserInitProcess {
         self.ppid_zero_first_slice = true;
         self.ppid_read_observed = true;
         Some(0)
+    }
+
+    pub fn read_process_group(&mut self, pid: usize) -> UserProcessGroupLookup {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.process_group_leader_first_slice
+            || self.process_group == 0
+        {
+            return UserProcessGroupLookup::NotReady;
+        }
+        if pid != 0 && pid != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupLookup::NoSuchProcess;
+        }
+        self.process_group_read_observed = true;
+        UserProcessGroupLookup::Found(self.process_group)
     }
 
     pub fn read_foreground_pgrp(&mut self) -> Option<usize> {

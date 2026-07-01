@@ -128,6 +128,7 @@ predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> boo
 predicate arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask() -> bool;
 predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_getpgid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
@@ -1601,20 +1602,27 @@ type ArceosExStartupPhaseCodingMust {
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
-         * sys_geteuid()/sys_getegid()/sys_getresuid()/sys_getresgid()/
-         * sys_newuname(), fs/d_path.c::sys_getcwd(), init/main.c::rest_init(),
+         * do_getpgid()/sys_getpgid()/sys_geteuid()/sys_getegid()/
+         * sys_getresuid()/sys_getresgid()/sys_newuname(),
+         * fs/d_path.c::sys_getcwd(), init/main.c::rest_init(),
          * init/version-timestamp.c::init_uts_ns and
          * include/uapi/linux/utsname.h. getpid must return the current PID1
          * UserInitProcess thread-group id. getppid must model PID1's visible
          * boot idle/init_task parent as 0, without introducing a full task
-         * tree. geteuid/getegid/getresuid/getresgid must read the existing
-         * root credential substate and write uid_t/gid_t user results for
-         * getres*. uname must copy the six-field 65-byte new_utsname layout
-         * using the static local Linux 6.12 generated UTS values. getcwd must
-         * use the inherited FsStruct root/pwd view; the current slice covers
-         * only root cwd and returns "/\\0" with the Linux return length that
-         * includes the trailing NUL. User pointer failures must return EFAULT
-         * and too-small getcwd buffers must return ERANGE. Writable UTS
+         * tree. getpgid(0) must read the current UserInitProcess process group
+         * and return PID1's pgrp. The first single-PID slice may also accept
+         * getpgid(1) as the same task and return 1; unknown or negative pid
+         * values must follow Linux's failed lookup shape and return ESRCH.
+         * Full tasklist lookup, RCU protection, security_task_getpgid(), pid
+         * namespaces and multi-process process-group state remain trimmed.
+         * geteuid/getegid/getresuid/getresgid must read the existing root
+         * credential substate and write uid_t/gid_t user results for getres*.
+         * uname must copy the six-field 65-byte new_utsname layout using the
+         * static local Linux 6.12 generated UTS values. getcwd must use the
+         * inherited FsStruct root/pwd view; the current slice covers only root
+         * cwd and returns "/\\0" with the Linux return length that includes
+         * the trailing NUL. User pointer failures must return EFAULT and
+         * too-small getcwd buffers must return ERANGE. Writable UTS
          * namespaces, personality release override, hostname/domainname
          * mutation, full parent/child task graph, pid namespaces and non-root
          * credential/user namespace semantics remain trimmed.
@@ -1702,6 +1710,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask();
         arceos_ex_must_syscall_table_support_credentials_first_slice();
         arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice();
+        arceos_ex_must_syscall_table_support_getpgid_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();
