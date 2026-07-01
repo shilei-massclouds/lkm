@@ -136,7 +136,9 @@ predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
+predicate arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free() -> bool;
 predicate arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice() -> bool;
 predicate arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice() -> bool;
 predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
@@ -1493,6 +1495,21 @@ type ArceosExStartupPhaseCodingMust {
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
          * semantics.
          *
+         * mmap(222) must reference local Linux 6.12
+         * arch/riscv/kernel/sys_riscv.c::SYSCALL_DEFINE6(mmap),
+         * mm/mmap.c::ksys_mmap_pgoff()/do_mmap()/mmap_region(), and the
+         * asm-generic/linux mman UAPI headers. The current first slice keeps
+         * ordinary MAP_PRIVATE|MAP_ANONYMOUS allocation in the staged arena
+         * and additionally accepts the observed BusyBox/musl shape
+         * mmap(USER_HEAP_BASE, 4096, PROT_NONE,
+         * MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0). The anonymous path
+         * must not consume fd; the request must be page-aligned and wholly
+         * contained in the pre-mapped anonymous arena, returning the fixed
+         * address. Full MAP_FIXED replacement
+         * unmap, PROT_NONE PTEs, VMA split/merge, file-backed mmap,
+         * overcommit/accounting, ASLR area selection, MAP_FIXED_NOREPLACE,
+         * mmap locks and complete errno behavior remain trimmed.
+         *
          * The first directory slice must reference local Linux 6.12
          * fs/open.c::do_sys_openat2()/sys_openat(),
          * fs/readdir.c::sys_getdents64()/iterate_dir()/filldir64(), and
@@ -1543,6 +1560,16 @@ type ArceosExStartupPhaseCodingMust {
          * canonical N_TTY
          * line discipline, job control, poll/ppoll, signal interruption/restart,
          * controlling tty state and real IRQ wakeup remain deferred.
+         * PROBE=user-read-trace is the explicit diagnostic for read success
+         * and failure results that are invisible to user-syscall-error. It may
+         * print supported read(63) fd, requested length, USER_COPY_MAX capped
+         * length, success result or failure reason, trap mode, a0..a2, sepc
+         * and stval, plus an internal FileError/copy reason when available.
+         * It must not change the read return value, errno mapping, checkpoint
+         * ordering, user-smoke pass/fail policy or default make test output.
+         * A no-ready-data char-device read returning 0 is diagnostic evidence
+         * for the current trimmed implementation, not proof that Linux
+         * blocking N_TTY read semantics are complete.
          *
          * The /dev/tty, fd-dup, termios and foreground-pgrp slice must reference local Linux
          * 6.12 fs/open.c::build_open_flags()/do_sys_openat2(),
@@ -1652,6 +1679,12 @@ type ArceosExStartupPhaseCodingMust {
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
          * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, TCGETS/TCSETS,
          * TIOCGWINSZ and TIOCGPGRP/TIOCSPGRP.
+         *
+         * A success-path trace such as PROBE=user-read-trace is separate from
+         * user-syscall-error. It is required when a distro symptom can be
+         * caused by a successful syscall result, for example read(63)
+         * returning 0 and making /bin/sh treat stdin as EOF. Such a probe must
+         * remain explicit, low noise and side-effect free.
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
@@ -1779,7 +1812,9 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice();
         arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice();
         arceos_ex_must_syscall_table_support_tiocspgrp_first_slice();
+        arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
+        arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free();
         arceos_ex_must_syscall_table_support_fd_cloexec_fcntl_first_slice();
         arceos_ex_must_newfstatat_support_cwd_dot_component_and_nofollow_first_slice();
         arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug();

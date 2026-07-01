@@ -9,7 +9,8 @@ use super::{
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     user_boot::{
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
+        UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction,
+        USER_SIGNAL_COUNT,
     },
 };
 
@@ -2219,23 +2220,30 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
     let requested = frame.reg(12);
     let len = core::cmp::min(requested, USER_COPY_MAX);
     if len == 0 {
+        print_read_trace_success(frame, fd, requested, len, 0);
         complete_successful_syscall(frame, 0);
         return;
     }
 
     let mut buffer = [0u8; USER_COPY_MAX];
     let ctx = crate::context::context();
-    let Ok(read) = ctx.files_struct.read_fd(fd, &mut buffer[..len]) else {
-        complete_unsupported_syscall(frame);
-        return;
+    let read = match ctx.files_struct.read_fd(fd, &mut buffer[..len]) {
+        Ok(read) => read,
+        Err(error) => {
+            print_read_trace_file_error(frame, fd, requested, len, error);
+            complete_unsupported_syscall(frame);
+            return;
+        }
     };
     if !copy_to_user(user_ptr, &buffer[..read]) {
+        print_read_trace_copy_error(frame, fd, requested, len, read);
         complete_unsupported_syscall(frame);
         return;
     }
 
     table.read_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableRead, crate::context::context_ref());
+    print_read_trace_success(frame, fd, requested, len, read);
     complete_successful_syscall(frame, read);
 }
 
@@ -3269,17 +3277,24 @@ fn syscall_table_brk(frame: &mut TrapFrame) {
 fn syscall_table_mmap(frame: &mut TrapFrame) {
     let addr = frame.reg(10);
     let len = frame.reg(11);
-    let _prot = frame.reg(12);
+    let prot = frame.reg(12);
     let flags = frame.reg(13);
     let fd = frame.reg(14);
     let offset = frame.reg(15);
     let ctx = crate::context::context();
-    let Some(mapped) = ctx
+    let mapped = match ctx
         .user_address_space
-        .user_mmap(addr, len, flags, fd, offset)
-    else {
-        complete_error_syscall(frame, ENOMEM);
-        return;
+        .user_mmap(addr, len, prot, flags, fd, offset)
+    {
+        Ok(mapped) => mapped,
+        Err(UserMmapError::Invalid) => {
+            complete_error_syscall(frame, EINVAL);
+            return;
+        }
+        Err(UserMmapError::NoMemory) => {
+            complete_error_syscall(frame, ENOMEM);
+            return;
+        }
     };
     complete_successful_syscall(frame, mapped);
 }
@@ -3756,6 +3771,106 @@ fn print_unsupported_syscall_detail(frame: &TrapFrame) {
     }
 }
 
+#[cfg(checkpoint_handler_user_read_trace)]
+fn print_read_trace_success(
+    frame: &TrapFrame,
+    fd: usize,
+    requested: usize,
+    capped: usize,
+    result: usize,
+) {
+    print_read_trace_prefix(frame, fd, requested, capped);
+    crate::arch::riscv64::sbi::putstr(" result=");
+    print_decimal(result);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_read_trace))]
+fn print_read_trace_success(
+    _frame: &TrapFrame,
+    _fd: usize,
+    _requested: usize,
+    _capped: usize,
+    _result: usize,
+) {
+}
+
+#[cfg(checkpoint_handler_user_read_trace)]
+fn print_read_trace_file_error(
+    frame: &TrapFrame,
+    fd: usize,
+    requested: usize,
+    capped: usize,
+    error: FileError,
+) {
+    print_read_trace_prefix(frame, fd, requested, capped);
+    crate::arch::riscv64::sbi::putstr(" failure=file_error file_error=");
+    print_file_error_name(error);
+    crate::arch::riscv64::sbi::putstr(" unsupported_errno=");
+    print_decimal(ENOSYS);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_read_trace))]
+fn print_read_trace_file_error(
+    _frame: &TrapFrame,
+    _fd: usize,
+    _requested: usize,
+    _capped: usize,
+    _error: FileError,
+) {
+}
+
+#[cfg(checkpoint_handler_user_read_trace)]
+fn print_read_trace_copy_error(
+    frame: &TrapFrame,
+    fd: usize,
+    requested: usize,
+    capped: usize,
+    read: usize,
+) {
+    print_read_trace_prefix(frame, fd, requested, capped);
+    crate::arch::riscv64::sbi::putstr(" failure=copy_to_user copied_len=");
+    print_decimal(read);
+    crate::arch::riscv64::sbi::putstr(" unsupported_errno=");
+    print_decimal(ENOSYS);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_read_trace))]
+fn print_read_trace_copy_error(
+    _frame: &TrapFrame,
+    _fd: usize,
+    _requested: usize,
+    _capped: usize,
+    _read: usize,
+) {
+}
+
+#[cfg(checkpoint_handler_user_read_trace)]
+fn print_read_trace_prefix(frame: &TrapFrame, fd: usize, requested: usize, capped: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall read trace nr=");
+    print_decimal(SYSCALL_READ);
+    crate::arch::riscv64::sbi::putstr(" name=read fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" requested=");
+    print_decimal(requested);
+    crate::arch::riscv64::sbi::putstr(" capped=");
+    print_decimal(capped);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    crate::arch::riscv64::sbi::putstr(" a0=0x");
+    print_hex(frame.reg(10));
+    crate::arch::riscv64::sbi::putstr(" a1=0x");
+    print_hex(frame.reg(11));
+    crate::arch::riscv64::sbi::putstr(" a2=0x");
+    print_hex(frame.reg(12));
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+}
+
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
     crate::arch::riscv64::sbi::putstr("syscall error");
@@ -4006,7 +4121,10 @@ fn print_path_bytes(path: &[u8]) {
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_path_syscall_error_detail(_error: FileError, _path: &[u8]) {}
 
-#[cfg(checkpoint_handler_user_syscall_error)]
+#[cfg(any(
+    checkpoint_handler_user_syscall_error,
+    checkpoint_handler_user_read_trace
+))]
 fn print_file_error_name(error: FileError) {
     let name = match error {
         FileError::NotReady => "NotReady",

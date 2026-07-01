@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/utsname.h>
@@ -314,6 +315,22 @@ static int smoke_getrandom(void)
 	return 0;
 }
 
+static int smoke_mmap_fixed_prot_none(void)
+{
+	void *fixed = (void *)0x30000000UL;
+	long rc;
+
+	rc = syscall(SYS_mmap, fixed, 4096, PROT_NONE,
+		     MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+	if (rc != (long)(unsigned long)fixed) {
+		return 95;
+	}
+	if (SAY_LITERAL("syscall mmap MAP_FIXED PROT_NONE ok\n") < 0) {
+		return 96;
+	}
+	return 0;
+}
+
 int smoke_sh_probe(void)
 {
 	int status;
@@ -342,6 +359,10 @@ int smoke_sh_probe(void)
 		return status;
 	}
 	status = smoke_time_syscalls();
+	if (status != 0) {
+		return status;
+	}
+	status = smoke_mmap_fixed_prot_none();
 	if (status != 0) {
 		return status;
 	}

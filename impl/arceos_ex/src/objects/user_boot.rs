@@ -3,13 +3,15 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
+use super::files::STDIN_READY_FIXTURE;
+#[cfg(app_user_boot)]
 use super::{
     block_device::BlockDeviceRegistry, boot_param::BootParam, command_line::StaticCommandLine,
     ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk,
 };
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
-    files::{FilesStruct, STDIN_READY_FIXTURE},
+    files::FilesStruct,
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
@@ -86,6 +88,12 @@ pub enum UserProcessGroupUpdate {
     NoSuchProcess,
     PermissionDenied,
     NotReady,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserMmapError {
+    Invalid,
+    NoMemory,
 }
 
 fn pid_t_arg(value: usize) -> i32 {
@@ -1260,6 +1268,12 @@ fn align_up(value: usize, align: usize) -> usize {
     (value + align - 1) & !(align - 1)
 }
 
+fn align_up_checked(value: usize, align: usize) -> Option<usize> {
+    value
+        .checked_add(align - 1)
+        .map(|value| value & !(align - 1))
+}
+
 fn write_stack_usize(
     stack: &UserStack,
     page_metadata_map: &PageMetadataMap,
@@ -1797,37 +1811,62 @@ impl UserAddressSpace {
         &mut self,
         addr: usize,
         len: usize,
+        prot: usize,
         flags: usize,
-        fd: usize,
+        _fd: usize,
         offset: usize,
-    ) -> Option<usize> {
+    ) -> Result<usize, UserMmapError> {
         if self.lifecycle.state() != State::Online || !self.heap_mapped || len == 0 {
-            return None;
+            return if len == 0 {
+                Err(UserMmapError::Invalid)
+            } else {
+                Err(UserMmapError::NoMemory)
+            };
         }
+        const PROT_NONE: usize = 0x0;
         const MAP_PRIVATE: usize = 0x02;
+        const MAP_FIXED: usize = 0x10;
         const MAP_ANONYMOUS: usize = 0x20;
+        const SUPPORTED_FLAGS: usize = MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS;
+        if offset % USER_PAGE_SIZE != 0 {
+            return Err(UserMmapError::Invalid);
+        }
+        if flags & !SUPPORTED_FLAGS != 0 {
+            return Err(UserMmapError::Invalid);
+        }
         if flags & MAP_ANONYMOUS == 0 || flags & MAP_PRIVATE == 0 {
-            return None;
+            return Err(UserMmapError::Invalid);
         }
-        if fd != usize::MAX || offset != 0 {
-            return None;
-        }
-        let len = align_up(len, USER_PAGE_SIZE);
+        let len = align_up_checked(len, USER_PAGE_SIZE).ok_or(UserMmapError::NoMemory)?;
         let mmap_start = self.heap_base + self.heap_size / 2;
-        let mmap_end = self.heap_base + self.heap_size;
+        let heap_end = self.heap_base + self.heap_size;
+        if flags == (MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS) {
+            if prot == PROT_NONE
+                && addr % USER_PAGE_SIZE == 0
+                && len == USER_PAGE_SIZE
+                && addr >= self.heap_base
+                && addr
+                    .checked_add(len)
+                    .filter(|end| *end <= heap_end)
+                    .is_some()
+            {
+                return Ok(addr);
+            }
+            return Err(UserMmapError::NoMemory);
+        }
         let base = if addr != 0 {
             align_down(addr, USER_PAGE_SIZE)
         } else {
             self.mmap_next
         };
-        let end = base.checked_add(len)?;
-        if base < mmap_start || end > mmap_end {
-            return None;
+        let end = base.checked_add(len).ok_or(UserMmapError::NoMemory)?;
+        if base < mmap_start || end > heap_end {
+            return Err(UserMmapError::NoMemory);
         }
         if addr == 0 {
             self.mmap_next = end;
         }
-        Some(base)
+        Ok(base)
     }
 
     pub fn user_mprotect(&self, addr: usize, len: usize) -> bool {

@@ -191,6 +191,7 @@ predicate user_address_space_prepared_but_not_current<T>(space: T) -> bool;
 predicate user_address_space_runtime_ready<T>(space: T) -> bool;
 predicate user_address_space_brk_window_bound<T>(space: T) -> bool;
 predicate user_address_space_mmap_anonymous_window_bound<T>(space: T) -> bool;
+predicate user_address_space_mmap_fixed_heap_base_compat_bound<T>(space: T) -> bool;
 predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
@@ -307,6 +308,8 @@ predicate syscall_nanosleep_full_hrtimer_deferred<T>(table: T) -> bool;
 predicate syscall_time_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
+predicate syscall_mmap_fixed_anonymous_prot_none_first_slice<T>(table: T) -> bool;
+predicate syscall_mmap_full_vma_model_deferred<T>(table: T) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_set_tid_address_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
@@ -323,6 +326,7 @@ predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
+predicate syscall_read_trace_probe_observes_result_without_side_effect<T>(table: T) -> bool;
 predicate syscall_table_ppoll_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
@@ -636,6 +640,7 @@ object UserAddressSpace: ResourceObject {
                 ensures {
                     user_address_space_heap_arena_mapped(self);
                     user_address_space_mmap_anonymous_window_bound(self);
+                    user_address_space_mmap_fixed_heap_base_compat_bound(self);
                 }
             }
 
@@ -910,6 +915,8 @@ object SyscallTable: ResourceObject {
                     syscall_time_usercopy_ready(self);
                     syscall_nanosleep_usercopy_ready(self);
                     syscall_ioctl_usercopy_ready(self);
+                    syscall_mmap_fixed_anonymous_prot_none_first_slice(self);
+                    syscall_mmap_full_vma_model_deferred(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
@@ -1061,7 +1068,10 @@ object SyscallTable: ResourceObject {
                  * the TTY side already contains bounded ready data. Blocking
                  * wait queues, canonical line discipline, job control, signal
                  * interruption/restart, poll/ppoll and real RX wakeup remain
-                 * deferred.
+                 * deferred. A user-read-trace probe may observe fd, requested
+                 * length and the returned read result for distro debugging, but
+                 * must not alter this action's return value, errno path,
+                 * checkpoint ordering or smoke pass/fail policy.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1087,6 +1097,7 @@ object SyscallTable: ResourceObject {
                     tty_flip_buffer_ready_data_consumed(TtyFlipBuffer);
                     syscall_read_tty_blocking_deferred(self);
                     tty_n_tty_blocking_read_deferred(TtyFlipBuffer);
+                    syscall_read_trace_probe_observes_result_without_side_effect(self);
                     syscall_table_read_observed(self);
                 }
             }
@@ -1804,6 +1815,8 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_table_mmap_supported(self);
                     syscall_mmap_routes_to_user_address_space(self, UserAddressSpace);
+                    syscall_mmap_fixed_anonymous_prot_none_first_slice(self);
+                    syscall_mmap_full_vma_model_deferred(self);
                 }
             }
 
