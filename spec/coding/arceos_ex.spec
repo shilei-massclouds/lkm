@@ -2754,12 +2754,23 @@ type ArceosExBlockIoCodingMust {
          * existing disk image. Explicit rebuild remains a command decision
          * through FORCE=1 or disk-clean.
          *
-         * QEMU_APPEND defaults to "earlycon=sbi", and the run target must pass
-         * it through to QEMU as -append "$(QEMU_APPEND)". Overriding
-         * QEMU_APPEND, for example with "earlycon=sbi init=/bin/ls", changes
-         * the Linux-like kernel command line and init selection. It is not a
-         * substitute for rootfs overlay, which remains the stable fixture
-         * injection mechanism for default user_smoke and staged probes.
+         * QEMU_APPEND defaults to "earlycon=sbi" for ordinary APPs. For a
+         * manual APP=user-boot run, the default MUST be
+         * "earlycon=sbi init=/bin/sh" so plain "make run APP=user-boot"
+         * enters the distro BusyBox shell through the Linux-like requested-init
+         * branch. The run target must pass QEMU_APPEND through to QEMU as
+         * -append "$(QEMU_APPEND)", and an explicit command-line QEMU_APPEND
+         * must continue to override the default; for example,
+         * "earlycon=sbi init=/bin/ls" selects /bin/ls, while "earlycon=sbi"
+         * lets the fallback list select /sbin/init.
+         *
+         * The test harness MUST NOT inherit the manual user-boot /bin/sh
+         * default for the user_smoke fixture. make test user-boot smoke cases
+         * must pass a case-local disk image, the default overlay map, FORCE=1,
+         * and QEMU_APPEND="earlycon=sbi" explicitly so they exercise the
+         * overlay-installed /sbin/init fixture and remain non-interactive.
+         * init= is not a substitute for rootfs overlay, which remains the
+         * stable fixture injection mechanism for user_smoke and staged probes.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
@@ -2774,7 +2785,8 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_user_syscall_analysis_mark_busybox_candidates_conservative();
         arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12();
         arceos_ex_must_disk_build_default_not_rebuild_existing_image();
-        arceos_ex_must_qemu_append_default_to_earlycon_sbi_and_passthrough();
+        arceos_ex_must_qemu_append_default_user_boot_to_bin_sh_and_passthrough();
+        arceos_ex_must_test_harness_pin_user_smoke_qemu_append();
         arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support();
 
         /*

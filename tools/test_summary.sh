@@ -99,7 +99,7 @@ run_user_boot_overlay_case() {
     local image=$5
 
     run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1
+        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
 run_user_boot_overlay_append_case() {

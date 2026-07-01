@@ -36,7 +36,7 @@ make run
 make run APP=user-boot
 ```
 
-`APP=user-boot` 会走普通用户态 payload 读取与启动路径，是 `docs/DEFECTS.md` 中 DF-0001 的固定复现入口之一。定位这类间歇性问题时，不要只用 probe 路径替代普通路径，因为额外观测可能改变时序。
+`APP=user-boot` 会走普通用户态 payload 读取与启动路径。默认命令行会指定 `init=/bin/sh`，进入 Alpine rootfs 内的 BusyBox shell；在 shell 中输入 `exit` 可退出并触发 `user exit status=0`。该入口也是 `docs/DEFECTS.md` 中 DF-0001 的固定复现入口之一。定位这类间歇性问题时，不要只用 probe 路径替代普通路径，因为额外观测可能改变时序。
 
 ### Rootfs Overlay
 
@@ -48,10 +48,10 @@ make run APP=user-boot
 /sbin/init    user_smoke  musl  dynamic
 ```
 
-因此单独运行当前用户态 smoke 可以用：
+手工 `make run APP=user-boot` 默认通过 `init=/bin/sh` 进入发行版 shell，不会选择 overlay 后的 `/sbin/init`。单独运行当前用户态 smoke 时，需要显式让内核走默认 fallback 列表：
 
 ```sh
-make run APP=user-boot FORCE=1
+make run APP=user-boot QEMU_APPEND='earlycon=sbi' FORCE=1
 ```
 
 `FORCE=1` 会重新生成 disk，确保当前 overlay map 和 `impl/arceos_ex/tests/user/smoke/` 下的源码被重新编译进 rootfs。若不加 `FORCE=1`，`make run APP=user-boot` 会复用已有的 `impl/arceos_ex/build/virtio-blk.raw`。
@@ -59,7 +59,7 @@ make run APP=user-boot FORCE=1
 需要不污染默认 disk 时，可以指定临时 disk：
 
 ```sh
-make run APP=user-boot VIRTIO_BLK_IMAGE=/tmp/lkm-user-smoke.raw FORCE=1
+make run APP=user-boot QEMU_APPEND='earlycon=sbi' VIRTIO_BLK_IMAGE=/tmp/lkm-user-smoke.raw FORCE=1
 ```
 
 禁用构造期 overlay、直接使用 Alpine rootfs 内容时：
@@ -78,10 +78,16 @@ make run APP=user-boot PROBE=announce
 
 ### Kernel Command Line
 
-`impl/arceos_ex/Makefile` 默认设置：
+`impl/arceos_ex/Makefile` 对普通 app 默认设置：
 
 ```text
 QEMU_APPEND ?= earlycon=sbi
+```
+
+对 `APP=user-boot`，默认值是：
+
+```text
+QEMU_APPEND ?= earlycon=sbi init=/bin/sh
 ```
 
 `make run` 会把该值原样传给 QEMU 的 `-append`。需要指定 Linux-like requested init 时，可以覆盖：
@@ -90,7 +96,7 @@ QEMU_APPEND ?= earlycon=sbi
 make run APP=user-boot QEMU_APPEND='earlycon=sbi init=/bin/ls' FORCE=1
 ```
 
-`init=` 只改变内核命令行下的 init 选择语义；rootfs overlay 仍用于构造测试 disk 时注入稳定 fixture。
+`init=` 只改变内核命令行下的 init 选择语义；rootfs overlay 仍用于构造测试 disk 时注入稳定 fixture。`make test` 的 user-boot smoke case 会显式传入 `QEMU_APPEND=earlycon=sbi`、临时 disk 和默认 overlay map，因此仍验证 `user_smoke`，不会进入交互式 shell。
 
 ## Provider 机制
 

@@ -61,7 +61,11 @@ RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
-QEMU_APPEND ?= earlycon=sbi
+DEFAULT_QEMU_APPEND := earlycon=sbi
+ifeq ($(APP),user-boot)
+DEFAULT_QEMU_APPEND := earlycon=sbi init=/bin/sh
+endif
+QEMU_APPEND ?= $(DEFAULT_QEMU_APPEND)
 VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
 VIRTIO_BLK_IMAGE_SIZE ?= 64M
 FS_TYPE ?= ext2
