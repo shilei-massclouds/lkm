@@ -34,6 +34,18 @@ formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and
 the final `APP=smoke` payload smoke run. Use root `make test-kunit` or
 `make test-smoke` when only one runtime path is needed.
 
+Stress tests are run from the repository root with the dedicated runner:
+
+```bash
+impl/arceos_ex/tests/stress/runner.py --runs 30
+```
+
+When no case is specified, the runner executes the standard stress suite. Use
+`--runs 0` for a dry configuration check without starting QEMU, or pass a case
+file such as `impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml` to run
+only that case. Detailed output layout and case policy are documented in
+`impl/arceos_ex/tests/stress/README.md`.
+
 Prerequisites:
 
 ```bash

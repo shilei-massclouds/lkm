@@ -2,9 +2,9 @@
 
 内核寄生于计算机并对其进行控制。
 
-> 内核：即操作系统内核，正式英文名称是Kernel
->
-> 计算机：正式英文名称是Computer
+内核：即操作系统内核，正式英文名称是Kernel
+
+计算机：正式英文名称是Computer
 
 内核是一个独立的系统，所驱使的计算机是更高一级的系统。内核与硬件、固件以及应用共同构成计算机系统，而它是计算机系统的核心。
 
@@ -37,6 +37,14 @@
 本项目采用相对简单的状态机模型，简化未来的建模、推导。
 
 唯一复杂之处在于，事件不仅可以来自外部，也可以是来自迁移完成时触发的通知，是否触发可以根据情况配置。通过此机制可以让部分状态无须由外部事件触发而自动迁移，进而达到一个外部事件引起多个状态顺序推进的连锁反应效果。
+
+> MUST: 状态机规格
+>
+> 1. 只有事件可以推动状态的迁移
+> 2. 事件类型只有外部事件和迁移完成事件两种
+> 3. 外部事件由其他对象发出
+> 4. 迁移完成事件是可选的，可以要求某个迁移在完成时发出
+> 5. 迁移完成事件的内部执行顺序是：驱动其他对象的迁移或动作 -> 更新自己的状态到目标状态 -> 触发迁移完成事件（可选）
 
 ## 惰性状态机
 
@@ -110,3 +118,34 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 ## 内核系统规格
 
 内核系统的规格遵循状态机模型，针对内核完整的生命周期建立规格。
+
+## BootPhase Subphases
+
+- `EntryPreludePhase`
+- `EntrySuccessorPhase`
+- `CorePreparePhase`
+- `MmCoreInitPhase`
+- `SchedInitPhase`
+- `IrqTimeInitPhase`
+
+## InterruptPhase Subphases
+
+- `LocalIrqEnablePhase`
+- `IrqOpenPreparePhase`
+- `ProcessPreparePhase`
+- `BootInitRestInitPhase`
+
+## UpMultitaskPhase Subphases
+
+- `BootInitScheduleHandoffPhase`
+- `BootIdleEntryPhase`
+- `PreSmpInitPhase`
+
+## SmpRuntimePhase Subphases
+
+- `SmpBringupPhase`
+- `RuntimeCorePhase`
+- `InitcallPhase`
+- `RootfsPhase`
+- `FinalizePhase`
+- `PayloadPhase`
