@@ -140,26 +140,33 @@ make run PLIC_PROVIDER=linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 
 ## 压力测试
 
-压力测试根目录位于 `impl/arceos_ex/tests/stress/`。不指定 case 时会运行默认压力测试套件，当前覆盖 DF-0001 的普通 `make run APP=user-boot` 入口和 DF-0002 的普通 `make run APP=smoke` 入口：
+压力测试根目录位于 `impl/arceos_ex/tests/stress/`。日常入口是：
 
 ```sh
-impl/arceos_ex/tests/stress/runner.py --runs 30
+make stress-test
 ```
 
-`--runs N` 会应用到套件里的每个 case。
+默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前覆盖 DF-0001 的非 probe `APP=user-boot` overlay `/sbin/init` 路径和 DF-0002 的非 probe `APP=smoke` 路径。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。
+
+常用覆盖方式：
+
+```sh
+make stress-test STRESS_RUNS=30
+make stress-test STRESS_TIMEOUT=60
+```
 
 只检查配置和输出目录生成、不执行 QEMU：
 
 ```sh
-impl/arceos_ex/tests/stress/runner.py --runs 0
+make stress-test STRESS_RUNS=0
 ```
 
 也可以显式指定 case；此时只运行指定 case：
 
 ```sh
-impl/arceos_ex/tests/stress/runner.py \
-  impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml \
-  --runs 30
+make stress-test \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml \
+  STRESS_RUNS=30
 ```
 
 每次压力测试会在 `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` 下保存原始日志、结构化事件、去重后的事件序列、分类统计和 `report.md`。重复序列只保存第一次代表样本，后续 run 通过计数和 run id 归档。

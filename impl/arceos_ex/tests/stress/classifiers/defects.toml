@@ -23,6 +23,12 @@ contains = ["arceos_ex allocation error"]
 description = "Kernel allocation error was printed."
 
 [[rules]]
+id = "smoke-result-failed"
+result = "failure"
+contains = ["result: FAILED", " failed="]
+description = "Smoke app reported one or more failed cases."
+
+[[rules]]
 id = "user-boot-success"
 result = "success"
 contains = ["user exit status=0"]

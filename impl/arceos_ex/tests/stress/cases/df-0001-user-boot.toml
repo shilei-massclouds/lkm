@@ -3,7 +3,22 @@ description = "Repeat the ordinary user-boot path to reproduce DF-0001."
 default_runs = 30
 timeout_seconds = 120
 working_directory = "."
-command = ["make", "run", "APP=user-boot"]
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
+  "ROOTFS_OVERLAY=default",
+]
+command = [
+  "make",
+  "run",
+  "APP=user-boot",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
+  "QEMU_APPEND=earlycon=sbi",
+]
 classifier = "../classifiers/defects.toml"
 
 [metadata]

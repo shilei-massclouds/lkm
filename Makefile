@@ -13,12 +13,17 @@ KUNIT_HANDLERS ?= impl/arceos_ex/tests/kunit.handlers
 KUNIT_APP ?= hello
 SMOKE_APP ?= smoke
 TEST_PLIC_PROVIDERS ?= $(strip $(foreach provider,$(PROVIDER_NAMES),$(if $(filter plic,$(PROVIDER_$(provider)_KIND)),$(provider))))
+STRESS_RUNS ?= 10
+STRESS_CASES ?=
+STRESS_TIMEOUT ?=
 
 KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
+STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
+STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify test test-verify test-kunit test-smoke clean
+.PHONY: build run disk disk-clean verify test test-verify test-kunit test-smoke stress-test clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -50,6 +55,9 @@ test-kunit:
 
 test-smoke:
 	$(MAKE) run APP=$(SMOKE_APP)
+
+stress-test:
+	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_TIMEOUT_ARG)
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean

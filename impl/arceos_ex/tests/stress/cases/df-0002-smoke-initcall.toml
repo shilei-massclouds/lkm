@@ -3,7 +3,21 @@ description = "Repeat the ordinary smoke path to reproduce DF-0002."
 default_runs = 30
 timeout_seconds = 120
 working_directory = "."
-command = ["make", "run", "APP=smoke"]
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall.raw",
+  "ROOTFS_OVERLAY=default",
+]
+command = [
+  "make",
+  "run",
+  "APP=smoke",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall.raw",
+]
 classifier = "../classifiers/defects.toml"
 
 [metadata]

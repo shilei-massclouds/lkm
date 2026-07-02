@@ -3,7 +3,24 @@ description = "Repeat user-boot with unified in-guest memory capture for DF-0001
 default_runs = 30
 timeout_seconds = 120
 working_directory = "."
-command = ["make", "run", "APP=user-boot", "PROBE=stress-mem", "STRESS_MEM_BYTES=65536"]
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot-stress-mem.raw",
+  "ROOTFS_OVERLAY=default",
+]
+command = [
+  "make",
+  "run",
+  "APP=user-boot",
+  "PROBE=stress-mem",
+  "STRESS_MEM_BYTES=65536",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot-stress-mem.raw",
+  "QEMU_APPEND=earlycon=sbi",
+]
 classifier = "../classifiers/defects.toml"
 
 [metadata]
