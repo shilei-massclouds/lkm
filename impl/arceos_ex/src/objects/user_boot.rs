@@ -3148,6 +3148,9 @@ pub struct UserInitProcess {
     process_group: usize,
     process_group_read_observed: bool,
     process_group_set_observed: bool,
+    child_process_group_visible: bool,
+    child_process_group: usize,
+    child_process_group_set_observed: bool,
     controlling_tty_bound: bool,
     foreground_pgrp_bound: bool,
     foreground_pgrp: usize,
@@ -3611,6 +3614,9 @@ impl UserInitProcess {
             process_group: 0,
             process_group_read_observed: false,
             process_group_set_observed: false,
+            child_process_group_visible: false,
+            child_process_group: 0,
+            child_process_group_set_observed: false,
             controlling_tty_bound: false,
             foreground_pgrp_bound: false,
             foreground_pgrp: 0,
@@ -3819,6 +3825,18 @@ impl UserInitProcess {
         self.process_group_set_observed
     }
 
+    pub const fn child_process_group_visible(&self) -> bool {
+        self.child_process_group_visible
+    }
+
+    pub const fn child_process_group(&self) -> usize {
+        self.child_process_group
+    }
+
+    pub const fn child_process_group_set_observed(&self) -> bool {
+        self.child_process_group_set_observed
+    }
+
     pub const fn controlling_tty_bound(&self) -> bool {
         self.controlling_tty_bound
     }
@@ -4011,6 +4029,9 @@ impl UserInitProcess {
         self.session_leader_first_slice = true;
         self.process_group_leader_first_slice = true;
         self.process_group = super::rest_init::KERNEL_INIT_PID;
+        self.child_process_group_visible = false;
+        self.child_process_group = 0;
+        self.child_process_group_set_observed = false;
         self.controlling_tty_bound = true;
         self.foreground_pgrp_bound = true;
         self.foreground_pgrp = super::rest_init::KERNEL_INIT_PID;
@@ -4125,16 +4146,35 @@ impl UserInitProcess {
             return UserProcessGroupLookup::NotReady;
         }
         if pid != 0 && pid != super::rest_init::KERNEL_INIT_PID {
+            if pid == USER_CHILD_PID && self.child_process_group_visible {
+                self.process_group_read_observed = true;
+                return UserProcessGroupLookup::Found(self.child_process_group);
+            }
             return UserProcessGroupLookup::NoSuchProcess;
         }
         self.process_group_read_observed = true;
         UserProcessGroupLookup::Found(self.process_group)
     }
 
+    pub fn observe_child_process_group_visible(&mut self, child_pid: usize) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || child_pid != USER_CHILD_PID
+            || self.process_group == 0
+        {
+            return false;
+        }
+
+        self.child_process_group_visible = true;
+        self.child_process_group = self.process_group;
+        true
+    }
+
     pub fn set_process_group_first_slice(
         &mut self,
         pid_arg: usize,
         pgid_arg: usize,
+        current_child_continuation: bool,
     ) -> UserProcessGroupUpdate {
         if self.lifecycle.state() != State::Online
             || !self.pid1_preserved
@@ -4150,13 +4190,37 @@ impl UserInitProcess {
         if pgid < 0 {
             return UserProcessGroupUpdate::Invalid;
         }
-        let normalized_pid = if pid == 0 {
+        let current_pid = if current_child_continuation {
+            USER_CHILD_PID
+        } else {
             super::rest_init::KERNEL_INIT_PID
+        };
+        let normalized_pid = if pid == 0 {
+            current_pid
         } else if pid < 0 {
             return UserProcessGroupUpdate::NoSuchProcess;
         } else {
             pid as usize
         };
+
+        if normalized_pid == USER_CHILD_PID {
+            if !self.child_process_group_visible {
+                return UserProcessGroupUpdate::NoSuchProcess;
+            }
+            let normalized_pgid = if pgid == 0 {
+                normalized_pid
+            } else {
+                pgid as usize
+            };
+            if normalized_pgid != USER_CHILD_PID {
+                return UserProcessGroupUpdate::PermissionDenied;
+            }
+            self.child_process_group = normalized_pgid;
+            self.process_group_set_observed = true;
+            self.child_process_group_set_observed = true;
+            return UserProcessGroupUpdate::Updated(self.child_process_group);
+        }
+
         if normalized_pid != super::rest_init::KERNEL_INIT_PID {
             return UserProcessGroupUpdate::NoSuchProcess;
         }
@@ -4207,6 +4271,12 @@ impl UserInitProcess {
             return UserProcessGroupUpdate::Invalid;
         }
         if pgrp as usize != super::rest_init::KERNEL_INIT_PID {
+            if self.child_process_group_visible && self.child_process_group == pgrp as usize {
+                self.foreground_pgrp = pgrp as usize;
+                self.foreground_pgrp_bound = true;
+                self.foreground_pgrp_set_observed = true;
+                return UserProcessGroupUpdate::Updated(self.foreground_pgrp);
+            }
             return UserProcessGroupUpdate::NoSuchProcess;
         }
         if self.process_group != super::rest_init::KERNEL_INIT_PID {

@@ -2878,9 +2878,12 @@ fn syscall_table_getpgid(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
     let pgid = frame.reg(11);
-    let update = crate::context::context()
-        .user_init_process
-        .set_process_group_first_slice(pid, pgid);
+    let update = {
+        let ctx = crate::context::context();
+        let current_child_continuation = ctx.user_child_process.child_continuation_taken();
+        ctx.user_init_process
+            .set_process_group_first_slice(pid, pgid, current_child_continuation)
+    };
     match update {
         UserProcessGroupUpdate::Updated(_) => {
             table.setpgid_observed.store(1, Ordering::Release);
@@ -3838,6 +3841,13 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             return;
         }
         if !ctx.user_child_process.mark_enqueued() {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+        if !ctx
+            .user_init_process
+            .observe_child_process_group_visible(child_pid)
+        {
             complete_unsupported_syscall(frame);
             return;
         }
