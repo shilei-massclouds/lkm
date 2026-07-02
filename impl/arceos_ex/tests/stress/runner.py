@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import selectors
 import signal
 import subprocess
 import sys
@@ -24,6 +26,7 @@ STRESS_DIR = Path(__file__).resolve().parent
 DEFAULT_SUITE = (
     STRESS_DIR / "cases" / "df-0001-user-boot.toml",
     STRESS_DIR / "cases" / "df-0002-smoke-initcall.toml",
+    STRESS_DIR / "cases" / "df-0003-distro-sh-ls.toml",
 )
 DEFAULT_OUT_ROOT = Path(__file__).resolve().parent / "out"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -51,6 +54,12 @@ STRESS_MEM_RE = re.compile(
     r"^stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
     r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data=(?P<data>[0-9a-f]*)$"
 )
+
+
+@dataclass(frozen=True)
+class DelayedStdin:
+    ready_marker: str
+    payload: str
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,9 +109,20 @@ def _run_case(
     output_dir.mkdir(parents=True, exist_ok=False)
 
     command = _string_list(case, "command")
+    delayed_stdin = _delayed_stdin(case)
     workdir = _resolve_workdir(repo_root, case.get("working_directory", "."))
     rules = _classifier_rules(classifier)
-    manifest = _manifest(case, case_path, classifier_path, command, runs, timeout, repo_root, workdir)
+    manifest = _manifest(
+        case,
+        case_path,
+        classifier_path,
+        command,
+        delayed_stdin,
+        runs,
+        timeout,
+        repo_root,
+        workdir,
+    )
     _write_json(output_dir / "manifest.json", manifest)
 
     sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -144,6 +164,7 @@ def _run_case(
             repo_root=repo_root,
             workdir=workdir,
             timeout=timeout,
+            delayed_stdin=delayed_stdin,
             env_updates=_string_map(case.get("env", {}), "env"),
             rules=rules,
         )
@@ -176,7 +197,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "cases",
         nargs="*",
         type=Path,
-        help="stress case TOML(s); default: standard DF-0001 + DF-0002 suite",
+        help="stress case TOML(s); default: standard DF-0001 + DF-0002 + DF-0003 suite",
     )
     parser.add_argument("--repo-root", type=Path, help="repository root, auto-detected by default")
     parser.add_argument("--runs", type=int, help="override case default_runs")
@@ -236,6 +257,7 @@ def _execute_one_run(
     repo_root: Path,
     workdir: Path,
     timeout: int,
+    delayed_stdin: DelayedStdin | None,
     env_updates: dict[str, str],
     rules: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -243,7 +265,9 @@ def _execute_one_run(
     start_monotonic = time.monotonic()
     env = os.environ.copy()
     env.update(env_updates)
-    stdout, returncode, timed_out = _run_command_capture(command, workdir, env, timeout)
+    stdout, returncode, timed_out, stdin_result = _run_command_capture(
+        command, workdir, env, timeout, delayed_stdin
+    )
     ended = datetime.now(timezone.utc)
     duration = time.monotonic() - start_monotonic
 
@@ -262,6 +286,7 @@ def _execute_one_run(
         "duration_seconds": round(duration, 3),
         "returncode": returncode,
         "timed_out": timed_out,
+        **stdin_result,
         "result": classification["result"],
         "class_id": classification["id"],
         "class_description": classification.get("description", ""),
@@ -302,7 +327,9 @@ def _run_setup_command(
 ) -> None:
     setup_dir = output_dir / "setup"
     setup_dir.mkdir(parents=True)
-    stdout, returncode, timed_out = _run_command_capture(command, workdir, os.environ.copy(), timeout)
+    stdout, returncode, timed_out, _ = _run_command_capture(
+        command, workdir, os.environ.copy(), timeout, None
+    )
     (setup_dir / "stdout.log").write_text(stdout, encoding="utf-8", errors="replace")
     _write_json(
         setup_dir / "result.json",
@@ -322,8 +349,17 @@ def _run_setup_command(
 
 
 def _run_command_capture(
-    command: list[str], workdir: Path, env: dict[str, str], timeout: int
-) -> tuple[str, int | None, bool]:
+    command: list[str],
+    workdir: Path,
+    env: dict[str, str],
+    timeout: int,
+    delayed_stdin: DelayedStdin | None,
+) -> tuple[str, int | None, bool, dict[str, Any]]:
+    if delayed_stdin is not None:
+        return _run_command_capture_with_delayed_stdin(
+            command, workdir, env, timeout, delayed_stdin
+        )
+
     process = subprocess.Popen(
         command,
         cwd=workdir,
@@ -335,11 +371,89 @@ def _run_command_capture(
     )
     try:
         stdout, _ = process.communicate(timeout=timeout)
-        return stdout, process.returncode, False
+        return stdout, process.returncode, False, {}
     except subprocess.TimeoutExpired:
         _kill_process_group(process)
         stdout, _ = process.communicate()
-        return stdout, process.returncode, True
+        return stdout, process.returncode, True, {}
+
+
+def _run_command_capture_with_delayed_stdin(
+    command: list[str],
+    workdir: Path,
+    env: dict[str, str],
+    timeout: int,
+    delayed_stdin: DelayedStdin,
+) -> tuple[str, int | None, bool, dict[str, Any]]:
+    marker = delayed_stdin.ready_marker.encode()
+    payload = delayed_stdin.payload.encode()
+    process = subprocess.Popen(
+        command,
+        cwd=workdir,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    stdout_parts: list[bytes] = []
+    tail = b""
+    stdin_sent = False
+    stdout_eof = False
+    deadline = time.monotonic() + timeout
+    timed_out = False
+
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            timed_out = True
+            _kill_process_group(process)
+            break
+        if stdout_eof and process.poll() is not None:
+            break
+
+        wait_time = min(0.25, max(0.0, deadline - now))
+        events = selector.select(wait_time)
+        if not events:
+            continue
+        for key, _ in events:
+            chunk = os.read(key.fd, 4096)
+            if not chunk:
+                stdout_eof = True
+                continue
+            stdout_parts.append(chunk)
+            tail = (tail + chunk)[-4096:]
+            if not stdin_sent and marker in tail:
+                try:
+                    assert process.stdin is not None
+                    process.stdin.write(payload)
+                    process.stdin.flush()
+                except BrokenPipeError:
+                    pass
+                stdin_sent = True
+
+    try:
+        rest, _ = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        rest, _ = process.communicate()
+    if rest:
+        stdout_parts.append(rest)
+    selector.close()
+    stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
+    return (
+        stdout,
+        process.returncode,
+        timed_out,
+        {
+            "stdin_ready_marker": delayed_stdin.ready_marker,
+            "stdin_payload_bytes": len(payload),
+            "stdin_sent": stdin_sent,
+        },
+    )
 
 
 def _kill_process_group(process: subprocess.Popen[str]) -> None:
@@ -472,6 +586,10 @@ def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
         return {"line": line_no, "kind": "symptom", "name": "KernelPanic", "raw": line}
     if "arceos_ex allocation error" in line:
         return {"line": line_no, "kind": "symptom", "name": "AllocationError", "raw": line}
+    if line.startswith("wait4 child handoff"):
+        return {"line": line_no, "kind": "boundary", "name": "Wait4ChildHandoff", "raw": line}
+    if "lost+found" in line:
+        return {"line": line_no, "kind": "user_output", "name": "DistroLsRootListing", "raw": line}
     if "user hello" in line:
         return {"line": line_no, "kind": "user_output", "name": "UserHello", "raw": line}
     if match := USER_EXIT_RE.search(line):
@@ -820,6 +938,7 @@ def _manifest(
     case_path: Path,
     classifier_path: Path,
     command: list[str],
+    delayed_stdin: DelayedStdin | None,
     runs: int,
     timeout: int,
     repo_root: Path,
@@ -832,6 +951,15 @@ def _manifest(
         "case_path": str(case_path),
         "classifier_path": str(classifier_path),
         "command": command,
+        "delayed_stdin": (
+            None
+            if delayed_stdin is None
+            else {
+                "ready_marker": delayed_stdin.ready_marker,
+                "payload": delayed_stdin.payload,
+                "payload_bytes": len(delayed_stdin.payload.encode()),
+            }
+        ),
         "requested_runs": runs,
         "timeout_seconds": timeout,
         "repo_root": str(repo_root),
@@ -866,6 +994,18 @@ def _classifier_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
             raise SystemExit(f"classifier rule {rule_id} has invalid result: {result}")
         rules.append(item)
     return rules
+
+
+def _delayed_stdin(case: dict[str, Any]) -> DelayedStdin | None:
+    raw = case.get("delayed_stdin")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SystemExit("expected table field: delayed_stdin")
+    return DelayedStdin(
+        ready_marker=_string(raw, "ready_marker"),
+        payload=_string(raw, "payload"),
+    )
 
 
 def _resolve_repo_root(value: Path | None) -> Path:

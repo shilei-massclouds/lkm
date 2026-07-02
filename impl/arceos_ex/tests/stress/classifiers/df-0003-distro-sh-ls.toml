@@ -1,0 +1,23 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["arceos_ex allocation error"]
+description = "Kernel allocation error was printed."
+
+[[rules]]
+id = "unsupported-syscall"
+result = "failure"
+contains = ["Function not implemented"]
+description = "BusyBox reported an unsupported syscall or command path."
+
+[[rules]]
+id = "distro-sh-ls-success"
+result = "success"
+contains = ["wait4 child handoff", "lost+found", "user exit status=0"]
+description = "Distro /bin/sh ran /bin/ls through fork/wait4/execve and exited cleanly."

@@ -1,0 +1,34 @@
+name = "df-0003-distro-sh-ls"
+description = "Repeat the non-PTY distro /bin/sh delayed-input path for DF-0003."
+default_runs = 30
+timeout_seconds = 120
+working_directory = "."
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
+  "ROOTFS_OVERLAY=none",
+]
+command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "run",
+  "APP=user-boot",
+  "ROOTFS_OVERLAY=none",
+  "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
+  "QEMU_APPEND=earlycon=sbi init=/bin/sh",
+]
+classifier = "../classifiers/df-0003-distro-sh-ls.toml"
+
+[delayed_stdin]
+ready_marker = "/ #"
+payload = "/bin/ls\nexit\n"
+
+[metadata]
+defect = "DF-0003"
+ordinary_path_required = true
+interactive_shell = true

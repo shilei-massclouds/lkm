@@ -16,6 +16,7 @@ current suite covers:
 
 - `cases/df-0001-user-boot.toml`
 - `cases/df-0002-smoke-initcall.toml`
+- `cases/df-0003-distro-sh-ls.toml`
 
 `make stress-test` defaults to `STRESS_RUNS=10`, which applies to each case in
 the suite. Use `STRESS_RUNS=N` to override it:
@@ -50,6 +51,14 @@ make stress-test \
   STRESS_RUNS=30
 ```
 
+DF-0003 exercises the non-PTY distro shell delayed-input path:
+
+```sh
+make stress-test \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0003-distro-sh-ls.toml \
+  STRESS_RUNS=30
+```
+
 Each case output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
 contains:
 
@@ -73,3 +82,8 @@ DF-0002 must keep the ordinary non-probe `APP=smoke` path for the same reason.
 It also uses a dedicated default-overlay disk prepared in `setup_command`, so
 stress results are not affected by a developer's stale `build/virtio-blk.raw`
 from distro or diagnostic runs.
+
+DF-0003 must keep the ordinary non-probe distro shell path and the explicit
+external command payload `/bin/ls\nexit\n`. The case uses `delayed_stdin` only to
+wait for the BusyBox prompt before writing that payload; it must not fake
+terminal responses or change the command shape to make the case pass.

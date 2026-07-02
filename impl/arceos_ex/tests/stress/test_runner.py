@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -16,7 +17,11 @@ class StressRunnerTests(unittest.TestCase):
         selected = runner._selected_case_paths([])
         self.assertEqual(
             [path.name for path in selected],
-            ["df-0001-user-boot.toml", "df-0002-smoke-initcall.toml"],
+            [
+                "df-0001-user-boot.toml",
+                "df-0002-smoke-initcall.toml",
+                "df-0003-distro-sh-ls.toml",
+            ],
         )
 
     def test_explicit_selection_replaces_default_suite(self) -> None:
@@ -35,6 +40,21 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(
             [runner._event_token(event) for event in events],
             ["user_output:UserHello", "user_exit:UserExitStatus:status=0"],
+        )
+
+    def test_extracts_distro_shell_ls_events(self) -> None:
+        events = runner._extract_events(
+            "wait4 child handoff sepc=0x1\n"
+            "etc         lost+found  opt\n"
+            "user exit status=0\n"
+        )
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            [
+                "boundary:Wait4ChildHandoff",
+                "user_output:DistroLsRootListing",
+                "user_exit:UserExitStatus:status=0",
+            ],
         )
 
     def test_extracts_smoke_success_event(self) -> None:
@@ -152,6 +172,36 @@ class StressRunnerTests(unittest.TestCase):
         )
         self.assertEqual(result["result"], "success")
         self.assertEqual(result["id"], "smoke-success")
+
+    def test_delayed_stdin_writes_after_marker(self) -> None:
+        script = (
+            "import sys\n"
+            "print('/ #', flush=True)\n"
+            "line = sys.stdin.readline()\n"
+            "print('got=' + line.strip(), flush=True)\n"
+        )
+        stdout, returncode, timed_out, stdin_result = runner._run_command_capture(
+            [sys.executable, "-c", script],
+            Path.cwd(),
+            {},
+            5,
+            runner.DelayedStdin(ready_marker="/ #", payload="ls\n"),
+        )
+        self.assertEqual(returncode, 0)
+        self.assertFalse(timed_out)
+        self.assertTrue(stdin_result["stdin_sent"])
+        self.assertEqual(stdin_result["stdin_payload_bytes"], 3)
+        self.assertIn("got=ls", stdout)
+
+    def test_delayed_stdin_config_is_optional(self) -> None:
+        self.assertIsNone(runner._delayed_stdin({}))
+        config = runner._delayed_stdin(
+            {"delayed_stdin": {"ready_marker": "ready", "payload": "input\n"}}
+        )
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.ready_marker, "ready")
+        self.assertEqual(config.payload, "input\n")
 
     def test_records_duplicate_sequence_once(self) -> None:
         events = runner._extract_events("user hello\nuser exit status=0\n")

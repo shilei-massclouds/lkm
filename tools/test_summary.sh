@@ -77,6 +77,10 @@ run_with_delayed_input_log() {
                 sent=1
             fi
         elif ! kill -0 "$proc_pid" 2>/dev/null; then
+            while IFS= read -r -N 1 -t 0.1 ch <&"$output_fd"; do
+                printf '%s' "$ch"
+                printf '%s' "$ch" >> "$log"
+            done
             break
         fi
     done
@@ -84,8 +88,16 @@ run_with_delayed_input_log() {
     rc=$?
     exec {input_fd}>&- 2>/dev/null || true
     exec {output_fd}<&- 2>/dev/null || true
+    if [ "$rc" -eq 124 ]; then
+        printf 'user-boot delayed input command timed out after %s\n' "$input_timeout"
+        printf 'user-boot delayed input command timed out after %s\n' "$input_timeout" >> "$log"
+    elif [ "$rc" -ne 0 ]; then
+        printf 'user-boot delayed input command rc: %s\n' "$rc"
+        printf 'user-boot delayed input command rc: %s\n' "$rc" >> "$log"
+    fi
     if [ "$sent" -eq 0 ]; then
         printf 'user-boot input ready marker missing: %s\n' "$ready_marker"
+        printf 'user-boot input ready marker missing: %s\n' "$ready_marker" >> "$log"
         if [ "$rc" -eq 0 ]; then
             rc=1
         fi
@@ -144,9 +156,11 @@ run_user_boot_input_case() {
     local name=$1
     local log=$2
     local input=$3
-    local expected_marker=$4
+    local expected_markers=$4
     local ready_marker=$5
     shift 5
+    local marker
+    local markers_ok=1
 
     run_with_delayed_input_log "$log" "$input" "$ready_marker" "$@"
     local rc=$?
@@ -156,12 +170,19 @@ run_user_boot_input_case() {
     local fail=1
     exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
     if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
-        if [ -z "$expected_marker" ] || grep -Fq "$expected_marker" "$log"; then
+        while IFS= read -r marker; do
+            if [ -z "$marker" ]; then
+                continue
+            fi
+            if ! grep -Fq "$marker" "$log"; then
+                markers_ok=0
+                status=1
+                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
+            fi
+        done <<< "$expected_markers"
+        if [ "$markers_ok" -eq 1 ]; then
             pass=1
             fail=0
-        else
-            status=1
-            printf 'user-boot expected marker missing for %s: %s\n' "$name" "$expected_marker"
         fi
     else
         status=1
@@ -344,5 +365,10 @@ done
 printf '\nTest summary:\n'
 printf '%s' "$summary_rows"
 printf '  %-18s total=%s pass=%s fail=%s\n' "overall" "$summary_total" "$summary_pass" "$summary_fail"
+
+if [ "$status" -ne 0 ]; then
+    trap - EXIT
+    printf 'Test logs retained in %s\n' "$tmpdir"
+fi
 
 exit "$status"
