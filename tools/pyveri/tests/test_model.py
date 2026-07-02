@@ -24,9 +24,21 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(result.ok, [diag.format() for diag in result.errors])
         self.assertEqual(len(result.errors), 0)
-        self.assertIn("StartupTimeline", result.model.objects)
+        self.assertIn("ComputerProject", result.model.objects)
         self.assertEqual(
-            result.model.children["StartupTimeline"],
+            result.model.children["ComputerProject"],
+            [
+                "KernelProject",
+            ],
+        )
+        self.assertEqual(
+            result.model.children["KernelProject"],
+            [
+                "Kernel",
+            ],
+        )
+        self.assertEqual(
+            result.model.children["Kernel"],
             [
                 "PreparePhase",
                 "BootPhase",
@@ -55,10 +67,12 @@ class ModelBuilderTests(unittest.TestCase):
         text = render_text(view)
         dot = render_dot(view)
 
-        self.assertIn("StartupTimeline: TimelineObject", text)
-        self.assertIn("StartupTimeline -> PreparePhase [parent]", text)
+        self.assertIn("ComputerProject: ProjectObject", text)
+        self.assertIn("ComputerProject -> KernelProject [parent]", text)
+        self.assertIn("Kernel -> PreparePhase [parent]", text)
         self.assertNotIn("drives", text)
-        self.assertIn('"StartupTimeline" -> "PreparePhase"', dot)
+        self.assertIn('"ComputerProject" -> "KernelProject"', dot)
+        self.assertIn('"Kernel" -> "PreparePhase"', dot)
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
@@ -69,7 +83,11 @@ class ModelBuilderTests(unittest.TestCase):
         text = render_text(view)
         dot = render_dot(view)
 
-        self.assertIn("StartupTimeline.Setup", text)
+        self.assertIn("ComputerProject.Preset", text)
+        self.assertIn("  -> ComputerProject.Setup [emits]", text)
+        self.assertIn("ComputerProject.Enable", text)
+        self.assertIn("  -> KernelProject.Preset", text)
+        self.assertIn("Kernel.Preset", text)
         self.assertIn("  -> PreparePhase.Setup", text)
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
@@ -78,7 +96,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("MmCoreInitPhase.Setup", text)
         self.assertIn("PayloadPhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
-        self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
+        self.assertIn('"ComputerProject.Preset" -> "ComputerProject.Setup"', dot)
+        self.assertIn('"ComputerProject.Enable" -> "KernelProject.Preset"', dot)
+        self.assertIn('"Kernel.Preset" -> "PreparePhase.Setup"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -105,7 +125,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
         self.assertIn("  - MemBlock.State::Offline", text)
-        self.assertNotIn("StartupTimeline", text)
+        self.assertNotIn("ComputerProject", text)
+        self.assertNotIn("KernelProject", text)
+        self.assertNotIn("Kernel: ready", text)
         self.assertIn("<svg", svg)
         self.assertIn("PreparePhase", svg)
         self.assertIn("BootPhase", svg)
@@ -114,7 +136,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPhase", svg)
-        self.assertNotIn("StartupTimeline", svg)
+        self.assertNotIn("ComputerProject", svg)
 
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
@@ -947,12 +969,12 @@ class ModelBuilderTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object StartupTimeline: TimelineObject {
+            object ComputerProject: ProjectObject {
                 initial_state: State::Base;
 
                 state State::Base {
                     transitions {
-                        on Transition::Setup -> State::Ready {
+                        on Transition::Preset -> State::Ready {
                             drives {
                                 A.Transition::Setup;
                                 A.Transition::Setup;
@@ -1000,12 +1022,12 @@ class ModelBuilderTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object StartupTimeline: TimelineObject {
+            object ComputerProject: ProjectObject {
                 initial_state: State::Base;
 
                 state State::Base {
                     transitions {
-                        on Transition::Setup -> State::Ready {
+                        on Transition::Preset -> State::Ready {
                             drives {
                                 A.Transition::Setup;
                             }
@@ -1080,7 +1102,7 @@ class ModelBuilderTests(unittest.TestCase):
                 ("C", "Setup"),
                 ("D", "Setup"),
                 ("A", "Setup"),
-                ("StartupTimeline", "Setup"),
+                ("ComputerProject", "Preset"),
             ],
         )
 

@@ -7,10 +7,10 @@
  * extend the same vocabulary explicitly.
  */
 
-type TimelineObject {
+type PhaseObject {
 }
 
-type PhaseObject {
+type ProjectObject {
 }
 
 type PrepareObject {

@@ -35,10 +35,10 @@ class ParseToolTests(unittest.TestCase):
             self.assertEqual(data["version"], AST_VERSION)
             document = data["document"]
             self.assertGreaterEqual(len(document["objects"]), 19)
-            startup = next(
-                item for item in document["objects"] if item["name"] == "StartupTimeline"
+            computer = next(
+                item for item in document["objects"] if item["name"] == "ComputerProject"
             )
-            self.assertEqual(startup["kind"], "TimelineObject")
+            self.assertEqual(computer["kind"], "ProjectObject")
 
     def test_entry_spans_are_serialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,6 +113,10 @@ class ParseToolTests(unittest.TestCase):
                                 }
                             }
 
+                            emits {
+                                Transition::Enable;
+                            }
+
                             drives {
                                 D.Transition::Setup;
                             }
@@ -136,11 +140,15 @@ class ParseToolTests(unittest.TestCase):
             transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
             self.assertEqual(
                 [member["kind"] for member in transition["body_members"]],
-                ["drives", "within", "drives"],
+                ["drives", "within", "emits", "drives"],
             )
             self.assertEqual(
                 transition["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
                 "C.Transition::Setup",
+            )
+            self.assertEqual(
+                transition["emits"][0]["entries"][0]["text"],
+                "Transition::Enable",
             )
 
     def test_output_parent_directory_is_created(self) -> None:
@@ -158,7 +166,7 @@ class ParseToolTests(unittest.TestCase):
             nested.mkdir()
             (nested / "child.spec").write_text(
                 """
-                object IncludedObject: TimelineObject {
+                object IncludedObject: ProjectObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -172,7 +180,7 @@ class ParseToolTests(unittest.TestCase):
                 """
                 include "nested/child.spec";
 
-                object RootObject: TimelineObject {
+                object RootObject: ProjectObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -197,7 +205,7 @@ class ParseToolTests(unittest.TestCase):
             child = root / "child.spec"
             child.write_text(
                 """
-                object IncludedOnce: TimelineObject {
+                object IncludedOnce: ProjectObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -232,7 +240,7 @@ class ParseToolTests(unittest.TestCase):
                 /*
                  * Included note.
                  */
-                object IncludedWithComment: TimelineObject {
+                object IncludedWithComment: ProjectObject {
                     initial_state: State::Base;
                 }
                 """,

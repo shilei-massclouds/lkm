@@ -542,6 +542,7 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
 
     depends_on: list[Block] = []
     drives: list[Block] = []
+    emits: list[Block] = []
     within: list[WithinDecl] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
@@ -561,6 +562,9 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
             body_members.append(_block_body_member(block))
         elif block.kind == "drives":
             drives.append(block)
+            body_members.append(_block_body_member(block))
+        elif block.kind == "emits":
+            emits.append(block)
             body_members.append(_block_body_member(block))
         elif block.kind == "within":
             child = _parse_within(block)
@@ -585,6 +589,7 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
         span=segment.span,
         depends_on=depends_on,
         drives=drives,
+        emits=emits,
         within=within,
         may_change=may_change,
         ensures=ensures,

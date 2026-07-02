@@ -22,7 +22,7 @@ include "rest-init/main.spec";
  */
 object UpMultitaskPhase: PhaseObject {
     initial_state: State::Base;
-    parent: StartupTimeline;
+    parent: Kernel;
 
     state State::Base {
         transitions {

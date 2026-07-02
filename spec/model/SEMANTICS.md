@@ -226,6 +226,51 @@ drives {
 `ProtectedCommit` 在 `SomeContext` 之内。代码生成或 lowering 不得把这三个动作
 重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 transition body。
 
+## SEM-TRANSITION-EMITS-001: Completion Events Are Local Post-Commit Events
+
+状态机是惰性的；外部事件或迁移完成事件触发 transition，transition 自身不得在未被
+事件触发时主动推进。`emits` 是 transition 的一等子块，用于声明“当前 transition
+完成后向本对象目标状态发出的迁移完成事件”：
+
+```text
+on Transition::Preset -> State::Prepared {
+    drives {
+        Child.Transition::Setup;
+    }
+
+    emits {
+        Transition::Setup;
+    }
+}
+```
+
+执行顺序固定为：
+
+- 执行当前 transition 的 `depends_on`、source-ordered body、`drives` 和 `within`。
+- 确认 owner 对象仍在当前 transition 的 source state。
+- 提交 owner 对象状态到 target state。
+- 验证 target state invariant。
+- 按 `emits` 中的 source order，在同一个 owner 对象的 target state 上触发对应
+  transition。
+
+`emits` 的约束：
+
+- `emits` 条目只能写成 `Transition::Name`，不得写成
+  `OtherObject.Transition::Name`。跨对象推进继续使用 `drives`。
+- 被发出的 transition 必须在同一个对象内存在，并且 source state 必须等于当前
+  transition 的 target state。
+- `emits` 不是 `drives` 的别名；`drives` 表达当前迁移过程中的外部驱动，
+  `emits` 表达当前迁移已经提交并通过目标状态 invariant 后的本地 completion
+  event。
+- `emits` 目前只覆盖 lifecycle transition completion event。state-local
+  `actions { ... }` 的正式 action event 语法落地后，可以在本规则基础上扩展
+  action event，但本轮不展开。
+
+默认推导入口是 `ComputerProject.Transition::Preset`。该入口表示唯一外部工程启动
+事件 `PRESET`；后续 `ComputerProject`、`KernelProject` 和 `Kernel` 的启动推进必须
+通过 `emits` completion-event 链或显式 `drives` 表达，不得依赖工具隐式补齐
+`Setup`/`Enable`。
+
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 
 `type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Transition::Setup`、`X.Transition::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”；其中 `Transition::Setup` / `Transition::Enable` 是 lifecycle transition 的迁移期语法，不是外部事件。
@@ -399,7 +444,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   body 表达的控制流、进入/退出并不形成作用域，或当前工具尚不能表达必要的动态绑定；
   这些情况应在规格中说明原因。
 - `within ContextName only-once { ... }` 表示该具体 lexical `within` 块声明自己在
-  `StartupTimeline.Transition::Setup` 可达调用图中只被进入一次。该标记必须由 model
+  `ComputerProject.Transition::Preset` 可达调用图中只被进入一次。该标记必须由 model
   工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。当前
   formal source 暂不使用该标记驱动 guard 省略；它作为工具能力保留，等待后续
   guard 优化机制单独恢复。
@@ -467,7 +512,7 @@ state State::Ready {
 
 `only-once` 是 `within` 使用点上的可验证断言，不是 `Context` 类型属性。同一个
 context 可以在一个地方被 `only-once` 使用，在另一个地方作为普通可复用上下文使用。
-工具验证时从 `StartupTimeline.Transition::Setup` 出发，沿 `drives` 调用图统计每个标记
+工具验证时从 `ComputerProject.Transition::Preset` 出发，沿 `drives` 和 `emits` 调用图统计每个标记
 `only-once` 的 lexical block 的可达进入次数；计数不是 1 时必须报错。
 
 当前策略是先建立基本 guard 规格和保守 lowering，不把 Effective Context 自动作为

@@ -1,8 +1,8 @@
 /*
- * Kernel Specification
+ * Kernel System Specification
  *
- * This file defines the current top-level timeline object and composes the
- * model phase tree. The formal directory entry is spec/model/main.spec.
+ * This file defines the formal kernel system object and composes the model
+ * phase tree. The formal directory entry is spec/model/main.spec.
  */
 
 include "objects/main.spec";
@@ -14,28 +14,84 @@ include "phases/smp-runtime/main.spec";
 include "phases/payload/main.spec";
 
 /*
- * StartupTimeline 表示当前模型的内核启动时间轴对象。
- * 它临时编排准备期、当前已经展开的引导期/中断期阶段，以及启动末尾的 payload 交接阶段。
+ * Kernel 表示 KernelProject.Enable 后启动出来的内核系统实例。
+ * 它替代旧的临时启动时间轴对象，按内核系统生命周期编排准备期、引导期、
+ * 中断期、单核多任务期、多核运行期以及 payload 交接阶段。
  */
-object StartupTimeline: TimelineObject {
+object Kernel: KernelObject {
     initial_state: State::Base;
+    parent: KernelProject;
 
     /*
-     * Base 表示顶层启动阶段对象已经进入模型空间，但尚未推进其子阶段。
+     * Base 表示内核系统规格对象已经进入模型空间，但尚未推进到中断开启边界。
      */
     state State::Base {
         transitions {
             /*
-             * Setup 先推进准备期边界，再推进当前已经展开的引导期、中断期、单核多任务期和多核运行期阶段，最后
-             * 进入 selected payload 的不返回交接边界。
+             * Preset 建立内核系统规格前置，推进准备期、当前已经展开的引导期
+             * 和中断期阶段，使目标 Prepared 表示中断已开启。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 drives {
                     PreparePhase.Transition::Setup;
                     PreparePhase.Transition::Enable;
                     BootPhase.Transition::Setup;
                     InterruptPhase.Transition::Setup;
+                }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示准备期、引导期和中断期边界已经生效，本地中断入口和
+     * IRQ/time 设施已经建立。
+     */
+    state State::Prepared {
+        invariant {
+            PreparePhase.state == State::Online;
+            BootPhase.state == State::Ready;
+            InterruptPhase.state == State::Ready;
+        }
+
+        transitions {
+            /*
+             * Setup 推进单核多任务阶段，使目标 Ready 表示进入多任务。
+             */
+            on Transition::Setup -> State::Ready {
+                drives {
                     UpMultitaskPhase.Transition::Setup;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示中断期阶段已经完成且已经进入单核多任务，可以继续推进
+     * SMP/runtime 与 payload 交接。
+     */
+    state State::Ready {
+        invariant {
+            PreparePhase.state == State::Online;
+            BootPhase.state == State::Ready;
+            InterruptPhase.state == State::Ready;
+            UpMultitaskPhase.state == State::Ready;
+        }
+
+        transitions {
+            /*
+             * Enable 启动完整内核系统实例，推进多核运行和 selected payload
+             * 不返回交接边界。
+             */
+            on Transition::Enable -> State::Online {
+                drives {
                     SmpRuntimePhase.Transition::Setup;
                     PayloadPhase.Transition::Setup;
                     PayloadPhase.Transition::Enable;
@@ -45,10 +101,9 @@ object StartupTimeline: TimelineObject {
     }
 
     /*
-     * Ready 表示准备期边界已经生效，当前已经展开的引导期/中断期/单核多任务期/多核运行期阶段已经完成，
-     * 且启动链已经移交给 selected payload。
+     * Online 表示内核启动编排链已经移交给 selected payload，内核系统实例在线。
      */
-    state State::Ready {
+    state State::Online {
         invariant {
             PreparePhase.state == State::Online;
             BootPhase.state == State::Ready;

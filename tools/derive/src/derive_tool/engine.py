@@ -26,6 +26,9 @@ _TRANSITION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
+_LOCAL_TRANSITION_EXPR_RE = re.compile(
+    r"\ATransition::([A-Za-z_][A-Za-z0-9_]*)\Z"
+)
 _ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
@@ -875,7 +878,13 @@ class _Deriver:
             return None
         return transition.target_state
 
-    def _derive_transition(self, object_name: str, transition_name: str) -> bool:
+    def _derive_transition(
+        self,
+        object_name: str,
+        transition_name: str,
+        *,
+        edge_kind: str | None = None,
+    ) -> bool:
         key = (object_name, transition_name)
         if key in self.stack:
             self._record(
@@ -907,6 +916,7 @@ class _Deriver:
             source_state=transition.source_state,
             target_state=transition.target_state,
             span=transition.decl.span,
+            edge_kind=edge_kind,
         )
         self.trace_stack.append(trace_frame)
         self.stack.append(key)
@@ -963,15 +973,66 @@ class _Deriver:
                 transition_name=transition_name,
                 state_name=transition.target_state,
             )
-            if self._validate_state(object_name, transition.target_state, entered_by=transition):
-                exit_status = DerivationStatus.PROVED
-                return True
-            exit_message = "target state invariant blocked"
-            return False
+            if not self._validate_state(object_name, transition.target_state, entered_by=transition):
+                exit_message = "target state invariant blocked"
+                return False
+            if not self._emit_blocks(transition):
+                exit_message = "emits blocked"
+                return False
+            exit_status = DerivationStatus.PROVED
+            return True
         finally:
             self.stack.pop()
             self.trace_stack.pop()
             self._finish_trace(trace_frame, exit_status, exit_message)
+
+
+    def _emit_blocks(self, transition: TransitionDef) -> bool:
+        for block in transition.decl.emits:
+            for entry, entry_span in block.entry_spans:
+                match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+                if match is None:
+                    self._record(
+                        DerivationStatus.CONTRADICTION,
+                        f"cannot parse emits entry: {entry}",
+                        entry_span,
+                        object_name=transition.object_name,
+                        transition_name=transition.name,
+                        expression=entry,
+                        source_kind="emits",
+                    )
+                    return False
+                emitted_transition = match.group(1)
+                self._record(
+                    DerivationStatus.PROVED,
+                    "completion event emitted: "
+                    f"{transition.object_name}.Transition::{emitted_transition}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="emits",
+                    proof_class="completion_event",
+                    proof_provider="transition_completion",
+                )
+                if self._derive_transition(
+                    transition.object_name,
+                    emitted_transition,
+                    edge_kind="emits",
+                ):
+                    continue
+                self._record(
+                    DerivationStatus.BLOCKED,
+                    "emitted transition blocked: "
+                    f"{_transition_label(transition.object_name, emitted_transition)}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="emits",
+                )
+                return False
+        return True
 
 
     def _drive_blocks(
@@ -1398,7 +1459,11 @@ class _Deriver:
                     )
                     return True
             else:
-                if self._derive_transition(driven_object, driven_transition):
+                if self._derive_transition(
+                    driven_object,
+                    driven_transition,
+                    edge_kind="drives",
+                ):
                     return True
             self._record(
                 DerivationStatus.BLOCKED,
@@ -3010,6 +3075,7 @@ class _Deriver:
             status=status,
             message=message,
             span=frame.span,
+            edge_kind=frame.edge_kind,
             children=tuple(frame.children),
         )
         if self.trace_stack:
@@ -3027,12 +3093,14 @@ class _TraceFrame:
         source_state: str,
         target_state: str,
         span: SourceSpan,
+        edge_kind: str | None = None,
     ) -> None:
         self.object_name = object_name
         self.transition_name = transition_name
         self.source_state = source_state
         self.target_state = target_state
         self.span = span
+        self.edge_kind = edge_kind
         self.children: list[DerivationTraceNode] = []
 
 
@@ -3602,6 +3670,8 @@ def _ordered_body_members(decl) -> list[BodyMember]:
     for block in decl.depends_on:
         members.append(_block_body_member(block))
     for block in decl.drives:
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "emits", []):
         members.append(_block_body_member(block))
     for within in decl.within:
         members.append(_within_body_member(within))

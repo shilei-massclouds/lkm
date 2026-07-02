@@ -121,6 +121,7 @@ def _trace_to_json(node: DerivationTraceNode) -> dict[str, Any]:
         "status": node.status.value,
         "message": node.message,
         "span": _optional_span_to_json(node.span),
+        "edge_kind": node.edge_kind,
         "label": node.label,
         "children": [_trace_to_json(child) for child in node.children],
     }

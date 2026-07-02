@@ -44,7 +44,7 @@
   <text x="169" y="464" text-anchor="middle" class="label">selected payload</text>
   <text x="169" y="488" text-anchor="middle" class="small">handoff target</text>
   <rect x="75" y="568" width="188" height="82" rx="8" class="box phase"/>
-  <text x="169" y="596" text-anchor="middle" class="label">StartupTimeline</text>
+  <text x="169" y="596" text-anchor="middle" class="label">Kernel</text>
   <text x="169" y="620" text-anchor="middle" class="small">no-return boundary</text>
   <path d="M169 256 L169 302" class="edge"/>
   <path d="M169 386 L169 434" class="edge"/>

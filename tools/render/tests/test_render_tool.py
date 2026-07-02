@@ -65,7 +65,7 @@ class RenderToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertIn("object view:", stdout.getvalue())
-            self.assertIn("StartupTimeline: TimelineObject", stdout.getvalue())
+            self.assertIn("ComputerProject: ProjectObject", stdout.getvalue())
 
     def test_render_dot_writes_ascii_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,7 +106,8 @@ class RenderToolTests(unittest.TestCase):
             text = stdout.getvalue()
             self.assertIn("trace view:", text)
             self.assertIn("columns:", text)
-            self.assertIn("StartupTimeline.Transition::Setup", text)
+            self.assertIn("ComputerProject.Transition::Preset", text)
+            self.assertIn("[emits]", text)
             self.assertIn("[drives]", text)
 
     def test_render_svg_from_trace_view(self) -> None:
@@ -120,7 +121,8 @@ class RenderToolTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
             self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
             self.assertIn("<svg", text)
-            self.assertIn("StartupTimeline.Setup", text)
+            self.assertIn("ComputerProject.Preset", text)
+            self.assertIn("ComputerProject.Setup", text)
             self.assertIn("PreparePhase.Setup", text)
             self.assertNotIn("PreparePhase.Enable", text)
             self.assertIn("phase-arrow", text)
@@ -129,7 +131,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn('dy="12">Online</tspan>', text)
             self.assertIn("<tspan", text)
             self.assertIn("depends-arrow", text)
-            self.assertNotIn("StartupTimeline.Base", text)
+            self.assertNotIn("ComputerProject.Base", text)
 
     def test_render_svg_from_trace_view_draws_within_context(self) -> None:
         view = ViewModel(

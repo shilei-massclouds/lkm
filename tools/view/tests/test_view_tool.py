@@ -57,11 +57,11 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(data["schema"], VIEW_SCHEMA)
             self.assertEqual(data["version"], VIEW_VERSION)
             self.assertEqual(data["view"], "object")
-            self.assertIn("StartupTimeline", data["nodes"])
+            self.assertIn("ComputerProject", data["nodes"])
             self.assertTrue(
                 any(
-                    edge["source"] == "StartupTimeline"
-                    and edge["target"] == "PreparePhase"
+                    edge["source"] == "ComputerProject"
+                    and edge["target"] == "KernelProject"
                     and edge["kind"] == "parent"
                     for edge in data["edges"]
                 )
@@ -76,11 +76,20 @@ class ViewToolTests(unittest.TestCase):
             data = read_json(output)
             self.assertEqual(data["view"], "drives")
             self.assertEqual(data["rankdir"], "LR")
-            self.assertIn("StartupTimeline.Setup", data["nodes"])
+            self.assertIn("ComputerProject.Preset", data["nodes"])
             self.assertTrue(
                 any(
-                    edge["source"] == "StartupTimeline.Setup"
-                    and edge["target"] == "PreparePhase.Setup"
+                    edge["source"] == "ComputerProject.Preset"
+                    and edge["target"] == "ComputerProject.Setup"
+                    and edge["kind"] == "emits"
+                    for edge in data["edges"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    edge["source"] == "ComputerProject.Enable"
+                    and edge["target"] == "KernelProject.Preset"
+                    and edge["kind"] == "drives"
                     for edge in data["edges"]
                 )
             )
@@ -121,9 +130,12 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     cell["kind"] == "transition_span"
-                    and cell["label"] == "StartupTimeline.Transition::Setup"
+                    and cell["label"] == "ComputerProject.Transition::Preset"
                     for cell in metadata["trace_cells"]
                 )
+            )
+            self.assertTrue(
+                any(arrow["kind"] == "emits" for arrow in metadata["trace_arrows"])
             )
             self.assertTrue(
                 any(arrow["kind"] == "drives" for arrow in metadata["trace_arrows"])

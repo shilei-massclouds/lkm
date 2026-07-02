@@ -137,6 +137,7 @@ def _event_to_json(item: TransitionDef) -> dict[str, Any]:
         "span": _span_to_json(decl.span),
         "depends_on": [_block_to_json(block) for block in decl.depends_on],
         "drives": [_block_to_json(block) for block in decl.drives],
+        "emits": [_block_to_json(block) for block in decl.emits],
         "within": [_within_to_json(block) for block in decl.within],
         "may_change": [_block_to_json(block) for block in decl.may_change],
         "ensures": [_block_to_json(block) for block in decl.ensures],

@@ -39,7 +39,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertTrue(data["summary"]["ok"])
             self.assertGreaterEqual(data["summary"]["objects"], 25)
             self.assertEqual(data["summary"]["errors"], 0)
-            self.assertIn("StartupTimeline", data["model"]["objects"])
+            self.assertIn("ComputerProject", data["model"]["objects"])
 
     def test_model_json_contains_indexed_children_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,14 +50,28 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
             data = read_json(model)
             objects = data["model"]["objects"]
-            startup = objects["StartupTimeline"]
-            setup = startup["states"]["Base"]["transitions"]["Setup"]
+            computer = objects["ComputerProject"]
+            kernel = objects["Kernel"]
+            preset = computer["states"]["Base"]["transitions"]["Preset"]
+            enable = computer["states"]["Ready"]["transitions"]["Enable"]
             event_stream = objects["EventStream"]
             event_preset = event_stream["states"]["Base"]["transitions"]["Preset"]
             completion_type = data["model"]["types"]["Completion"]
 
             self.assertEqual(
-                startup["children"],
+                computer["children"],
+                [
+                    "KernelProject",
+                ],
+            )
+            self.assertEqual(
+                objects["KernelProject"]["children"],
+                [
+                    "Kernel",
+                ],
+            )
+            self.assertEqual(
+                kernel["children"],
                 [
                     "PreparePhase",
                     "BootPhase",
@@ -67,8 +81,12 @@ class ModelToolTests(unittest.TestCase):
                     "PayloadPhase",
                 ],
             )
-            self.assertEqual(setup["source_state"], "Base")
-            self.assertEqual(setup["target_state"], "Ready")
+            self.assertEqual(preset["source_state"], "Base")
+            self.assertEqual(preset["target_state"], "Prepared")
+            self.assertEqual(
+                [entry["text"] for entry in preset["emits"][0]["entries"]],
+                ["Transition::Setup"],
+            )
             self.assertIn(
                 "Riscv64.stvec == phys_addr(EventStream.early_event_entry)",
                 [
@@ -93,16 +111,9 @@ class ModelToolTests(unittest.TestCase):
                 ["owned", "lifecycle", "processes"],
             )
             self.assertEqual(
-                [entry["text"] for entry in setup["drives"][0]["entries"]],
+                [entry["text"] for entry in enable["drives"][0]["entries"]],
                 [
-                    "PreparePhase.Transition::Setup",
-                    "PreparePhase.Transition::Enable",
-                    "BootPhase.Transition::Setup",
-                    "InterruptPhase.Transition::Setup",
-                    "UpMultitaskPhase.Transition::Setup",
-                    "SmpRuntimePhase.Transition::Setup",
-                    "PayloadPhase.Transition::Setup",
-                    "PayloadPhase.Transition::Enable",
+                    "KernelProject.Transition::Preset",
                 ],
             )
 
@@ -175,6 +186,96 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertIn(
                 "duplicate object transition declaration: A.Transition::Enable",
+                stderr.getvalue(),
+            )
+
+    def test_emits_must_be_same_object_transition(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            emits {
+                                B.Transition::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Base;
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-emits-cross-object.spec"
+            ast = Path(tmp) / "bad-emits-cross-object.ast.json"
+            model = Path(tmp) / "bad-emits-cross-object.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "emits must reference a same-object transition as Transition::Name",
+                stderr.getvalue(),
+            )
+
+    def test_emits_must_target_transition_enabled_from_target_state(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            emits {
+                                Transition::Enable;
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+
+                state State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-emits-source-state.spec"
+            ast = Path(tmp) / "bad-emits-source-state.ast.json"
+            model = Path(tmp) / "bad-emits-source-state.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "emitted transition is not enabled from target state",
                 stderr.getvalue(),
             )
 
@@ -544,12 +645,12 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object StartupTimeline: TimelineObject {
+            object ComputerProject: ProjectObject {
                 initial_state: State::Base;
 
                 state State::Base {
                     transitions {
-                        on Transition::Setup -> State::Ready {
+                        on Transition::Preset -> State::Ready {
                             drives {
                                 A.Transition::Setup;
                             }
@@ -599,7 +700,7 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object StartupTimeline: TimelineObject {
+            object ComputerProject: ProjectObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -690,12 +791,12 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object StartupTimeline: TimelineObject {
+            object ComputerProject: ProjectObject {
                 initial_state: State::Base;
 
                 state State::Base {
                     transitions {
-                        on Transition::Setup -> State::Ready {
+                        on Transition::Preset -> State::Ready {
                             drives {
                                 A.Transition::Setup;
                                 A.Transition::Setup;

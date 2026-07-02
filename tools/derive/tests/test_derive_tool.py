@@ -46,7 +46,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(data["summary"]["ok"])
             self.assertEqual(data["summary"]["blocked"], 0)
             self.assertEqual(data["summary"]["contradiction"], 0)
-            self.assertEqual(data["states"]["StartupTimeline"], "Ready")
+            self.assertEqual(data["states"]["ComputerProject"], "Online")
+            self.assertEqual(data["states"]["KernelProject"], "Online")
+            self.assertEqual(data["states"]["Kernel"], "Online")
             self.assertIn("locks", data["model"])
             self.assertIn("exclusive_contexts", data["model"])
 
@@ -68,8 +70,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertNotIn("unknown", data["summary"]["obligation_categories"])
             self.assertTrue(
                 any(
-                    transition["object"] == "StartupTimeline"
-                    and transition["transition"] == "Setup"
+                    transition["object"] == "ComputerProject"
+                    and transition["transition"] == "Preset"
                     for transition in data["transitions"]
                 )
             )
@@ -90,12 +92,13 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["states"]["VmallocAllocator"], "Ready")
             self.assertEqual(len(data["trace"]), 1)
             root = data["trace"][0]
-            self.assertEqual(root["object"], "StartupTimeline")
-            self.assertEqual(root["transition"], "Setup")
+            self.assertEqual(root["object"], "ComputerProject")
+            self.assertEqual(root["transition"], "Preset")
             self.assertEqual(root["source_state"], "Base")
-            self.assertEqual(root["target_state"], "Ready")
+            self.assertEqual(root["target_state"], "Prepared")
             self.assertEqual(root["status"], "proved")
             self.assertGreater(len(root["children"]), 0)
+            self.assertEqual(root["children"][0]["edge_kind"], "emits")
             self.assertTrue(
                 any(record["span"] is not None for record in data["records"])
             )

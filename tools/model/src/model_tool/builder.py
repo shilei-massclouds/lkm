@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from common.defaults import DEFAULT_TARGET
 from common.model_types import (
     BuildResult,
     Diagnostic,
@@ -35,6 +36,9 @@ _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za
 _OBJECT_TRANSITION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
+)
+_LOCAL_TRANSITION_EXPR_RE = re.compile(
+    r"\ATransition::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
 _OBJECT_ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
@@ -1006,6 +1010,7 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
                     diagnostics,
                     bindings=bindings,
                 )
+                _check_emit_references(model, transition, diagnostics)
 
 
 def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
@@ -1031,7 +1036,9 @@ def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) 
 
 
 def _reachable_transition_call_counts(model: ObjectModel) -> dict[tuple[str, str], int]:
-    root = ("StartupTimeline", "Setup")
+    root = _default_transition_target()
+    if root is None:
+        return {}
     if _transition_def(model, *root) is None:
         return {}
     counts: dict[tuple[str, str], int] = {}
@@ -1045,12 +1052,19 @@ def _reachable_transition_call_counts(model: ObjectModel) -> dict[tuple[str, str
         if transition is None:
             return
         visiting.add(transition_key)
-        for callee in _driven_transitions(transition.decl):
+        for callee in _transition_call_edges(transition):
             visit(callee)
         visiting.remove(transition_key)
 
     visit(root)
     return counts
+
+
+def _default_transition_target() -> tuple[str, str] | None:
+    match = _OBJECT_TRANSITION_EXPR_RE.match(DEFAULT_TARGET)
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
 
 
 def _transition_def(model: ObjectModel, object_name: str, transition_name: str) -> TransitionDef | None:
@@ -1064,8 +1078,11 @@ def _transition_def(model: ObjectModel, object_name: str, transition_name: str) 
     return None
 
 
-def _driven_transitions(transition: TransitionDecl) -> list[tuple[str, str]]:
-    return _driven_transitions_from_body_members(_ordered_body_members(transition))
+def _transition_call_edges(transition: TransitionDef) -> list[tuple[str, str]]:
+    return [
+        *_driven_transitions_from_body_members(_ordered_body_members(transition.decl)),
+        *_emitted_transitions(transition),
+    ]
 
 
 def _driven_transitions_from_body_members(members) -> list[tuple[str, str]]:
@@ -1091,6 +1108,16 @@ def _driven_transitions_from_block(block: Block) -> list[tuple[str, str]]:
     return transitions
 
 
+def _emitted_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
+    transitions: list[tuple[str, str]] = []
+    for block in transition.decl.emits:
+        for entry, _span in block.entry_spans:
+            match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+            if match is not None:
+                transitions.append((transition.object_name, match.group(1)))
+    return transitions
+
+
 def _within_local_entries(withins) -> list[tuple[object, int]]:
     entries: list[tuple[object, int]] = []
     for within in withins:
@@ -1106,6 +1133,8 @@ def _ordered_body_members(decl):
     for block in decl.depends_on:
         members.append(_block_body_member(block))
     for block in decl.drives:
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "emits", []):
         members.append(_block_body_member(block))
     for within in decl.within:
         members.append(_within_body_member(within))
@@ -1240,6 +1269,52 @@ def _check_body_member_references(
             inherited_bindings=bindings,
             inherited_context=inherited_context,
         )
+
+
+def _check_emit_references(
+    model: ObjectModel,
+    transition: TransitionDef,
+    diagnostics: list[Diagnostic],
+) -> None:
+    for block in transition.decl.emits:
+        for entry, entry_span in block.entry_spans:
+            match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+            if match is None:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "emits must reference a same-object transition as "
+                        f"Transition::Name: {entry}",
+                        entry_span,
+                    )
+                )
+                continue
+
+            emitted_name = match.group(1)
+            emitted = _transition_def(model, transition.object_name, emitted_name)
+            if emitted is None:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "unknown emitted transition: "
+                        f"{transition.object_name}.Transition::{emitted_name}",
+                        entry_span,
+                    )
+                )
+                continue
+
+            if emitted.source_state != transition.target_state:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "emitted transition is not enabled from target state: "
+                        f"{transition.object_name}.Transition::{emitted_name} "
+                        f"requires State::{emitted.source_state}, "
+                        f"but {transition.object_name}.Transition::{transition.name} "
+                        f"targets State::{transition.target_state}",
+                        entry_span,
+                    )
+                )
 
 
 def _check_context_nesting_contribution(

@@ -19,7 +19,7 @@ class ParserTests(unittest.TestCase):
     def test_parse_minimal_object(self) -> None:
         document = parse_text(
             """
-            object StartupTimeline: TimelineObject {
+            object Kernel: KernelObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -28,6 +28,10 @@ class ParserTests(unittest.TestCase):
                             drives {
                                 PreparePhase.Transition::Setup;
                                 BootPhase.Transition::Setup;
+                            }
+
+                            emits {
+                                Transition::Enable;
                             }
 
                             ensures {
@@ -47,8 +51,8 @@ class ParserTests(unittest.TestCase):
         )
 
         obj = document.objects[0]
-        self.assertEqual(obj.name, "StartupTimeline")
-        self.assertEqual(obj.kind, "TimelineObject")
+        self.assertEqual(obj.name, "Kernel")
+        self.assertEqual(obj.kind, "KernelObject")
         self.assertEqual(obj.initial_state, "Base")
         self.assertEqual([state.name for state in obj.states], ["Base", "Ready"])
         transition = obj.states[0].transitions[0]
@@ -61,6 +65,7 @@ class ParserTests(unittest.TestCase):
                 "BootPhase.Transition::Setup",
             ],
         )
+        self.assertEqual(transition.emits[0].entries, ["Transition::Enable"])
         self.assertEqual(
             transition.ensures[0].entries,
             ["BootPhase.state == State::Ready"],
@@ -374,7 +379,9 @@ class ParserTests(unittest.TestCase):
         document = parse_file(spec)
 
         object_names = {obj.name for obj in document.objects}
-        self.assertIn("StartupTimeline", object_names)
+        self.assertIn("ComputerProject", object_names)
+        self.assertIn("KernelProject", object_names)
+        self.assertIn("Kernel", object_names)
         self.assertIn("PreparePhase", object_names)
         self.assertIn("BootPhase", object_names)
         self.assertIn("EntryPreludePhase", object_names)

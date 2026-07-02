@@ -15,18 +15,18 @@
 
 `pyveri` 是面向组件化内核规格的静态推导验证器。它不读取运行时轨迹，也不依赖模拟器、硬件采集或参考内核差分数据。
 
-第一版验证器只做基于 `.spec` 文件本身的纸上推导验证：从规格声明的顶层启动时间轴出发，检查对象、阶段、状态和事件能否按模型规则逐级推出目标状态。
+第一版验证器只做基于 `.spec` 文件本身的纸上推导验证：从规格声明的顶层工程入口出发，检查对象、阶段、状态和事件能否按模型规则逐级推出目标状态。
 
 当前推导入口是：
 
 ```text
-StartupTimeline.Transition::Setup
+ComputerProject.Transition::Preset
 ```
 
 当前推导目标是：
 
 ```text
-StartupTimeline.state == State::Ready
+ComputerProject.state == State::Online
 ```
 
 ## 工具链架构目标
@@ -222,8 +222,8 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 - 已检查重复声明、未知父对象、未知事件目标状态、未知事件引用和未知状态引用。
 - 已提供对象视图、驱动关系视图和时间轴视图。
 - 图形输出中，`object` 和 `drives` 仍使用 Graphviz DOT；`timeline` 直接生成 SVG。
-- 已加入最小推导器，可从 `StartupTimeline.Transition::Setup` 按事件源状态、`depends_on`、`drives` 顺序和目标状态执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
-- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Transition::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `StartupTimeline.Transition::Setup` 可严格推出 `StartupTimeline.state == State::Ready`，复杂谓词仍作为 `obligation` 保留。
+- 已加入最小推导器，可从 `ComputerProject.Transition::Preset` 按事件源状态、`depends_on`、`drives`、目标状态 invariant 和 `emits` completion-event 顺序执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
+- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Transition::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `ComputerProject.Transition::Preset` 可严格推出目标 transition 已提交，并通过 completion-event 链使 `ComputerProject.state == State::Online`，复杂谓词仍作为 `obligation` 保留。
 
 ### 2.1 Timeline View
 
@@ -246,7 +246,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
 - 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`BootInitTask`、`BootInitStack`、`EventStream` 等。
-- `StartupTimeline` 是顶层时间轴对象，不在图中显示。
+- `ComputerProject` 是顶层工程对象，不在时间轴行中显示；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
 待确认或后续改进：
@@ -329,13 +329,13 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 默认目标：
 
 ```text
-StartupTimeline.Transition::Setup
+ComputerProject.Transition::Preset
 ```
 
 后续可以增加参数：
 
 ```text
---target StartupTimeline.Transition::Setup
+--target ComputerProject.Transition::Preset
 --format text|json
 --strict
 ```
@@ -392,8 +392,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --str
 
 已完成。`tools/pyveri/tests/test_derive.py` 已从“报告 blocked”改为“目标可达”：
 
-- 目标为 `StartupTimeline.Transition::Setup`。
-- 期望最终 `StartupTimeline.state == State::Ready`。
+- 目标为 `ComputerProject.Transition::Preset`。
+- 期望目标 transition 已提交，且 completion-event 链最终达到 `ComputerProject.state == State::Online`。
 - 复杂谓词仍允许作为 `obligation` 保留。
 
 完成标准：
@@ -440,7 +440,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - 当前完整推导报告过于平铺，信息噪音较大。后续应重新设计输出层次，默认只显示摘要、目标状态、根因 blocked、deferred 和 obligation 统计；详细 transitions 和全部 obligation 应通过 verbose/detail 参数打开。
 - 将默认推导过程显示为进入/退出式 trace，而不是平铺的 `transitions` 列表。每个事件输出成对记录：进入行使用 `>`，退出行使用 `<`；被 `drives` 的子事件缩进两格嵌套在中间。成功退出行不额外标注 `ok`，失败退出行标注 `blocked:` 或 `contradiction:` 并附带原因。
 - trace 图形输出应先建立单元格布局，再填充内容：横向先划分对象/嵌套列，列与列之间的空隙也作为占位单元格；列内部再按时间顺序分段，状态框、事件区间和内部空隙都占据明确单元格。虚线只作为布局辅助线或 debug 层，最终 SVG 默认不必显示。
-- 当前先以 `StartupTimeline.Transition::Setup` 从 `State::Base` 到 `State::Ready` 的推导作为模板实现结构化 trace；未来完整入口再扩展为 `StartupTimeline` 顺序执行 `Preset`、`Setup`、`Enable` 并推进到 `State::Online`。
+- 当前以 `ComputerProject.Transition::Preset` 从 `State::Base` 到 `State::Prepared` 的推导作为结构化 trace 入口；该入口通过 `emits` 连锁到 `ComputerProject.Setup` 和 `ComputerProject.Enable`，再驱动 `KernelProject` 与 `Kernel` 的启动链并使内核系统进入 `State::Online`。
 - 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
@@ -587,7 +587,7 @@ tools/out/
 - 状态和事件引用检查。
 - `drives` 顺序保持。
 - `deferred` 收集。
-- 从 `StartupTimeline.Transition::Setup` 推导到目标状态的最小路径。
+- 从 `ComputerProject.Transition::Preset` 推导到目标 transition，并通过 `emits` 连锁到最终在线状态的最小路径。
 
 ## 第一版非目标
 

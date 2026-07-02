@@ -6,7 +6,9 @@ from dataclasses import replace
 import re
 from typing import Any
 
+from common.defaults import DEFAULT_TARGET
 from common.model_types import TransitionDef, ObjectModel, StateDef
+from common.spec_ast import BodyMember, Block, WithinDecl
 from common.view_types import (
     TimelineItem,
     TimelineRow,
@@ -19,11 +21,14 @@ from common.view_types import (
 
 
 _OBJECT_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
+_TARGET_RE = re.compile(r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\Z")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
+_LOCAL_TRANSITION_EXPR_RE = re.compile(r"\ATransition::([A-Za-z_][A-Za-z0-9_]*)\Z")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 DEFAULT_TRACE_ACTION_DEPTH = 3
+_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
 
 
 def build_object_view(model: ObjectModel) -> ViewModel:
@@ -68,6 +73,13 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
                     _add_transition_node(nodes, target, target_obj, target_transition)
                     edges.append(ViewEdge(source=source, target=target, kind="drives"))
 
+                for target_obj, target_transition in _emitted_transitions(transition):
+                    if target_obj not in model.objects:
+                        continue
+                    target = _transition_node_id(target_obj, target_transition)
+                    _add_transition_node(nodes, target, target_obj, target_transition)
+                    edges.append(ViewEdge(source=source, target=target, kind="emits"))
+
                 for target_obj, target_action in _driven_actions(transition):
                     if target_obj not in model.objects:
                         continue
@@ -86,7 +98,7 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
     phase_objects = {
         name
         for name, obj in model.objects.items()
-        if obj.kind in {"TimelineObject", "PhaseObject"}
+        if _is_timeline_object(name, obj.kind)
     }
     phase_parents = {
         name: model.objects[name].parent for name in phase_objects if name in model.objects
@@ -120,6 +132,18 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
                             source=event_id,
                             target=target,
                             kind="drives",
+                        )
+                    )
+                for target_obj, target_transition in _emitted_transitions(transition):
+                    if target_obj not in phase_objects:
+                        continue
+                    target = _transition_node_id(target_obj, target_transition)
+                    _add_transition_node(nodes, target, target_obj, target_transition)
+                    edges.append(
+                        ViewEdge(
+                            source=event_id,
+                            target=target,
+                            kind="emits",
                         )
                     )
 
@@ -928,7 +952,7 @@ def _build_timeline_rows(
 
     def ensure_row(phase: str, state: str) -> None:
         row_key = (phase, state)
-        if phase == "StartupTimeline" or row_key in rows_by_phase_state:
+        if phase in _LIFECYCLE_ROOT_OBJECTS or row_key in rows_by_phase_state:
             return
         rows_by_phase_state[row_key] = []
         row_order.append(row_key)
@@ -977,7 +1001,12 @@ def _build_timeline_rows(
                 )
             )
 
-    process_transition("StartupTimeline", "Setup", "StartupTimeline", None)
+        for target_obj, target_transition in _emitted_transitions(transition):
+            process_transition(target_obj, target_transition, next_phase, next_phase_state)
+
+    root = _default_transition_target()
+    if root is not None:
+        process_transition(root[0], root[1], root[0], None)
 
     final_by_object: dict[str, tuple[str, str, str, str]] = {}
     for phase, phase_state, object_name, target_state, transition_name in sequence:
@@ -1087,23 +1116,82 @@ def _find_transition(obj, transition_name: str, current_state: str | None) -> Tr
 
 
 def _driven_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
+    return _driven_transitions_from_body_members(_ordered_body_members(transition.decl))
+
+
+def _driven_transitions_from_body_members(members) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
-    for block in transition.decl.drives:
-        driven.extend(_OBJECT_TRANSITION_RE.findall(block.body))
-    for within in transition.decl.within:
-        for block in within.drives:
-            driven.extend(_OBJECT_TRANSITION_RE.findall(block.body))
+    for member in members:
+        if member.block is not None and member.kind == "drives":
+            driven.extend(_OBJECT_TRANSITION_RE.findall(member.block.body))
+            continue
+        if member.within is not None:
+            driven.extend(
+                _driven_transitions_from_body_members(
+                    _ordered_body_members(member.within)
+                )
+            )
     return driven
+
+
+def _emitted_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
+    emitted: list[tuple[str, str]] = []
+    for block in transition.decl.emits:
+        for entry, _span in block.entry_spans:
+            match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+            if match is not None:
+                emitted.append((transition.object_name, match.group(1)))
+    return emitted
 
 
 def _driven_actions(transition: TransitionDef) -> list[tuple[str, str]]:
+    return _driven_actions_from_body_members(_ordered_body_members(transition.decl))
+
+
+def _driven_actions_from_body_members(members) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
-    for block in transition.decl.drives:
-        driven.extend(_OBJECT_ACTION_RE.findall(block.body))
-    for within in transition.decl.within:
-        for block in within.drives:
-            driven.extend(_OBJECT_ACTION_RE.findall(block.body))
+    for member in members:
+        if member.block is not None and member.kind == "drives":
+            driven.extend(_OBJECT_ACTION_RE.findall(member.block.body))
+            continue
+        if member.within is not None:
+            driven.extend(
+                _driven_actions_from_body_members(_ordered_body_members(member.within))
+            )
     return driven
+
+
+def _ordered_body_members(decl) -> list[BodyMember]:
+    if decl.body_members:
+        return list(decl.body_members)
+    members: list[BodyMember] = []
+    for block in getattr(decl, "depends_on", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "drives", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "emits", []):
+        members.append(_block_body_member(block))
+    for within in getattr(decl, "within", []):
+        members.append(_within_body_member(within))
+    for block in getattr(decl, "exited_by", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "may_change", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "ensures", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "deferred", []):
+        members.append(_block_body_member(block))
+    for block in getattr(decl, "other_blocks", []):
+        members.append(_block_body_member(block))
+    return members
+
+
+def _block_body_member(block: Block) -> BodyMember:
+    return BodyMember(kind=block.kind, span=block.span, block=block)
+
+
+def _within_body_member(within: WithinDecl) -> BodyMember:
+    return BodyMember(kind="within", span=within.span, within=within)
 
 
 class _TraceLayoutBuilder:
@@ -1296,6 +1384,7 @@ class _TraceLayoutBuilder:
                     "kind": "child",
                     "order": event_orders.get(child_key, 1_000_000 + child_index),
                     "child": child,
+                    "edge_kind": _trace_edge_kind(child_data),
                 }
             )
         event_key = (str(data["object"]), str(data["transition"]))
@@ -1715,7 +1804,11 @@ class _TraceLayoutBuilder:
                 continue
             child_event_id = f"transition-{self._event_index}"
             self.arrows.append(
-                TraceArrow(source=span_id, target=f"{child_event_id}-span", kind="drives")
+                TraceArrow(
+                    source=span_id,
+                    target=f"{child_event_id}-span",
+                    kind=str(item.get("edge_kind") or "drives"),
+                )
             )
             child_data = _trace_node_object(child)
             child_is_phase = _is_trace_phase_object(str(child_data.get("object")))
@@ -1938,6 +2031,13 @@ def _trace_label(node: dict[str, Any]) -> str:
     return f"{node.get('object')}.Transition::{node.get('transition')}"
 
 
+def _trace_edge_kind(node: dict[str, Any]) -> str:
+    edge_kind = node.get("edge_kind")
+    if edge_kind in {"drives", "emits"}:
+        return str(edge_kind)
+    return "drives"
+
+
 def _should_skip_trace_node(
     node: Any,
     verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
@@ -1964,7 +2064,18 @@ def _should_skip_trace_node(
 
 
 def _is_trace_phase_object(object_name: str) -> bool:
-    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or object_name.endswith("Phase")
+
+
+def _is_timeline_object(object_name: str, kind: str) -> bool:
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or kind == "PhaseObject"
+
+
+def _default_transition_target() -> tuple[str, str] | None:
+    match = _TARGET_RE.match(DEFAULT_TARGET)
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
 
 
 def _max_trace_phase_lane(

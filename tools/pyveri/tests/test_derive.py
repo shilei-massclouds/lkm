@@ -13,7 +13,7 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                object A: TimelineObject {
+                object A: ProjectObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -86,7 +86,7 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                object A: TimelineObject {
+                object A: ProjectObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -498,10 +498,13 @@ class DerivationTests(unittest.TestCase):
                 for record in derivation.records
             )
         )
-        self.assertIn("> StartupTimeline.Transition::Setup State::Base", text)
+        self.assertIn("> ComputerProject.Transition::Preset State::Base", text)
+        self.assertIn("  > ComputerProject.Transition::Setup State::Prepared", text)
         self.assertIn("  > PreparePhase.Transition::Setup State::Base", text)
-        self.assertIn("< StartupTimeline.Transition::Setup State::Ready", text)
-        self.assertEqual(derivation.states["StartupTimeline"], "Ready")
+        self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
+        self.assertEqual(derivation.states["ComputerProject"], "Online")
+        self.assertEqual(derivation.states["KernelProject"], "Online")
+        self.assertEqual(derivation.states["Kernel"], "Online")
         self.assertEqual(derivation.states["EntrySuccessorPhase"], "Ready")
         self.assertEqual(derivation.states["CorePreparePhase"], "Ready")
         self.assertEqual(derivation.states["MmCoreInitPhase"], "Ready")

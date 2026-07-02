@@ -1,3 +1,3 @@
 """Shared default values for LKM verification tools."""
 
-DEFAULT_TARGET = "StartupTimeline.Transition::Setup"
+DEFAULT_TARGET = "ComputerProject.Transition::Preset"

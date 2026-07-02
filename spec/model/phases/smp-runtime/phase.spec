@@ -21,7 +21,7 @@ include "finalize/main.spec";
  */
 object SmpRuntimePhase: PhaseObject {
     initial_state: State::Base;
-    parent: StartupTimeline;
+    parent: Kernel;
 
     state State::Base {
         transitions {

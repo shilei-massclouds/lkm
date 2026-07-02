@@ -67,6 +67,7 @@ class DerivationTraceNode:
     status: DerivationStatus
     message: str | None = None
     span: SourceSpan | None = None
+    edge_kind: str | None = None
     children: tuple["DerivationTraceNode", ...] = ()
 
     @property
@@ -113,9 +114,13 @@ class DerivationResult:
 
     @property
     def target_reached(self) -> bool:
-        if self.target_object is None or self.target_state is None:
+        if self.target_object is None or self.target_transition is None:
             return False
-        return self.states.get(self.target_object) == self.target_state
+        return any(
+            transition.object_name == self.target_object
+            and transition.transition_name == self.target_transition
+            for transition in self.transitions
+        )
 
     @property
     def ok(self) -> bool:

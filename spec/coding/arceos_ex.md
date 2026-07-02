@@ -988,7 +988,7 @@ trimmed、RCU in-kernel boot ended 与 atomic/WRITE_ONCE/lazy-trim facts、sysct
 
 ## PayloadPhase 编码约束
 
-`PayloadPhase` 是 `StartupTimeline` 的末尾阶段，formal model 路径为 `spec/model/phases/payload/`。它必须作为
+`PayloadPhase` 是 `Kernel` 的末尾阶段，formal model 路径为 `spec/model/phases/payload/`。它必须作为
 `SmpRuntimePhase.Ready` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
 `FinalizePhase.Ready` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
 

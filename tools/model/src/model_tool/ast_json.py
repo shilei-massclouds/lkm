@@ -187,6 +187,7 @@ def _event_from_json(item: Any) -> TransitionDecl:
     data = _as_object(item, "transition")
     depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
     drives = [_block_from_json(block) for block in _list(data, "drives")]
+    emits = [_block_from_json(block) for block in data.get("emits", [])]
     within = [_within_from_json(block) for block in _list(data, "within")]
     may_change = [_block_from_json(block) for block in _list(data, "may_change")]
     ensures = [_block_from_json(block) for block in _list(data, "ensures")]
@@ -197,6 +198,7 @@ def _event_from_json(item: Any) -> TransitionDecl:
         fallback=[
             *(_block_body_member(block) for block in depends_on),
             *(_block_body_member(block) for block in drives),
+            *(_block_body_member(block) for block in emits),
             *(_within_body_member(block) for block in within),
             *(_block_body_member(block) for block in may_change),
             *(_block_body_member(block) for block in ensures),
@@ -210,6 +212,7 @@ def _event_from_json(item: Any) -> TransitionDecl:
         span=_span_from_json(data["span"]),
         depends_on=depends_on,
         drives=drives,
+        emits=emits,
         within=within,
         may_change=may_change,
         ensures=ensures,

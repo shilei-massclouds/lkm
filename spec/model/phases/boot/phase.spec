@@ -33,7 +33,7 @@ context SingleTaskContext: Context {
  */
 object BootPhase: PhaseObject {
     initial_state: State::Base;
-    parent: StartupTimeline;
+    parent: Kernel;
 
     /*
      * Base 表示引导期阶段对象已经进入模型空间，但尚未推进其子阶段。

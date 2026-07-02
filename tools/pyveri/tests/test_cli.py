@@ -59,7 +59,7 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("obligation: 0", text)
-        self.assertIn("deferred: 81", text)
+        self.assertIn("deferred: 85", text)
         self.assertIn("MmCoreInitPhase.Transition::Setup", text)
         self.assertIn("InterruptPhase.Transition::Setup", text)
 
@@ -102,8 +102,8 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("trace:", text)
-        self.assertIn("> StartupTimeline.Transition::Setup State::Base", text)
-        self.assertIn("< StartupTimeline.Transition::Setup State::Ready", text)
+        self.assertIn("> ComputerProject.Transition::Preset State::Base", text)
+        self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
 
     def test_check_command_uses_strict_derivation_exit_code(self) -> None:
         stdout = io.StringIO()
@@ -133,7 +133,7 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("trace view:", text)
         self.assertIn("columns:", text)
-        self.assertIn("StartupTimeline.Transition::Setup", text)
+        self.assertIn("ComputerProject.Transition::Preset", text)
 
     def test_view_trace_command_accepts_action_depth_option(self) -> None:
         stdout = io.StringIO()
@@ -219,7 +219,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
             self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
-            self.assertIn("StartupTimeline.Setup", text)
+            self.assertIn("ComputerProject.Preset", text)
 
     def test_render_trace_command_accepts_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -329,7 +329,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output.is_file())
             self.assertIn(f"trace_svg: {output}", stdout.getvalue())
-            self.assertIn("StartupTimeline.Setup", output.read_text(encoding="utf-8"))
+            self.assertIn("ComputerProject.Preset", output.read_text(encoding="utf-8"))
         finally:
             if output.exists():
                 output.unlink()

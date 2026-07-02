@@ -1327,7 +1327,7 @@ type ArceosExStartupPhaseCodingMust {
         /*
          * Payload placement:
          *
-         * PayloadPhase is a StartupTimeline child that follows
+         * PayloadPhase is a Kernel child that follows
          * SmpRuntimePhase. It must not be implemented as the last subphase
          * nested under SmpRuntimePhase.
          */

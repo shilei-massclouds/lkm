@@ -385,7 +385,7 @@ object PlatformCpuInfo: PrepareObject {
  */
 object PreparePhase: PhaseObject {
     initial_state: State::Base;
-    parent: StartupTimeline;
+    parent: Kernel;
 
     /*
      * Base 表示准备期阶段对象已经进入模型空间，但尚未形成当前规格所需的准备期完成边界。

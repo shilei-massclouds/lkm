@@ -38,6 +38,7 @@ RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
 DEFAULT_TRACE_SVG_MARKER = "__pyveri_default_trace_svg__"
 DEFAULT_TRACE_ACTION_DEPTH = 3
+_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -872,7 +873,7 @@ def _spec_trace_annotations(
 
 
 def _is_phase_object_name(object_name: str) -> bool:
-    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or object_name.endswith("Phase")
 
 
 def _doc_comment_before(lines: list[str], start_line: int) -> str:

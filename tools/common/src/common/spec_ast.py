@@ -62,6 +62,7 @@ class TransitionDecl:
     span: SourceSpan
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)
+    emits: list[Block] = field(default_factory=list)
     within: list[WithinDecl] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
     ensures: list[Block] = field(default_factory=list)

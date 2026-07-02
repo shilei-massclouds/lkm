@@ -29,6 +29,7 @@ _TRACE_ANNOTATION_GAP = 10
 _TRACE_ANNOTATION_MARGIN = 18
 _TRACE_ANNOTATION_CLEARANCE = 6
 _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
+_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
 
 
 def render_view(
@@ -379,7 +380,7 @@ def _render_trace_svg(
             if _trace_transition_id(arrow.source) in phase_span_ids:
                 continue
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
-        elif arrow.kind == "drives":
+        elif arrow.kind in {"drives", "emits"}:
             if _is_phase_to_phase_arrow(source, target):
                 continue
             if source.kind == "context_action" or target.kind == "context_action":
@@ -455,7 +456,8 @@ def _render_drives_text(view: ViewModel) -> str:
     for source, edges in outgoing.items():
         lines.append(source)
         for edge in edges:
-            lines.append(f"  -> {edge.target}")
+            label = "" if edge.kind == "drives" else f" [{edge.kind}]"
+            lines.append(f"  -> {edge.target}{label}")
 
     return "\n".join(lines)
 
@@ -474,7 +476,7 @@ def _render_timeline_text(view: ViewModel) -> str:
     phase_nodes = [
         node
         for node in view.nodes.values()
-        if node.kind in {"TimelineObject", "PhaseObject"}
+        if _is_timeline_phase_node(node)
     ]
     phase_nodes.sort(key=lambda node: _timeline_phase_order(view, node.id))
 
@@ -483,8 +485,9 @@ def _render_timeline_text(view: ViewModel) -> str:
         for transition in _timeline_events_for_phase(view, phase.id):
             lines.append(f"  {transition.id}")
             for edge in view.edges:
-                if edge.kind == "drives" and edge.source == transition.id:
-                    lines.append(f"    -> {edge.target}")
+                if edge.kind in {"drives", "emits"} and edge.source == transition.id:
+                    label = "" if edge.kind == "drives" else f" [{edge.kind}]"
+                    lines.append(f"    -> {edge.target}{label}")
 
     return "\n".join(lines)
 
@@ -531,13 +534,19 @@ def _timeline_phase_order(view: ViewModel, phase_id: str) -> int:
 
 def _timeline_phase_order_from_id(phase_id: str) -> int:
     order = {
-        "StartupTimeline": 0,
-        "PreparePhase": 1,
-        "BootPhase": 2,
-        "EntryPreludePhase": 3,
-        "EntrySuccessorPhase": 4,
+        "ComputerProject": 0,
+        "KernelProject": 1,
+        "Kernel": 2,
+        "PreparePhase": 3,
+        "BootPhase": 4,
+        "EntryPreludePhase": 5,
+        "EntrySuccessorPhase": 6,
     }
     return order.get(phase_id, 1000)
+
+
+def _is_timeline_phase_node(node: ViewNode) -> bool:
+    return node.id in _LIFECYCLE_ROOT_OBJECTS or node.kind == "PhaseObject"
 
 
 def _timeline_events_for_phase(view: ViewModel, phase_id: str) -> list[ViewNode]:
@@ -1411,19 +1420,19 @@ def _shorten_context_detail(label: str) -> str:
 
 def _is_trace_phase_transition(label: str) -> bool:
     object_name = label.split(".Transition::", 1)[0]
-    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or object_name.endswith("Phase")
 
 
 def _is_trace_phase_label(label: str) -> bool:
     object_name = label.split(".", 1)[0]
-    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or object_name.endswith("Phase")
 
 
 def _is_trace_phase_row(label: str) -> bool:
     if ".verified." in label:
         return False
     object_name = label.split(".", 1)[0]
-    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+    return object_name in _LIFECYCLE_ROOT_OBJECTS or object_name.endswith("Phase")
 
 
 def _is_phase_to_phase_arrow(source: TraceCell, target: TraceCell) -> bool:
