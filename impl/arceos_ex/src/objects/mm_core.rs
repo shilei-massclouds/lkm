@@ -3775,22 +3775,32 @@ impl PageTableLockCache {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VmapAreaFlags {
     VmIoremap,
+    VmStack,
 }
 
 impl VmapAreaFlags {
     pub const fn is_vm_ioremap(self) -> bool {
         matches!(self, Self::VmIoremap)
     }
+
+    pub const fn is_vm_stack(self) -> bool {
+        matches!(self, Self::VmStack)
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum PageProtection {
     IoMemory,
+    KernelData,
 }
 
 impl PageProtection {
     pub const fn is_io_memory(self) -> bool {
         matches!(self, Self::IoMemory)
+    }
+
+    pub const fn is_kernel_data(self) -> bool {
+        matches!(self, Self::KernelData)
     }
 }
 
@@ -3879,6 +3889,10 @@ impl VmapArea {
 
     pub const fn is_vm_ioremap(self) -> bool {
         self.flags.is_vm_ioremap()
+    }
+
+    pub const fn is_vm_stack(self) -> bool {
+        self.flags.is_vm_stack()
     }
 }
 
@@ -3971,6 +3985,10 @@ impl VmapMapping {
 
     pub const fn uses_io_memory_protection(self) -> bool {
         self.protection.is_io_memory()
+    }
+
+    pub const fn uses_kernel_data_protection(self) -> bool {
+        self.protection.is_kernel_data()
     }
 }
 
@@ -4247,6 +4265,46 @@ impl VmallocAllocator {
 
         let aligned_size = align_up(size, self.page_size())?;
         let virt_base = align_up(self.next_vaddr, self.page_size())?;
+        let area_end = virt_base.checked_add(aligned_size)?;
+        if area_end > self.address_space.end() {
+            return None;
+        }
+
+        if self.areas.try_reserve(1).is_err() {
+            return None;
+        }
+        let area = VmapArea::new(self.areas.len(), virt_base, aligned_size, flags);
+        self.areas.push(area);
+        self.next_vaddr = area_end;
+        Some(area)
+    }
+
+    pub fn get_vm_area_aligned_with_guard(
+        &mut self,
+        size: usize,
+        align: usize,
+        guard_size: usize,
+        flags: VmapAreaFlags,
+    ) -> Option<VmapArea> {
+        if self.lifecycle.state() != State::Ready
+            || !self.vmap_area_api_ready
+            || !self.dynamic_record_storage_ready
+            || !self.address_space.free_space_ready()
+            || size == 0
+            || align < self.page_size()
+            || !align.is_power_of_two()
+        {
+            return None;
+        }
+
+        let aligned_size = align_up(size, self.page_size())?;
+        let aligned_guard = align_up(guard_size, self.page_size())?;
+        let guarded_next = self.next_vaddr.checked_add(aligned_guard)?;
+        let virt_base = align_up(guarded_next, align)?;
+        let guard_base = virt_base.checked_sub(aligned_guard)?;
+        if guard_base < self.next_vaddr {
+            return None;
+        }
         let area_end = virt_base.checked_add(aligned_size)?;
         if area_end > self.address_space.end() {
             return None;

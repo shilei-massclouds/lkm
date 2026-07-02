@@ -1,13 +1,18 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
+#[cfg(app_user_boot)]
+use core::sync::atomic::AtomicUsize;
+
 use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
 use super::files::STDIN_READY_FIXTURE;
 #[cfg(app_user_boot)]
+use super::mm_core::{PageProtection, PageTableCaches, VmallocAllocator, VmapAreaFlags};
+#[cfg(app_user_boot)]
 use super::{
     block_device::BlockDeviceRegistry, boot_param::BootParam, command_line::StaticCommandLine,
-    ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk,
+    config::Config, ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk,
 };
 use super::{
     event_stream::TrapFrame,
@@ -53,6 +58,8 @@ pub const USER_KERNEL_TRAP_STACK_SIZE: usize = USER_PAGE_SIZE << USER_KERNEL_TRA
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_ALIGN: usize = USER_KERNEL_TRAP_STACK_SIZE * 2;
 #[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_GUARD_SIZE: usize = USER_PAGE_SIZE;
+#[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = USER_PAGE_SIZE;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_IRQ_STACK_SIZE: usize = USER_KERNEL_TRAP_STACK_SIZE;
@@ -63,9 +70,11 @@ pub const USER_KERNEL_TRAP_VMAP_STACK: bool = true;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_IRQ_STACKS: bool = true;
 #[cfg(app_user_boot)]
-pub const USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED: bool = true;
+pub const USER_KERNEL_TRAP_GUARD_PAGE_READY: bool = true;
 #[cfg(app_user_boot)]
-pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED: bool = true;
+pub const USER_KERNEL_TRAP_OVERFLOW_STACK_READY: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED: bool = true;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED: bool = true;
 
@@ -2523,15 +2532,54 @@ pub const USER_SSTATUS_INITIAL: usize =
     SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR | SSTATUS_USER_FPU_INITIAL;
 
 #[cfg(app_user_boot)]
-#[repr(align(32768))]
-struct UserKernelTrapStack {
-    bytes: [u8; USER_KERNEL_TRAP_STACK_SIZE],
+struct UserKernelTrapStackRuntime {
+    ready: AtomicUsize,
+    vmapped: AtomicUsize,
+    guard_base: AtomicUsize,
+    guard_size: AtomicUsize,
+    guard_unmapped: AtomicUsize,
+    stack_base: AtomicUsize,
+    stack_top: AtomicUsize,
+    stack_size: AtomicUsize,
+    stack_align: AtomicUsize,
+    backing_phys: AtomicUsize,
+    backing_order: AtomicUsize,
 }
 
 #[cfg(app_user_boot)]
-static mut USER_KERNEL_TRAP_STACK: UserKernelTrapStack = UserKernelTrapStack {
-    bytes: [0; USER_KERNEL_TRAP_STACK_SIZE],
-};
+impl UserKernelTrapStackRuntime {
+    const fn new() -> Self {
+        Self {
+            ready: AtomicUsize::new(0),
+            vmapped: AtomicUsize::new(0),
+            guard_base: AtomicUsize::new(0),
+            guard_size: AtomicUsize::new(0),
+            guard_unmapped: AtomicUsize::new(0),
+            stack_base: AtomicUsize::new(0),
+            stack_top: AtomicUsize::new(0),
+            stack_size: AtomicUsize::new(0),
+            stack_align: AtomicUsize::new(0),
+            backing_phys: AtomicUsize::new(0),
+            backing_order: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[cfg(app_user_boot)]
+static USER_KERNEL_TRAP_STACK_RUNTIME: UserKernelTrapStackRuntime =
+    UserKernelTrapStackRuntime::new();
+
+#[cfg(app_user_boot)]
+#[repr(align(16))]
+struct UserKernelTrapOverflowStack {
+    bytes: [u8; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
+}
+
+#[cfg(app_user_boot)]
+static mut USER_KERNEL_TRAP_OVERFLOW_STACK: UserKernelTrapOverflowStack =
+    UserKernelTrapOverflowStack {
+        bytes: [0; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
+    };
 #[cfg(app_user_boot)]
 static mut USER_BOOT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 #[cfg(app_user_boot)]
@@ -4739,6 +4787,9 @@ pub fn run_first_user_init(
     syscall_table: &mut SyscallTable,
     boot_param: &BootParam,
     static_command_line: &StaticCommandLine,
+    vmalloc_allocator: &mut VmallocAllocator,
+    page_table_caches: &mut PageTableCaches,
+    config: &Config,
 ) -> ! {
     if payload.setup(kernel_init_task, exec_sync).is_err() {
         user_boot_panic("user payload setup failed\n");
@@ -4844,6 +4895,15 @@ pub fn run_first_user_init(
     }
     if elf.enable(address_space, stack, trap_frame).is_err() {
         user_boot_panic("user ELF enable failed\n");
+    }
+    if !prepare_user_kernel_trap_stack(
+        vmalloc_allocator,
+        page_table_caches,
+        page_allocator,
+        page_metadata_map,
+        config,
+    ) {
+        user_boot_panic("user kernel trap stack setup failed\n");
     }
     if address_space
         .enable(
@@ -5286,17 +5346,201 @@ fn sbi_put_usize(mut value: usize) {
 
 #[cfg(app_user_boot)]
 pub fn user_kernel_trap_stack_base() -> usize {
-    unsafe { core::ptr::addr_of!(USER_KERNEL_TRAP_STACK.bytes) as usize }
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_base
+        .load(Ordering::Acquire)
 }
 
 #[cfg(app_user_boot)]
 pub fn user_kernel_trap_stack_top() -> usize {
-    user_kernel_trap_stack_base() + USER_KERNEL_TRAP_STACK_SIZE
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_top
+        .load(Ordering::Acquire)
 }
 
 #[cfg(app_user_boot)]
 pub fn user_kernel_trap_stack_base_aligned() -> bool {
     user_kernel_trap_stack_base() % USER_KERNEL_TRAP_STACK_ALIGN == 0
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_ready() -> bool {
+    USER_KERNEL_TRAP_STACK_RUNTIME.ready.load(Ordering::Acquire) != 0
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_vmapped() -> bool {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .vmapped
+        .load(Ordering::Acquire)
+        != 0
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_guard_base() -> usize {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_base
+        .load(Ordering::Acquire)
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_guard_size() -> usize {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_size
+        .load(Ordering::Acquire)
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_guard_unmapped() -> bool {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_unmapped
+        .load(Ordering::Acquire)
+        != 0
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_backing_phys() -> usize {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .backing_phys
+        .load(Ordering::Acquire)
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_backing_order() -> usize {
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .backing_order
+        .load(Ordering::Acquire)
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_overflow_stack_base() -> usize {
+    unsafe { core::ptr::addr_of!(USER_KERNEL_TRAP_OVERFLOW_STACK.bytes) as usize }
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_overflow_stack_top() -> usize {
+    user_kernel_trap_overflow_stack_base() + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_overflow_stack_ready() -> bool {
+    user_kernel_trap_overflow_stack_base() != 0
+        && user_kernel_trap_overflow_stack_top()
+            == user_kernel_trap_overflow_stack_base() + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE
+}
+
+#[cfg(app_user_boot)]
+fn prepare_user_kernel_trap_stack(
+    vmalloc_allocator: &mut VmallocAllocator,
+    page_table_caches: &mut PageTableCaches,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+    config: &Config,
+) -> bool {
+    if user_kernel_trap_stack_ready() {
+        return true;
+    }
+    if config.page_size() != USER_PAGE_SIZE {
+        return false;
+    }
+    let Some(area) = vmalloc_allocator.get_vm_area_aligned_with_guard(
+        USER_KERNEL_TRAP_STACK_SIZE,
+        USER_KERNEL_TRAP_STACK_ALIGN,
+        USER_KERNEL_TRAP_GUARD_SIZE,
+        VmapAreaFlags::VmStack,
+    ) else {
+        return false;
+    };
+    if !area.is_vm_stack()
+        || area.size() != USER_KERNEL_TRAP_STACK_SIZE
+        || area.virt_base() % USER_KERNEL_TRAP_STACK_ALIGN != 0
+    {
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    }
+    let Some(guard_base) = area.virt_base().checked_sub(USER_KERNEL_TRAP_GUARD_SIZE) else {
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    };
+    let Some(page) = page_allocator.alloc_pages(
+        USER_KERNEL_TRAP_STACK_ORDER,
+        GfpFlags::kernel(),
+        page_metadata_map,
+    ) else {
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    };
+    let Some(phys) = page_metadata_map
+        .page_to_phys(page)
+        .map(|addr| addr.value())
+    else {
+        let _ = page_allocator.free_pages(page, USER_KERNEL_TRAP_STACK_ORDER, page_metadata_map);
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    };
+    let Some(linear) = page_metadata_map.page_address(page) else {
+        let _ = page_allocator.free_pages(page, USER_KERNEL_TRAP_STACK_ORDER, page_metadata_map);
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    };
+    unsafe {
+        core::ptr::write_bytes(linear as *mut u8, 0, USER_KERNEL_TRAP_STACK_SIZE);
+    }
+    let Some(mapping) = vmalloc_allocator.map_page_range(
+        page_table_caches,
+        page_allocator,
+        page_metadata_map,
+        config,
+        area,
+        phys,
+        USER_KERNEL_TRAP_STACK_SIZE,
+        PageProtection::KernelData,
+    ) else {
+        let _ = page_allocator.free_pages(page, USER_KERNEL_TRAP_STACK_ORDER, page_metadata_map);
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    };
+    if !mapping.uses_kernel_data_protection() {
+        let _ = vmalloc_allocator.unmap_page_range(mapping);
+        let _ = page_allocator.free_pages(page, USER_KERNEL_TRAP_STACK_ORDER, page_metadata_map);
+        let _ = vmalloc_allocator.free_vm_area(area);
+        return false;
+    }
+
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_base
+        .store(guard_base, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_size
+        .store(USER_KERNEL_TRAP_GUARD_SIZE, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .guard_unmapped
+        .store(1, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_base
+        .store(area.virt_base(), Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_top
+        .store(area.end(), Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_size
+        .store(area.size(), Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .stack_align
+        .store(USER_KERNEL_TRAP_STACK_ALIGN, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .backing_phys
+        .store(phys, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .backing_order
+        .store(USER_KERNEL_TRAP_STACK_ORDER, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .vmapped
+        .store(1, Ordering::Release);
+    USER_KERNEL_TRAP_STACK_RUNTIME
+        .ready
+        .store(1, Ordering::Release);
+    true
 }
 
 #[cfg(app_user_boot)]

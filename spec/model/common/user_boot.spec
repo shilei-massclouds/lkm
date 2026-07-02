@@ -402,8 +402,10 @@ predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_linux_riscv_config_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_thread_size_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_vmap_alignment_bound<T>(frame: T) -> bool;
-predicate user_kernel_trap_stack_vmap_guard_deferred<T>(frame: T) -> bool;
-predicate user_kernel_trap_stack_overflow_stack_deferred<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_vmapped_bound<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_vmap_guard_page_bound<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_overflow_stack_bound<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_entry_scratch_deferred<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_irq_stack_switch_deferred<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
@@ -2618,8 +2620,10 @@ object UserInitProcess: ResourceObject {
                         user_kernel_trap_stack_linux_riscv_config_bound(UserTrapFrame);
                         user_kernel_trap_stack_thread_size_bound(UserTrapFrame);
                         user_kernel_trap_stack_vmap_alignment_bound(UserTrapFrame);
-                        user_kernel_trap_stack_vmap_guard_deferred(UserTrapFrame);
-                        user_kernel_trap_stack_overflow_stack_deferred(UserTrapFrame);
+                        user_kernel_trap_stack_vmapped_bound(UserTrapFrame);
+                        user_kernel_trap_stack_vmap_guard_page_bound(UserTrapFrame);
+                        user_kernel_trap_stack_overflow_stack_bound(UserTrapFrame);
+                        user_kernel_trap_stack_entry_scratch_deferred(UserTrapFrame);
                         user_kernel_trap_stack_irq_stack_switch_deferred(UserTrapFrame);
                     }
                 }

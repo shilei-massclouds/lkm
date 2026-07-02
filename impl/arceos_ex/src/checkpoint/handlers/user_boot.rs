@@ -13,11 +13,17 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(app_user_boot)]
 use crate::objects::user_boot::{
-    user_kernel_trap_stack_base, user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_top,
-    UserStack, USER_KERNEL_IRQ_STACK_SIZE, USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED,
-    USER_KERNEL_TRAP_IRQ_STACKS, USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED,
-    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED,
-    USER_KERNEL_TRAP_STACK_ALIGN, USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
+    user_kernel_trap_overflow_stack_base, user_kernel_trap_overflow_stack_ready,
+    user_kernel_trap_overflow_stack_top, user_kernel_trap_stack_backing_order,
+    user_kernel_trap_stack_backing_phys, user_kernel_trap_stack_base,
+    user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_guard_base,
+    user_kernel_trap_stack_guard_size, user_kernel_trap_stack_guard_unmapped,
+    user_kernel_trap_stack_ready, user_kernel_trap_stack_top, user_kernel_trap_stack_vmapped,
+    UserStack, USER_KERNEL_IRQ_STACK_SIZE, USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED,
+    USER_KERNEL_TRAP_GUARD_PAGE_READY, USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACKS,
+    USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
+    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
+    USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
     USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
 };
 
@@ -506,6 +512,9 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     let process = &ctx.user_init_process;
     let trap_stack_base = user_kernel_trap_stack_base();
     let trap_stack_top = user_kernel_trap_stack_top();
+    let trap_guard_base = user_kernel_trap_stack_guard_base();
+    let overflow_stack_base = user_kernel_trap_overflow_stack_base();
+    let overflow_stack_top = user_kernel_trap_overflow_stack_top();
     let trap_stack_valid = USER_KERNEL_TRAP_THREAD_INFO_IN_TASK
         && USER_KERNEL_TRAP_VMAP_STACK
         && USER_KERNEL_TRAP_IRQ_STACKS
@@ -515,11 +524,21 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && USER_KERNEL_TRAP_STACK_ALIGN == USER_KERNEL_TRAP_STACK_SIZE * 2
         && USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE == USER_PAGE_SIZE
         && USER_KERNEL_IRQ_STACK_SIZE == USER_KERNEL_TRAP_STACK_SIZE
-        && USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED
-        && USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED
+        && USER_KERNEL_TRAP_GUARD_PAGE_READY
+        && USER_KERNEL_TRAP_OVERFLOW_STACK_READY
+        && USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED
         && USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED
+        && user_kernel_trap_stack_ready()
+        && user_kernel_trap_stack_vmapped()
+        && user_kernel_trap_stack_guard_unmapped()
+        && user_kernel_trap_stack_guard_size() == USER_KERNEL_TRAP_GUARD_SIZE
+        && trap_guard_base + USER_KERNEL_TRAP_GUARD_SIZE == trap_stack_base
         && user_kernel_trap_stack_base_aligned()
-        && trap_stack_top == trap_stack_base + USER_KERNEL_TRAP_STACK_SIZE;
+        && trap_stack_top == trap_stack_base + USER_KERNEL_TRAP_STACK_SIZE
+        && user_kernel_trap_stack_backing_phys() != 0
+        && user_kernel_trap_stack_backing_order() == USER_KERNEL_TRAP_STACK_ORDER
+        && user_kernel_trap_overflow_stack_ready()
+        && overflow_stack_top == overflow_stack_base + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE;
     let valid = process.state() == State::Online
         && process.reuses_kernel_init_task()
         && process.pid1_preserved()
@@ -581,6 +600,14 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         trap_stack_base,
         trap_stack_top,
     );
+    sink.diag_usize(
+        "kernel_trap_stack_ready",
+        user_kernel_trap_stack_ready() as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_stack_vmapped",
+        user_kernel_trap_stack_vmapped() as usize,
+    );
     sink.diag_usize("kernel_trap_stack_order", USER_KERNEL_TRAP_STACK_ORDER);
     sink.diag_usize("kernel_trap_stack_size", USER_KERNEL_TRAP_STACK_SIZE);
     sink.diag_usize("kernel_trap_stack_align", USER_KERNEL_TRAP_STACK_ALIGN);
@@ -600,18 +627,41 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         "kernel_trap_irq_stacks_config",
         USER_KERNEL_TRAP_IRQ_STACKS as usize,
     );
+    sink.diag_hex_pair(
+        "kernel_trap_guard_base_size",
+        trap_guard_base,
+        user_kernel_trap_stack_guard_size(),
+    );
+    sink.diag_usize(
+        "kernel_trap_guard_unmapped",
+        user_kernel_trap_stack_guard_unmapped() as usize,
+    );
+    sink.diag_hex_pair(
+        "kernel_trap_stack_backing_phys_order",
+        user_kernel_trap_stack_backing_phys(),
+        user_kernel_trap_stack_backing_order(),
+    );
+    sink.diag_hex_pair(
+        "kernel_trap_overflow_stack_base_top",
+        overflow_stack_base,
+        overflow_stack_top,
+    );
     sink.diag_usize(
         "kernel_trap_overflow_stack_size",
         USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE,
     );
     sink.diag_usize("kernel_irq_stack_size", USER_KERNEL_IRQ_STACK_SIZE);
     sink.diag_usize(
-        "kernel_trap_guard_page_deferred",
-        USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED as usize,
+        "kernel_trap_guard_page_ready",
+        USER_KERNEL_TRAP_GUARD_PAGE_READY as usize,
     );
     sink.diag_usize(
-        "kernel_trap_overflow_switch_deferred",
-        USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED as usize,
+        "kernel_trap_overflow_stack_ready",
+        USER_KERNEL_TRAP_OVERFLOW_STACK_READY as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_entry_scratch_deferred",
+        USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED as usize,
     );
     sink.diag_usize(
         "kernel_trap_irq_stack_switch_deferred",

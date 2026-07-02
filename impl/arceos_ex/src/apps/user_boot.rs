@@ -28,5 +28,8 @@ pub fn run() -> ! {
         &mut ctx.syscall_table,
         &ctx.boot_param,
         &ctx.static_command_line,
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_table_caches,
+        &ctx.config,
     )
 }
