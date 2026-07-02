@@ -439,12 +439,16 @@ predicate user_child_process_fs_struct_copied<T, F>(process: T, fs: F) -> bool;
 predicate user_child_process_credentials_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_signal_state_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_user_address_space_snapshot<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_user_stack_snapshot_copied<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_user_stack_snapshot_restored<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bool;
 predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
 predicate user_child_process_tls_inherited<T>(process: T) -> bool;
 predicate user_child_process_enqueued<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_wait4_parent_wait_observed<T>(process: T) -> bool;
 predicate user_child_process_child_continuation_taken<T>(process: T) -> bool;
+predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
+predicate user_address_space_fault_mapping_diagnostic_bound<T>(space: T) -> bool;
 predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
@@ -612,7 +616,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片只记录 parent wait_chldexit 边界并交给 child continuation。wait4 首片实现后的同一 guest 不再打印 unsupported wait4，后续观察为 child continuation 中 a7=135 附近的 instruction page fault，说明 copied trap frame 之外的 child address-space/stack snapshot 是下一边界。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、exit/zombie/reap/status copyout 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片只记录 parent wait_chldexit 边界并交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid 并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。新的观察边界为 BusyBox /bin/sh 报 can't set tty process group: No such process 并 user exit status=2，后续应转入 process-group/session/job-control 或 tty foreground pgrp 对照。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、exit/zombie/reap/status copyout、完整地址空间复制/COW 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
                 }
             }
         }
@@ -2126,6 +2130,7 @@ object SyscallTable: ResourceObject {
                     syscall_clone_parent_returns_child_pid(self, UserInitProcess);
                     syscall_clone_child_return_zero_bound(self, UserChildProcess);
                     syscall_clone_wake_up_new_task_shape(self, Scheduler);
+                    user_child_process_user_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
                     syscall_table_clone_observed(self);
                 }
             }
@@ -2161,6 +2166,9 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_yields_to_user_child_continuation(self, UserChildProcess);
                     user_child_process_wait4_parent_wait_observed(UserChildProcess);
                     user_child_process_child_continuation_taken(UserChildProcess);
+                    user_child_process_wait4_handoff_frame_diagnostic_bound(UserChildProcess);
+                    user_child_process_user_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
+                    user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
                     syscall_wait4_status_copyout_deferred(self);
                     syscall_wait4_zombie_reap_deferred(self);
                     syscall_wait4_blocking_sleep_deferred(self);
@@ -2232,6 +2240,7 @@ object UserChildProcess: ResourceObject {
             user_child_process_credentials_copied(self, UserInitProcess);
             user_child_process_signal_state_copied(self, UserInitProcess);
             user_child_process_user_address_space_snapshot(self, UserAddressSpace);
+            user_child_process_user_stack_snapshot_copied(self, UserAddressSpace);
             user_child_process_trap_frame_copied(self, UserTrapFrame);
             user_child_process_trap_frame_child_return_zero(self);
             user_child_process_tls_inherited(self);

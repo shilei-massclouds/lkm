@@ -16,11 +16,11 @@ use super::{
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
-        PageTablePage, copy_high_half_root_entries, page_table_storage_ready, sv39_indices,
-        table_pte_from_phys, user_leaf_pte_from_phys,
+        copy_high_half_root_entries, page_table_storage_ready, sv39_indices, table_pte_from_phys,
+        user_leaf_pte_from_phys, PageTablePage,
     },
     rest_init::{KernelInitTask, SystemState, SystemStateValue},
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_page_tables,
     swapper_vm::SwapperVm,
     task::TaskEntry,
@@ -870,6 +870,114 @@ pub enum UserMappingKind {
     ElfSegment,
     Stack,
     Heap,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UserFaultAccess {
+    Instruction,
+    Load,
+    Store,
+    Unknown,
+}
+
+#[derive(Clone, Copy)]
+pub struct UserFaultMappingDiagnostic {
+    address: usize,
+    access: UserFaultAccess,
+    mapped: bool,
+    kind: UserMappingKind,
+    start: usize,
+    end: usize,
+    readable: bool,
+    writable: bool,
+    executable: bool,
+    user_accessible: bool,
+    permission_satisfied: bool,
+}
+
+impl UserFaultMappingDiagnostic {
+    const fn unmapped(address: usize, access: UserFaultAccess) -> Self {
+        Self {
+            address,
+            access,
+            mapped: false,
+            kind: UserMappingKind::Empty,
+            start: 0,
+            end: 0,
+            readable: false,
+            writable: false,
+            executable: false,
+            user_accessible: false,
+            permission_satisfied: false,
+        }
+    }
+
+    const fn covered(
+        address: usize,
+        access: UserFaultAccess,
+        mapping: &UserMapping,
+        start: usize,
+        end: usize,
+        permission_satisfied: bool,
+    ) -> Self {
+        Self {
+            address,
+            access,
+            mapped: true,
+            kind: mapping.kind(),
+            start,
+            end,
+            readable: mapping.readable(),
+            writable: mapping.writable(),
+            executable: mapping.executable(),
+            user_accessible: mapping.user_accessible(),
+            permission_satisfied,
+        }
+    }
+
+    pub const fn address(&self) -> usize {
+        self.address
+    }
+
+    pub const fn access(&self) -> UserFaultAccess {
+        self.access
+    }
+
+    pub const fn mapped(&self) -> bool {
+        self.mapped
+    }
+
+    pub const fn kind(&self) -> UserMappingKind {
+        self.kind
+    }
+
+    pub const fn start(&self) -> usize {
+        self.start
+    }
+
+    pub const fn end(&self) -> usize {
+        self.end
+    }
+
+    pub const fn readable(&self) -> bool {
+        self.readable
+    }
+
+    pub const fn writable(&self) -> bool {
+        self.writable
+    }
+
+    pub const fn executable(&self) -> bool {
+        self.executable
+    }
+
+    pub const fn user_accessible(&self) -> bool {
+        self.user_accessible
+    }
+
+    pub const fn permission_satisfied(&self) -> bool {
+        self.permission_satisfied
+    }
 }
 
 pub struct UserMapping {
@@ -2034,6 +2142,57 @@ impl UserAddressSpace {
         false
     }
 
+    pub fn fault_mapping_diagnostic(
+        &self,
+        addr: usize,
+        access: UserFaultAccess,
+    ) -> UserFaultMappingDiagnostic {
+        if self.lifecycle.state() != State::Online {
+            return UserFaultMappingDiagnostic::unmapped(addr, access);
+        }
+
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            let Some(mapping_start) = mapping.vaddr().checked_sub(mapping.page_offset()) else {
+                index += 1;
+                continue;
+            };
+            let Some(mapping_len) = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE) else {
+                index += 1;
+                continue;
+            };
+            let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
+                index += 1;
+                continue;
+            };
+            if mapping.kind() != UserMappingKind::Empty
+                && addr >= mapping_start
+                && addr < mapping_end
+            {
+                let permission_satisfied = match access {
+                    UserFaultAccess::Instruction => {
+                        mapping.user_accessible() && mapping.executable()
+                    }
+                    UserFaultAccess::Load => mapping.user_accessible() && mapping.readable(),
+                    UserFaultAccess::Store => mapping.user_accessible() && mapping.writable(),
+                    UserFaultAccess::Unknown => mapping.user_accessible(),
+                };
+                return UserFaultMappingDiagnostic::covered(
+                    addr,
+                    access,
+                    mapping,
+                    mapping_start,
+                    mapping_end,
+                    permission_satisfied,
+                );
+            }
+            index += 1;
+        }
+
+        UserFaultMappingDiagnostic::unmapped(addr, access)
+    }
+
     pub fn enable(
         &mut self,
         trap_frame: &UserTrapFrame,
@@ -3039,6 +3198,10 @@ pub struct UserChildProcess {
     credentials_copied: bool,
     signal_state_copied: bool,
     user_address_space_snapshot: bool,
+    user_stack_snapshot: [u8; USER_STACK_SIZE],
+    user_stack_snapshot_len: usize,
+    user_stack_snapshot_copied: bool,
+    user_stack_snapshot_restored: bool,
     trap_frame_copied: bool,
     trap_frame_child_return_zero: bool,
     tls_inherited: bool,
@@ -3070,6 +3233,10 @@ impl UserChildProcess {
             credentials_copied: false,
             signal_state_copied: false,
             user_address_space_snapshot: false,
+            user_stack_snapshot: [0; USER_STACK_SIZE],
+            user_stack_snapshot_len: 0,
+            user_stack_snapshot_copied: false,
+            user_stack_snapshot_restored: false,
             trap_frame_copied: false,
             trap_frame_child_return_zero: false,
             tls_inherited: false,
@@ -3128,6 +3295,14 @@ impl UserChildProcess {
         self.child_continuation_taken
     }
 
+    pub const fn user_stack_snapshot_copied(&self) -> bool {
+        self.user_stack_snapshot_copied
+    }
+
+    pub const fn user_stack_snapshot_restored(&self) -> bool {
+        self.user_stack_snapshot_restored
+    }
+
     pub fn preset(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Base {
             return failed_condition(
@@ -3154,6 +3329,7 @@ impl UserChildProcess {
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
         files_struct: &FilesStruct,
+        page_metadata_map: &PageMetadataMap,
         current_frame: &TrapFrame,
         clone_flags: usize,
         newsp: usize,
@@ -3184,6 +3360,11 @@ impl UserChildProcess {
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        let stack_snapshot_len = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.user_stack_snapshot,
+        )?;
 
         self.pid = USER_CHILD_PID;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
@@ -3199,6 +3380,9 @@ impl UserChildProcess {
         self.credentials_copied = parent.credentials_inherited();
         self.signal_state_copied = parent.signal_state_inherited();
         self.user_address_space_snapshot = true;
+        self.user_stack_snapshot_len = stack_snapshot_len;
+        self.user_stack_snapshot_copied = true;
+        self.user_stack_snapshot_restored = false;
         self.trap_frame_copied = true;
         self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
         self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
@@ -3225,6 +3409,8 @@ impl UserChildProcess {
     pub fn wait4_yield_to_child_continuation(
         &mut self,
         parent: &UserInitProcess,
+        address_space: &UserAddressSpace,
+        page_metadata_map: &PageMetadataMap,
         upid: usize,
         options: usize,
         rusage: usize,
@@ -3246,9 +3432,12 @@ impl UserChildProcess {
             || !self.credentials_copied
             || !self.signal_state_copied
             || !self.user_address_space_snapshot
+            || !self.user_stack_snapshot_copied
+            || self.user_stack_snapshot_len == 0
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
             || parent.state() != State::Online
+            || address_space.state() != State::Online
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
             || options != USER_WAIT4_WUNTRACED
@@ -3257,11 +3446,121 @@ impl UserChildProcess {
             return None;
         }
 
+        if !restore_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &self.user_stack_snapshot,
+            self.user_stack_snapshot_len,
+        ) {
+            return None;
+        }
+
         let child_frame = self.child_trap_frame?;
         self.wait4_parent_wait_observed = true;
+        self.user_stack_snapshot_restored = true;
         self.child_continuation_taken = true;
         Some(child_frame)
     }
+}
+
+fn copy_user_stack_snapshot(
+    address_space: &UserAddressSpace,
+    page_metadata_map: &PageMetadataMap,
+    output: &mut [u8; USER_STACK_SIZE],
+) -> Option<usize> {
+    let mapping = address_space.stack_mapping()?;
+    if mapping.kind() != UserMappingKind::Stack || mapping.memsz() == 0 {
+        return None;
+    }
+    let page_bytes = mapping
+        .backing_page_count()
+        .checked_mul(USER_PAGE_SIZE)
+        .filter(|bytes| *bytes >= mapping.memsz())?;
+    let snapshot_len = min_usize(mapping.memsz(), page_bytes);
+    if snapshot_len == 0 || snapshot_len > output.len() {
+        return None;
+    }
+    if !copy_stack_mapping_to_buffer(mapping, page_metadata_map, &mut output[..snapshot_len]) {
+        return None;
+    }
+    Some(snapshot_len)
+}
+
+fn restore_user_stack_snapshot(
+    address_space: &UserAddressSpace,
+    page_metadata_map: &PageMetadataMap,
+    input: &[u8; USER_STACK_SIZE],
+    len: usize,
+) -> bool {
+    let Some(mapping) = address_space.stack_mapping() else {
+        return false;
+    };
+    if mapping.kind() != UserMappingKind::Stack || len == 0 || len > input.len() {
+        return false;
+    }
+    let Some(page_bytes) = mapping
+        .backing_page_count()
+        .checked_mul(USER_PAGE_SIZE)
+        .filter(|bytes| *bytes >= len)
+    else {
+        return false;
+    };
+    if page_bytes < mapping.memsz() || len > mapping.memsz() {
+        return false;
+    }
+    copy_buffer_to_stack_mapping(mapping, page_metadata_map, &input[..len])
+}
+
+fn copy_stack_mapping_to_buffer(
+    mapping: &UserMapping,
+    page_metadata_map: &PageMetadataMap,
+    output: &mut [u8],
+) -> bool {
+    let mut copied = 0usize;
+    let mut page_index = 0usize;
+    while copied < output.len() {
+        let Some(page) = mapping.backing_page(page_index) else {
+            return false;
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            return false;
+        };
+        let len = min_usize(USER_PAGE_SIZE, output.len() - copied);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                linear as *const u8,
+                output.as_mut_ptr().add(copied),
+                len,
+            );
+        }
+        copied += len;
+        page_index += 1;
+    }
+    true
+}
+
+fn copy_buffer_to_stack_mapping(
+    mapping: &UserMapping,
+    page_metadata_map: &PageMetadataMap,
+    input: &[u8],
+) -> bool {
+    let mut copied = 0usize;
+    let mut page_index = 0usize;
+    while copied < input.len() {
+        let Some(page) = mapping.backing_page(page_index) else {
+            return false;
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            return false;
+        };
+        let len = min_usize(USER_PAGE_SIZE, input.len() - copied);
+        unsafe {
+            core::ptr::copy_nonoverlapping(input.as_ptr().add(copied), linear as *mut u8, len);
+        }
+        copied += len;
+        page_index += 1;
+    }
+    true
 }
 
 #[allow(dead_code)]
@@ -5359,7 +5658,11 @@ fn mappings_have_page_table_entries(
 }
 
 const fn min_usize(a: usize, b: usize) -> usize {
-    if a < b { a } else { b }
+    if a < b {
+        a
+    } else {
+        b
+    }
 }
 
 fn loadable_content_contains(input: &[u8], parsed: &ParsedLoadSegments, needle: &[u8]) -> bool {

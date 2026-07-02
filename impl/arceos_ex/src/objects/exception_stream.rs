@@ -4,15 +4,16 @@ use crate::trace::{self, Checkpoint};
 
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{FILE_POLLIN, FileError, TERMIOS_SIZE},
+    files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     process_prepare::TaskCopyUserProcessInputs,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     task::TaskEntry,
     user_boot::{
-        USER_SIGNAL_COUNT, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction,
+        UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
+        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
     },
 };
 
@@ -3805,6 +3806,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             &ctx.user_trap_frame,
             &ctx.fs_struct,
             &ctx.files_struct,
+            &ctx.page_metadata_map,
             frame,
             clone_flags,
             newsp,
@@ -3870,6 +3872,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let ctx = crate::context::context();
         let Some(child_frame) = ctx.user_child_process.wait4_yield_to_child_continuation(
             &ctx.user_init_process,
+            &ctx.user_address_space,
+            &ctx.page_metadata_map,
             upid,
             options,
             rusage,
@@ -3882,6 +3886,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.wait4_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+    print_wait4_child_handoff_diagnostic(&child_frame);
     *frame = child_frame;
 }
 
@@ -4162,7 +4167,11 @@ fn unexpected_exception_handler(frame: &TrapFrame) -> ! {
 
 fn breakpoint_instruction_length(sepc: usize) -> usize {
     let insn = unsafe { core::ptr::read_unaligned(sepc as *const u16) };
-    if insn & 0b11 == 0b11 { 4 } else { 2 }
+    if insn & 0b11 == 0b11 {
+        4
+    } else {
+        2
+    }
 }
 
 fn panic_dispatch(message: &str) -> ! {
@@ -4189,8 +4198,115 @@ fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
     print_hex(crate::arch::riscv64::csr::read_gp());
     crate::arch::riscv64::sbi::putstr(" tp=0x");
     print_hex(crate::arch::riscv64::csr::read_tp());
+    crate::arch::riscv64::sbi::putstr(" frame_sp=0x");
+    print_hex(frame.reg(2));
+    crate::arch::riscv64::sbi::putstr(" frame_gp=0x");
+    print_hex(frame.reg(3));
+    crate::arch::riscv64::sbi::putstr(" frame_tp=0x");
+    print_hex(frame.reg(4));
+    print_user_page_fault_diagnostic(frame);
     crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn print_wait4_child_handoff_diagnostic(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr("wait4 child handoff sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" sp=0x");
+    print_hex(frame.reg(2));
+    crate::arch::riscv64::sbi::putstr(" gp=0x");
+    print_hex(frame.reg(3));
+    crate::arch::riscv64::sbi::putstr(" tp=0x");
+    print_hex(frame.reg(4));
+    crate::arch::riscv64::sbi::putstr(" a7=");
+    print_decimal(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" sstatus=0x");
+    print_hex(frame.sstatus);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn print_user_page_fault_diagnostic(frame: &TrapFrame) {
+    let cause = frame.scause & !SCAUSE_INTERRUPT_BIT;
+    if !PAGE_FAULT_CAUSES.contains(&cause) {
+        return;
+    }
+
+    let ctx = crate::context::context_ref();
+    let space = &ctx.user_address_space;
+    let current_satp = crate::arch::riscv64::csr::read_satp();
+    let expected_satp = space.satp_token();
+    crate::arch::riscv64::sbi::putstr(" user_fault_diag current_satp=0x");
+    print_hex(current_satp);
+    crate::arch::riscv64::sbi::putstr(" expected_satp=0x");
+    print_hex(expected_satp);
+    crate::arch::riscv64::sbi::putstr(" satp_match=");
+    print_bool_digit(current_satp == expected_satp);
+
+    let fault_access = page_fault_access(frame);
+    let sepc_mapping = space.fault_mapping_diagnostic(frame.sepc, UserFaultAccess::Instruction);
+    let stval_mapping = space.fault_mapping_diagnostic(frame.stval, fault_access);
+    print_fault_mapping_diagnostic(" sepc_map=", sepc_mapping);
+    print_fault_mapping_diagnostic(" stval_map=", stval_mapping);
+}
+
+fn page_fault_access(frame: &TrapFrame) -> UserFaultAccess {
+    match frame.scause & !SCAUSE_INTERRUPT_BIT {
+        EXC_INSTRUCTION_PAGE_FAULT => UserFaultAccess::Instruction,
+        EXC_LOAD_PAGE_FAULT => UserFaultAccess::Load,
+        EXC_STORE_PAGE_FAULT => UserFaultAccess::Store,
+        _ => UserFaultAccess::Unknown,
+    }
+}
+
+fn print_fault_mapping_diagnostic(label: &str, diag: UserFaultMappingDiagnostic) {
+    crate::arch::riscv64::sbi::putstr(label);
+    print_mapping_kind(diag.kind(), diag.mapped());
+    crate::arch::riscv64::sbi::putstr(" addr=0x");
+    print_hex(diag.address());
+    crate::arch::riscv64::sbi::putstr(" need=");
+    print_fault_access(diag.access());
+    if diag.mapped() {
+        crate::arch::riscv64::sbi::putstr(" range=0x");
+        print_hex(diag.start());
+        crate::arch::riscv64::sbi::putstr("..0x");
+        print_hex(diag.end());
+        crate::arch::riscv64::sbi::putstr(" r=");
+        print_bool_digit(diag.readable());
+        crate::arch::riscv64::sbi::putstr(" w=");
+        print_bool_digit(diag.writable());
+        crate::arch::riscv64::sbi::putstr(" x=");
+        print_bool_digit(diag.executable());
+        crate::arch::riscv64::sbi::putstr(" u=");
+        print_bool_digit(diag.user_accessible());
+    }
+    crate::arch::riscv64::sbi::putstr(" perm_ok=");
+    print_bool_digit(diag.permission_satisfied());
+}
+
+fn print_mapping_kind(kind: UserMappingKind, mapped: bool) {
+    if !mapped {
+        crate::arch::riscv64::sbi::putstr("unmapped");
+        return;
+    }
+    match kind {
+        UserMappingKind::ElfSegment => crate::arch::riscv64::sbi::putstr("elf"),
+        UserMappingKind::Stack => crate::arch::riscv64::sbi::putstr("stack"),
+        UserMappingKind::Heap => crate::arch::riscv64::sbi::putstr("heap"),
+        UserMappingKind::Empty => crate::arch::riscv64::sbi::putstr("empty"),
+    }
+}
+
+fn print_fault_access(access: UserFaultAccess) {
+    match access {
+        UserFaultAccess::Instruction => crate::arch::riscv64::sbi::putstr("execute"),
+        UserFaultAccess::Load => crate::arch::riscv64::sbi::putstr("load"),
+        UserFaultAccess::Store => crate::arch::riscv64::sbi::putstr("store"),
+        UserFaultAccess::Unknown => crate::arch::riscv64::sbi::putstr("unknown"),
+    }
+}
+
+fn print_bool_digit(value: bool) {
+    crate::arch::riscv64::sbi::putchar(if value { b'1' } else { b'0' });
 }
 
 fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
