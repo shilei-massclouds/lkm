@@ -387,10 +387,12 @@ predicate syscall_wait4_pid_minus_one_all_children_first_slice<T>(table: T) -> b
 predicate syscall_wait4_options_wuntraced_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_parent_wait_chldexit_boundary<T>(table: T) -> bool;
 predicate syscall_wait4_yields_to_user_child_continuation<T, P>(table: T, process: P) -> bool;
-predicate syscall_wait4_status_copyout_deferred<T>(table: T) -> bool;
-predicate syscall_wait4_zombie_reap_deferred<T>(table: T) -> bool;
+predicate syscall_wait4_child_exit_status_copyout_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_observed_child_reap_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_no_child_echild_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_blocking_sleep_deferred<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
+predicate syscall_exit_group_pid1_shutdown_child_wait4_split<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
 predicate user_trap_return_ready() -> bool;
@@ -493,6 +495,20 @@ predicate user_child_process_enqueued<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_wait4_parent_wait_observed<T>(process: T) -> bool;
 predicate user_child_process_child_continuation_taken<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_frame_saved<T>(process: T) -> bool;
+predicate user_child_process_parent_address_space_snapshot_saved<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_wait_register_checkpoint_bound<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_stack_window_checkpoint_bound<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_stack_window_compared<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_stack_snapshot_copied<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_wait_stack_snapshot_restored<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_wait_writable_page_snapshot_copied<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_wait_writable_page_snapshot_compared<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_wait_writable_page_snapshot_restored<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_exit_status_observed<T>(process: T) -> bool;
+predicate user_child_process_wait4_status_copied<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_resumed<T>(process: T) -> bool;
+predicate user_child_process_parent_wait_resume_checkpoint_bound<T>(process: T) -> bool;
 predicate user_address_space_fault_mapping_diagnostic_bound<T>(space: T) -> bool;
 predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
@@ -661,7 +677,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片只记录 parent wait_chldexit 边界并交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid 并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。新的 errno 证据为 parent setpgid(3,3) 返回 ESRCH、child continuation setpgid(0,3) 返回 EPERM、随后 /dev/tty fd 上 TIOCSPGRP(3) 返回 ESRCH；当前 job-control 首片只把 plain-fork child pid/pgrp 3 加入同 session 可见视图并允许该 pgrp 成为 console foreground pgrp。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、exit/zombie/reap/status copyout、完整地址空间复制/COW、setsid、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid 并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum 并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task、完整地址空间复制/COW、setsid、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
                 }
             }
         }
@@ -1130,10 +1146,12 @@ object SyscallTable: ResourceObject {
                     syscall_execve_close_on_exec_deferred(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
                     syscall_execve_full_linux_model_deferred(self);
-                    syscall_wait4_status_copyout_deferred(self);
-                    syscall_wait4_zombie_reap_deferred(self);
+                    syscall_wait4_child_exit_status_copyout_first_slice(self);
+                    syscall_wait4_observed_child_reap_first_slice(self);
+                    syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
                     syscall_exit_records_status(self);
+                    syscall_exit_group_pid1_shutdown_child_wait4_split(self);
                     syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
             }
@@ -1204,10 +1222,12 @@ object SyscallTable: ResourceObject {
             syscall_execve_close_on_exec_deferred(self);
             syscall_execve_old_mm_reclaim_deferred(self);
             syscall_execve_full_linux_model_deferred(self);
-            syscall_wait4_status_copyout_deferred(self);
-            syscall_wait4_zombie_reap_deferred(self);
+            syscall_wait4_child_exit_status_copyout_first_slice(self);
+            syscall_wait4_observed_child_reap_first_slice(self);
+            syscall_wait4_no_child_echild_first_slice(self);
             syscall_wait4_blocking_sleep_deferred(self);
             syscall_exit_records_status(self);
+            syscall_exit_group_pid1_shutdown_child_wait4_split(self);
         }
 
         actions {
@@ -2335,10 +2355,17 @@ object SyscallTable: ResourceObject {
                  * child exists but has not produced a waitable exit/stop/
                  * continue event, do_wait() reaches the interruptible
                  * wait_chldexit boundary and would schedule another runnable
-                 * task. This first slice records that parent wait boundary and
+                 * task. This first slice records that parent wait boundary,
+                 * saves the parent wait frame/address-space snapshot, and
                  * yields to the child trap-frame continuation already produced
-                 * by clone. It must not synthesize a child exit status, perform
-                 * zombie reaping or write the status pointer.
+                 * by clone. A later observed child exit_group can then restore
+                 * the parent address space, copy the Linux wait status to the
+                 * parent status pointer, and return the child pid from wait4.
+                 * After that observed child has been reaped, a follow-up
+                 * wait4(-1, status, valid_options, NULL) has no eligible child
+                 * and returns ECHILD, matching __do_wait()'s notask_error path
+                 * after kernel_wait4() adds WEXITED internally.
+                 * It still does not model full wait queues or release_task().
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2357,10 +2384,17 @@ object SyscallTable: ResourceObject {
                     user_child_process_wait4_parent_wait_observed(UserChildProcess);
                     user_child_process_child_continuation_taken(UserChildProcess);
                     user_child_process_wait4_handoff_frame_diagnostic_bound(UserChildProcess);
+                    user_child_process_parent_wait_frame_saved(UserChildProcess);
+                    user_child_process_parent_address_space_snapshot_saved(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_wait_register_checkpoint_bound(UserChildProcess);
+                    user_child_process_parent_wait_stack_window_checkpoint_bound(UserChildProcess);
+                    user_child_process_parent_wait_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_copied(UserChildProcess, UserAddressSpace);
                     user_child_process_user_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
                     user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
-                    syscall_wait4_status_copyout_deferred(self);
-                    syscall_wait4_zombie_reap_deferred(self);
+                    syscall_wait4_child_exit_status_copyout_first_slice(self);
+                    syscall_wait4_observed_child_reap_first_slice(self);
+                    syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
                     syscall_table_wait4_observed(self);
                 }
@@ -2384,6 +2418,15 @@ object SyscallTable: ResourceObject {
 
                 ensures {
                     syscall_exit_records_status(self);
+                    syscall_exit_group_pid1_shutdown_child_wait4_split(self);
+                    user_child_process_exit_status_observed(UserChildProcess);
+                    user_child_process_wait4_status_copied(UserChildProcess);
+                    user_child_process_parent_wait_resumed(UserChildProcess);
+                    user_child_process_parent_wait_resume_checkpoint_bound(UserChildProcess);
+                    user_child_process_parent_wait_stack_window_compared(UserChildProcess);
+                    user_child_process_parent_wait_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_compared(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_restored(UserChildProcess, UserAddressSpace);
                     syscall_table_exit_observed(self);
                 }
             }

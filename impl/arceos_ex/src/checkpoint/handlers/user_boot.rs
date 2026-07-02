@@ -29,7 +29,7 @@ use crate::objects::user_boot::{
 
 #[cfg(app_user_boot)]
 use crate::objects::{
-    exception_stream::execve_checkpoint_observation,
+    exception_stream::{execve_checkpoint_observation, wait4_checkpoint_observation},
     files::{FdRef, FileBackendKind},
     state::State,
 };
@@ -77,10 +77,14 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableNewFstatAt,
     #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableWait4,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserChildParentWaitResumed,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 19;
+pub const KUNIT_CASE_COUNT: usize = 21;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
@@ -100,6 +104,10 @@ static FILES_WRITE_PATH_REPORTED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_CLOSE_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_NEWFSTATAT_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_WAIT4_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CHILD_PARENT_WAIT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_EXIT_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -189,6 +197,18 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::SyscallTableNewFstatAt => {
             run_once(&SYSCALL_NEWFSTATAT_REPORTED, || {
                 run_syscall_table_newfstatat(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableWait4 => {
+            run_once(&SYSCALL_WAIT4_REPORTED, || {
+                run_syscall_table_wait4(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserChildParentWaitResumed => {
+            run_once(&USER_CHILD_PARENT_WAIT_RESUMED_REPORTED, || {
+                run_user_child_parent_wait_resumed(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -1045,6 +1065,189 @@ fn run_syscall_table_newfstatat(
 }
 
 #[cfg(app_user_boot)]
+fn run_syscall_table_wait4(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.wait4_parent_saved";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let child = &ctx.user_child_process;
+    let obs = wait4_checkpoint_observation();
+    let valid = table.state() == State::Ready
+        && table.wait4_supported()
+        && table.wait4_parent_wait_chldexit_boundary()
+        && table.wait4_yields_to_user_child_continuation()
+        && table.wait4_child_exit_status_copyout_first_slice()
+        && table.wait4_observed_child_reap_first_slice()
+        && table.wait4_no_child_echild_first_slice()
+        && table.wait4_observed()
+        && child.wait4_parent_wait_observed()
+        && child.child_continuation_taken()
+        && child.parent_wait_frame_saved()
+        && child.parent_address_space_snapshot_saved()
+        && child.parent_wait_register_checkpoint_bound()
+        && child.parent_wait_stack_window_checkpoint_bound()
+        && child.parent_wait_stack_snapshot_copied()
+        && child.parent_wait_writable_page_snapshot_copied()
+        && obs.saved != 0
+        && obs.saved_sepc != 0
+        && obs.saved_sp != 0
+        && obs.saved_a7 == 260
+        && obs.saved_status_ptr != 0
+        && obs.saved_child_pid == crate::objects::user_boot::USER_CHILD_PID
+        && obs.stack_window_saved != 0
+        && obs.stack_window_start == child.parent_wait_stack_window_start()
+        && obs.stack_window_len == child.parent_wait_stack_window_len()
+        && obs.stack_window_len != 0
+        && obs.writable_pages_saved != 0
+        && obs.writable_pages_count == child.parent_wait_writable_page_count()
+        && obs.writable_pages_count != 0
+        && obs.writable_pages_truncated == 0;
+
+    sink.diag_hex_pair("wait4_saved_sepc_sp", obs.saved_sepc, obs.saved_sp);
+    sink.diag_hex_pair("wait4_saved_s2_s4", obs.saved_s2, obs.saved_s4);
+    sink.diag_hex_pair(
+        "wait4_saved_satp_status",
+        obs.saved_satp,
+        obs.saved_status_ptr,
+    );
+    sink.diag_usize("wait4_saved_a7", obs.saved_a7);
+    sink.diag_usize("wait4_saved_child_pid", obs.saved_child_pid);
+    sink.diag_hex_pair(
+        "wait4_stack_window_start_len",
+        obs.stack_window_start,
+        obs.stack_window_len,
+    );
+    sink.diag_usize("wait4_stack_window_saved", obs.stack_window_saved);
+    sink.diag_usize(
+        "wait4_parent_stack_snapshot_copied",
+        child.parent_wait_stack_snapshot_copied() as usize,
+    );
+    sink.diag_usize("wait4_writable_pages_saved", obs.writable_pages_saved);
+    sink.diag_usize("wait4_writable_pages_count", obs.writable_pages_count);
+    sink.diag_usize(
+        "wait4_writable_pages_truncated",
+        obs.writable_pages_truncated,
+    );
+    sink.diag_usize(
+        "wait4_parent_writable_snapshot_copied",
+        child.parent_wait_writable_page_snapshot_copied() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "wait4 parent saved facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_child_parent_wait_resumed(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_child.parent_wait_resumed";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let obs = wait4_checkpoint_observation();
+    let valid = child.child_exit_status_observed()
+        && child.wait4_status_copied()
+        && child.parent_wait_resumed()
+        && child.parent_wait_resume_checkpoint_bound()
+        && obs.saved != 0
+        && obs.resumed != 0
+        && obs.resumed_sepc != 0
+        && obs.resumed_sp != 0
+        && obs.resumed_a0 == crate::objects::user_boot::USER_CHILD_PID
+        && obs.resumed_a7 == 260
+        && obs.resumed_status_ptr == obs.saved_status_ptr
+        && obs.resumed_wait_status == 0
+        && obs.resumed_status_copied != 0
+        && obs.child_exit_status == child.child_exit_status()
+        && child.parent_wait_stack_window_compared()
+        && child.parent_wait_stack_snapshot_restored()
+        && obs.stack_window_compared != 0
+        && obs.stack_window_start == child.parent_wait_stack_window_start()
+        && obs.stack_window_len == child.parent_wait_stack_window_len()
+        && child.parent_wait_writable_page_compared()
+        && child.parent_wait_writable_page_snapshot_restored()
+        && obs.writable_pages_compared != 0
+        && obs.writable_pages_restored != 0;
+
+    sink.diag_hex_pair("wait4_resumed_sepc_sp", obs.resumed_sepc, obs.resumed_sp);
+    sink.diag_hex_pair("wait4_resumed_s2_s4", obs.resumed_s2, obs.resumed_s4);
+    sink.diag_hex_pair(
+        "wait4_resumed_satp_status",
+        obs.resumed_satp,
+        obs.resumed_status_ptr,
+    );
+    sink.diag_usize("wait4_resumed_a0", obs.resumed_a0);
+    sink.diag_usize("wait4_resumed_a7", obs.resumed_a7);
+    sink.diag_usize("wait4_resumed_wait_status", obs.resumed_wait_status);
+    sink.diag_usize("wait4_resumed_status_copied", obs.resumed_status_copied);
+    sink.diag_usize("wait4_child_exit_status", obs.child_exit_status);
+    sink.diag_usize("wait4_stack_window_compared", obs.stack_window_compared);
+    sink.diag_usize("wait4_stack_window_diff_count", obs.stack_window_diff_count);
+    sink.diag_hex_pair(
+        "wait4_stack_window_first_diff",
+        obs.stack_window_first_diff_addr,
+        obs.stack_window_before_byte,
+    );
+    sink.diag_usize("wait4_stack_window_after_byte", obs.stack_window_after_byte);
+    sink.diag_usize(
+        "wait4_parent_stack_snapshot_restored",
+        child.parent_wait_stack_snapshot_restored() as usize,
+    );
+    sink.diag_usize(
+        "wait4_parent_writable_snapshot_restored",
+        child.parent_wait_writable_page_snapshot_restored() as usize,
+    );
+    sink.diag_usize("wait4_writable_pages_compared", obs.writable_pages_compared);
+    sink.diag_usize("wait4_writable_pages_restored", obs.writable_pages_restored);
+    sink.diag_usize(
+        "wait4_writable_pages_dirty_count",
+        obs.writable_pages_dirty_count,
+    );
+    sink.diag_usize(
+        "wait4_writable_pages_stack_dirty_count",
+        obs.writable_pages_stack_dirty_count,
+    );
+    sink.diag_usize(
+        "wait4_writable_pages_non_stack_dirty_count",
+        obs.writable_pages_non_stack_dirty_count,
+    );
+    sink.diag_usize(
+        "wait4_writable_pages_first_non_stack_kind",
+        obs.writable_pages_first_non_stack_kind,
+    );
+    sink.diag_hex_pair(
+        "wait4_writable_pages_first_non_stack_index_page",
+        obs.writable_pages_first_non_stack_mapping_index,
+        obs.writable_pages_first_non_stack_page_index,
+    );
+    sink.diag_hex_pair(
+        "wait4_writable_pages_first_non_stack_addr_before",
+        obs.writable_pages_first_non_stack_addr,
+        obs.writable_pages_first_non_stack_before_checksum,
+    );
+    sink.diag_usize(
+        "wait4_writable_pages_first_non_stack_after_checksum",
+        obs.writable_pages_first_non_stack_after_checksum,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "parent wait resumed facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
 fn run_syscall_table_exit(
     checkpoint: Checkpoint,
     ctx: &Context,
@@ -1064,6 +1267,7 @@ fn run_syscall_table_exit(
         && table.exit_supported()
         && table.exit_group_supported()
         && table.exit_records_status()
+        && table.exit_group_pid1_shutdown_child_wait4_split()
         && table.write_observed()
         && table.exit_observed()
         && ctx.exception_stream.syscall_state() == State::Online;
@@ -1083,6 +1287,10 @@ fn run_syscall_table_exit(
     sink.diag_usize(
         "syscall_table_exit_group_supported",
         table.exit_group_supported() as usize,
+    );
+    sink.diag_usize(
+        "syscall_table_exit_group_pid1_shutdown_child_wait4_split",
+        table.exit_group_pid1_shutdown_child_wait4_split() as usize,
     );
     if valid {
         sink.pass(total, "", name);

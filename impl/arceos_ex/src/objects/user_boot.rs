@@ -51,6 +51,8 @@ pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_HEAP_BASE: usize = 0x3000_0000;
 pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
+pub const USER_PARENT_WAIT_STACK_PROBE_LEN: usize = 512;
+pub const USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX: usize = 768;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 2;
 #[cfg(app_user_boot)]
@@ -3277,6 +3279,44 @@ pub struct UserChildProcess {
     trap_frame_child_return_zero: bool,
     tls_inherited: bool,
     child_trap_frame: Option<TrapFrame>,
+    parent_wait_frame: Option<TrapFrame>,
+    parent_wait_status_ptr: usize,
+    parent_address_space_snapshot: UserAddressSpace,
+    parent_address_space_snapshot_saved: bool,
+    parent_wait_stack_snapshot: [u8; USER_STACK_SIZE],
+    parent_wait_stack_snapshot_len: usize,
+    parent_wait_stack_snapshot_copied: bool,
+    parent_wait_stack_snapshot_restored: bool,
+    parent_wait_stack_window: [u8; USER_PARENT_WAIT_STACK_PROBE_LEN],
+    parent_wait_stack_window_start: usize,
+    parent_wait_stack_window_len: usize,
+    parent_wait_stack_window_saved: bool,
+    parent_wait_stack_window_compared: bool,
+    parent_wait_stack_window_diff_count: usize,
+    parent_wait_stack_window_first_diff_addr: usize,
+    parent_wait_stack_window_before_byte: u8,
+    parent_wait_stack_window_after_byte: u8,
+    parent_wait_writable_page_snapshot_pages:
+        [Option<PageRef>; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    parent_wait_writable_page_checksums: [usize; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    parent_wait_writable_page_count: usize,
+    parent_wait_writable_page_snapshot_saved: bool,
+    parent_wait_writable_page_snapshot_truncated: bool,
+    parent_wait_writable_page_snapshot_restored: bool,
+    parent_wait_writable_page_compared: bool,
+    parent_wait_writable_page_dirty_count: usize,
+    parent_wait_writable_page_stack_dirty_count: usize,
+    parent_wait_writable_page_non_stack_dirty_count: usize,
+    parent_wait_first_non_stack_dirty_kind: usize,
+    parent_wait_first_non_stack_dirty_mapping_index: usize,
+    parent_wait_first_non_stack_dirty_page_index: usize,
+    parent_wait_first_non_stack_dirty_addr: usize,
+    parent_wait_first_non_stack_dirty_before_checksum: usize,
+    parent_wait_first_non_stack_dirty_after_checksum: usize,
+    child_exit_status: usize,
+    child_exit_status_observed: bool,
+    wait4_status_copied: bool,
+    parent_wait_resumed: bool,
     enqueued: bool,
     wait4_parent_wait_observed: bool,
     child_continuation_taken: bool,
@@ -3312,6 +3352,43 @@ impl UserChildProcess {
             trap_frame_child_return_zero: false,
             tls_inherited: false,
             child_trap_frame: None,
+            parent_wait_frame: None,
+            parent_wait_status_ptr: 0,
+            parent_address_space_snapshot: UserAddressSpace::new(),
+            parent_address_space_snapshot_saved: false,
+            parent_wait_stack_snapshot: [0; USER_STACK_SIZE],
+            parent_wait_stack_snapshot_len: 0,
+            parent_wait_stack_snapshot_copied: false,
+            parent_wait_stack_snapshot_restored: false,
+            parent_wait_stack_window: [0; USER_PARENT_WAIT_STACK_PROBE_LEN],
+            parent_wait_stack_window_start: 0,
+            parent_wait_stack_window_len: 0,
+            parent_wait_stack_window_saved: false,
+            parent_wait_stack_window_compared: false,
+            parent_wait_stack_window_diff_count: 0,
+            parent_wait_stack_window_first_diff_addr: 0,
+            parent_wait_stack_window_before_byte: 0,
+            parent_wait_stack_window_after_byte: 0,
+            parent_wait_writable_page_snapshot_pages: [None; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+            parent_wait_writable_page_checksums: [0; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+            parent_wait_writable_page_count: 0,
+            parent_wait_writable_page_snapshot_saved: false,
+            parent_wait_writable_page_snapshot_truncated: false,
+            parent_wait_writable_page_snapshot_restored: false,
+            parent_wait_writable_page_compared: false,
+            parent_wait_writable_page_dirty_count: 0,
+            parent_wait_writable_page_stack_dirty_count: 0,
+            parent_wait_writable_page_non_stack_dirty_count: 0,
+            parent_wait_first_non_stack_dirty_kind: 0,
+            parent_wait_first_non_stack_dirty_mapping_index: 0,
+            parent_wait_first_non_stack_dirty_page_index: 0,
+            parent_wait_first_non_stack_dirty_addr: 0,
+            parent_wait_first_non_stack_dirty_before_checksum: 0,
+            parent_wait_first_non_stack_dirty_after_checksum: 0,
+            child_exit_status: 0,
+            child_exit_status_observed: false,
+            wait4_status_copied: false,
+            parent_wait_resumed: false,
             enqueued: false,
             wait4_parent_wait_observed: false,
             child_continuation_taken: false,
@@ -3372,6 +3449,140 @@ impl UserChildProcess {
 
     pub const fn user_stack_snapshot_restored(&self) -> bool {
         self.user_stack_snapshot_restored
+    }
+
+    pub const fn parent_address_space_snapshot_saved(&self) -> bool {
+        self.parent_address_space_snapshot_saved
+    }
+
+    pub const fn parent_wait_frame_saved(&self) -> bool {
+        self.parent_wait_frame.is_some()
+    }
+
+    pub const fn parent_wait_register_checkpoint_bound(&self) -> bool {
+        self.parent_wait_frame.is_some() && self.parent_address_space_snapshot_saved
+    }
+
+    pub const fn parent_wait_stack_window_checkpoint_bound(&self) -> bool {
+        self.parent_wait_stack_window_saved && self.parent_wait_stack_window_len != 0
+    }
+
+    pub const fn parent_wait_stack_snapshot_copied(&self) -> bool {
+        self.parent_wait_stack_snapshot_copied && self.parent_wait_stack_snapshot_len != 0
+    }
+
+    pub const fn parent_wait_stack_snapshot_restored(&self) -> bool {
+        self.parent_wait_stack_snapshot_restored
+    }
+
+    pub const fn parent_wait_stack_window_compared(&self) -> bool {
+        self.parent_wait_stack_window_compared
+    }
+
+    pub const fn parent_wait_stack_window_start(&self) -> usize {
+        self.parent_wait_stack_window_start
+    }
+
+    pub const fn parent_wait_stack_window_len(&self) -> usize {
+        self.parent_wait_stack_window_len
+    }
+
+    pub const fn parent_wait_stack_window_diff_count(&self) -> usize {
+        self.parent_wait_stack_window_diff_count
+    }
+
+    pub const fn parent_wait_stack_window_first_diff_addr(&self) -> usize {
+        self.parent_wait_stack_window_first_diff_addr
+    }
+
+    pub const fn parent_wait_stack_window_before_byte(&self) -> u8 {
+        self.parent_wait_stack_window_before_byte
+    }
+
+    pub const fn parent_wait_stack_window_after_byte(&self) -> u8 {
+        self.parent_wait_stack_window_after_byte
+    }
+
+    pub const fn parent_wait_writable_page_snapshot_saved(&self) -> bool {
+        self.parent_wait_writable_page_snapshot_saved
+    }
+
+    pub const fn parent_wait_writable_page_snapshot_copied(&self) -> bool {
+        self.parent_wait_writable_page_snapshot_saved
+            && self.parent_wait_writable_page_count != 0
+            && !self.parent_wait_writable_page_snapshot_truncated
+    }
+
+    pub const fn parent_wait_writable_page_count(&self) -> usize {
+        self.parent_wait_writable_page_count
+    }
+
+    pub const fn parent_wait_writable_page_snapshot_truncated(&self) -> bool {
+        self.parent_wait_writable_page_snapshot_truncated
+    }
+
+    pub const fn parent_wait_writable_page_snapshot_restored(&self) -> bool {
+        self.parent_wait_writable_page_snapshot_restored
+    }
+
+    pub const fn parent_wait_writable_page_compared(&self) -> bool {
+        self.parent_wait_writable_page_compared
+    }
+
+    pub const fn parent_wait_writable_page_dirty_count(&self) -> usize {
+        self.parent_wait_writable_page_dirty_count
+    }
+
+    pub const fn parent_wait_writable_page_stack_dirty_count(&self) -> usize {
+        self.parent_wait_writable_page_stack_dirty_count
+    }
+
+    pub const fn parent_wait_writable_page_non_stack_dirty_count(&self) -> usize {
+        self.parent_wait_writable_page_non_stack_dirty_count
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_kind(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_kind
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_mapping_index(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_mapping_index
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_page_index(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_page_index
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_addr(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_addr
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_before_checksum(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_before_checksum
+    }
+
+    pub const fn parent_wait_first_non_stack_dirty_after_checksum(&self) -> usize {
+        self.parent_wait_first_non_stack_dirty_after_checksum
+    }
+
+    pub const fn child_exit_status(&self) -> usize {
+        self.child_exit_status
+    }
+
+    pub const fn child_exit_status_observed(&self) -> bool {
+        self.child_exit_status_observed
+    }
+
+    pub const fn wait4_status_copied(&self) -> bool {
+        self.wait4_status_copied
+    }
+
+    pub const fn parent_wait_resumed(&self) -> bool {
+        self.parent_wait_resumed
+    }
+
+    pub const fn parent_wait_resume_checkpoint_bound(&self) -> bool {
+        self.parent_wait_resumed && self.child_exit_status_observed
     }
 
     pub fn preset(&mut self) -> EventResult {
@@ -3458,6 +3669,42 @@ impl UserChildProcess {
         self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
         self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
         self.child_trap_frame = Some(child_frame);
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_address_space_snapshot = UserAddressSpace::new();
+        self.parent_address_space_snapshot_saved = false;
+        self.parent_wait_stack_snapshot_len = 0;
+        self.parent_wait_stack_snapshot_copied = false;
+        self.parent_wait_stack_snapshot_restored = false;
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+        self.parent_wait_writable_page_snapshot_pages =
+            [None; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX];
+        self.parent_wait_writable_page_checksums = [0; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX];
+        self.parent_wait_writable_page_count = 0;
+        self.parent_wait_writable_page_snapshot_saved = false;
+        self.parent_wait_writable_page_snapshot_truncated = false;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        self.parent_wait_resumed = false;
 
         if self
             .lifecycle
@@ -3481,7 +3728,10 @@ impl UserChildProcess {
         &mut self,
         parent: &UserInitProcess,
         address_space: &UserAddressSpace,
+        page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
+        parent_wait_frame: &TrapFrame,
+        stat_addr: usize,
         upid: usize,
         options: usize,
         rusage: usize,
@@ -3507,6 +3757,7 @@ impl UserChildProcess {
             || self.user_stack_snapshot_len == 0
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
+            || self.parent_wait_resumed
             || parent.state() != State::Online
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
@@ -3516,6 +3767,59 @@ impl UserChildProcess {
         {
             return None;
         }
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                address_space as *const UserAddressSpace,
+                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
+                1,
+            );
+        }
+        self.parent_wait_frame = Some(*parent_wait_frame);
+        self.parent_wait_status_ptr = stat_addr;
+        self.parent_address_space_snapshot_saved = true;
+
+        if !self.capture_parent_wait_stack_window(
+            address_space,
+            page_metadata_map,
+            parent_wait_frame.reg(2),
+        ) {
+            return None;
+        }
+        let Some(parent_stack_snapshot_len) = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.parent_wait_stack_snapshot,
+        ) else {
+            return None;
+        };
+        self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
+        self.parent_wait_stack_snapshot_copied = true;
+        self.parent_wait_stack_snapshot_restored = false;
+
+        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+            address_space,
+            page_allocator,
+            page_metadata_map,
+            &mut self.parent_wait_writable_page_snapshot_pages,
+            &mut self.parent_wait_writable_page_checksums,
+        ) else {
+            return None;
+        };
+        self.parent_wait_writable_page_count = writable_page_count;
+        self.parent_wait_writable_page_snapshot_saved = true;
+        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
 
         if !restore_user_stack_snapshot(
             address_space,
@@ -3531,6 +3835,490 @@ impl UserChildProcess {
         self.user_stack_snapshot_restored = true;
         self.child_continuation_taken = true;
         Some(child_frame)
+    }
+
+    pub fn child_exit_to_parent_wait(
+        &mut self,
+        address_space: &mut UserAddressSpace,
+        exit_status: usize,
+    ) -> Option<(TrapFrame, usize, usize)> {
+        if self.lifecycle.state() != State::Ready
+            || !self.child_continuation_taken
+            || self.parent_wait_resumed
+            || !self.parent_address_space_snapshot_saved
+            || self.pid != USER_CHILD_PID
+            || self.parent_pid != super::rest_init::KERNEL_INIT_PID
+        {
+            return None;
+        }
+
+        let parent_frame = self.parent_wait_frame?;
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &self.parent_address_space_snapshot as *const UserAddressSpace,
+                address_space as *mut UserAddressSpace,
+                1,
+            );
+        }
+        self.child_exit_status = exit_status;
+        self.child_exit_status_observed = true;
+        Some((parent_frame, self.parent_wait_status_ptr, self.pid))
+    }
+
+    pub fn compare_parent_wait_stack_window(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.parent_wait_stack_window_saved
+            || self.parent_wait_stack_window_len == 0
+            || self.parent_wait_stack_window_len > USER_PARENT_WAIT_STACK_PROBE_LEN
+        {
+            return false;
+        }
+        let Some(mapping) = address_space.stack_mapping() else {
+            return false;
+        };
+        if mapping.kind() != UserMappingKind::Stack {
+            return false;
+        }
+        let Some(window_end) = self
+            .parent_wait_stack_window_start
+            .checked_add(self.parent_wait_stack_window_len)
+        else {
+            return false;
+        };
+        if self.parent_wait_stack_window_start < mapping.vaddr() || window_end > mapping.end_vaddr()
+        {
+            return false;
+        }
+
+        let mut diff_count = 0usize;
+        let mut first_diff_addr = 0usize;
+        let mut first_before = 0u8;
+        let mut first_after = 0u8;
+        let mut index = 0usize;
+        while index < self.parent_wait_stack_window_len {
+            let addr = self.parent_wait_stack_window_start + index;
+            let Some(after) = read_stack_mapping_byte(mapping, page_metadata_map, addr) else {
+                return false;
+            };
+            let before = self.parent_wait_stack_window[index];
+            if before != after {
+                diff_count = diff_count.wrapping_add(1);
+                if first_diff_addr == 0 {
+                    first_diff_addr = addr;
+                    first_before = before;
+                    first_after = after;
+                }
+            }
+            index += 1;
+        }
+
+        self.parent_wait_stack_window_compared = true;
+        self.parent_wait_stack_window_diff_count = diff_count;
+        self.parent_wait_stack_window_first_diff_addr = first_diff_addr;
+        self.parent_wait_stack_window_before_byte = first_before;
+        self.parent_wait_stack_window_after_byte = first_after;
+        true
+    }
+
+    pub fn compare_parent_wait_writable_pages(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.parent_wait_writable_page_snapshot_saved
+            || self.parent_wait_writable_page_count == 0
+            || self.parent_wait_writable_page_count > USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX
+        {
+            return false;
+        }
+        let Some(diff) = compare_writable_page_checksums(
+            address_space,
+            page_metadata_map,
+            &self.parent_wait_writable_page_checksums,
+            self.parent_wait_writable_page_count,
+        ) else {
+            return false;
+        };
+
+        self.parent_wait_writable_page_compared = true;
+        self.parent_wait_writable_page_dirty_count = diff.dirty_count;
+        self.parent_wait_writable_page_stack_dirty_count = diff.stack_dirty_count;
+        self.parent_wait_writable_page_non_stack_dirty_count = diff.non_stack_dirty_count;
+        self.parent_wait_first_non_stack_dirty_kind = diff.first_non_stack_kind;
+        self.parent_wait_first_non_stack_dirty_mapping_index = diff.first_non_stack_mapping_index;
+        self.parent_wait_first_non_stack_dirty_page_index = diff.first_non_stack_page_index;
+        self.parent_wait_first_non_stack_dirty_addr = diff.first_non_stack_addr;
+        self.parent_wait_first_non_stack_dirty_before_checksum = diff.first_non_stack_before;
+        self.parent_wait_first_non_stack_dirty_after_checksum = diff.first_non_stack_after;
+        true
+    }
+
+    pub fn restore_parent_wait_stack_snapshot(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.parent_wait_stack_snapshot_copied
+            || self.parent_wait_stack_snapshot_len == 0
+            || self.parent_wait_stack_snapshot_restored
+        {
+            return false;
+        }
+        if !restore_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &self.parent_wait_stack_snapshot,
+            self.parent_wait_stack_snapshot_len,
+        ) {
+            return false;
+        }
+        self.parent_wait_stack_snapshot_restored = true;
+        true
+    }
+
+    pub fn restore_parent_wait_writable_page_snapshot(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.parent_wait_writable_page_snapshot_copied()
+            || self.parent_wait_writable_page_snapshot_restored
+        {
+            return false;
+        }
+        if !restore_writable_page_snapshot(
+            address_space,
+            page_metadata_map,
+            &self.parent_wait_writable_page_snapshot_pages,
+            self.parent_wait_writable_page_count,
+        ) {
+            return false;
+        }
+        release_writable_page_snapshot_pages(
+            &mut self.parent_wait_writable_page_snapshot_pages,
+            self.parent_wait_writable_page_count,
+            page_allocator,
+            page_metadata_map,
+        );
+        self.parent_wait_writable_page_snapshot_restored = true;
+        true
+    }
+
+    pub fn mark_parent_wait_resumed(&mut self, status_copied: bool) -> bool {
+        if !self.child_exit_status_observed
+            || !self.parent_wait_stack_snapshot_restored
+            || !self.parent_wait_writable_page_snapshot_restored
+            || self.parent_wait_resumed
+        {
+            return false;
+        }
+        self.wait4_status_copied = status_copied;
+        self.parent_wait_resumed = true;
+        true
+    }
+
+    fn capture_parent_wait_stack_window(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_metadata_map: &PageMetadataMap,
+        start: usize,
+    ) -> bool {
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+
+        let Some(len) = copy_user_stack_window_to_buffer(
+            address_space,
+            page_metadata_map,
+            start,
+            &mut self.parent_wait_stack_window,
+        ) else {
+            return false;
+        };
+        if len == 0 {
+            return false;
+        }
+        self.parent_wait_stack_window_start = start;
+        self.parent_wait_stack_window_len = len;
+        self.parent_wait_stack_window_saved = true;
+        true
+    }
+}
+
+struct WritablePageChecksumDiff {
+    dirty_count: usize,
+    stack_dirty_count: usize,
+    non_stack_dirty_count: usize,
+    first_non_stack_kind: usize,
+    first_non_stack_mapping_index: usize,
+    first_non_stack_page_index: usize,
+    first_non_stack_addr: usize,
+    first_non_stack_before: usize,
+    first_non_stack_after: usize,
+}
+
+fn capture_writable_page_snapshot(
+    address_space: &UserAddressSpace,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+    snapshot_pages: &mut [Option<PageRef>; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    output: &mut [usize; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+) -> Option<(usize, bool)> {
+    let mut reset_index = 0usize;
+    while reset_index < snapshot_pages.len() {
+        snapshot_pages[reset_index] = None;
+        output[reset_index] = 0;
+        reset_index += 1;
+    }
+
+    let mut count = 0usize;
+    let mut mapping_index = 0usize;
+    while mapping_index < address_space.mapping_count {
+        let mapping = &address_space.mappings[mapping_index];
+        if mapping.kind() != UserMappingKind::Empty
+            && mapping.user_accessible()
+            && mapping.writable()
+        {
+            let mut page_index = 0usize;
+            while page_index < mapping.backing_page_count() {
+                if count == output.len() {
+                    return Some((count, true));
+                }
+                output[count] = checksum_mapping_page(mapping, page_metadata_map, page_index)?;
+                let source_page = mapping.backing_page(page_index)?;
+                let source_linear = page_metadata_map.page_address(source_page)?;
+                let Some(snapshot_page) =
+                    page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
+                else {
+                    release_writable_page_snapshot_pages(
+                        snapshot_pages,
+                        count,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                    return None;
+                };
+                let Some(snapshot_linear) = page_metadata_map.page_address(snapshot_page) else {
+                    let _ = page_allocator.free_pages(snapshot_page, 0, page_metadata_map);
+                    release_writable_page_snapshot_pages(
+                        snapshot_pages,
+                        count,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                    return None;
+                };
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        source_linear as *const u8,
+                        snapshot_linear as *mut u8,
+                        USER_PAGE_SIZE,
+                    );
+                }
+                snapshot_pages[count] = Some(snapshot_page);
+                count += 1;
+                page_index += 1;
+            }
+        }
+        mapping_index += 1;
+    }
+    Some((count, false))
+}
+
+fn restore_writable_page_snapshot(
+    address_space: &UserAddressSpace,
+    page_metadata_map: &PageMetadataMap,
+    snapshot_pages: &[Option<PageRef>; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    expected_count: usize,
+) -> bool {
+    if expected_count == 0 || expected_count > snapshot_pages.len() {
+        return false;
+    }
+
+    let mut restored = 0usize;
+    let mut mapping_index = 0usize;
+    while mapping_index < address_space.mapping_count && restored < expected_count {
+        let mapping = &address_space.mappings[mapping_index];
+        if mapping.kind() != UserMappingKind::Empty
+            && mapping.user_accessible()
+            && mapping.writable()
+        {
+            let mut page_index = 0usize;
+            while page_index < mapping.backing_page_count() && restored < expected_count {
+                let Some(snapshot_page) = snapshot_pages[restored] else {
+                    return false;
+                };
+                let Some(snapshot_linear) = page_metadata_map.page_address(snapshot_page) else {
+                    return false;
+                };
+                let Some(target_page) = mapping.backing_page(page_index) else {
+                    return false;
+                };
+                let Some(target_linear) = page_metadata_map.page_address(target_page) else {
+                    return false;
+                };
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        snapshot_linear as *const u8,
+                        target_linear as *mut u8,
+                        USER_PAGE_SIZE,
+                    );
+                }
+                restored += 1;
+                page_index += 1;
+            }
+        }
+        mapping_index += 1;
+    }
+
+    restored == expected_count
+}
+
+fn release_writable_page_snapshot_pages(
+    snapshot_pages: &mut [Option<PageRef>; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    count: usize,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) {
+    let mut index = 0usize;
+    while index < count && index < snapshot_pages.len() {
+        if let Some(page) = snapshot_pages[index].take() {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+        }
+        index += 1;
+    }
+}
+
+fn compare_writable_page_checksums(
+    address_space: &UserAddressSpace,
+    page_metadata_map: &PageMetadataMap,
+    expected: &[usize; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    expected_count: usize,
+) -> Option<WritablePageChecksumDiff> {
+    if expected_count == 0 || expected_count > expected.len() {
+        return None;
+    }
+
+    let mut checked = 0usize;
+    let mut dirty_count = 0usize;
+    let mut stack_dirty_count = 0usize;
+    let mut non_stack_dirty_count = 0usize;
+    let mut first_non_stack_kind = 0usize;
+    let mut first_non_stack_mapping_index = 0usize;
+    let mut first_non_stack_page_index = 0usize;
+    let mut first_non_stack_addr = 0usize;
+    let mut first_non_stack_before = 0usize;
+    let mut first_non_stack_after = 0usize;
+
+    let mut mapping_index = 0usize;
+    while mapping_index < address_space.mapping_count && checked < expected_count {
+        let mapping = &address_space.mappings[mapping_index];
+        if mapping.kind() != UserMappingKind::Empty
+            && mapping.user_accessible()
+            && mapping.writable()
+        {
+            let mut page_index = 0usize;
+            while page_index < mapping.backing_page_count() && checked < expected_count {
+                let before = expected[checked];
+                let after = checksum_mapping_page(mapping, page_metadata_map, page_index)?;
+                if before != after {
+                    dirty_count += 1;
+                    if mapping.kind() == UserMappingKind::Stack {
+                        stack_dirty_count += 1;
+                    } else {
+                        non_stack_dirty_count += 1;
+                        if first_non_stack_addr == 0 {
+                            first_non_stack_kind = user_mapping_kind_index(mapping.kind());
+                            first_non_stack_mapping_index = mapping_index;
+                            first_non_stack_page_index = page_index;
+                            first_non_stack_addr = mapping_page_user_start(mapping, page_index)?;
+                            first_non_stack_before = before;
+                            first_non_stack_after = after;
+                        }
+                    }
+                }
+                checked += 1;
+                page_index += 1;
+            }
+        }
+        mapping_index += 1;
+    }
+
+    if checked != expected_count {
+        return None;
+    }
+    Some(WritablePageChecksumDiff {
+        dirty_count,
+        stack_dirty_count,
+        non_stack_dirty_count,
+        first_non_stack_kind,
+        first_non_stack_mapping_index,
+        first_non_stack_page_index,
+        first_non_stack_addr,
+        first_non_stack_before,
+        first_non_stack_after,
+    })
+}
+
+fn checksum_mapping_page(
+    mapping: &UserMapping,
+    page_metadata_map: &PageMetadataMap,
+    page_index: usize,
+) -> Option<usize> {
+    let page = mapping.backing_page(page_index)?;
+    let linear = page_metadata_map.page_address(page)?;
+    let page_base_offset = page_index.checked_mul(USER_PAGE_SIZE)?;
+    let mapping_end_offset = mapping.page_offset().checked_add(mapping.memsz())?;
+    if page_base_offset >= mapping_end_offset {
+        return None;
+    }
+    let page_end_offset = page_base_offset.checked_add(USER_PAGE_SIZE)?;
+    let start = if page_base_offset < mapping.page_offset() {
+        mapping.page_offset() - page_base_offset
+    } else {
+        0
+    };
+    let end = if mapping_end_offset < page_end_offset {
+        mapping_end_offset - page_base_offset
+    } else {
+        USER_PAGE_SIZE
+    };
+    if start >= end {
+        return None;
+    }
+
+    let mut hash = 0xcbf29ce484222325usize;
+    let mut offset = start;
+    while offset < end {
+        let byte = unsafe { *((linear + offset) as *const u8) };
+        hash ^= byte as usize;
+        hash = hash.wrapping_mul(0x100000001b3usize);
+        offset += 1;
+    }
+    Some(hash)
+}
+
+fn mapping_page_user_start(mapping: &UserMapping, page_index: usize) -> Option<usize> {
+    let page_base_offset = page_index.checked_mul(USER_PAGE_SIZE)?;
+    let user_offset = page_base_offset.saturating_sub(mapping.page_offset());
+    mapping.vaddr().checked_add(user_offset)
+}
+
+fn user_mapping_kind_index(kind: UserMappingKind) -> usize {
+    match kind {
+        UserMappingKind::Empty => 0,
+        UserMappingKind::ElfSegment => 1,
+        UserMappingKind::Stack => 2,
+        UserMappingKind::Heap => 3,
     }
 }
 
@@ -3580,6 +4368,45 @@ fn restore_user_stack_snapshot(
         return false;
     }
     copy_buffer_to_stack_mapping(mapping, page_metadata_map, &input[..len])
+}
+
+fn copy_user_stack_window_to_buffer(
+    address_space: &UserAddressSpace,
+    page_metadata_map: &PageMetadataMap,
+    start: usize,
+    output: &mut [u8; USER_PARENT_WAIT_STACK_PROBE_LEN],
+) -> Option<usize> {
+    let mapping = address_space.stack_mapping()?;
+    if mapping.kind() != UserMappingKind::Stack || start < mapping.vaddr() {
+        return None;
+    }
+    let remaining = mapping.end_vaddr().checked_sub(start)?;
+    let len = min_usize(output.len(), remaining);
+    if len == 0 {
+        return None;
+    }
+    let mut index = 0usize;
+    while index < len {
+        output[index] = read_stack_mapping_byte(mapping, page_metadata_map, start + index)?;
+        index += 1;
+    }
+    Some(len)
+}
+
+fn read_stack_mapping_byte(
+    mapping: &UserMapping,
+    page_metadata_map: &PageMetadataMap,
+    user_addr: usize,
+) -> Option<u8> {
+    if user_addr < mapping.vaddr() || user_addr >= mapping.end_vaddr() {
+        return None;
+    }
+    let offset = mapping.page_offset() + (user_addr - mapping.vaddr());
+    let page_index = offset / USER_PAGE_SIZE;
+    let page_offset = offset % USER_PAGE_SIZE;
+    let page = mapping.backing_page(page_index)?;
+    let linear = page_metadata_map.page_address(page)?;
+    Some(unsafe { *((linear + page_offset) as *const u8) })
 }
 
 fn copy_stack_mapping_to_buffer(

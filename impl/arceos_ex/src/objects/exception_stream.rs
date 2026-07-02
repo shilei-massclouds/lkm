@@ -16,8 +16,8 @@ use super::{
     task::TaskEntry,
     user_boot::{
         UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
-        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_CHILD_PID,
+        USER_SIGNAL_COUNT, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
     },
 };
 
@@ -361,6 +361,215 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
     }
 }
 
+#[cfg(app_user_boot)]
+#[derive(Clone, Copy)]
+pub struct Wait4CheckpointObservation {
+    pub saved: usize,
+    pub saved_sepc: usize,
+    pub saved_sp: usize,
+    pub saved_s2: usize,
+    pub saved_s4: usize,
+    pub saved_a7: usize,
+    pub saved_satp: usize,
+    pub saved_status_ptr: usize,
+    pub saved_child_pid: usize,
+    pub stack_window_saved: usize,
+    pub stack_window_start: usize,
+    pub stack_window_len: usize,
+    pub writable_pages_saved: usize,
+    pub writable_pages_count: usize,
+    pub writable_pages_truncated: usize,
+    pub writable_pages_restored: usize,
+    pub resumed: usize,
+    pub resumed_sepc: usize,
+    pub resumed_sp: usize,
+    pub resumed_s2: usize,
+    pub resumed_s4: usize,
+    pub resumed_a0: usize,
+    pub resumed_a7: usize,
+    pub resumed_satp: usize,
+    pub resumed_status_ptr: usize,
+    pub resumed_wait_status: usize,
+    pub resumed_status_copied: usize,
+    pub child_exit_status: usize,
+    pub stack_window_compared: usize,
+    pub stack_window_diff_count: usize,
+    pub stack_window_first_diff_addr: usize,
+    pub stack_window_before_byte: usize,
+    pub stack_window_after_byte: usize,
+    pub writable_pages_compared: usize,
+    pub writable_pages_dirty_count: usize,
+    pub writable_pages_stack_dirty_count: usize,
+    pub writable_pages_non_stack_dirty_count: usize,
+    pub writable_pages_first_non_stack_kind: usize,
+    pub writable_pages_first_non_stack_mapping_index: usize,
+    pub writable_pages_first_non_stack_page_index: usize,
+    pub writable_pages_first_non_stack_addr: usize,
+    pub writable_pages_first_non_stack_before_checksum: usize,
+    pub writable_pages_first_non_stack_after_checksum: usize,
+}
+
+#[cfg(app_user_boot)]
+struct Wait4CheckpointObservationAtomics {
+    saved: AtomicUsize,
+    saved_sepc: AtomicUsize,
+    saved_sp: AtomicUsize,
+    saved_s2: AtomicUsize,
+    saved_s4: AtomicUsize,
+    saved_a7: AtomicUsize,
+    saved_satp: AtomicUsize,
+    saved_status_ptr: AtomicUsize,
+    saved_child_pid: AtomicUsize,
+    stack_window_saved: AtomicUsize,
+    stack_window_start: AtomicUsize,
+    stack_window_len: AtomicUsize,
+    writable_pages_saved: AtomicUsize,
+    writable_pages_count: AtomicUsize,
+    writable_pages_truncated: AtomicUsize,
+    writable_pages_restored: AtomicUsize,
+    resumed: AtomicUsize,
+    resumed_sepc: AtomicUsize,
+    resumed_sp: AtomicUsize,
+    resumed_s2: AtomicUsize,
+    resumed_s4: AtomicUsize,
+    resumed_a0: AtomicUsize,
+    resumed_a7: AtomicUsize,
+    resumed_satp: AtomicUsize,
+    resumed_status_ptr: AtomicUsize,
+    resumed_wait_status: AtomicUsize,
+    resumed_status_copied: AtomicUsize,
+    child_exit_status: AtomicUsize,
+    stack_window_compared: AtomicUsize,
+    stack_window_diff_count: AtomicUsize,
+    stack_window_first_diff_addr: AtomicUsize,
+    stack_window_before_byte: AtomicUsize,
+    stack_window_after_byte: AtomicUsize,
+    writable_pages_compared: AtomicUsize,
+    writable_pages_dirty_count: AtomicUsize,
+    writable_pages_stack_dirty_count: AtomicUsize,
+    writable_pages_non_stack_dirty_count: AtomicUsize,
+    writable_pages_first_non_stack_kind: AtomicUsize,
+    writable_pages_first_non_stack_mapping_index: AtomicUsize,
+    writable_pages_first_non_stack_page_index: AtomicUsize,
+    writable_pages_first_non_stack_addr: AtomicUsize,
+    writable_pages_first_non_stack_before_checksum: AtomicUsize,
+    writable_pages_first_non_stack_after_checksum: AtomicUsize,
+}
+
+#[cfg(app_user_boot)]
+static WAIT4_CHECKPOINT_OBSERVATION: Wait4CheckpointObservationAtomics =
+    Wait4CheckpointObservationAtomics {
+        saved: AtomicUsize::new(0),
+        saved_sepc: AtomicUsize::new(0),
+        saved_sp: AtomicUsize::new(0),
+        saved_s2: AtomicUsize::new(0),
+        saved_s4: AtomicUsize::new(0),
+        saved_a7: AtomicUsize::new(0),
+        saved_satp: AtomicUsize::new(0),
+        saved_status_ptr: AtomicUsize::new(0),
+        saved_child_pid: AtomicUsize::new(0),
+        stack_window_saved: AtomicUsize::new(0),
+        stack_window_start: AtomicUsize::new(0),
+        stack_window_len: AtomicUsize::new(0),
+        writable_pages_saved: AtomicUsize::new(0),
+        writable_pages_count: AtomicUsize::new(0),
+        writable_pages_truncated: AtomicUsize::new(0),
+        writable_pages_restored: AtomicUsize::new(0),
+        resumed: AtomicUsize::new(0),
+        resumed_sepc: AtomicUsize::new(0),
+        resumed_sp: AtomicUsize::new(0),
+        resumed_s2: AtomicUsize::new(0),
+        resumed_s4: AtomicUsize::new(0),
+        resumed_a0: AtomicUsize::new(0),
+        resumed_a7: AtomicUsize::new(0),
+        resumed_satp: AtomicUsize::new(0),
+        resumed_status_ptr: AtomicUsize::new(0),
+        resumed_wait_status: AtomicUsize::new(0),
+        resumed_status_copied: AtomicUsize::new(0),
+        child_exit_status: AtomicUsize::new(0),
+        stack_window_compared: AtomicUsize::new(0),
+        stack_window_diff_count: AtomicUsize::new(0),
+        stack_window_first_diff_addr: AtomicUsize::new(0),
+        stack_window_before_byte: AtomicUsize::new(0),
+        stack_window_after_byte: AtomicUsize::new(0),
+        writable_pages_compared: AtomicUsize::new(0),
+        writable_pages_dirty_count: AtomicUsize::new(0),
+        writable_pages_stack_dirty_count: AtomicUsize::new(0),
+        writable_pages_non_stack_dirty_count: AtomicUsize::new(0),
+        writable_pages_first_non_stack_kind: AtomicUsize::new(0),
+        writable_pages_first_non_stack_mapping_index: AtomicUsize::new(0),
+        writable_pages_first_non_stack_page_index: AtomicUsize::new(0),
+        writable_pages_first_non_stack_addr: AtomicUsize::new(0),
+        writable_pages_first_non_stack_before_checksum: AtomicUsize::new(0),
+        writable_pages_first_non_stack_after_checksum: AtomicUsize::new(0),
+    };
+
+#[cfg(app_user_boot)]
+pub fn wait4_checkpoint_observation() -> Wait4CheckpointObservation {
+    let obs = &WAIT4_CHECKPOINT_OBSERVATION;
+    Wait4CheckpointObservation {
+        saved: obs.saved.load(Ordering::Acquire),
+        saved_sepc: obs.saved_sepc.load(Ordering::Acquire),
+        saved_sp: obs.saved_sp.load(Ordering::Acquire),
+        saved_s2: obs.saved_s2.load(Ordering::Acquire),
+        saved_s4: obs.saved_s4.load(Ordering::Acquire),
+        saved_a7: obs.saved_a7.load(Ordering::Acquire),
+        saved_satp: obs.saved_satp.load(Ordering::Acquire),
+        saved_status_ptr: obs.saved_status_ptr.load(Ordering::Acquire),
+        saved_child_pid: obs.saved_child_pid.load(Ordering::Acquire),
+        stack_window_saved: obs.stack_window_saved.load(Ordering::Acquire),
+        stack_window_start: obs.stack_window_start.load(Ordering::Acquire),
+        stack_window_len: obs.stack_window_len.load(Ordering::Acquire),
+        writable_pages_saved: obs.writable_pages_saved.load(Ordering::Acquire),
+        writable_pages_count: obs.writable_pages_count.load(Ordering::Acquire),
+        writable_pages_truncated: obs.writable_pages_truncated.load(Ordering::Acquire),
+        writable_pages_restored: obs.writable_pages_restored.load(Ordering::Acquire),
+        resumed: obs.resumed.load(Ordering::Acquire),
+        resumed_sepc: obs.resumed_sepc.load(Ordering::Acquire),
+        resumed_sp: obs.resumed_sp.load(Ordering::Acquire),
+        resumed_s2: obs.resumed_s2.load(Ordering::Acquire),
+        resumed_s4: obs.resumed_s4.load(Ordering::Acquire),
+        resumed_a0: obs.resumed_a0.load(Ordering::Acquire),
+        resumed_a7: obs.resumed_a7.load(Ordering::Acquire),
+        resumed_satp: obs.resumed_satp.load(Ordering::Acquire),
+        resumed_status_ptr: obs.resumed_status_ptr.load(Ordering::Acquire),
+        resumed_wait_status: obs.resumed_wait_status.load(Ordering::Acquire),
+        resumed_status_copied: obs.resumed_status_copied.load(Ordering::Acquire),
+        child_exit_status: obs.child_exit_status.load(Ordering::Acquire),
+        stack_window_compared: obs.stack_window_compared.load(Ordering::Acquire),
+        stack_window_diff_count: obs.stack_window_diff_count.load(Ordering::Acquire),
+        stack_window_first_diff_addr: obs.stack_window_first_diff_addr.load(Ordering::Acquire),
+        stack_window_before_byte: obs.stack_window_before_byte.load(Ordering::Acquire),
+        stack_window_after_byte: obs.stack_window_after_byte.load(Ordering::Acquire),
+        writable_pages_compared: obs.writable_pages_compared.load(Ordering::Acquire),
+        writable_pages_dirty_count: obs.writable_pages_dirty_count.load(Ordering::Acquire),
+        writable_pages_stack_dirty_count: obs
+            .writable_pages_stack_dirty_count
+            .load(Ordering::Acquire),
+        writable_pages_non_stack_dirty_count: obs
+            .writable_pages_non_stack_dirty_count
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_kind: obs
+            .writable_pages_first_non_stack_kind
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_mapping_index: obs
+            .writable_pages_first_non_stack_mapping_index
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_page_index: obs
+            .writable_pages_first_non_stack_page_index
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_addr: obs
+            .writable_pages_first_non_stack_addr
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_before_checksum: obs
+            .writable_pages_first_non_stack_before_checksum
+            .load(Ordering::Acquire),
+        writable_pages_first_non_stack_after_checksum: obs
+            .writable_pages_first_non_stack_after_checksum
+            .load(Ordering::Acquire),
+    }
+}
+
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
 pub struct SyscallTable {
@@ -501,10 +710,12 @@ pub struct SyscallTable {
     execve_full_linux_model_deferred: bool,
     wait4_parent_wait_chldexit_boundary: bool,
     wait4_yields_to_user_child_continuation: bool,
-    wait4_status_copyout_deferred: bool,
-    wait4_zombie_reap_deferred: bool,
+    wait4_child_exit_status_copyout_first_slice: bool,
+    wait4_observed_child_reap_first_slice: bool,
+    wait4_no_child_echild_first_slice: bool,
     wait4_blocking_sleep_deferred: bool,
     exit_records_status: bool,
+    exit_group_pid1_shutdown_child_wait4_split: bool,
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
     openat_observed: AtomicU8,
@@ -685,10 +896,12 @@ impl SyscallTable {
             execve_full_linux_model_deferred: false,
             wait4_parent_wait_chldexit_boundary: false,
             wait4_yields_to_user_child_continuation: false,
-            wait4_status_copyout_deferred: false,
-            wait4_zombie_reap_deferred: false,
+            wait4_child_exit_status_copyout_first_slice: false,
+            wait4_observed_child_reap_first_slice: false,
+            wait4_no_child_echild_first_slice: false,
             wait4_blocking_sleep_deferred: false,
             exit_records_status: false,
+            exit_group_pid1_shutdown_child_wait4_split: false,
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
             openat_observed: AtomicU8::new(0),
@@ -1197,18 +1410,28 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn wait4_status_copyout_deferred(&self) -> bool {
-        self.wait4_status_copyout_deferred
+    pub const fn wait4_child_exit_status_copyout_first_slice(&self) -> bool {
+        self.wait4_child_exit_status_copyout_first_slice
     }
 
     #[allow(dead_code)]
-    pub const fn wait4_zombie_reap_deferred(&self) -> bool {
-        self.wait4_zombie_reap_deferred
+    pub const fn wait4_observed_child_reap_first_slice(&self) -> bool {
+        self.wait4_observed_child_reap_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_no_child_echild_first_slice(&self) -> bool {
+        self.wait4_no_child_echild_first_slice
     }
 
     #[allow(dead_code)]
     pub const fn wait4_blocking_sleep_deferred(&self) -> bool {
         self.wait4_blocking_sleep_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn exit_group_pid1_shutdown_child_wait4_split(&self) -> bool {
+        self.exit_group_pid1_shutdown_child_wait4_split
     }
 
     #[allow(dead_code)]
@@ -1502,10 +1725,12 @@ impl SyscallTable {
         self.execve_full_linux_model_deferred = true;
         self.wait4_parent_wait_chldexit_boundary = true;
         self.wait4_yields_to_user_child_continuation = true;
-        self.wait4_status_copyout_deferred = true;
-        self.wait4_zombie_reap_deferred = true;
+        self.wait4_child_exit_status_copyout_first_slice = true;
+        self.wait4_observed_child_reap_first_slice = true;
+        self.wait4_no_child_echild_first_slice = true;
         self.wait4_blocking_sleep_deferred = true;
         self.exit_records_status = true;
+        self.exit_group_pid1_shutdown_child_wait4_split = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
@@ -2052,8 +2277,9 @@ impl SyscallTable {
             || !self.wait4_supported
             || !self.wait4_parent_wait_chldexit_boundary
             || !self.wait4_yields_to_user_child_continuation
-            || !self.wait4_status_copyout_deferred
-            || !self.wait4_zombie_reap_deferred
+            || !self.wait4_child_exit_status_copyout_first_slice
+            || !self.wait4_observed_child_reap_first_slice
+            || !self.wait4_no_child_echild_first_slice
             || !self.wait4_blocking_sleep_deferred
         {
             complete_unsupported_syscall(frame);
@@ -2063,7 +2289,7 @@ impl SyscallTable {
         syscall_table_wait4(self, frame);
     }
 
-    pub fn exit(&self, frame: &mut TrapFrame) -> ! {
+    pub fn exit(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.exit_supported
             || !self.exit_records_status
@@ -2074,10 +2300,11 @@ impl SyscallTable {
         syscall_table_exit(self, frame)
     }
 
-    pub fn exit_group(&self, frame: &mut TrapFrame) -> ! {
+    pub fn exit_group(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.exit_group_supported
             || !self.exit_records_status
+            || !self.exit_group_pid1_shutdown_child_wait4_split
         {
             panic_dispatch("syscall exit_group table entry not ready\n");
         }
@@ -4456,6 +4683,129 @@ fn reset_frame_for_execve_start_thread(
     frame.stval = 0;
 }
 
+#[cfg(app_user_boot)]
+fn record_wait4_parent_wait_saved(
+    parent_frame: &TrapFrame,
+    status_ptr: usize,
+    child_pid: usize,
+    stack_window_saved: bool,
+    stack_window_start: usize,
+    stack_window_len: usize,
+    writable_pages_saved: bool,
+    writable_pages_count: usize,
+    writable_pages_truncated: bool,
+) {
+    let obs = &WAIT4_CHECKPOINT_OBSERVATION;
+    obs.saved_sepc.store(parent_frame.sepc, Ordering::Release);
+    obs.saved_sp.store(parent_frame.reg(2), Ordering::Release);
+    obs.saved_s2.store(parent_frame.reg(18), Ordering::Release);
+    obs.saved_s4.store(parent_frame.reg(20), Ordering::Release);
+    obs.saved_a7.store(parent_frame.reg(17), Ordering::Release);
+    obs.saved_satp
+        .store(crate::arch::riscv64::csr::read_satp(), Ordering::Release);
+    obs.saved_status_ptr.store(status_ptr, Ordering::Release);
+    obs.saved_child_pid.store(child_pid, Ordering::Release);
+    obs.stack_window_saved
+        .store(stack_window_saved as usize, Ordering::Release);
+    obs.stack_window_start
+        .store(stack_window_start, Ordering::Release);
+    obs.stack_window_len
+        .store(stack_window_len, Ordering::Release);
+    obs.writable_pages_saved
+        .store(writable_pages_saved as usize, Ordering::Release);
+    obs.writable_pages_count
+        .store(writable_pages_count, Ordering::Release);
+    obs.writable_pages_truncated
+        .store(writable_pages_truncated as usize, Ordering::Release);
+    obs.writable_pages_restored.store(0, Ordering::Release);
+    obs.saved.store(1, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_wait4_parent_wait_resumed(
+    parent_frame: &TrapFrame,
+    parent_satp: usize,
+    status_ptr: usize,
+    wait_status: usize,
+    status_copied: bool,
+    child_exit_status: usize,
+    stack_window_compared: bool,
+    stack_window_diff_count: usize,
+    stack_window_first_diff_addr: usize,
+    stack_window_before_byte: usize,
+    stack_window_after_byte: usize,
+    writable_pages_compared: bool,
+    writable_pages_dirty_count: usize,
+    writable_pages_stack_dirty_count: usize,
+    writable_pages_non_stack_dirty_count: usize,
+    writable_pages_restored: bool,
+    writable_pages_first_non_stack_kind: usize,
+    writable_pages_first_non_stack_mapping_index: usize,
+    writable_pages_first_non_stack_page_index: usize,
+    writable_pages_first_non_stack_addr: usize,
+    writable_pages_first_non_stack_before_checksum: usize,
+    writable_pages_first_non_stack_after_checksum: usize,
+) {
+    let obs = &WAIT4_CHECKPOINT_OBSERVATION;
+    obs.resumed_sepc.store(parent_frame.sepc, Ordering::Release);
+    obs.resumed_sp.store(parent_frame.reg(2), Ordering::Release);
+    obs.resumed_s2
+        .store(parent_frame.reg(18), Ordering::Release);
+    obs.resumed_s4
+        .store(parent_frame.reg(20), Ordering::Release);
+    obs.resumed_a0
+        .store(parent_frame.reg(10), Ordering::Release);
+    obs.resumed_a7
+        .store(parent_frame.reg(17), Ordering::Release);
+    obs.resumed_satp.store(parent_satp, Ordering::Release);
+    obs.resumed_status_ptr.store(status_ptr, Ordering::Release);
+    obs.resumed_wait_status
+        .store(wait_status, Ordering::Release);
+    obs.resumed_status_copied
+        .store(status_copied as usize, Ordering::Release);
+    obs.child_exit_status
+        .store(child_exit_status, Ordering::Release);
+    obs.stack_window_compared
+        .store(stack_window_compared as usize, Ordering::Release);
+    obs.stack_window_diff_count
+        .store(stack_window_diff_count, Ordering::Release);
+    obs.stack_window_first_diff_addr
+        .store(stack_window_first_diff_addr, Ordering::Release);
+    obs.stack_window_before_byte
+        .store(stack_window_before_byte, Ordering::Release);
+    obs.stack_window_after_byte
+        .store(stack_window_after_byte, Ordering::Release);
+    obs.writable_pages_compared
+        .store(writable_pages_compared as usize, Ordering::Release);
+    obs.writable_pages_dirty_count
+        .store(writable_pages_dirty_count, Ordering::Release);
+    obs.writable_pages_stack_dirty_count
+        .store(writable_pages_stack_dirty_count, Ordering::Release);
+    obs.writable_pages_non_stack_dirty_count
+        .store(writable_pages_non_stack_dirty_count, Ordering::Release);
+    obs.writable_pages_restored
+        .store(writable_pages_restored as usize, Ordering::Release);
+    obs.writable_pages_first_non_stack_kind
+        .store(writable_pages_first_non_stack_kind, Ordering::Release);
+    obs.writable_pages_first_non_stack_mapping_index.store(
+        writable_pages_first_non_stack_mapping_index,
+        Ordering::Release,
+    );
+    obs.writable_pages_first_non_stack_page_index
+        .store(writable_pages_first_non_stack_page_index, Ordering::Release);
+    obs.writable_pages_first_non_stack_addr
+        .store(writable_pages_first_non_stack_addr, Ordering::Release);
+    obs.writable_pages_first_non_stack_before_checksum.store(
+        writable_pages_first_non_stack_before_checksum,
+        Ordering::Release,
+    );
+    obs.writable_pages_first_non_stack_after_checksum.store(
+        writable_pages_first_non_stack_after_checksum,
+        Ordering::Release,
+    );
+    obs.resumed.store(1, Ordering::Release);
+}
+
 fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     let upid = frame.reg(10);
     let _stat_addr = frame.reg(11);
@@ -4470,6 +4820,14 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, EINVAL);
         return;
     }
+    if crate::context::context_ref()
+        .user_child_process
+        .parent_wait_resumed()
+    {
+        table.wait4_observed.store(1, Ordering::Release);
+        complete_error_syscall(frame, ECHILD);
+        return;
+    }
     if options != USER_WAIT4_WUNTRACED {
         complete_unsupported_syscall(frame);
         return;
@@ -4480,7 +4838,10 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let Some(child_frame) = ctx.user_child_process.wait4_yield_to_child_continuation(
             &ctx.user_init_process,
             &ctx.user_address_space,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
+            frame,
+            _stat_addr,
             upid,
             options,
             rusage,
@@ -4492,6 +4853,21 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     table.wait4_observed.store(1, Ordering::Release);
+    #[cfg(app_user_boot)]
+    {
+        let child = &crate::context::context_ref().user_child_process;
+        record_wait4_parent_wait_saved(
+            frame,
+            _stat_addr,
+            USER_CHILD_PID,
+            child.parent_wait_stack_window_checkpoint_bound(),
+            child.parent_wait_stack_window_start(),
+            child.parent_wait_stack_window_len(),
+            child.parent_wait_writable_page_snapshot_saved(),
+            child.parent_wait_writable_page_count(),
+            child.parent_wait_writable_page_snapshot_truncated(),
+        );
+    }
     crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
     print_wait4_child_handoff_diagnostic(&child_frame);
     *frame = child_frame;
@@ -4515,15 +4891,161 @@ fn syscall_table_set_tid_address(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, pid);
 }
 
-fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) -> ! {
+fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     table.exit_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
     print_syscall_trace_exit(frame, status);
+    if complete_child_exit_to_parent_wait(frame, status) {
+        return;
+    }
     crate::arch::riscv64::sbi::putstr("user exit status=");
     print_decimal(status);
     crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+#[cfg(app_user_boot)]
+fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> bool {
+    let wait_status = ((status & 0xff) << 8) as u32;
+    let (mut parent_frame, status_ptr, child_pid, parent_satp) = {
+        let ctx = crate::context::context();
+        let Some((parent_frame, status_ptr, child_pid)) = ctx
+            .user_child_process
+            .child_exit_to_parent_wait(&mut ctx.user_address_space, status)
+        else {
+            return false;
+        };
+        (
+            parent_frame,
+            status_ptr,
+            child_pid,
+            ctx.user_address_space.satp_token(),
+        )
+    };
+
+    crate::arch::riscv64::csr::write_satp(parent_satp);
+    crate::arch::riscv64::csr::sfence_vma();
+
+    let stack_window_compared = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+
+    let writable_pages_compared = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+
+    let parent_stack_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+    if !parent_stack_restored {
+        return false;
+    }
+
+    let writable_pages_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_wait_writable_page_snapshot(
+                &ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+    };
+    if !writable_pages_restored {
+        return false;
+    }
+
+    let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
+    {
+        let ctx = crate::context::context();
+        if !ctx
+            .user_child_process
+            .mark_parent_wait_resumed(status_copied)
+        {
+            return false;
+        }
+    }
+    let (
+        stack_window_diff_count,
+        stack_window_first_diff_addr,
+        stack_window_before_byte,
+        stack_window_after_byte,
+        writable_pages_dirty_count,
+        writable_pages_stack_dirty_count,
+        writable_pages_non_stack_dirty_count,
+        writable_pages_restored,
+        writable_pages_first_non_stack_kind,
+        writable_pages_first_non_stack_mapping_index,
+        writable_pages_first_non_stack_page_index,
+        writable_pages_first_non_stack_addr,
+        writable_pages_first_non_stack_before_checksum,
+        writable_pages_first_non_stack_after_checksum,
+    ) = {
+        let child = &crate::context::context_ref().user_child_process;
+        (
+            child.parent_wait_stack_window_diff_count(),
+            child.parent_wait_stack_window_first_diff_addr(),
+            child.parent_wait_stack_window_before_byte() as usize,
+            child.parent_wait_stack_window_after_byte() as usize,
+            child.parent_wait_writable_page_dirty_count(),
+            child.parent_wait_writable_page_stack_dirty_count(),
+            child.parent_wait_writable_page_non_stack_dirty_count(),
+            child.parent_wait_writable_page_snapshot_restored(),
+            child.parent_wait_first_non_stack_dirty_kind(),
+            child.parent_wait_first_non_stack_dirty_mapping_index(),
+            child.parent_wait_first_non_stack_dirty_page_index(),
+            child.parent_wait_first_non_stack_dirty_addr(),
+            child.parent_wait_first_non_stack_dirty_before_checksum(),
+            child.parent_wait_first_non_stack_dirty_after_checksum(),
+        )
+    };
+
+    if status_copied {
+        complete_successful_syscall(&mut parent_frame, child_pid);
+    } else {
+        complete_error_syscall(&mut parent_frame, EFAULT);
+    }
+    record_wait4_parent_wait_resumed(
+        &parent_frame,
+        parent_satp,
+        status_ptr,
+        wait_status as usize,
+        status_copied,
+        status,
+        stack_window_compared,
+        stack_window_diff_count,
+        stack_window_first_diff_addr,
+        stack_window_before_byte,
+        stack_window_after_byte,
+        writable_pages_compared,
+        writable_pages_dirty_count,
+        writable_pages_stack_dirty_count,
+        writable_pages_non_stack_dirty_count,
+        writable_pages_restored,
+        writable_pages_first_non_stack_kind,
+        writable_pages_first_non_stack_mapping_index,
+        writable_pages_first_non_stack_page_index,
+        writable_pages_first_non_stack_addr,
+        writable_pages_first_non_stack_before_checksum,
+        writable_pages_first_non_stack_after_checksum,
+    );
+    *frame = parent_frame;
+    crate::checkpoint::dispatch(
+        Checkpoint::UserChildParentWaitResumed,
+        crate::context::context_ref(),
+    );
+    true
+}
+
+#[cfg(not(app_user_boot))]
+fn complete_child_exit_to_parent_wait(_frame: &mut TrapFrame, _status: usize) -> bool {
+    false
 }
 
 fn copy_from_user(user_ptr: usize, dst: &mut [u8]) -> bool {
@@ -4829,6 +5351,7 @@ fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
     crate::arch::riscv64::sbi::putstr(" a7=");
     print_decimal(frame.reg(17));
     print_syscall_arg_registers(frame);
+    print_trap_saved_registers(frame);
     crate::arch::riscv64::sbi::putstr(" gp=0x");
     print_hex(crate::arch::riscv64::csr::read_gp());
     crate::arch::riscv64::sbi::putstr(" tp=0x");
@@ -4951,6 +5474,8 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
     crate::arch::riscv64::sbi::putstr(" mode=");
     print_trap_mode(frame);
     print_syscall_arg_registers(frame);
+    print_trap_return_address(frame);
+    print_trap_saved_registers(frame);
     crate::arch::riscv64::sbi::putstr(" sepc=0x");
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
@@ -5194,6 +5719,8 @@ fn print_syscall_trace_return(frame: &TrapFrame, value: usize) {
     crate::arch::riscv64::sbi::putstr(" mode=");
     print_trap_mode(frame);
     print_syscall_arg_registers(frame);
+    print_trap_return_address(frame);
+    print_trap_saved_registers(frame);
     crate::arch::riscv64::sbi::putstr(" sepc=0x");
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
@@ -5215,6 +5742,8 @@ fn print_syscall_trace_exit(frame: &TrapFrame, status: usize) {
     crate::arch::riscv64::sbi::putstr(" mode=");
     print_trap_mode(frame);
     print_syscall_arg_registers(frame);
+    print_trap_return_address(frame);
+    print_trap_saved_registers(frame);
     crate::arch::riscv64::sbi::putstr(" sepc=0x");
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
@@ -5626,6 +6155,20 @@ fn print_syscall_arg_registers(frame: &TrapFrame) {
     print_hex(frame.reg(14));
     crate::arch::riscv64::sbi::putstr(" a5=0x");
     print_hex(frame.reg(15));
+}
+
+fn print_trap_return_address(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr(" ra=0x");
+    print_hex(frame.reg(1));
+}
+
+fn print_trap_saved_registers(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr(" s2=0x");
+    print_hex(frame.reg(18));
+    crate::arch::riscv64::sbi::putstr(" s3=0x");
+    print_hex(frame.reg(19));
+    crate::arch::riscv64::sbi::putstr(" s4=0x");
+    print_hex(frame.reg(20));
 }
 
 fn print_hex(value: usize) {
