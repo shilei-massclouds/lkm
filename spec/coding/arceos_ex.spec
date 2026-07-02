@@ -138,6 +138,7 @@ predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_wait4_parent_wait_first_slice() -> bool;
 predicate arceos_ex_must_user_clone_deferred_boundaries_classify_out_of_slice_paths() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free() -> bool;
@@ -1507,20 +1508,32 @@ type ArceosExStartupPhaseCodingMust {
          * newsp=0, inherited TLS because CLONE_SETTLS is absent, copied
          * files/fs/credentials/signal first-slice facts, a PID, and a
          * wake_up_new_task-shaped SelectRunQueue -> SetTaskCpu -> EnqueueTask
-         * boundary. The parent returns the child pid. After this first slice,
-         * the same shell "ls" evidence moves to parent wait4(260) with
-         * a0=-1, a1=status pointer, a2=2 and the remaining args zero; do not
-         * bypass that parent wait boundary with an ad-hoc child exec/scheduler
-         * shortcut. clone3, CLONE_VM/vfork, thread groups, COW mm, pidfd,
+         * boundary. The parent returns the child pid. After clone, the same
+         * shell "ls" evidence reaches parent wait4(260) with pid=-1,
+         * status pointer, options=WUNTRACED and rusage=NULL. wait4(260) first
+         * slice must reference local Linux 6.12
+         * kernel/exit.c::SYSCALL_DEFINE4(wait4), kernel_wait4() and
+         * do_wait(); kernel_wait4() adds WEXITED and do_wait() reaches the
+         * wait_chldexit interruptible boundary because the cloned child exists
+         * but is not yet waitable. The first slice may record that parent wait
+         * boundary and yield to the already-created child continuation; it
+         * must not synthesize a child exit, write the status pointer, reap a
+         * zombie or claim full scheduler sleep/wakeup semantics. After this
+         * first slice, the same guest no longer stops at unsupported wait4;
+         * the next observation is an instruction page fault in the child
+         * continuation with a7=135, which makes copied trap-frame-adjacent
+         * child address-space/stack snapshot the next boundary instead of an
+         * ad-hoc child exec shortcut. clone3, CLONE_VM/vfork, thread groups,
+         * COW mm, pidfd,
          * ptrace/seccomp/cgroup/audit, namespace, robust futex,
-         * clear-child futex wake, wait/exit/reap, failure rollback and
-         * unobserved flag combinations must be recorded by
-         * UserCloneDeferredBoundaries as deferred, trimmed or
-         * unsupported-first-slice.
+         * clear-child futex wake, exit/reap/status copyout, failure rollback
+         * and unobserved flag combinations must be recorded by
+         * UserCloneDeferredBoundaries or SyscallTable wait4 facts as deferred,
+         * trimmed or unsupported-first-slice.
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
-         * discipline, futex/clone/thread-group semantics, fork/wait or signal
-         * semantics.
+         * discipline, futex/clone/thread-group semantics, complete fork/wait
+         * or signal semantics.
          *
          * mmap(222) must reference local Linux 6.12
          * arch/riscv/kernel/sys_riscv.c::SYSCALL_DEFINE6(mmap),
@@ -1855,6 +1868,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_tiocspgrp_first_slice();
         arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice();
         arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice();
+        arceos_ex_must_syscall_table_support_wait4_parent_wait_first_slice();
         arceos_ex_must_user_clone_deferred_boundaries_classify_out_of_slice_paths();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free();

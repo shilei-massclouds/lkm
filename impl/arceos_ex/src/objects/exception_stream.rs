@@ -11,8 +11,8 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     task::TaskEntry,
     user_boot::{
-        USER_SIGNAL_COUNT, UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate,
-        UserSignalAction,
+        USER_SIGNAL_COUNT, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED, UserMmapError,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction,
     },
 };
 
@@ -97,6 +97,7 @@ const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_CLONE: usize = 220;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
+const SYSCALL_WAIT4: usize = 260;
 const SYSCALL_GETRANDOM: usize = 278;
 const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
@@ -150,6 +151,17 @@ const SIGKILL: usize = 9;
 const SIGSTOP: usize = 19;
 const UNBLOCKABLE_SIGNAL_MASK: usize = (1usize << (SIGKILL - 1)) | (1usize << (SIGSTOP - 1));
 const UAPI_SA_FLAGS: usize = 0xd800_0807;
+const WAIT4_WNOHANG: usize = 0x0000_0001;
+const WAIT4_WCONTINUED: usize = 0x0000_0008;
+const WAIT4_WNOTHREAD: usize = 0x2000_0000;
+const WAIT4_WALL: usize = 0x4000_0000;
+const WAIT4_WCLONE: usize = 0x8000_0000;
+const WAIT4_LINUX_VALID_OPTIONS: usize = WAIT4_WNOHANG
+    | USER_WAIT4_WUNTRACED
+    | WAIT4_WCONTINUED
+    | WAIT4_WNOTHREAD
+    | WAIT4_WALL
+    | WAIT4_WCLONE;
 const EPERM: usize = 1;
 const EACCES: usize = 13;
 const ESRCH: usize = 3;
@@ -167,6 +179,7 @@ const ESPIPE: usize = 29;
 const ENOTTY: usize = 25;
 const ELOOP: usize = 40;
 const EMFILE: usize = 24;
+const ECHILD: usize = 10;
 
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
@@ -214,6 +227,7 @@ pub struct SyscallTable {
     munmap_supported: bool,
     set_tid_address_supported: bool,
     clone_supported: bool,
+    wait4_supported: bool,
     exit_supported: bool,
     exit_group_supported: bool,
     write_usercopy_ready: bool,
@@ -294,6 +308,11 @@ pub struct SyscallTable {
     clone_routes_to_task_creation_core: bool,
     clone_routes_to_user_clone_deferred_boundaries: bool,
     clone_plain_fork_first_slice: bool,
+    wait4_parent_wait_chldexit_boundary: bool,
+    wait4_yields_to_user_child_continuation: bool,
+    wait4_status_copyout_deferred: bool,
+    wait4_zombie_reap_deferred: bool,
+    wait4_blocking_sleep_deferred: bool,
     exit_records_status: bool,
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
@@ -331,6 +350,7 @@ pub struct SyscallTable {
     lseek_observed: AtomicU8,
     set_tid_address_observed: AtomicU8,
     clone_observed: AtomicU8,
+    wait4_observed: AtomicU8,
     exit_observed: AtomicU8,
 }
 
@@ -379,6 +399,7 @@ impl SyscallTable {
             munmap_supported: false,
             set_tid_address_supported: false,
             clone_supported: false,
+            wait4_supported: false,
             exit_supported: false,
             exit_group_supported: false,
             write_usercopy_ready: false,
@@ -459,6 +480,11 @@ impl SyscallTable {
             clone_routes_to_task_creation_core: false,
             clone_routes_to_user_clone_deferred_boundaries: false,
             clone_plain_fork_first_slice: false,
+            wait4_parent_wait_chldexit_boundary: false,
+            wait4_yields_to_user_child_continuation: false,
+            wait4_status_copyout_deferred: false,
+            wait4_zombie_reap_deferred: false,
+            wait4_blocking_sleep_deferred: false,
             exit_records_status: false,
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
@@ -496,6 +522,7 @@ impl SyscallTable {
             lseek_observed: AtomicU8::new(0),
             set_tid_address_observed: AtomicU8::new(0),
             clone_observed: AtomicU8::new(0),
+            wait4_observed: AtomicU8::new(0),
             exit_observed: AtomicU8::new(0),
         }
     }
@@ -658,6 +685,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn clone_supported(&self) -> bool {
         self.clone_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_supported(&self) -> bool {
+        self.wait4_supported
     }
 
     #[allow(dead_code)]
@@ -951,6 +983,31 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn wait4_parent_wait_chldexit_boundary(&self) -> bool {
+        self.wait4_parent_wait_chldexit_boundary
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_yields_to_user_child_continuation(&self) -> bool {
+        self.wait4_yields_to_user_child_continuation
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_status_copyout_deferred(&self) -> bool {
+        self.wait4_status_copyout_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_zombie_reap_deferred(&self) -> bool {
+        self.wait4_zombie_reap_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn wait4_blocking_sleep_deferred(&self) -> bool {
+        self.wait4_blocking_sleep_deferred
+    }
+
+    #[allow(dead_code)]
     pub fn write_observed(&self) -> bool {
         self.write_observed.load(Ordering::Acquire) != 0
     }
@@ -1086,6 +1143,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn wait4_observed(&self) -> bool {
+        self.wait4_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn exit_observed(&self) -> bool {
         self.exit_observed.load(Ordering::Acquire) != 0
     }
@@ -1142,6 +1204,7 @@ impl SyscallTable {
         self.munmap_supported = true;
         self.set_tid_address_supported = true;
         self.clone_supported = true;
+        self.wait4_supported = true;
         self.exit_supported = true;
         self.exit_group_supported = true;
         self.write_usercopy_ready = true;
@@ -1222,6 +1285,11 @@ impl SyscallTable {
         self.clone_routes_to_task_creation_core = true;
         self.clone_routes_to_user_clone_deferred_boundaries = true;
         self.clone_plain_fork_first_slice = true;
+        self.wait4_parent_wait_chldexit_boundary = true;
+        self.wait4_yields_to_user_child_continuation = true;
+        self.wait4_status_copyout_deferred = true;
+        self.wait4_zombie_reap_deferred = true;
+        self.wait4_blocking_sleep_deferred = true;
         self.exit_records_status = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
         self.lifecycle
@@ -1741,6 +1809,22 @@ impl SyscallTable {
         syscall_table_clone(self, frame);
     }
 
+    pub fn wait4(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.wait4_supported
+            || !self.wait4_parent_wait_chldexit_boundary
+            || !self.wait4_yields_to_user_child_continuation
+            || !self.wait4_status_copyout_deferred
+            || !self.wait4_zombie_reap_deferred
+            || !self.wait4_blocking_sleep_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_wait4(self, frame);
+    }
+
     pub fn exit(&self, frame: &mut TrapFrame) -> ! {
         if self.lifecycle.state() != State::Ready
             || !self.exit_supported
@@ -2106,6 +2190,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
         SYSCALL_MUNMAP => table.munmap(frame),
+        SYSCALL_WAIT4 => table.wait4(frame),
         SYSCALL_GETRANDOM => table.getrandom(frame),
         SYSCALL_EXIT => table.exit(frame),
         SYSCALL_EXIT_GROUP => table.exit_group(frame),
@@ -3762,6 +3847,44 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, child_pid);
 }
 
+fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
+    let upid = frame.reg(10);
+    let _stat_addr = frame.reg(11);
+    let options = frame.reg(12);
+    let rusage = frame.reg(13);
+
+    if upid != USER_WAIT4_ALL_CHILDREN || rusage != 0 {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+    if options & !WAIT4_LINUX_VALID_OPTIONS != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if options != USER_WAIT4_WUNTRACED {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let child_frame = {
+        let ctx = crate::context::context();
+        let Some(child_frame) = ctx.user_child_process.wait4_yield_to_child_continuation(
+            &ctx.user_init_process,
+            upid,
+            options,
+            rusage,
+        ) else {
+            complete_error_syscall(frame, ECHILD);
+            return;
+        };
+        child_frame
+    };
+
+    table.wait4_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+    *frame = child_frame;
+}
+
 fn syscall_table_set_tid_address(table: &SyscallTable, frame: &mut TrapFrame) {
     let tidptr = frame.reg(10);
     let pid = crate::context::context()
@@ -4426,6 +4549,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_CLONE => "clone",
         SYSCALL_MMAP => "mmap",
         SYSCALL_MPROTECT => "mprotect",
+        SYSCALL_WAIT4 => "wait4",
         SYSCALL_GETRANDOM => "getrandom",
         SYSCALL_EXIT => "exit",
         SYSCALL_EXIT_GROUP => "exit_group",

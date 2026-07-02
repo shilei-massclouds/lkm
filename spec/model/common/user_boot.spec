@@ -273,6 +273,7 @@ predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
 predicate syscall_table_munmap_supported<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_supported<T>(table: T) -> bool;
 predicate syscall_table_clone_supported<T>(table: T) -> bool;
+predicate syscall_table_wait4_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
@@ -358,6 +359,15 @@ predicate syscall_clone_plain_fork_first_slice<T>(table: T) -> bool;
 predicate syscall_clone_parent_returns_child_pid<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_child_return_zero_bound<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
+predicate syscall_wait4_linux_6_12_kernel_wait4_bound<T>(table: T) -> bool;
+predicate syscall_wait4_observed_shell_args_bound<T>(table: T) -> bool;
+predicate syscall_wait4_pid_minus_one_all_children_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_options_wuntraced_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_parent_wait_chldexit_boundary<T>(table: T) -> bool;
+predicate syscall_wait4_yields_to_user_child_continuation<T, P>(table: T, process: P) -> bool;
+predicate syscall_wait4_status_copyout_deferred<T>(table: T) -> bool;
+predicate syscall_wait4_zombie_reap_deferred<T>(table: T) -> bool;
+predicate syscall_wait4_blocking_sleep_deferred<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
@@ -391,6 +401,7 @@ predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_clone_observed<T>(table: T) -> bool;
+predicate syscall_table_wait4_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
@@ -432,6 +443,8 @@ predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bo
 predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
 predicate user_child_process_tls_inherited<T>(process: T) -> bool;
 predicate user_child_process_enqueued<T, R>(process: T, runqueue: R) -> bool;
+predicate user_child_process_wait4_parent_wait_observed<T>(process: T) -> bool;
+predicate user_child_process_child_continuation_taken<T>(process: T) -> bool;
 predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
@@ -599,7 +612,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、wait/exit/zombie/reap 和未观察到的 flags 组合保持 deferred 或 unsupported-first-slice。";
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片只记录 parent wait_chldexit 边界并交给 child continuation。wait4 首片实现后的同一 guest 不再打印 unsupported wait4，后续观察为 child continuation 中 a7=135 附近的 instruction page fault，说明 copied trap frame 之外的 child address-space/stack snapshot 是下一边界。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、exit/zombie/reap/status copyout 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
                 }
             }
         }
@@ -1032,6 +1045,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_munmap_supported(self);
                     syscall_table_set_tid_address_supported(self);
                     syscall_table_clone_supported(self);
+                    syscall_table_wait4_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
                     syscall_write_usercopy_ready(self);
@@ -1060,6 +1074,9 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
+                    syscall_wait4_status_copyout_deferred(self);
+                    syscall_wait4_zombie_reap_deferred(self);
+                    syscall_wait4_blocking_sleep_deferred(self);
                     syscall_exit_records_status(self);
                     syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
@@ -1097,6 +1114,7 @@ object SyscallTable: ResourceObject {
             syscall_table_munmap_supported(self);
             syscall_table_set_tid_address_supported(self);
             syscall_table_clone_supported(self);
+            syscall_table_wait4_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
             syscall_write_usercopy_ready(self);
@@ -1123,6 +1141,9 @@ object SyscallTable: ResourceObject {
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_nanosleep_full_hrtimer_deferred(self);
+            syscall_wait4_status_copyout_deferred(self);
+            syscall_wait4_zombie_reap_deferred(self);
+            syscall_wait4_blocking_sleep_deferred(self);
             syscall_exit_records_status(self);
         }
 
@@ -2109,6 +2130,44 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::Wait4 {
+                /*
+                 * Linux 6.12 wait4(260) routes through
+                 * kernel/exit.c::kernel_wait4()/do_wait(). For the observed
+                 * BusyBox /bin/sh "ls" parent path, pid is -1, status is a
+                 * user pointer, options is WUNTRACED, and rusage is NULL.
+                 * kernel_wait4() adds WEXITED internally. Because the cloned
+                 * child exists but has not produced a waitable exit/stop/
+                 * continue event, do_wait() reaches the interruptible
+                 * wait_chldexit boundary and would schedule another runnable
+                 * task. This first slice records that parent wait boundary and
+                 * yields to the child trap-frame continuation already produced
+                 * by clone. It must not synthesize a child exit status, perform
+                 * zombie reaping or write the status pointer.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    UserChildProcess.state == State::Ready;
+                    Scheduler.state == State::Online;
+                }
+
+                ensures {
+                    syscall_wait4_linux_6_12_kernel_wait4_bound(self);
+                    syscall_wait4_observed_shell_args_bound(self);
+                    syscall_wait4_pid_minus_one_all_children_first_slice(self);
+                    syscall_wait4_options_wuntraced_first_slice(self);
+                    syscall_wait4_parent_wait_chldexit_boundary(self);
+                    syscall_wait4_yields_to_user_child_continuation(self, UserChildProcess);
+                    user_child_process_wait4_parent_wait_observed(UserChildProcess);
+                    user_child_process_child_continuation_taken(UserChildProcess);
+                    syscall_wait4_status_copyout_deferred(self);
+                    syscall_wait4_zombie_reap_deferred(self);
+                    syscall_wait4_blocking_sleep_deferred(self);
+                    syscall_table_wait4_observed(self);
+                }
+            }
+
             on Action::Exit {
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2159,6 +2218,24 @@ object UserChildProcess: ResourceObject {
             user_child_process_prepared(self);
             task_clone_args_ready(self);
             task_entry_bound(self, TaskEntry::UserChild);
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            user_child_process_parent_pid1(self, UserInitProcess);
+            user_child_process_pid_allocated(self, RootPidNamespace);
+            user_child_process_tgid_equals_pid(self);
+            user_child_process_exit_signal_sigchld(self);
+            user_child_process_files_struct_copied(self, FilesStruct);
+            user_child_process_fs_struct_copied(self, FsStruct);
+            user_child_process_credentials_copied(self, UserInitProcess);
+            user_child_process_signal_state_copied(self, UserInitProcess);
+            user_child_process_user_address_space_snapshot(self, UserAddressSpace);
+            user_child_process_trap_frame_copied(self, UserTrapFrame);
+            user_child_process_trap_frame_child_return_zero(self);
+            user_child_process_tls_inherited(self);
+            user_child_process_enqueued(self, Scheduler);
         }
     }
 }

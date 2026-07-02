@@ -36,6 +36,8 @@ const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
 pub const USER_CHILD_PID: usize = 3;
 pub const USER_CLONE_SIGCHLD: usize = 17;
+pub const USER_WAIT4_ALL_CHILDREN: usize = usize::MAX;
+pub const USER_WAIT4_WUNTRACED: usize = 2;
 
 pub const ELF_HEADER_LEN: usize = 64;
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
@@ -3042,6 +3044,8 @@ pub struct UserChildProcess {
     tls_inherited: bool,
     child_trap_frame: Option<TrapFrame>,
     enqueued: bool,
+    wait4_parent_wait_observed: bool,
+    child_continuation_taken: bool,
 }
 
 #[allow(dead_code)]
@@ -3071,6 +3075,8 @@ impl UserChildProcess {
             tls_inherited: false,
             child_trap_frame: None,
             enqueued: false,
+            wait4_parent_wait_observed: false,
+            child_continuation_taken: false,
         }
     }
 
@@ -3112,6 +3118,14 @@ impl UserChildProcess {
 
     pub const fn enqueued(&self) -> bool {
         self.enqueued
+    }
+
+    pub const fn wait4_parent_wait_observed(&self) -> bool {
+        self.wait4_parent_wait_observed
+    }
+
+    pub const fn child_continuation_taken(&self) -> bool {
+        self.child_continuation_taken
     }
 
     pub fn preset(&mut self) -> EventResult {
@@ -3206,6 +3220,47 @@ impl UserChildProcess {
         }
         self.enqueued = true;
         true
+    }
+
+    pub fn wait4_yield_to_child_continuation(
+        &mut self,
+        parent: &UserInitProcess,
+        upid: usize,
+        options: usize,
+        rusage: usize,
+    ) -> Option<TrapFrame> {
+        if self.lifecycle.state() != State::Ready
+            || !self.enqueued
+            || self.child_continuation_taken
+            || self.pid != USER_CHILD_PID
+            || self.parent_pid != super::rest_init::KERNEL_INIT_PID
+            || self.tgid != USER_CHILD_PID
+            || self.exit_signal != USER_CLONE_SIGCHLD
+            || !self.task_struct_allocated
+            || !self.pid_allocated
+            || !self.thread_context_ready
+            || !self.sched_entity_ready
+            || !self.task_state_new
+            || !self.files_struct_copied
+            || !self.fs_struct_copied
+            || !self.credentials_copied
+            || !self.signal_state_copied
+            || !self.user_address_space_snapshot
+            || !self.trap_frame_copied
+            || !self.trap_frame_child_return_zero
+            || parent.state() != State::Online
+            || !parent.pid1_preserved()
+            || upid != USER_WAIT4_ALL_CHILDREN
+            || options != USER_WAIT4_WUNTRACED
+            || rusage != 0
+        {
+            return None;
+        }
+
+        let child_frame = self.child_trap_frame?;
+        self.wait4_parent_wait_observed = true;
+        self.child_continuation_taken = true;
+        Some(child_frame)
     }
 }
 
