@@ -1184,7 +1184,7 @@ type ArceosExLocalIrqEnableCodingMust {
          * Model path:
          *
          * LocalIrqEnablePhase is InterruptPhase subphase 2. Its formal model
-         * path is spec/model/interrupt/local-irq-enable/.
+         * path is spec/model/phases/interrupt/local-irq-enable/.
          */
         arceos_ex_must_local_irq_enable_model_path_under_interrupt_phase();
 
@@ -1900,8 +1900,8 @@ type ArceosExIrqTimeInitCodingMust {
          * Model path:
          *
          * IrqTimeInitPhase is InterruptPhase subphase 1. Its formal model
-         * path is spec/model/interrupt/irq-time-init/, not
-         * spec/model/boot/irq-time-init/.
+         * path is spec/model/phases/interrupt/irq-time-init/, not
+         * spec/model/phases/boot/irq-time-init/.
          */
         arceos_ex_must_irq_time_init_model_path_under_interrupt_phase();
 
@@ -2371,7 +2371,7 @@ type ArceosExIrqOpenPrepareCodingMust {
          * Model path:
          *
          * IrqOpenPreparePhase is InterruptPhase subphase 3. Its formal model
-         * path is spec/model/interrupt/irq-open-prepare/.
+         * path is spec/model/phases/interrupt/irq-open-prepare/.
          */
         arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase();
 
@@ -2463,7 +2463,7 @@ type ArceosExProcessPrepareCodingMust {
          * Model path:
          *
          * ProcessPreparePhase is InterruptPhase subphase 4. Its formal model
-         * path is spec/model/interrupt/process-prepare/.
+         * path is spec/model/phases/interrupt/process-prepare/.
          */
         arceos_ex_must_process_prepare_model_path_under_interrupt_phase();
 
@@ -2992,7 +2992,7 @@ type ArceosExRestInitCodingMust {
          *
          * The rest_init path is split into BootInitRestInitPhase,
          * BootInitScheduleHandoffPhase and BootIdleEntryPhase under
-         * spec/model/up-multitask/rest-init/. No RestInitPhase wrapper object,
+         * spec/model/phases/up-multitask/rest-init/. No RestInitPhase wrapper object,
          * state or checkpoint may be modeled; rest_init() remains only the
          * Linux control-flow name for the owner-split path.
          */
@@ -3616,7 +3616,7 @@ type ArceosExPreSmpInitCodingMust {
          * Model path:
          *
          * PreSmpInitPhase is SmpRuntimePhase subphase 1. Its formal model
-         * path is spec/model/smp-runtime/pre-smp-init/.
+         * path is spec/model/phases/smp-runtime/pre-smp-init/.
          */
         arceos_ex_must_pre_smp_init_model_path_under_smp_runtime_phase();
 
@@ -3698,7 +3698,7 @@ type ArceosExSmpBringupCodingMust {
          * Model path:
          *
          * SmpBringupPhase is SMP Runtime Phase subphase 2. Its formal model
-         * path is spec/model/smp-runtime/smp-bringup/.
+         * path is spec/model/phases/smp-runtime/smp-bringup/.
          */
         arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase();
 
@@ -3798,7 +3798,7 @@ type ArceosExRuntimeCoreCodingMust {
          * Model path:
          *
          * RuntimeCorePhase is SMP Runtime Phase subphase 3. Its formal model
-         * path is spec/model/smp-runtime/runtime-core/.
+         * path is spec/model/phases/smp-runtime/runtime-core/.
          */
         arceos_ex_must_runtime_core_model_path_under_smp_runtime_phase();
 
@@ -3870,7 +3870,7 @@ type ArceosExInitcallCodingMust {
          * Model path:
          *
          * InitcallPhase is SMP Runtime Phase subphase 3. Its formal model
-         * path is spec/model/smp-runtime/initcall/.
+         * path is spec/model/phases/smp-runtime/initcall/.
          */
         arceos_ex_must_initcall_model_path_under_smp_runtime_phase();
 
@@ -4213,7 +4213,7 @@ type ArceosExInitcallCodingMust {
          *
          * The first concrete platform-driver closure must be the real
          * ns16550a-compatible OF serial platform driver, modeled in
-         * spec/model/common/ns16550a_driver.spec and implemented in an
+         * spec/model/objects/ns16550a_driver.spec and implemented in an
          * independent Rust module. Its Linux-like device_initcall!() static
          * entry represents the initcall action. Concrete platform drivers
          * must declare that initcall in the driver's own implementation
@@ -4347,7 +4347,7 @@ type ArceosExRootfsCodingMust {
          * Model path:
          *
          * RootfsPhase is SMP Runtime Phase subphase 4. Its formal model path
-         * is spec/model/smp-runtime/rootfs/.
+         * is spec/model/phases/smp-runtime/rootfs/.
          */
         arceos_ex_must_rootfs_model_path_under_smp_runtime_phase();
 
@@ -4472,7 +4472,7 @@ type ArceosExFinalizeCodingMust {
          * Model path:
          *
          * FinalizePhase is SMP Runtime Phase subphase 5. Its formal model
-         * path is spec/model/smp-runtime/finalize/.
+         * path is spec/model/phases/smp-runtime/finalize/.
          */
         arceos_ex_must_finalize_model_path_under_smp_runtime_phase();
 

@@ -139,7 +139,7 @@ make clean
 ## ProcessPreparePhase 编码约束
 
 `ProcessPreparePhase` 是 `InterruptPhase` 的第四个子阶段，formal model 路径为
-`spec/model/interrupt/process-prepare/`，目标实现路径为
+`spec/model/phases/interrupt/process-prepare/`，目标实现路径为
 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。该阶段必须在 `IrqOpenPreparePhase.Ready`
 之后运行，复用已打开的 boot CPU local IRQ、`Console.Prepared`、`SchedClock.Ready` 和 `DelayLoop.Ready`
 事实，为后续 `rest_init()` 创建 `kernel_init`/`kthreadd` 准备对象基础。
@@ -173,7 +173,7 @@ cpuset/cgroup/taskstats/delayacct/ACPI/KCSAN 裁剪依据；同时也要记录�
 
 ## Completion 编码约束
 
-`Completion` 是 `spec/model/common/main.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
+`Completion` 是 `spec/model/objects/main.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
 `impl/arceos_ex/src/objects/completion.rs`，由 `Completion` 结构体承载普通生命周期状态、`CompletionExtState`
 扩展状态、token 计数和 owned `SimpleWaitQueue`。`SimpleWaitQueue` 对应 Linux simple waitqueue/swait 的核心等待队列语义，
 不是 completion 用户传入的外部引用。
@@ -194,7 +194,7 @@ smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup
 
 `rest_init()` 路径在 formal model 中拆成三个 owner-scoped 子阶段：
 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
-`BootIdleEntryPhase`，路径为 `spec/model/up-multitask/rest-init/`，目标实现路径为
+`BootIdleEntryPhase`，路径为 `spec/model/phases/up-multitask/rest-init/`，目标实现路径为
 `impl/arceos_ex/src/phases/up_multitask/rest_init.rs`。规格和实现不得再建立
 `RestInitPhase` wrapper 对象、状态或 checkpoint；`rest_init()` 只作为 Linux 控制流名称保留。
 
@@ -286,7 +286,7 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 ## PreSmpInitPhase 编码约束
 
 `PreSmpInitPhase` 是 `SmpRuntimePhase` 的第一个子阶段，formal model 路径为
-`spec/model/smp-runtime/pre-smp-init/`，目标实现路径为
+`spec/model/phases/smp-runtime/pre-smp-init/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`。该阶段由 `KernelInitTask` 在
 `kernel_init_freeable()` 中推进，入口是 `KernelInitTask` dispatch facts 和 Scheduler 首次调度 fact 已成立；
 该子阶段第一步必须由 `KernelInitTask` 通过 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已释放，
@@ -310,7 +310,7 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 ## SmpBringupPhase 编码约束
 
 `SmpBringupPhase` 是 `SMP Runtime Phase` 的第二个子阶段，formal model 路径为
-`spec/model/smp-runtime/smp-bringup/`，目标实现路径为
+`spec/model/phases/smp-runtime/smp-bringup/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。该阶段从 `smp_init()` 开始，由
 `KernelInitTask` 在 boot CPU 上驱动，当前对象级实现只展开 BP 侧主线和 BP/AP 同步边界。
 
@@ -342,7 +342,7 @@ mutex guard、`cpu_running` / `done_up` completion wait-lock irqsave guard、SBI
 ## RuntimeCorePhase 编码约束
 
 `RuntimeCorePhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
-`spec/model/smp-runtime/runtime-core/`，目标实现路径为
+`spec/model/phases/smp-runtime/runtime-core/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。该阶段必须在 `SmpBringupPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `sched_init_smp()` 到 `page_alloc_init_late()` 的 BP 主线。
 
@@ -377,7 +377,7 @@ facts 与 mutex guard、Async/Padata deferred facts、PageAllocator late facts �
 ## InitcallPhase 编码约束
 
 `InitcallPhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
-`spec/model/smp-runtime/initcall/`，目标实现路径为
+`spec/model/phases/smp-runtime/initcall/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。该阶段必须在 `RuntimeCorePhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `do_basic_setup()` 的对象级边界。
 
@@ -908,7 +908,7 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 ## RootfsPhase 编码约束
 
 `RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为
-`spec/model/smp-runtime/rootfs/`，目标实现路径为
+`spec/model/phases/smp-runtime/rootfs/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。该阶段必须在 `InitcallPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init_freeable()` 的 rootfs 准备边界。
 
@@ -958,7 +958,7 @@ device-probe/rootwait/initrd/md/NFS/CIFS/devtmpfs 路径分类、integrity keys 
 ## FinalizePhase 编码约束
 
 `FinalizePhase` 是 `SMP Runtime Phase` 的第六个子阶段，formal model 路径为
-`spec/model/smp-runtime/finalize/`，目标实现路径为
+`spec/model/phases/smp-runtime/finalize/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。该阶段必须在 `RootfsPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init()` 中 `kernel_init_freeable()` 返回后的收尾边界。
 
@@ -988,7 +988,7 @@ trimmed、RCU in-kernel boot ended 与 atomic/WRITE_ONCE/lazy-trim facts、sysct
 
 ## PayloadPhase 编码约束
 
-`PayloadPhase` 是 `StartupTimeline` 的末尾阶段，formal model 路径为 `spec/model/payload/`。它必须作为
+`PayloadPhase` 是 `StartupTimeline` 的末尾阶段，formal model 路径为 `spec/model/phases/payload/`。它必须作为
 `SmpRuntimePhase.Ready` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
 `FinalizePhase.Ready` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
 
@@ -1442,7 +1442,7 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 ## `mm_core_init()` 编码约束
 
-`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubSubsystem.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
+`MmCoreInitPhase` 已正式落到 `spec/model/phases/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubSubsystem.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
 
 `SystemExclusive` / `SingleTaskContext` 只提供当前 boot 调用点的上下文事实。它不能作为规格省略锁、irqsave、preempt、RCU、per-cpu 或 TLB/cache 同步语义的理由，也不再作为默认擦除 protocol guard 的依据。`mm_core_init()` 中每个对象/API 都必须明确属于三类之一：本阶段实际执行同步协议、纯上下文事实且无运行时协议、或后续 runtime consumer 触发时再展开。凡是 `Ready` 后暴露 runtime API 的对象，若完整并发协议尚未展开，必须保留显式 deferred contract，而不是用顶层 context 抵消。
 
@@ -1607,13 +1607,13 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 
 ## `SchedInitPhase` 编码约束
 
-`SchedInitPhase` 已正式落到 `spec/model/boot/sched-init/`。实现侧必须保持与模型一致的阶段边界：入口是
+`SchedInitPhase` 已正式落到 `spec/model/phases/boot/sched-init/`。实现侧必须保持与模型一致的阶段边界：入口是
 `MmCoreInitPhase.Ready`、`PageAllocator.Ready`、`SlubSubsystem.Ready`、`KmallocCaches.Ready`、`CpuGroup.Ready`、
 `PerCpuStorage.Ready`、`CpuHotplugState.Ready`、`StaticBranch.Ready`、`PrintkBuffer.Ready` 和
 `SystemExclusive`；出口是 `Scheduler.Online`、`RadixTree.Ready`、`MapleTree.Ready`、`Workqueue.Prepared`、
 `Softirq.Prepared`、`RcuCore.Ready` 和 `TasksRcu.Prepared`。
 
-目录、文件和对象命名必须跟阶段名一致：模型目录为 `spec/model/boot/sched-init/`，实现文件为
+目录、文件和对象命名必须跟阶段名一致：模型目录为 `spec/model/phases/boot/sched-init/`，实现文件为
 `impl/arceos_ex/src/phases/boot/sched_init.rs`，阶段对象名为 `SchedInitPhase`。不得混用 `scheduler-init` /
 `SchedulerInitPhase`，除非先正式改名并同步所有规格、图示和实现。
 
@@ -1705,7 +1705,7 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 
 ## `IrqTimeInitPhase` 编码约束
 
-`IrqTimeInitPhase` 已正式落到 `spec/model/interrupt/irq-time-init/`，属于 `InterruptPhase` 的第一个子阶段。实现侧边界和早期设计草案不同：`local_irq_enable()`
+`IrqTimeInitPhase` 已正式落到 `spec/model/phases/interrupt/irq-time-init/`，属于 `InterruptPhase` 的第一个子阶段。实现侧边界和早期设计草案不同：`local_irq_enable()`
 不属于本阶段，而是独立的 `LocalIrqEnablePhase`。阶段出口必须满足 `InterruptStream.Ready`、boot CPU
 `sstatus.SIE` 仍关闭、`early_boot_irqs_disabled == true`、`IrqController.Ready`、`RiscvIntc.Ready`、
 `IrqDispatchTree.Ready`、`Plic.Ready`、`Tick.Ready`、`TimerWheel.Ready`、`SrcuCore.Ready`、
@@ -1729,7 +1729,7 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 `include/linux/kfence.h` 的 inline no-op；实现必须通过 `IrqTimeTrimmedPaths` 这类结构化对象记录调用位置和裁剪依据，不能只依赖
 缺省未实现或 markdown 说明。
 
-目录、文件和对象命名必须跟阶段树一致：模型目录为 `spec/model/interrupt/irq-time-init/`，实现文件位于
+目录、文件和对象命名必须跟阶段树一致：模型目录为 `spec/model/phases/interrupt/irq-time-init/`，实现文件位于
 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs` 等 `interrupt` 阶段子树下；旧
 `phases/boot/irq_time_init.rs` 路径不得再作为本阶段实现位置。
 
@@ -1890,7 +1890,7 @@ kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提
 
 ## `LocalIrqEnablePhase` 编码约束
 
-`LocalIrqEnablePhase` 已正式落到 `spec/model/interrupt/local-irq-enable/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
+`LocalIrqEnablePhase` 已正式落到 `spec/model/phases/interrupt/local-irq-enable/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
 `IrqTimeInitPhase.Ready` 之后运行，且只能执行 boot CPU 的 `local_irq_enable()` 边界：通过
 `InterruptStream.enable()` 先把 `early_boot_irqs_disabled` 清为 false，再打开 RISC-V `sstatus.SIE` 本地中断总入口；该顺序必须匹配
 Linux `start_kernel()` 中 `early_boot_irqs_disabled = false; local_irq_enable();`，不得留下 SIE 已开但 early flag 仍为 true 的窗口。
@@ -1915,7 +1915,7 @@ checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 
 ## `IrqOpenPreparePhase` 编码约束
 
-`IrqOpenPreparePhase` 已正式落到 `spec/model/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第三个子阶段。它必须接在
+`IrqOpenPreparePhase` 已正式落到 `spec/model/phases/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第三个子阶段。它必须接在
 `LocalIrqEnablePhase.Ready` 之后运行，此时 boot CPU 本地中断总入口已经开放；本阶段不得再执行
 `local_irq_enable()`。
 

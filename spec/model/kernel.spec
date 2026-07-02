@@ -1,17 +1,17 @@
 /*
- * Startup Timeline Specification
+ * Kernel Specification
  *
  * This file defines the current top-level timeline object and composes the
  * model phase tree. The formal directory entry is spec/model/main.spec.
  */
 
-include "common/main.spec";
+include "objects/main.spec";
 include "prepare/main.spec";
-include "boot/main.spec";
-include "interrupt/main.spec";
-include "up-multitask/main.spec";
-include "smp-runtime/main.spec";
-include "payload/main.spec";
+include "phases/boot/main.spec";
+include "phases/interrupt/main.spec";
+include "phases/up-multitask/main.spec";
+include "phases/smp-runtime/main.spec";
+include "phases/payload/main.spec";
 
 /*
  * StartupTimeline 表示当前模型的内核启动时间轴对象。

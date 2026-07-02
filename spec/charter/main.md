@@ -1308,7 +1308,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
-形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `StartupTimeline`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格。子阶段 4 的正式模型位于 `spec/model/boot/mm-core-init/`。
+形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `StartupTimeline`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格。子阶段 4 的正式模型位于 `spec/model/phases/boot/mm-core-init/`。
 
 本子阶段的结束状态应至少包含：
 
