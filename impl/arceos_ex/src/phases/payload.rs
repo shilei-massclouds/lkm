@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU8;
 use crate::{
     objects::{
         printk,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
     trace::Checkpoint,
 };
@@ -34,6 +34,9 @@ fn setup() -> EventResult {
     let ctx = crate::context::context();
     ctx.payload_exec_sync_boundaries
         .setup(&ctx.kernel_init_task, &ctx.system_state)?;
+    ctx.user_clone_deferred_boundaries
+        .setup(&ctx.payload_exec_sync_boundaries)?;
+    ctx.user_child_process.preset()?;
 
     crate::phases::state::mark(
         &PAYLOAD_PHASE_STATE,

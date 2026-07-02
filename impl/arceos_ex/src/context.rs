@@ -99,8 +99,8 @@ use crate::objects::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     user_boot::{
-        ElfObject, PayloadExecSyncBoundaries, UserAddressSpace, UserBootPayload, UserInitProcess,
-        UserStack, UserTrapFrame,
+        ElfObject, PayloadExecSyncBoundaries, UserAddressSpace, UserBootPayload, UserChildProcess,
+        UserCloneDeferredBoundaries, UserInitProcess, UserStack, UserTrapFrame,
     },
     vfs::{FsStruct, RamFsType, VfsCore},
     virtio::VirtioBus,
@@ -310,12 +310,14 @@ pub struct Context {
     pub sysctl_args_deferred: SysctlArgsDeferred,
     pub finalize_boundary: FinalizeBoundary,
     pub payload_exec_sync_boundaries: PayloadExecSyncBoundaries,
+    pub user_clone_deferred_boundaries: UserCloneDeferredBoundaries,
     pub user_boot_payload: UserBootPayload,
     pub elf_object: ElfObject,
     pub elf_interpreter_object: ElfObject,
     pub user_address_space: UserAddressSpace,
     pub user_stack: UserStack,
     pub user_trap_frame: UserTrapFrame,
+    pub user_child_process: UserChildProcess,
     pub user_init_process: UserInitProcess,
 }
 
@@ -511,12 +513,14 @@ impl Context {
             sysctl_args_deferred: SysctlArgsDeferred::new(),
             finalize_boundary: FinalizeBoundary::new(),
             payload_exec_sync_boundaries: PayloadExecSyncBoundaries::new(),
+            user_clone_deferred_boundaries: UserCloneDeferredBoundaries::new(),
             user_boot_payload: UserBootPayload::new(),
             elf_object: ElfObject::new(),
             elf_interpreter_object: ElfObject::new(),
             user_address_space: UserAddressSpace::new(),
             user_stack: UserStack::new(),
             user_trap_frame: UserTrapFrame::new(),
+            user_child_process: UserChildProcess::new(),
             user_init_process: UserInitProcess::new(),
         }
     }

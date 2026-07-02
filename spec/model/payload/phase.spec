@@ -52,6 +52,7 @@ object PayloadPhase: PhaseObject {
 
                 drives {
                     PayloadExecSyncBoundaries.Transition::Setup;
+                    UserCloneDeferredBoundaries.Transition::Setup;
                     UserBootPayload.Transition::Setup;
                 }
 
@@ -84,6 +85,7 @@ object PayloadPhase: PhaseObject {
             payload_phase_next_boundary();
             selected_payload_ready();
             PayloadExecSyncBoundaries.state == State::Ready;
+            UserCloneDeferredBoundaries.state == State::Ready;
         }
 
         transitions {
@@ -127,6 +129,7 @@ object PayloadPhase: PhaseObject {
             payload_phase_next_boundary();
             selected_payload_ready();
             PayloadExecSyncBoundaries.state == State::Ready;
+            UserCloneDeferredBoundaries.state == State::Ready;
             selected_payload_no_return_handoff();
         }
     }

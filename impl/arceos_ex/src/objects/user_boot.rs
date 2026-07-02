@@ -10,18 +10,20 @@ use super::{
     ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk,
 };
 use super::{
+    event_stream::TrapFrame,
     exception_stream::{ExceptionStream, SyscallTable},
     files::FilesStruct,
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
-        copy_high_half_root_entries, page_table_storage_ready, sv39_indices, table_pte_from_phys,
-        user_leaf_pte_from_phys, PageTablePage,
+        PageTablePage, copy_high_half_root_entries, page_table_storage_ready, sv39_indices,
+        table_pte_from_phys, user_leaf_pte_from_phys,
     },
     rest_init::{KernelInitTask, SystemState, SystemStateValue},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
+    task::TaskEntry,
     vfs::FsStruct,
 };
 
@@ -32,6 +34,8 @@ pub const USER_BIN_SH_PATH: &[u8] = b"/bin/sh";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
+pub const USER_CHILD_PID: usize = 3;
+pub const USER_CLONE_SIGCHLD: usize = 17;
 
 pub const ELF_HEADER_LEN: usize = 64;
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
@@ -140,6 +144,8 @@ const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
 const MAX_MAPPING_BACKING_PAGES: usize = 512;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
+const USER_CLONE_CSIGNAL_MASK: usize = 0xff;
+const USER_CLONE_SETTLS: usize = 0x0008_0000;
 
 pub struct PayloadExecSyncBoundaries {
     lifecycle: Lifecycle,
@@ -366,6 +372,122 @@ impl PayloadExecSyncBoundaries {
         self.exec_panic_terminal_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+pub struct UserCloneDeferredBoundaries {
+    lifecycle: Lifecycle,
+    linux_6_12_legacy_clone_bound: bool,
+    riscv_abi_argument_order_bound: bool,
+    observed_plain_fork_args_bound: bool,
+    plain_fork_first_slice_bound: bool,
+    csignal_split_bound: bool,
+    sigchld_exit_signal_bound: bool,
+    newsp_zero_inherits_parent_sp: bool,
+    tls_ignored_without_clone_settls: bool,
+    thread_group_deferred: bool,
+    clone_vm_vfork_deferred: bool,
+    cow_mm_deferred: bool,
+    pidfd_deferred: bool,
+    ptrace_seccomp_cgroup_audit_deferred: bool,
+    namespace_deferred: bool,
+    robust_futex_deferred: bool,
+    clear_child_futex_deferred: bool,
+    wait_exit_reap_deferred: bool,
+    unsupported_flags_first_slice: bool,
+}
+
+#[allow(dead_code)]
+impl UserCloneDeferredBoundaries {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            linux_6_12_legacy_clone_bound: false,
+            riscv_abi_argument_order_bound: false,
+            observed_plain_fork_args_bound: false,
+            plain_fork_first_slice_bound: false,
+            csignal_split_bound: false,
+            sigchld_exit_signal_bound: false,
+            newsp_zero_inherits_parent_sp: false,
+            tls_ignored_without_clone_settls: false,
+            thread_group_deferred: true,
+            clone_vm_vfork_deferred: true,
+            cow_mm_deferred: true,
+            pidfd_deferred: true,
+            ptrace_seccomp_cgroup_audit_deferred: true,
+            namespace_deferred: true,
+            robust_futex_deferred: true,
+            clear_child_futex_deferred: true,
+            wait_exit_reap_deferred: true,
+            unsupported_flags_first_slice: true,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn plain_fork_first_slice_bound(&self) -> bool {
+        self.plain_fork_first_slice_bound
+    }
+
+    pub const fn wait_exit_reap_deferred(&self) -> bool {
+        self.wait_exit_reap_deferred
+    }
+
+    pub fn setup(&mut self, exec_sync: &PayloadExecSyncBoundaries) -> EventResult {
+        if self.lifecycle.state() != State::Base || exec_sync.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.linux_6_12_legacy_clone_bound = true;
+        self.riscv_abi_argument_order_bound = true;
+        self.observed_plain_fork_args_bound = true;
+        self.plain_fork_first_slice_bound = true;
+        self.csignal_split_bound = true;
+        self.sigchld_exit_signal_bound = true;
+        self.newsp_zero_inherits_parent_sp = true;
+        self.tls_ignored_without_clone_settls = true;
+        self.thread_group_deferred = true;
+        self.clone_vm_vfork_deferred = true;
+        self.cow_mm_deferred = true;
+        self.pidfd_deferred = true;
+        self.ptrace_seccomp_cgroup_audit_deferred = true;
+        self.namespace_deferred = true;
+        self.robust_futex_deferred = true;
+        self.clear_child_futex_deferred = true;
+        self.wait_exit_reap_deferred = true;
+        self.unsupported_flags_first_slice = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn accepts_plain_fork_first_slice(&self, clone_flags: usize, newsp: usize) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.linux_6_12_legacy_clone_bound
+            && self.riscv_abi_argument_order_bound
+            && self.plain_fork_first_slice_bound
+            && self.clone_flags_without_csignal(clone_flags) == 0
+            && self.exit_signal(clone_flags) == USER_CLONE_SIGCHLD
+            && newsp == 0
+            && self.tls_inherited_without_clone_settls(clone_flags)
+    }
+
+    pub const fn exit_signal(&self, clone_flags: usize) -> usize {
+        clone_flags & USER_CLONE_CSIGNAL_MASK
+    }
+
+    pub const fn clone_flags_without_csignal(&self, clone_flags: usize) -> usize {
+        clone_flags & !USER_CLONE_CSIGNAL_MASK
+    }
+
+    pub const fn tls_inherited_without_clone_settls(&self, clone_flags: usize) -> bool {
+        clone_flags & USER_CLONE_SETTLS == 0
     }
 }
 
@@ -2896,6 +3018,197 @@ pub struct UserInitProcess {
     getcwd_observed: bool,
 }
 
+pub struct UserChildProcess {
+    lifecycle: Lifecycle,
+    prepared: bool,
+    task_entry: TaskEntry,
+    task_entry_bound: bool,
+    pid: usize,
+    parent_pid: usize,
+    tgid: usize,
+    exit_signal: usize,
+    task_struct_allocated: bool,
+    pid_allocated: bool,
+    thread_context_ready: bool,
+    sched_entity_ready: bool,
+    task_state_new: bool,
+    files_struct_copied: bool,
+    fs_struct_copied: bool,
+    credentials_copied: bool,
+    signal_state_copied: bool,
+    user_address_space_snapshot: bool,
+    trap_frame_copied: bool,
+    trap_frame_child_return_zero: bool,
+    tls_inherited: bool,
+    child_trap_frame: Option<TrapFrame>,
+    enqueued: bool,
+}
+
+#[allow(dead_code)]
+impl UserChildProcess {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            prepared: false,
+            task_entry: TaskEntry::None,
+            task_entry_bound: false,
+            pid: 0,
+            parent_pid: 0,
+            tgid: 0,
+            exit_signal: 0,
+            task_struct_allocated: false,
+            pid_allocated: false,
+            thread_context_ready: false,
+            sched_entity_ready: false,
+            task_state_new: false,
+            files_struct_copied: false,
+            fs_struct_copied: false,
+            credentials_copied: false,
+            signal_state_copied: false,
+            user_address_space_snapshot: false,
+            trap_frame_copied: false,
+            trap_frame_child_return_zero: false,
+            tls_inherited: false,
+            child_trap_frame: None,
+            enqueued: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn prepared(&self) -> bool {
+        self.prepared
+    }
+
+    pub const fn task_entry(&self) -> TaskEntry {
+        self.task_entry
+    }
+
+    pub const fn pid(&self) -> usize {
+        self.pid
+    }
+
+    pub const fn parent_pid(&self) -> usize {
+        self.parent_pid
+    }
+
+    pub const fn tgid(&self) -> usize {
+        self.tgid
+    }
+
+    pub const fn exit_signal(&self) -> usize {
+        self.exit_signal
+    }
+
+    pub const fn trap_frame_child_return_zero(&self) -> bool {
+        self.trap_frame_child_return_zero
+    }
+
+    pub const fn tls_inherited(&self) -> bool {
+        self.tls_inherited
+    }
+
+    pub const fn enqueued(&self) -> bool {
+        self.enqueued
+    }
+
+    pub fn preset(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.prepared = true;
+        self.task_entry = TaskEntry::UserChild;
+        self.task_entry_bound = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_plain_fork_from_parent(
+        &mut self,
+        parent: &UserInitProcess,
+        boundaries: &UserCloneDeferredBoundaries,
+        address_space: &UserAddressSpace,
+        trap_frame: &UserTrapFrame,
+        fs_struct: &FsStruct,
+        files_struct: &FilesStruct,
+        current_frame: &TrapFrame,
+        clone_flags: usize,
+        newsp: usize,
+        task_struct_allocated: bool,
+        thread_context_ready: bool,
+        sched_entity_ready: bool,
+        task_state_new: bool,
+    ) -> Option<usize> {
+        if self.lifecycle.state() != State::Prepared
+            || !self.prepared
+            || self.task_entry != TaskEntry::UserChild
+            || parent.state() != State::Online
+            || !parent.pid1_preserved()
+            || boundaries.state() != State::Ready
+            || !boundaries.accepts_plain_fork_first_slice(clone_flags, newsp)
+            || address_space.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
+            || !task_struct_allocated
+            || !thread_context_ready
+            || !sched_entity_ready
+            || !task_state_new
+        {
+            return None;
+        }
+
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+
+        self.pid = USER_CHILD_PID;
+        self.parent_pid = super::rest_init::KERNEL_INIT_PID;
+        self.tgid = USER_CHILD_PID;
+        self.exit_signal = boundaries.exit_signal(clone_flags);
+        self.task_struct_allocated = task_struct_allocated;
+        self.pid_allocated = true;
+        self.thread_context_ready = thread_context_ready;
+        self.sched_entity_ready = sched_entity_ready;
+        self.task_state_new = task_state_new;
+        self.files_struct_copied = true;
+        self.fs_struct_copied = true;
+        self.credentials_copied = parent.credentials_inherited();
+        self.signal_state_copied = parent.signal_state_inherited();
+        self.user_address_space_snapshot = true;
+        self.trap_frame_copied = true;
+        self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
+        self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
+        self.child_trap_frame = Some(child_frame);
+
+        if self
+            .lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+            .is_err()
+        {
+            return None;
+        }
+        Some(self.pid)
+    }
+
+    pub fn mark_enqueued(&mut self) -> bool {
+        if self.lifecycle.state() != State::Ready || self.pid != USER_CHILD_PID {
+            return false;
+        }
+        self.enqueued = true;
+        true
+    }
+}
+
 #[allow(dead_code)]
 impl UserInitProcess {
     pub const fn new() -> Self {
@@ -4991,11 +5304,7 @@ fn mappings_have_page_table_entries(
 }
 
 const fn min_usize(a: usize, b: usize) -> usize {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 
 fn loadable_content_contains(input: &[u8], parsed: &ParsedLoadSegments, needle: &[u8]) -> bool {

@@ -137,6 +137,8 @@ predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice
 predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice() -> bool;
+predicate arceos_ex_must_user_clone_deferred_boundaries_classify_out_of_slice_paths() -> bool;
 predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free() -> bool;
 predicate arceos_ex_must_user_syscall_trace_probe_be_explicit_and_side_effect_free() -> bool;
@@ -1492,6 +1494,29 @@ type ArceosExStartupPhaseCodingMust {
          * final symlink path, getrandom(278) through HwRngCore current-device
          * reads rather than /dev or VFS, and set_tid_address by recording the
          * current PID1 UserInitProcess clear_child_tid pointer.
+         * clone(220) plain fork first slice must reference local Linux 6.12
+         * kernel/fork.c::SYSCALL_DEFINE5(clone), kernel_clone(),
+         * copy_process(), include/uapi/asm-generic/unistd.h and
+         * arch/riscv/kernel/process.c::copy_thread(). The current observed
+         * BusyBox /bin/sh "ls" request is a0=0x11, a1=0, a2=0, a3=8,
+         * a4=0x20096580, a5=1; implementations must decode this as
+         * exit_signal=SIGCHLD with no CLONE_* flags after CSIGNAL removal.
+         * SyscallTable.Action::Clone must drive TaskCreationCore.CopyUserProcess
+         * rather than manufacturing a pid return. The child process must have
+         * a copied user trap frame with a0=0, inherited user sp because
+         * newsp=0, inherited TLS because CLONE_SETTLS is absent, copied
+         * files/fs/credentials/signal first-slice facts, a PID, and a
+         * wake_up_new_task-shaped SelectRunQueue -> SetTaskCpu -> EnqueueTask
+         * boundary. The parent returns the child pid. After this first slice,
+         * the same shell "ls" evidence moves to parent wait4(260) with
+         * a0=-1, a1=status pointer, a2=2 and the remaining args zero; do not
+         * bypass that parent wait boundary with an ad-hoc child exec/scheduler
+         * shortcut. clone3, CLONE_VM/vfork, thread groups, COW mm, pidfd,
+         * ptrace/seccomp/cgroup/audit, namespace, robust futex,
+         * clear-child futex wake, wait/exit/reap, failure rollback and
+         * unobserved flag combinations must be recorded by
+         * UserCloneDeferredBoundaries as deferred, trimmed or
+         * unsupported-first-slice.
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
@@ -1829,6 +1854,8 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice();
         arceos_ex_must_syscall_table_support_tiocspgrp_first_slice();
         arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice();
+        arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice();
+        arceos_ex_must_user_clone_deferred_boundaries_classify_out_of_slice_paths();
         arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise();
         arceos_ex_must_user_read_trace_probe_be_explicit_and_side_effect_free();
         arceos_ex_must_user_syscall_trace_probe_be_explicit_and_side_effect_free();

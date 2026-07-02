@@ -109,6 +109,7 @@ enum TaskEntry {
     None,
     KernelInit,
     Kthreadd,
+    UserChild,
 }
 
 enum RunQueueRuntimeState {

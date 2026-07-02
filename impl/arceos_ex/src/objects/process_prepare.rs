@@ -3,14 +3,19 @@ use super::{
     cpu_capabilities::CpuCapabilities,
     cpu_group::CpuGroup,
     exception_stream::ExceptionStream,
+    files::FilesStruct,
     init_task::InitTask,
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
-    state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_branch::StaticBranch,
     task::TaskEntry,
-    vfs::VfsCore,
+    user_boot::{
+        UserAddressSpace, UserChildProcess, UserCloneDeferredBoundaries, UserInitProcess,
+        UserTrapFrame,
+    },
+    vfs::{FsStruct, VfsCore},
 };
 use crate::trace::Checkpoint;
 
@@ -376,6 +381,7 @@ pub struct TaskCreationCore {
     entry_contract_ready: bool,
     kernel_init_created: bool,
     kthreadd_created: bool,
+    user_child_created: bool,
     system_scheduling: bool,
 }
 
@@ -398,6 +404,7 @@ impl TaskCreationCore {
             entry_contract_ready: false,
             kernel_init_created: false,
             kthreadd_created: false,
+            user_child_created: false,
             system_scheduling: false,
         }
     }
@@ -466,6 +473,10 @@ impl TaskCreationCore {
         self.kthreadd_created
     }
 
+    pub const fn user_child_created(&self) -> bool {
+        self.user_child_created
+    }
+
     pub const fn system_scheduling(&self) -> bool {
         self.system_scheduling
     }
@@ -527,6 +538,7 @@ impl TaskCreationCore {
         self.entry_contract_ready = true;
         self.kernel_init_created = false;
         self.kthreadd_created = false;
+        self.user_child_created = false;
         self.system_scheduling = false;
 
         if self.vector_context.state() != State::Prepared
@@ -558,6 +570,7 @@ impl TaskCreationCore {
             || dst_state != State::Prepared
             || dst_entry != inputs.entry
             || inputs.entry == TaskEntry::None
+            || inputs.entry == TaskEntry::UserChild
             || inputs.entry == TaskEntry::SmokeScheduler
             || inputs.src_task.state() != State::Online
             || inputs.root_pid_namespace.state() != State::Ready
@@ -583,9 +596,57 @@ impl TaskCreationCore {
         match inputs.entry {
             TaskEntry::KernelInit => self.kernel_init_created = true,
             TaskEntry::Kthreadd => self.kthreadd_created = true,
-            TaskEntry::None | TaskEntry::SmokeScheduler => {}
+            TaskEntry::None | TaskEntry::UserChild | TaskEntry::SmokeScheduler => {}
         }
 
+        Ok(TaskCopyProcessResult {
+            entry: inputs.entry,
+            task_struct_allocated: self.task_struct_cache_ready,
+            thread_context_ready: self.thread_stack_cache_ready,
+            sched_entity_ready: true,
+            task_state_new: true,
+            task_not_enqueued: true,
+        })
+    }
+
+    pub fn copy_user_process(
+        &mut self,
+        inputs: TaskCopyUserProcessInputs<'_>,
+        dst_state: State,
+        dst_entry: TaskEntry,
+    ) -> Result<TaskCopyProcessResult, EventError> {
+        if self.lifecycle.state() != State::Ready
+            || !self.entry_contract_ready
+            || !self.rest_init_inputs_ready
+            || dst_state != State::Prepared
+            || dst_entry != TaskEntry::UserChild
+            || inputs.entry != TaskEntry::UserChild
+            || inputs.src_process.state() != State::Online
+            || inputs.dst_process.state() != State::Prepared
+            || !inputs.dst_process.prepared()
+            || inputs.root_pid_namespace.state() != State::Ready
+            || inputs.scheduler.state() != State::Online
+            || inputs.fs_struct.state() != State::Ready
+            || inputs.files_struct.state() != State::Ready
+            || inputs.address_space.state() != State::Online
+            || inputs.trap_frame.state() != State::Ready
+            || inputs.boundaries.state() != State::Ready
+            || !inputs.boundaries.plain_fork_first_slice_bound()
+            || !inputs
+                .scheduler
+                .boot_cpu_owned_scheduler_view(inputs.cpu_group)
+                .is_some()
+        {
+            return Err(EventError::failed(
+                super::state::EventErrorCode::ConditionFailed,
+                LifecycleEvent::Setup,
+                dst_state,
+                State::Prepared,
+                State::Ready,
+            ));
+        }
+
+        self.user_child_created = true;
         Ok(TaskCopyProcessResult {
             entry: inputs.entry,
             task_struct_allocated: self.task_struct_cache_ready,
@@ -624,6 +685,20 @@ pub struct TaskCopyProcessInputs<'a> {
     pub security_core: &'a SecurityCore,
     pub scheduler: &'a Scheduler,
     pub cpu_group: &'a CpuGroup,
+    pub entry: TaskEntry,
+}
+
+pub struct TaskCopyUserProcessInputs<'a> {
+    pub src_process: &'a UserInitProcess,
+    pub dst_process: &'a UserChildProcess,
+    pub root_pid_namespace: &'a RootPidNamespace,
+    pub scheduler: &'a Scheduler,
+    pub cpu_group: &'a CpuGroup,
+    pub fs_struct: &'a FsStruct,
+    pub files_struct: &'a FilesStruct,
+    pub address_space: &'a UserAddressSpace,
+    pub trap_frame: &'a UserTrapFrame,
+    pub boundaries: &'a UserCloneDeferredBoundaries,
     pub entry: TaskEntry,
 }
 

@@ -60,6 +60,10 @@ enum ElfObjectRole {
     Interpreter,
 }
 
+enum UserCloneFirstSliceKind {
+    PlainFork,
+}
+
 predicate user_boot_payload_selected<T>(payload: T) -> bool;
 predicate user_boot_payload_candidates_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_path_bound<T>(payload: T) -> bool;
@@ -131,6 +135,26 @@ predicate payload_default_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
 predicate payload_default_init_trimmed_because_config_default_init_empty<T>(boundaries: T) -> bool;
 predicate payload_binfmt_script_deferred<T>(boundaries: T) -> bool;
 predicate payload_exec_panic_terminal_bound<T>(boundaries: T) -> bool;
+
+predicate user_clone_deferred_boundaries_ready<T>(boundaries: T) -> bool;
+predicate user_clone_linux_6_12_legacy_clone_bound<T>(boundaries: T) -> bool;
+predicate user_clone_riscv_abi_argument_order_bound<T>(boundaries: T) -> bool;
+predicate user_clone_observed_plain_fork_args_bound<T>(boundaries: T) -> bool;
+predicate user_clone_plain_fork_first_slice_bound<T>(boundaries: T) -> bool;
+predicate user_clone_csignal_split_bound<T>(boundaries: T) -> bool;
+predicate user_clone_sigchld_exit_signal_bound<T>(boundaries: T) -> bool;
+predicate user_clone_newsp_zero_inherits_parent_sp<T>(boundaries: T) -> bool;
+predicate user_clone_tls_ignored_without_clone_settls<T>(boundaries: T) -> bool;
+predicate user_clone_thread_group_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_cow_mm_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_pidfd_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_ptrace_seccomp_cgroup_audit_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_namespace_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_robust_futex_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_clear_child_futex_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_wait_exit_reap_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_unsupported_flags_first_slice<T>(boundaries: T) -> bool;
 
 predicate elf_object_input_bound<T>(elf: T) -> bool;
 predicate elf_object_input_from_vfs<T, V>(elf: T, vfs: V) -> bool;
@@ -248,6 +272,7 @@ predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
 predicate syscall_table_munmap_supported<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_supported<T>(table: T) -> bool;
+predicate syscall_table_clone_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
@@ -326,6 +351,13 @@ predicate syscall_mmap_full_vma_model_deferred<T>(table: T) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_set_tid_address_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_clone_routes_to_task_creation_core<T, C>(table: T, core: C) -> bool;
+predicate syscall_clone_routes_to_user_clone_deferred_boundaries<T, B>(table: T, boundaries: B) -> bool;
+predicate syscall_clone_legacy_args_decoded<T>(table: T) -> bool;
+predicate syscall_clone_plain_fork_first_slice<T>(table: T) -> bool;
+predicate syscall_clone_parent_returns_child_pid<T, P>(table: T, process: P) -> bool;
+predicate syscall_clone_child_return_zero_bound<T, P>(table: T, process: P) -> bool;
+predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
@@ -358,6 +390,7 @@ predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
+predicate syscall_table_clone_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
@@ -385,6 +418,20 @@ predicate user_init_process_signal_action_table_layout_bound<T>(process: T) -> b
 predicate user_init_process_blocked_signal_mask_bound<T>(process: T) -> bool;
 predicate user_init_process_signal_delivery_deferred<T>(process: T) -> bool;
 predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
+predicate user_child_process_prepared<T>(process: T) -> bool;
+predicate user_child_process_parent_pid1<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_pid_allocated<T, N>(process: T, pid_ns: N) -> bool;
+predicate user_child_process_tgid_equals_pid<T>(process: T) -> bool;
+predicate user_child_process_exit_signal_sigchld<T>(process: T) -> bool;
+predicate user_child_process_files_struct_copied<T, F>(process: T, files: F) -> bool;
+predicate user_child_process_fs_struct_copied<T, F>(process: T, fs: F) -> bool;
+predicate user_child_process_credentials_copied<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_signal_state_copied<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_user_address_space_snapshot<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bool;
+predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
+predicate user_child_process_tls_inherited<T>(process: T) -> bool;
+predicate user_child_process_enqueued<T, R>(process: T, runqueue: R) -> bool;
 predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
@@ -512,6 +559,73 @@ object PayloadExecSyncBoundaries: KernelObject {
             payload_default_init_trimmed_because_config_default_init_empty(self);
             payload_binfmt_script_deferred(self);
             payload_exec_panic_terminal_bound(self);
+        }
+    }
+}
+
+object UserCloneDeferredBoundaries: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    PayloadParam.state == State::Ready;
+                    KernelInitTask.state == State::Online;
+                    SystemState.state == State::Online;
+                    system_state_running(SystemState);
+                }
+
+                ensures {
+                    user_clone_deferred_boundaries_ready(self);
+                    user_clone_linux_6_12_legacy_clone_bound(self);
+                    user_clone_riscv_abi_argument_order_bound(self);
+                    user_clone_observed_plain_fork_args_bound(self);
+                    user_clone_plain_fork_first_slice_bound(self);
+                    user_clone_csignal_split_bound(self);
+                    user_clone_sigchld_exit_signal_bound(self);
+                    user_clone_newsp_zero_inherits_parent_sp(self);
+                    user_clone_tls_ignored_without_clone_settls(self);
+                    user_clone_thread_group_deferred(self);
+                    user_clone_clone_vm_vfork_deferred(self);
+                    user_clone_cow_mm_deferred(self);
+                    user_clone_pidfd_deferred(self);
+                    user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
+                    user_clone_namespace_deferred(self);
+                    user_clone_robust_futex_deferred(self);
+                    user_clone_clear_child_futex_deferred(self);
+                    user_clone_wait_exit_reap_deferred(self);
+                    user_clone_unsupported_flags_first_slice(self);
+                }
+
+                deferred {
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、wait/exit/zombie/reap 和未观察到的 flags 组合保持 deferred 或 unsupported-first-slice。";
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            user_clone_deferred_boundaries_ready(self);
+            user_clone_linux_6_12_legacy_clone_bound(self);
+            user_clone_riscv_abi_argument_order_bound(self);
+            user_clone_observed_plain_fork_args_bound(self);
+            user_clone_plain_fork_first_slice_bound(self);
+            user_clone_csignal_split_bound(self);
+            user_clone_sigchld_exit_signal_bound(self);
+            user_clone_newsp_zero_inherits_parent_sp(self);
+            user_clone_tls_ignored_without_clone_settls(self);
+            user_clone_thread_group_deferred(self);
+            user_clone_clone_vm_vfork_deferred(self);
+            user_clone_cow_mm_deferred(self);
+            user_clone_pidfd_deferred(self);
+            user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
+            user_clone_namespace_deferred(self);
+            user_clone_robust_futex_deferred(self);
+            user_clone_clear_child_futex_deferred(self);
+            user_clone_wait_exit_reap_deferred(self);
+            user_clone_unsupported_flags_first_slice(self);
         }
     }
 }
@@ -917,6 +1031,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_mprotect_supported(self);
                     syscall_table_munmap_supported(self);
                     syscall_table_set_tid_address_supported(self);
+                    syscall_table_clone_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
                     syscall_write_usercopy_ready(self);
@@ -981,6 +1096,7 @@ object SyscallTable: ResourceObject {
             syscall_table_mprotect_supported(self);
             syscall_table_munmap_supported(self);
             syscall_table_set_tid_address_supported(self);
+            syscall_table_clone_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
             syscall_write_usercopy_ready(self);
@@ -1940,6 +2056,59 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::Clone {
+                /*
+                 * Linux 6.12 legacy clone(220) on riscv64 receives
+                 * clone_flags, newsp, parent_tidptr, child_tidptr and tls in
+                 * a0..a4. The current observed BusyBox /bin/sh "ls" path is a
+                 * plain fork: clone_flags=0x11, so exit_signal=SIGCHLD and
+                 * flags with CSIGNAL removed are zero.  newsp=0 keeps the
+                 * copied child user sp, and tls is ignored because
+                 * CLONE_SETTLS is not set.  The syscall action decodes this
+                 * ABI shape, then drives TaskCreationCore.CopyUserProcess;
+                 * it must not synthesize a PID return without creating a
+                 * child task boundary.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    TaskCreationCore.state == State::Ready;
+                    UserInitProcess.state == State::Online;
+                    UserChildProcess.state == State::Prepared;
+                    UserCloneDeferredBoundaries.state == State::Ready;
+                    Scheduler.state == State::Online;
+                    RootPidNamespace.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    FilesStruct.state == State::Ready;
+                    UserAddressSpace.state == State::Online;
+                    UserTrapFrame.state == State::Ready;
+                }
+
+                drives {
+                    TaskCreationCore.Action::CopyUserProcess(
+                        src_process: UserInitProcess,
+                        dst_process: UserChildProcess,
+                        pid_ns: RootPidNamespace,
+                        scheduler: Scheduler,
+                        fs: FsStruct,
+                        files: FilesStruct,
+                        address_space: UserAddressSpace,
+                        trap_frame: UserTrapFrame,
+                        boundaries: UserCloneDeferredBoundaries
+                    );
+                }
+
+                ensures {
+                    syscall_clone_routes_to_task_creation_core(self, TaskCreationCore);
+                    syscall_clone_routes_to_user_clone_deferred_boundaries(self, UserCloneDeferredBoundaries);
+                    syscall_clone_legacy_args_decoded(self);
+                    syscall_clone_plain_fork_first_slice(self);
+                    syscall_clone_parent_returns_child_pid(self, UserInitProcess);
+                    syscall_clone_child_return_zero_bound(self, UserChildProcess);
+                    syscall_clone_wake_up_new_task_shape(self, Scheduler);
+                    syscall_table_clone_observed(self);
+                }
+            }
+
             on Action::Exit {
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1961,6 +2130,35 @@ object SyscallTable: ResourceObject {
                     syscall_table_exit_observed(self);
                 }
             }
+        }
+    }
+}
+
+object UserChildProcess: ResourceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    UserCloneDeferredBoundaries.state == State::Ready;
+                }
+
+                ensures {
+                    user_child_process_prepared(self);
+                    task_clone_args_ready(self);
+                    task_entry_bound(self, TaskEntry::UserChild);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            user_child_process_prepared(self);
+            task_clone_args_ready(self);
+            task_entry_bound(self, TaskEntry::UserChild);
         }
     }
 }

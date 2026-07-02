@@ -3,7 +3,7 @@ use super::{
     cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
     init_task::InitTask,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::arch::riscv64::csr;
 use crate::trace::Checkpoint;
@@ -17,6 +17,7 @@ pub enum CurrentTaskRef {
     BootIdle,
     KernelInit,
     Kthreadd,
+    UserChild,
     SmokeScheduler,
     SmokeMutex,
     SmokeRwsem,
@@ -31,6 +32,7 @@ impl CurrentTaskRef {
             Self::BootIdle => "BootIdleTask",
             Self::KernelInit => "KernelInitTask",
             Self::Kthreadd => "KthreaddTask",
+            Self::UserChild => "UserChildTask",
             Self::SmokeScheduler => "SmokeSchedulerTask",
             Self::SmokeMutex => "SmokeMutexTask",
             Self::SmokeRwsem => "SmokeRwsemTask",

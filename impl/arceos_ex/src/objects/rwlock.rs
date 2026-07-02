@@ -1,7 +1,7 @@
 use super::{
     cpu_control::CurrentTaskRef,
     state::{
-        failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
+        EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
 };
 
@@ -378,6 +378,7 @@ const fn owner_from_task_ref(task_ref: CurrentTaskRef) -> RwLockOwner {
         CurrentTaskRef::None
         | CurrentTaskRef::BootIdle
         | CurrentTaskRef::Kthreadd
+        | CurrentTaskRef::UserChild
         | CurrentTaskRef::SmokeScheduler
         | CurrentTaskRef::SmokeMutex
         | CurrentTaskRef::SmokeRwsem => RwLockOwner::None,

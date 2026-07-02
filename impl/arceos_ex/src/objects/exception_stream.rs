@@ -4,13 +4,15 @@ use crate::trace::{self, Checkpoint};
 
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
+    files::{FILE_POLLIN, FileError, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    process_prepare::TaskCopyUserProcessInputs,
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    task::TaskEntry,
     user_boot::{
-        UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction,
-        USER_SIGNAL_COUNT,
+        USER_SIGNAL_COUNT, UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate,
+        UserSignalAction,
     },
 };
 
@@ -92,6 +94,7 @@ const SYSCALL_GETGID: usize = 176;
 const SYSCALL_GETEGID: usize = 177;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
+const SYSCALL_CLONE: usize = 220;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_GETRANDOM: usize = 278;
@@ -210,6 +213,7 @@ pub struct SyscallTable {
     mprotect_supported: bool,
     munmap_supported: bool,
     set_tid_address_supported: bool,
+    clone_supported: bool,
     exit_supported: bool,
     exit_group_supported: bool,
     write_usercopy_ready: bool,
@@ -287,6 +291,9 @@ pub struct SyscallTable {
     ioctl_routes_to_files_struct: bool,
     faccessat_routes_to_files_struct: bool,
     lseek_routes_to_files_struct: bool,
+    clone_routes_to_task_creation_core: bool,
+    clone_routes_to_user_clone_deferred_boundaries: bool,
+    clone_plain_fork_first_slice: bool,
     exit_records_status: bool,
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
@@ -323,6 +330,7 @@ pub struct SyscallTable {
     faccessat_observed: AtomicU8,
     lseek_observed: AtomicU8,
     set_tid_address_observed: AtomicU8,
+    clone_observed: AtomicU8,
     exit_observed: AtomicU8,
 }
 
@@ -370,6 +378,7 @@ impl SyscallTable {
             mprotect_supported: false,
             munmap_supported: false,
             set_tid_address_supported: false,
+            clone_supported: false,
             exit_supported: false,
             exit_group_supported: false,
             write_usercopy_ready: false,
@@ -447,6 +456,9 @@ impl SyscallTable {
             ioctl_routes_to_files_struct: false,
             faccessat_routes_to_files_struct: false,
             lseek_routes_to_files_struct: false,
+            clone_routes_to_task_creation_core: false,
+            clone_routes_to_user_clone_deferred_boundaries: false,
+            clone_plain_fork_first_slice: false,
             exit_records_status: false,
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
@@ -483,6 +495,7 @@ impl SyscallTable {
             faccessat_observed: AtomicU8::new(0),
             lseek_observed: AtomicU8::new(0),
             set_tid_address_observed: AtomicU8::new(0),
+            clone_observed: AtomicU8::new(0),
             exit_observed: AtomicU8::new(0),
         }
     }
@@ -640,6 +653,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn set_tid_address_supported(&self) -> bool {
         self.set_tid_address_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn clone_supported(&self) -> bool {
+        self.clone_supported
     }
 
     #[allow(dead_code)]
@@ -1063,6 +1081,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn clone_observed(&self) -> bool {
+        self.clone_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn exit_observed(&self) -> bool {
         self.exit_observed.load(Ordering::Acquire) != 0
     }
@@ -1118,6 +1141,7 @@ impl SyscallTable {
         self.mprotect_supported = true;
         self.munmap_supported = true;
         self.set_tid_address_supported = true;
+        self.clone_supported = true;
         self.exit_supported = true;
         self.exit_group_supported = true;
         self.write_usercopy_ready = true;
@@ -1195,6 +1219,9 @@ impl SyscallTable {
         self.ioctl_routes_to_files_struct = true;
         self.faccessat_routes_to_files_struct = true;
         self.lseek_routes_to_files_struct = true;
+        self.clone_routes_to_task_creation_core = true;
+        self.clone_routes_to_user_clone_deferred_boundaries = true;
+        self.clone_plain_fork_first_slice = true;
         self.exit_records_status = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
         self.lifecycle
@@ -1700,6 +1727,20 @@ impl SyscallTable {
         syscall_table_set_tid_address(self, frame);
     }
 
+    pub fn clone(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.clone_supported
+            || !self.clone_routes_to_task_creation_core
+            || !self.clone_routes_to_user_clone_deferred_boundaries
+            || !self.clone_plain_fork_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_clone(self, frame);
+    }
+
     pub fn exit(&self, frame: &mut TrapFrame) -> ! {
         if self.lifecycle.state() != State::Ready
             || !self.exit_supported
@@ -2061,6 +2102,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_GETGID => table.getgid(frame),
         SYSCALL_GETEGID => table.getegid(frame),
         SYSCALL_BRK => table.brk(frame),
+        SYSCALL_CLONE => table.clone(frame),
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
         SYSCALL_MUNMAP => table.munmap(frame),
@@ -3630,6 +3672,96 @@ fn syscall_table_writev(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, total);
 }
 
+fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
+    let clone_flags = frame.reg(10);
+    let newsp = frame.reg(11);
+    let _parent_tidptr = frame.reg(12);
+    let _child_tidptr = frame.reg(13);
+    let _tls = frame.reg(14);
+
+    let child_pid = {
+        let ctx = crate::context::context();
+        if !ctx
+            .user_clone_deferred_boundaries
+            .accepts_plain_fork_first_slice(clone_flags, newsp)
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        let copy_result = match ctx.task_creation_core.copy_user_process(
+            TaskCopyUserProcessInputs {
+                src_process: &ctx.user_init_process,
+                dst_process: &ctx.user_child_process,
+                root_pid_namespace: &ctx.root_pid_namespace,
+                scheduler: &ctx.scheduler,
+                cpu_group: &ctx.cpu_group,
+                fs_struct: &ctx.fs_struct,
+                files_struct: &ctx.files_struct,
+                address_space: &ctx.user_address_space,
+                trap_frame: &ctx.user_trap_frame,
+                boundaries: &ctx.user_clone_deferred_boundaries,
+                entry: TaskEntry::UserChild,
+            },
+            ctx.user_child_process.state(),
+            TaskEntry::UserChild,
+        ) {
+            Ok(result) => result,
+            Err(_) => {
+                complete_unsupported_syscall(frame);
+                return;
+            }
+        };
+
+        let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_parent(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            frame,
+            clone_flags,
+            newsp,
+            copy_result.task_struct_allocated(),
+            copy_result.thread_context_ready(),
+            copy_result.sched_entity_ready(),
+            copy_result.task_state_new(),
+        ) else {
+            complete_unsupported_syscall(frame);
+            return;
+        };
+
+        let runqueue_ref = match ctx
+            .scheduler
+            .select_runqueue_for_task(child_pid, &ctx.cpu_group)
+        {
+            Ok(runqueue_ref) => runqueue_ref,
+            Err(_) => {
+                complete_unsupported_syscall(frame);
+                return;
+            }
+        };
+        if ctx
+            .scheduler
+            .enqueue_task_on_runqueue(child_pid, runqueue_ref)
+            .is_err()
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+        if !ctx.user_child_process.mark_enqueued() {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+        child_pid
+    };
+
+    table.clone_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableClone, crate::context::context_ref());
+    complete_successful_syscall(frame, child_pid);
+}
+
 fn syscall_table_set_tid_address(table: &SyscallTable, frame: &mut TrapFrame) {
     let tidptr = frame.reg(10);
     let pid = crate::context::context()
@@ -3907,11 +4039,7 @@ fn unexpected_exception_handler(frame: &TrapFrame) -> ! {
 
 fn breakpoint_instruction_length(sepc: usize) -> usize {
     let insn = unsafe { core::ptr::read_unaligned(sepc as *const u16) };
-    if insn & 0b11 == 0b11 {
-        4
-    } else {
-        2
-    }
+    if insn & 0b11 == 0b11 { 4 } else { 2 }
 }
 
 fn panic_dispatch(message: &str) -> ! {
@@ -4295,6 +4423,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_GETEGID => "getegid",
         SYSCALL_BRK => "brk",
         SYSCALL_MUNMAP => "munmap",
+        SYSCALL_CLONE => "clone",
         SYSCALL_MMAP => "mmap",
         SYSCALL_MPROTECT => "mprotect",
         SYSCALL_GETRANDOM => "getrandom",

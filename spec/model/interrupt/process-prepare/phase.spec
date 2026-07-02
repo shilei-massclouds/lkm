@@ -313,6 +313,82 @@ object TaskCreationCore: TaskObject {
                     "copy_process() 内部的 current->sighand->siglock、tasklist_lock、PID allocator/pidmap 锁、cgroup/cred/file/fs/mm 引用同步和 sched_fork()/PI 初始化锁属于 TaskCreationCore 的共享创建协议，后续在 TaskCreationCore 内展开；rest_init 子阶段只消费 CopyProcess 的成功提交结果。";
                 }
             }
+
+            /*
+             * CopyUserProcess 是用户态 clone(220)/fork 首片使用的
+             * copy_process() 变体。它复用 TaskCreationCore.Ready 内的
+             * shared creation contract，但输入从 rest_init 内核线程 entry
+             * 切换为当前 UserInitProcess 的 trap frame、mm/files/fs/signal
+             * 可见状态。当前只覆盖 BusyBox /bin/sh 触发的 plain fork：
+             * clone_flags 去掉 CSIGNAL 后为 0，exit_signal 为 SIGCHLD。
+             */
+            Action::CopyUserProcess(
+                src_process: UserInitProcess,
+                dst_process: UserChildProcess,
+                pid_ns: RootPidNamespace,
+                scheduler: Scheduler,
+                fs: FsStruct,
+                files: FilesStruct,
+                address_space: UserAddressSpace,
+                trap_frame: UserTrapFrame,
+                boundaries: UserCloneDeferredBoundaries
+            ) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    src_process.state == State::Online;
+                    dst_process.state == State::Prepared;
+                    pid_ns.state == State::Ready;
+                    scheduler.state == State::Online;
+                    fs.state == State::Ready;
+                    files.state == State::Ready;
+                    address_space.state == State::Online;
+                    trap_frame.state == State::Ready;
+                    boundaries.state == State::Ready;
+                    task_clone_args_ready(dst_process);
+                    task_entry_bound(dst_process, TaskEntry::UserChild);
+                    user_clone_plain_fork_first_slice_bound(boundaries);
+                }
+
+                drives {
+                    let runqueue: RunQueueRef <- scheduler.Action::SelectRunQueue(UserChildTaskRef);
+                    UserChildTaskRef.Action::SetTaskCpu(BootCPURef);
+                    BootRunQueue.Action::EnqueueTask(runqueue, UserChildTaskRef);
+                }
+
+                ensures {
+                    task_creation_copy_process_committed(TaskCreationCore, src_process, dst_process);
+                    task_creation_used_clone_args(TaskCreationCore, dst_process);
+                    task_creation_bound_entry(TaskCreationCore, dst_process, TaskEntry::UserChild);
+                    task_struct_allocated(dst_process);
+                    task_duplicated_from(dst_process, src_process);
+                    task_pid_allocated(dst_process, pid_ns);
+                    task_thread_context_ready(dst_process);
+                    task_sched_entity_initialized(dst_process, scheduler);
+                    task_state_new(dst_process);
+                    user_child_process_parent_pid1(dst_process, src_process);
+                    user_child_process_pid_allocated(dst_process, pid_ns);
+                    user_child_process_tgid_equals_pid(dst_process);
+                    user_child_process_exit_signal_sigchld(dst_process);
+                    user_child_process_files_struct_copied(dst_process, files);
+                    user_child_process_fs_struct_copied(dst_process, fs);
+                    user_child_process_credentials_copied(dst_process, src_process);
+                    user_child_process_signal_state_copied(dst_process, src_process);
+                    user_child_process_user_address_space_snapshot(dst_process, address_space);
+                    user_child_process_trap_frame_copied(dst_process, trap_frame);
+                    user_child_process_trap_frame_child_return_zero(dst_process);
+                    user_child_process_tls_inherited(dst_process);
+                    user_child_process_enqueued(dst_process, BootRunQueue);
+                    task_enqueued_on_runqueue(UserChildTaskRef, BootRunQueue);
+                    task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
+                    task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore);
+                }
+
+                deferred {
+                    "用户态 CopyUserProcess 当前只覆盖 observed plain fork。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、wait/exit/reap 后续按真实 guest 证据展开。";
+                }
+            }
         }
     }
 }
