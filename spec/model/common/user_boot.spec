@@ -275,6 +275,7 @@ predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
 predicate syscall_table_munmap_supported<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_supported<T>(table: T) -> bool;
 predicate syscall_table_clone_supported<T>(table: T) -> bool;
+predicate syscall_table_execve_supported<T>(table: T) -> bool;
 predicate syscall_table_wait4_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
@@ -366,6 +367,20 @@ predicate syscall_clone_plain_fork_first_slice<T>(table: T) -> bool;
 predicate syscall_clone_parent_returns_child_pid<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_child_return_zero_bound<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
+predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> bool;
+predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
+predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
+predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
+predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
+predicate syscall_execve_context_staging_address_space_bound<T, A>(table: T, space: A) -> bool;
+predicate syscall_execve_sets_start_thread_frame_first_slice<T, R>(table: T, frame: R) -> bool;
+predicate syscall_execve_argv0_first_slice<T>(table: T) -> bool;
+predicate syscall_execve_stage_checkpoints_bound<T>(table: T) -> bool;
+predicate syscall_execve_return_path_diagnostic_bound<T>(table: T) -> bool;
+predicate syscall_execve_envp_full_copy_deferred<T>(table: T) -> bool;
+predicate syscall_execve_close_on_exec_deferred<T>(table: T) -> bool;
+predicate syscall_execve_old_mm_reclaim_deferred<T>(table: T) -> bool;
+predicate syscall_execve_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_wait4_linux_6_12_kernel_wait4_bound<T>(table: T) -> bool;
 predicate syscall_wait4_observed_shell_args_bound<T>(table: T) -> bool;
 predicate syscall_wait4_pid_minus_one_all_children_first_slice<T>(table: T) -> bool;
@@ -410,6 +425,7 @@ predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_clone_observed<T>(table: T) -> bool;
+predicate syscall_table_execve_observed<T>(table: T) -> bool;
 predicate syscall_table_wait4_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -1072,6 +1088,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_munmap_supported(self);
                     syscall_table_set_tid_address_supported(self);
                     syscall_table_clone_supported(self);
+                    syscall_table_execve_supported(self);
                     syscall_table_wait4_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
@@ -1101,6 +1118,10 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
+                    syscall_execve_envp_full_copy_deferred(self);
+                    syscall_execve_close_on_exec_deferred(self);
+                    syscall_execve_old_mm_reclaim_deferred(self);
+                    syscall_execve_full_linux_model_deferred(self);
                     syscall_wait4_status_copyout_deferred(self);
                     syscall_wait4_zombie_reap_deferred(self);
                     syscall_wait4_blocking_sleep_deferred(self);
@@ -1143,6 +1164,7 @@ object SyscallTable: ResourceObject {
             syscall_table_munmap_supported(self);
             syscall_table_set_tid_address_supported(self);
             syscall_table_clone_supported(self);
+            syscall_table_execve_supported(self);
             syscall_table_wait4_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
@@ -1170,6 +1192,10 @@ object SyscallTable: ResourceObject {
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_nanosleep_full_hrtimer_deferred(self);
+            syscall_execve_envp_full_copy_deferred(self);
+            syscall_execve_close_on_exec_deferred(self);
+            syscall_execve_old_mm_reclaim_deferred(self);
+            syscall_execve_full_linux_model_deferred(self);
             syscall_wait4_status_copyout_deferred(self);
             syscall_wait4_zombie_reap_deferred(self);
             syscall_wait4_blocking_sleep_deferred(self);
@@ -2222,6 +2248,72 @@ object SyscallTable: ResourceObject {
                     user_init_process_child_process_group_visible(UserInitProcess, UserChildProcess);
                     user_child_process_user_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
                     syscall_table_clone_observed(self);
+                }
+            }
+
+            on Action::Execve {
+                /*
+                 * Linux 6.12 execve(221) routes through
+                 * fs/exec.c::do_execveat_common()/bprm_execve() and the ELF
+                 * binfmt handler.  The observed BusyBox /bin/sh "ls" child
+                 * continuation issues execve("/bin/ls", argv={"ls", NULL},
+                 * envp={"SHLVL=1", "PWD=/", NULL}) and then tries
+                 * "/usr/bin/ls" if the first attempt returns ENOSYS.  This
+                 * first slice accepts the child-continuation path, copies the
+                 * filename and argv[0], reuses the current UserBootPayload
+                 * VFS/ELF/interpreter/UserStack/UserAddressSpace loading
+                 * shape to build a replacement user mm.  This follows the
+                 * local Linux 6.12 shape where fs/exec.c::alloc_bprm()
+                 * heap-allocates linux_binprm, bprm_mm_init() installs a
+                 * nascent bprm->mm from mm_alloc(), and begin_new_exec()
+                 * commits it through exec_mmap(bprm->mm).  The replacement
+                 * UserAddressSpace is staged in Context-owned storage rather
+                 * than on the syscall/trap stack, then committed without
+                 * materializing the whole object as a large stack temporary.
+                 * The action switches satp to the replacement page table and
+                 * updates the trap frame to the RISC-V start_thread-style
+                 * entry/sp.  It does not model the
+                 * full point-of-no-return rollback, credentials, signal table,
+                 * do_close_on_exec(), task comm, perf/audit/accounting or
+                 * old-mm reclamation paths.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserBootPayload.state == State::Online;
+                    UserChildProcess.state == State::Ready;
+                    UserAddressSpace.state == State::Online;
+                    UserTrapFrame.state == State::Ready;
+                    FilesStruct.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                }
+
+                drives {
+                    UserBootPayload.Action::TryDefaultInitSequence;
+                    ElfObject.Transition::Preset;
+                    ElfObject.Transition::Setup;
+                    UserStack.Transition::Setup;
+                    UserAddressSpace.Transition::Setup;
+                    UserAddressSpace.Transition::Enable;
+                    UserTrapFrame.Transition::Setup;
+                }
+
+                ensures {
+                    syscall_execve_linux_6_12_do_execveat_common_bound(self);
+                    syscall_execve_observed_shell_ls_args_bound(self);
+                    syscall_execve_child_continuation_first_slice(self, UserChildProcess);
+                    syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
+                    syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
+                    syscall_execve_context_staging_address_space_bound(self, UserAddressSpace);
+                    syscall_execve_sets_start_thread_frame_first_slice(self, UserTrapFrame);
+                    syscall_execve_argv0_first_slice(self);
+                    syscall_execve_stage_checkpoints_bound(self);
+                    syscall_execve_return_path_diagnostic_bound(self);
+                    syscall_execve_envp_full_copy_deferred(self);
+                    syscall_execve_close_on_exec_deferred(self);
+                    syscall_execve_old_mm_reclaim_deferred(self);
+                    syscall_execve_full_linux_model_deferred(self);
+                    syscall_table_execve_observed(self);
                 }
             }
 

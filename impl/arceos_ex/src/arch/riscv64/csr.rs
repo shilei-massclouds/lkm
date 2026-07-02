@@ -157,6 +157,16 @@ pub fn read_tp() -> usize {
     value
 }
 
+pub fn read_sp() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("mv {value}, sp", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
 pub fn read_sstatus() -> usize {
     let value: usize;
 

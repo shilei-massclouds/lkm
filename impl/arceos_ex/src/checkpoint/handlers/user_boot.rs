@@ -16,6 +16,7 @@ use crate::objects::user_boot::{UserStack, USER_PAGE_SIZE};
 
 #[cfg(app_user_boot)]
 use crate::objects::{
+    exception_stream::execve_checkpoint_observation,
     files::{FdRef, FileBackendKind},
     state::State,
 };
@@ -32,6 +33,24 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::UserAddressSpaceReady,
     #[cfg(app_user_boot)]
     Checkpoint::UserModeEntry,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableExecveArgsReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecMainElfReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecInterpreterReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecAddressSpaceReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecTrapFrameReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecSatpReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecContextReplaced,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecSatpSwitched,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserExecReturnFrameReady,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableSetTidAddress,
     #[cfg(app_user_boot)]
@@ -106,6 +125,18 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             run_user_mode_entry(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableExecveArgsReady
+        | Checkpoint::UserExecMainElfReady
+        | Checkpoint::UserExecInterpreterReady
+        | Checkpoint::UserExecAddressSpaceReady
+        | Checkpoint::UserExecTrapFrameReady
+        | Checkpoint::UserExecSatpReady
+        | Checkpoint::UserExecContextReplaced
+        | Checkpoint::UserExecSatpSwitched
+        | Checkpoint::UserExecReturnFrameReady => {
+            emit_execve_checkpoint_diag(checkpoint, sink);
+        }
+        #[cfg(app_user_boot)]
         Checkpoint::SyscallTableSetTidAddress => {
             run_once(&SYSCALL_SET_TID_ADDRESS_REPORTED, || {
                 run_syscall_table_set_tid_address(checkpoint, ctx, sink, total)
@@ -163,6 +194,71 @@ fn run_once(reported: &AtomicBool, run_case: impl FnOnce()) {
     if !reported.swap(true, Ordering::AcqRel) {
         run_case();
     }
+}
+
+#[cfg(app_user_boot)]
+fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
+    let _ = checkpoint;
+    let obs = execve_checkpoint_observation();
+    sink.diag_usize("execve_stage", obs.stage);
+    sink.diag_usize("execve_filename_len", obs.filename_len);
+    sink.diag_usize("execve_argv0_len", obs.argv0_len);
+    sink.diag_usize("execve_main_elf_type", obs.main_elf_type);
+    sink.diag_usize("execve_main_input_len", obs.main_input_len);
+    sink.diag_usize("execve_main_segments", obs.main_segments);
+    sink.diag_usize(
+        "execve_main_interpreter_required",
+        obs.main_interpreter_required,
+    );
+    sink.diag_hex_pair(
+        "execve_main_load_bias_entry",
+        obs.main_load_bias,
+        obs.main_entry,
+    );
+    sink.diag_hex_pair(
+        "execve_main_entry_runtime",
+        obs.main_entry,
+        obs.main_runtime_entry,
+    );
+    sink.diag_usize("execve_interpreter_input_len", obs.interpreter_input_len);
+    sink.diag_usize("execve_interpreter_segments", obs.interpreter_segments);
+    sink.diag_hex_pair(
+        "execve_interpreter_load_bias_entry",
+        obs.interpreter_load_bias,
+        obs.interpreter_entry,
+    );
+    sink.diag_usize("execve_address_space_state", obs.address_space_state);
+    sink.diag_usize("execve_mapping_count", obs.mapping_count);
+    sink.diag_usize("execve_segment_mapping_count", obs.segment_mapping_count);
+    sink.diag_hex_pair("execve_satp_old_new", obs.old_satp, obs.new_satp);
+    sink.diag_hex_pair(
+        "execve_satp_current_token",
+        obs.current_satp,
+        obs.satp_token,
+    );
+    sink.diag_hex_pair("execve_trap_entry_sp", obs.trap_entry, obs.trap_sp);
+    sink.diag_usize("execve_trap_sstatus", obs.trap_sstatus);
+    sink.diag_hex_pair(
+        "execve_frame_before_sepc_sp",
+        obs.frame_before_sepc,
+        obs.frame_before_sp,
+    );
+    sink.diag_hex_pair(
+        "execve_frame_before_ra_sstatus",
+        obs.frame_before_ra,
+        obs.frame_before_sstatus,
+    );
+    sink.diag_hex_pair(
+        "execve_frame_after_sepc_sp",
+        obs.frame_after_sepc,
+        obs.frame_after_sp,
+    );
+    sink.diag_hex_pair(
+        "execve_frame_after_ra_sstatus",
+        obs.frame_after_ra,
+        obs.frame_after_sstatus,
+    );
+    sink.diag_usize("execve_kernel_sp", obs.kernel_sp);
 }
 
 #[cfg(app_user_boot)]

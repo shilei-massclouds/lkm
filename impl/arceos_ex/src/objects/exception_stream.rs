@@ -1,7 +1,11 @@
+#[cfg(app_user_boot)]
+use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::trace::{self, Checkpoint};
 
+#[cfg(app_user_boot)]
+use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
@@ -96,6 +100,7 @@ const SYSCALL_GETEGID: usize = 177;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_CLONE: usize = 220;
+const SYSCALL_EXECVE: usize = 221;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_WAIT4: usize = 260;
@@ -103,6 +108,27 @@ const SYSCALL_GETRANDOM: usize = 278;
 const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
+const USER_EXECVE_VECTOR_DIAG_MAX: usize = 4;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_NONE: usize = 0;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_ARGS_READY: usize = 1;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_MAIN_ELF_READY: usize = 2;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_INTERPRETER_READY: usize = 3;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_ADDRESS_SPACE_READY: usize = 4;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_TRAP_FRAME_READY: usize = 5;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_SATP_READY: usize = 6;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_CONTEXT_REPLACED: usize = 7;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_SATP_SWITCHED: usize = 8;
+#[cfg(app_user_boot)]
+const EXECVE_OBS_STAGE_RETURN_FRAME_READY: usize = 9;
 const AT_FDCWD: usize = usize::MAX - 99;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
@@ -182,6 +208,159 @@ const ELOOP: usize = 40;
 const EMFILE: usize = 24;
 const ECHILD: usize = 10;
 
+#[cfg(app_user_boot)]
+#[derive(Clone, Copy)]
+pub struct ExecveCheckpointObservation {
+    pub stage: usize,
+    pub filename_len: usize,
+    pub argv0_len: usize,
+    pub main_elf_type: usize,
+    pub main_input_len: usize,
+    pub main_load_bias: usize,
+    pub main_entry: usize,
+    pub main_runtime_entry: usize,
+    pub main_segments: usize,
+    pub main_interpreter_required: usize,
+    pub interpreter_input_len: usize,
+    pub interpreter_load_bias: usize,
+    pub interpreter_entry: usize,
+    pub interpreter_segments: usize,
+    pub address_space_state: usize,
+    pub mapping_count: usize,
+    pub segment_mapping_count: usize,
+    pub satp_token: usize,
+    pub trap_entry: usize,
+    pub trap_sp: usize,
+    pub trap_sstatus: usize,
+    pub old_satp: usize,
+    pub new_satp: usize,
+    pub current_satp: usize,
+    pub frame_before_sepc: usize,
+    pub frame_before_sp: usize,
+    pub frame_before_ra: usize,
+    pub frame_before_sstatus: usize,
+    pub frame_after_sepc: usize,
+    pub frame_after_sp: usize,
+    pub frame_after_ra: usize,
+    pub frame_after_sstatus: usize,
+    pub kernel_sp: usize,
+}
+
+#[cfg(app_user_boot)]
+struct ExecveCheckpointObservationAtomics {
+    stage: AtomicUsize,
+    filename_len: AtomicUsize,
+    argv0_len: AtomicUsize,
+    main_elf_type: AtomicUsize,
+    main_input_len: AtomicUsize,
+    main_load_bias: AtomicUsize,
+    main_entry: AtomicUsize,
+    main_runtime_entry: AtomicUsize,
+    main_segments: AtomicUsize,
+    main_interpreter_required: AtomicUsize,
+    interpreter_input_len: AtomicUsize,
+    interpreter_load_bias: AtomicUsize,
+    interpreter_entry: AtomicUsize,
+    interpreter_segments: AtomicUsize,
+    address_space_state: AtomicUsize,
+    mapping_count: AtomicUsize,
+    segment_mapping_count: AtomicUsize,
+    satp_token: AtomicUsize,
+    trap_entry: AtomicUsize,
+    trap_sp: AtomicUsize,
+    trap_sstatus: AtomicUsize,
+    old_satp: AtomicUsize,
+    new_satp: AtomicUsize,
+    current_satp: AtomicUsize,
+    frame_before_sepc: AtomicUsize,
+    frame_before_sp: AtomicUsize,
+    frame_before_ra: AtomicUsize,
+    frame_before_sstatus: AtomicUsize,
+    frame_after_sepc: AtomicUsize,
+    frame_after_sp: AtomicUsize,
+    frame_after_ra: AtomicUsize,
+    frame_after_sstatus: AtomicUsize,
+    kernel_sp: AtomicUsize,
+}
+
+#[cfg(app_user_boot)]
+static EXECVE_CHECKPOINT_OBSERVATION: ExecveCheckpointObservationAtomics =
+    ExecveCheckpointObservationAtomics {
+        stage: AtomicUsize::new(EXECVE_OBS_STAGE_NONE),
+        filename_len: AtomicUsize::new(0),
+        argv0_len: AtomicUsize::new(0),
+        main_elf_type: AtomicUsize::new(0),
+        main_input_len: AtomicUsize::new(0),
+        main_load_bias: AtomicUsize::new(0),
+        main_entry: AtomicUsize::new(0),
+        main_runtime_entry: AtomicUsize::new(0),
+        main_segments: AtomicUsize::new(0),
+        main_interpreter_required: AtomicUsize::new(0),
+        interpreter_input_len: AtomicUsize::new(0),
+        interpreter_load_bias: AtomicUsize::new(0),
+        interpreter_entry: AtomicUsize::new(0),
+        interpreter_segments: AtomicUsize::new(0),
+        address_space_state: AtomicUsize::new(0),
+        mapping_count: AtomicUsize::new(0),
+        segment_mapping_count: AtomicUsize::new(0),
+        satp_token: AtomicUsize::new(0),
+        trap_entry: AtomicUsize::new(0),
+        trap_sp: AtomicUsize::new(0),
+        trap_sstatus: AtomicUsize::new(0),
+        old_satp: AtomicUsize::new(0),
+        new_satp: AtomicUsize::new(0),
+        current_satp: AtomicUsize::new(0),
+        frame_before_sepc: AtomicUsize::new(0),
+        frame_before_sp: AtomicUsize::new(0),
+        frame_before_ra: AtomicUsize::new(0),
+        frame_before_sstatus: AtomicUsize::new(0),
+        frame_after_sepc: AtomicUsize::new(0),
+        frame_after_sp: AtomicUsize::new(0),
+        frame_after_ra: AtomicUsize::new(0),
+        frame_after_sstatus: AtomicUsize::new(0),
+        kernel_sp: AtomicUsize::new(0),
+    };
+
+#[cfg(app_user_boot)]
+pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    ExecveCheckpointObservation {
+        stage: obs.stage.load(Ordering::Acquire),
+        filename_len: obs.filename_len.load(Ordering::Acquire),
+        argv0_len: obs.argv0_len.load(Ordering::Acquire),
+        main_elf_type: obs.main_elf_type.load(Ordering::Acquire),
+        main_input_len: obs.main_input_len.load(Ordering::Acquire),
+        main_load_bias: obs.main_load_bias.load(Ordering::Acquire),
+        main_entry: obs.main_entry.load(Ordering::Acquire),
+        main_runtime_entry: obs.main_runtime_entry.load(Ordering::Acquire),
+        main_segments: obs.main_segments.load(Ordering::Acquire),
+        main_interpreter_required: obs.main_interpreter_required.load(Ordering::Acquire),
+        interpreter_input_len: obs.interpreter_input_len.load(Ordering::Acquire),
+        interpreter_load_bias: obs.interpreter_load_bias.load(Ordering::Acquire),
+        interpreter_entry: obs.interpreter_entry.load(Ordering::Acquire),
+        interpreter_segments: obs.interpreter_segments.load(Ordering::Acquire),
+        address_space_state: obs.address_space_state.load(Ordering::Acquire),
+        mapping_count: obs.mapping_count.load(Ordering::Acquire),
+        segment_mapping_count: obs.segment_mapping_count.load(Ordering::Acquire),
+        satp_token: obs.satp_token.load(Ordering::Acquire),
+        trap_entry: obs.trap_entry.load(Ordering::Acquire),
+        trap_sp: obs.trap_sp.load(Ordering::Acquire),
+        trap_sstatus: obs.trap_sstatus.load(Ordering::Acquire),
+        old_satp: obs.old_satp.load(Ordering::Acquire),
+        new_satp: obs.new_satp.load(Ordering::Acquire),
+        current_satp: obs.current_satp.load(Ordering::Acquire),
+        frame_before_sepc: obs.frame_before_sepc.load(Ordering::Acquire),
+        frame_before_sp: obs.frame_before_sp.load(Ordering::Acquire),
+        frame_before_ra: obs.frame_before_ra.load(Ordering::Acquire),
+        frame_before_sstatus: obs.frame_before_sstatus.load(Ordering::Acquire),
+        frame_after_sepc: obs.frame_after_sepc.load(Ordering::Acquire),
+        frame_after_sp: obs.frame_after_sp.load(Ordering::Acquire),
+        frame_after_ra: obs.frame_after_ra.load(Ordering::Acquire),
+        frame_after_sstatus: obs.frame_after_sstatus.load(Ordering::Acquire),
+        kernel_sp: obs.kernel_sp.load(Ordering::Acquire),
+    }
+}
+
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
 pub struct SyscallTable {
@@ -228,6 +407,7 @@ pub struct SyscallTable {
     munmap_supported: bool,
     set_tid_address_supported: bool,
     clone_supported: bool,
+    execve_supported: bool,
     wait4_supported: bool,
     exit_supported: bool,
     exit_group_supported: bool,
@@ -309,6 +489,16 @@ pub struct SyscallTable {
     clone_routes_to_task_creation_core: bool,
     clone_routes_to_user_clone_deferred_boundaries: bool,
     clone_plain_fork_first_slice: bool,
+    execve_child_continuation_first_slice: bool,
+    execve_reuses_user_boot_payload_elf_loader: bool,
+    execve_replaces_user_address_space_first_slice: bool,
+    execve_context_staging_address_space_bound: bool,
+    execve_sets_start_thread_frame_first_slice: bool,
+    execve_argv0_first_slice: bool,
+    execve_envp_full_copy_deferred: bool,
+    execve_close_on_exec_deferred: bool,
+    execve_old_mm_reclaim_deferred: bool,
+    execve_full_linux_model_deferred: bool,
     wait4_parent_wait_chldexit_boundary: bool,
     wait4_yields_to_user_child_continuation: bool,
     wait4_status_copyout_deferred: bool,
@@ -351,6 +541,7 @@ pub struct SyscallTable {
     lseek_observed: AtomicU8,
     set_tid_address_observed: AtomicU8,
     clone_observed: AtomicU8,
+    execve_observed: AtomicU8,
     wait4_observed: AtomicU8,
     exit_observed: AtomicU8,
 }
@@ -400,6 +591,7 @@ impl SyscallTable {
             munmap_supported: false,
             set_tid_address_supported: false,
             clone_supported: false,
+            execve_supported: false,
             wait4_supported: false,
             exit_supported: false,
             exit_group_supported: false,
@@ -481,6 +673,16 @@ impl SyscallTable {
             clone_routes_to_task_creation_core: false,
             clone_routes_to_user_clone_deferred_boundaries: false,
             clone_plain_fork_first_slice: false,
+            execve_child_continuation_first_slice: false,
+            execve_reuses_user_boot_payload_elf_loader: false,
+            execve_replaces_user_address_space_first_slice: false,
+            execve_context_staging_address_space_bound: false,
+            execve_sets_start_thread_frame_first_slice: false,
+            execve_argv0_first_slice: false,
+            execve_envp_full_copy_deferred: false,
+            execve_close_on_exec_deferred: false,
+            execve_old_mm_reclaim_deferred: false,
+            execve_full_linux_model_deferred: false,
             wait4_parent_wait_chldexit_boundary: false,
             wait4_yields_to_user_child_continuation: false,
             wait4_status_copyout_deferred: false,
@@ -523,6 +725,7 @@ impl SyscallTable {
             lseek_observed: AtomicU8::new(0),
             set_tid_address_observed: AtomicU8::new(0),
             clone_observed: AtomicU8::new(0),
+            execve_observed: AtomicU8::new(0),
             wait4_observed: AtomicU8::new(0),
             exit_observed: AtomicU8::new(0),
         }
@@ -1205,6 +1408,7 @@ impl SyscallTable {
         self.munmap_supported = true;
         self.set_tid_address_supported = true;
         self.clone_supported = true;
+        self.execve_supported = true;
         self.wait4_supported = true;
         self.exit_supported = true;
         self.exit_group_supported = true;
@@ -1286,6 +1490,16 @@ impl SyscallTable {
         self.clone_routes_to_task_creation_core = true;
         self.clone_routes_to_user_clone_deferred_boundaries = true;
         self.clone_plain_fork_first_slice = true;
+        self.execve_child_continuation_first_slice = true;
+        self.execve_reuses_user_boot_payload_elf_loader = true;
+        self.execve_replaces_user_address_space_first_slice = true;
+        self.execve_context_staging_address_space_bound = true;
+        self.execve_sets_start_thread_frame_first_slice = true;
+        self.execve_argv0_first_slice = true;
+        self.execve_envp_full_copy_deferred = true;
+        self.execve_close_on_exec_deferred = true;
+        self.execve_old_mm_reclaim_deferred = true;
+        self.execve_full_linux_model_deferred = true;
         self.wait4_parent_wait_chldexit_boundary = true;
         self.wait4_yields_to_user_child_continuation = true;
         self.wait4_status_copyout_deferred = true;
@@ -1810,6 +2024,29 @@ impl SyscallTable {
         syscall_table_clone(self, frame);
     }
 
+    #[cfg(app_user_boot)]
+    pub fn execve(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.execve_supported
+            || !self.path_usercopy_ready
+            || !self.execve_child_continuation_first_slice
+            || !self.execve_reuses_user_boot_payload_elf_loader
+            || !self.execve_replaces_user_address_space_first_slice
+            || !self.execve_context_staging_address_space_bound
+            || !self.execve_sets_start_thread_frame_first_slice
+            || !self.execve_argv0_first_slice
+            || !self.execve_envp_full_copy_deferred
+            || !self.execve_close_on_exec_deferred
+            || !self.execve_old_mm_reclaim_deferred
+            || !self.execve_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_execve(self, frame);
+    }
+
     pub fn wait4(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.wait4_supported
@@ -2192,6 +2429,8 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_MPROTECT => table.mprotect(frame),
         SYSCALL_MUNMAP => table.munmap(frame),
         SYSCALL_WAIT4 => table.wait4(frame),
+        #[cfg(app_user_boot)]
+        SYSCALL_EXECVE => table.execve(frame),
         SYSCALL_GETRANDOM => table.getrandom(frame),
         SYSCALL_EXIT => table.exit(frame),
         SYSCALL_EXIT_GROUP => table.exit_group(frame),
@@ -3859,6 +4098,364 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, child_pid);
 }
 
+#[cfg(app_user_boot)]
+fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
+    if !crate::context::context_ref()
+        .user_child_process
+        .child_continuation_taken()
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let mut filename = [0u8; USER_PATH_MAX];
+    let Some(filename_len) = copy_execve_cstr(frame.reg(10), &mut filename) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+    if filename[0] != b'/' {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+    let mut argv0 = [0u8; USER_PATH_MAX];
+    let Some(argv0_len) = copy_execve_argv0(frame.reg(11), &mut argv0) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+    record_execve_args(filename_len, argv0_len, frame);
+    crate::checkpoint::dispatch(
+        Checkpoint::SyscallTableExecveArgsReady,
+        crate::context::context_ref(),
+    );
+
+    let result =
+        replace_current_user_exec_image(&filename[..filename_len], &argv0[..argv0_len], frame);
+    match result {
+        Ok(()) => {
+            table.execve_observed.store(1, Ordering::Release);
+        }
+        Err(ExecveFirstSliceError::Fault) => complete_error_syscall(frame, EFAULT),
+        Err(ExecveFirstSliceError::NotFound) => complete_error_syscall(frame, ENOENT),
+        Err(ExecveFirstSliceError::Unsupported) => complete_unsupported_syscall(frame),
+    }
+}
+
+#[cfg(app_user_boot)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ExecveFirstSliceError {
+    Fault,
+    NotFound,
+    Unsupported,
+}
+
+#[cfg(app_user_boot)]
+fn reset_execve_checkpoint_observation() {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.stage.store(EXECVE_OBS_STAGE_NONE, Ordering::Release);
+    obs.filename_len.store(0, Ordering::Release);
+    obs.argv0_len.store(0, Ordering::Release);
+    obs.main_elf_type.store(0, Ordering::Release);
+    obs.main_input_len.store(0, Ordering::Release);
+    obs.main_load_bias.store(0, Ordering::Release);
+    obs.main_entry.store(0, Ordering::Release);
+    obs.main_runtime_entry.store(0, Ordering::Release);
+    obs.main_segments.store(0, Ordering::Release);
+    obs.main_interpreter_required.store(0, Ordering::Release);
+    obs.interpreter_input_len.store(0, Ordering::Release);
+    obs.interpreter_load_bias.store(0, Ordering::Release);
+    obs.interpreter_entry.store(0, Ordering::Release);
+    obs.interpreter_segments.store(0, Ordering::Release);
+    obs.address_space_state.store(0, Ordering::Release);
+    obs.mapping_count.store(0, Ordering::Release);
+    obs.segment_mapping_count.store(0, Ordering::Release);
+    obs.satp_token.store(0, Ordering::Release);
+    obs.trap_entry.store(0, Ordering::Release);
+    obs.trap_sp.store(0, Ordering::Release);
+    obs.trap_sstatus.store(0, Ordering::Release);
+    obs.old_satp.store(0, Ordering::Release);
+    obs.new_satp.store(0, Ordering::Release);
+    obs.current_satp.store(0, Ordering::Release);
+    obs.frame_before_sepc.store(0, Ordering::Release);
+    obs.frame_before_sp.store(0, Ordering::Release);
+    obs.frame_before_ra.store(0, Ordering::Release);
+    obs.frame_before_sstatus.store(0, Ordering::Release);
+    obs.frame_after_sepc.store(0, Ordering::Release);
+    obs.frame_after_sp.store(0, Ordering::Release);
+    obs.frame_after_ra.store(0, Ordering::Release);
+    obs.frame_after_sstatus.store(0, Ordering::Release);
+    obs.kernel_sp.store(0, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_stage(stage: usize) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.current_satp
+        .store(crate::arch::riscv64::csr::read_satp(), Ordering::Release);
+    obs.kernel_sp
+        .store(crate::arch::riscv64::csr::read_sp(), Ordering::Release);
+    obs.stage.store(stage, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_args(filename_len: usize, argv0_len: usize, frame: &TrapFrame) {
+    reset_execve_checkpoint_observation();
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.filename_len.store(filename_len, Ordering::Release);
+    obs.argv0_len.store(argv0_len, Ordering::Release);
+    obs.frame_before_sepc.store(frame.sepc, Ordering::Release);
+    obs.frame_before_sp.store(frame.reg(2), Ordering::Release);
+    obs.frame_before_ra.store(frame.reg(1), Ordering::Release);
+    obs.frame_before_sstatus
+        .store(frame.sstatus, Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_ARGS_READY);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_main_elf(elf: &ElfObject) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.main_elf_type
+        .store(elf.elf_type_index(), Ordering::Release);
+    obs.main_input_len.store(elf.input_len(), Ordering::Release);
+    obs.main_load_bias.store(elf.load_bias(), Ordering::Release);
+    obs.main_entry.store(elf.entry(), Ordering::Release);
+    obs.main_runtime_entry
+        .store(elf.runtime_entry(), Ordering::Release);
+    obs.main_segments
+        .store(elf.load_segment_count(), Ordering::Release);
+    obs.main_interpreter_required
+        .store(elf.interpreter_required() as usize, Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_MAIN_ELF_READY);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_interpreter(interpreter: &ElfObject) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.interpreter_input_len
+        .store(interpreter.input_len(), Ordering::Release);
+    obs.interpreter_load_bias
+        .store(interpreter.load_bias(), Ordering::Release);
+    obs.interpreter_entry
+        .store(interpreter.entry(), Ordering::Release);
+    obs.interpreter_segments
+        .store(interpreter.load_segment_count(), Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_INTERPRETER_READY);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_address_space(stage: usize, address_space: &UserAddressSpace) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.address_space_state
+        .store(address_space.state() as usize, Ordering::Release);
+    obs.mapping_count
+        .store(address_space.mapping_count(), Ordering::Release);
+    obs.segment_mapping_count
+        .store(address_space.segment_mapping_count(), Ordering::Release);
+    obs.satp_token
+        .store(address_space.satp_token(), Ordering::Release);
+    obs.new_satp
+        .store(address_space.satp_token(), Ordering::Release);
+    record_execve_stage(stage);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_trap_frame(trap_frame: &UserTrapFrame) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.trap_entry.store(trap_frame.entry(), Ordering::Release);
+    obs.trap_sp.store(trap_frame.sp(), Ordering::Release);
+    obs.trap_sstatus
+        .store(trap_frame.sstatus(), Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_TRAP_FRAME_READY);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_context_replaced(old_satp: usize, new_satp: usize) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.old_satp.store(old_satp, Ordering::Release);
+    obs.new_satp.store(new_satp, Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_CONTEXT_REPLACED);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_return_frame(frame: &TrapFrame) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.frame_after_sepc.store(frame.sepc, Ordering::Release);
+    obs.frame_after_sp.store(frame.reg(2), Ordering::Release);
+    obs.frame_after_ra.store(frame.reg(1), Ordering::Release);
+    obs.frame_after_sstatus
+        .store(frame.sstatus, Ordering::Release);
+    record_execve_stage(EXECVE_OBS_STAGE_RETURN_FRAME_READY);
+}
+
+#[cfg(app_user_boot)]
+fn replace_current_user_exec_image(
+    filename: &[u8],
+    argv0: &[u8],
+    frame: &mut TrapFrame,
+) -> Result<(), ExecveFirstSliceError> {
+    let ctx = crate::context::context();
+    let image = super::user_boot::read_runtime_exec_path_image(
+        &mut ctx.vfs_core,
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+        filename,
+        false,
+    )
+    .map_err(|_| ExecveFirstSliceError::NotFound)?;
+
+    let mut new_elf = ElfObject::new();
+    new_elf
+        .preset_from_vfs(image)
+        .and_then(|_| new_elf.setup(image))
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    record_execve_main_elf(&new_elf);
+    crate::checkpoint::dispatch(Checkpoint::UserExecMainElfReady, ctx);
+
+    let mut new_interpreter = ElfObject::new();
+    let interpreter_image = if let Some(interpreter_path) = new_elf.interpreter_path() {
+        let image = super::user_boot::read_runtime_exec_path_image(
+            &mut ctx.vfs_core,
+            &ctx.fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            interpreter_path,
+            true,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        new_interpreter
+            .preset_interpreter_from_vfs(image)
+            .and_then(|_| new_interpreter.setup(image))
+            .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        new_elf
+            .bind_runtime_interpreter(&new_interpreter)
+            .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        record_execve_interpreter(&new_interpreter);
+        crate::checkpoint::dispatch(Checkpoint::UserExecInterpreterReady, ctx);
+        Some(image)
+    } else {
+        None
+    };
+    let interpreter_ref = interpreter_image.map(|_| &new_interpreter);
+
+    ctx.user_exec_staging_address_space
+        .preset(
+            ctx.vm.swapper_vm(),
+            &ctx.page_allocator,
+            &ctx.kernel_global_allocator,
+            &ctx.kernel_init_task,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+
+    let mut new_stack = UserStack::new();
+    new_stack
+        .setup(
+            &ctx.user_exec_staging_address_space,
+            &new_elf,
+            interpreter_ref,
+            argv0,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    ctx.user_exec_staging_address_space
+        .setup(
+            &new_elf,
+            interpreter_ref,
+            &new_stack,
+            image,
+            interpreter_image,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    record_execve_address_space(
+        EXECVE_OBS_STAGE_ADDRESS_SPACE_READY,
+        &ctx.user_exec_staging_address_space,
+    );
+    crate::checkpoint::dispatch(Checkpoint::UserExecAddressSpaceReady, ctx);
+
+    let mut new_trap_frame = UserTrapFrame::new();
+    new_trap_frame
+        .setup(&ctx.user_exec_staging_address_space, &new_elf, &new_stack)
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    record_execve_trap_frame(&new_trap_frame);
+    crate::checkpoint::dispatch(Checkpoint::UserExecTrapFrameReady, ctx);
+    new_elf
+        .enable(
+            &ctx.user_exec_staging_address_space,
+            &new_stack,
+            &new_trap_frame,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    ctx.user_exec_staging_address_space
+        .enable(
+            &new_trap_frame,
+            ctx.vm.swapper_vm(),
+            &ctx.kernel_image,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    record_execve_address_space(
+        EXECVE_OBS_STAGE_SATP_READY,
+        &ctx.user_exec_staging_address_space,
+    );
+    crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
+
+    let entry = new_trap_frame.entry();
+    let sp = new_trap_frame.sp();
+    let sstatus = new_trap_frame.sstatus();
+    let old_satp = crate::arch::riscv64::csr::read_satp();
+    let satp = ctx.user_exec_staging_address_space.satp_token();
+    ctx.elf_object = new_elf;
+    ctx.elf_interpreter_object = new_interpreter;
+    ctx.user_stack = new_stack;
+    ctx.user_trap_frame = new_trap_frame;
+    commit_execve_staging_address_space(ctx);
+    record_execve_context_replaced(old_satp, satp);
+    crate::checkpoint::dispatch(Checkpoint::UserExecContextReplaced, ctx);
+
+    crate::arch::riscv64::csr::write_satp(satp);
+    crate::arch::riscv64::csr::sfence_vma();
+    record_execve_stage(EXECVE_OBS_STAGE_SATP_SWITCHED);
+    crate::checkpoint::dispatch(Checkpoint::UserExecSatpSwitched, ctx);
+    reset_frame_for_execve_start_thread(frame, entry, sp, sstatus);
+    record_execve_return_frame(frame);
+    crate::checkpoint::dispatch(Checkpoint::UserExecReturnFrameReady, ctx);
+    Ok(())
+}
+
+#[cfg(app_user_boot)]
+fn commit_execve_staging_address_space(ctx: &mut crate::context::Context) {
+    let staging = &ctx.user_exec_staging_address_space as *const UserAddressSpace;
+    let current = &mut ctx.user_address_space as *mut UserAddressSpace;
+    // The first slice leaves old-mm reclamation and staging reset deferred; avoid a
+    // whole-UserAddressSpace stack temporary on the trap/syscall stack.
+    unsafe {
+        core::ptr::copy_nonoverlapping(staging, current, 1);
+    }
+}
+
+#[cfg(app_user_boot)]
+fn reset_frame_for_execve_start_thread(
+    frame: &mut TrapFrame,
+    entry: usize,
+    sp: usize,
+    sstatus: usize,
+) {
+    let mut index = 1usize;
+    while index < 32 {
+        frame.set_reg(index, 0);
+        index += 1;
+    }
+    frame.set_reg(2, sp);
+    frame.sstatus = sstatus;
+    frame.sepc = entry;
+    frame.stval = 0;
+}
+
 fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     let upid = frame.reg(10);
     let _stat_addr = frame.reg(11);
@@ -4091,6 +4688,34 @@ fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
     }
     crate::arch::riscv64::csr::restore_user_memory_access(saved);
     None
+}
+
+#[cfg(app_user_boot)]
+fn copy_execve_cstr(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
+    if user_ptr == 0
+        || !crate::context::context_ref()
+            .user_address_space
+            .user_range_mapped(user_ptr, dst.len())
+    {
+        return None;
+    }
+    copy_cstr_from_user(user_ptr, dst)
+}
+
+#[cfg(app_user_boot)]
+fn copy_execve_argv0(argv_ptr: usize, dst: &mut [u8]) -> Option<usize> {
+    if argv_ptr == 0
+        || !crate::context::context_ref()
+            .user_address_space
+            .user_range_mapped(argv_ptr, core::mem::size_of::<usize>())
+    {
+        return None;
+    }
+    let argv0_ptr = read_user_usize(argv_ptr)?;
+    if argv0_ptr == 0 {
+        return None;
+    }
+    copy_execve_cstr(argv0_ptr, dst)
 }
 
 fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32) {
@@ -4335,10 +4960,14 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
 }
 
 fn print_unsupported_syscall_detail(frame: &TrapFrame) {
-    if frame.reg(17) != SYSCALL_NANOSLEEP {
-        return;
+    match frame.reg(17) {
+        SYSCALL_NANOSLEEP => print_nanosleep_unsupported_detail(frame),
+        SYSCALL_EXECVE => print_execve_unsupported_detail(frame),
+        _ => {}
     }
+}
 
+fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {
     let rqtp = frame.reg(10);
     let rmtp = frame.reg(11);
     crate::arch::riscv64::sbi::putstr(" name=nanosleep rqtp=0x");
@@ -4360,6 +4989,93 @@ fn print_unsupported_syscall_detail(frame: &TrapFrame) {
         print_i64(sec);
         crate::arch::riscv64::sbi::putstr(" req_nsec=");
         print_i64(nsec);
+    } else {
+        crate::arch::riscv64::sbi::putstr("failed");
+    }
+}
+
+fn print_execve_unsupported_detail(frame: &TrapFrame) {
+    let filename_ptr = frame.reg(10);
+    let argv_ptr = frame.reg(11);
+    let envp_ptr = frame.reg(12);
+    let child_continuation = crate::context::context_ref()
+        .user_child_process
+        .child_continuation_taken();
+    crate::arch::riscv64::sbi::putstr(" name=execve filename_ptr=0x");
+    print_hex(filename_ptr);
+    crate::arch::riscv64::sbi::putstr(" argv_ptr=0x");
+    print_hex(argv_ptr);
+    crate::arch::riscv64::sbi::putstr(" envp_ptr=0x");
+    print_hex(envp_ptr);
+    crate::arch::riscv64::sbi::putstr(" child_cont=");
+    print_bool_digit(child_continuation);
+    print_execve_cstr_copy(" filename", filename_ptr);
+    print_execve_vector_prefix(" argv", argv_ptr);
+    print_execve_vector_prefix(" envp", envp_ptr);
+}
+
+fn print_execve_vector_prefix(label: &str, vector_ptr: usize) {
+    crate::arch::riscv64::sbi::putstr(" ");
+    crate::arch::riscv64::sbi::putstr(label);
+    crate::arch::riscv64::sbi::putstr("=");
+    if vector_ptr == 0 {
+        crate::arch::riscv64::sbi::putstr("NULL");
+        return;
+    }
+    crate::arch::riscv64::sbi::putchar(b'[');
+    let mut index = 0usize;
+    while index < USER_EXECVE_VECTOR_DIAG_MAX {
+        if index != 0 {
+            crate::arch::riscv64::sbi::putchar(b',');
+        }
+        let Some(entry_ptr_addr) = vector_ptr.checked_add(index * core::mem::size_of::<usize>())
+        else {
+            crate::arch::riscv64::sbi::putstr("overflow");
+            break;
+        };
+        if !crate::context::context_ref()
+            .user_address_space
+            .user_range_mapped(entry_ptr_addr, core::mem::size_of::<usize>())
+        {
+            crate::arch::riscv64::sbi::putstr("skipped");
+            break;
+        }
+        let Some(entry_ptr) = read_user_usize(entry_ptr_addr) else {
+            crate::arch::riscv64::sbi::putstr("failed");
+            break;
+        };
+        crate::arch::riscv64::sbi::putstr("{ptr=0x");
+        print_hex(entry_ptr);
+        if entry_ptr == 0 {
+            crate::arch::riscv64::sbi::putstr(",value=NULL}");
+            break;
+        }
+        print_execve_cstr_copy(",value", entry_ptr);
+        crate::arch::riscv64::sbi::putchar(b'}');
+        index += 1;
+    }
+    crate::arch::riscv64::sbi::putchar(b']');
+}
+
+fn print_execve_cstr_copy(label: &str, user_ptr: usize) {
+    crate::arch::riscv64::sbi::putstr(label);
+    crate::arch::riscv64::sbi::putchar(b'=');
+    if user_ptr == 0 {
+        crate::arch::riscv64::sbi::putstr("NULL");
+        return;
+    }
+    if !crate::context::context_ref()
+        .user_address_space
+        .user_range_mapped(user_ptr, USER_PATH_MAX)
+    {
+        crate::arch::riscv64::sbi::putstr("skipped");
+        return;
+    }
+    let mut bytes = [0u8; USER_PATH_MAX];
+    if let Some(len) = copy_cstr_from_user(user_ptr, &mut bytes) {
+        crate::arch::riscv64::sbi::putchar(b'"');
+        print_path_bytes(&bytes[..len]);
+        crate::arch::riscv64::sbi::putchar(b'"');
     } else {
         crate::arch::riscv64::sbi::putstr("failed");
     }
@@ -4673,6 +5389,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_BRK => "brk",
         SYSCALL_MUNMAP => "munmap",
         SYSCALL_CLONE => "clone",
+        SYSCALL_EXECVE => "execve",
         SYSCALL_MMAP => "mmap",
         SYSCALL_MPROTECT => "mprotect",
         SYSCALL_WAIT4 => "wait4",
@@ -4849,7 +5566,6 @@ fn print_path_syscall_error_detail(error: FileError, path: &[u8]) {
     crate::arch::riscv64::sbi::putstr("\"\n");
 }
 
-#[cfg(checkpoint_handler_user_syscall_error)]
 fn print_path_bytes(path: &[u8]) {
     for &byte in path {
         if byte.is_ascii_graphic() || byte == b' ' {

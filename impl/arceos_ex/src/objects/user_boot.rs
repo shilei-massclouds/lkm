@@ -5092,6 +5092,27 @@ fn read_user_path_image(
 }
 
 #[cfg(app_user_boot)]
+pub fn read_runtime_exec_path_image(
+    vfs_core: &mut VfsCore,
+    fs_struct: &FsStruct,
+    ext2_filesystem: &mut Ext2FileSystem,
+    block_device_registry: &mut BlockDeviceRegistry,
+    kernel_image: &KernelImage,
+    path: &[u8],
+    use_interpreter_buffer: bool,
+) -> Result<&'static [u8], ()> {
+    try_read_user_path_image(
+        vfs_core,
+        fs_struct,
+        ext2_filesystem,
+        block_device_registry,
+        kernel_image,
+        path,
+        use_interpreter_buffer,
+    )
+}
+
+#[cfg(app_user_boot)]
 fn try_read_user_path_image(
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
