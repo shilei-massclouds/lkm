@@ -1,4 +1,13 @@
-SMOKE_SRC := smoke.c fileio.c signal.c stdin.c sh_probe.c
+SMOKE_SRC := smoke.c \
+	fileio.c \
+	signal.c \
+	stdin.c \
+	fpu_mmap.c \
+	credentials.c \
+	process_identity.c \
+	tty_termios.c \
+	uts_cwd.c \
+	time_random.c
 SMOKE_DEPS := smoke.h Makefile
 
 .PHONY: build

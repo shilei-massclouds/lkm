@@ -94,7 +94,37 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
-	rc = RUN_CASE("sh_probe", smoke_sh_probe);
+	rc = RUN_CASE("fpu_mmap", smoke_fpu_mmap);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("credentials", smoke_credentials);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("process_identity", smoke_process_identity);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("tty_termios", smoke_tty_termios);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("uts_cwd", smoke_uts_cwd);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("time_random", smoke_time_random);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
 		return rc;
