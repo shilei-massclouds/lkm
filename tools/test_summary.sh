@@ -9,7 +9,7 @@ kunit_handlers=$5
 smoke_app=$6
 test_plic_providers=${7:-}
 default_overlay_map="tests/user/rootfs-overlay.map"
-input_timeout=${USER_BOOT_INPUT_TIMEOUT:-30s}
+input_timeout=${USER_BOOT_INPUT_TIMEOUT:-120s}
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -50,58 +50,17 @@ run_with_delayed_input_log() {
     local input=$2
     local ready_marker=$3
     shift 3
-    local ch
-    local buffer=""
-    local sent=0
     local rc
-    local proc_pid
-    local input_fd
-    local output_fd
 
     : > "$log"
     set +e
-    coproc USER_BOOT_INPUT_PROC { timeout "$input_timeout" "$@" 2>&1; }
-    proc_pid=$USER_BOOT_INPUT_PROC_PID
-    output_fd=${USER_BOOT_INPUT_PROC[0]}
-    input_fd=${USER_BOOT_INPUT_PROC[1]}
-    while true; do
-        if IFS= read -r -N 1 -t 1 ch <&"$output_fd"; then
-            printf '%s' "$ch"
-            printf '%s' "$ch" >> "$log"
-            buffer="${buffer}${ch}"
-            if [ "${#buffer}" -gt 512 ]; then
-                buffer="${buffer: -512}"
-            fi
-            if [ "$sent" -eq 0 ] && [[ "$buffer" == *"$ready_marker"* ]]; then
-                printf '%s' "$input" >&"$input_fd"
-                sent=1
-            fi
-        elif ! kill -0 "$proc_pid" 2>/dev/null; then
-            while IFS= read -r -N 1 -t 0.1 ch <&"$output_fd"; do
-                printf '%s' "$ch"
-                printf '%s' "$ch" >> "$log"
-            done
-            break
-        fi
-    done
-    wait "$proc_pid"
+    python3 tools/delayed_stdin.py \
+        --timeout "$input_timeout" \
+        --ready-marker "$ready_marker" \
+        --payload "$input" \
+        -- "$@" > "$log"
     rc=$?
-    exec {input_fd}>&- 2>/dev/null || true
-    exec {output_fd}<&- 2>/dev/null || true
-    if [ "$rc" -eq 124 ]; then
-        printf 'user-boot delayed input command timed out after %s\n' "$input_timeout"
-        printf 'user-boot delayed input command timed out after %s\n' "$input_timeout" >> "$log"
-    elif [ "$rc" -ne 0 ]; then
-        printf 'user-boot delayed input command rc: %s\n' "$rc"
-        printf 'user-boot delayed input command rc: %s\n' "$rc" >> "$log"
-    fi
-    if [ "$sent" -eq 0 ]; then
-        printf 'user-boot input ready marker missing: %s\n' "$ready_marker"
-        printf 'user-boot input ready marker missing: %s\n' "$ready_marker" >> "$log"
-        if [ "$rc" -eq 0 ]; then
-            rc=1
-        fi
-    fi
+    cat "$log"
     return "$rc"
 }
 
@@ -331,7 +290,7 @@ cat > "$requested_init_overlay_map" <<'EOF'
 # target      test        toolchain  link
 /bin/ls       user_smoke  musl       dynamic
 EOF
-distro_sh_input=$'echo OK\nexit\n'
+distro_sh_input=$'/bin/ls\nexit\n'
 
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
@@ -343,7 +302,7 @@ run_user_boot_overlay_append_case "run init=ls native" native "$requested_init_o
 run_user_boot_no_overlay_append_case "run distro ls native" native \
     "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-native.log" "$tmpdir/user-native-distro-ls.raw"
 run_user_boot_no_overlay_input_append_case "run distro sh native" native \
-    "earlycon=sbi init=/bin/sh" "$distro_sh_input" "OK" "/ #" \
+    "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'wait4 child handoff\nlost+found' "/ #" \
     "$tmpdir/run-distro-sh-native.log" "$tmpdir/user-native-distro-sh.raw"
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
@@ -357,7 +316,7 @@ for provider in $test_plic_providers; do
     run_user_boot_no_overlay_append_case "run distro ls $provider" "$provider" \
         "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-$provider.log" "$tmpdir/user-$provider-distro-ls.raw"
     run_user_boot_no_overlay_input_append_case "run distro sh $provider" "$provider" \
-        "earlycon=sbi init=/bin/sh" "$distro_sh_input" "OK" "/ #" \
+        "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'wait4 child handoff\nlost+found' "/ #" \
         "$tmpdir/run-distro-sh-$provider.log" "$tmpdir/user-$provider-distro-sh.raw"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"

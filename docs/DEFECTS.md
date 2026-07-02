@@ -6,20 +6,21 @@
 
 ### DF-0003: 非 PTY `/bin/sh` delayed-input 执行 `/bin/ls` 表现不一致
 
-- 状态：疑似概率性/时序敏感问题，新增 stress 回归采样入口，不作为当前 `make test` 强门禁。
+- 状态：50/50 stress 未复现失败，已升级为 `make test` 发行版 shell 外部命令门禁；作为历史不一致候选继续保留 stress 回归。
 - 首次记录日期：2026-07-02。
 - 关联范围：`impl/arceos_ex` 发行版 rootfs `/bin/sh`、host delayed-input harness、TTY/N_TTY stdin、QEMU stdio、child `clone/wait4/execve` 外部命令链路。
-- 表现：此前把默认 shell smoke 从 `echo OK; exit` 升级为外部命令时，非 PTY delayed-input 日志曾稳定到达 `wait4 child handoff` 后截断，未能稳定看到目录输出和 `user exit status=0`；同一代码状态下后续用非 PTY `ls\nexit\n` 路径复现两次均成功输出 rootfs 目录和 `user exit status=0`。DF-0003 固定输入为显式 `/bin/ls\nexit\n`，用于覆盖 `/bin/sh` 派生 child 执行 `/bin/ls` 的路径。因此当前不能把它归类为确定性内核语义缺口，也不能只凭一次成功直接升级默认门禁。
+- 表现：此前把默认 shell smoke 从 `echo OK; exit` 升级为外部命令时，非 PTY delayed-input 日志曾稳定到达 `wait4 child handoff` 后截断，未能稳定看到目录输出和 `user exit status=0`；同一代码状态下后续用非 PTY `ls\nexit\n` 路径复现两次均成功输出 rootfs 目录和 `user exit status=0`。DF-0003 固定输入为显式 `/bin/ls\nexit\n`，用于覆盖 `/bin/sh` 派生 child 执行 `/bin/ls` 的路径；后续 50 次 stress 全部成功，均观察到 `wait4 child handoff`、rootfs 目录 marker 和 `user exit status=0`。因此当前把该路径升级为默认门禁，但仍保留 DF-0003 作为概率性/时序敏感回归入口。
 
 当前判断：
 
 - 手工 PTY `/bin/sh` 输入 `ls` 已闭合，说明 plain fork、child continuation、job-control 和 child execve 主线可用。
-- 非 PTY delayed-input 路径前后表现不一致，当前优先按概率性/时序敏感候选处理。
+- 非 PTY delayed-input 路径前后表现不一致，但 50 次 DF-0003 stress 未再复现失败；当前按已进入默认门禁的概率性/时序敏感候选保留回归。
+- `make test` 首次升级外部命令门禁时，bash delayed-input harness 会在逐字转发 guest 输出到当前终端的路径上复现截断：日志到达 `wait4 child handoff` 并开始目录输出，但缺失 `lost+found` 和 `user exit status=0`，且 prompt 后可见 `ESC[6n` 交织；同一输入在 DF-0003 Python runner 的非 live-forwarding drain 下 50/50 成功。当前定位为 host harness 输出 drain/终端交织问题：默认 timeout 对齐 DF-0003 为 120s 量级，输出先 drain 到 log 再回放，成功仍以完整 marker 判定。
 - 定位和回归应使用显式目标输入 `/bin/ls\nexit\n`，不得通过更换为其它输入命令形态、伪造 ANSI cursor-status response 或新增测试专用 kernel API 试修。
 
-下一步定位建议：
+后续回归建议：
 
-- 新增 DF-0003 stress case，多轮执行 `ROOTFS_OVERLAY=none QEMU_APPEND='earlycon=sbi init=/bin/sh'`，等待 BusyBox prompt `/ #` 后写入 `/bin/ls\nexit\n`。
+- 保留 DF-0003 stress case，多轮执行 `ROOTFS_OVERLAY=none QEMU_APPEND='earlycon=sbi init=/bin/sh'`，等待 BusyBox prompt `/ #` 后写入 `/bin/ls\nexit\n`。
 - 成功分类必须同时观察到 `wait4 child handoff`、rootfs 目录标志 `lost+found` 和 `user exit status=0`；timeout、panic、非零退出、缺少上述 marker 均归为失败样本。
 - 若 stress 捕获失败样本，先比较成功/失败事件序列并定位最后完整 syscall/output/exit 边界，再决定是否补 `user-syscall-trace`、`user-read-trace` 或新的长期 checkpoint；不得从外部截断症状直接猜修。
 
