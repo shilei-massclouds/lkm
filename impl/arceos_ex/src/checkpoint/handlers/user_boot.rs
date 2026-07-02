@@ -12,7 +12,14 @@ use crate::{
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(app_user_boot)]
-use crate::objects::user_boot::{UserStack, USER_PAGE_SIZE};
+use crate::objects::user_boot::{
+    user_kernel_trap_stack_base, user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_top,
+    UserStack, USER_KERNEL_IRQ_STACK_SIZE, USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED,
+    USER_KERNEL_TRAP_IRQ_STACKS, USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED,
+    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED,
+    USER_KERNEL_TRAP_STACK_ALIGN, USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
+    USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
+};
 
 #[cfg(app_user_boot)]
 use crate::objects::{
@@ -497,6 +504,22 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     sink.start_case(total, "", name, checkpoint);
 
     let process = &ctx.user_init_process;
+    let trap_stack_base = user_kernel_trap_stack_base();
+    let trap_stack_top = user_kernel_trap_stack_top();
+    let trap_stack_valid = USER_KERNEL_TRAP_THREAD_INFO_IN_TASK
+        && USER_KERNEL_TRAP_VMAP_STACK
+        && USER_KERNEL_TRAP_IRQ_STACKS
+        && USER_KERNEL_TRAP_STACK_ORDER == 2
+        && USER_KERNEL_TRAP_STACK_SIZE == 16 * 1024
+        && USER_KERNEL_TRAP_STACK_SIZE == USER_PAGE_SIZE << USER_KERNEL_TRAP_STACK_ORDER
+        && USER_KERNEL_TRAP_STACK_ALIGN == USER_KERNEL_TRAP_STACK_SIZE * 2
+        && USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE == USER_PAGE_SIZE
+        && USER_KERNEL_IRQ_STACK_SIZE == USER_KERNEL_TRAP_STACK_SIZE
+        && USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED
+        && USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED
+        && USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED
+        && user_kernel_trap_stack_base_aligned()
+        && trap_stack_top == trap_stack_base + USER_KERNEL_TRAP_STACK_SIZE;
     let valid = process.state() == State::Online
         && process.reuses_kernel_init_task()
         && process.pid1_preserved()
@@ -521,7 +544,8 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && ctx.files_struct.state() == State::Ready
         && ctx.files_struct.stdio_bound()
         && ctx.files_struct.fd_bound(FdRef::Stdout)
-        && ctx.files_struct.fd_bound(FdRef::Stderr);
+        && ctx.files_struct.fd_bound(FdRef::Stderr)
+        && trap_stack_valid;
 
     sink.diag_usize(
         "user_init_runtime_entered",
@@ -551,6 +575,47 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     sink.diag_usize(
         "user_address_space_runtime_ready",
         ctx.user_address_space.runtime_ready() as usize,
+    );
+    sink.diag_hex_pair(
+        "kernel_trap_stack_base_top",
+        trap_stack_base,
+        trap_stack_top,
+    );
+    sink.diag_usize("kernel_trap_stack_order", USER_KERNEL_TRAP_STACK_ORDER);
+    sink.diag_usize("kernel_trap_stack_size", USER_KERNEL_TRAP_STACK_SIZE);
+    sink.diag_usize("kernel_trap_stack_align", USER_KERNEL_TRAP_STACK_ALIGN);
+    sink.diag_usize(
+        "kernel_trap_stack_base_aligned",
+        user_kernel_trap_stack_base_aligned() as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_thread_info_in_task",
+        USER_KERNEL_TRAP_THREAD_INFO_IN_TASK as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_vmap_stack_config",
+        USER_KERNEL_TRAP_VMAP_STACK as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_irq_stacks_config",
+        USER_KERNEL_TRAP_IRQ_STACKS as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_overflow_stack_size",
+        USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE,
+    );
+    sink.diag_usize("kernel_irq_stack_size", USER_KERNEL_IRQ_STACK_SIZE);
+    sink.diag_usize(
+        "kernel_trap_guard_page_deferred",
+        USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_overflow_switch_deferred",
+        USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_irq_stack_switch_deferred",
+        USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED as usize,
     );
     if valid {
         sink.pass(total, "", name);

@@ -46,6 +46,28 @@ pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_HEAP_BASE: usize = 0x3000_0000;
 pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 2;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_STACK_SIZE: usize = USER_PAGE_SIZE << USER_KERNEL_TRAP_STACK_ORDER;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_STACK_ALIGN: usize = USER_KERNEL_TRAP_STACK_SIZE * 2;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = USER_PAGE_SIZE;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_IRQ_STACK_SIZE: usize = USER_KERNEL_TRAP_STACK_SIZE;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_THREAD_INFO_IN_TASK: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_VMAP_STACK: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_IRQ_STACKS: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_GUARD_PAGE_DEFERRED: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SWITCH_DEFERRED: bool = true;
+#[cfg(app_user_boot)]
+pub const USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED: bool = true;
 
 #[derive(Clone, Copy)]
 pub struct UserSignalAction {
@@ -106,8 +128,6 @@ fn pid_t_arg(value: usize) -> i32 {
     value as u32 as i32
 }
 
-#[cfg(app_user_boot)]
-pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
 pub const USER_INTERPRETER_LOAD_BIAS: usize = 0x2000_0000;
 const USER_INITIAL_STACK_WORDS: usize = 18;
@@ -2503,7 +2523,7 @@ pub const USER_SSTATUS_INITIAL: usize =
     SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR | SSTATUS_USER_FPU_INITIAL;
 
 #[cfg(app_user_boot)]
-#[repr(align(16))]
+#[repr(align(32768))]
 struct UserKernelTrapStack {
     bytes: [u8; USER_KERNEL_TRAP_STACK_SIZE],
 }
@@ -5265,11 +5285,18 @@ fn sbi_put_usize(mut value: usize) {
 }
 
 #[cfg(app_user_boot)]
-fn user_kernel_trap_stack_top() -> usize {
-    unsafe {
-        let base = core::ptr::addr_of!(USER_KERNEL_TRAP_STACK.bytes) as usize;
-        base + USER_KERNEL_TRAP_STACK_SIZE
-    }
+pub fn user_kernel_trap_stack_base() -> usize {
+    unsafe { core::ptr::addr_of!(USER_KERNEL_TRAP_STACK.bytes) as usize }
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_top() -> usize {
+    user_kernel_trap_stack_base() + USER_KERNEL_TRAP_STACK_SIZE
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_stack_base_aligned() -> bool {
+    user_kernel_trap_stack_base() % USER_KERNEL_TRAP_STACK_ALIGN == 0
 }
 
 #[cfg(app_user_boot)]
