@@ -3423,6 +3423,58 @@ impl UserChildProcess {
         self.exit_signal
     }
 
+    pub const fn task_struct_allocated(&self) -> bool {
+        self.task_struct_allocated
+    }
+
+    pub const fn pid_allocated(&self) -> bool {
+        self.pid_allocated
+    }
+
+    pub const fn thread_context_ready(&self) -> bool {
+        self.thread_context_ready
+    }
+
+    pub const fn sched_entity_ready(&self) -> bool {
+        self.sched_entity_ready
+    }
+
+    pub const fn task_state_new(&self) -> bool {
+        self.task_state_new
+    }
+
+    pub const fn files_struct_copied(&self) -> bool {
+        self.files_struct_copied
+    }
+
+    pub const fn fs_struct_copied(&self) -> bool {
+        self.fs_struct_copied
+    }
+
+    pub const fn credentials_copied(&self) -> bool {
+        self.credentials_copied
+    }
+
+    pub const fn signal_state_copied(&self) -> bool {
+        self.signal_state_copied
+    }
+
+    pub const fn user_address_space_snapshot(&self) -> bool {
+        self.user_address_space_snapshot
+    }
+
+    pub const fn trap_frame_copied(&self) -> bool {
+        self.trap_frame_copied
+    }
+
+    pub fn child_trap_frame_reg(&self, index: usize) -> Option<usize> {
+        self.child_trap_frame.map(|frame| frame.reg(index))
+    }
+
+    pub fn child_trap_frame_sepc(&self) -> Option<usize> {
+        self.child_trap_frame.map(|frame| frame.sepc)
+    }
+
     pub const fn trap_frame_child_return_zero(&self) -> bool {
         self.trap_frame_child_return_zero
     }

@@ -9,7 +9,7 @@
 - 状态：50/50 stress 未复现失败，已升级为 `make test` 发行版 shell 外部命令门禁；作为历史不一致候选继续保留 stress 回归。
 - 首次记录日期：2026-07-02。
 - 关联范围：`impl/arceos_ex` 发行版 rootfs `/bin/sh`、host delayed-input harness、TTY/N_TTY stdin、QEMU stdio、child `clone/wait4/execve` 外部命令链路。
-- 表现：此前把默认 shell smoke 从 `echo OK; exit` 升级为外部命令时，非 PTY delayed-input 日志曾稳定到达 `wait4 child handoff` 后截断，未能稳定看到目录输出和 `user exit status=0`；同一代码状态下后续用非 PTY `ls\nexit\n` 路径复现两次均成功输出 rootfs 目录和 `user exit status=0`。DF-0003 固定输入为显式 `/bin/ls\nexit\n`，用于覆盖 `/bin/sh` 派生 child 执行 `/bin/ls` 的路径；后续 50 次 stress 全部成功，均观察到 `wait4 child handoff`、rootfs 目录 marker 和 `user exit status=0`。因此当前把该路径升级为默认门禁，但仍保留 DF-0003 作为概率性/时序敏感回归入口。
+- 表现：此前把默认 shell smoke 从 `echo OK; exit` 升级为外部命令时，非 PTY delayed-input 日志曾稳定到达 `wait4 child handoff` 后截断，未能稳定看到目录输出和 `user exit status=0`；同一代码状态下后续用非 PTY `ls\nexit\n` 路径复现两次均成功输出 rootfs 目录和 `user exit status=0`。DF-0003 固定输入为显式 `/bin/ls\nexit\n`，用于覆盖 `/bin/sh` 派生 child 执行 `/bin/ls` 的路径；后续 50 次 stress 全部成功，均观察到 rootfs 目录 marker 和 `user exit status=0`。`wait4 child handoff` 已被归类为显式 trace/probe 诊断，不再作为默认成功 marker。因此当前把该路径升级为默认门禁，但仍保留 DF-0003 作为概率性/时序敏感回归入口。
 
 当前判断：
 
@@ -21,7 +21,7 @@
 后续回归建议：
 
 - 保留 DF-0003 stress case，多轮执行 `ROOTFS_OVERLAY=none QEMU_APPEND='earlycon=sbi init=/bin/sh'`，等待 BusyBox prompt `/ #` 后写入 `/bin/ls\nexit\n`。
-- 成功分类必须同时观察到 `wait4 child handoff`、rootfs 目录标志 `lost+found` 和 `user exit status=0`；timeout、panic、非零退出、缺少上述 marker 均归为失败样本。
+- 成功分类必须同时观察到 rootfs 目录标志 `lost+found` 和 `user exit status=0`；fork/wait4/execve 边界由 checkpoint/KUnit facts 覆盖。timeout、panic、非零退出、缺少上述 marker 均归为失败样本。
 - 若 stress 捕获失败样本，先比较成功/失败事件序列并定位最后完整 syscall/output/exit 边界，再决定是否补 `user-syscall-trace`、`user-read-trace` 或新的长期 checkpoint；不得从外部截断症状直接猜修。
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败

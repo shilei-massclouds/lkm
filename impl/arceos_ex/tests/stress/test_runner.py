@@ -44,17 +44,22 @@ class StressRunnerTests(unittest.TestCase):
 
     def test_extracts_distro_shell_ls_events(self) -> None:
         events = runner._extract_events(
-            "wait4 child handoff sepc=0x1\n"
             "etc         lost+found  opt\n"
             "user exit status=0\n"
         )
         self.assertEqual(
             [runner._event_token(event) for event in events],
             [
-                "boundary:Wait4ChildHandoff",
                 "user_output:DistroLsRootListing",
                 "user_exit:UserExitStatus:status=0",
             ],
+        )
+
+    def test_extracts_legacy_wait4_handoff_event(self) -> None:
+        events = runner._extract_events("wait4 child handoff sepc=0x1\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["boundary:Wait4ChildHandoff"],
         )
 
     def test_extracts_smoke_success_event(self) -> None:

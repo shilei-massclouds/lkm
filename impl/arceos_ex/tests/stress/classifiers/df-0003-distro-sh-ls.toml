@@ -19,5 +19,5 @@ description = "BusyBox reported an unsupported syscall or command path."
 [[rules]]
 id = "distro-sh-ls-success"
 result = "success"
-contains = ["wait4 child handoff", "lost+found", "user exit status=0"]
+contains = ["lost+found", "user exit status=0"]
 description = "Distro /bin/sh ran /bin/ls through fork/wait4/execve and exited cleanly."

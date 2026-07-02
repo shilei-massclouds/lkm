@@ -302,7 +302,7 @@ run_user_boot_overlay_append_case "run init=ls native" native "$requested_init_o
 run_user_boot_no_overlay_append_case "run distro ls native" native \
     "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-native.log" "$tmpdir/user-native-distro-ls.raw"
 run_user_boot_no_overlay_input_append_case "run distro sh native" native \
-    "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'wait4 child handoff\nlost+found' "/ #" \
+    "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'lost+found' "/ #" \
     "$tmpdir/run-distro-sh-native.log" "$tmpdir/user-native-distro-sh.raw"
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
@@ -316,7 +316,7 @@ for provider in $test_plic_providers; do
     run_user_boot_no_overlay_append_case "run distro ls $provider" "$provider" \
         "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-$provider.log" "$tmpdir/user-$provider-distro-ls.raw"
     run_user_boot_no_overlay_input_append_case "run distro sh $provider" "$provider" \
-        "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'wait4 child handoff\nlost+found' "/ #" \
+        "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'lost+found' "/ #" \
         "$tmpdir/run-distro-sh-$provider.log" "$tmpdir/user-$provider-distro-sh.raw"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"

@@ -67,6 +67,8 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableSetTidAddress,
     #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableClone,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableOpenAt,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableRead,
@@ -84,12 +86,14 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 21;
+pub const KUNIT_CASE_COUNT: usize = 22;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
 #[cfg(app_user_boot)]
 static SYSCALL_SET_TID_ADDRESS_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_CLONE_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_OPENAT_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -161,6 +165,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::SyscallTableSetTidAddress => {
             run_once(&SYSCALL_SET_TID_ADDRESS_REPORTED, || {
                 run_syscall_table_set_tid_address(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableClone => {
+            run_once(&SYSCALL_CLONE_REPORTED, || {
+                run_syscall_table_clone(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -806,6 +816,84 @@ fn run_syscall_table_set_tid_address(
             name,
             "syscall table set_tid_address facts invalid",
         );
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_clone(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.clone_plain_fork";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let child = &ctx.user_child_process;
+    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let parent_pid = crate::objects::rest_init::KERNEL_INIT_PID;
+    let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
+    let child_tp = child.child_trap_frame_reg(4).unwrap_or(0);
+    let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
+    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+
+    let valid = table.state() == State::Ready
+        && table.clone_supported()
+        && table.clone_routes_to_task_creation_core()
+        && table.clone_routes_to_user_clone_deferred_boundaries()
+        && table.clone_plain_fork_first_slice()
+        && table.clone_observed()
+        && ctx.task_creation_core.state() == State::Ready
+        && ctx.task_creation_core.user_child_created()
+        && child.state() == State::Ready
+        && child.pid() == child_pid
+        && child.parent_pid() == parent_pid
+        && child.tgid() == child_pid
+        && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && child.task_struct_allocated()
+        && child.pid_allocated()
+        && child.thread_context_ready()
+        && child.sched_entity_ready()
+        && child.task_state_new()
+        && child.files_struct_copied()
+        && child.fs_struct_copied()
+        && child.credentials_copied()
+        && child.signal_state_copied()
+        && child.user_address_space_snapshot()
+        && child.user_stack_snapshot_copied()
+        && child.trap_frame_copied()
+        && child.trap_frame_child_return_zero()
+        && child_a0 == 0
+        && child.tls_inherited()
+        && child.enqueued()
+        && ctx.scheduler.selected_runqueue_task_id() == child_pid
+        && runqueue_contains_child
+        && ctx.user_init_process.child_process_group_visible();
+
+    sink.diag_usize("clone_observed", table.clone_observed() as usize);
+    sink.diag_usize("clone_child_pid", child.pid());
+    sink.diag_usize("clone_parent_pid", child.parent_pid());
+    sink.diag_usize("clone_tgid", child.tgid());
+    sink.diag_usize("clone_exit_signal", child.exit_signal());
+    sink.diag_usize("clone_child_a0", child_a0);
+    sink.diag_hex_pair("clone_child_sepc_tp", child_sepc, child_tp);
+    sink.diag_usize(
+        "clone_task_creation_user_child_created",
+        ctx.task_creation_core.user_child_created() as usize,
+    );
+    sink.diag_usize(
+        "clone_scheduler_selected_task",
+        ctx.scheduler.selected_runqueue_task_id(),
+    );
+    sink.diag_usize(
+        "clone_runqueue_contains_child",
+        runqueue_contains_child as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table clone facts invalid");
     }
 }
 

@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use crate::trace::{self, Checkpoint};
 
 #[cfg(app_user_boot)]
-use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
+use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame, USER_CHILD_PID};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
@@ -16,8 +16,8 @@ use super::{
     task::TaskEntry,
     user_boot::{
         UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_CHILD_PID,
-        USER_SIGNAL_COUNT, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
+        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
     },
 };
 
@@ -1102,6 +1102,21 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn clone_supported(&self) -> bool {
         self.clone_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn clone_routes_to_task_creation_core(&self) -> bool {
+        self.clone_routes_to_task_creation_core
+    }
+
+    #[allow(dead_code)]
+    pub const fn clone_routes_to_user_clone_deferred_boundaries(&self) -> bool {
+        self.clone_routes_to_user_clone_deferred_boundaries
+    }
+
+    #[allow(dead_code)]
+    pub const fn clone_plain_fork_first_slice(&self) -> bool {
+        self.clone_plain_fork_first_slice
     }
 
     #[allow(dead_code)]
@@ -4869,7 +4884,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         );
     }
     crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
-    print_wait4_child_handoff_diagnostic(&child_frame);
+    print_wait4_child_handoff_trace(&child_frame);
     *frame = child_frame;
 }
 
@@ -5367,7 +5382,8 @@ fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
     crate::arch::riscv64::sbi::system_shutdown()
 }
 
-fn print_wait4_child_handoff_diagnostic(frame: &TrapFrame) {
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_wait4_child_handoff_trace(frame: &TrapFrame) {
     crate::arch::riscv64::sbi::putstr("wait4 child handoff sepc=0x");
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" sp=0x");
@@ -5382,6 +5398,9 @@ fn print_wait4_child_handoff_diagnostic(frame: &TrapFrame) {
     print_hex(frame.sstatus);
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_wait4_child_handoff_trace(_frame: &TrapFrame) {}
 
 fn print_user_page_fault_diagnostic(frame: &TrapFrame) {
     let cause = frame.scause & !SCAUSE_INTERRUPT_BIT;
