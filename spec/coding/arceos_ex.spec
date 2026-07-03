@@ -235,6 +235,8 @@ predicate arceos_ex_must_linux_checkpoint_mapping_preserve_checkpoint_order() ->
 predicate arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_export_stable_fields() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2312,6 +2314,23 @@ type ArceosExIrqTimeInitCodingMust {
          * unmapped means the current stage cannot justify a reliable mapping
          * and must record the reason instead of guessing.
          *
+         * The mapping stage may include explicitly architecture-scoped RISC-V64
+         * entry anchors. For that scope it must be able to resolve
+         * arch/riscv/kernel/head.S symbols declared through SYM_CODE_START /
+         * SYM_CODE_END and ordinary assembly labels such as
+         * relocate_enable_mmu, and it may pair them with
+         * arch/riscv/mm/init.c::setup_vm() anchors. EntryPreludePhase.Started
+         * maps to head.S::_start when present; EntryPreludePhase.Ready maps
+         * to the _start_kernel tail start_kernel handoff when present. Early
+         * VM, FDT/fixmap, kernel-image and trap-stream checkpoints must use
+         * exact anchors only when a single Linux boundary is found; otherwise
+         * they must use ordered ranges or remain unmapped.
+         *
+         * RISC-V64 entry mappings are not portable Linux init/main.c anchors.
+         * The emitted notes must keep this architecture scope visible and must
+         * not claim cross-architecture equivalence for head.S/setup_vm()
+         * boundaries.
+         *
          * The output surface remains tools/out/checkpoints/ with
          * machine-readable JSON and human-readable Markdown. Each JSON row
          * must contain checkpoint_index, checkpoint_name, checkpoint_variant,
@@ -2329,6 +2348,8 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped();
         arceos_ex_must_linux_checkpoint_mapping_export_stable_fields();
         arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime();
+        arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors();
+        arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit();
 
         /*
          * Observation levels and domains:

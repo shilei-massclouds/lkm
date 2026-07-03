@@ -91,6 +91,9 @@ type RepositoryChangeWorkflow {
          * Linux source tree, and emit reviewable mapping artifacts. It must
          * not silently turn the task into Linux instrumentation, runtime
          * collection, checkpoint-handler changes or behavioral changes.
+         * Architecture-specific entry mapping, such as RISC-V64 head.S and
+         * setup_vm() alignment, must keep that architecture scope explicit
+         * and must classify uncertain object boundaries as range or unmapped.
          */
         guidance_agent_must_keep_linux_checkpoint_mapping_read_only();
     }

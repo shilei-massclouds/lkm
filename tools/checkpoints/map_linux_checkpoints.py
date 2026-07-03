@@ -41,6 +41,7 @@ class LinuxCheckpointMappingRecord:
 class LinuxSymbol:
     relative_file: str
     name: str
+    kind: str
     start_line: int
     end_line: int
     body: str
@@ -163,6 +164,17 @@ class LinuxSourceIndex:
         if text is None:
             return None
 
+        if relative_file.endswith((".S", ".s")):
+            return self._find_assembly_symbol(relative_file, symbol, text)
+
+        return self._find_c_function(relative_file, symbol, text)
+
+    def _find_c_function(
+        self,
+        relative_file: str,
+        symbol: str,
+        text: str,
+    ) -> LinuxSymbol | None:
         for match in re.finditer(rf"\b{re.escape(symbol)}\s*\(", text):
             open_paren = text.find("(", match.start(), match.end() + 1)
             if open_paren == -1:
@@ -188,6 +200,7 @@ class LinuxSourceIndex:
             return LinuxSymbol(
                 relative_file=relative_file,
                 name=symbol,
+                kind="c_function",
                 start_line=_line_number(text, match.start()),
                 end_line=_line_number(text, close_brace),
                 body=text[open_brace + 1 : close_brace],
@@ -196,6 +209,71 @@ class LinuxSourceIndex:
             )
 
         return None
+
+    def _find_assembly_symbol(
+        self,
+        relative_file: str,
+        symbol: str,
+        text: str,
+    ) -> LinuxSymbol | None:
+        sym_macro = re.compile(
+            rf"^[ \t]*SYM_[A-Z0-9_]*START[A-Z0-9_]*\(\s*{re.escape(symbol)}\s*\)",
+            re.MULTILINE,
+        )
+        match = sym_macro.search(text)
+        if match is not None:
+            end_match = re.search(
+                rf"^[ \t]*SYM_[A-Z0-9_]*END[A-Z0-9_]*\(\s*{re.escape(symbol)}\s*\)",
+                text[match.end() :],
+                re.MULTILINE,
+            )
+            if end_match is not None:
+                body_end = match.end() + end_match.start()
+                end_offset = match.end() + end_match.end()
+            else:
+                body_end = _next_assembly_symbol_boundary(text, match.end())
+                end_offset = body_end
+            return LinuxSymbol(
+                relative_file=relative_file,
+                name=symbol,
+                kind="assembly_symbol",
+                start_line=_line_number(text, match.start()),
+                end_line=_line_number(text, end_offset),
+                body=text[match.end() : body_end],
+                body_start_offset=match.end(),
+                text=text,
+            )
+
+        label_pattern = re.compile(
+            rf"^[ \t]*{re.escape(symbol)}:\s*(?:$|[#/@])",
+            re.MULTILINE,
+        )
+        match = label_pattern.search(text)
+        if match is None:
+            return None
+
+        body_end = _next_assembly_symbol_boundary(text, match.end())
+        return LinuxSymbol(
+            relative_file=relative_file,
+            name=symbol,
+            kind="assembly_label",
+            start_line=_line_number(text, match.start()),
+            end_line=_line_number(text, body_end),
+            body=text[match.end() : body_end],
+            body_start_offset=match.end(),
+            text=text,
+        )
+
+
+def _next_assembly_symbol_boundary(text: str, offset: int) -> int:
+    boundary_pattern = re.compile(
+        r"^[ \t]*(?:SYM_[A-Z0-9_]*START[A-Z0-9_]*\(|(?:\.global[^\n]*\n[ \t]*)?[A-Za-z_][A-Za-z0-9_$]*:\s*(?:$|[#/@]))",
+        re.MULTILINE,
+    )
+    match = boundary_pattern.search(text, offset)
+    if match is None:
+        return len(text)
+    return match.start()
 
 
 def _find_anchor(symbol: LinuxSymbol, pattern: str) -> AnchorMatch | None:
@@ -210,12 +288,18 @@ def _find_anchor(symbol: LinuxSymbol, pattern: str) -> AnchorMatch | None:
     )
 
 
+def _symbol_display(symbol: LinuxSymbol) -> str:
+    if symbol.kind == "c_function":
+        return f"{symbol.name}()"
+    return symbol.name
+
+
 def _function_anchor(symbol: LinuxSymbol) -> str:
-    return f"{symbol.name}() definition line {symbol.start_line}"
+    return f"{_symbol_display(symbol)} definition line {symbol.start_line}"
 
 
 def _resolved_anchor(symbol: LinuxSymbol, anchor: AnchorMatch) -> str:
-    return f"{symbol.name}() line {anchor.line}: {anchor.text}"
+    return f"{_symbol_display(symbol)} line {anchor.line}: {anchor.text}"
 
 
 def _unmapped(record: CheckpointInventoryRecord, notes: str) -> LinuxCheckpointMappingRecord:
@@ -280,7 +364,7 @@ def _resolve_rule(
                 ),
             )
         linux_anchor = (
-            f"{symbol.name}() lines {start_anchor.line}-{end_anchor.line}: "
+            f"{_symbol_display(symbol)} lines {start_anchor.line}-{end_anchor.line}: "
             f"{start_anchor.text} .. {end_anchor.text}"
         )
     else:
@@ -301,6 +385,146 @@ def _resolve_rule(
 
 def default_mapping_rules() -> dict[str, MappingRule]:
     return {
+        "EntryPreludePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start",
+            confidence="high",
+            notes="RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping.",
+        ),
+        "EntryPreludePhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start_kernel",
+            anchor_pattern=r"^[ \t]*tail[ \t]+start_kernel\b",
+            confidence="high",
+            notes="RISC-V64 head.S handoff from _start_kernel to Linux start_kernel().",
+        ),
+        "KernelImage.Prepared": MappingRule(
+            mapping_kind="range",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start_kernel",
+            start_anchor_pattern=r"^[ \t]*\.Lclear_bss:",
+            end_anchor_pattern=r"^[ \t]*\.Lclear_bss_done:",
+            confidence="medium",
+            notes="RISC-V64 head.S BSS clear interval; not a portable Linux kernel-image object boundary.",
+        ),
+        "KernelImage.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            start_anchor_pattern=r"\bkernel_map\.virt_addr\s*=",
+            end_anchor_pattern=r"\bcreate_kernel_page_table\s*\(\s*early_pg_dir\s*,\s*true\s*\)",
+            confidence="medium",
+            notes="RISC-V64 setup_vm() kernel_map initialization through early kernel mapping construction.",
+        ),
+        "KernelImage.Online": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="relocate_enable_mmu",
+            anchor_pattern=r"^[ \t]*load_global_pointer\b",
+            confidence="medium",
+            notes="RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial.",
+        ),
+        "EventStream.Prepared": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start_kernel",
+            anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_TVEC,\s*a3\b",
+            confidence="medium",
+            notes="RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping.",
+        ),
+        "EventStream.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start",
+            anchor_pattern=r"^[ \t]*la[ \t]+a0,\s*handle_exception\b",
+            confidence="high",
+            notes="RISC-V64 formal trap-vector target in .Lsetup_trap_vector.",
+        ),
+        "ExceptionStream.Prepared": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start_kernel",
+            anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_TVEC,\s*a3\b",
+            confidence="medium",
+            notes="RISC-V64 early fallback exception path uses the temporary spin trap vector.",
+        ),
+        "ExceptionStream.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="_start",
+            anchor_pattern=r"^[ \t]*la[ \t]+a0,\s*handle_exception\b",
+            confidence="high",
+            notes="RISC-V64 formal exception entry target installed by .Lsetup_trap_vector.",
+        ),
+        "TrampolineVm.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            start_anchor_pattern=r"Setup trampoline PGD",
+            end_anchor_pattern=r"\bcreate_pmd_mapping\s*\(\s*trampoline_pmd\b",
+            confidence="medium",
+            notes="RISC-V64 setup_vm() trampoline page-table construction interval.",
+        ),
+        "TrampolineVm.Online": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="relocate_enable_mmu",
+            anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_SATP,\s*a0\b",
+            confidence="high",
+            notes="RISC-V64 relocate_enable_mmu loads the trampoline page directory into satp.",
+        ),
+        "RawDtb.Prepared": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            anchor_pattern=r"\bcreate_fdt_early_page_table\s*\(\s*__fix_to_virt\s*\(\s*FIX_FDT\s*\)\s*,\s*dtb_pa\s*\)",
+            confidence="medium",
+            notes="RISC-V64 setup_vm() consumes the boot DTB physical address for early FDT mapping.",
+        ),
+        "RawDtb.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="create_fdt_early_page_table",
+            anchor_pattern=r"\bdtb_early_pa\s*=\s*dtb_pa\s*;",
+            confidence="high",
+            notes="RISC-V64 early FDT helper records dtb_early_pa after creating the fixmap-backed DTB view.",
+        ),
+        "FixMap.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            start_anchor_pattern=r"Setup early PGD for fixmap",
+            end_anchor_pattern=r"\bcreate_pmd_mapping\s*\(\s*fixmap_pmd\s*,\s*FIXADDR_START\b",
+            confidence="medium",
+            notes="RISC-V64 setup_vm() early fixmap page-table construction interval.",
+        ),
+        "EarlyVm.Prepared": MappingRule(
+            mapping_kind="range",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            start_anchor_pattern=r"\bpt_ops_set_early\s*\(",
+            end_anchor_pattern=r"\bcreate_kernel_page_table\s*\(\s*early_pg_dir\s*,\s*true\s*\)",
+            confidence="medium",
+            notes="RISC-V64 setup_vm() early page-table preparation interval.",
+        ),
+        "EarlyVm.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/mm/init.c",
+            linux_symbol="setup_vm",
+            anchor_pattern=r"\bcreate_kernel_page_table\s*\(\s*early_pg_dir\s*,\s*true\s*\)",
+            confidence="high",
+            notes="RISC-V64 setup_vm() constructs the early kernel page table.",
+        ),
+        "EarlyVm.Online": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/head.S",
+            linux_symbol="relocate_enable_mmu",
+            anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_SATP,\s*a2\b",
+            confidence="high",
+            notes="RISC-V64 relocate_enable_mmu switches from trampoline mappings to the early kernel page table.",
+        ),
         "StartupTimeline.Started": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
@@ -375,6 +599,154 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             anchor_pattern=r'try_to_run_init_process\s*\(\s*"/sbin/init"',
             confidence="medium",
             notes="Linux kernel_init() default init candidate handoff anchor.",
+        ),
+        "CorePreparePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\bsetup_arch\s*\(",
+            confidence="medium",
+            notes="Linux start_kernel() architecture setup call; RISC-V paging_init is inside setup_arch().",
+        ),
+        "CorePreparePhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\btrap_init\s*\(",
+            confidence="medium",
+            notes="Linux start_kernel() trap_init() call near the CorePreparePhase ready boundary.",
+        ),
+        "IrqTimeInitPhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\bearly_irq_init\s*\(",
+            confidence="high",
+            notes="Linux start_kernel() begins the IRQ/time init call interval at early_irq_init().",
+        ),
+        "IrqTimeInitPhase.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            start_anchor_pattern=r"\bearly_irq_init\s*\(",
+            end_anchor_pattern=r"\btime_init\s*\(",
+            confidence="medium",
+            notes="Linux start_kernel() IRQ/tick/timer/time initialization interval.",
+        ),
+        "LocalIrqEnablePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\bearly_boot_irqs_disabled\s*=\s*false\s*;",
+            confidence="high",
+            notes="Linux start_kernel() clears the early IRQ-disabled guard before enabling local IRQs.",
+        ),
+        "LocalIrqEnablePhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\blocal_irq_enable\s*\(",
+            confidence="high",
+            notes="Linux start_kernel() local_irq_enable() boundary.",
+        ),
+        "ProcessPreparePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            anchor_pattern=r"\bpid_idr_init\s*\(",
+            confidence="medium",
+            notes="Linux start_kernel() process/task namespace preparation interval starts at pid_idr_init().",
+        ),
+        "ProcessPreparePhase.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="init/main.c",
+            linux_symbol="start_kernel",
+            start_anchor_pattern=r"\bpid_idr_init\s*\(",
+            end_anchor_pattern=r"\bdelayacct_init\s*\(",
+            confidence="medium",
+            notes="Linux start_kernel() process/task/credential/cache preparation interval before rest_init().",
+        ),
+        "PreSmpInitPhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            anchor_pattern=r"\bsmp_prepare_cpus\s*\(",
+            confidence="high",
+            notes="Linux kernel_init_freeable() starts pre-SMP preparation at smp_prepare_cpus().",
+        ),
+        "PreSmpInitPhase.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            start_anchor_pattern=r"\bsmp_prepare_cpus\s*\(",
+            end_anchor_pattern=r"\blockup_detector_init\s*\(",
+            confidence="medium",
+            notes="Linux kernel_init_freeable() pre-SMP preparation interval before smp_init().",
+        ),
+        "SmpBringupPhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            anchor_pattern=r"\bsmp_init\s*\(",
+            confidence="high",
+            notes="Linux kernel_init_freeable() SMP bringup call.",
+        ),
+        "SmpBringupPhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            anchor_pattern=r"\bsched_init_smp\s*\(",
+            confidence="medium",
+            notes="Linux kernel_init_freeable() scheduler SMP completion call after smp_init().",
+        ),
+        "RuntimeCorePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            anchor_pattern=r"\bworkqueue_init_topology\s*\(",
+            confidence="medium",
+            notes="Linux kernel_init_freeable() runtime core follow-up interval starts after SMP scheduler setup.",
+        ),
+        "RuntimeCorePhase.Ready": MappingRule(
+            mapping_kind="range",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            start_anchor_pattern=r"\bworkqueue_init_topology\s*\(",
+            end_anchor_pattern=r"\bpage_alloc_init_late\s*\(",
+            confidence="medium",
+            notes="Linux kernel_init_freeable() runtime core topology/async/padata/page-alloc-late interval.",
+        ),
+        "InitcallPhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init_freeable",
+            anchor_pattern=r"\bdo_basic_setup\s*\(",
+            confidence="high",
+            notes="Linux kernel_init_freeable() enters do_basic_setup().",
+        ),
+        "InitcallPhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="do_basic_setup",
+            anchor_pattern=r"\bdo_initcalls\s*\(",
+            confidence="high",
+            notes="Linux do_basic_setup() initcall execution anchor.",
+        ),
+        "FinalizePhase.Started": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init",
+            anchor_pattern=r"\basync_synchronize_full\s*\(",
+            confidence="medium",
+            notes="Linux kernel_init() begins final async/initmem cleanup after kernel_init_freeable().",
+        ),
+        "FinalizePhase.Ready": MappingRule(
+            mapping_kind="exact",
+            linux_file="init/main.c",
+            linux_symbol="kernel_init",
+            anchor_pattern=r"\bsystem_state\s*=\s*SYSTEM_RUNNING\s*;",
+            confidence="high",
+            notes="Linux kernel_init() marks SYSTEM_RUNNING before payload selection.",
         ),
     }
 
