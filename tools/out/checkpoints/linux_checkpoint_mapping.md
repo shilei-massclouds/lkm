@@ -1,8 +1,8 @@
 # Linux Checkpoint Mapping
 
-- exact: 64
+- exact: 70
 - range: 11
-- unmapped: 327
+- unmapped: 321
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -330,12 +330,12 @@
 | 321 | SmpBringupBoundary.Ready | SmpBringupBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 322 | RuntimeCorePhase.Started | RuntimeCorePhaseStarted | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1575: workqueue_init_topology(); | Linux kernel_init_freeable() runtime core follow-up interval starts after SMP scheduler setup. |
 | 323 | RuntimeCorePhase.Ready | RuntimeCorePhaseReady | range | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() lines 1575-1578: workqueue_init_topology(); .. page_alloc_init_late(); | Linux kernel_init_freeable() runtime core topology/async/padata/page-alloc-late interval. |
-| 324 | Scheduler.SmpReady | SchedulerSmpReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 325 | Workqueue.TopologyReady | WorkqueueTopologyReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 326 | AsyncCore.DeferredReady | AsyncCoreDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 327 | PadataCore.DeferredReady | PadataCoreDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 328 | PageAllocator.LateReady | PageAllocatorLateReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 329 | RuntimeCoreBoundary.Ready | RuntimeCoreBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 324 | Scheduler.SmpReady | SchedulerSmpReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1573: sched_init_smp(); | Linux kernel_init_freeable() sched_init_smp() call; reuses the SmpBringupPhase.Ready anchor but records the scheduler SMP runtime object fact. |
+| 325 | Workqueue.TopologyReady | WorkqueueTopologyReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1575: workqueue_init_topology(); | Linux kernel_init_freeable() workqueue_init_topology() call; records the Workqueue topology object fact after SMP scheduler setup. |
+| 326 | AsyncCore.DeferredReady | AsyncCoreDeferredReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1576: async_init(); | Linux kernel_init_freeable() async_init() call; arceos_ex keeps async internals deferred and maps only the deferred runtime-core boundary. |
+| 327 | PadataCore.DeferredReady | PadataCoreDeferredReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1577: padata_init(); | Linux kernel_init_freeable() padata_init() call; maps the deferred padata boundary without expanding padata object details. |
+| 328 | PageAllocator.LateReady | PageAllocatorLateReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1578: page_alloc_init_late(); | Linux kernel_init_freeable() page_alloc_init_late() call; records the PageAllocator late object fact without changing the earlier allocator lifecycle view. |
+| 329 | RuntimeCoreBoundary.Ready | RuntimeCoreBoundaryReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1578: page_alloc_init_late(); | Linux kernel_init_freeable() page_alloc_init_late() call; marks the Runtime Core window end boundary before do_basic_setup(), not an independent Linux object. |
 | 330 | InitcallPhase.Started | InitcallPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1580: do_basic_setup(); | Linux kernel_init_freeable() enters do_basic_setup(). |
 | 331 | InitcallPhase.Ready | InitcallPhaseReady | exact | high | init/main.c | do_basic_setup | do_basic_setup() line 1366: do_initcalls(); | Linux do_basic_setup() initcall execution anchor. |
 | 332 | CpusetSmp.TrimmedReady | CpusetSmpTrimmedReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

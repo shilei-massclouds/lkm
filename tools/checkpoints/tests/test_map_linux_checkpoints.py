@@ -102,6 +102,19 @@ static int __ref kernel_init(void *unused)
 
 static noinline void __init kernel_init_freeable(void)
 {
+    smp_prepare_cpus(setup_max_cpus);
+    workqueue_init();
+    init_mm_internals();
+    rcu_init_tasks_generic();
+    do_pre_smp_initcalls();
+    lockup_detector_init();
+    smp_init();
+    sched_init_smp();
+    workqueue_init_topology();
+    async_init();
+    padata_init();
+    page_alloc_init_late();
+    do_basic_setup();
     prepare_namespace();
 }
 """
@@ -763,6 +776,79 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(online.linux_symbol, "kernel_init")
         self.assertEqual(online.confidence, "high")
         self.assertIn("SYSTEM_RUNNING", online.linux_anchor)
+
+    def test_runtime_core_object_rules_map_to_kernel_init_freeable(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=324,
+                variant="SchedulerSmpReady",
+                name="Scheduler.SmpReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=325,
+                variant="WorkqueueTopologyReady",
+                name="Workqueue.TopologyReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=326,
+                variant="AsyncCoreDeferredReady",
+                name="AsyncCore.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=327,
+                variant="PadataCoreDeferredReady",
+                name="PadataCore.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=328,
+                variant="PageAllocatorLateReady",
+                name="PageAllocator.LateReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=329,
+                variant="RuntimeCoreBoundaryReady",
+                name="RuntimeCoreBoundary.Ready",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        for record in by_name.values():
+            self.assertEqual(record.linux_file, "init/main.c")
+            self.assertEqual(record.linux_symbol, "kernel_init_freeable")
+            self.assertEqual(record.mapping_kind, "exact")
+            self.assertEqual(record.confidence, "medium")
+
+        scheduler = by_name["Scheduler.SmpReady"]
+        self.assertIn("sched_init_smp", scheduler.linux_anchor)
+        self.assertIn("object fact", scheduler.notes)
+        self.assertIn("SmpBringupPhase.Ready", scheduler.notes)
+
+        workqueue = by_name["Workqueue.TopologyReady"]
+        self.assertIn("workqueue_init_topology", workqueue.linux_anchor)
+        self.assertIn("topology object fact", workqueue.notes)
+
+        async_core = by_name["AsyncCore.DeferredReady"]
+        self.assertIn("async_init", async_core.linux_anchor)
+        self.assertIn("deferred runtime-core boundary", async_core.notes)
+
+        padata = by_name["PadataCore.DeferredReady"]
+        self.assertIn("padata_init", padata.linux_anchor)
+        self.assertIn("without expanding padata object details", padata.notes)
+
+        page_allocator = by_name["PageAllocator.LateReady"]
+        self.assertIn("page_alloc_init_late", page_allocator.linux_anchor)
+        self.assertIn("PageAllocator late object fact", page_allocator.notes)
+
+        boundary = by_name["RuntimeCoreBoundary.Ready"]
+        self.assertIn("page_alloc_init_late", boundary.linux_anchor)
+        self.assertIn("Runtime Core window end boundary", boundary.notes)
+        self.assertIn("not an independent Linux object", boundary.notes)
 
     def test_user_boot_rules_map_to_linux_init_exec_anchors(self) -> None:
         records = [

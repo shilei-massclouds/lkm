@@ -228,6 +228,12 @@ Finalize 末端的 deferred/trimmed checkpoint 只有在 Linux `kernel_init()` �
 call site 或状态赋值时才可映射。纯 deferred 语义或缺少本地 Linux 对象边界的 checkpoint
 应继续保留 `unmapped`。
 
+若单个 Linux call-site 同时承载 `arceos_ex` 的阶段边界和对象级事实，mapping artifact 可以
+让多个 checkpoint 复用同一锚点，但每条 notes 必须区分该条记录声明的是 phase boundary、
+object fact 还是 deferred boundary。Runtime Core 窗口中的 `sched_init_smp()` 和
+`page_alloc_init_late()` 属于这种情况：共享锚点不表示 Linux 暴露了多个独立对象，只表示同一
+源码边界可静态复核不同的 `arceos_ex` 语义视图。
+
 ## 待补充
 
 - `arceos_ex` 第一轮对象到 crate/module/struct 的具体映射表。

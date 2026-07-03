@@ -3,7 +3,7 @@
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 64
+      "count": 70
     },
     {
       "mapping_kind": "range",
@@ -11,27 +11,27 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 327
+      "count": 321
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 327
+      "count": 321
+    },
+    {
+      "confidence": "medium",
+      "count": 41
     },
     {
       "confidence": "high",
       "count": 40
-    },
-    {
-      "confidence": "medium",
-      "count": 35
     }
   ],
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 30
+      "count": 36
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -93,7 +93,7 @@
   "unmapped_checkpoint_family_counts": [
     {
       "family": "Scheduler",
-      "count": 9
+      "count": 8
     },
     {
       "family": "CpuHotplugSync",
@@ -101,7 +101,7 @@
     },
     {
       "family": "PageAllocator",
-      "count": 6
+      "count": 5
     },
     {
       "family": "CpuGroup",
@@ -161,10 +161,6 @@
     },
     {
       "family": "Vm",
-      "count": 3
-    },
-    {
-      "family": "Workqueue",
       "count": 3
     },
     {
@@ -288,6 +284,10 @@
       "count": 2
     },
     {
+      "family": "Workqueue",
+      "count": 2
+    },
+    {
       "family": "AcpiEarly",
       "count": 1
     },
@@ -305,10 +305,6 @@
     },
     {
       "family": "ArchPostAcpi",
-      "count": 1
-    },
-    {
-      "family": "AsyncCore",
       "count": 1
     },
     {
@@ -668,10 +664,6 @@
       "count": 1
     },
     {
-      "family": "PadataCore",
-      "count": 1
-    },
-    {
       "family": "PageCache",
       "count": 1
     },
@@ -813,10 +805,6 @@
     },
     {
       "family": "RootfsPrepareNamespacePaths",
-      "count": 1
-    },
-    {
-      "family": "RuntimeCoreBoundary",
       "count": 1
     },
     {
@@ -1056,5 +1044,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 192
+  "unmapped_singleton_family_count": 189
 }

@@ -31,6 +31,7 @@ predicate linux_checkpoint_mapping_must_be_static_source_only() -> bool;
 predicate linux_checkpoint_mapping_must_keep_unproven_unmapped() -> bool;
 predicate linux_checkpoint_mapping_should_mark_partial_boundaries() -> bool;
 predicate linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec() -> bool;
+predicate linux_checkpoint_mapping_must_distinguish_shared_call_site_semantics() -> bool;
 
 predicate coding_should_use_global_context() -> bool;
 predicate coding_should_name_context_parameters_ctx() -> bool;
@@ -307,5 +308,17 @@ type LinuxCheckpointMappingRules {
          * exec syscall view.
          */
         linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec();
+
+        /*
+         * Shared call-site semantics:
+         *
+         * Multiple arceos_ex checkpoints may reuse the same Linux call site
+         * when a single Linux boundary is the reviewable anchor for a phase
+         * boundary and one or more object facts. Each mapping note must name
+         * the semantic view being claimed, such as phase boundary, object fact
+         * or deferred boundary, so the artifact does not imply distinct Linux
+         * objects where Linux exposes only one local call-site boundary.
+         */
+        linux_checkpoint_mapping_must_distinguish_shared_call_site_semantics();
     }
 }

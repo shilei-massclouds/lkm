@@ -6,23 +6,23 @@
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 64 |
+| exact | 70 |
 | range | 11 |
-| unmapped | 327 |
+| unmapped | 321 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 327 |
+| none | 321 |
+| medium | 41 |
 | high | 40 |
-| medium | 35 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 30 |
+| init/main.c | 36 |
 | arch/riscv/kernel/head.S | 10 |
 | arch/riscv/mm/init.c | 7 |
 | fs/binfmt_elf.c | 6 |
@@ -42,9 +42,9 @@
 
 | family | count |
 | --- | ---: |
-| Scheduler | 9 |
+| Scheduler | 8 |
 | CpuHotplugSync | 7 |
-| PageAllocator | 6 |
+| PageAllocator | 5 |
 | CpuGroup | 4 |
 | EarlyCon | 4 |
 | KthreaddTask | 4 |
@@ -60,7 +60,6 @@
 | RcuCore | 3 |
 | SlubSubsystem | 3 |
 | Vm | 3 |
-| Workqueue | 3 |
 | BootCurrentCPU | 2 |
 | BootPhase | 2 |
 | CommandLine | 2 |
@@ -91,5 +90,6 @@
 | TickBroadcast | 2 |
 | UpMultitaskPhase | 2 |
 | VirtioBus | 2 |
+| Workqueue | 2 |
 
-- singleton unmapped families: 192
+- singleton unmapped families: 189
