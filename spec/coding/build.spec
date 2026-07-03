@@ -142,11 +142,11 @@ type BuildAndScriptCodingMust {
         /*
          * Checkpoint artifact drift gate:
          *
-         * The aggregate make test target must run checkpoint inventory and
-         * Linux mapping artifact checks before QEMU/runtime stages. The gate
-         * must be independently callable, must report drift as a test failure
-         * with retained logs, and must not rewrite tracked checkpoint output
-         * files while running in test mode.
+         * The aggregate make test target must run checkpoint inventory,
+         * Linux mapping and Linux mapping coverage artifact checks before
+         * QEMU/runtime stages. The gate must be independently callable, must
+         * report drift as a test failure with retained logs, and must not
+         * rewrite tracked checkpoint output files while running in test mode.
          */
         build_must_gate_checkpoint_artifact_drift_before_runtime_tests();
 
@@ -166,9 +166,10 @@ type BuildAndScriptCodingMust {
          *
          * The repository top-level make clean target must remove routine
          * build, code-generation and test-cache artifacts created under the
-         * repository, while preserving user-local environments, diagnostic
-         * logs, editor state and other unlisted local files. It must keep the
-         * selected kernel implementation clean as the owner of
+         * repository, while preserving tracked checkpoint review artifacts
+         * under tools/out/checkpoints/, user-local environments, diagnostic
+         * logs, editor state and other unlisted local files. It must keep
+         * the selected kernel implementation clean as the owner of
          * kernel-specific build artifacts.
          */
         build_must_make_clean_remove_routine_artifacts_only();

@@ -1,0 +1,1080 @@
+{
+  "total_checkpoints": 402,
+  "mapping_kind_counts": [
+    {
+      "mapping_kind": "exact",
+      "count": 55
+    },
+    {
+      "mapping_kind": "range",
+      "count": 10
+    },
+    {
+      "mapping_kind": "unmapped",
+      "count": 337
+    }
+  ],
+  "confidence_counts": [
+    {
+      "confidence": "none",
+      "count": 337
+    },
+    {
+      "confidence": "high",
+      "count": 36
+    },
+    {
+      "confidence": "medium",
+      "count": 29
+    }
+  ],
+  "mapped_linux_file_counts": [
+    {
+      "linux_file": "init/main.c",
+      "count": 25
+    },
+    {
+      "linux_file": "arch/riscv/kernel/head.S",
+      "count": 10
+    },
+    {
+      "linux_file": "arch/riscv/mm/init.c",
+      "count": 7
+    },
+    {
+      "linux_file": "fs/binfmt_elf.c",
+      "count": 3
+    },
+    {
+      "linux_file": "fs/exec.c",
+      "count": 3
+    },
+    {
+      "linux_file": "fs/read_write.c",
+      "count": 3
+    },
+    {
+      "linux_file": "kernel/exit.c",
+      "count": 3
+    },
+    {
+      "linux_file": "arch/riscv/kernel/entry.S",
+      "count": 2
+    },
+    {
+      "linux_file": "fs/open.c",
+      "count": 2
+    },
+    {
+      "linux_file": "kernel/fork.c",
+      "count": 2
+    },
+    {
+      "linux_file": "arch/riscv/kernel/process.c",
+      "count": 1
+    },
+    {
+      "linux_file": "fs/stat.c",
+      "count": 1
+    },
+    {
+      "linux_file": "init/do_mounts.c",
+      "count": 1
+    },
+    {
+      "linux_file": "kernel/sched/core.c",
+      "count": 1
+    },
+    {
+      "linux_file": "mm/mm_init.c",
+      "count": 1
+    }
+  ],
+  "unmapped_checkpoint_family_counts": [
+    {
+      "family": "Scheduler",
+      "count": 9
+    },
+    {
+      "family": "CpuHotplugSync",
+      "count": 7
+    },
+    {
+      "family": "PageAllocator",
+      "count": 6
+    },
+    {
+      "family": "CpuGroup",
+      "count": 4
+    },
+    {
+      "family": "EarlyCon",
+      "count": 4
+    },
+    {
+      "family": "KthreaddTask",
+      "count": 4
+    },
+    {
+      "family": "MemBlock",
+      "count": 4
+    },
+    {
+      "family": "SystemState",
+      "count": 4
+    },
+    {
+      "family": "UserBoot",
+      "count": 4
+    },
+    {
+      "family": "VirtioBlk",
+      "count": 4
+    },
+    {
+      "family": "BootCPU",
+      "count": 3
+    },
+    {
+      "family": "Completion",
+      "count": 3
+    },
+    {
+      "family": "CpuStartProvider",
+      "count": 3
+    },
+    {
+      "family": "EarlyDtb",
+      "count": 3
+    },
+    {
+      "family": "InitStack",
+      "count": 3
+    },
+    {
+      "family": "InterruptStream",
+      "count": 3
+    },
+    {
+      "family": "KernelInitTask",
+      "count": 3
+    },
+    {
+      "family": "RcuCore",
+      "count": 3
+    },
+    {
+      "family": "SlubSubsystem",
+      "count": 3
+    },
+    {
+      "family": "Vm",
+      "count": 3
+    },
+    {
+      "family": "Workqueue",
+      "count": 3
+    },
+    {
+      "family": "BootCurrentCPU",
+      "count": 2
+    },
+    {
+      "family": "BootPhase",
+      "count": 2
+    },
+    {
+      "family": "CommandLine",
+      "count": 2
+    },
+    {
+      "family": "EntrySuccessorPhase",
+      "count": 2
+    },
+    {
+      "family": "InitTask",
+      "count": 2
+    },
+    {
+      "family": "InterruptPhase",
+      "count": 2
+    },
+    {
+      "family": "IrqChipInitTable",
+      "count": 2
+    },
+    {
+      "family": "IrqOpenPreparePhase",
+      "count": 2
+    },
+    {
+      "family": "IrqOpenPrepareTrimmedPaths",
+      "count": 2
+    },
+    {
+      "family": "IrqTimeTrimmedPaths",
+      "count": 2
+    },
+    {
+      "family": "KthreaddReadyGate",
+      "count": 2
+    },
+    {
+      "family": "PhysicalMemory",
+      "count": 2
+    },
+    {
+      "family": "PlatformCpuInfo",
+      "count": 2
+    },
+    {
+      "family": "PlicIrqDomain",
+      "count": 2
+    },
+    {
+      "family": "PreparePhase",
+      "count": 2
+    },
+    {
+      "family": "PrintkBuffer",
+      "count": 2
+    },
+    {
+      "family": "Randomness",
+      "count": 2
+    },
+    {
+      "family": "SecondaryCpuOnlineAck",
+      "count": 2
+    },
+    {
+      "family": "Serial8250Console",
+      "count": 2
+    },
+    {
+      "family": "SignalCore",
+      "count": 2
+    },
+    {
+      "family": "SmpRuntimePhase",
+      "count": 2
+    },
+    {
+      "family": "Softirq",
+      "count": 2
+    },
+    {
+      "family": "SwapperVm",
+      "count": 2
+    },
+    {
+      "family": "TaskCreationCore",
+      "count": 2
+    },
+    {
+      "family": "TasksRcu",
+      "count": 2
+    },
+    {
+      "family": "Tick",
+      "count": 2
+    },
+    {
+      "family": "TickBroadcast",
+      "count": 2
+    },
+    {
+      "family": "UpMultitaskPhase",
+      "count": 2
+    },
+    {
+      "family": "VirtioBus",
+      "count": 2
+    },
+    {
+      "family": "AcpiEarly",
+      "count": 1
+    },
+    {
+      "family": "AcpiSubsystem",
+      "count": 1
+    },
+    {
+      "family": "AnonVmaCore",
+      "count": 1
+    },
+    {
+      "family": "ArchCpuFinalize",
+      "count": 1
+    },
+    {
+      "family": "ArchPostAcpi",
+      "count": 1
+    },
+    {
+      "family": "AsyncCore",
+      "count": 1
+    },
+    {
+      "family": "AsyncFullSync",
+      "count": 1
+    },
+    {
+      "family": "BitWaitQueueTable",
+      "count": 1
+    },
+    {
+      "family": "BootConsole",
+      "count": 1
+    },
+    {
+      "family": "BootCpuCurrentTask",
+      "count": 1
+    },
+    {
+      "family": "BootCpuLocalInterrupt",
+      "count": 1
+    },
+    {
+      "family": "BootIdleEntryPhase",
+      "count": 1
+    },
+    {
+      "family": "BootIdlePiLock",
+      "count": 1
+    },
+    {
+      "family": "BootIdlePreemption",
+      "count": 1
+    },
+    {
+      "family": "BootIdleRcuReadSide",
+      "count": 1
+    },
+    {
+      "family": "BootIdleRuntime",
+      "count": 1
+    },
+    {
+      "family": "BootIdleTask",
+      "count": 1
+    },
+    {
+      "family": "BootInitPreemption",
+      "count": 1
+    },
+    {
+      "family": "BootInitScheduleHandoffPhase",
+      "count": 1
+    },
+    {
+      "family": "BootParam",
+      "count": 1
+    },
+    {
+      "family": "BootRunQueue",
+      "count": 1
+    },
+    {
+      "family": "BootRunQueueLock",
+      "count": 1
+    },
+    {
+      "family": "BootStackCanary",
+      "count": 1
+    },
+    {
+      "family": "BreakpointException",
+      "count": 1
+    },
+    {
+      "family": "CacheBlockInfo",
+      "count": 1
+    },
+    {
+      "family": "Cgroup",
+      "count": 1
+    },
+    {
+      "family": "ClocksourceCore",
+      "count": 1
+    },
+    {
+      "family": "Console",
+      "count": 1
+    },
+    {
+      "family": "ConsoleDriverSet",
+      "count": 1
+    },
+    {
+      "family": "ContextTrackingInit",
+      "count": 1
+    },
+    {
+      "family": "CpuAddRemoveLock",
+      "count": 1
+    },
+    {
+      "family": "CpuCapabilities",
+      "count": 1
+    },
+    {
+      "family": "CpuDoneUpWaitLock",
+      "count": 1
+    },
+    {
+      "family": "CpuHotplugState",
+      "count": 1
+    },
+    {
+      "family": "CpuRunningWaitLock",
+      "count": 1
+    },
+    {
+      "family": "Cpuset",
+      "count": 1
+    },
+    {
+      "family": "CpusetSmp",
+      "count": 1
+    },
+    {
+      "family": "CredentialCore",
+      "count": 1
+    },
+    {
+      "family": "CtorTable",
+      "count": 1
+    },
+    {
+      "family": "DbgLateInit",
+      "count": 1
+    },
+    {
+      "family": "DefaultSchedRootDomain",
+      "count": 1
+    },
+    {
+      "family": "DelayAccounting",
+      "count": 1
+    },
+    {
+      "family": "DelayLoop",
+      "count": 1
+    },
+    {
+      "family": "DeviceTree",
+      "count": 1
+    },
+    {
+      "family": "DmaCachePolicy",
+      "count": 1
+    },
+    {
+      "family": "DriverCore",
+      "count": 1
+    },
+    {
+      "family": "DynamicContainerRuntime",
+      "count": 1
+    },
+    {
+      "family": "EarlyIoremap",
+      "count": 1
+    },
+    {
+      "family": "EarlyParam",
+      "count": 1
+    },
+    {
+      "family": "EarlyTraceInit",
+      "count": 1
+    },
+    {
+      "family": "EarlyVm",
+      "count": 1
+    },
+    {
+      "family": "EntryPreludePhase",
+      "count": 1
+    },
+    {
+      "family": "ExceptionTable",
+      "count": 1
+    },
+    {
+      "family": "FinalizeBoundary",
+      "count": 1
+    },
+    {
+      "family": "FtraceInit",
+      "count": 1
+    },
+    {
+      "family": "HrtimerCore",
+      "count": 1
+    },
+    {
+      "family": "InitMM",
+      "count": 1
+    },
+    {
+      "family": "InitMemoryCleanup",
+      "count": 1
+    },
+    {
+      "family": "InitcallBoundary",
+      "count": 1
+    },
+    {
+      "family": "InitcallTable",
+      "count": 1
+    },
+    {
+      "family": "InitramfsSync",
+      "count": 1
+    },
+    {
+      "family": "InitrdBounds",
+      "count": 1
+    },
+    {
+      "family": "IntegrityKeys",
+      "count": 1
+    },
+    {
+      "family": "Ioremap",
+      "count": 1
+    },
+    {
+      "family": "IpiMux",
+      "count": 1
+    },
+    {
+      "family": "IrqController",
+      "count": 1
+    },
+    {
+      "family": "IrqDispatchTree",
+      "count": 1
+    },
+    {
+      "family": "IrqHandlerRegistry",
+      "count": 1
+    },
+    {
+      "family": "IrqProcView",
+      "count": 1
+    },
+    {
+      "family": "JiffiesClocksource",
+      "count": 1
+    },
+    {
+      "family": "KUnitRuntime",
+      "count": 1
+    },
+    {
+      "family": "Kcsan",
+      "count": 1
+    },
+    {
+      "family": "KernelCmdline",
+      "count": 1
+    },
+    {
+      "family": "KernelGlobalAllocator",
+      "count": 1
+    },
+    {
+      "family": "KernelInitTaskPiLock",
+      "count": 1
+    },
+    {
+      "family": "KernelMappingProtection",
+      "count": 1
+    },
+    {
+      "family": "KeyringCore",
+      "count": 1
+    },
+    {
+      "family": "KfenceInit",
+      "count": 1
+    },
+    {
+      "family": "KmallocCaches",
+      "count": 1
+    },
+    {
+      "family": "KthreaddReadyGateWaitLock",
+      "count": 1
+    },
+    {
+      "family": "KthreaddTaskPiLock",
+      "count": 1
+    },
+    {
+      "family": "LateTimeInit",
+      "count": 1
+    },
+    {
+      "family": "LockdepInit",
+      "count": 1
+    },
+    {
+      "family": "LockdepInitTask",
+      "count": 1
+    },
+    {
+      "family": "LockingSelftest",
+      "count": 1
+    },
+    {
+      "family": "MapleTree",
+      "count": 1
+    },
+    {
+      "family": "MemoryDebugHardening",
+      "count": 1
+    },
+    {
+      "family": "MemoryNode",
+      "count": 1
+    },
+    {
+      "family": "MemoryTopology",
+      "count": 1
+    },
+    {
+      "family": "MmCoreTrimmedPaths",
+      "count": 1
+    },
+    {
+      "family": "MmStructCache",
+      "count": 1
+    },
+    {
+      "family": "NetNamespace",
+      "count": 1
+    },
+    {
+      "family": "NsProxy",
+      "count": 1
+    },
+    {
+      "family": "Nsfs",
+      "count": 1
+    },
+    {
+      "family": "NumaDefaultPolicy",
+      "count": 1
+    },
+    {
+      "family": "NumaPolicy",
+      "count": 1
+    },
+    {
+      "family": "OfPlatformDefaultPopulate",
+      "count": 1
+    },
+    {
+      "family": "PadataCore",
+      "count": 1
+    },
+    {
+      "family": "PageCache",
+      "count": 1
+    },
+    {
+      "family": "PageMetadataMap",
+      "count": 1
+    },
+    {
+      "family": "PageTableCaches",
+      "count": 1
+    },
+    {
+      "family": "PageTableLockCache",
+      "count": 1
+    },
+    {
+      "family": "PanicLater",
+      "count": 1
+    },
+    {
+      "family": "PayloadParam",
+      "count": 1
+    },
+    {
+      "family": "PerCpuFirstChunk",
+      "count": 1
+    },
+    {
+      "family": "PerCpuOffsetTable",
+      "count": 1
+    },
+    {
+      "family": "PerCpuStaticImage",
+      "count": 1
+    },
+    {
+      "family": "PerCpuStorage",
+      "count": 1
+    },
+    {
+      "family": "PerfEventCore",
+      "count": 1
+    },
+    {
+      "family": "Pidfs",
+      "count": 1
+    },
+    {
+      "family": "Plic",
+      "count": 1
+    },
+    {
+      "family": "PlicDriver",
+      "count": 1
+    },
+    {
+      "family": "PokingInit",
+      "count": 1
+    },
+    {
+      "family": "PreSmpBoundary",
+      "count": 1
+    },
+    {
+      "family": "PreSmpInitcalls",
+      "count": 1
+    },
+    {
+      "family": "PrintUnknownBootoptions",
+      "count": 1
+    },
+    {
+      "family": "ProcessPrepareTrimmedPaths",
+      "count": 1
+    },
+    {
+      "family": "Procfs",
+      "count": 1
+    },
+    {
+      "family": "ProfileCore",
+      "count": 1
+    },
+    {
+      "family": "PtiFinalize",
+      "count": 1
+    },
+    {
+      "family": "RadixTree",
+      "count": 1
+    },
+    {
+      "family": "RamdiskExecuteCommand",
+      "count": 1
+    },
+    {
+      "family": "RcuBootEnd",
+      "count": 1
+    },
+    {
+      "family": "RcuInitNohz",
+      "count": 1
+    },
+    {
+      "family": "ResourceTree",
+      "count": 1
+    },
+    {
+      "family": "RiscvIntc",
+      "count": 1
+    },
+    {
+      "family": "RiscvIrqStackSet",
+      "count": 1
+    },
+    {
+      "family": "RiscvTimerProvider",
+      "count": 1
+    },
+    {
+      "family": "RootFS",
+      "count": 1
+    },
+    {
+      "family": "RootPidNamespace",
+      "count": 1
+    },
+    {
+      "family": "RootStream",
+      "count": 1
+    },
+    {
+      "family": "RootfsBoundary",
+      "count": 1
+    },
+    {
+      "family": "RootfsConsole",
+      "count": 1
+    },
+    {
+      "family": "RootfsPrepareNamespacePaths",
+      "count": 1
+    },
+    {
+      "family": "RuntimeCoreBoundary",
+      "count": 1
+    },
+    {
+      "family": "SBI",
+      "count": 1
+    },
+    {
+      "family": "SavedCommandLine",
+      "count": 1
+    },
+    {
+      "family": "SbiIpi",
+      "count": 1
+    },
+    {
+      "family": "SchedClock",
+      "count": 1
+    },
+    {
+      "family": "SchedInitIrqsDisabled",
+      "count": 1
+    },
+    {
+      "family": "SchedInitPreludeTrimmedPaths",
+      "count": 1
+    },
+    {
+      "family": "SchedInitTraceContextBoundaries",
+      "count": 1
+    },
+    {
+      "family": "SecondParseEarlyParam",
+      "count": 1
+    },
+    {
+      "family": "SecondaryCpuStartupAck",
+      "count": 1
+    },
+    {
+      "family": "SecondaryIdleTasks",
+      "count": 1
+    },
+    {
+      "family": "SecurityCore",
+      "count": 1
+    },
+    {
+      "family": "SeqFileCore",
+      "count": 1
+    },
+    {
+      "family": "Serial8250ConsoleBurstIrqTx",
+      "count": 1
+    },
+    {
+      "family": "Serial8250ConsoleLongBurstIrqTx",
+      "count": 1
+    },
+    {
+      "family": "Serial8250ConsoleLongIrqTx",
+      "count": 1
+    },
+    {
+      "family": "Serial8250ConsoleTxQuiesce",
+      "count": 1
+    },
+    {
+      "family": "Serial8250RxBatchLoopback",
+      "count": 1
+    },
+    {
+      "family": "Serial8250RxLoopback",
+      "count": 1
+    },
+    {
+      "family": "SetupNrCpuIds",
+      "count": 1
+    },
+    {
+      "family": "ShadowCallStackInit",
+      "count": 1
+    },
+    {
+      "family": "SimpleWaitQueue",
+      "count": 1
+    },
+    {
+      "family": "SlubCacheRegistry",
+      "count": 1
+    },
+    {
+      "family": "SmpBringupBoundary",
+      "count": 1
+    },
+    {
+      "family": "SmpCallFunction",
+      "count": 1
+    },
+    {
+      "family": "SmpbootThreadsLock",
+      "count": 1
+    },
+    {
+      "family": "Soc",
+      "count": 1
+    },
+    {
+      "family": "SrcuCore",
+      "count": 1
+    },
+    {
+      "family": "StackDepot",
+      "count": 1
+    },
+    {
+      "family": "StartupTimeline",
+      "count": 1
+    },
+    {
+      "family": "StaticBranch",
+      "count": 1
+    },
+    {
+      "family": "StaticCommandLine",
+      "count": 1
+    },
+    {
+      "family": "Swiotlb",
+      "count": 1
+    },
+    {
+      "family": "SysctlArgs",
+      "count": 1
+    },
+    {
+      "family": "TaskFileContext",
+      "count": 1
+    },
+    {
+      "family": "Taskstats",
+      "count": 1
+    },
+    {
+      "family": "Timekeeper",
+      "count": 1
+    },
+    {
+      "family": "TimerWheel",
+      "count": 1
+    },
+    {
+      "family": "TraceInit",
+      "count": 1
+    },
+    {
+      "family": "TrampolineVm",
+      "count": 1
+    },
+    {
+      "family": "TtyLineDisciplineRegistry",
+      "count": 1
+    },
+    {
+      "family": "TtyWriteBatchRuntimeTx",
+      "count": 1
+    },
+    {
+      "family": "TtyWriteRuntimeTx",
+      "count": 1
+    },
+    {
+      "family": "TtyXmitFifoProbe",
+      "count": 1
+    },
+    {
+      "family": "UprobeCore",
+      "count": 1
+    },
+    {
+      "family": "UserAddressSpace",
+      "count": 1
+    },
+    {
+      "family": "UserInitProcess",
+      "count": 1
+    },
+    {
+      "family": "UtsNamespace",
+      "count": 1
+    },
+    {
+      "family": "VectorContext",
+      "count": 1
+    },
+    {
+      "family": "VfreeDeferredSet",
+      "count": 1
+    },
+    {
+      "family": "VirtioRng",
+      "count": 1
+    },
+    {
+      "family": "VmaCore",
+      "count": 1
+    },
+    {
+      "family": "VmallocAllocator",
+      "count": 1
+    },
+    {
+      "family": "VmapAddressSpace",
+      "count": 1
+    },
+    {
+      "family": "VmapAreaCache",
+      "count": 1
+    },
+    {
+      "family": "VmapBlockQueues",
+      "count": 1
+    },
+    {
+      "family": "VmapNodeSet",
+      "count": 1
+    },
+    {
+      "family": "VmstatCore",
+      "count": 1
+    },
+    {
+      "family": "X86EfiRuntimeSwitch",
+      "count": 1
+    },
+    {
+      "family": "ZoneSet",
+      "count": 1
+    },
+    {
+      "family": "ZonelistSet",
+      "count": 1
+    },
+    {
+      "family": "Zones",
+      "count": 1
+    }
+  ],
+  "unmapped_singleton_family_count": 196
+}

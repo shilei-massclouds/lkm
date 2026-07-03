@@ -20,9 +20,9 @@ make verify
 make test
 ```
 
-`make verify` 会对默认规格 `spec/model/main.spec` 执行推导检查。`make test` 会汇总规格验证、checkpoint inventory/Linux mapping 产物漂移检查、默认运行入口、用户态启动入口、KUnit 风格检查和 smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
+`make verify` 会对默认规格 `spec/model/main.spec` 执行推导检查。`make test` 会汇总规格验证、checkpoint inventory/Linux mapping/coverage 产物漂移检查、默认运行入口、用户态启动入口、KUnit 风格检查和 smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
 
-checkpoint inventory 和 Linux mapping 是已提交的审阅产物。需要重新生成时运行：
+checkpoint inventory、Linux mapping 和 Linux mapping coverage 是已提交的审阅产物。需要重新生成时运行：
 
 ```sh
 make checkpoints
@@ -33,6 +33,8 @@ make checkpoints
 ```sh
 make test-checkpoints
 ```
+
+`make checkpoints` 会按 inventory -> Linux mapping -> Linux mapping coverage 顺序更新产物。coverage report 是 mapping-only 的紧凑审阅视图，汇总映射分类、confidence、Linux 文件和 unmapped checkpoint family 覆盖情况，不包含逐 checkpoint 明细。
 
 `test-checkpoints` 会先跑 checkpoint 工具单元测试，再以只读 `--check` 模式比较 `tools/out/checkpoints/` 下的 JSON/Markdown；它不会重写已提交产物。`make test` 会在 QEMU/runtime 用例前运行该门禁。
 

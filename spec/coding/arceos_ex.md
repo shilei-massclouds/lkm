@@ -91,6 +91,20 @@ arceos_ex checkpoint 输出一个候选映射行，并保持原 checkpoint 顺�
 `range` 表示只能定位到 Linux 启动流程中的两个可验证 anchor 之间；`unmapped` 表示当前无法可靠映射，必须记录原因，
 不得猜测。该阶段不得修改 Linux tree、不得加入 instrumentation、不得改变 arceos_ex 运行时行为、不得新增
 checkpoint handler、不得实现内存采集 runtime，也不得把候选映射当作后续插点已经完成的证明。
+该阶段的只读源码解析可以解析 C 函数定义、`SYSCALL_DEFINE*` syscall wrapper macro 定义和 assembly symbol/label。
+用户态 syscall 边界可以映射到对应 `SYSCALL_DEFINE*` wrapper 的核心 helper 调用；当 syscall ABI wrapper 受
+arch/config 条件化影响而不能稳定代表 RISC-V64 语义时，必须映射到共同实现 helper 或保持 `unmapped`，并用
+`medium` 或更低 confidence 在 notes 中说明条件化 ABI 层。用户态 exec/return/wait 边界可以使用 RISC-V64
+architecture-scoped anchor，但必须保守使用 `range` 或 `medium` confidence 表达阶段性对应关系。
+
+MUST：Linux differential checkpoint 工作的第三子阶段只汇总已提交 Linux checkpoint mapping 的覆盖率审阅视图。该阶段消费
+`tools/out/checkpoints/linux_checkpoint_mapping.json`，不得读取或修改 Linux tree，不得改变任何 checkpoint 的
+`mapping_kind`、confidence 或映射语义，不得新增 instrumentation、runtime 采集或 checkpoint handler。输出仍只能写入
+`tools/out/checkpoints/` 下的机器可读 JSON 和人工可读 Markdown；JSON 只能保存聚合审阅数据：总 checkpoint 数、
+`exact`/`range`/`unmapped` 计数、confidence 计数、mapped Linux file 计数、unmapped checkpoint family 计数和
+singleton unmapped family 总数，不得复制逐 checkpoint 明细，不得包含 timestamp。Markdown 保持紧凑，只展示 count >= 2
+的 unmapped family，并汇总 singleton family 数。该工具的 `--check` 模式必须只在内存中重新生成 JSON/Markdown 并比较
+tracked coverage 产物，发现漂移时报具体文件并非零退出，不得重写 stale tracked 输出。
 
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters

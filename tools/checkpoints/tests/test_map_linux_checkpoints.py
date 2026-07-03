@@ -158,19 +158,291 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
 """
 
 
+READ_WRITE_C = """
+ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+{
+    return vfs_read(fd, buf, count);
+}
+
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+{
+    return ksys_read(fd, buf, count);
+}
+
+SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
+                size_t, count)
+{
+    return ksys_write(fd, buf, count);
+}
+
+SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
+                unsigned long, vlen)
+{
+    return do_writev(fd, vec, vlen, 0);
+}
+"""
+
+
+OPEN_C = """
+SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
+                umode_t, mode)
+{
+    if (force_o_largefile())
+        flags |= O_LARGEFILE;
+    return do_sys_open(dfd, filename, flags, mode);
+}
+
+SYSCALL_DEFINE1(close, unsigned int, fd)
+{
+    int retval;
+    struct file *file;
+
+    file = file_close_fd(fd);
+    if (!file)
+        return -EBADF;
+
+    retval = filp_flush(file, current->files);
+    return retval;
+}
+"""
+
+
+STAT_C = """
+SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+                struct stat __user *, statbuf, int, flag)
+{
+    struct kstat stat;
+    int error;
+
+    error = vfs_fstatat(dfd, filename, &stat, flag);
+    if (error)
+        return error;
+    return cp_new_stat(&stat, statbuf);
+}
+"""
+
+
+EXEC_C = """
+static int exec_mmap(struct mm_struct *mm)
+{
+    struct mm_struct *active_mm = current->active_mm;
+
+    current->mm = mm;
+    activate_mm(active_mm, mm);
+    return 0;
+}
+
+int begin_new_exec(struct linux_binprm * bprm)
+{
+    int retval;
+
+    retval = exec_mmap(bprm->mm);
+    if (retval)
+        return retval;
+    bprm->mm = NULL;
+    return 0;
+}
+
+static int do_execveat_common(int fd, struct filename *filename,
+                              struct user_arg_ptr argv,
+                              struct user_arg_ptr envp,
+                              int flags)
+{
+    struct linux_binprm *bprm = alloc_bprm(fd, filename, flags);
+    int retval;
+
+    retval = copy_string_kernel(bprm->filename, bprm);
+    if (retval < 0)
+        return retval;
+    bprm->exec = bprm->p;
+
+    retval = copy_strings(bprm->envc, envp, bprm);
+    if (retval < 0)
+        return retval;
+
+    retval = copy_strings(bprm->argc, argv, bprm);
+    if (retval < 0)
+        return retval;
+
+    retval = bprm_execve(bprm);
+    return retval;
+}
+"""
+
+
+BIN_ELF_C = """
+static int load_elf_binary(struct linux_binprm *bprm)
+{
+    struct elfhdr *elf_ex = (struct elfhdr *)bprm->buf;
+    struct elfhdr *interp_elf_ex = NULL;
+    struct elf_phdr *elf_phdata;
+    struct elf_phdr *interp_elf_phdata = NULL;
+    struct mm_struct *mm;
+    int retval;
+
+    elf_phdata = load_elf_phdrs(elf_ex, bprm->file);
+    if (!elf_phdata)
+        return -ENOEXEC;
+
+    interp_elf_phdata = load_elf_phdrs(interp_elf_ex, interpreter);
+    if (!interp_elf_phdata)
+        return -ELIBBAD;
+
+    retval = begin_new_exec(bprm);
+    if (retval)
+        return retval;
+
+    retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
+                             executable_stack);
+    if (retval < 0)
+        return retval;
+
+    error = elf_load(bprm->file, load_bias + vaddr, elf_ppnt,
+                     elf_prot, elf_flags, total_size);
+
+    retval = create_elf_tables(bprm, elf_ex, interp_load_addr,
+                               e_entry, phdr_addr);
+    if (retval < 0)
+        return retval;
+
+    mm = current->mm;
+    mm->start_stack = bprm->p;
+
+    START_THREAD(elf_ex, regs, elf_entry, bprm->p);
+    return 0;
+}
+"""
+
+
+PROCESS_C = """
+void start_thread(struct pt_regs *regs, unsigned long pc,
+                  unsigned long sp)
+{
+    regs->status = SR_PIE;
+    regs->epc = pc;
+    regs->sp = sp;
+}
+"""
+
+
+ENTRY_S = """
+SYM_CODE_START_NOALIGN(ret_from_exception)
+    REG_L a0, PT_STATUS(sp)
+    csrw CSR_STATUS, a0
+    csrw CSR_EPC, a2
+    REG_L x2, PT_SP(sp)
+    sret
+SYM_CODE_END(ret_from_exception)
+"""
+
+
+FORK_C = """
+SYSCALL_DEFINE1(set_tid_address, int __user *, tidptr)
+{
+    current->clear_child_tid = tidptr;
+    return task_pid_vnr(current);
+}
+
+pid_t kernel_clone(struct kernel_clone_args *args)
+{
+    struct task_struct *p;
+    int trace = 0;
+
+    p = copy_process(NULL, trace, NUMA_NO_NODE, args);
+    if (IS_ERR(p))
+        return PTR_ERR(p);
+    wake_up_new_task(p);
+    return pid_vnr(get_task_pid(p, PIDTYPE_PID));
+}
+
+#ifdef __ARCH_WANT_SYS_CLONE
+#ifdef CONFIG_CLONE_BACKWARDS
+SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
+                int __user *, parent_tidptr,
+                unsigned long, tls,
+                int __user *, child_tidptr)
+#elif defined(CONFIG_CLONE_BACKWARDS2)
+SYSCALL_DEFINE5(clone, unsigned long, newsp, unsigned long, clone_flags,
+                int __user *, parent_tidptr,
+                int __user *, child_tidptr,
+                unsigned long, tls)
+#else
+SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
+                int __user *, parent_tidptr,
+                int __user *, child_tidptr,
+                unsigned long, tls)
+#endif
+{
+    struct kernel_clone_args args = {
+        .stack = newsp,
+        .tls = tls,
+    };
+    return kernel_clone(&args);
+}
+#endif
+"""
+
+
+EXIT_C = """
+void __noreturn do_group_exit(int exit_code)
+{
+    do_exit(exit_code);
+}
+
+long kernel_wait4(pid_t upid, int __user *stat_addr, int options,
+                  struct rusage *ru)
+{
+    struct wait_opts wo;
+    long ret;
+
+    wo.wo_flags = options | WEXITED;
+    ret = do_wait(&wo);
+    if (ret > 0 && stat_addr && put_user(wo.wo_stat, stat_addr))
+        ret = -EFAULT;
+    return ret;
+}
+
+SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
+                int, options, struct rusage __user *, ru)
+{
+    struct rusage r;
+    long err = kernel_wait4(upid, stat_addr, options, ru ? &r : NULL);
+
+    return err;
+}
+"""
+
+
 class MapLinuxCheckpointsTests(unittest.TestCase):
     def _write_linux_fixture(self, tmp: str) -> Path:
         root = Path(tmp) / "linux"
         (root / "init").mkdir(parents=True)
         (root / "mm").mkdir(parents=True)
         (root / "kernel" / "sched").mkdir(parents=True)
+        (root / "kernel").mkdir(parents=True, exist_ok=True)
+        (root / "fs").mkdir(parents=True)
         (root / "arch" / "riscv" / "kernel").mkdir(parents=True)
         (root / "arch" / "riscv" / "mm").mkdir(parents=True)
         (root / "init" / "main.c").write_text(MAIN_C, encoding="utf-8")
         (root / "mm" / "mm_init.c").write_text(MM_INIT_C, encoding="utf-8")
         (root / "kernel" / "sched" / "core.c").write_text(SCHED_CORE_C, encoding="utf-8")
+        (root / "kernel" / "fork.c").write_text(FORK_C, encoding="utf-8")
+        (root / "kernel" / "exit.c").write_text(EXIT_C, encoding="utf-8")
+        (root / "fs" / "read_write.c").write_text(READ_WRITE_C, encoding="utf-8")
+        (root / "fs" / "open.c").write_text(OPEN_C, encoding="utf-8")
+        (root / "fs" / "stat.c").write_text(STAT_C, encoding="utf-8")
+        (root / "fs" / "exec.c").write_text(EXEC_C, encoding="utf-8")
+        (root / "fs" / "binfmt_elf.c").write_text(BIN_ELF_C, encoding="utf-8")
         (root / "init" / "do_mounts.c").write_text(DO_MOUNTS_C, encoding="utf-8")
         (root / "arch" / "riscv" / "kernel" / "head.S").write_text(HEAD_S, encoding="utf-8")
+        (root / "arch" / "riscv" / "kernel" / "entry.S").write_text(
+            ENTRY_S,
+            encoding="utf-8",
+        )
+        (root / "arch" / "riscv" / "kernel" / "process.c").write_text(
+            PROCESS_C,
+            encoding="utf-8",
+        )
         (root / "arch" / "riscv" / "mm" / "init.c").write_text(
             RISCV_MM_INIT_C,
             encoding="utf-8",
@@ -342,6 +614,193 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("csrw CSR_SATP, a2", by_name["EarlyVm.Online"].linux_anchor)
         self.assertIn("handle_exception", by_name["EventStream.Ready"].linux_anchor)
 
+    def test_syscall_macro_parser_handles_wrappers_and_rejects_conditional_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            index = map_linux_checkpoints.LinuxSourceIndex(linux_tree)
+
+            read = index.find_symbol("fs/read_write.c", "SYSCALL_DEFINE3(read)")
+            write = index.find_symbol("fs/read_write.c", "SYSCALL_DEFINE3(write)")
+            clone = index.find_symbol("kernel/fork.c", "SYSCALL_DEFINE5(clone)")
+
+        self.assertIsNotNone(read)
+        assert read is not None
+        self.assertEqual(read.kind, "syscall_macro")
+        self.assertIn("ksys_read", read.body)
+
+        self.assertIsNotNone(write)
+        assert write is not None
+        self.assertEqual(write.kind, "syscall_macro")
+        self.assertIn("ksys_write", write.body)
+
+        self.assertIsNone(clone)
+
+    def test_syscall_macro_missing_anchor_is_unmapped(self) -> None:
+        record = map_linux_checkpoints.CheckpointInventoryRecord(
+            index=12,
+            variant="DemoMissingSyscallAnchor",
+            name="Demo.MissingSyscallAnchor",
+        )
+        missing = map_linux_checkpoints.MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/read_write.c",
+            linux_symbol="SYSCALL_DEFINE3(read)",
+            confidence="high",
+            notes="fixture syscall macro",
+            anchor_pattern=r"\bdoes_not_exist\s*\(",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                [record],
+                linux_tree=self._write_linux_fixture(tmp),
+                rules={"Demo.MissingSyscallAnchor": missing},
+            )[0]
+
+        self.assertEqual(mapped.mapping_kind, "unmapped")
+        self.assertIn("Linux anchor", mapped.notes)
+
+    def test_user_mode_boundary_rules_map_to_linux_anchors(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=380,
+                variant="SyscallTableExecveArgsReady",
+                name="SyscallTable.ExecveArgsReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=381,
+                variant="UserExecMainElfReady",
+                name="UserExec.MainElfReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=382,
+                variant="UserExecInterpreterReady",
+                name="UserExec.InterpreterReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=383,
+                variant="UserExecAddressSpaceReady",
+                name="UserExec.AddressSpaceReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=384,
+                variant="UserExecTrapFrameReady",
+                name="UserExec.TrapFrameReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=385,
+                variant="UserExecSatpReady",
+                name="UserExec.SatpReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=386,
+                variant="UserExecContextReplaced",
+                name="UserExec.ContextReplaced",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=387,
+                variant="UserExecSatpSwitched",
+                name="UserExec.SatpSwitched",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=388,
+                variant="UserExecReturnFrameReady",
+                name="UserExec.ReturnFrameReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=389,
+                variant="SyscallTableOpenAt",
+                name="SyscallTable.OpenAt",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=390,
+                variant="SyscallTableRead",
+                name="SyscallTable.Read",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=391,
+                variant="SyscallTableWrite",
+                name="SyscallTable.Write",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=392,
+                variant="SyscallTableWritev",
+                name="SyscallTable.Writev",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=393,
+                variant="SyscallTableClose",
+                name="SyscallTable.Close",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=394,
+                variant="SyscallTableNewFstatAt",
+                name="SyscallTable.NewFstatAt",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=395,
+                variant="SyscallTableSetTidAddress",
+                name="SyscallTable.SetTidAddress",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=396,
+                variant="SyscallTableClone",
+                name="SyscallTable.Clone",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=397,
+                variant="SyscallTableWait4",
+                name="SyscallTable.Wait4",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=398,
+                variant="UserChildParentWaitResumed",
+                name="UserChild.ParentWaitResumed",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=399,
+                variant="SyscallTableExit",
+                name="SyscallTable.Exit",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        self.assertEqual(by_name["SyscallTable.ExecveArgsReady"].linux_file, "fs/exec.c")
+        self.assertIn("copy_strings(bprm->argc", by_name["SyscallTable.ExecveArgsReady"].linux_anchor)
+        self.assertEqual(by_name["UserExec.MainElfReady"].linux_symbol, "load_elf_binary")
+        self.assertIn("load_elf_phdrs", by_name["UserExec.InterpreterReady"].linux_anchor)
+        self.assertEqual(by_name["UserExec.AddressSpaceReady"].mapping_kind, "range")
+        self.assertEqual(by_name["UserExec.AddressSpaceReady"].confidence, "medium")
+        self.assertEqual(by_name["UserExec.TrapFrameReady"].linux_file, "arch/riscv/kernel/process.c")
+        self.assertEqual(by_name["UserExec.SatpReady"].linux_symbol, "exec_mmap")
+        self.assertIn("exec_mmap", by_name["UserExec.ContextReplaced"].linux_anchor)
+        self.assertEqual(by_name["UserExec.SatpSwitched"].linux_symbol, "ret_from_exception")
+        self.assertIn("sret", by_name["UserExec.ReturnFrameReady"].linux_anchor)
+        self.assertEqual(by_name["SyscallTable.OpenAt"].linux_symbol, "SYSCALL_DEFINE4(openat)")
+        self.assertIn("do_sys_open", by_name["SyscallTable.OpenAt"].linux_anchor)
+        self.assertEqual(by_name["SyscallTable.Read"].linux_symbol, "SYSCALL_DEFINE3(read)")
+        self.assertIn("ksys_read", by_name["SyscallTable.Read"].linux_anchor)
+        self.assertIn("ksys_write", by_name["SyscallTable.Write"].linux_anchor)
+        self.assertIn("do_writev", by_name["SyscallTable.Writev"].linux_anchor)
+        self.assertEqual(by_name["SyscallTable.Close"].linux_file, "fs/open.c")
+        self.assertIn("file_close_fd", by_name["SyscallTable.Close"].linux_anchor)
+        self.assertIn("vfs_fstatat", by_name["SyscallTable.NewFstatAt"].linux_anchor)
+        self.assertIn("clear_child_tid", by_name["SyscallTable.SetTidAddress"].linux_anchor)
+        self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")
+        self.assertEqual(by_name["SyscallTable.Clone"].confidence, "medium")
+        self.assertIn("conditional", by_name["SyscallTable.Clone"].notes)
+        self.assertIn("kernel_wait4", by_name["SyscallTable.Wait4"].linux_anchor)
+        self.assertEqual(by_name["UserChild.ParentWaitResumed"].linux_symbol, "kernel_wait4")
+        self.assertEqual(by_name["UserChild.ParentWaitResumed"].confidence, "medium")
+        self.assertEqual(by_name["SyscallTable.Exit"].linux_symbol, "do_group_exit")
+        self.assertEqual(by_name["SyscallTable.Exit"].confidence, "medium")
+
     def test_write_outputs_uses_fixed_record_fields(self) -> None:
         records = [
             map_linux_checkpoints.LinuxCheckpointMappingRecord(
@@ -506,6 +965,13 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["BootInitRestInitPhase.Ready"].linux_symbol, "rest_init")
         self.assertEqual(by_name["RootfsPhase.Ready"].linux_symbol, "prepare_namespace")
         self.assertEqual(by_name["PayloadPhase.Online"].linux_symbol, "kernel_init")
+        self.assertEqual(by_name["SyscallTable.Read"].linux_symbol, "SYSCALL_DEFINE3(read)")
+        self.assertEqual(by_name["SyscallTable.Write"].linux_symbol, "SYSCALL_DEFINE3(write)")
+        self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")
+        self.assertEqual(by_name["SyscallTable.Clone"].confidence, "medium")
+        self.assertEqual(by_name["UserExec.AddressSpaceReady"].mapping_kind, "range")
+        self.assertEqual(by_name["UserExec.TrapFrameReady"].linux_symbol, "start_thread")
+        self.assertEqual(by_name["UserChild.ParentWaitResumed"].linux_symbol, "kernel_wait4")
 
 
 if __name__ == "__main__":

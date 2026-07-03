@@ -151,6 +151,56 @@ def _find_matching_delimiter(text: str, open_index: int, open_char: str, close_c
     raise LinuxCheckpointMappingError(f"unclosed {open_char!r}")
 
 
+def _offset_is_code(text: str, offset: int) -> bool:
+    i = 0
+    state = "code"
+    while i < offset:
+        char = text[i]
+        next_char = text[i + 1] if i + 1 < len(text) else ""
+
+        if state == "code":
+            if char == "/" and next_char == "/":
+                state = "line_comment"
+                i += 2
+                continue
+            if char == "/" and next_char == "*":
+                state = "block_comment"
+                i += 2
+                continue
+            if char == '"':
+                state = "string"
+                i += 1
+                continue
+            if char == "'":
+                state = "char"
+                i += 1
+                continue
+        elif state == "line_comment":
+            if char == "\n":
+                state = "code"
+        elif state == "block_comment":
+            if char == "*" and next_char == "/":
+                state = "code"
+                i += 2
+                continue
+        elif state == "string":
+            if char == "\\":
+                i += 2
+                continue
+            if char == '"':
+                state = "code"
+        elif state == "char":
+            if char == "\\":
+                i += 2
+                continue
+            if char == "'":
+                state = "code"
+
+        i += 1
+
+    return state == "code"
+
+
 class LinuxSourceIndex:
     def __init__(self, root: Path):
         self.root = root
@@ -174,7 +224,71 @@ class LinuxSourceIndex:
         if relative_file.endswith((".S", ".s")):
             return self._find_assembly_symbol(relative_file, symbol, text)
 
+        syscall_macro = self._find_syscall_macro(relative_file, symbol, text)
+        if syscall_macro is not None:
+            return syscall_macro
+
         return self._find_c_function(relative_file, symbol, text)
+
+    def _find_syscall_macro(
+        self,
+        relative_file: str,
+        symbol: str,
+        text: str,
+    ) -> LinuxSymbol | None:
+        symbol_match = re.fullmatch(
+            r"(SYSCALL_DEFINE[0-9]+)\(([A-Za-z_][A-Za-z0-9_]*)\)",
+            symbol,
+        )
+        if symbol_match is None:
+            return None
+
+        macro_name, syscall_name = symbol_match.groups()
+        macro_pattern = re.compile(
+            rf"^[ \t]*{re.escape(macro_name)}\s*\(\s*"
+            rf"{re.escape(syscall_name)}\b",
+            re.MULTILINE,
+        )
+        for match in macro_pattern.finditer(text):
+            if not _offset_is_code(text, match.start()):
+                continue
+            open_paren = text.find("(", match.start(), match.end() + 1)
+            if open_paren == -1:
+                continue
+            try:
+                close_paren = _find_matching_delimiter(text, open_paren, "(", ")")
+            except LinuxCheckpointMappingError:
+                continue
+
+            search_end = min(len(text), close_paren + 4096)
+            open_brace = text.find("{", close_paren, search_end)
+            if open_brace == -1:
+                continue
+
+            between_signature_and_body = text[close_paren + 1 : open_brace]
+            if (
+                re.search(r"\b(?:SYSCALL_DEFINE|COMPAT_SYSCALL_DEFINE)[0-9]+\s*\(", between_signature_and_body)
+                or re.search(r"^[ \t]*#\s*(?:elif|else|endif)\b", between_signature_and_body, re.MULTILINE)
+            ):
+                continue
+
+            try:
+                close_brace = _find_matching_delimiter(text, open_brace, "{", "}")
+            except LinuxCheckpointMappingError:
+                continue
+
+            return LinuxSymbol(
+                relative_file=relative_file,
+                name=symbol,
+                kind="syscall_macro",
+                start_line=_line_number(text, match.start()),
+                end_line=_line_number(text, close_brace),
+                body=text[open_brace + 1 : close_brace],
+                body_start_offset=open_brace + 1,
+                text=text,
+            )
+
+        return None
 
     def _find_c_function(
         self,
@@ -183,6 +297,8 @@ class LinuxSourceIndex:
         text: str,
     ) -> LinuxSymbol | None:
         for match in re.finditer(rf"\b{re.escape(symbol)}\s*\(", text):
+            if not _offset_is_code(text, match.start()):
+                continue
             open_paren = text.find("(", match.start(), match.end() + 1)
             if open_paren == -1:
                 continue
@@ -754,6 +870,167 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             anchor_pattern=r"\bsystem_state\s*=\s*SYSTEM_RUNNING\s*;",
             confidence="high",
             notes="Linux kernel_init() marks SYSTEM_RUNNING before payload selection.",
+        ),
+        "SyscallTable.ExecveArgsReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/exec.c",
+            linux_symbol="do_execveat_common",
+            anchor_pattern=r"\bretval\s*=\s*copy_strings\s*\(\s*bprm->argc\s*,\s*argv\s*,\s*bprm\s*\)\s*;",
+            confidence="high",
+            notes="Linux do_execveat_common() has copied filename, envp and argv into linux_binprm before bprm_execve().",
+        ),
+        "UserExec.MainElfReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/binfmt_elf.c",
+            linux_symbol="load_elf_binary",
+            anchor_pattern=r"\belf_phdata\s*=\s*load_elf_phdrs\s*\(\s*elf_ex\s*,\s*bprm->file\s*\)\s*;",
+            confidence="high",
+            notes="Linux ELF loader has read the main executable program headers.",
+        ),
+        "UserExec.InterpreterReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/binfmt_elf.c",
+            linux_symbol="load_elf_binary",
+            anchor_pattern=r"\binterp_elf_phdata\s*=\s*load_elf_phdrs\s*\(\s*interp_elf_ex\s*,\s*interpreter\s*\)\s*;",
+            confidence="high",
+            notes="Linux PT_INTERP path has opened and parsed the interpreter ELF program headers when an interpreter is present.",
+        ),
+        "UserExec.AddressSpaceReady": MappingRule(
+            mapping_kind="range",
+            linux_file="fs/binfmt_elf.c",
+            linux_symbol="load_elf_binary",
+            start_anchor_pattern=r"\bretval\s*=\s*setup_arg_pages\s*\(",
+            end_anchor_pattern=r"\bmm->start_stack\s*=\s*bprm->p\s*;",
+            confidence="medium",
+            notes="Linux load_elf_binary() stack setup, PT_LOAD mapping, interpreter load, ELF tables and mm layout interval.",
+        ),
+        "UserExec.TrapFrameReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/process.c",
+            linux_symbol="start_thread",
+            anchor_pattern=r"\bregs->epc\s*=\s*pc\s*;",
+            confidence="high",
+            notes="RISC-V start_thread() installs the user entry PC and stack in pt_regs for exec return.",
+        ),
+        "UserExec.SatpReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/exec.c",
+            linux_symbol="exec_mmap",
+            anchor_pattern=r"\bactivate_mm\s*\(\s*active_mm\s*,\s*mm\s*\)\s*;",
+            confidence="medium",
+            notes="Linux exec_mmap() installs and activates the new mm; Linux has no separate arceos_ex satp token boundary.",
+        ),
+        "UserExec.ContextReplaced": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/exec.c",
+            linux_symbol="begin_new_exec",
+            anchor_pattern=r"\bretval\s*=\s*exec_mmap\s*\(\s*bprm->mm\s*\)\s*;",
+            confidence="medium",
+            notes="Linux begin_new_exec() crosses the point-of-no-return and hands the nascent exec mm to exec_mmap().",
+        ),
+        "UserExec.SatpSwitched": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/entry.S",
+            linux_symbol="ret_from_exception",
+            anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_STATUS,\s*a0\b",
+            confidence="medium",
+            notes="RISC-V return-to-user path restores trap CSRs before sret; this is architecture-scoped and not a separate Linux satp object boundary.",
+        ),
+        "UserExec.ReturnFrameReady": MappingRule(
+            mapping_kind="exact",
+            linux_file="arch/riscv/kernel/entry.S",
+            linux_symbol="ret_from_exception",
+            anchor_pattern=r"^[ \t]*sret\b",
+            confidence="medium",
+            notes="RISC-V ret_from_exception reaches the final sret return-to-user boundary.",
+        ),
+        "SyscallTable.OpenAt": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/open.c",
+            linux_symbol="SYSCALL_DEFINE4(openat)",
+            anchor_pattern=r"\breturn\s+do_sys_open\s*\(\s*dfd\s*,\s*filename\s*,\s*flags\s*,\s*mode\s*\)\s*;",
+            confidence="high",
+            notes="Linux openat syscall wrapper dispatches to do_sys_open().",
+        ),
+        "SyscallTable.Read": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/read_write.c",
+            linux_symbol="SYSCALL_DEFINE3(read)",
+            anchor_pattern=r"\breturn\s+ksys_read\s*\(\s*fd\s*,\s*buf\s*,\s*count\s*\)\s*;",
+            confidence="high",
+            notes="Linux read syscall wrapper dispatches to ksys_read().",
+        ),
+        "SyscallTable.Write": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/read_write.c",
+            linux_symbol="SYSCALL_DEFINE3(write)",
+            anchor_pattern=r"\breturn\s+ksys_write\s*\(\s*fd\s*,\s*buf\s*,\s*count\s*\)\s*;",
+            confidence="high",
+            notes="Linux write syscall wrapper dispatches to ksys_write().",
+        ),
+        "SyscallTable.Writev": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/read_write.c",
+            linux_symbol="SYSCALL_DEFINE3(writev)",
+            anchor_pattern=r"\breturn\s+do_writev\s*\(\s*fd\s*,\s*vec\s*,\s*vlen\s*,\s*0\s*\)\s*;",
+            confidence="high",
+            notes="Linux writev syscall wrapper dispatches to do_writev().",
+        ),
+        "SyscallTable.Close": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/open.c",
+            linux_symbol="SYSCALL_DEFINE1(close)",
+            anchor_pattern=r"\bfile\s*=\s*file_close_fd\s*\(\s*fd\s*\)\s*;",
+            confidence="high",
+            notes="Linux close syscall wrapper removes the fd entry before flushing and fput handling.",
+        ),
+        "SyscallTable.NewFstatAt": MappingRule(
+            mapping_kind="exact",
+            linux_file="fs/stat.c",
+            linux_symbol="SYSCALL_DEFINE4(newfstatat)",
+            anchor_pattern=r"\berror\s*=\s*vfs_fstatat\s*\(\s*dfd\s*,\s*filename\s*,\s*&stat\s*,\s*flag\s*\)\s*;",
+            confidence="high",
+            notes="Linux newfstatat syscall wrapper dispatches to vfs_fstatat() before stat copyout.",
+        ),
+        "SyscallTable.SetTidAddress": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/fork.c",
+            linux_symbol="SYSCALL_DEFINE1(set_tid_address)",
+            anchor_pattern=r"\bcurrent->clear_child_tid\s*=\s*tidptr\s*;",
+            confidence="high",
+            notes="Linux set_tid_address syscall wrapper records current->clear_child_tid and returns task_pid_vnr().",
+        ),
+        "SyscallTable.Clone": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/fork.c",
+            linux_symbol="kernel_clone",
+            anchor_pattern=r"\bp\s*=\s*copy_process\s*\(\s*NULL\s*,\s*trace\s*,\s*NUMA_NO_NODE\s*,\s*args\s*\)\s*;",
+            confidence="medium",
+            notes="Mapped to shared kernel_clone() because the legacy clone syscall ABI wrapper is arch/config conditional on CONFIG_CLONE_BACKWARDS variants.",
+        ),
+        "SyscallTable.Wait4": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/exit.c",
+            linux_symbol="SYSCALL_DEFINE4(wait4)",
+            anchor_pattern=r"\blong\s+err\s*=\s*kernel_wait4\s*\(\s*upid\s*,\s*stat_addr\s*,\s*options\s*,\s*ru\s*\?\s*&r\s*:\s*NULL\s*\)\s*;",
+            confidence="high",
+            notes="Linux wait4 syscall wrapper dispatches to kernel_wait4().",
+        ),
+        "UserChild.ParentWaitResumed": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/exit.c",
+            linux_symbol="kernel_wait4",
+            anchor_pattern=r"\bif\s*\(\s*ret\s*>\s*0\s*&&\s*stat_addr\s*&&\s*put_user\s*\(\s*wo\.wo_stat\s*,\s*stat_addr\s*\)\s*\)",
+            confidence="medium",
+            notes="Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent.",
+        ),
+        "SyscallTable.Exit": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/exit.c",
+            linux_symbol="do_group_exit",
+            anchor_pattern=r"\bdo_exit\s*\(\s*exit_code\s*\)\s*;",
+            confidence="medium",
+            notes="Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit().",
         ),
     }
 

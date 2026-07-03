@@ -239,6 +239,9 @@ predicate arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runt
 predicate arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check() -> bool;
+predicate arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact() -> bool;
+predicate arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only() -> bool;
+predicate arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2322,6 +2325,19 @@ type ArceosExIrqTimeInitCodingMust {
          * unmapped means the current stage cannot justify a reliable mapping
          * and must record the reason instead of guessing.
          *
+         * The read-only source parser may resolve C function definitions,
+         * SYSCALL_DEFINE* syscall wrapper macro definitions and assembly
+         * symbols/labels. User-mode syscall checkpoints may map to the
+         * corresponding SYSCALL_DEFINE* wrapper around the core helper call.
+         * If a syscall ABI wrapper is arch/config conditional and therefore
+         * not a stable RISC-V64 semantic boundary, the mapping must use the
+         * shared implementation helper or remain unmapped, with medium-or-lower
+         * confidence and notes that explain the conditional ABI layer. User
+         * exec, return-to-user and wait boundaries may use RISC-V64
+         * architecture-scoped anchors, but must keep range/medium confidence
+         * where the correspondence is phase-level rather than a single exact
+         * object boundary.
+         *
          * The mapping stage may include explicitly architecture-scoped RISC-V64
          * entry anchors. For that scope it must be able to resolve
          * arch/riscv/kernel/head.S symbols declared through SYM_CODE_START /
@@ -2365,6 +2381,36 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors();
         arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit();
         arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check();
+
+        /*
+         * Linux checkpoint mapping coverage review:
+         *
+         * A third Linux-differential checkpoint artifact may summarize the
+         * tracked Linux checkpoint mapping as a compact coverage review. This
+         * stage is mapping-only: it consumes
+         * tools/out/checkpoints/linux_checkpoint_mapping.json and must not
+         * read or mutate a Linux tree, alter mapping_kind/classification
+         * semantics, add instrumentation, collect runtime data, or change
+         * checkpoint handlers.
+         *
+         * The output surface remains tools/out/checkpoints/ with
+         * machine-readable JSON and human-readable Markdown. The JSON must
+         * contain only aggregate review data: total checkpoint count, mapping
+         * kind counts, confidence counts, mapped Linux file counts, unmapped
+         * checkpoint family counts and the singleton unmapped family count.
+         * It must not copy the full per-checkpoint mapping rows or include
+         * timestamps. The Markdown should keep the same compact view and
+         * list only unmapped families with count >= 2, while summarizing the
+         * number of singleton unmapped families.
+         *
+         * The coverage tool must also support a read-only regeneration check:
+         * it regenerates JSON and Markdown in memory from the tracked mapping
+         * artifact, compares them with the tracked coverage artifacts, and
+         * reports drift as failure without rewriting repository outputs.
+         */
+        arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact();
+        arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only();
+        arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check();
 
         /*
          * Observation levels and domains:

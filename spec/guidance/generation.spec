@@ -16,6 +16,7 @@ predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bo
 predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
 predicate guidance_agent_must_keep_linux_checkpoint_mapping_read_only() -> bool;
 predicate guidance_agent_must_make_checkpoint_artifact_checks_read_only() -> bool;
+predicate guidance_agent_must_keep_linux_checkpoint_coverage_mapping_only() -> bool;
 predicate guidance_user_boot_codegen_must_read_user_boot_specs_first() -> bool;
 predicate guidance_user_boot_codegen_must_use_consensus_object_names() -> bool;
 predicate guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects() -> bool;
@@ -92,6 +93,11 @@ type RepositoryChangeWorkflow {
          * Linux source tree, and emit reviewable mapping artifacts. It must
          * not silently turn the task into Linux instrumentation, runtime
          * collection, checkpoint-handler changes or behavioral changes.
+         * The mapping parser may resolve C functions, SYSCALL_DEFINE* syscall
+         * wrappers and assembly symbols/labels. Conditional arch/config ABI
+         * wrappers must be handled conservatively: map to a shared helper or
+         * keep the checkpoint unmapped, with confidence and notes explaining
+         * the conditional layer.
          * Architecture-specific entry mapping, such as RISC-V64 head.S and
          * setup_vm() alignment, must keep that architecture scope explicit
          * and must classify uncertain object boundaries as range or unmapped.
@@ -99,13 +105,26 @@ type RepositoryChangeWorkflow {
         guidance_agent_must_keep_linux_checkpoint_mapping_read_only();
 
         /*
+         * Linux checkpoint coverage is mapping-only:
+         *
+         * When the requested task summarizes Linux checkpoint mapping
+         * coverage, the agent must treat it as a review artifact derived only
+         * from the tracked mapping JSON. It may aggregate counts by mapping
+         * kind, confidence, Linux file and unmapped checkpoint family, but it
+         * must not reinterpret mappings, read or edit Linux sources, add
+         * runtime collection, or change checkpoint handlers.
+         */
+        guidance_agent_must_keep_linux_checkpoint_coverage_mapping_only();
+
+        /*
          * Checkpoint artifact checks are drift detectors:
          *
-         * When adding or running checkpoint inventory or Linux mapping
-         * validation, check mode must regenerate expected artifacts in memory,
-         * compare them with the tracked review artifacts, and fail on drift.
-         * It must not rewrite outputs, edit Linux sources, add runtime
-         * collection, or change checkpoint handlers while validating.
+         * When adding or running checkpoint inventory, Linux mapping or Linux
+         * mapping coverage validation, check mode must regenerate expected
+         * artifacts in memory, compare them with the tracked review artifacts,
+         * and fail on drift. It must not rewrite outputs, edit Linux sources,
+         * add runtime collection, or change checkpoint handlers while
+         * validating.
          */
         guidance_agent_must_make_checkpoint_artifact_checks_read_only();
     }

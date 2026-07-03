@@ -1,0 +1,2816 @@
+[
+  {
+    "index": 0,
+    "variant": "StartupTimelineStarted",
+    "name": "StartupTimeline.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 1,
+    "variant": "StartupTimelineReady",
+    "name": "StartupTimeline.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 2,
+    "variant": "PreparePhaseReady",
+    "name": "PreparePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 3,
+    "variant": "PreparePhaseOnline",
+    "name": "PreparePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 4,
+    "variant": "BootPhaseStarted",
+    "name": "BootPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 5,
+    "variant": "BootPhaseReady",
+    "name": "BootPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 6,
+    "variant": "InterruptPhaseStarted",
+    "name": "InterruptPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 7,
+    "variant": "InterruptPhaseReady",
+    "name": "InterruptPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 8,
+    "variant": "EntryPreludePhaseStarted",
+    "name": "EntryPreludePhase.Started",
+    "early_byte": "A",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 9,
+    "variant": "EntryPreludePhaseReady",
+    "name": "EntryPreludePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 10,
+    "variant": "EntrySuccessorPhaseStarted",
+    "name": "EntrySuccessorPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 11,
+    "variant": "EntrySuccessorPhaseReady",
+    "name": "EntrySuccessorPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 12,
+    "variant": "EntryPreludePhaseDestroyed",
+    "name": "EntryPreludePhase.Destroyed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 13,
+    "variant": "InterruptStreamPrepared",
+    "name": "InterruptStream.Prepared",
+    "early_byte": "I",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 14,
+    "variant": "InterruptStreamReady",
+    "name": "InterruptStream.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 15,
+    "variant": "KernelImagePrepared",
+    "name": "KernelImage.Prepared",
+    "early_byte": "K",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 16,
+    "variant": "RootStreamPrepared",
+    "name": "RootStream.Prepared",
+    "early_byte": "O",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 17,
+    "variant": "KernelImageReady",
+    "name": "KernelImage.Ready",
+    "early_byte": "Z",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 18,
+    "variant": "BootCurrentCpuReady",
+    "name": "BootCurrentCPU.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 19,
+    "variant": "BootCurrentCpuOnline",
+    "name": "BootCurrentCPU.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 20,
+    "variant": "BootCpuPrepared",
+    "name": "BootCPU.Prepared",
+    "early_byte": "H",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 21,
+    "variant": "BootCpuReady",
+    "name": "BootCPU.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 22,
+    "variant": "BootCpuOnline",
+    "name": "BootCPU.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 23,
+    "variant": "BootCpuLocalInterruptReady",
+    "name": "BootCpuLocalInterrupt.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 24,
+    "variant": "BootCpuCurrentTaskReady",
+    "name": "BootCpuCurrentTask.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 25,
+    "variant": "CpuGroupPrepared",
+    "name": "CpuGroup.Prepared",
+    "early_byte": "G",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 26,
+    "variant": "InitTaskPrepared",
+    "name": "InitTask.Prepared",
+    "early_byte": "T",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 27,
+    "variant": "InitStackPrepared",
+    "name": "InitStack.Prepared",
+    "early_byte": "S",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 28,
+    "variant": "EventStreamPrepared",
+    "name": "EventStream.Prepared",
+    "early_byte": "V",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 29,
+    "variant": "ExceptionStreamPrepared",
+    "name": "ExceptionStream.Prepared",
+    "early_byte": "9",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 30,
+    "variant": "TrampolineVmReady",
+    "name": "TrampolineVm.Ready",
+    "early_byte": "Q",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 31,
+    "variant": "TrampolineVmOnline",
+    "name": "TrampolineVm.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 32,
+    "variant": "TrampolineVmDestroyed",
+    "name": "TrampolineVm.Destroyed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 33,
+    "variant": "RawDtbPrepared",
+    "name": "RawDtb.Prepared",
+    "early_byte": "Y",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 34,
+    "variant": "RawDtbReady",
+    "name": "RawDtb.Ready",
+    "early_byte": "W",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 35,
+    "variant": "FixMapReady",
+    "name": "FixMap.Ready",
+    "early_byte": "M",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 36,
+    "variant": "EarlyVmPrepared",
+    "name": "EarlyVm.Prepared",
+    "early_byte": "N",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 37,
+    "variant": "EarlyVmReady",
+    "name": "EarlyVm.Ready",
+    "early_byte": "J",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 38,
+    "variant": "EarlyVmOnline",
+    "name": "EarlyVm.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 39,
+    "variant": "VmPrepared",
+    "name": "Vm.Prepared",
+    "early_byte": "U",
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 40,
+    "variant": "VmReady",
+    "name": "Vm.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 41,
+    "variant": "VmOnline",
+    "name": "Vm.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 42,
+    "variant": "KernelImageOnline",
+    "name": "KernelImage.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 43,
+    "variant": "EventStreamReady",
+    "name": "EventStream.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 44,
+    "variant": "InitTaskOnline",
+    "name": "InitTask.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 45,
+    "variant": "InitStackReady",
+    "name": "InitStack.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 46,
+    "variant": "InitStackOnline",
+    "name": "InitStack.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 47,
+    "variant": "SocPrepared",
+    "name": "Soc.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 48,
+    "variant": "EarlyDtbPrepared",
+    "name": "EarlyDtb.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 49,
+    "variant": "EarlyDtbReady",
+    "name": "EarlyDtb.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 50,
+    "variant": "EarlyDtbDestroyed",
+    "name": "EarlyDtb.Destroyed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 51,
+    "variant": "PlatformCpuInfoReady",
+    "name": "PlatformCpuInfo.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 52,
+    "variant": "PlatformCpuInfoOnline",
+    "name": "PlatformCpuInfo.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 53,
+    "variant": "PhysicalMemoryReady",
+    "name": "PhysicalMemory.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 54,
+    "variant": "PhysicalMemoryOnline",
+    "name": "PhysicalMemory.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 55,
+    "variant": "CommandLinePrepared",
+    "name": "CommandLine.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 56,
+    "variant": "KernelCmdlineReady",
+    "name": "KernelCmdline.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 57,
+    "variant": "InitMmReady",
+    "name": "InitMM.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 58,
+    "variant": "EarlyIoremapReady",
+    "name": "EarlyIoremap.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 59,
+    "variant": "SbiReady",
+    "name": "SBI.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 60,
+    "variant": "EarlyParamReady",
+    "name": "EarlyParam.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 61,
+    "variant": "MemBlockPrepared",
+    "name": "MemBlock.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 62,
+    "variant": "MemBlockReady",
+    "name": "MemBlock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 63,
+    "variant": "MemBlockOnline",
+    "name": "MemBlock.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 64,
+    "variant": "MemBlockOffline",
+    "name": "MemBlock.Offline",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 65,
+    "variant": "SwapperVmReady",
+    "name": "SwapperVm.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 66,
+    "variant": "SwapperVmOnline",
+    "name": "SwapperVm.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 67,
+    "variant": "EarlyVmDestroyed",
+    "name": "EarlyVm.Destroyed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 68,
+    "variant": "PrintkBufferPrepared",
+    "name": "PrintkBuffer.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 69,
+    "variant": "EarlyConPrepared",
+    "name": "EarlyCon.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 70,
+    "variant": "EarlyConReady",
+    "name": "EarlyCon.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 71,
+    "variant": "EarlyConOnline",
+    "name": "EarlyCon.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 72,
+    "variant": "EarlyConOffline",
+    "name": "EarlyCon.Offline",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 73,
+    "variant": "Serial8250ConsoleOnline",
+    "name": "Serial8250Console.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 74,
+    "variant": "Serial8250ConsoleIrqDrivenReady",
+    "name": "Serial8250Console.IrqDrivenReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 75,
+    "variant": "Serial8250ConsoleLongBurstIrqTxReady",
+    "name": "Serial8250ConsoleLongBurstIrqTx.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 76,
+    "variant": "Serial8250ConsoleTxQuiesceReady",
+    "name": "Serial8250ConsoleTxQuiesce.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 77,
+    "variant": "Serial8250RxLoopbackReady",
+    "name": "Serial8250RxLoopback.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 78,
+    "variant": "Serial8250RxBatchLoopbackReady",
+    "name": "Serial8250RxBatchLoopback.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 79,
+    "variant": "BootConsoleOffline",
+    "name": "BootConsole.Offline",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 80,
+    "variant": "CorePreparePhaseStarted",
+    "name": "CorePreparePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 81,
+    "variant": "CorePreparePhaseReady",
+    "name": "CorePreparePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 82,
+    "variant": "DeviceTreeReady",
+    "name": "DeviceTree.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 83,
+    "variant": "ZonesReady",
+    "name": "Zones.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 84,
+    "variant": "ResourceTreeReady",
+    "name": "ResourceTree.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 85,
+    "variant": "CpuGroupReady",
+    "name": "CpuGroup.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 86,
+    "variant": "CacheBlockInfoReady",
+    "name": "CacheBlockInfo.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 87,
+    "variant": "CpuCapabilitiesReady",
+    "name": "CpuCapabilities.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 88,
+    "variant": "DmaCachePolicyReady",
+    "name": "DmaCachePolicy.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 89,
+    "variant": "StaticBranchReady",
+    "name": "StaticBranch.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 90,
+    "variant": "CommandLineReady",
+    "name": "CommandLine.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 91,
+    "variant": "SavedCommandLineReady",
+    "name": "SavedCommandLine.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 92,
+    "variant": "StaticCommandLineReady",
+    "name": "StaticCommandLine.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 93,
+    "variant": "SetupNrCpuIdsCheckpoint",
+    "name": "SetupNrCpuIds.Checkpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 94,
+    "variant": "PerCpuStaticImageReady",
+    "name": "PerCpuStaticImage.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 95,
+    "variant": "PerCpuFirstChunkReady",
+    "name": "PerCpuFirstChunk.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 96,
+    "variant": "PerCpuOffsetTableReady",
+    "name": "PerCpuOffsetTable.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 97,
+    "variant": "PerCpuStorageReady",
+    "name": "PerCpuStorage.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 98,
+    "variant": "CpuHotplugStateReady",
+    "name": "CpuHotplugState.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 99,
+    "variant": "SecondParseEarlyParamCheckpoint",
+    "name": "SecondParseEarlyParam.Checkpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 100,
+    "variant": "BootParamReady",
+    "name": "BootParam.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 101,
+    "variant": "PrintUnknownBootoptionsCheckpoint",
+    "name": "PrintUnknownBootoptions.Checkpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 102,
+    "variant": "PayloadParamReady",
+    "name": "PayloadParam.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 103,
+    "variant": "RandomnessPrepared",
+    "name": "Randomness.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 104,
+    "variant": "PrintkBufferReady",
+    "name": "PrintkBuffer.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 105,
+    "variant": "ExceptionTableReady",
+    "name": "ExceptionTable.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 106,
+    "variant": "ExceptionStreamReady",
+    "name": "ExceptionStream.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 107,
+    "variant": "MmCoreInitPhaseStarted",
+    "name": "MmCoreInitPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 108,
+    "variant": "MmCoreInitPhaseReady",
+    "name": "MmCoreInitPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 109,
+    "variant": "MemoryTopologyReady",
+    "name": "MemoryTopology.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 110,
+    "variant": "MemoryNodeReady",
+    "name": "MemoryNode.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 111,
+    "variant": "ZoneSetReady",
+    "name": "ZoneSet.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 112,
+    "variant": "PageMetadataMapReady",
+    "name": "PageMetadataMap.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 113,
+    "variant": "ZonelistSetReady",
+    "name": "ZonelistSet.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 114,
+    "variant": "PageAllocatorPrepared",
+    "name": "PageAllocator.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 115,
+    "variant": "MemoryDebugHardeningReady",
+    "name": "MemoryDebugHardening.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 116,
+    "variant": "StackDepotReady",
+    "name": "StackDepot.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 117,
+    "variant": "SwiotlbReady",
+    "name": "Swiotlb.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 118,
+    "variant": "PageAllocatorReady",
+    "name": "PageAllocator.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 119,
+    "variant": "PageAllocatorMemBlockHandoffReady",
+    "name": "PageAllocator.MemBlockHandoffReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 120,
+    "variant": "SlubSubsystemPrepared",
+    "name": "SlubSubsystem.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 121,
+    "variant": "SlubCacheRegistryReady",
+    "name": "SlubCacheRegistry.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 122,
+    "variant": "KmallocCachesReady",
+    "name": "KmallocCaches.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 123,
+    "variant": "SlubSubsystemReady",
+    "name": "SlubSubsystem.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 124,
+    "variant": "KernelGlobalAllocatorReady",
+    "name": "KernelGlobalAllocator.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 125,
+    "variant": "DynamicContainerRuntimeReady",
+    "name": "DynamicContainerRuntime.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 126,
+    "variant": "PageTableLockCacheReady",
+    "name": "PageTableLockCache.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 127,
+    "variant": "PageTableCachesReady",
+    "name": "PageTableCaches.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 128,
+    "variant": "VmapAreaCacheReady",
+    "name": "VmapAreaCache.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 129,
+    "variant": "VmapAddressSpaceReady",
+    "name": "VmapAddressSpace.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 130,
+    "variant": "VmapNodeSetReady",
+    "name": "VmapNodeSet.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 131,
+    "variant": "VmapBlockQueuesReady",
+    "name": "VmapBlockQueues.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 132,
+    "variant": "VfreeDeferredSetReady",
+    "name": "VfreeDeferredSet.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 133,
+    "variant": "VmallocAllocatorReady",
+    "name": "VmallocAllocator.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 134,
+    "variant": "IoremapReady",
+    "name": "Ioremap.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 135,
+    "variant": "MmStructCacheReady",
+    "name": "MmStructCache.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 136,
+    "variant": "MmCoreTrimmedPathsReady",
+    "name": "MmCoreTrimmedPaths.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 137,
+    "variant": "SchedInitPhaseStarted",
+    "name": "SchedInitPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 138,
+    "variant": "SchedInitPhaseReady",
+    "name": "SchedInitPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 139,
+    "variant": "PokingInitNoop",
+    "name": "PokingInit.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 140,
+    "variant": "FtraceInitTrimmedNoop",
+    "name": "FtraceInit.TrimmedNoop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 141,
+    "variant": "EarlyTraceInitDeferred",
+    "name": "EarlyTraceInit.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 142,
+    "variant": "SchedInitPreludeTrimmedPathsReady",
+    "name": "SchedInitPreludeTrimmedPaths.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 143,
+    "variant": "DefaultSchedRootDomainReady",
+    "name": "DefaultSchedRootDomain.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 144,
+    "variant": "BitWaitQueueTablePrepared",
+    "name": "BitWaitQueueTable.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 145,
+    "variant": "BootIdleRcuReadSidePrepared",
+    "name": "BootIdleRcuReadSide.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 146,
+    "variant": "SchedulerPrepared",
+    "name": "Scheduler.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 147,
+    "variant": "BootRunQueueReady",
+    "name": "BootRunQueue.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 148,
+    "variant": "BootRunQueueLockReady",
+    "name": "BootRunQueueLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 149,
+    "variant": "BootInitPreemptionReady",
+    "name": "BootInitPreemption.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 150,
+    "variant": "BootIdleTaskReady",
+    "name": "BootIdleTask.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 151,
+    "variant": "BootIdlePiLockReady",
+    "name": "BootIdlePiLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 152,
+    "variant": "BootIdlePreemptionReady",
+    "name": "BootIdlePreemption.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 153,
+    "variant": "SchedulerReady",
+    "name": "Scheduler.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 154,
+    "variant": "SchedulerOnline",
+    "name": "Scheduler.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 155,
+    "variant": "SchedInitIrqsDisabledCheckpoint",
+    "name": "SchedInitIrqsDisabled.Checkpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 156,
+    "variant": "RadixTreeReady",
+    "name": "RadixTree.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 157,
+    "variant": "MapleTreeReady",
+    "name": "MapleTree.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 158,
+    "variant": "WorkqueuePrepared",
+    "name": "Workqueue.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 159,
+    "variant": "SoftirqPrepared",
+    "name": "Softirq.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 160,
+    "variant": "TasksRcuPrepared",
+    "name": "TasksRcu.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 161,
+    "variant": "RcuCoreReady",
+    "name": "RcuCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 162,
+    "variant": "TraceInitDeferred",
+    "name": "TraceInit.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 163,
+    "variant": "ContextTrackingInitTrimmedNoop",
+    "name": "ContextTrackingInit.TrimmedNoop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 164,
+    "variant": "SchedInitTraceContextBoundariesReady",
+    "name": "SchedInitTraceContextBoundaries.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 165,
+    "variant": "SchedulerPickNextTaskExit",
+    "name": "Scheduler.PickNextTask.Exit",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 166,
+    "variant": "SchedulerSwitchToEntry",
+    "name": "Scheduler.SwitchTo.Entry",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 167,
+    "variant": "SchedulerSwitchToExit",
+    "name": "Scheduler.SwitchTo.Exit",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 168,
+    "variant": "SchedulerSchedule",
+    "name": "Scheduler.Schedule",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 169,
+    "variant": "SchedulerScheduleExit",
+    "name": "Scheduler.Schedule.Exit",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 170,
+    "variant": "IrqTimeInitPhaseStarted",
+    "name": "IrqTimeInitPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 171,
+    "variant": "IrqTimeInitPhaseReady",
+    "name": "IrqTimeInitPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 172,
+    "variant": "IrqControllerReady",
+    "name": "IrqController.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 173,
+    "variant": "RiscvIntcReady",
+    "name": "RiscvIntc.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 174,
+    "variant": "RiscvIrqStackSetReady",
+    "name": "RiscvIrqStackSet.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 175,
+    "variant": "IrqChipInitTablePrepared",
+    "name": "IrqChipInitTable.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 176,
+    "variant": "PlicDriverPrepared",
+    "name": "PlicDriver.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 177,
+    "variant": "IrqChipInitTableReady",
+    "name": "IrqChipInitTable.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 178,
+    "variant": "IrqDispatchTreeReady",
+    "name": "IrqDispatchTree.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 179,
+    "variant": "PlicReady",
+    "name": "Plic.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 180,
+    "variant": "PlicIrqDomainPrepared",
+    "name": "PlicIrqDomain.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 181,
+    "variant": "PlicIrqDomainReady",
+    "name": "PlicIrqDomain.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 182,
+    "variant": "IrqHandlerRegistryReady",
+    "name": "IrqHandlerRegistry.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 183,
+    "variant": "TickBroadcastPrepared",
+    "name": "TickBroadcast.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 184,
+    "variant": "TickPrepared",
+    "name": "Tick.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 185,
+    "variant": "RcuInitNohzTrimmedNoop",
+    "name": "RcuInitNohz.TrimmedNoop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 186,
+    "variant": "IrqTimeTrimmedPathsPrepared",
+    "name": "IrqTimeTrimmedPaths.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 187,
+    "variant": "TimerWheelReady",
+    "name": "TimerWheel.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 188,
+    "variant": "SrcuCoreReady",
+    "name": "SrcuCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 189,
+    "variant": "HrtimerCoreReady",
+    "name": "HrtimerCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 190,
+    "variant": "ClocksourceCorePrepared",
+    "name": "ClocksourceCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 191,
+    "variant": "JiffiesClocksourcePrepared",
+    "name": "JiffiesClocksource.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 192,
+    "variant": "TimekeeperReady",
+    "name": "Timekeeper.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 193,
+    "variant": "RiscvTimerProviderReady",
+    "name": "RiscvTimerProvider.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 194,
+    "variant": "TickBroadcastReady",
+    "name": "TickBroadcast.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 195,
+    "variant": "TickReady",
+    "name": "Tick.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 196,
+    "variant": "SoftirqReady",
+    "name": "Softirq.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 197,
+    "variant": "RandomnessReady",
+    "name": "Randomness.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 198,
+    "variant": "KfenceInitTrimmedNoop",
+    "name": "KfenceInit.TrimmedNoop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 199,
+    "variant": "IrqTimeTrimmedPathsReady",
+    "name": "IrqTimeTrimmedPaths.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 200,
+    "variant": "BootStackCanaryReady",
+    "name": "BootStackCanary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 201,
+    "variant": "PerfEventCoreReady",
+    "name": "PerfEventCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 202,
+    "variant": "ProfileCoreReady",
+    "name": "ProfileCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 203,
+    "variant": "IpiMuxReady",
+    "name": "IpiMux.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 204,
+    "variant": "SbiIpiReady",
+    "name": "SbiIpi.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 205,
+    "variant": "SmpCallFunctionReady",
+    "name": "SmpCallFunction.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 206,
+    "variant": "LocalIrqEnablePhaseStarted",
+    "name": "LocalIrqEnablePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 207,
+    "variant": "LocalIrqEnablePhaseReady",
+    "name": "LocalIrqEnablePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 208,
+    "variant": "InterruptStreamOnline",
+    "name": "InterruptStream.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 209,
+    "variant": "IrqOpenPreparePhaseStarted",
+    "name": "IrqOpenPreparePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 210,
+    "variant": "IrqOpenPreparePhaseReady",
+    "name": "IrqOpenPreparePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 211,
+    "variant": "SlubFlushWorkqueueReady",
+    "name": "SlubSubsystem.FlushWorkqueueReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 212,
+    "variant": "TtyLineDisciplineRegistryPrepared",
+    "name": "TtyLineDisciplineRegistry.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 213,
+    "variant": "ConsoleDriverSetPrepared",
+    "name": "ConsoleDriverSet.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 214,
+    "variant": "ConsolePrepared",
+    "name": "Console.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 215,
+    "variant": "IrqOpenPrepareTrimmedPathsPrepared",
+    "name": "IrqOpenPrepareTrimmedPaths.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 216,
+    "variant": "IrqOpenPrepareTrimmedPathsReady",
+    "name": "IrqOpenPrepareTrimmedPaths.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 217,
+    "variant": "PanicLaterClearCheckpoint",
+    "name": "PanicLater.Clear",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 218,
+    "variant": "LockdepInitNoop",
+    "name": "LockdepInit.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 219,
+    "variant": "LockingSelftestNoop",
+    "name": "LockingSelftest.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 220,
+    "variant": "InitrdBoundsTrimmed",
+    "name": "InitrdBounds.Trimmed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 221,
+    "variant": "PageAllocatorPerCpuPagesetsDeferred",
+    "name": "PageAllocator.PerCpuPagesetsDeferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 222,
+    "variant": "NumaPolicyNoop",
+    "name": "NumaPolicy.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 223,
+    "variant": "AcpiEarlyNoop",
+    "name": "AcpiEarly.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 224,
+    "variant": "LateTimeInitNoop",
+    "name": "LateTimeInit.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 225,
+    "variant": "SchedClockReady",
+    "name": "SchedClock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 226,
+    "variant": "DelayLoopReady",
+    "name": "DelayLoop.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 227,
+    "variant": "ArchCpuFinalizeNoop",
+    "name": "ArchCpuFinalize.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 228,
+    "variant": "ProcessPreparePhaseStarted",
+    "name": "ProcessPreparePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 229,
+    "variant": "ProcessPreparePhaseReady",
+    "name": "ProcessPreparePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 230,
+    "variant": "RootPidNamespaceReady",
+    "name": "RootPidNamespace.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 231,
+    "variant": "AnonVmaCoreReady",
+    "name": "AnonVmaCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 232,
+    "variant": "X86EfiRuntimeSwitchTrimmed",
+    "name": "X86EfiRuntimeSwitch.Trimmed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 233,
+    "variant": "TaskCreationCorePrepared",
+    "name": "TaskCreationCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 234,
+    "variant": "CredentialCorePrepared",
+    "name": "CredentialCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 235,
+    "variant": "VectorContextPrepared",
+    "name": "VectorContext.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 236,
+    "variant": "UprobeCoreReady",
+    "name": "UprobeCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 237,
+    "variant": "TaskCreationCoreReady",
+    "name": "TaskCreationCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 238,
+    "variant": "ShadowCallStackInitNoop",
+    "name": "ShadowCallStackInit.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 239,
+    "variant": "LockdepInitTaskNoop",
+    "name": "LockdepInitTask.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 240,
+    "variant": "SignalCorePrepared",
+    "name": "SignalCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 241,
+    "variant": "TaskFileContextPrepared",
+    "name": "TaskFileContext.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 242,
+    "variant": "VmaCorePrepared",
+    "name": "VmaCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 243,
+    "variant": "NsProxyPrepared",
+    "name": "NsProxy.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 244,
+    "variant": "UtsNamespacePrepared",
+    "name": "UtsNamespace.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 245,
+    "variant": "KeyringCoreReady",
+    "name": "KeyringCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 246,
+    "variant": "SecurityCoreReady",
+    "name": "SecurityCore.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 247,
+    "variant": "ProcessPrepareTrimmedPathsPrepared",
+    "name": "ProcessPrepareTrimmedPaths.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 248,
+    "variant": "DbgLateInitNoop",
+    "name": "DbgLateInit.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 249,
+    "variant": "NetNamespaceDeferred",
+    "name": "NetNamespace.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 250,
+    "variant": "PageCacheDeferred",
+    "name": "PageCache.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 251,
+    "variant": "SignalCoreSetupDeferred",
+    "name": "SignalCore.SetupDeferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 252,
+    "variant": "SeqFileCoreDeferred",
+    "name": "SeqFileCore.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 253,
+    "variant": "ProcfsDeferred",
+    "name": "Procfs.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 254,
+    "variant": "NsfsDeferred",
+    "name": "Nsfs.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 255,
+    "variant": "PidfsDeferred",
+    "name": "Pidfs.Deferred",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 256,
+    "variant": "CpusetNoop",
+    "name": "Cpuset.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 257,
+    "variant": "CgroupNoop",
+    "name": "Cgroup.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 258,
+    "variant": "TaskstatsNoop",
+    "name": "Taskstats.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 259,
+    "variant": "DelayAccountingNoop",
+    "name": "DelayAccounting.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 260,
+    "variant": "AcpiSubsystemNoop",
+    "name": "AcpiSubsystem.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 261,
+    "variant": "ArchPostAcpiNoop",
+    "name": "ArchPostAcpi.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 262,
+    "variant": "KcsanNoop",
+    "name": "Kcsan.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 263,
+    "variant": "UpMultitaskPhaseStarted",
+    "name": "UpMultitaskPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 264,
+    "variant": "UpMultitaskPhaseReady",
+    "name": "UpMultitaskPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 265,
+    "variant": "BootInitRestInitPhaseReady",
+    "name": "BootInitRestInitPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 266,
+    "variant": "BootInitScheduleHandoffPhaseReady",
+    "name": "BootInitScheduleHandoffPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 267,
+    "variant": "BootIdleEntryPhaseReady",
+    "name": "BootIdleEntryPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 268,
+    "variant": "RcuSchedulerStartingReady",
+    "name": "RcuCore.SchedulerStartingReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 269,
+    "variant": "KernelInitTaskPiLockReady",
+    "name": "KernelInitTaskPiLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 270,
+    "variant": "KthreaddTaskPiLockReady",
+    "name": "KthreaddTaskPiLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 271,
+    "variant": "KthreaddReadyGateWaitLockReady",
+    "name": "KthreaddReadyGateWaitLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 272,
+    "variant": "KernelInitTaskPrepared",
+    "name": "KernelInitTask.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 273,
+    "variant": "KernelInitTaskReady",
+    "name": "KernelInitTask.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 274,
+    "variant": "KernelInitTaskOnline",
+    "name": "KernelInitTask.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 275,
+    "variant": "NumaDefaultPolicyNoop",
+    "name": "NumaDefaultPolicy.Noop",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 276,
+    "variant": "KthreaddTaskPrepared",
+    "name": "KthreaddTask.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 277,
+    "variant": "KthreaddTaskReady",
+    "name": "KthreaddTask.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 278,
+    "variant": "KthreaddTaskOnline",
+    "name": "KthreaddTask.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 279,
+    "variant": "KthreaddTaskGlobalRefBound",
+    "name": "KthreaddTask.GlobalRefBound",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 280,
+    "variant": "SimpleWaitQueueReady",
+    "name": "SimpleWaitQueue.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 281,
+    "variant": "CompletionPrepared",
+    "name": "Completion.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 282,
+    "variant": "CompletionReady",
+    "name": "Completion.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 283,
+    "variant": "CompletionOnline",
+    "name": "Completion.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 284,
+    "variant": "SystemStatePrepared",
+    "name": "SystemState.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 285,
+    "variant": "SystemStateReady",
+    "name": "SystemState.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 286,
+    "variant": "KthreaddReadyGateReady",
+    "name": "KthreaddReadyGate.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 287,
+    "variant": "KthreaddReadyGateOnline",
+    "name": "KthreaddReadyGate.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 288,
+    "variant": "BootIdleRuntimeReady",
+    "name": "BootIdleRuntime.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 289,
+    "variant": "PreSmpInitPhaseStarted",
+    "name": "PreSmpInitPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 290,
+    "variant": "PreSmpInitPhaseReady",
+    "name": "PreSmpInitPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 291,
+    "variant": "PageAllocatorFullGfpMaskOpen",
+    "name": "PageAllocator.FullGfpMaskOpen",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 292,
+    "variant": "CpuGroupPreSmpReady",
+    "name": "CpuGroup.PreSmpReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 293,
+    "variant": "WorkqueueReady",
+    "name": "Workqueue.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 294,
+    "variant": "VmstatCorePrepared",
+    "name": "VmstatCore.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 295,
+    "variant": "TasksRcuReady",
+    "name": "TasksRcu.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 296,
+    "variant": "PreSmpInitcallsReady",
+    "name": "PreSmpInitcalls.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 297,
+    "variant": "PreSmpBoundaryReady",
+    "name": "PreSmpBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 298,
+    "variant": "SmpRuntimePhaseStarted",
+    "name": "SmpRuntimePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 299,
+    "variant": "SmpRuntimePhaseReady",
+    "name": "SmpRuntimePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 300,
+    "variant": "SmpBringupPhaseStarted",
+    "name": "SmpBringupPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 301,
+    "variant": "SmpBringupPhaseReady",
+    "name": "SmpBringupPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 302,
+    "variant": "SecondaryIdleTasksPrepared",
+    "name": "SecondaryIdleTasks.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 303,
+    "variant": "SmpbootThreadsLockReady",
+    "name": "SmpbootThreadsLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 304,
+    "variant": "CpuHotplugSyncPrepared",
+    "name": "CpuHotplugSync.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 305,
+    "variant": "CpuHotplugReadGuardUsed",
+    "name": "CpuHotplugSync.CpuHotplugReadGuardUsed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 306,
+    "variant": "SmpbootThreadsMutexGuardUsed",
+    "name": "CpuHotplugSync.SmpbootThreadsMutexGuardUsed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 307,
+    "variant": "CpuAddRemoveLockReady",
+    "name": "CpuAddRemoveLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 308,
+    "variant": "CpuHotplugWriteGuardUsed",
+    "name": "CpuStartProvider.CpuHotplugWriteGuardUsed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 309,
+    "variant": "CpuRunningWaitLockReady",
+    "name": "CpuRunningWaitLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 310,
+    "variant": "CpuDoneUpWaitLockReady",
+    "name": "CpuDoneUpWaitLock.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 311,
+    "variant": "CpuStartProviderReady",
+    "name": "CpuStartProvider.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 312,
+    "variant": "CpuStartProviderBootDataPublished",
+    "name": "CpuStartProvider.BootDataPublished",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 313,
+    "variant": "CpuRunningObserved",
+    "name": "CpuHotplugSync.CpuRunningObserved",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 314,
+    "variant": "CpuRunningWaitLockGuardUsed",
+    "name": "CpuHotplugSync.CpuRunningWaitLockGuardUsed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 315,
+    "variant": "SecondaryCpuStartupAckReady",
+    "name": "SecondaryCpuStartupAck.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 316,
+    "variant": "CpuDoneUpObserved",
+    "name": "CpuHotplugSync.DoneUpObserved",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 317,
+    "variant": "CpuDoneUpWaitLockGuardUsed",
+    "name": "CpuHotplugSync.DoneUpWaitLockGuardUsed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 318,
+    "variant": "SecondaryCpusOnline",
+    "name": "CpuGroup.SecondaryCpusOnline",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 319,
+    "variant": "SecondaryCpuApLocalSyncSummary",
+    "name": "SecondaryCpuOnlineAck.ApLocalSyncSummary",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 320,
+    "variant": "SecondaryCpuOnlineAckReady",
+    "name": "SecondaryCpuOnlineAck.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 321,
+    "variant": "SmpBringupBoundaryReady",
+    "name": "SmpBringupBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 322,
+    "variant": "RuntimeCorePhaseStarted",
+    "name": "RuntimeCorePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 323,
+    "variant": "RuntimeCorePhaseReady",
+    "name": "RuntimeCorePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 324,
+    "variant": "SchedulerSmpReady",
+    "name": "Scheduler.SmpReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 325,
+    "variant": "WorkqueueTopologyReady",
+    "name": "Workqueue.TopologyReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 326,
+    "variant": "AsyncCoreDeferredReady",
+    "name": "AsyncCore.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 327,
+    "variant": "PadataCoreDeferredReady",
+    "name": "PadataCore.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 328,
+    "variant": "PageAllocatorLateReady",
+    "name": "PageAllocator.LateReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 329,
+    "variant": "RuntimeCoreBoundaryReady",
+    "name": "RuntimeCoreBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 330,
+    "variant": "InitcallPhaseStarted",
+    "name": "InitcallPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 331,
+    "variant": "InitcallPhaseReady",
+    "name": "InitcallPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 332,
+    "variant": "CpusetSmpTrimmedReady",
+    "name": "CpusetSmp.TrimmedReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 333,
+    "variant": "DriverCoreDeferredReady",
+    "name": "DriverCore.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 334,
+    "variant": "IrqProcViewDeferredReady",
+    "name": "IrqProcView.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 335,
+    "variant": "CtorTableReady",
+    "name": "CtorTable.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 336,
+    "variant": "OfPlatformDefaultPopulateScanComplete",
+    "name": "OfPlatformDefaultPopulate.ScanComplete",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 337,
+    "variant": "VirtioBusReady",
+    "name": "VirtioBus.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 338,
+    "variant": "VirtioBusDeviceAdded",
+    "name": "VirtioBus.DeviceAdded",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 339,
+    "variant": "VirtioBlkReady",
+    "name": "VirtioBlk.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 340,
+    "variant": "VirtioBlkReadReady",
+    "name": "VirtioBlk.ReadReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 341,
+    "variant": "VirtioBlkLiveReadSubmitted",
+    "name": "VirtioBlk.LiveReadSubmitted",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 342,
+    "variant": "VirtioBlkLiveReadCompleted",
+    "name": "VirtioBlk.LiveReadCompleted",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 343,
+    "variant": "VirtioRngEntropyReady",
+    "name": "VirtioRng.EntropyReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 344,
+    "variant": "InitcallTableReady",
+    "name": "InitcallTable.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 345,
+    "variant": "Serial8250ConsoleBurstIrqTxReady",
+    "name": "Serial8250ConsoleBurstIrqTx.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 346,
+    "variant": "Serial8250ConsoleLongIrqTxReady",
+    "name": "Serial8250ConsoleLongIrqTx.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 347,
+    "variant": "TtyXmitFifoProbeReady",
+    "name": "TtyXmitFifoProbe.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 348,
+    "variant": "TtyWriteRuntimeTxReady",
+    "name": "TtyWriteRuntimeTx.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 349,
+    "variant": "TtyWriteBatchRuntimeTxReady",
+    "name": "TtyWriteBatchRuntimeTx.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 350,
+    "variant": "InitcallBoundaryReady",
+    "name": "InitcallBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 351,
+    "variant": "RootfsPhaseStarted",
+    "name": "RootfsPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 352,
+    "variant": "RootfsPhaseReady",
+    "name": "RootfsPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 353,
+    "variant": "KUnitRuntimeTrimmedReady",
+    "name": "KUnitRuntime.TrimmedReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 354,
+    "variant": "InitramfsSyncDeferredReady",
+    "name": "InitramfsSync.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 355,
+    "variant": "RootfsConsoleDeferredReady",
+    "name": "RootfsConsole.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 356,
+    "variant": "RootfsPrepareNamespacePathsReady",
+    "name": "RootfsPrepareNamespacePaths.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 357,
+    "variant": "RamdiskExecuteCommandEaccessCheckpoint",
+    "name": "RamdiskExecuteCommand.EaccessCheckpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 358,
+    "variant": "RootFSOnline",
+    "name": "RootFS.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 359,
+    "variant": "IntegrityKeysDeferredReady",
+    "name": "IntegrityKeys.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 360,
+    "variant": "RootfsBoundaryReady",
+    "name": "RootfsBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 361,
+    "variant": "FinalizePhaseStarted",
+    "name": "FinalizePhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 362,
+    "variant": "FinalizePhaseReady",
+    "name": "FinalizePhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 363,
+    "variant": "AsyncFullSyncDeferredReady",
+    "name": "AsyncFullSync.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 364,
+    "variant": "SystemStateFreeingInitmemCheckpoint",
+    "name": "SystemState.FreeingInitmemCheckpoint",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 365,
+    "variant": "InitMemoryCleanupDeferredReady",
+    "name": "InitMemoryCleanup.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 366,
+    "variant": "KernelMappingProtectionDeferredReady",
+    "name": "KernelMappingProtection.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 367,
+    "variant": "PtiFinalizeTrimmedReady",
+    "name": "PtiFinalize.TrimmedReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 368,
+    "variant": "SystemStateOnline",
+    "name": "SystemState.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 369,
+    "variant": "RcuInkernelBootEnded",
+    "name": "RcuCore.InkernelBootEnded",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 370,
+    "variant": "RcuBootEndReady",
+    "name": "RcuBootEnd.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 371,
+    "variant": "SysctlArgsDeferredReady",
+    "name": "SysctlArgs.DeferredReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 372,
+    "variant": "FinalizeBoundaryReady",
+    "name": "FinalizeBoundary.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 373,
+    "variant": "BreakpointExceptionHandled",
+    "name": "BreakpointException.Handled",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 374,
+    "variant": "UserBootMainElfReady",
+    "name": "UserBoot.MainElfReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 375,
+    "variant": "UserBootInterpreterReady",
+    "name": "UserBoot.InterpreterReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 376,
+    "variant": "UserBootInitAttemptFailed",
+    "name": "UserBoot.InitAttemptFailed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 377,
+    "variant": "UserBootAddressSpaceSetupStart",
+    "name": "UserBoot.AddressSpaceSetupStart",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 378,
+    "variant": "UserModeEntry",
+    "name": "UserInitProcess.EnterUserMode",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 379,
+    "variant": "UserAddressSpaceReady",
+    "name": "UserAddressSpace.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 380,
+    "variant": "SyscallTableExecveArgsReady",
+    "name": "SyscallTable.ExecveArgsReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 381,
+    "variant": "UserExecMainElfReady",
+    "name": "UserExec.MainElfReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 382,
+    "variant": "UserExecInterpreterReady",
+    "name": "UserExec.InterpreterReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 383,
+    "variant": "UserExecAddressSpaceReady",
+    "name": "UserExec.AddressSpaceReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 384,
+    "variant": "UserExecTrapFrameReady",
+    "name": "UserExec.TrapFrameReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 385,
+    "variant": "UserExecSatpReady",
+    "name": "UserExec.SatpReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 386,
+    "variant": "UserExecContextReplaced",
+    "name": "UserExec.ContextReplaced",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 387,
+    "variant": "UserExecSatpSwitched",
+    "name": "UserExec.SatpSwitched",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 388,
+    "variant": "UserExecReturnFrameReady",
+    "name": "UserExec.ReturnFrameReady",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 389,
+    "variant": "SyscallTableOpenAt",
+    "name": "SyscallTable.OpenAt",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 390,
+    "variant": "SyscallTableRead",
+    "name": "SyscallTable.Read",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 391,
+    "variant": "SyscallTableWrite",
+    "name": "SyscallTable.Write",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 392,
+    "variant": "SyscallTableWritev",
+    "name": "SyscallTable.Writev",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 393,
+    "variant": "SyscallTableClose",
+    "name": "SyscallTable.Close",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 394,
+    "variant": "SyscallTableNewFstatAt",
+    "name": "SyscallTable.NewFstatAt",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 395,
+    "variant": "SyscallTableSetTidAddress",
+    "name": "SyscallTable.SetTidAddress",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 396,
+    "variant": "SyscallTableClone",
+    "name": "SyscallTable.Clone",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 397,
+    "variant": "SyscallTableWait4",
+    "name": "SyscallTable.Wait4",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 398,
+    "variant": "UserChildParentWaitResumed",
+    "name": "UserChild.ParentWaitResumed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 399,
+    "variant": "SyscallTableExit",
+    "name": "SyscallTable.Exit",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 400,
+    "variant": "PayloadPhaseReady",
+    "name": "PayloadPhase.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 401,
+    "variant": "PayloadPhaseOnline",
+    "name": "PayloadPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  }
+]

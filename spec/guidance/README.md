@@ -19,6 +19,10 @@ Linux 源码树并生成可审阅清单，不得把该任务扩展成 Linux 源�
 
 checkpoint inventory 和 Linux mapping 的测试模式是只读漂移检测：只能在内存中重新生成 JSON/Markdown，与
 `tools/out/checkpoints/` 中已提交的审阅产物比较；发现漂移应作为测试失败报告，不得在测试模式下重写产物。
+Linux mapping 可以只读解析 C 函数、`SYSCALL_DEFINE*` macro 和 assembly symbol/label；遇到 arch/config
+条件化 syscall ABI wrapper 时，只能映射到共同 helper 或保持 unmapped，并在 confidence/notes 中保守说明。
+Linux checkpoint mapping coverage 也是 mapping-only 审阅产物，只能从已提交 mapping JSON 聚合覆盖率视图，不得读取
+或修改 Linux tree、不得重解释 mapping 语义、不得新增 runtime 采集或 checkpoint handler；其测试模式同样只能做只读漂移检测。
 
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 

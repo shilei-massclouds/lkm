@@ -23,7 +23,7 @@ STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints test test-verify test-checkpoints test-kunit test-smoke stress-test clean
+.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints test test-verify test-checkpoints test-kunit test-smoke stress-test clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -50,7 +50,10 @@ checkpoints-inventory:
 checkpoints-map-linux: checkpoints-inventory
 	python3 tools/checkpoints/map_linux_checkpoints.py
 
-checkpoints: checkpoints-map-linux
+checkpoints-coverage: checkpoints-map-linux
+	python3 tools/checkpoints/summarize_linux_checkpoint_mapping.py
+
+checkpoints: checkpoints-coverage
 
 test:
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
@@ -59,9 +62,10 @@ test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
 
 test-checkpoints:
-	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints
+	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints tools.checkpoints.tests.test_summarize_linux_checkpoint_mapping
 	python3 tools/checkpoints/list_checkpoints.py --check
 	python3 tools/checkpoints/map_linux_checkpoints.py --check
+	python3 tools/checkpoints/summarize_linux_checkpoint_mapping.py --check
 
 test-kunit:
 	$(MAKE) -C $(KERNEL_DIR) run APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))"
@@ -74,6 +78,7 @@ stress-test:
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean
-	rm -rf tools/build tools/out
+	rm -rf tools/build
+	@if [ -d tools/out ]; then find tools/out -mindepth 1 \( -path 'tools/out/checkpoints' -o -path 'tools/out/checkpoints/*' \) -prune -o -exec rm -rf {} +; fi
 	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type d \( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
 	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type f \( -name '*.pyc' -o -name '*.pyo' \) -exec rm -f {} +

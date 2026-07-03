@@ -20,6 +20,11 @@ Desktop.ini
 # Toolchain outputs
 tools/build/
 tools/out/
+!tools/out/
+tools/out/*
+!tools/out/checkpoints/
+!tools/out/checkpoints/*.json
+!tools/out/checkpoints/*.md
 
 # Python
 __pycache__/
