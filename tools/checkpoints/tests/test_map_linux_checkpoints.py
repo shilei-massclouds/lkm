@@ -26,7 +26,32 @@ void setup_arch(char **cmdline) {}
 void mm_core_init(void) {}
 void sched_init(void) {}
 void rest_init(void) {}
-int try_to_run_init_process(const char *init_filename) { return 0; }
+int run_init_process(const char *init_filename) { return 0; }
+void async_synchronize_full(void) {}
+void kprobe_free_init_mem(void) {}
+void ftrace_free_init_mem(void) {}
+void kgdb_free_init_mem(void) {}
+void exit_boot_config(void) {}
+void free_initmem(void) {}
+void mark_readonly(void) {}
+void pti_finalize(void) {}
+void numa_default_policy(void) {}
+void rcu_end_inkernel_boot(void) {}
+void panic(const char *message) {}
+
+static int try_to_run_init_process(const char *init_filename)
+{
+    int ret;
+
+    ret = run_init_process(init_filename);
+
+    if (ret && ret != -ENOENT) {
+        pr_err("Starting init: %s exists but couldn't execute it (error %d)\\n",
+               init_filename, ret);
+    }
+
+    return ret;
+}
 
 void start_kernel(void)
 {
@@ -45,10 +70,34 @@ static noinline void __ref __noreturn rest_init(void)
 
 static int __ref kernel_init(void *unused)
 {
+    int ret;
+
+    async_synchronize_full();
+    system_state = SYSTEM_FREEING_INITMEM;
+    kprobe_free_init_mem();
+    ftrace_free_init_mem();
+    kgdb_free_init_mem();
+    exit_boot_config();
+    free_initmem();
+    mark_readonly();
+    pti_finalize();
+    system_state = SYSTEM_RUNNING;
+    numa_default_policy();
+    rcu_end_inkernel_boot();
+
     do_sysctl_args();
-    if (!try_to_run_init_process("/sbin/init"))
+    if (execute_command) {
+        ret = run_init_process(execute_command);
+        if (!ret)
+            return 0;
+        panic("Requested init failed.");
+    }
+    if (!try_to_run_init_process("/sbin/init") ||
+        !try_to_run_init_process("/etc/init") ||
+        !try_to_run_init_process("/bin/init") ||
+        !try_to_run_init_process("/bin/sh"))
         return 0;
-    return -1;
+    panic("No working init found.");
 }
 
 static noinline void __init kernel_init_freeable(void)
@@ -660,6 +709,147 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(mapped.mapping_kind, "unmapped")
         self.assertIn("Linux anchor", mapped.notes)
 
+    def test_finalize_tail_rules_map_to_kernel_init_anchors(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=363,
+                variant="AsyncFullSyncDeferredReady",
+                name="AsyncFullSync.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=364,
+                variant="SystemStateFreeingInitmemCheckpoint",
+                name="SystemState.FreeingInitmemCheckpoint",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=365,
+                variant="InitMemoryCleanupDeferredReady",
+                name="InitMemoryCleanup.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=368,
+                variant="SystemStateOnline",
+                name="SystemState.Online",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        async_full_sync = by_name["AsyncFullSync.DeferredReady"]
+        self.assertEqual(async_full_sync.linux_file, "init/main.c")
+        self.assertEqual(async_full_sync.linux_symbol, "kernel_init")
+        self.assertEqual(async_full_sync.mapping_kind, "exact")
+        self.assertEqual(async_full_sync.confidence, "medium")
+        self.assertIn("async_synchronize_full", async_full_sync.linux_anchor)
+        self.assertIn("deferred finalize boundary", async_full_sync.notes)
+
+        freeing = by_name["SystemState.FreeingInitmemCheckpoint"]
+        self.assertEqual(freeing.mapping_kind, "exact")
+        self.assertEqual(freeing.confidence, "high")
+        self.assertIn("SYSTEM_FREEING_INITMEM", freeing.linux_anchor)
+
+        cleanup = by_name["InitMemoryCleanup.DeferredReady"]
+        self.assertEqual(cleanup.mapping_kind, "exact")
+        self.assertEqual(cleanup.confidence, "medium")
+        self.assertIn("free_initmem", cleanup.linux_anchor)
+        self.assertIn("deferred cleanup boundary", cleanup.notes)
+
+        online = by_name["SystemState.Online"]
+        self.assertEqual(online.linux_symbol, "kernel_init")
+        self.assertEqual(online.confidence, "high")
+        self.assertIn("SYSTEM_RUNNING", online.linux_anchor)
+
+    def test_user_boot_rules_map_to_linux_init_exec_anchors(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=374,
+                variant="UserBootMainElfReady",
+                name="UserBoot.MainElfReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=375,
+                variant="UserBootInterpreterReady",
+                name="UserBoot.InterpreterReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=376,
+                variant="UserBootInitAttemptFailed",
+                name="UserBoot.InitAttemptFailed",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=377,
+                variant="UserBootAddressSpaceSetupStart",
+                name="UserBoot.AddressSpaceSetupStart",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=378,
+                variant="UserModeEntry",
+                name="UserInitProcess.EnterUserMode",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=379,
+                variant="UserAddressSpaceReady",
+                name="UserAddressSpace.Ready",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        main_elf = by_name["UserBoot.MainElfReady"]
+        self.assertEqual(main_elf.linux_file, "fs/binfmt_elf.c")
+        self.assertEqual(main_elf.linux_symbol, "load_elf_binary")
+        self.assertEqual(main_elf.mapping_kind, "exact")
+        self.assertEqual(main_elf.confidence, "high")
+        self.assertIn("load_elf_phdrs", main_elf.linux_anchor)
+        self.assertIn("Boot-time init exec", main_elf.notes)
+        self.assertIn("kernel_execve", main_elf.notes)
+
+        interpreter = by_name["UserBoot.InterpreterReady"]
+        self.assertEqual(interpreter.mapping_kind, "exact")
+        self.assertEqual(interpreter.confidence, "high")
+        self.assertIn("interp_elf_phdata", interpreter.linux_anchor)
+        self.assertIn("runtime UserExec", interpreter.notes)
+
+        init_failed = by_name["UserBoot.InitAttemptFailed"]
+        self.assertEqual(init_failed.linux_file, "init/main.c")
+        self.assertEqual(init_failed.linux_symbol, "try_to_run_init_process")
+        self.assertEqual(init_failed.mapping_kind, "range")
+        self.assertEqual(init_failed.confidence, "medium")
+        self.assertIn("run_init_process", init_failed.linux_anchor)
+        self.assertIn("return ret", init_failed.linux_anchor)
+        self.assertIn("stage/reason checkpoint", init_failed.notes)
+
+        address_start = by_name["UserBoot.AddressSpaceSetupStart"]
+        self.assertEqual(address_start.linux_file, "fs/binfmt_elf.c")
+        self.assertEqual(address_start.linux_symbol, "load_elf_binary")
+        self.assertEqual(address_start.mapping_kind, "exact")
+        self.assertEqual(address_start.confidence, "medium")
+        self.assertIn("begin_new_exec", address_start.linux_anchor)
+        self.assertIn("UserBoot-specific", address_start.notes)
+
+        enter_user = by_name["UserInitProcess.EnterUserMode"]
+        self.assertEqual(enter_user.linux_file, "arch/riscv/kernel/entry.S")
+        self.assertEqual(enter_user.linux_symbol, "ret_from_exception")
+        self.assertEqual(enter_user.confidence, "medium")
+        self.assertIn("sret", enter_user.linux_anchor)
+
+        space_ready = by_name["UserAddressSpace.Ready"]
+        self.assertEqual(space_ready.linux_file, "fs/exec.c")
+        self.assertEqual(space_ready.linux_symbol, "exec_mmap")
+        self.assertEqual(space_ready.confidence, "medium")
+        self.assertIn("activate_mm", space_ready.linux_anchor)
+        self.assertIn("UserAddressSpace object boundary", space_ready.notes)
+
     def test_user_mode_boundary_rules_map_to_linux_anchors(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
@@ -969,6 +1159,18 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["SyscallTable.Write"].linux_symbol, "SYSCALL_DEFINE3(write)")
         self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")
         self.assertEqual(by_name["SyscallTable.Clone"].confidence, "medium")
+        self.assertEqual(by_name["AsyncFullSync.DeferredReady"].linux_symbol, "kernel_init")
+        self.assertEqual(
+            by_name["SystemState.FreeingInitmemCheckpoint"].confidence,
+            "high",
+        )
+        self.assertEqual(by_name["InitMemoryCleanup.DeferredReady"].linux_symbol, "kernel_init")
+        self.assertEqual(by_name["SystemState.Online"].confidence, "high")
+        self.assertEqual(by_name["UserBoot.MainElfReady"].linux_symbol, "load_elf_binary")
+        self.assertEqual(by_name["UserBoot.InitAttemptFailed"].mapping_kind, "range")
+        self.assertEqual(by_name["UserBoot.AddressSpaceSetupStart"].confidence, "medium")
+        self.assertEqual(by_name["UserInitProcess.EnterUserMode"].linux_symbol, "ret_from_exception")
+        self.assertEqual(by_name["UserAddressSpace.Ready"].linux_symbol, "exec_mmap")
         self.assertEqual(by_name["UserExec.AddressSpaceReady"].mapping_kind, "range")
         self.assertEqual(by_name["UserExec.TrapFrameReady"].linux_symbol, "start_thread")
         self.assertEqual(by_name["UserChild.ParentWaitResumed"].linux_symbol, "kernel_wait4")

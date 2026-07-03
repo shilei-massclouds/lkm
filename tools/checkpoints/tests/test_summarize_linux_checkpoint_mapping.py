@@ -155,6 +155,8 @@ class SummarizeLinuxCheckpointMappingTests(unittest.TestCase):
         )
         self.assertNotIn("checkpoint_index", json_text)
         self.assertNotIn("checkpoint_name", json_text)
+        self.assertNotIn("timestamp", json_text.lower())
+        self.assertNotIn("timestamp", markdown.lower())
         self.assertIn("# Linux Checkpoint Mapping Coverage", markdown)
 
     def test_check_mode_accepts_current_outputs(self) -> None:

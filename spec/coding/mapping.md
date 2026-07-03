@@ -212,6 +212,22 @@ checkpoint announce 是独立观测路径，不属于 `EarlyCon` 或正式 `Cons
 - 不应用平台硬编码替代模型中的对象事实。
 - 关键 checkpoint 的命名应尽量沿用模型对象和状态名称。
 
+### Linux checkpoint mapping-only 规则
+
+Linux checkpoint mapping artifact 只记录可审阅的静态源码锚点。默认参考树是只读
+`../linux-6.12`；mapping pass 不应修改 Linux 源码、不应添加 probe，也不应依赖
+runtime 采集结果来证明锚点。
+
+映射规则只能声明当前能从 Linux 源码复核的边界。若 Linux 没有与 `arceos_ex` 普通对象
+一一对应的对象边界，应使用 `range` 或 `medium` confidence 表达部分对齐；若无法从源码
+稳定证明，checkpoint 必须保持 `unmapped`，并在 notes 中记录具体原因。用户态启动路径允许
+`UserBoot` 与运行期 `UserExec` 复用同一 Linux exec/binfmt/riscv return 锚点，但 notes
+必须区分这是 boot-time init exec 视图还是运行期 exec syscall 视图。
+
+Finalize 末端的 deferred/trimmed checkpoint 只有在 Linux `kernel_init()` 中存在直接可复核
+call site 或状态赋值时才可映射。纯 deferred 语义或缺少本地 Linux 对象边界的 checkpoint
+应继续保留 `unmapped`。
+
 ## 待补充
 
 - `arceos_ex` 第一轮对象到 crate/module/struct 的具体映射表。

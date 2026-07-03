@@ -3,35 +3,35 @@
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 55
+      "count": 64
     },
     {
       "mapping_kind": "range",
-      "count": 10
+      "count": 11
     },
     {
       "mapping_kind": "unmapped",
-      "count": 337
+      "count": 327
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 337
+      "count": 327
     },
     {
       "confidence": "high",
-      "count": 36
+      "count": 40
     },
     {
       "confidence": "medium",
-      "count": 29
+      "count": 35
     }
   ],
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 25
+      "count": 30
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -43,10 +43,14 @@
     },
     {
       "linux_file": "fs/binfmt_elf.c",
-      "count": 3
+      "count": 6
     },
     {
       "linux_file": "fs/exec.c",
+      "count": 4
+    },
+    {
+      "linux_file": "arch/riscv/kernel/entry.S",
       "count": 3
     },
     {
@@ -56,10 +60,6 @@
     {
       "linux_file": "kernel/exit.c",
       "count": 3
-    },
-    {
-      "linux_file": "arch/riscv/kernel/entry.S",
-      "count": 2
     },
     {
       "linux_file": "fs/open.c",
@@ -117,14 +117,6 @@
     },
     {
       "family": "MemBlock",
-      "count": 4
-    },
-    {
-      "family": "SystemState",
-      "count": 4
-    },
-    {
-      "family": "UserBoot",
       "count": 4
     },
     {
@@ -268,6 +260,10 @@
       "count": 2
     },
     {
+      "family": "SystemState",
+      "count": 2
+    },
+    {
       "family": "TaskCreationCore",
       "count": 2
     },
@@ -313,10 +309,6 @@
     },
     {
       "family": "AsyncCore",
-      "count": 1
-    },
-    {
-      "family": "AsyncFullSync",
       "count": 1
     },
     {
@@ -517,10 +509,6 @@
     },
     {
       "family": "InitMM",
-      "count": 1
-    },
-    {
-      "family": "InitMemoryCleanup",
       "count": 1
     },
     {
@@ -1008,14 +996,6 @@
       "count": 1
     },
     {
-      "family": "UserAddressSpace",
-      "count": 1
-    },
-    {
-      "family": "UserInitProcess",
-      "count": 1
-    },
-    {
       "family": "UtsNamespace",
       "count": 1
     },
@@ -1076,5 +1056,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 196
+  "unmapped_singleton_family_count": 192
 }

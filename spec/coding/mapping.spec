@@ -27,6 +27,10 @@ predicate coding_must_failure_diagnostic_not_be_checkpoint_handler() -> bool;
 predicate coding_must_linker_script_driven_by_model_lds() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
+predicate linux_checkpoint_mapping_must_be_static_source_only() -> bool;
+predicate linux_checkpoint_mapping_must_keep_unproven_unmapped() -> bool;
+predicate linux_checkpoint_mapping_should_mark_partial_boundaries() -> bool;
+predicate linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec() -> bool;
 
 predicate coding_should_use_global_context() -> bool;
 predicate coding_should_name_context_parameters_ctx() -> bool;
@@ -261,5 +265,47 @@ type CodingMappingShould {
          * files should not define their own local objects()/context() accessors.
          */
         coding_should_avoid_phase_local_context_accessors();
+    }
+}
+
+type LinuxCheckpointMappingRules {
+    invariant {
+        /*
+         * Static source only:
+         *
+         * Linux checkpoint mapping artifacts record reviewable anchors in the
+         * read-only Linux reference tree. The mapping pass must not modify
+         * Linux source, add probes, or depend on runtime collection to justify
+         * a mapping.
+         */
+        linux_checkpoint_mapping_must_be_static_source_only();
+
+        /*
+         * Unproven stays unmapped:
+         *
+         * If a checkpoint cannot be tied to a stable Linux source boundary from
+         * the reference tree, it must remain unmapped and the notes must record
+         * why no reliable boundary was claimed.
+         */
+        linux_checkpoint_mapping_must_keep_unproven_unmapped();
+
+        /*
+         * Partial boundaries:
+         *
+         * When Linux lacks a local object boundary matching the arceos_ex
+         * checkpoint, the mapping should use a range or medium confidence to
+         * make the partial alignment explicit.
+         */
+        linux_checkpoint_mapping_should_mark_partial_boundaries();
+
+        /*
+         * UserBoot versus UserExec:
+         *
+         * Boot-time init exec checkpoints may reuse Linux exec/binfmt/return
+         * anchors that also describe runtime exec syscall checkpoints, but the
+         * notes must distinguish the boot-time init exec view from the runtime
+         * exec syscall view.
+         */
+        linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec();
     }
 }

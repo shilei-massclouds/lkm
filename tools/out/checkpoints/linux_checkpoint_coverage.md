@@ -6,30 +6,30 @@
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 55 |
-| range | 10 |
-| unmapped | 337 |
+| exact | 64 |
+| range | 11 |
+| unmapped | 327 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 337 |
-| high | 36 |
-| medium | 29 |
+| none | 327 |
+| high | 40 |
+| medium | 35 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 25 |
+| init/main.c | 30 |
 | arch/riscv/kernel/head.S | 10 |
 | arch/riscv/mm/init.c | 7 |
-| fs/binfmt_elf.c | 3 |
-| fs/exec.c | 3 |
+| fs/binfmt_elf.c | 6 |
+| fs/exec.c | 4 |
+| arch/riscv/kernel/entry.S | 3 |
 | fs/read_write.c | 3 |
 | kernel/exit.c | 3 |
-| arch/riscv/kernel/entry.S | 2 |
 | fs/open.c | 2 |
 | kernel/fork.c | 2 |
 | arch/riscv/kernel/process.c | 1 |
@@ -49,8 +49,6 @@
 | EarlyCon | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
-| SystemState | 4 |
-| UserBoot | 4 |
 | VirtioBlk | 4 |
 | BootCPU | 3 |
 | Completion | 3 |
@@ -86,6 +84,7 @@
 | SmpRuntimePhase | 2 |
 | Softirq | 2 |
 | SwapperVm | 2 |
+| SystemState | 2 |
 | TaskCreationCore | 2 |
 | TasksRcu | 2 |
 | Tick | 2 |
@@ -93,4 +92,4 @@
 | UpMultitaskPhase | 2 |
 | VirtioBus | 2 |
 
-- singleton unmapped families: 196
+- singleton unmapped families: 192

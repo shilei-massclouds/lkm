@@ -1,8 +1,8 @@
 # Linux Checkpoint Mapping
 
-- exact: 55
-- range: 10
-- unmapped: 337
+- exact: 64
+- range: 11
+- unmapped: 327
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -369,23 +369,23 @@
 | 360 | RootfsBoundary.Ready | RootfsBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 361 | FinalizePhase.Started | FinalizePhaseStarted | exact | medium | init/main.c | kernel_init | kernel_init() line 1471: async_synchronize_full(); | Linux kernel_init() begins final async/initmem cleanup after kernel_init_freeable(). |
 | 362 | FinalizePhase.Ready | FinalizePhaseReady | exact | high | init/main.c | kernel_init | kernel_init() line 1487: system_state = SYSTEM_RUNNING; | Linux kernel_init() marks SYSTEM_RUNNING before payload selection. |
-| 363 | AsyncFullSync.DeferredReady | AsyncFullSyncDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 364 | SystemState.FreeingInitmemCheckpoint | SystemStateFreeingInitmemCheckpoint | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 365 | InitMemoryCleanup.DeferredReady | InitMemoryCleanupDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 363 | AsyncFullSync.DeferredReady | AsyncFullSyncDeferredReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1471: async_synchronize_full(); | Linux kernel_init() waits for async __init work before initmem cleanup; arceos_ex models this as a deferred finalize boundary. |
+| 364 | SystemState.FreeingInitmemCheckpoint | SystemStateFreeingInitmemCheckpoint | exact | high | init/main.c | kernel_init | kernel_init() line 1473: system_state = SYSTEM_FREEING_INITMEM; | Linux kernel_init() explicitly marks the system_state transition into initmem freeing. |
+| 365 | InitMemoryCleanup.DeferredReady | InitMemoryCleanupDeferredReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1478: free_initmem(); | Linux kernel_init() initmem cleanup call site; arceos_ex keeps this as a deferred cleanup boundary rather than a separate Linux object. |
 | 366 | KernelMappingProtection.DeferredReady | KernelMappingProtectionDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 367 | PtiFinalize.TrimmedReady | PtiFinalizeTrimmedReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 368 | SystemState.Online | SystemStateOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 368 | SystemState.Online | SystemStateOnline | exact | high | init/main.c | kernel_init | kernel_init() line 1487: system_state = SYSTEM_RUNNING; | Linux kernel_init() marks SYSTEM_RUNNING after initmem cleanup and before payload/init selection. |
 | 369 | RcuCore.InkernelBootEnded | RcuInkernelBootEnded | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 370 | RcuBootEnd.Ready | RcuBootEndReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 371 | SysctlArgs.DeferredReady | SysctlArgsDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 372 | FinalizeBoundary.Ready | FinalizeBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 373 | BreakpointException.Handled | BreakpointExceptionHandled | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 374 | UserBoot.MainElfReady | UserBootMainElfReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 375 | UserBoot.InterpreterReady | UserBootInterpreterReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 376 | UserBoot.InitAttemptFailed | UserBootInitAttemptFailed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 377 | UserBoot.AddressSpaceSetupStart | UserBootAddressSpaceSetupStart | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 378 | UserInitProcess.EnterUserMode | UserModeEntry | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 379 | UserAddressSpace.Ready | UserAddressSpaceReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 374 | UserBoot.MainElfReady | UserBootMainElfReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file); | Boot-time init exec view of the main ELF program-header parse; this reuses the UserExec.MainElfReady Linux anchor but is reached from kernel_init() via kernel_execve(). |
+| 375 | UserBoot.InterpreterReady | UserBootInterpreterReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex, | Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec. |
+| 376 | UserBoot.InitAttemptFailed | UserBootInitAttemptFailed | range | medium | init/main.c | try_to_run_init_process | try_to_run_init_process() lines 1397-1404: ret = run_init_process(init_filename); .. return ret; | Linux folds a default init candidate attempt, non-ENOENT diagnostic and fallback return into try_to_run_init_process(); there is no separate stage/reason checkpoint. |
+| 377 | UserBoot.AddressSpaceSetupStart | UserBootAddressSpaceSetupStart | exact | medium | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 996: retval = begin_new_exec(bprm); | Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary. |
+| 378 | UserInitProcess.EnterUserMode | UserModeEntry | exact | medium | arch/riscv/kernel/entry.S | ret_from_exception | ret_from_exception line 279: sret | RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff. |
+| 379 | UserAddressSpace.Ready | UserAddressSpaceReady | exact | medium | fs/exec.c | exec_mmap | exec_mmap() line 1003: activate_mm(active_mm, mm); | Linux exec_mmap() installs and activates the new mm; Linux does not expose a separate UserAddressSpace object boundary. |
 | 380 | SyscallTable.ExecveArgsReady | SyscallTableExecveArgsReady | exact | high | fs/exec.c | do_execveat_common | do_execveat_common() line 1935: retval = copy_strings(bprm->argc, argv, bprm); | Linux do_execveat_common() has copied filename, envp and argv into linux_binprm before bprm_execve(). |
 | 381 | UserExec.MainElfReady | UserExecMainElfReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file); | Linux ELF loader has read the main executable program headers. |
 | 382 | UserExec.InterpreterReady | UserExecInterpreterReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex, | Linux PT_INTERP path has opened and parsed the interpreter ELF program headers when an interpreter is present. |
