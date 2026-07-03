@@ -203,6 +203,140 @@ object MemBlock: MemoryObject {
 }
 
 /*
+ * PhysicalMemory 表示平台提供的物理 RAM 和设备 I/O 地址布局。
+ * 它由入口后继期 EarlyDtb.Preset 从 RawDtb 的 /memory 描述中建立。
+ */
+object PhysicalMemory: PrepareObject {
+    initial_state: State::Base;
+    access: Access::ReadOnly;
+    source: fdt::memory;
+
+    attrs {
+        ram: PhysRangeSet<Ram>;
+        iomap: PhysRangeSet<Io>;
+    }
+
+    /*
+     * Base 表示物理内存事实尚未从 RawDtb 的 /memory 描述中抽取。
+     */
+    state State::Base {
+        transitions {
+            /*
+             * Preset 由 EarlyDtb.Preset 触发，解析 /memory 并形成平台物理内存布局事实。
+             */
+            on Transition::Preset -> State::Ready {
+                depends_on {
+                    RawDtb.state == State::Ready;
+                }
+
+                ensures {
+                    physical_memory_ranges_ready(PhysicalMemory, RawDtb);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 FDT /memory 已解析为物理资源布局事实，等待发布为后续对象可依赖输入。
+     */
+    state State::Ready {
+        invariant {
+            attrs_accessible(self);
+            readonly(self);
+            valid_phys_range_set(ram);
+            valid_phys_range_set(iomap);
+            disjoint(ram, iomap);
+            physical_memory_ranges_ready(PhysicalMemory, RawDtb);
+        }
+
+        transitions {
+            /*
+             * Enable 将已解析的物理内存布局发布为后续 MemBlock 可依赖的事实。
+             */
+            on Transition::Enable -> State::Online {
+                ensures {
+                    physical_memory_ranges_published(PhysicalMemory);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示物理资源布局已经从 RawDtb 的 FDT /memory 描述中抽取并可读取。
+     * 本状态要求 RAM 和 I/O 范围结构良好、非空且互不重叠。
+     */
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            readonly(self);
+            valid_phys_range_set(ram);
+            valid_phys_range_set(iomap);
+            disjoint(ram, iomap);
+            physical_memory_ranges_published(PhysicalMemory);
+        }
+    }
+}
+
+/*
+ * PlatformCpuInfo 表示从平台 CPU 描述中提取出的有效 hart 集合。
+ * 当前只建模启动参数中的 hart id 是否属于该集合，完整 CPU 拓扑留给后续阶段。
+ */
+object PlatformCpuInfo: PrepareObject {
+    initial_state: State::Base;
+    source: fdt::cpus;
+
+    /*
+     * Base 表示平台 CPU 事实尚未从 RawDtb 的 /cpus 描述中抽取。
+     */
+    state State::Base {
+        transitions {
+            /*
+             * Preset 由 EarlyDtb.Preset 触发，解析 /cpus 并确认启动 hart 属于平台有效集合。
+             */
+            on Transition::Preset -> State::Ready {
+                depends_on {
+                    BootArgs.state == State::Online;
+                    RawDtb.state == State::Ready;
+                }
+
+                ensures {
+                    platform_cpu_info_ready(PlatformCpuInfo, RawDtb);
+                    platform_hart_id_valid(BootArgs.boot_hartid);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 FDT /cpus 已解析为平台 CPU 事实，且启动 hartid 已通过该集合验证。
+     */
+    state State::Ready {
+        invariant {
+            platform_cpu_info_ready(PlatformCpuInfo, RawDtb);
+            platform_hart_id_valid(BootArgs.boot_hartid);
+        }
+
+        transitions {
+            /*
+             * Enable 将平台 CPU 事实发布为 BootCPU 后续推进可依赖的输入。
+             */
+            on Transition::Enable -> State::Online {
+                ensures {
+                    platform_cpu_info_published(PlatformCpuInfo);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            platform_cpu_info_published(PlatformCpuInfo);
+            platform_hart_id_valid(BootArgs.boot_hartid);
+        }
+    }
+}
+
+/*
  * EarlyDtb 表示入口后继期短暂存在的早期 DTB 解析对象。
  */
 object EarlyDtb: ResourceObject {

@@ -43,7 +43,7 @@ object BootPhase: PhaseObject {
             /*
              * Setup 顺序推进入口前导期、入口后继期、核心准备期、内存核心初始化期
              * 和调度准备期五个子阶段。
-             * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
+             * BootPhase 直接依赖 project-level 启动输入，不再通过单独准备阶段衔接。
              */
             on Transition::Setup -> State::Ready {
                 within SingleTaskContext {

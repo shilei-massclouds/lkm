@@ -33,7 +33,11 @@ object PayloadPhase: PhaseObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    PreparePhase.state == State::Online;
+                    Riscv64.state == State::Online;
+                    SbiSpec.state == State::Online;
+                    OpenSbiFirmware.state == State::Online;
+                    Lds.state == State::Online;
+                    Config.state == State::Online;
                     BootPhase.state == State::Ready;
                     InterruptPhase.state == State::Ready;
                     UpMultitaskPhase.state == State::Ready;
@@ -68,7 +72,11 @@ object PayloadPhase: PhaseObject {
      */
     state State::Ready {
         invariant {
-            PreparePhase.state == State::Online;
+            Riscv64.state == State::Online;
+            SbiSpec.state == State::Online;
+            OpenSbiFirmware.state == State::Online;
+            Lds.state == State::Online;
+            Config.state == State::Online;
             BootPhase.state == State::Ready;
             InterruptPhase.state == State::Ready;
             UpMultitaskPhase.state == State::Ready;
@@ -112,7 +120,11 @@ object PayloadPhase: PhaseObject {
      */
     state State::Online {
         invariant {
-            PreparePhase.state == State::Online;
+            Riscv64.state == State::Online;
+            SbiSpec.state == State::Online;
+            OpenSbiFirmware.state == State::Online;
+            Lds.state == State::Online;
+            Config.state == State::Online;
             BootPhase.state == State::Ready;
             InterruptPhase.state == State::Ready;
             UpMultitaskPhase.state == State::Ready;
