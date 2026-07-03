@@ -318,6 +318,13 @@ type LinuxCheckpointMappingRules {
          * the semantic view being claimed, such as phase boundary, object fact
          * or deferred boundary, so the artifact does not imply distinct Linux
          * objects where Linux exposes only one local call-site boundary.
+         *
+         * do_basic_setup() object-level checkpoint mappings may reuse direct
+         * call sites from the same Linux function, including do_initcalls().
+         * Their notes must distinguish cpuset/cgroup trimmed no-op position
+         * reservation, driver core deferred boundary, procfs IRQ view deferred
+         * boundary, constructor table dispatch, initcall table dispatcher, and
+         * the do_basic_setup() end boundary before the KUnit handoff.
          */
         linux_checkpoint_mapping_must_distinguish_shared_call_site_semantics();
     }

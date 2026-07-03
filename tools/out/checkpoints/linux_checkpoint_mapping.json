@@ -3655,45 +3655,45 @@
     "checkpoint_index": 332,
     "checkpoint_name": "CpusetSmp.TrimmedReady",
     "checkpoint_variant": "CpusetSmpTrimmedReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1362: cpuset_init_smp();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() cpuset_init_smp() call; arceos_ex records the cpuset/cgroup trimmed/no-op object fact at this reserved position."
   },
   {
     "checkpoint_index": 333,
     "checkpoint_name": "DriverCore.DeferredReady",
     "checkpoint_variant": "DriverCoreDeferredReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1363: driver_init();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() driver_init() call; maps only the driver core base/deferred boundary without expanding driver model subobjects."
   },
   {
     "checkpoint_index": 334,
     "checkpoint_name": "IrqProcView.DeferredReady",
     "checkpoint_variant": "IrqProcViewDeferredReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1364: init_irq_proc();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() init_irq_proc() call; maps the procfs IRQ view deferred boundary without expanding per-IRQ proc export details."
   },
   {
     "checkpoint_index": 335,
     "checkpoint_name": "CtorTable.Ready",
     "checkpoint_variant": "CtorTableReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1365: do_ctors();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() do_ctors() call; maps the constructor table dispatch boundary and current trimmed/empty constructor-table fact."
   },
   {
     "checkpoint_index": 336,
@@ -3787,12 +3787,12 @@
     "checkpoint_index": 344,
     "checkpoint_name": "InitcallTable.Ready",
     "checkpoint_variant": "InitcallTableReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1366: do_initcalls();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() do_initcalls() call; maps the initcall levels dispatcher/table object fact, not any individual initcall entry side effect."
   },
   {
     "checkpoint_index": 345,
@@ -3853,12 +3853,12 @@
     "checkpoint_index": 350,
     "checkpoint_name": "InitcallBoundary.Ready",
     "checkpoint_variant": "InitcallBoundaryReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+    "linux_file": "init/main.c",
+    "linux_symbol": "do_basic_setup",
+    "linux_anchor": "do_basic_setup() line 1366: do_initcalls();",
+    "mapping_kind": "exact",
+    "confidence": "medium",
+    "notes": "Linux do_basic_setup() do_initcalls() call; marks the do_basic_setup() end boundary before kernel_init_freeable() continues to kunit_run_all_tests(), not an independent Linux object."
   },
   {
     "checkpoint_index": 351,

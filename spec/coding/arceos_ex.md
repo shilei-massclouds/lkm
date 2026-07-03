@@ -96,6 +96,10 @@ checkpoint handler、不得实现内存采集 runtime，也不得把候选映射
 arch/config 条件化影响而不能稳定代表 RISC-V64 语义时，必须映射到共同实现 helper 或保持 `unmapped`，并用
 `medium` 或更低 confidence 在 notes 中说明条件化 ABI 层。用户态 exec/return/wait 边界可以使用 RISC-V64
 architecture-scoped anchor，但必须保守使用 `range` 或 `medium` confidence 表达阶段性对应关系。
+`do_basic_setup()` 内对象级 checkpoint 可以复用同一 Linux 函数内的直接 call-site；若多个 checkpoint 共享
+`do_initcalls()` 等 anchor，notes 必须分别说明 trimmed/no-op 位置保留、deferred boundary、constructor
+table dispatch、initcall dispatcher/table object fact 或 `do_basic_setup()` 结束边界，不能暗示 Linux 暴露了
+多个独立对象。
 
 MUST：Linux differential checkpoint 工作的第三子阶段只汇总已提交 Linux checkpoint mapping 的覆盖率审阅视图。该阶段消费
 `tools/out/checkpoints/linux_checkpoint_mapping.json`，不得读取或修改 Linux tree，不得改变任何 checkpoint 的

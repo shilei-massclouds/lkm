@@ -1,8 +1,8 @@
 # Linux Checkpoint Mapping
 
-- exact: 70
+- exact: 76
 - range: 11
-- unmapped: 321
+- unmapped: 315
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -338,10 +338,10 @@
 | 329 | RuntimeCoreBoundary.Ready | RuntimeCoreBoundaryReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1578: page_alloc_init_late(); | Linux kernel_init_freeable() page_alloc_init_late() call; marks the Runtime Core window end boundary before do_basic_setup(), not an independent Linux object. |
 | 330 | InitcallPhase.Started | InitcallPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1580: do_basic_setup(); | Linux kernel_init_freeable() enters do_basic_setup(). |
 | 331 | InitcallPhase.Ready | InitcallPhaseReady | exact | high | init/main.c | do_basic_setup | do_basic_setup() line 1366: do_initcalls(); | Linux do_basic_setup() initcall execution anchor. |
-| 332 | CpusetSmp.TrimmedReady | CpusetSmpTrimmedReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 333 | DriverCore.DeferredReady | DriverCoreDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 334 | IrqProcView.DeferredReady | IrqProcViewDeferredReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 335 | CtorTable.Ready | CtorTableReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 332 | CpusetSmp.TrimmedReady | CpusetSmpTrimmedReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1362: cpuset_init_smp(); | Linux do_basic_setup() cpuset_init_smp() call; arceos_ex records the cpuset/cgroup trimmed/no-op object fact at this reserved position. |
+| 333 | DriverCore.DeferredReady | DriverCoreDeferredReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1363: driver_init(); | Linux do_basic_setup() driver_init() call; maps only the driver core base/deferred boundary without expanding driver model subobjects. |
+| 334 | IrqProcView.DeferredReady | IrqProcViewDeferredReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1364: init_irq_proc(); | Linux do_basic_setup() init_irq_proc() call; maps the procfs IRQ view deferred boundary without expanding per-IRQ proc export details. |
+| 335 | CtorTable.Ready | CtorTableReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1365: do_ctors(); | Linux do_basic_setup() do_ctors() call; maps the constructor table dispatch boundary and current trimmed/empty constructor-table fact. |
 | 336 | OfPlatformDefaultPopulate.ScanComplete | OfPlatformDefaultPopulateScanComplete | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 337 | VirtioBus.Ready | VirtioBusReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 338 | VirtioBus.DeviceAdded | VirtioBusDeviceAdded | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -350,13 +350,13 @@
 | 341 | VirtioBlk.LiveReadSubmitted | VirtioBlkLiveReadSubmitted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 342 | VirtioBlk.LiveReadCompleted | VirtioBlkLiveReadCompleted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 343 | VirtioRng.EntropyReady | VirtioRngEntropyReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 344 | InitcallTable.Ready | InitcallTableReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 344 | InitcallTable.Ready | InitcallTableReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1366: do_initcalls(); | Linux do_basic_setup() do_initcalls() call; maps the initcall levels dispatcher/table object fact, not any individual initcall entry side effect. |
 | 345 | Serial8250ConsoleBurstIrqTx.Ready | Serial8250ConsoleBurstIrqTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 346 | Serial8250ConsoleLongIrqTx.Ready | Serial8250ConsoleLongIrqTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 347 | TtyXmitFifoProbe.Ready | TtyXmitFifoProbeReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 348 | TtyWriteRuntimeTx.Ready | TtyWriteRuntimeTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 349 | TtyWriteBatchRuntimeTx.Ready | TtyWriteBatchRuntimeTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 350 | InitcallBoundary.Ready | InitcallBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 350 | InitcallBoundary.Ready | InitcallBoundaryReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1366: do_initcalls(); | Linux do_basic_setup() do_initcalls() call; marks the do_basic_setup() end boundary before kernel_init_freeable() continues to kunit_run_all_tests(), not an independent Linux object. |
 | 351 | RootfsPhase.Started | RootfsPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1593: prepare_namespace(); | Linux kernel_init_freeable() call site for prepare_namespace(). |
 | 352 | RootfsPhase.Ready | RootfsPhaseReady | exact | high | init/do_mounts.c | prepare_namespace | prepare_namespace() definition line 464 | Linux prepare_namespace() rootfs preparation boundary. |
 | 353 | KUnitRuntime.TrimmedReady | KUnitRuntimeTrimmedReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

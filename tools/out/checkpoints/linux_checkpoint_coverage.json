@@ -3,7 +3,7 @@
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 70
+      "count": 76
     },
     {
       "mapping_kind": "range",
@@ -11,17 +11,17 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 321
+      "count": 315
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 321
+      "count": 315
     },
     {
       "confidence": "medium",
-      "count": 41
+      "count": 47
     },
     {
       "confidence": "high",
@@ -31,7 +31,7 @@
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 36
+      "count": 42
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -424,15 +424,7 @@
       "count": 1
     },
     {
-      "family": "CpusetSmp",
-      "count": 1
-    },
-    {
       "family": "CredentialCore",
-      "count": 1
-    },
-    {
-      "family": "CtorTable",
       "count": 1
     },
     {
@@ -457,10 +449,6 @@
     },
     {
       "family": "DmaCachePolicy",
-      "count": 1
-    },
-    {
-      "family": "DriverCore",
       "count": 1
     },
     {
@@ -508,14 +496,6 @@
       "count": 1
     },
     {
-      "family": "InitcallBoundary",
-      "count": 1
-    },
-    {
-      "family": "InitcallTable",
-      "count": 1
-    },
-    {
       "family": "InitramfsSync",
       "count": 1
     },
@@ -545,10 +525,6 @@
     },
     {
       "family": "IrqHandlerRegistry",
-      "count": 1
-    },
-    {
-      "family": "IrqProcView",
       "count": 1
     },
     {
@@ -1044,5 +1020,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 189
+  "unmapped_singleton_family_count": 183
 }

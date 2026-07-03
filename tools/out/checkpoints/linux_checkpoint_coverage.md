@@ -6,23 +6,23 @@
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 70 |
+| exact | 76 |
 | range | 11 |
-| unmapped | 321 |
+| unmapped | 315 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 321 |
-| medium | 41 |
+| none | 315 |
+| medium | 47 |
 | high | 40 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 36 |
+| init/main.c | 42 |
 | arch/riscv/kernel/head.S | 10 |
 | arch/riscv/mm/init.c | 7 |
 | fs/binfmt_elf.c | 6 |
@@ -92,4 +92,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 189
+- singleton unmapped families: 183

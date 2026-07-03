@@ -38,6 +38,11 @@ void pti_finalize(void) {}
 void numa_default_policy(void) {}
 void rcu_end_inkernel_boot(void) {}
 void panic(const char *message) {}
+void cpuset_init_smp(void) {}
+void driver_init(void) {}
+void init_irq_proc(void) {}
+void do_ctors(void) {}
+void do_initcalls(void) {}
 
 static int try_to_run_init_process(const char *init_filename)
 {
@@ -116,6 +121,15 @@ static noinline void __init kernel_init_freeable(void)
     page_alloc_init_late();
     do_basic_setup();
     prepare_namespace();
+}
+
+static void __init do_basic_setup(void)
+{
+    cpuset_init_smp();
+    driver_init();
+    init_irq_proc();
+    do_ctors();
+    do_initcalls();
 }
 """
 
@@ -848,6 +862,81 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         boundary = by_name["RuntimeCoreBoundary.Ready"]
         self.assertIn("page_alloc_init_late", boundary.linux_anchor)
         self.assertIn("Runtime Core window end boundary", boundary.notes)
+        self.assertIn("not an independent Linux object", boundary.notes)
+
+    def test_initcall_core_object_rules_map_to_do_basic_setup(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=332,
+                variant="CpusetSmpTrimmedReady",
+                name="CpusetSmp.TrimmedReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=333,
+                variant="DriverCoreDeferredReady",
+                name="DriverCore.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=334,
+                variant="IrqProcViewDeferredReady",
+                name="IrqProcView.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=335,
+                variant="CtorTableReady",
+                name="CtorTable.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=344,
+                variant="InitcallTableReady",
+                name="InitcallTable.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=350,
+                variant="InitcallBoundaryReady",
+                name="InitcallBoundary.Ready",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        for record in by_name.values():
+            self.assertEqual(record.linux_file, "init/main.c")
+            self.assertEqual(record.linux_symbol, "do_basic_setup")
+            self.assertEqual(record.mapping_kind, "exact")
+            self.assertEqual(record.confidence, "medium")
+
+        cpuset = by_name["CpusetSmp.TrimmedReady"]
+        self.assertIn("cpuset_init_smp", cpuset.linux_anchor)
+        self.assertIn("cpuset/cgroup trimmed/no-op object fact", cpuset.notes)
+
+        driver = by_name["DriverCore.DeferredReady"]
+        self.assertIn("driver_init", driver.linux_anchor)
+        self.assertIn("driver core base/deferred boundary", driver.notes)
+        self.assertIn("without expanding driver model subobjects", driver.notes)
+
+        irq_proc = by_name["IrqProcView.DeferredReady"]
+        self.assertIn("init_irq_proc", irq_proc.linux_anchor)
+        self.assertIn("procfs IRQ view deferred boundary", irq_proc.notes)
+
+        ctor = by_name["CtorTable.Ready"]
+        self.assertIn("do_ctors", ctor.linux_anchor)
+        self.assertIn("constructor table dispatch boundary", ctor.notes)
+
+        initcall_table = by_name["InitcallTable.Ready"]
+        self.assertIn("do_initcalls", initcall_table.linux_anchor)
+        self.assertIn("initcall levels dispatcher/table object fact", initcall_table.notes)
+        self.assertIn("not any individual initcall entry side effect", initcall_table.notes)
+
+        boundary = by_name["InitcallBoundary.Ready"]
+        self.assertIn("do_initcalls", boundary.linux_anchor)
+        self.assertIn("do_basic_setup() end boundary", boundary.notes)
+        self.assertIn("kunit_run_all_tests", boundary.notes)
         self.assertIn("not an independent Linux object", boundary.notes)
 
     def test_user_boot_rules_map_to_linux_init_exec_anchors(self) -> None:
