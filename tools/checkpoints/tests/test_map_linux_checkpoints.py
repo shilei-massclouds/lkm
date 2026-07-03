@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import json
 import sys
@@ -375,6 +377,111 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ],
         )
         self.assertIn("| 1 | Demo.Ready | DemoReady | exact | high |", markdown)
+
+    def test_check_mode_accepts_current_outputs(self) -> None:
+        inventory = [
+            {
+                "index": 0,
+                "variant": "StartupTimelineStarted",
+                "name": "StartupTimeline.Started",
+            },
+            {
+                "index": 401,
+                "variant": "PayloadPhaseOnline",
+                "name": "PayloadPhase.Online",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            linux_tree = self._write_linux_fixture(tmp)
+            inventory_path = tmp_path / "inventory.json"
+            inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+            records = map_linux_checkpoints.load_inventory(inventory_path)
+            mapped = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+            out_dir = tmp_path / "out"
+            map_linux_checkpoints.write_outputs(mapped, out_dir)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = map_linux_checkpoints.main(
+                    [
+                        "--input",
+                        str(inventory_path),
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--check",
+                    ]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("artifacts are current", stdout.getvalue())
+
+    def test_check_mode_reports_drift_without_rewriting_outputs(self) -> None:
+        inventory = [
+            {
+                "index": 0,
+                "variant": "StartupTimelineStarted",
+                "name": "StartupTimeline.Started",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            linux_tree = self._write_linux_fixture(tmp)
+            inventory_path = tmp_path / "inventory.json"
+            inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+            records = map_linux_checkpoints.load_inventory(inventory_path)
+            mapped = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+            out_dir = tmp_path / "out"
+            json_path, _markdown_path = map_linux_checkpoints.write_outputs(mapped, out_dir)
+            stale_json = "[]\n"
+            json_path.write_text(stale_json, encoding="utf-8")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = map_linux_checkpoints.main(
+                    [
+                        "--input",
+                        str(inventory_path),
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--check",
+                    ]
+                )
+
+            json_after_check = json_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(json_after_check, stale_json)
+        self.assertIn("content differs", stderr.getvalue())
+
+    def test_check_mode_requires_linux_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            inventory_path = tmp_path / "inventory.json"
+            inventory_path.write_text("[]", encoding="utf-8")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = map_linux_checkpoints.main(
+                    [
+                        "--input",
+                        str(inventory_path),
+                        "--linux-tree",
+                        str(tmp_path / "missing-linux"),
+                        "--out-dir",
+                        str(tmp_path / "out"),
+                        "--check",
+                    ]
+                )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("Linux reference tree is missing", stderr.getvalue())
 
     @unittest.skipUnless(
         map_linux_checkpoints.DEFAULT_LINUX_TREE.is_dir()

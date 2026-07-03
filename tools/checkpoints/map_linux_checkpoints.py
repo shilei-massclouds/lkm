@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -70,6 +71,12 @@ class MappingRule:
 
 class LinuxCheckpointMappingError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ArtifactDrift:
+    path: Path
+    reason: str
 
 
 def _line_number(text: str, offset: int) -> int:
@@ -828,6 +835,11 @@ def _cell(value: str | None) -> str:
     return _markdown_escape(value)
 
 
+def render_json(records: list[LinuxCheckpointMappingRecord]) -> str:
+    json_rows = [asdict(record) for record in records]
+    return json.dumps(json_rows, indent=2, ensure_ascii=False) + "\n"
+
+
 def render_markdown(records: list[LinuxCheckpointMappingRecord]) -> str:
     counts = {kind: 0 for kind in ("exact", "range", "unmapped")}
     for record in records:
@@ -865,6 +877,13 @@ def render_markdown(records: list[LinuxCheckpointMappingRecord]) -> str:
     return "\n".join(lines)
 
 
+def _expected_outputs(records: list[LinuxCheckpointMappingRecord]) -> dict[str, str]:
+    return {
+        JSON_NAME: render_json(records),
+        MARKDOWN_NAME: render_markdown(records),
+    }
+
+
 def write_outputs(
     records: list[LinuxCheckpointMappingRecord],
     out_dir: Path = DEFAULT_OUT_DIR,
@@ -873,13 +892,26 @@ def write_outputs(
     json_path = out_dir / JSON_NAME
     markdown_path = out_dir / MARKDOWN_NAME
 
-    json_rows = [asdict(record) for record in records]
-    json_path.write_text(
-        json.dumps(json_rows, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    markdown_path.write_text(render_markdown(records), encoding="utf-8")
+    outputs = _expected_outputs(records)
+    json_path.write_text(outputs[JSON_NAME], encoding="utf-8")
+    markdown_path.write_text(outputs[MARKDOWN_NAME], encoding="utf-8")
     return json_path, markdown_path
+
+
+def check_outputs(
+    records: list[LinuxCheckpointMappingRecord],
+    out_dir: Path = DEFAULT_OUT_DIR,
+) -> list[ArtifactDrift]:
+    drift: list[ArtifactDrift] = []
+    for name, expected in _expected_outputs(records).items():
+        path = out_dir / name
+        if not path.is_file():
+            drift.append(ArtifactDrift(path, "missing"))
+            continue
+        actual = path.read_text(encoding="utf-8")
+        if actual != expected:
+            drift.append(ArtifactDrift(path, "content differs"))
+    return drift
 
 
 def _count_by_kind(records: Iterable[LinuxCheckpointMappingRecord]) -> dict[str, int]:
@@ -911,10 +943,34 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUT_DIR,
         help="Directory for JSON and Markdown mapping outputs.",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Regenerate in memory and fail if tracked outputs have drifted.",
+    )
     args = parser.parse_args(argv)
+
+    if args.check and not args.linux_tree.is_dir():
+        print(f"Linux reference tree is missing: {args.linux_tree}", file=sys.stderr)
+        return 1
 
     inventory = load_inventory(args.input)
     records = map_checkpoints(inventory, args.linux_tree)
+    if args.check:
+        drift = check_outputs(records, args.out_dir)
+        if drift:
+            print("Linux checkpoint mapping artifact drift detected:", file=sys.stderr)
+            for item in drift:
+                print(f"{item.reason}: {item.path}", file=sys.stderr)
+            return 1
+        counts = _count_by_kind(records)
+        print(
+            f"Linux checkpoint mapping artifacts are current ({len(records)} mappings; "
+            f"exact={counts.get('exact', 0)} range={counts.get('range', 0)} "
+            f"unmapped={counts.get('unmapped', 0)})"
+        )
+        return 0
+
     json_path, markdown_path = write_outputs(records, args.out_dir)
     counts = _count_by_kind(records)
     print(f"wrote {len(records)} Linux checkpoint mappings")

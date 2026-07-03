@@ -20,7 +20,21 @@ make verify
 make test
 ```
 
-`make verify` 会对默认规格 `spec/model/main.spec` 执行推导检查。`make test` 会汇总规格验证、默认运行入口、用户态启动入口、KUnit 风格检查和 smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
+`make verify` 会对默认规格 `spec/model/main.spec` 执行推导检查。`make test` 会汇总规格验证、checkpoint inventory/Linux mapping 产物漂移检查、默认运行入口、用户态启动入口、KUnit 风格检查和 smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
+
+checkpoint inventory 和 Linux mapping 是已提交的审阅产物。需要重新生成时运行：
+
+```sh
+make checkpoints
+```
+
+只做门禁验证时运行：
+
+```sh
+make test-checkpoints
+```
+
+`test-checkpoints` 会先跑 checkpoint 工具单元测试，再以只读 `--check` 模式比较 `tools/out/checkpoints/` 下的 JSON/Markdown；它不会重写已提交产物。`make test` 会在 QEMU/runtime 用例前运行该门禁。
 
 ## 运行目标内核
 

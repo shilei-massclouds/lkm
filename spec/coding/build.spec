@@ -17,6 +17,7 @@ predicate build_must_not_hide_model_codegen_or_verification_boundaries() -> bool
 predicate build_must_preserve_app_payload_selection_as_explicit_parameter() -> bool;
 predicate build_must_stage_external_tools_as_configurable_commands() -> bool;
 predicate build_must_keep_test_aggregate_decomposable() -> bool;
+predicate build_must_gate_checkpoint_artifact_drift_before_runtime_tests() -> bool;
 predicate build_must_not_check_in_generated_or_runtime_local_outputs() -> bool;
 predicate build_must_make_clean_remove_routine_artifacts_only() -> bool;
 
@@ -137,6 +138,17 @@ type BuildAndScriptCodingMust {
          * part of the default acceptance gate.
          */
         build_must_keep_test_aggregate_decomposable();
+
+        /*
+         * Checkpoint artifact drift gate:
+         *
+         * The aggregate make test target must run checkpoint inventory and
+         * Linux mapping artifact checks before QEMU/runtime stages. The gate
+         * must be independently callable, must report drift as a test failure
+         * with retained logs, and must not rewrite tracked checkpoint output
+         * files while running in test mode.
+         */
+        build_must_gate_checkpoint_artifact_drift_before_runtime_tests();
 
         /*
          * Generated output hygiene:

@@ -5,6 +5,7 @@ import argparse
 import ast
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -28,6 +29,12 @@ class CheckpointRecord:
 
 class CheckpointParseError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ArtifactDrift:
+    path: Path
+    reason: str
 
 
 def _find_matching_brace(text: str, open_index: int) -> int:
@@ -251,6 +258,11 @@ def _markdown_escape(value: str) -> str:
     return value.replace("|", r"\|")
 
 
+def render_json(records: list[CheckpointRecord]) -> str:
+    json_rows = [asdict(record) for record in records]
+    return json.dumps(json_rows, indent=2, ensure_ascii=False) + "\n"
+
+
 def render_markdown(records: list[CheckpointRecord]) -> str:
     lines = [
         "# arceos_ex Checkpoints",
@@ -277,6 +289,13 @@ def render_markdown(records: list[CheckpointRecord]) -> str:
     return "\n".join(lines)
 
 
+def _expected_outputs(records: list[CheckpointRecord]) -> dict[str, str]:
+    return {
+        JSON_NAME: render_json(records),
+        MARKDOWN_NAME: render_markdown(records),
+    }
+
+
 def write_outputs(
     records: list[CheckpointRecord],
     out_dir: Path = DEFAULT_OUT_DIR,
@@ -285,13 +304,26 @@ def write_outputs(
     json_path = out_dir / JSON_NAME
     markdown_path = out_dir / MARKDOWN_NAME
 
-    json_rows = [asdict(record) for record in records]
-    json_path.write_text(
-        json.dumps(json_rows, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    markdown_path.write_text(render_markdown(records), encoding="utf-8")
+    outputs = _expected_outputs(records)
+    json_path.write_text(outputs[JSON_NAME], encoding="utf-8")
+    markdown_path.write_text(outputs[MARKDOWN_NAME], encoding="utf-8")
     return json_path, markdown_path
+
+
+def check_outputs(
+    records: list[CheckpointRecord],
+    out_dir: Path = DEFAULT_OUT_DIR,
+) -> list[ArtifactDrift]:
+    drift: list[ArtifactDrift] = []
+    for name, expected in _expected_outputs(records).items():
+        path = out_dir / name
+        if not path.is_file():
+            drift.append(ArtifactDrift(path, "missing"))
+            continue
+        actual = path.read_text(encoding="utf-8")
+        if actual != expected:
+            drift.append(ArtifactDrift(path, "content differs"))
+    return drift
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -310,9 +342,24 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUT_DIR,
         help="Directory for JSON and Markdown checkpoint inventory outputs.",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Regenerate in memory and fail if tracked outputs have drifted.",
+    )
     args = parser.parse_args(argv)
 
     records = parse_checkpoints(args.source)
+    if args.check:
+        drift = check_outputs(records, args.out_dir)
+        if drift:
+            print("checkpoint inventory artifact drift detected:", file=sys.stderr)
+            for item in drift:
+                print(f"{item.reason}: {item.path}", file=sys.stderr)
+            return 1
+        print(f"checkpoint inventory artifacts are current ({len(records)} checkpoints)")
+        return 0
+
     json_path, markdown_path = write_outputs(records, args.out_dir)
     print(f"wrote {len(records)} checkpoints")
     print(json_path)

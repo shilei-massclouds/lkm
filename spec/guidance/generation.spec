@@ -15,6 +15,7 @@ predicate guidance_agent_must_not_guess_fix_without_reproducible_localization() 
 predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bool;
 predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
 predicate guidance_agent_must_keep_linux_checkpoint_mapping_read_only() -> bool;
+predicate guidance_agent_must_make_checkpoint_artifact_checks_read_only() -> bool;
 predicate guidance_user_boot_codegen_must_read_user_boot_specs_first() -> bool;
 predicate guidance_user_boot_codegen_must_use_consensus_object_names() -> bool;
 predicate guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects() -> bool;
@@ -96,6 +97,17 @@ type RepositoryChangeWorkflow {
          * and must classify uncertain object boundaries as range or unmapped.
          */
         guidance_agent_must_keep_linux_checkpoint_mapping_read_only();
+
+        /*
+         * Checkpoint artifact checks are drift detectors:
+         *
+         * When adding or running checkpoint inventory or Linux mapping
+         * validation, check mode must regenerate expected artifacts in memory,
+         * compare them with the tracked review artifacts, and fail on drift.
+         * It must not rewrite outputs, edit Linux sources, add runtime
+         * collection, or change checkpoint handlers while validating.
+         */
+        guidance_agent_must_make_checkpoint_artifact_checks_read_only();
     }
 }
 

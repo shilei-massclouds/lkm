@@ -17,6 +17,9 @@
 Linux checkpoint 对齐映射任务属于只读 cross-reference 阶段：代理只能消费已有 arceos_ex checkpoint inventory、读取参考
 Linux 源码树并生成可审阅清单，不得把该任务扩展成 Linux 源码插桩、运行时采集、checkpoint handler 修改或行为修改。
 
+checkpoint inventory 和 Linux mapping 的测试模式是只读漂移检测：只能在内存中重新生成 JSON/Markdown，与
+`tools/out/checkpoints/` 中已提交的审阅产物比较；发现漂移应作为测试失败报告，不得在测试模式下重写产物。
+
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 
 ## 用户态启动代码生成

@@ -294,6 +294,7 @@ distro_sh_input=$'/bin/ls\nexit\n'
 
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
+run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkpoints
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
 run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
     "$tmpdir/run-user-native.log" "$tmpdir/user-native-default.raw"

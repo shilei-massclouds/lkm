@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import json
 import sys
@@ -84,6 +86,43 @@ class ListCheckpointsTests(unittest.TestCase):
             markdown = markdown_path.read_text(encoding="utf-8")
             self.assertIn("| 0 | AlphaStarted | Alpha.Started | A |", markdown)
             self.assertIn("| 1 | BetaReady | Beta.Ready | null |", markdown)
+
+    def test_check_mode_accepts_current_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._write_fixture(tmp)
+            records = list_checkpoints.parse_checkpoints(source)
+            out_dir = Path(tmp) / "out"
+            list_checkpoints.write_outputs(records, out_dir)
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = list_checkpoints.main(
+                    ["--source", str(source), "--out-dir", str(out_dir), "--check"]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("artifacts are current", stdout.getvalue())
+
+    def test_check_mode_reports_drift_without_rewriting_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._write_fixture(tmp)
+            records = list_checkpoints.parse_checkpoints(source)
+            out_dir = Path(tmp) / "out"
+            _json_path, markdown_path = list_checkpoints.write_outputs(records, out_dir)
+            stale_markdown = "# stale\n"
+            markdown_path.write_text(stale_markdown, encoding="utf-8")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = list_checkpoints.main(
+                    ["--source", str(source), "--out-dir", str(out_dir), "--check"]
+                )
+
+            markdown_after_check = markdown_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(markdown_after_check, stale_markdown)
+        self.assertIn("content differs", stderr.getvalue())
 
     def test_real_trace_file_contains_expected_checkpoints(self) -> None:
         records = list_checkpoints.parse_checkpoints()

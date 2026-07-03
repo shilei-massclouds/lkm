@@ -229,6 +229,7 @@ predicate arceos_ex_must_log_trace_and_probe_remain_distinct_consumers() -> bool
 predicate arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_export_stable_fields() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux() -> bool;
+predicate arceos_ex_must_checkpoint_inventory_support_regeneration_check() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_be_mapping_only() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_consume_inventory_and_read_linux_only() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_preserve_checkpoint_order() -> bool;
@@ -237,6 +238,7 @@ predicate arceos_ex_must_linux_checkpoint_mapping_export_stable_fields() -> bool
 predicate arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2294,10 +2296,16 @@ type ArceosExIrqTimeInitCodingMust {
          * output, runtime observations, memory collection, or any Linux
          * source tree. Linux insertion mapping and memory collection belong
          * to later stages consuming the exported inventory.
+         *
+         * The inventory tool must also support a read-only regeneration check:
+         * it regenerates JSON and Markdown in memory, compares them with the
+         * tracked tools/out/checkpoints/ artifacts, and reports file drift as
+         * failure without rewriting repository outputs.
          */
         arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source();
         arceos_ex_must_checkpoint_inventory_export_stable_fields();
         arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux();
+        arceos_ex_must_checkpoint_inventory_support_regeneration_check();
 
         /*
          * Linux checkpoint alignment mapping:
@@ -2341,6 +2349,12 @@ type ArceosExIrqTimeInitCodingMust {
          * instrumentation, change arceos_ex runtime behavior, add checkpoint
          * handlers, collect memory/runtime payloads, or treat the candidate
          * mapping as proof that a Linux insertion point has been implemented.
+         *
+         * The mapping tool must also support a read-only regeneration check:
+         * it regenerates JSON and Markdown in memory from the tracked
+         * inventory and reference Linux tree, compares them with the tracked
+         * mapping artifacts, and reports drift as failure without rewriting
+         * repository outputs.
          */
         arceos_ex_must_linux_checkpoint_mapping_be_mapping_only();
         arceos_ex_must_linux_checkpoint_mapping_consume_inventory_and_read_linux_only();
@@ -2350,6 +2364,7 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime();
         arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors();
         arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit();
+        arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check();
 
         /*
          * Observation levels and domains:
