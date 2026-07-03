@@ -25,6 +25,8 @@ make clean
 
 Kernel-specific command bodies belong under the selected kernel directory, currently `impl/arceos_ex/Makefile`. The top-level file should pass explicit parameters such as `KERNEL`, `APP`, `LOG`, `SPEC`, `PROBE`, `PROBE_FILE`, `KUNIT_HANDLERS`, `KUNIT_APP` and `SMOKE_APP`; it should not duplicate the kernel-specific Rust, linker, disk or QEMU command lines.
 
+`make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, `tools/out/`, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. It must not remove user-local environments such as `.venv/` or `venv/`, diagnostic logs, editor state or other unlisted local files.
+
 ## Target Boundaries
 
 Targets must remain composable:
@@ -36,6 +38,7 @@ Targets must remain composable:
 - `verify` runs formal derivation or trace generation.
 - `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
 - `test` may aggregate validation stages, but must preserve their order and individual entry points.
+- `clean` removes generated build and cache artifacts, while preserving user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
 

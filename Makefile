@@ -61,3 +61,6 @@ stress-test:
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean
+	rm -rf tools/build tools/out
+	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type d \( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
+	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type f \( -name '*.pyc' -o -name '*.pyo' \) -exec rm -f {} +

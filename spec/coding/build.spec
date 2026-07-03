@@ -18,6 +18,7 @@ predicate build_must_preserve_app_payload_selection_as_explicit_parameter() -> b
 predicate build_must_stage_external_tools_as_configurable_commands() -> bool;
 predicate build_must_keep_test_aggregate_decomposable() -> bool;
 predicate build_must_not_check_in_generated_or_runtime_local_outputs() -> bool;
+predicate build_must_make_clean_remove_routine_artifacts_only() -> bool;
 
 predicate build_should_name_image_and_fs_knobs_explicitly() -> bool;
 predicate build_should_make_qemu_devices_data_driven() -> bool;
@@ -147,6 +148,18 @@ type BuildAndScriptCodingMust {
          * stable source inputs.
          */
         build_must_not_check_in_generated_or_runtime_local_outputs();
+
+        /*
+         * Clean scope:
+         *
+         * The repository top-level make clean target must remove routine
+         * build, code-generation and test-cache artifacts created under the
+         * repository, while preserving user-local environments, diagnostic
+         * logs, editor state and other unlisted local files. It must keep the
+         * selected kernel implementation clean as the owner of
+         * kernel-specific build artifacts.
+         */
+        build_must_make_clean_remove_routine_artifacts_only();
     }
 }
 
