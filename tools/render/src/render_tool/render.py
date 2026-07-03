@@ -315,6 +315,7 @@ def _render_trace_svg(
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".transition-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".emit-label { fill: #fff7ed; stroke: #f97316; stroke-width: 1; }",
         ".action { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".action-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
@@ -322,6 +323,7 @@ def _render_trace_svg(
         ".phase-label { fill: #0f172a; font-weight: 600; }",
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".emit-arrow { stroke: #f97316; stroke-width: 1.1; stroke-dasharray: 4 3; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".within-arrow { stroke: #0f766e; stroke-width: 1.1; stroke-dasharray: 5 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".context-box { fill: #f0fdfa; stroke: #0f766e; stroke-width: 1.2; stroke-dasharray: 6 4; }",
@@ -362,6 +364,8 @@ def _render_trace_svg(
             _append_trace_phase_event(lines, cell, cell_box(cell))
         elif cell.kind == "transition_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
+        elif cell.kind == "emit_event":
+            _append_trace_emit_event(lines, cell, cell_box(cell))
         elif cell.kind == "action":
             _append_trace_action(lines, cell, cell_box(cell))
         elif cell.kind == "context_action":
@@ -380,7 +384,7 @@ def _render_trace_svg(
             if _trace_transition_id(arrow.source) in phase_span_ids:
                 continue
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
-        elif arrow.kind in {"drives", "emits"}:
+        elif arrow.kind == "drives":
             if _is_phase_to_phase_arrow(source, target):
                 continue
             if source.kind == "context_action" or target.kind == "context_action":
@@ -408,6 +412,14 @@ def _render_trace_svg(
                     css_class="drive-arrow",
                     max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
                 )
+        elif arrow.kind == "emits":
+            _append_trace_horizontal_arrow(
+                lines,
+                _trace_event_anchor_box(source, cell_box(source)),
+                _trace_emit_anchor_box(target, cell_box(target)),
+                css_class="emit-arrow",
+                max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
+            )
         elif arrow.kind == "depends_on":
             _append_trace_horizontal_arrow(
                 lines, cell_box(source), cell_box(target), css_class="depends-arrow"
@@ -689,6 +701,29 @@ def _append_trace_event_label(
         label_x + label_width / 2,
         label_y + _TRACE_TRANSITION_LABEL_HEIGHT / 2,
         css_class="muted",
+        font_size=10,
+        baseline_offset=3.5,
+    )
+
+
+def _append_trace_emit_event(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    x, y, width, height = box
+    label_width = max(10, width - _TRACE_TRANSITION_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_TRANSITION_LABEL_PAD_X
+    label_y = y + (height - _TRACE_TRANSITION_LABEL_HEIGHT) / 2
+    lines.extend(
+        [
+            f'<title>emits {_xml_escape(cell.label)}</title>',
+            f'<rect class="emit-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{_TRACE_TRANSITION_LABEL_HEIGHT:.1f}" rx="4" />',
+        ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_emit_label_lines(cell.label),
+        label_x + label_width / 2,
+        label_y + _TRACE_TRANSITION_LABEL_HEIGHT / 2,
         font_size=10,
         baseline_offset=3.5,
     )
@@ -984,6 +1019,18 @@ def _trace_event_anchor_box(
     return label_x, label_y, label_width, _TRACE_TRANSITION_LABEL_HEIGHT
 
 
+def _trace_emit_anchor_box(
+    cell: TraceCell, box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    if cell.kind != "emit_event":
+        return box
+    x, y, width, height = box
+    label_width = max(10, width - _TRACE_TRANSITION_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_TRANSITION_LABEL_PAD_X
+    label_y = y + (height - _TRACE_TRANSITION_LABEL_HEIGHT) / 2
+    return label_x, label_y, label_width, _TRACE_TRANSITION_LABEL_HEIGHT
+
+
 def _trace_semantic_anchor_box(
     cell: TraceCell, box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
@@ -1118,6 +1165,8 @@ def _trace_annotation_occupied_boxes(
             boxes.append(_trace_state_anchor_box(cell_box(cell)))
         elif cell.kind == "transition_span" and cell.id not in phase_span_ids:
             boxes.append(_trace_event_anchor_box(cell, cell_box(cell)))
+        elif cell.kind == "emit_event":
+            boxes.append(_trace_emit_anchor_box(cell, cell_box(cell)))
         elif cell.kind == "context_span":
             boxes.append(_trace_context_box_rect(cell_box(cell)))
         elif cell.kind == "action":
@@ -1380,6 +1429,12 @@ def _trace_label_lines(label: str) -> tuple[str, ...]:
         return (label,)
     object_name, state_or_transition = label.split(".", 1)
     return (object_name, state_or_transition)
+
+
+def _trace_emit_label_lines(label: str) -> tuple[str, str]:
+    compact = _shorten_trace_transition(label)
+    event_name = compact.split(".", 1)[1] if "." in compact else compact
+    return ("emits", event_name)
 
 
 def _trace_action_label_lines(label: str) -> tuple[str, ...]:

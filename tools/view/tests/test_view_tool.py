@@ -104,8 +104,9 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(data["view"], "timeline")
             self.assertEqual(data["graph_format"], "svg")
             rows = data["metadata"]["timeline_rows"]
-            self.assertTrue(any(row["phase"] == "PreparePhase" for row in rows))
+            self.assertFalse(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "InterruptPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "PayloadPhase" for row in rows))
 
     def test_trace_view_contains_cell_layout_metadata(self) -> None:
@@ -159,13 +160,6 @@ class ViewToolTests(unittest.TestCase):
                 if cell["kind"] == "verified_state"
                 and cell["label"] == "Riscv64.State::Online"
             )
-            prepare_setup_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "PreparePhase.Transition::Setup"
-            )
-            self.assertGreater(riscv64_cell["column"], prepare_setup_cell["column"])
             root_stream_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
@@ -180,11 +174,47 @@ class ViewToolTests(unittest.TestCase):
                     for cell in metadata["trace_cells"]
                 )
             )
+            self.assertFalse(
+                any(
+                    cell["label"].startswith("PreparePhase.")
+                    for cell in metadata["trace_cells"]
+                )
+            )
+            kernel_preset_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "Kernel.Transition::Preset"
+            )
             boot_setup_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
                 if cell["kind"] == "transition_span"
                 and cell["label"] == "BootPhase.Transition::Setup"
+            )
+            kernel_setup_emit_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "emit_event"
+                and cell["label"] == "Kernel.Transition::Setup"
+            )
+            kernel_setup_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "Kernel.Transition::Setup"
+            )
+            interrupt_setup_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "InterruptPhase.Transition::Setup"
+            )
+            kernel_enable_emit_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "emit_event"
+                and cell["label"] == "Kernel.Transition::Enable"
             )
             entry_prelude_setup_cell = next(
                 cell
@@ -192,7 +222,15 @@ class ViewToolTests(unittest.TestCase):
                 if cell["kind"] == "transition_span"
                 and cell["label"] == "EntryPreludePhase.Transition::Setup"
             )
-            self.assertEqual(boot_setup_cell["column"], prepare_setup_cell["column"])
+            self.assertEqual(boot_setup_cell["column"], kernel_preset_cell["column"] + 1)
+            self.assertEqual(kernel_setup_emit_cell["column"], boot_setup_cell["column"])
+            self.assertGreater(
+                kernel_setup_cell["row"],
+                kernel_preset_cell["row"] + kernel_preset_cell["row_span"],
+            )
+            self.assertEqual(kernel_setup_cell["column"], kernel_setup_emit_cell["column"])
+            self.assertEqual(interrupt_setup_cell["column"], kernel_setup_cell["column"] + 1)
+            self.assertEqual(kernel_enable_emit_cell["column"], interrupt_setup_cell["column"])
             self.assertEqual(
                 entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 1
             )
@@ -203,13 +241,6 @@ class ViewToolTests(unittest.TestCase):
                     for row in metadata["trace_rows"]
                 )
             )
-            prepare_ready_cells = [
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "state"
-                and cell["label"] == "PreparePhase.State::Ready"
-            ]
-            self.assertEqual(len(prepare_ready_cells), 1)
 
     def test_trace_view_rejects_negative_action_depth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
