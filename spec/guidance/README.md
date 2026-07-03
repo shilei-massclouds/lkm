@@ -14,6 +14,9 @@
 - 先规格后实现。涉及行为、接口、对象边界或 Linux 差分语义的改动，必须先更新适用的 model、coding、testing 或 guidance 规格，再改实现。
 - 每次修改代码后，最终回归必须在仓库根目录运行 `make test`。Focused test 只能用于中间定位，不能替代最终回归。
 
+Linux checkpoint 对齐映射任务属于只读 cross-reference 阶段：代理只能消费已有 arceos_ex checkpoint inventory、读取参考
+Linux 源码树并生成可审阅清单，不得把该任务扩展成 Linux 源码插桩、运行时采集、checkpoint handler 修改或行为修改。
+
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 
 ## 用户态启动代码生成

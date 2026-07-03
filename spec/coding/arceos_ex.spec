@@ -229,6 +229,12 @@ predicate arceos_ex_must_log_trace_and_probe_remain_distinct_consumers() -> bool
 predicate arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_export_stable_fields() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_be_mapping_only() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_consume_inventory_and_read_linux_only() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_preserve_checkpoint_order() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_export_stable_fields() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2290,6 +2296,39 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source();
         arceos_ex_must_checkpoint_inventory_export_stable_fields();
         arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux();
+
+        /*
+         * Linux checkpoint alignment mapping:
+         *
+         * The second Linux-differential checkpoint stage is mapping only. It
+         * consumes the exported arceos_ex checkpoint inventory and reads a
+         * Linux reference source tree, defaulting to ../linux-6.12, to build
+         * a reviewable candidate alignment list. It must preserve the
+         * checkpoint inventory order and produce one row per checkpoint.
+         *
+         * Each row must classify the mapping as exact, range or unmapped.
+         * exact means a concrete Linux function or call anchor was found;
+         * range means only an ordered Linux boot interval can be named;
+         * unmapped means the current stage cannot justify a reliable mapping
+         * and must record the reason instead of guessing.
+         *
+         * The output surface remains tools/out/checkpoints/ with
+         * machine-readable JSON and human-readable Markdown. Each JSON row
+         * must contain checkpoint_index, checkpoint_name, checkpoint_variant,
+         * linux_file, linux_symbol, linux_anchor, mapping_kind, confidence
+         * and notes.
+         *
+         * This stage must not modify any Linux source tree, add
+         * instrumentation, change arceos_ex runtime behavior, add checkpoint
+         * handlers, collect memory/runtime payloads, or treat the candidate
+         * mapping as proof that a Linux insertion point has been implemented.
+         */
+        arceos_ex_must_linux_checkpoint_mapping_be_mapping_only();
+        arceos_ex_must_linux_checkpoint_mapping_consume_inventory_and_read_linux_only();
+        arceos_ex_must_linux_checkpoint_mapping_preserve_checkpoint_order();
+        arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped();
+        arceos_ex_must_linux_checkpoint_mapping_export_stable_fields();
+        arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime();
 
         /*
          * Observation levels and domains:

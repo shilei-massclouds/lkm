@@ -78,6 +78,20 @@ MUST：Linux differential checkpoint 工作的第一个子阶段只导出本项�
 `index`、`variant`、`name`、`early_byte` 和 `source_file`。本阶段不得改变 checkpoint 行为、handler、KUnit 输出、
 运行时观察、内存采集机制或任何 Linux 源码。Linux 插点映射和内存采集设计只能在后续阶段消费该 inventory。
 
+MUST：Linux differential checkpoint 工作的第二子阶段只建立 Linux checkpoint 对齐映射清单。该阶段消费
+`tools/out/checkpoints/arceos_ex_checkpoints.json`，只读参考 Linux 源码树（默认 `../linux-6.12`），为每个
+arceos_ex checkpoint 输出一个候选映射行，并保持原 checkpoint 顺序。输出仍只能写入
+`tools/out/checkpoints/` 下的机器可读 JSON 和人工可读 Markdown；JSON 行字段固定为
+`checkpoint_index`、`checkpoint_name`、`checkpoint_variant`、`linux_file`、`linux_symbol`、`linux_anchor`、
+`mapping_kind`、`confidence` 和 `notes`。
+
+映射分类只能使用 `exact`、`range` 和 `unmapped`。`exact` 表示已经定位到明确 Linux 函数或调用点，例如
+`init/main.c::start_kernel()`、`mm/mm_init.c::mm_core_init()`、`kernel/sched/core.c::sched_init()`、
+`init/main.c::rest_init()`、`init/main.c::kernel_init()` 或 `init/do_mounts.c::prepare_namespace()`；
+`range` 表示只能定位到 Linux 启动流程中的两个可验证 anchor 之间；`unmapped` 表示当前无法可靠映射，必须记录原因，
+不得猜测。该阶段不得修改 Linux tree、不得加入 instrumentation、不得改变 arceos_ex 运行时行为、不得新增
+checkpoint handler、不得实现内存采集 runtime，也不得把候选映射当作后续插点已经完成的证明。
+
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters
 和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`
