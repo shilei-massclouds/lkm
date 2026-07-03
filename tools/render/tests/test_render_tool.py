@@ -129,6 +129,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn(">emits</tspan>", text)
             self.assertNotIn(">emits Kernel</tspan>", text)
             self.assertIn("emit-label", text)
+            self.assertIn('class="emit-arrow"', text)
             self.assertNotIn(">PreparePhase.Setup<", text)
             self.assertNotIn(">PreparePhase.Enable<", text)
             self.assertNotIn("<title>PreparePhase.State::", text)

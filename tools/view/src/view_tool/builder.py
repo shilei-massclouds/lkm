@@ -29,6 +29,7 @@ _OBJECT_STATE_RE = re.compile(
 )
 DEFAULT_TRACE_ACTION_DEPTH = 3
 _LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
+_TRACE_PHASE_MIN_BODY_ROWS = 24
 
 
 def build_object_view(model: ObjectModel) -> ViewModel:
@@ -1456,6 +1457,7 @@ class _TraceLayoutBuilder:
         body_item_ranges: list[dict[str, int]] = []
         pending_context_spans: list[dict[str, object]] = []
         emitted_continuations: list[dict[str, object]] = []
+        emit_items: list[dict[str, object]] = []
         emit_index = 0
 
         def register_body_item_range(
@@ -1491,6 +1493,19 @@ class _TraceLayoutBuilder:
                 process_cell_by_key.setdefault(key, cell_id)
                 process_row_by_key.setdefault(key, row)
 
+        def pad_phase_body_to_min_rows(reserved_rows: int = 0) -> None:
+            if not is_phase:
+                return
+            final_body_rows = len(self.rows) - event_body_start + reserved_rows + 1
+            padding_rows = max(0, _TRACE_PHASE_MIN_BODY_ROWS - final_body_rows)
+            for padding_index in range(padding_rows):
+                padding_row = len(self.rows)
+                self._add_row(
+                    "phase_padding",
+                    padding_row,
+                    f"{label}.phase_padding.{padding_index}",
+                )
+
         def external_process_cell(keys: object) -> str | None:
             if not isinstance(keys, set):
                 return None
@@ -1508,6 +1523,82 @@ class _TraceLayoutBuilder:
                 if row is not None:
                     return row
             return None
+
+        def child_lanes(
+            child_data: dict[str, object], edge_kind: str
+        ) -> tuple[str, bool, int, int]:
+            child_object = str(child_data.get("object"))
+            child_is_phase = _is_trace_phase_object(child_object)
+            same_object_emit = (
+                edge_kind == "emits" and child_object == str(data.get("object"))
+            )
+            next_phase_lane = (
+                phase_lane
+                if same_object_emit or not child_is_phase
+                else phase_lane + 1
+            )
+            next_object_lane = (
+                object_lane
+                if same_object_emit or child_is_phase
+                else child_object_lane
+            )
+            return child_object, child_is_phase, next_phase_lane, next_object_lane
+
+        def place_emit_item(item: dict[str, object]) -> None:
+            nonlocal emit_index
+            child = item.get("child")
+            if child is None:
+                return
+            child_data = _trace_node_object(child)
+            _child_object, child_is_phase, next_phase_lane, next_object_lane = child_lanes(
+                child_data, "emits"
+            )
+            emit_row = len(self.rows)
+            self._add_row(
+                "emit",
+                emit_row,
+                f"{label}.emits.{emit_index}",
+                group_id=event_id if not is_phase else None,
+                group_role="emit" if not is_phase else None,
+            )
+            emit_id = f"{event_id}-emit-{emit_index}"
+            emit_column = (
+                next_phase_lane
+                if child_is_phase
+                else self._object_column(next_object_lane)
+            )
+            if child_is_phase:
+                self._max_phase_lane = max(self._max_phase_lane, next_phase_lane)
+            else:
+                self._max_object_lane = max(self._max_object_lane, next_object_lane)
+            self.cells.append(
+                TraceCell(
+                    id=emit_id,
+                    kind="emit_event",
+                    row=emit_row,
+                    column=emit_column,
+                    label=_trace_label(child_data),
+                )
+            )
+            if not child_is_phase:
+                self._add_gap_cell(
+                    TraceCell(
+                        id=f"{emit_id}-gap",
+                        kind="gap",
+                        row=emit_row,
+                        column=self._object_gap_column(next_object_lane),
+                    )
+                )
+            self.arrows.append(TraceArrow(source=span_id, target=emit_id, kind="emits"))
+            emitted_continuations.append(
+                {
+                    "node": child,
+                    "phase_lane": next_phase_lane,
+                    "object_lane": next_object_lane,
+                    "parent_event_id": None,
+                }
+            )
+            emit_index += 1
 
         def place_context_node(
             node: dict[str, object], depth: int
@@ -1820,62 +1911,12 @@ class _TraceLayoutBuilder:
                 continue
             child_data = _trace_node_object(child)
             edge_kind = str(item.get("edge_kind") or "drives")
-            child_is_phase = _is_trace_phase_object(str(child_data.get("object")))
-            next_phase_lane = phase_lane + 1 if child_is_phase else phase_lane
-            next_object_lane = object_lane if child_is_phase else child_object_lane
             if edge_kind == "emits":
-                emit_row = len(self.rows)
-                self._add_row(
-                    "emit",
-                    emit_row,
-                    f"{label}.emits.{emit_index}",
-                    group_id=event_id if not is_phase else None,
-                    group_role="emit" if not is_phase else None,
-                )
-                emit_id = f"{event_id}-emit-{emit_index}"
-                emit_column = (
-                    next_phase_lane
-                    if child_is_phase
-                    else self._object_column(next_object_lane)
-                )
-                if child_is_phase:
-                    self._max_phase_lane = max(self._max_phase_lane, next_phase_lane)
-                else:
-                    self._max_object_lane = max(
-                        self._max_object_lane, next_object_lane
-                    )
-                self.cells.append(
-                    TraceCell(
-                        id=emit_id,
-                        kind="emit_event",
-                        row=emit_row,
-                        column=emit_column,
-                        label=_trace_label(child_data),
-                    )
-                )
-                if not child_is_phase:
-                    self._add_gap_cell(
-                        TraceCell(
-                            id=f"{emit_id}-gap",
-                            kind="gap",
-                            row=emit_row,
-                            column=self._object_gap_column(next_object_lane),
-                        )
-                    )
-                self.arrows.append(
-                    TraceArrow(source=span_id, target=emit_id, kind="emits")
-                )
-                emitted_continuations.append(
-                    {
-                        "node": child,
-                        "phase_lane": next_phase_lane,
-                        "object_lane": next_object_lane,
-                        "parent_event_id": None,
-                    }
-                )
-                register_body_item_range(item.get("order"), emit_row, emit_row + 1)
-                emit_index += 1
+                emit_items.append(item)
                 continue
+            _child_object, _child_is_phase, next_phase_lane, next_object_lane = child_lanes(
+                child_data, edge_kind
+            )
 
             child_event_id = f"transition-{self._event_index}"
             self.arrows.append(
@@ -1901,6 +1942,9 @@ class _TraceLayoutBuilder:
             emitted_continuations.extend(child_continuations)
 
         finalize_context_spans()
+        pad_phase_body_to_min_rows(reserved_rows=len(emit_items))
+        for emit_item in emit_items:
+            place_emit_item(emit_item)
 
         event_exit_gap_row = len(self.rows)
         self._add_row(

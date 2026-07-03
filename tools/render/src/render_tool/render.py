@@ -413,11 +413,10 @@ def _render_trace_svg(
                     max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
                 )
         elif arrow.kind == "emits":
-            _append_trace_horizontal_arrow(
+            _append_trace_emit_arrow(
                 lines,
                 _trace_event_anchor_box(source, cell_box(source)),
                 _trace_emit_anchor_box(target, cell_box(target)),
-                css_class="emit-arrow",
                 max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
             )
         elif arrow.kind == "depends_on":
@@ -643,6 +642,8 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
             height = 28
         elif group_role in {"body_start", "body_end"}:
             height = 12
+        elif kind == "phase_padding":
+            height = 20
         elif kind == "action":
             height = 46
         elif isinstance(label, str) and _is_trace_phase_row(label):
@@ -962,6 +963,32 @@ def _append_trace_horizontal_arrow(
         x1 = x2 - max_length
     lines.append(
         f'<line class="{css_class}" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+    )
+
+
+def _append_trace_emit_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+    *,
+    max_length: float | None = None,
+) -> None:
+    source_x, _source_y, source_w, _source_h = source_box
+    target_x, target_y, target_w, target_h = target_box
+    if target_x < source_x + source_w and target_x + target_w > source_x:
+        y = target_y + target_h / 2
+        x2 = target_x
+        x1 = x2 - 22
+        lines.append(
+            f'<line class="emit-arrow" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+        )
+        return
+    _append_trace_horizontal_arrow(
+        lines,
+        source_box,
+        target_box,
+        css_class="emit-arrow",
+        max_length=max_length,
     )
 
 

@@ -180,57 +180,135 @@ class ViewToolTests(unittest.TestCase):
                     for cell in metadata["trace_cells"]
                 )
             )
-            kernel_preset_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "Kernel.Transition::Preset"
+
+            def trace_cell(kind: str, label: str) -> dict[str, object]:
+                return next(
+                    cell
+                    for cell in metadata["trace_cells"]
+                    if cell["kind"] == kind and cell["label"] == label
+                )
+
+            def assert_emit_at_transition_end(
+                transition_cell: dict[str, object], emit_cell: dict[str, object]
+            ) -> None:
+                transition_end = transition_cell["row"] + transition_cell["row_span"]
+                self.assertEqual(emit_cell["row"], transition_end - 2)
+
+            computer_preset_cell = trace_cell(
+                "transition_span", "ComputerProject.Transition::Preset"
             )
-            boot_setup_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "BootPhase.Transition::Setup"
+            computer_setup_emit_cell = trace_cell(
+                "emit_event", "ComputerProject.Transition::Setup"
             )
-            kernel_setup_emit_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "emit_event"
-                and cell["label"] == "Kernel.Transition::Setup"
+            computer_setup_cell = trace_cell(
+                "transition_span", "ComputerProject.Transition::Setup"
             )
-            kernel_setup_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "Kernel.Transition::Setup"
+            computer_enable_emit_cell = trace_cell(
+                "emit_event", "ComputerProject.Transition::Enable"
             )
-            interrupt_setup_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "InterruptPhase.Transition::Setup"
+            computer_enable_cell = trace_cell(
+                "transition_span", "ComputerProject.Transition::Enable"
             )
-            kernel_enable_emit_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "emit_event"
-                and cell["label"] == "Kernel.Transition::Enable"
+            kernel_project_preset_cell = trace_cell(
+                "transition_span", "KernelProject.Transition::Preset"
             )
-            entry_prelude_setup_cell = next(
-                cell
-                for cell in metadata["trace_cells"]
-                if cell["kind"] == "transition_span"
-                and cell["label"] == "EntryPreludePhase.Transition::Setup"
+            kernel_project_setup_emit_cell = trace_cell(
+                "emit_event", "KernelProject.Transition::Setup"
+            )
+            kernel_project_setup_cell = trace_cell(
+                "transition_span", "KernelProject.Transition::Setup"
+            )
+            kernel_project_enable_emit_cell = trace_cell(
+                "emit_event", "KernelProject.Transition::Enable"
+            )
+            kernel_project_enable_cell = trace_cell(
+                "transition_span", "KernelProject.Transition::Enable"
+            )
+            kernel_preset_cell = trace_cell(
+                "transition_span", "Kernel.Transition::Preset"
+            )
+            boot_setup_cell = trace_cell(
+                "transition_span", "BootPhase.Transition::Setup"
+            )
+            kernel_setup_emit_cell = trace_cell(
+                "emit_event", "Kernel.Transition::Setup"
+            )
+            kernel_setup_cell = trace_cell(
+                "transition_span", "Kernel.Transition::Setup"
+            )
+            interrupt_setup_cell = trace_cell(
+                "transition_span", "InterruptPhase.Transition::Setup"
+            )
+            kernel_enable_emit_cell = trace_cell(
+                "emit_event", "Kernel.Transition::Enable"
+            )
+            entry_prelude_setup_cell = trace_cell(
+                "transition_span", "EntryPreludePhase.Transition::Setup"
+            )
+            self.assertEqual(
+                computer_setup_emit_cell["column"], computer_preset_cell["column"]
+            )
+            self.assertEqual(computer_setup_cell["column"], computer_preset_cell["column"])
+            self.assertEqual(
+                computer_enable_emit_cell["column"], computer_preset_cell["column"]
+            )
+            self.assertEqual(
+                computer_enable_cell["column"], computer_preset_cell["column"]
+            )
+            assert_emit_at_transition_end(
+                computer_preset_cell, computer_setup_emit_cell
+            )
+            assert_emit_at_transition_end(
+                computer_setup_cell, computer_enable_emit_cell
+            )
+            for phase_cell in (
+                computer_preset_cell,
+                computer_setup_cell,
+                computer_enable_cell,
+                kernel_project_preset_cell,
+                kernel_project_setup_cell,
+                kernel_project_enable_cell,
+                kernel_preset_cell,
+                kernel_setup_cell,
+            ):
+                self.assertGreaterEqual(phase_cell["row_span"], 24)
+            self.assertEqual(
+                kernel_project_preset_cell["column"], computer_enable_cell["column"] + 1
+            )
+            self.assertEqual(
+                kernel_project_setup_emit_cell["column"],
+                kernel_project_preset_cell["column"],
+            )
+            self.assertEqual(
+                kernel_project_setup_cell["column"], kernel_project_preset_cell["column"]
+            )
+            self.assertEqual(
+                kernel_project_enable_emit_cell["column"],
+                kernel_project_preset_cell["column"],
+            )
+            self.assertEqual(
+                kernel_project_enable_cell["column"], kernel_project_preset_cell["column"]
+            )
+            assert_emit_at_transition_end(
+                kernel_project_preset_cell, kernel_project_setup_emit_cell
+            )
+            assert_emit_at_transition_end(
+                kernel_project_setup_cell, kernel_project_enable_emit_cell
+            )
+            self.assertEqual(
+                kernel_preset_cell["column"], kernel_project_enable_cell["column"] + 1
             )
             self.assertEqual(boot_setup_cell["column"], kernel_preset_cell["column"] + 1)
-            self.assertEqual(kernel_setup_emit_cell["column"], boot_setup_cell["column"])
+            self.assertEqual(kernel_setup_emit_cell["column"], kernel_preset_cell["column"])
             self.assertGreater(
                 kernel_setup_cell["row"],
                 kernel_preset_cell["row"] + kernel_preset_cell["row_span"],
             )
-            self.assertEqual(kernel_setup_cell["column"], kernel_setup_emit_cell["column"])
+            self.assertEqual(kernel_setup_cell["column"], kernel_preset_cell["column"])
             self.assertEqual(interrupt_setup_cell["column"], kernel_setup_cell["column"] + 1)
-            self.assertEqual(kernel_enable_emit_cell["column"], interrupt_setup_cell["column"])
+            self.assertEqual(kernel_enable_emit_cell["column"], kernel_setup_cell["column"])
+            assert_emit_at_transition_end(kernel_preset_cell, kernel_setup_emit_cell)
+            assert_emit_at_transition_end(kernel_setup_cell, kernel_enable_emit_cell)
             self.assertEqual(
                 entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 1
             )

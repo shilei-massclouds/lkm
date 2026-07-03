@@ -133,7 +133,7 @@ view.json -> text/DOT/SVG/animated SVG
 
 动画输出遵循简单直观、开源免费、面向工程人员理解使用的原则。优先采用基于开放标准和浏览器原生能力的 `animated SVG`，第一阶段不引入外部动画框架。动画只用于表达推导顺序、状态推进、transition 进入/退出、对象出现和 blocked 位置，不做装饰性特效。
 
-当前 `trace` SVG 已作为推导过程展示模板开始实现：空阶段 transition会被隐藏，阶段 transition显示为紧凑的粗竖箭头，普通对象 transition显示在自身状态推进箭头中部，`drives` 短箭头对准目标 transition 框，`emits` 在当前 transition 内显示为一条箭头指向事件说明框，emitted transition 作为同 lane 后续事件继续展开，准备期 `depends_on` 结果显示为 verified 状态。后续仍需继续改进：
+当前 `trace` SVG 已作为推导过程展示模板开始实现：空阶段 transition会被隐藏，阶段 transition显示为带最小高度的紧凑粗竖箭头，普通对象 transition显示在自身状态推进箭头中部，`drives` 短箭头对准目标 transition 框，`emits` 在当前 transition 的末端区域显示为一条箭头指向事件说明框，同对象 emitted transition 留在原 lifecycle lane 作为后续事件继续展开，跨对象 emitted transition 才进入目标对象 lane，准备期 `depends_on` 结果显示为 verified 状态。后续仍需继续改进：
 
 - 预览输出文件不要散落在仓库根目录。`-T/--trace` 不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`；显式给出路径时仍按命令指定路径输出。
 - 主 trace 图默认只展开嵌套 action 到深度 3，使 `Scheduler.Action::ScheduleIdle` 这类边界可见，但不继续展开 `Scheduler.Action::Schedule` 的内部细节；`--trace-action-depth all` 保留完整展开能力。后续应增加专门的 action 展开图，用于单独查看深层 action/process 内部。
