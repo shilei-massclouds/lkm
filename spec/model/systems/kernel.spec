@@ -1,17 +1,18 @@
 /*
  * Kernel System Specification
  *
- * This file defines the formal kernel system object and composes the model
- * phase tree. The formal directory entry is spec/model/main.spec.
+ * This file defines the formal kernel system object and composes the sibling
+ * model object, prepare, and phase trees. The formal directory entry is
+ * spec/model/main.spec.
  */
 
-include "objects/main.spec";
-include "prepare/main.spec";
-include "phases/boot/main.spec";
-include "phases/interrupt/main.spec";
-include "phases/up-multitask/main.spec";
-include "phases/smp-runtime/main.spec";
-include "phases/payload/main.spec";
+include "../objects/main.spec";
+include "../prepare/main.spec";
+include "../phases/boot/main.spec";
+include "../phases/interrupt/main.spec";
+include "../phases/up-multitask/main.spec";
+include "../phases/smp-runtime/main.spec";
+include "../phases/payload/main.spec";
 
 /*
  * Kernel 表示 KernelProject.Enable 后启动出来的内核系统实例。

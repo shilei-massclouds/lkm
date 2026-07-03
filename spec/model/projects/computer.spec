@@ -6,7 +6,7 @@
  * scope without expanding the full computer construction model yet.
  */
 
-include "kernel-project.spec";
+include "kernel.spec";
 
 object ComputerProject: ProjectObject {
     initial_state: State::Base;

@@ -6,7 +6,7 @@
  * evaluate the resulting kernel instance.
  */
 
-include "kernel.spec";
+include "../systems/kernel.spec";
 
 object KernelProject: ProjectObject {
     initial_state: State::Base;
