@@ -130,37 +130,150 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 规格建立在状态机模型基础上，是对模型的细化。核心是内核系统模型的规格，另外还包括内核工程模型和前置依赖的计算机工程模型。
 
+## 计算机工程规格
+
+对构建计算机系统的过程约束，参照前述计算机工程模型，包括三个阶段：定义体系结构和硬件平台规范，生产硬件平台和构造固件，构造内核然后进行系统集成测试和评估。
+
+> MUST[model]：计算机工程规格，遵循''标准状态和迁移''和“计算机工程模型”
+>
+> Preset：建立Riscv64 ISA规范
+>
+> Setup：建立硬件平台，定义BootArgs标准，建立SbiSpec规范，实现OpenSbiFirmware
+>
+> Enable：驱动内核工程
+
+
+
+## 内核工程规格
+
+构造内核系统的工程过程约束，参照前述内核工程模型，包括三个阶段：建立内核系统规格、构造内核映像、造到启动评估。
+
+> MUST[model]：内核工程规格，遵循''标准状态和迁移''和“内核工程模型”
+>
+> Preset：建立内核规格charter、model和coding
+>
+> Setup：定义Lds和Config，构造产生内核映像
+>
+> Enable：驱动内核系统的实例启动，测试和评估
+
+
+
 ## 内核系统规格
 
-内核系统的规格遵循状态机模型，针对内核完整的生命周期建立规格。
+内核系统的规格约束了内核系统实例的启动与运行行为，以及测试和评估过程。
 
-## BootPhase Subphases
+> MUST[model]：内核系统规格，遵循''标准状态和迁移''和“内核系统模型”
+>
+> Preset：接替固件引导计算机系统，驱动完成引导期
+>
+> Setup：接续引导期并推进中断期
+>
+> Enable：推进单核多任务期、多核运行期和 完成对选中Payload的交接，达到运行状态
 
-- `EntryPreludePhase`
-- `EntrySuccessorPhase`
-- `CorePreparePhase`
-- `MmCoreInitPhase`
-- `SchedInitPhase`
-- `IrqTimeInitPhase`
+### 引导期BootPhase
 
-## InterruptPhase Subphases
+从内核入口到中断启用之前的阶段。
 
-- `LocalIrqEnablePhase`
-- `IrqOpenPreparePhase`
-- `ProcessPreparePhase`
-- `BootInitRestInitPhase`
+#### EntryPreludePhase
 
-## UpMultitaskPhase Subphases
+待补充。
 
-- `BootInitScheduleHandoffPhase`
-- `BootIdleEntryPhase`
-- `PreSmpInitPhase`
+#### EntrySuccessorPhase
 
-## SmpRuntimePhase Subphases
+待补充。
 
-- `SmpBringupPhase`
-- `RuntimeCorePhase`
-- `InitcallPhase`
-- `RootfsPhase`
-- `FinalizePhase`
-- `PayloadPhase`
+#### CorePreparePhase
+
+待补充。
+
+#### MmCoreInitPhase
+
+待补充。
+
+#### SchedInitPhase
+
+待补充。
+
+#### IrqTimeInitPhase
+
+待补充。
+
+### 中断期InterruptPhase
+
+从中断启动到多任务启动之前。
+
+#### LocalIrqEnablePhase
+
+待补充。
+
+#### IrqOpenPreparePhase
+
+待补充。
+
+#### ProcessPreparePhase
+
+待补充。
+
+#### BootInitRestInitPhase
+
+待补充。
+
+### 单核多任务期UpMultiTaskPhase
+
+引导任务转化为IDLE任务，同时启动了内核初始化任务和内核线程守护任务。
+
+#### BootInitScheduleHandoffPhase
+
+待补充。
+
+#### BootIdleEntryPhase
+
+待补充。
+
+#### PreSmpInitPhase
+
+待补充。
+
+### 多核运行期SmpRuntimePhase
+
+启用多核，完成内核初始化并引导进入用户态应用或Unikernel应用。
+
+#### SmpBringupPhase
+
+待补充。
+
+#### RuntimeCorePhase
+
+待补充。
+
+#### InitcallPhase
+
+待补充。
+
+#### RootfsPhase
+
+待补充。
+
+#### FinalizePhase
+
+待补充。
+
+### 应用引导期PayloadPhase
+
+从准备应用启动环境到切换到应用。
+
+#### PayloadExecSyncBoundaries
+
+待补充。
+
+#### UserCloneDeferredBoundaries
+
+待补充。
+
+#### UserBootPayloadSetup
+
+待补充。
+
+#### UserBootPayloadEnable
+
+待补充。

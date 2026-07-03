@@ -3621,6 +3621,54 @@ model/coding 规格应允许同一 block request 的 completion 来源不同：�
 
 # 新版准备
 
+## 计算机工程规格
+
+`ComputerProject` 是当前模型的顶层工程对象，按计算机前置、硬件/固件前置和内核工程启动三段迁移组织：
+
+- `Preset -> Prepared`：确认 `Riscv64` 已在线，建立当前项目采用的 RISC-V64 ISA 前置；`emits ComputerProject.Setup`；无 `drives`。
+- `Setup -> Ready`：确认 `BootArgs`、`SbiSpec`、`OpenSbiFirmware` 已在线，建立启动 ABI 与固件交接前置；`emits ComputerProject.Enable`；无 `drives`。
+- `Enable -> Online`：启动内核工程编排；`drives KernelProject.Preset`。
+
+## 内核工程规格
+
+`KernelProject` 描述内核工程产物从规格建立、image 构造到启动评估的生命周期：
+
+- `Preset -> Prepared`：建立 kernel system spec 和工程模型前置；`emits KernelProject.Setup`；无 `drives`。
+- `Setup -> Ready`：依赖 `Lds` 与 `Config`，生成代码并构造 kernel image；`emits KernelProject.Enable`；无 `drives`。
+- `Enable -> Online`：启动内核系统实例；`drives Kernel.Preset`。
+
 ## 内核系统规格
 
-待补充。
+`Kernel` 是 `KernelProject.Enable` 后启动出来的内核系统实例，按系统生命周期驱动阶段树：
+
+- `Kernel.Preset -> Prepared`：验证 project-level 启动输入并推进引导期；`drives BootPhase.Setup`；`emits Kernel.Setup`。
+  - `BootPhase.Setup` 顺序推进：
+    - `EntryPreludePhase.Setup`
+    - `EntrySuccessorPhase.Setup`
+    - `CorePreparePhase.Setup`
+    - `MmCoreInitPhase.Setup`
+    - `SchedInitPhase.Setup`
+- `Kernel.Setup -> Ready`：接续引导期并推进中断期；`drives InterruptPhase.Setup`；`emits Kernel.Enable`。
+  - `InterruptPhase.Setup` 推进：
+    - `IrqTimeInitPhase.Setup`
+    - `LocalIrqEnablePhase.Setup`
+    - `IrqOpenPreparePhase.Setup`
+    - `ProcessPreparePhase.Setup`
+- `Kernel.Enable -> Online`：推进单核多任务期、多核运行期和 selected payload 交接。
+  - `drives UpMultitaskPhase.Setup`
+    - `BootInitRestInitPhase.Setup`
+    - `BootInitScheduleHandoffPhase.Setup`
+    - `BootIdleEntryPhase.Setup`
+  - `drives SmpRuntimePhase.Setup`
+    - `PreSmpInitPhase.Setup`
+    - `SmpBringupPhase.Setup`
+    - `RuntimeCorePhase.Setup`
+    - `InitcallPhase.Setup`
+    - `RootfsPhase.Setup`
+    - `FinalizePhase.Setup`
+  - `drives PayloadPhase.Setup`
+    - `PayloadExecSyncBoundaries.Setup`
+    - `UserCloneDeferredBoundaries.Setup`
+    - `UserBootPayload.Setup`
+  - `drives PayloadPhase.Enable`
+    - `UserBootPayload.Enable`
