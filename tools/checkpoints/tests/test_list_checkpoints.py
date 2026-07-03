@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TOOL_PATH = REPO_ROOT / "tools" / "checkpoints" / "list_checkpoints.py"
+
+spec = importlib.util.spec_from_file_location("list_checkpoints", TOOL_PATH)
+assert spec is not None
+list_checkpoints = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+sys.modules[spec.name] = list_checkpoints
+spec.loader.exec_module(list_checkpoints)
+
+
+FIXTURE = """
+pub enum Checkpoint {
+    AlphaStarted,
+    #[allow(dead_code)]
+    BetaReady,
+    GammaOnline,
+}
+
+impl Checkpoint {
+    pub(crate) const fn early_byte(self) -> u8 {
+        match self {
+            Self::AlphaStarted => b'A',
+            Self::GammaOnline => b'9',
+            _ => b'?',
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::AlphaStarted => "Alpha.Started",
+            Self::BetaReady => {
+                "Beta.Ready"
+            }
+            Self::GammaOnline => "Gamma.Online",
+        }
+    }
+}
+"""
+
+
+class ListCheckpointsTests(unittest.TestCase):
+    def _write_fixture(self, tmp: str) -> Path:
+        source = Path(tmp) / "mod.rs"
+        source.write_text(FIXTURE, encoding="utf-8")
+        return source
+
+    def test_fixture_preserves_enum_order_and_mappings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            records = list_checkpoints.parse_checkpoints(self._write_fixture(tmp))
+
+        self.assertEqual(
+            [(record.index, record.variant, record.name, record.early_byte) for record in records],
+            [
+                (0, "AlphaStarted", "Alpha.Started", "A"),
+                (1, "BetaReady", "Beta.Ready", None),
+                (2, "GammaOnline", "Gamma.Online", "9"),
+            ],
+        )
+
+    def test_output_json_uses_fixed_record_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._write_fixture(tmp)
+            records = list_checkpoints.parse_checkpoints(source)
+            out_dir = Path(tmp) / "out"
+            json_path, markdown_path = list_checkpoints.write_outputs(records, out_dir)
+
+            rows = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                list(rows[0].keys()),
+                ["index", "variant", "name", "early_byte", "source_file"],
+            )
+            self.assertIsNone(rows[1]["early_byte"])
+            markdown = markdown_path.read_text(encoding="utf-8")
+            self.assertIn("| 0 | AlphaStarted | Alpha.Started | A |", markdown)
+            self.assertIn("| 1 | BetaReady | Beta.Ready | null |", markdown)
+
+    def test_real_trace_file_contains_expected_checkpoints(self) -> None:
+        records = list_checkpoints.parse_checkpoints()
+        by_name = {record.name: record for record in records}
+
+        self.assertIn("StartupTimeline.Started", by_name)
+        self.assertIn("EntryPreludePhase.Started", by_name)
+        self.assertIn("PayloadPhase.Online", by_name)
+        self.assertEqual(by_name["StartupTimeline.Started"].variant, "StartupTimelineStarted")
+        self.assertEqual(
+            by_name["EntryPreludePhase.Started"].early_byte,
+            "A",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

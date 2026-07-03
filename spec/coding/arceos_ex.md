@@ -71,6 +71,13 @@ MUST：当前 checkpoint 机制按“观察点 + consumer”理解。默认构�
 结构化事实，但不得把该 probe 路径等同于普通运行路径的稳定性证明。`LOG=trace` 仅作为兼容入口映射到
 `PROBE=announce`，长期应清理；`trace` 名称留给后续 Linux-like trace 机制。
 
+MUST：Linux differential checkpoint 工作的第一个子阶段只导出本项目 checkpoint inventory。唯一事实源是
+`impl/arceos_ex/src/trace/mod.rs`：`Checkpoint` enum 顺序定义稳定序号和启动观测顺序基线，
+`Checkpoint::name()` 定义稳定对外名称，`early_byte()` 的显式 match arm 定义可选早期单字符 announce 元数据。
+导出工具只能写入 `tools/out/checkpoints/` 下的机器可读 JSON 和人工可读 Markdown；JSON 行字段固定为
+`index`、`variant`、`name`、`early_byte` 和 `source_file`。本阶段不得改变 checkpoint 行为、handler、KUnit 输出、
+运行时观察、内存采集机制或任何 Linux 源码。Linux 插点映射和内存采集设计只能在后续阶段消费该 inventory。
+
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters
 和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`

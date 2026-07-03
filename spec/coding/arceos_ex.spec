@@ -226,6 +226,9 @@ predicate arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant() -> b
 predicate arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers() -> bool;
 predicate arceos_ex_must_checkpoint_consumers_be_cfg_selected() -> bool;
 predicate arceos_ex_must_log_trace_and_probe_remain_distinct_consumers() -> bool;
+predicate arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source() -> bool;
+predicate arceos_ex_must_checkpoint_inventory_export_stable_fields() -> bool;
+predicate arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2266,6 +2269,27 @@ type ArceosExIrqTimeInitCodingMust {
          */
         arceos_ex_must_checkpoint_consumers_be_cfg_selected();
         arceos_ex_must_log_trace_and_probe_remain_distinct_consumers();
+
+        /*
+         * Checkpoint inventory export:
+         *
+         * The first Linux-differential checkpoint stage is inventory only.
+         * Its sole source of truth is impl/arceos_ex/src/trace/mod.rs:
+         * Checkpoint enum order defines the stable index/order baseline,
+         * Checkpoint::name() defines the public stable name, and explicit
+         * early_byte() match arms define optional early announce metadata.
+         * The export surface is tools/out/checkpoints/ with machine-readable
+         * JSON and human-readable Markdown. Each JSON row must contain only
+         * index, variant, name, early_byte and source_file.
+         *
+         * This stage must not change checkpoint behavior, handlers, KUnit
+         * output, runtime observations, memory collection, or any Linux
+         * source tree. Linux insertion mapping and memory collection belong
+         * to later stages consuming the exported inventory.
+         */
+        arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source();
+        arceos_ex_must_checkpoint_inventory_export_stable_fields();
+        arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux();
 
         /*
          * Observation levels and domains:
