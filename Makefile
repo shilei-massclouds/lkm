@@ -23,7 +23,7 @@ STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints test test-verify test-checkpoints test-kunit test-smoke stress-test clean
+.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke stress-test clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -53,7 +53,10 @@ checkpoints-map-linux: checkpoints-inventory
 checkpoints-coverage: checkpoints-map-linux
 	python3 tools/checkpoints/summarize_linux_checkpoint_mapping.py
 
-checkpoints: checkpoints-coverage
+checkpoints-instrumentation-plan: checkpoints-map-linux checkpoints-coverage
+	python3 tools/checkpoints/plan_linux_instrumentation.py
+
+checkpoints: checkpoints-instrumentation-plan
 
 test:
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
@@ -62,10 +65,11 @@ test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
 
 test-checkpoints:
-	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints tools.checkpoints.tests.test_summarize_linux_checkpoint_mapping
+	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints tools.checkpoints.tests.test_summarize_linux_checkpoint_mapping tools.checkpoints.tests.test_plan_linux_instrumentation
 	python3 tools/checkpoints/list_checkpoints.py --check
 	python3 tools/checkpoints/map_linux_checkpoints.py --check
 	python3 tools/checkpoints/summarize_linux_checkpoint_mapping.py --check
+	python3 tools/checkpoints/plan_linux_instrumentation.py --check
 
 test-kunit:
 	$(MAKE) -C $(KERNEL_DIR) run APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))"

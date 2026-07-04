@@ -143,10 +143,13 @@ type BuildAndScriptCodingMust {
          * Checkpoint artifact drift gate:
          *
          * The aggregate make test target must run checkpoint inventory,
-         * Linux mapping and Linux mapping coverage artifact checks before
-         * QEMU/runtime stages. The gate must be independently callable, must
-         * report drift as a test failure with retained logs, and must not
-         * rewrite tracked checkpoint output files while running in test mode.
+         * Linux mapping, Linux mapping coverage and Linux instrumentation
+         * plan artifact checks before QEMU/runtime stages. The gate must be
+         * independently callable, must report drift as a test failure with
+         * retained logs, and must not rewrite tracked checkpoint output files
+         * while running in test mode. Linux marker scans are useful for trees
+         * that already carry marker comments, but they must remain an explicit
+         * opt-in check until the referenced Linux tree is instrumented.
          */
         build_must_gate_checkpoint_artifact_drift_before_runtime_tests();
 
