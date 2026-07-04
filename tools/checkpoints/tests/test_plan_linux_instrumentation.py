@@ -205,6 +205,48 @@ class PlanLinuxInstrumentationTests(unittest.TestCase):
 
         self.assertEqual(recomputed.anchor_fingerprint, entry.anchor_fingerprint)
 
+    def test_anchor_fingerprint_ignores_runtime_instrumentation_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            rows = [
+                self._exact_row(
+                    linux_tree,
+                    1,
+                    "Demo.Started",
+                    "DemoStarted",
+                    "setup_arch(&command_line);",
+                )
+            ]
+            mapping_path = self._write_mapping(tmp, rows)
+            entry = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(mapping_path),
+                linux_tree,
+            )[0]
+
+            main_c = linux_tree / "init" / "main.c"
+            lines = main_c.read_text(encoding="utf-8").splitlines()
+            lines.insert(0, "#include <linux/lkm_checkpoints.h>")
+            lines[1:1] = (
+                "#ifdef CONFIG_LKM_CHECKPOINTS",
+                "#define LKM_RUNTIME_CHECKPOINT(id) do { } while (0)",
+                "#endif",
+                "",
+            )
+            anchor_line = next(
+                index
+                for index, line in enumerate(lines)
+                if "setup_arch(&command_line);" in line
+            )
+            lines.insert(anchor_line, "    LKM_RUNTIME_CHECKPOINT(DEMO_STARTED);")
+            main_c.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            recomputed = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(mapping_path),
+                linux_tree,
+            )[0]
+
+        self.assertEqual(recomputed.anchor_fingerprint, entry.anchor_fingerprint)
+
     def test_check_mode_accepts_current_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             linux_tree = self._write_linux_fixture(tmp)

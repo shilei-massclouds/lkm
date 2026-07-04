@@ -51,9 +51,29 @@ SMOKE_RESULT_RE = re.compile(
 )
 USER_EXIT_RE = re.compile(r"user exit status=(?P<status>-?\d+)")
 STRESS_MEM_RE = re.compile(
-    r"^stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
+    r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
     r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data=(?P<data>[0-9a-f]*)$"
 )
+EARLY_CHECKPOINT_BYTES = {
+    "A": "EntryPreludePhase.Started",
+    "I": "InterruptStream.Prepared",
+    "K": "KernelImage.Prepared",
+    "O": "RootStream.Prepared",
+    "Z": "KernelImage.Ready",
+    "H": "BootCPU.Prepared",
+    "G": "CpuGroup.Prepared",
+    "T": "InitTask.Prepared",
+    "S": "InitStack.Prepared",
+    "V": "EventStream.Prepared",
+    "9": "ExceptionStream.Prepared",
+    "Q": "TrampolineVm.Ready",
+    "Y": "RawDtb.Prepared",
+    "W": "RawDtb.Ready",
+    "M": "FixMap.Ready",
+    "N": "EarlyVm.Prepared",
+    "J": "EarlyVm.Ready",
+    "U": "Vm.Prepared",
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +115,20 @@ def _run_case(
     dry_run: bool,
 ) -> dict[str, Any]:
     case = _load_toml(case_path)
+    mode = _optional_string(case, "mode")
+    if mode is not None:
+        if mode == "paired_checkpoint_diff":
+            return _run_paired_case(
+                case=case,
+                case_path=case_path,
+                repo_root=repo_root,
+                out_root=out_root,
+                runs_override=runs_override,
+                timeout_override=timeout_override,
+                dry_run=dry_run,
+            )
+        raise SystemExit(f"unknown stress case mode: {mode}")
+
     classifier_path = _resolve_case_path(case_path, _string(case, "classifier"))
     classifier = _load_toml(classifier_path)
     runs = runs_override if runs_override is not None else _integer(case, "default_runs")
@@ -185,6 +219,153 @@ def _run_case(
         ended=suite_ended,
         duration_seconds=suite_duration,
     )
+    _write_json(output_dir / "summary.json", summary)
+    _write_report(output_dir / "report.md", case_name, summary)
+    print(f"stress report: {output_dir / 'report.md'}")
+    return _case_result(case_name, case_path, output_dir, summary)
+
+
+def _run_paired_case(
+    *,
+    case: dict[str, Any],
+    case_path: Path,
+    repo_root: Path,
+    out_root: Path,
+    runs_override: int | None,
+    timeout_override: int | None,
+    dry_run: bool,
+) -> dict[str, Any]:
+    runs = runs_override if runs_override is not None else _integer(case, "default_runs")
+    timeout = timeout_override if timeout_override is not None else _integer(case, "timeout_seconds")
+    if runs < 0:
+        raise SystemExit("--runs must be non-negative")
+    if timeout <= 0:
+        raise SystemExit("--timeout must be positive")
+
+    case_name = _string(case, "name")
+    output_dir = _unique_output_dir(out_root / _run_dir_name(case_name))
+    output_dir.mkdir(parents=True, exist_ok=False)
+    base_workdir = _resolve_workdir(repo_root, case.get("working_directory", "."))
+    paired = _paired_config(case, case_path, repo_root, base_workdir)
+    manifest = _paired_manifest(case, case_path, runs, timeout, repo_root, base_workdir, paired)
+    _write_json(output_dir / "manifest.json", manifest)
+
+    sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
+    run_results: list[dict[str, Any]] = []
+    suite_started = datetime.now(timezone.utc)
+    suite_start_monotonic = time.monotonic()
+
+    if runs == 0 or dry_run:
+        suite_ended = datetime.now(timezone.utc)
+        suite_duration = time.monotonic() - suite_start_monotonic
+        summary = _build_summary(
+            case_name,
+            runs,
+            run_results,
+            sequences,
+            dry_run=True,
+            started=suite_started,
+            ended=suite_ended,
+            duration_seconds=suite_duration,
+        )
+        summary["paired_checkpoint_diff"] = []
+        _write_json(output_dir / "summary.json", summary)
+        _write_report(output_dir / "report.md", case_name, summary)
+        print(f"stress dry-run wrote {output_dir}")
+        return _case_result(case_name, case_path, output_dir, summary)
+
+    setup_command = _optional_string_list(case, "setup_command")
+    if setup_command:
+        _run_setup_command(setup_command, repo_root, base_workdir, timeout, output_dir)
+
+    linux_build = paired["linux"].get("build_command")
+    if isinstance(linux_build, list) and linux_build:
+        _run_setup_command(
+            _expand_command_placeholders(_as_string_list(linux_build, "paired.linux.build_command")),
+            repo_root,
+            paired["linux"]["workdir"],
+            timeout,
+            output_dir,
+            label="linux-build",
+        )
+
+    for run_index in range(1, runs + 1):
+        run_id = f"run-{run_index:04d}"
+        run_dir = output_dir / "runs" / run_id
+        run_dir.mkdir(parents=True)
+        print(f"[stress] {case_name} {run_id}/{runs}")
+        started = datetime.now(timezone.utc)
+        start_monotonic = time.monotonic()
+        arceos = _execute_paired_side(
+            side_id="arceos_ex",
+            config=paired["arceos_ex"],
+            run_dir=run_dir,
+            timeout=timeout,
+        )
+        linux = _execute_paired_side(
+            side_id="linux",
+            config=paired["linux"],
+            run_dir=run_dir,
+            timeout=timeout,
+        )
+        ended = datetime.now(timezone.utc)
+        duration = time.monotonic() - start_monotonic
+        diff = _paired_checkpoint_diff(
+            arceos["events_data"],
+            linux["events_data"],
+            paired["checkpoint_scope"],
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        side_failed = arceos["timed_out"] or linux["timed_out"] or linux["stress_mem"] is None
+        passed = diff["passed"] and not side_failed
+        sequence_tokens = [
+            *(f"arceos_ex:{token}" for token in arceos["sequence_tokens"]),
+            *(f"linux:{token}" for token in linux["sequence_tokens"]),
+        ]
+        result = {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": run_id,
+            "started_at": started.isoformat(),
+            "ended_at": ended.isoformat(),
+            "duration_seconds": round(duration, 3),
+            "result": "success" if passed else "failure",
+            "class_id": "paired-checkpoint-diff-ok" if passed else "paired-checkpoint-diff",
+            "class_description": (
+                "declared checkpoint intersection matched"
+                if passed
+                else "declared checkpoint intersection differed"
+            ),
+            "sequence_hash": _sequence_hash(sequence_tokens),
+            "event_count": len(sequence_tokens),
+            "arceos_ex": _persisted_side_result(arceos),
+            "linux": _persisted_side_result(linux),
+            "paired_diff": diff,
+        }
+        run = {
+            **result,
+            "events_data": _paired_events_for_sequence(arceos, linux, diff),
+            "sequence_tokens": sequence_tokens,
+        }
+        _write_json(run_dir / "paired_diff.json", diff)
+        _record_sequence(sequences, run)
+        _write_run_metadata(run_dir, run, repo_root)
+        run_results.append(_persisted_run_result(run))
+
+    _write_sequences(output_dir, sequences)
+    suite_ended = datetime.now(timezone.utc)
+    suite_duration = time.monotonic() - suite_start_monotonic
+    summary = _build_summary(
+        case_name,
+        runs,
+        run_results,
+        sequences,
+        dry_run=False,
+        started=suite_started,
+        ended=suite_ended,
+        duration_seconds=suite_duration,
+    )
+    summary["paired_checkpoint_diff"] = [run["paired_diff"] for run in run_results]
     _write_json(output_dir / "summary.json", summary)
     _write_report(output_dir / "report.md", case_name, summary)
     print(f"stress report: {output_dir / 'report.md'}")
@@ -323,9 +504,14 @@ def _execute_one_run(
 
 
 def _run_setup_command(
-    command: list[str], repo_root: Path, workdir: Path, timeout: int, output_dir: Path
+    command: list[str],
+    repo_root: Path,
+    workdir: Path,
+    timeout: int,
+    output_dir: Path,
+    label: str = "setup",
 ) -> None:
-    setup_dir = output_dir / "setup"
+    setup_dir = output_dir / _safe_path(label)
     setup_dir.mkdir(parents=True)
     stdout, returncode, timed_out, _ = _run_command_capture(
         command, workdir, os.environ.copy(), timeout, None
@@ -346,6 +532,107 @@ def _run_setup_command(
         raise SystemExit("setup command timed out")
     if returncode != 0:
         raise SystemExit(f"setup command failed with return code {returncode}")
+
+
+def _execute_paired_side(
+    *,
+    side_id: str,
+    config: dict[str, Any],
+    run_dir: Path,
+    timeout: int,
+) -> dict[str, Any]:
+    side_dir = run_dir / side_id
+    side_dir.mkdir(parents=True)
+    command = _expand_command_placeholders(_as_string_list(config.get("command"), f"paired.{side_id}.command"))
+    workdir = config["workdir"]
+    env = os.environ.copy()
+    env.update(_string_map(config.get("env", {}), f"paired.{side_id}.env"))
+    delayed_stdin = _delayed_stdin(config)
+    stop_after_stress_mem = bool(config.get("stop_after_stress_mem", False))
+
+    started = datetime.now(timezone.utc)
+    start_monotonic = time.monotonic()
+    if stop_after_stress_mem:
+        stdout, returncode, timed_out, capture_result = _run_command_capture_until_stress_mem(
+            command, workdir, env, timeout
+        )
+    else:
+        stdout, returncode, timed_out, capture_result = _run_command_capture(
+            command, workdir, env, timeout, delayed_stdin
+        )
+    ended = datetime.now(timezone.utc)
+    duration = time.monotonic() - start_monotonic
+
+    observed_text, stress_mem = _observed_text(stdout)
+    events = _extract_events(observed_text)
+    sequence_tokens = [_event_token(event) for event in events]
+    stdout_path = side_dir / "stdout.log"
+    stdout_path.write_text(stdout, encoding="utf-8", errors="replace")
+    decoded_path = side_dir / "stress-mem.txt"
+    decoded_path.write_text(observed_text, encoding="utf-8", errors="replace")
+    events_path = side_dir / "events.jsonl"
+    _write_jsonl(events_path, events)
+
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "side": side_id,
+        "command": command,
+        "working_directory": str(workdir),
+        "started_at": started.isoformat(),
+        "ended_at": ended.isoformat(),
+        "duration_seconds": round(duration, 3),
+        "returncode": returncode,
+        "timed_out": timed_out,
+        **capture_result,
+        "stress_mem": stress_mem,
+        "events": str(events_path),
+        "stdout": str(stdout_path),
+        "stress_mem_decoded": str(decoded_path),
+        "event_count": len(events),
+        "sequence_hash": _sequence_hash(sequence_tokens),
+        "events_data": events,
+        "sequence_tokens": sequence_tokens,
+    }
+    _write_json(side_dir / "result.json", _persisted_side_result(result))
+    return result
+
+
+def _persisted_side_result(side: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in side.items()
+        if key not in {"events_data", "sequence_tokens"}
+    }
+
+
+def _paired_events_for_sequence(
+    arceos: dict[str, Any],
+    linux: dict[str, Any],
+    diff: dict[str, Any],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for side_id, side in (("arceos_ex", arceos), ("linux", linux)):
+        for event in side["events_data"]:
+            events.append(
+                {
+                    "i": len(events),
+                    "line": event.get("line", 0),
+                    "kind": f"{side_id}_{event.get('kind', 'unknown')}",
+                    "name": event.get("name", "unknown"),
+                    "raw": event.get("raw", ""),
+                }
+            )
+    if not diff["passed"]:
+        events.append(
+            {
+                "i": len(events),
+                "line": 0,
+                "kind": "paired_diff",
+                "name": "PairedCheckpointDiffMismatch",
+                "raw": json.dumps(diff, ensure_ascii=True, sort_keys=True),
+            }
+        )
+    return events
 
 
 def _run_command_capture(
@@ -376,6 +663,72 @@ def _run_command_capture(
         _kill_process_group(process)
         stdout, _ = process.communicate()
         return stdout, process.returncode, True, {}
+
+
+def _run_command_capture_until_stress_mem(
+    command: list[str],
+    workdir: Path,
+    env: dict[str, str],
+    timeout: int,
+) -> tuple[str, int | None, bool, dict[str, Any]]:
+    process = subprocess.Popen(
+        command,
+        cwd=workdir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    stdout_parts: list[bytes] = []
+    tail = b""
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    terminated_after_stress_mem = False
+
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            timed_out = True
+            _kill_process_group(process)
+            break
+        if process.poll() is not None:
+            break
+
+        wait_time = min(0.25, max(0.0, deadline - now))
+        events = selector.select(wait_time)
+        if not events:
+            continue
+        for key, _ in events:
+            chunk = os.read(key.fd, 4096)
+            if not chunk:
+                continue
+            stdout_parts.append(chunk)
+            tail = (tail + chunk)[-131072:]
+            if _parse_stress_mem(tail.decode("utf-8", errors="replace")) is not None:
+                terminated_after_stress_mem = True
+                _kill_process_group(process)
+                break
+        if terminated_after_stress_mem:
+            break
+
+    try:
+        rest, _ = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        rest, _ = process.communicate()
+    if rest:
+        stdout_parts.append(rest)
+    selector.close()
+    stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
+    return (
+        stdout,
+        process.returncode,
+        timed_out,
+        {"terminated_after_stress_mem": terminated_after_stress_mem},
+    )
 
 
 def _run_command_capture_with_delayed_stdin(
@@ -472,6 +825,10 @@ def _extract_events(text: str) -> list[dict[str, Any]]:
         line = _normalize_line(raw_line)
         if not line:
             continue
+        early_events = _early_byte_events_from_line(line, line_no, len(events))
+        if early_events:
+            events.extend(early_events)
+            continue
         event = _event_from_line(line, line_no)
         if event is not None:
             event["i"] = len(events)
@@ -492,18 +849,33 @@ def _observed_text(stdout: str) -> tuple[str, dict[str, Any] | None]:
 def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
     for raw_line in reversed(stdout.splitlines()):
         line = _normalize_line(raw_line)
-        match = STRESS_MEM_RE.match(line)
+        match = STRESS_MEM_RE.search(line)
         if not match:
             continue
-        data = bytes.fromhex(match.group("data"))
+        expected_bytes = int(match.group("bytes"))
+        hex_data = match.group("data")
+        if len(hex_data) != expected_bytes * 2:
+            continue
+        data = bytes.fromhex(hex_data)
         text = data.decode("utf-8", errors="replace")
+        early_prefix = _stress_mem_early_prefix(line[: match.start()])
+        if early_prefix:
+            text = early_prefix + "\n" + text
         return text, {
-            "bytes": int(match.group("bytes")),
+            "bytes": expected_bytes,
             "total": int(match.group("total")),
             "overflow": match.group("overflow") == "1",
             "dropped": int(match.group("dropped")),
         }
     return None
+
+
+def _stress_mem_early_prefix(prefix: str) -> str:
+    allowed = set(EARLY_CHECKPOINT_BYTES) | {"?"}
+    index = len(prefix)
+    while index > 0 and prefix[index - 1] in allowed:
+        index -= 1
+    return prefix[index:]
 
 
 def _normalize_line(line: str) -> str:
@@ -611,6 +983,34 @@ def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
             "raw": line,
         }
     return None
+
+
+def _early_byte_events_from_line(
+    line: str,
+    line_no: int,
+    start_index: int,
+) -> list[dict[str, Any]]:
+    if any(char not in EARLY_CHECKPOINT_BYTES and char != "?" for char in line):
+        return []
+    if not any(char in EARLY_CHECKPOINT_BYTES for char in line):
+        return []
+
+    events: list[dict[str, Any]] = []
+    for char in line:
+        name = EARLY_CHECKPOINT_BYTES.get(char)
+        if name is None:
+            continue
+        events.append(
+            {
+                "i": start_index + len(events),
+                "line": line_no,
+                "kind": "checkpoint",
+                "name": name,
+                "source": "early-byte",
+                "raw": char,
+            }
+        )
+    return events
 
 
 def _event_token(event: dict[str, Any]) -> str:
@@ -882,6 +1282,85 @@ def _failure_success_comparisons(
     return comparisons
 
 
+def _checkpoint_sequence(events: list[dict[str, Any]], scope: list[str]) -> list[str]:
+    scope_set = set(scope)
+    return [
+        str(event["name"])
+        for event in events
+        if event.get("kind") == "checkpoint" and str(event.get("name")) in scope_set
+    ]
+
+
+def _ordered_missing(expected: list[str], actual: list[str]) -> list[str]:
+    remaining = Counter(actual)
+    missing: list[str] = []
+    for item in expected:
+        if remaining[item] > 0:
+            remaining[item] -= 1
+        else:
+            missing.append(item)
+    return missing
+
+
+def _first_divergence(left: list[str], right: list[str]) -> dict[str, Any] | None:
+    for index, (left_item, right_item) in enumerate(zip(left, right)):
+        if left_item != right_item:
+            return {"index": index, "left": left_item, "right": right_item}
+    if len(left) == len(right):
+        return None
+    index = min(len(left), len(right))
+    return {
+        "index": index,
+        "left": _token_at(left, index),
+        "right": _token_at(right, index),
+    }
+
+
+def _paired_checkpoint_diff(
+    left_events: list[dict[str, Any]],
+    right_events: list[dict[str, Any]],
+    checkpoint_scope: list[str],
+    *,
+    left_label: str = "left",
+    right_label: str = "right",
+) -> dict[str, Any]:
+    left_sequence = _checkpoint_sequence(left_events, checkpoint_scope)
+    right_sequence = _checkpoint_sequence(right_events, checkpoint_scope)
+    missing_from_left = _ordered_missing(checkpoint_scope, left_sequence)
+    missing_from_right = _ordered_missing(checkpoint_scope, right_sequence)
+    extra_in_left = _ordered_missing(left_sequence, right_sequence)
+    extra_in_right = _ordered_missing(right_sequence, left_sequence)
+    first_divergence = _first_divergence(left_sequence, right_sequence)
+    order_mismatch = (
+        first_divergence is not None
+        and not missing_from_left
+        and not missing_from_right
+        and not extra_in_left
+        and not extra_in_right
+    )
+    passed = (
+        not missing_from_left
+        and not missing_from_right
+        and not extra_in_left
+        and not extra_in_right
+        and first_divergence is None
+    )
+    return {
+        "left_label": left_label,
+        "right_label": right_label,
+        "checkpoint_scope": checkpoint_scope,
+        "left_sequence": left_sequence,
+        "right_sequence": right_sequence,
+        f"missing_from_{left_label}": missing_from_left,
+        f"missing_from_{right_label}": missing_from_right,
+        f"extra_in_{left_label}": extra_in_left,
+        f"extra_in_{right_label}": extra_in_right,
+        "order_mismatch": order_mismatch,
+        "first_divergence": first_divergence,
+        "passed": passed,
+    }
+
+
 def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
     lines = [
         f"# Stress Report: {case_name}",
@@ -924,6 +1403,24 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
                 f"failure={item['failure_event_at_divergence']} "
                 f"success={item['success_event_at_divergence']}."
             )
+    paired_diffs = summary.get("paired_checkpoint_diff")
+    if isinstance(paired_diffs, list):
+        lines.extend(["", "## Paired Checkpoint Diff", ""])
+        if not paired_diffs:
+            lines.append("No paired runs completed.")
+        for index, diff in enumerate(paired_diffs, 1):
+            status = "passed" if diff.get("passed") else "failed"
+            lines.append(f"- run {index}: {status}")
+            lines.append(
+                f"  - {diff.get('left_label')}: "
+                f"{', '.join(diff.get('left_sequence', [])) or 'none'}"
+            )
+            lines.append(
+                f"  - {diff.get('right_label')}: "
+                f"{', '.join(diff.get('right_sequence', [])) or 'none'}"
+            )
+            if diff.get("first_divergence") is not None:
+                lines.append(f"  - first_divergence: {diff['first_divergence']}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -970,6 +1467,93 @@ def _manifest(
             "status_short": _git_output(repo_root, ["status", "--short"]),
         },
     }
+
+
+def _paired_manifest(
+    case: dict[str, Any],
+    case_path: Path,
+    runs: int,
+    timeout: int,
+    repo_root: Path,
+    workdir: Path,
+    paired: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "case": _string(case, "name"),
+        "mode": "paired_checkpoint_diff",
+        "description": str(case.get("description", "")),
+        "case_path": str(case_path),
+        "requested_runs": runs,
+        "timeout_seconds": timeout,
+        "repo_root": str(repo_root),
+        "working_directory": str(workdir),
+        "metadata": case.get("metadata", {}),
+        "paired": {
+            "checkpoint_scope": paired["checkpoint_scope"],
+            "arceos_ex": {
+                "command": paired["arceos_ex"]["command"],
+                "working_directory": str(paired["arceos_ex"]["workdir"]),
+            },
+            "linux": {
+                "build_command": paired["linux"].get("build_command"),
+                "command": paired["linux"]["command"],
+                "working_directory": str(paired["linux"]["workdir"]),
+                "stop_after_stress_mem": paired["linux"].get("stop_after_stress_mem", False),
+            },
+        },
+        "git": {
+            "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
+            "status_short": _git_output(repo_root, ["status", "--short"]),
+        },
+    }
+
+
+def _paired_config(
+    case: dict[str, Any],
+    case_path: Path,
+    repo_root: Path,
+    base_workdir: Path,
+) -> dict[str, Any]:
+    raw = case.get("paired")
+    if not isinstance(raw, dict):
+        raise SystemExit("paired_checkpoint_diff cases require a [paired] table")
+    scope = _as_string_list(raw.get("checkpoint_scope"), "paired.checkpoint_scope")
+    if not scope:
+        raise SystemExit("paired.checkpoint_scope must not be empty")
+    arceos = _paired_side_config(raw, "arceos_ex", case_path, repo_root, base_workdir)
+    linux = _paired_side_config(raw, "linux", case_path, repo_root, base_workdir)
+    return {
+        "checkpoint_scope": scope,
+        "arceos_ex": arceos,
+        "linux": linux,
+    }
+
+
+def _paired_side_config(
+    paired: dict[str, Any],
+    side_id: str,
+    case_path: Path,
+    repo_root: Path,
+    base_workdir: Path,
+) -> dict[str, Any]:
+    raw = paired.get(side_id)
+    if not isinstance(raw, dict):
+        raise SystemExit(f"paired_checkpoint_diff cases require [paired.{side_id}]")
+    workdir = _resolve_workdir(repo_root, raw.get("working_directory", str(base_workdir)))
+    command = _as_string_list(raw.get("command"), f"paired.{side_id}.command")
+    config = {
+        **raw,
+        "command": command,
+        "workdir": workdir,
+        "case_dir": case_path.parent,
+    }
+    if "build_command" in raw:
+        config["build_command"] = _as_string_list(
+            raw.get("build_command"),
+            f"paired.{side_id}.build_command",
+        )
+    return config
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -1115,6 +1699,15 @@ def _string(data: dict[str, Any], key: str) -> str:
     return value
 
 
+def _optional_string(data: dict[str, Any], key: str) -> str | None:
+    if key not in data:
+        return None
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"expected non-empty string field: {key}")
+    return value
+
+
 def _integer(data: dict[str, Any], key: str) -> int:
     value = data.get(key)
     if not isinstance(value, int):
@@ -1147,6 +1740,11 @@ def _string_map(value: object, name: str) -> dict[str, str]:
             raise SystemExit(f"expected string map entries in field: {name}")
         result[key] = item
     return result
+
+
+def _expand_command_placeholders(command: list[str]) -> list[str]:
+    nproc = str(os.cpu_count() or 1)
+    return [item.replace("$(nproc)", nproc) for item in command]
 
 
 if __name__ == "__main__":

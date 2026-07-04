@@ -21,6 +21,9 @@ DEFAULT_PLAN = DEFAULT_OUT_DIR / "linux_checkpoint_instrumentation_plan.json"
 JSON_NAME = "linux_checkpoint_instrumentation_plan.json"
 MARKDOWN_NAME = "linux_checkpoint_instrumentation_plan.md"
 MARKER_PREFIX = "LKM_CHECKPOINT"
+INSTRUMENTATION_INCLUDE = "#include <linux/lkm_checkpoints.h>"
+INSTRUMENTATION_CONFIG = "CONFIG_LKM_CHECKPOINTS"
+INSTRUMENTATION_CALL = "LKM_RUNTIME_CHECKPOINT"
 FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 MARKER_PATTERN = re.compile(
     r"/\*\s*"
@@ -229,10 +232,48 @@ def _anchor_line(linux_anchor: str) -> int:
     return int(match.group(1))
 
 
+def _ignored_context_lines(lines: list[str]) -> set[int]:
+    ignored: set[int] = set()
+    instrumentation_block_depth = 0
+    ignore_next_blank = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if ignore_next_blank:
+            if not stripped:
+                ignored.add(index)
+                ignore_next_blank = False
+                continue
+            ignore_next_blank = False
+        if INSTRUMENTATION_INCLUDE in line:
+            ignored.add(index)
+            continue
+        if re.match(r"#\s*if(?:def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
+            instrumentation_block_depth = 1
+            ignored.add(index)
+            continue
+        if instrumentation_block_depth:
+            ignored.add(index)
+            if re.match(r"#\s*if(?:def)?\b", stripped):
+                instrumentation_block_depth += 1
+            elif re.match(r"#\s*endif\b", stripped):
+                instrumentation_block_depth -= 1
+                if instrumentation_block_depth == 0:
+                    ignore_next_blank = True
+            continue
+        if INSTRUMENTATION_CALL in line:
+            ignored.add(index)
+    return ignored
+
+
+def _context_line_is_ignored(line: str, index: int, ignored_lines: set[int]) -> bool:
+    return index in ignored_lines or MARKER_PREFIX in line
+
+
 def _anchor_physical_index(lines: list[str], line_number: int) -> int:
+    ignored_lines = _ignored_context_lines(lines)
     logical_line = 0
     for index, line in enumerate(lines):
-        if MARKER_PREFIX in line:
+        if _context_line_is_ignored(line, index, ignored_lines):
             continue
         logical_line += 1
         if logical_line == line_number:
@@ -244,19 +285,20 @@ def _anchor_physical_index(lines: list[str], line_number: int) -> int:
 
 
 def _source_context(lines: list[str], line_number: int, radius: int = 2) -> list[str]:
+    ignored_lines = _ignored_context_lines(lines)
     anchor_index = _anchor_physical_index(lines, line_number)
 
     before: list[str] = []
     index = anchor_index - 1
     while index >= 0 and len(before) < radius:
-        if MARKER_PREFIX not in lines[index]:
+        if not _context_line_is_ignored(lines[index], index, ignored_lines):
             before.append(lines[index].rstrip())
         index -= 1
 
     after: list[str] = []
     index = anchor_index + 1
     while index < len(lines) and len(after) < radius:
-        if MARKER_PREFIX not in lines[index]:
+        if not _context_line_is_ignored(lines[index], index, ignored_lines):
             after.append(lines[index].rstrip())
         index += 1
 

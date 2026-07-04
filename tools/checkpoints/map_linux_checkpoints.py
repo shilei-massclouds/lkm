@@ -16,6 +16,9 @@ DEFAULT_LINUX_TREE = REPO_ROOT.parent / "linux-6.12"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "out" / "checkpoints"
 JSON_NAME = "linux_checkpoint_mapping.json"
 MARKDOWN_NAME = "linux_checkpoint_mapping.md"
+INSTRUMENTATION_INCLUDE = "#include <linux/lkm_checkpoints.h>"
+INSTRUMENTATION_CONFIG = "CONFIG_LKM_CHECKPOINTS"
+INSTRUMENTATION_CALL = "LKM_RUNTIME_CHECKPOINT"
 LKM_CHECKPOINT_MARKER_LINE_RE = re.compile(
     r"^[ \t]*/\* LKM_CHECKPOINT\b.*\*/[ \t]*(?:\r?\n|\r)?$"
 )
@@ -100,6 +103,41 @@ def _strip_lkm_checkpoint_marker_lines(text: str) -> str:
         for line in text.splitlines(keepends=True)
         if not LKM_CHECKPOINT_MARKER_LINE_RE.fullmatch(line)
     )
+
+
+def _strip_lkm_runtime_instrumentation_lines(text: str) -> str:
+    kept: list[str] = []
+    block_depth = 0
+    ignore_next_blank = False
+
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if ignore_next_blank:
+            if not stripped:
+                ignore_next_blank = False
+                continue
+            ignore_next_blank = False
+
+        if block_depth:
+            if re.match(r"#\s*if(?:def)?\b", stripped):
+                block_depth += 1
+            elif re.match(r"#\s*endif\b", stripped):
+                block_depth -= 1
+                if block_depth == 0:
+                    ignore_next_blank = True
+            continue
+
+        if INSTRUMENTATION_INCLUDE in line:
+            continue
+        if re.match(r"#\s*if(?:def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
+            block_depth = 1
+            continue
+        if INSTRUMENTATION_CALL in line:
+            continue
+
+        kept.append(line)
+
+    return "".join(kept)
 
 
 def _find_matching_delimiter(text: str, open_index: int, open_char: str, close_char: str) -> int:
@@ -223,9 +261,9 @@ class LinuxSourceIndex:
         path = self.root / relative_file
         if not path.is_file():
             return None
-        text = _strip_lkm_checkpoint_marker_lines(
-            path.read_text(encoding="utf-8", errors="replace")
-        )
+        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _strip_lkm_checkpoint_marker_lines(text)
+        text = _strip_lkm_runtime_instrumentation_lines(text)
         self._texts[relative_file] = text
         return text
 

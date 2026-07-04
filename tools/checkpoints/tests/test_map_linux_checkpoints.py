@@ -651,6 +651,127 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
 
         self.assertEqual(baseline, annotated)
 
+    def test_mapping_ignores_runtime_instrumentation_lines(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=8,
+                variant="EntryPreludePhaseStarted",
+                name="EntryPreludePhase.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=9,
+                variant="EntryPreludePhaseReady",
+                name="EntryPreludePhase.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=31,
+                variant="TrampolineVmOnline",
+                name="TrampolineVm.Online",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=33,
+                variant="EarlyVmOnline",
+                name="EarlyVm.Online",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=42,
+                variant="KernelImageOnline",
+                name="KernelImage.Online",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=43,
+                variant="EventStreamReady",
+                name="EventStream.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=80,
+                variant="ExceptionStreamReady",
+                name="ExceptionStream.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=28,
+                variant="EventStreamPrepared",
+                name="EventStream.Prepared",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=29,
+                variant="ExceptionStreamPrepared",
+                name="ExceptionStream.Prepared",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            baseline = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+
+            head_path = linux_tree / "arch" / "riscv" / "kernel" / "head.S"
+            head_text = head_path.read_text(encoding="utf-8")
+            head_text = head_text.replace(
+                "__HEAD\n",
+                "#include <linux/lkm_checkpoints.h>\n"
+                "#ifdef CONFIG_LKM_CHECKPOINTS\n"
+                ".macro LKM_RUNTIME_CHECKPOINT checkpoint_id\n"
+                "    nop\n"
+                ".endm\n"
+                "#else\n"
+                ".macro LKM_RUNTIME_CHECKPOINT checkpoint_id\n"
+                ".endm\n"
+                "#endif\n\n"
+                "__HEAD\n",
+            )
+            head_text = head_text.replace(
+                "    csrw CSR_SATP, a0\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_TRAMPOLINE_VM_ONLINE\n"
+                "    csrw CSR_SATP, a0\n",
+            )
+            head_text = head_text.replace(
+                "    load_global_pointer\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_KERNEL_IMAGE_ONLINE\n"
+                "    load_global_pointer\n",
+            )
+            head_text = head_text.replace(
+                "    csrw CSR_SATP, a2\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EARLY_VM_ONLINE\n"
+                "    csrw CSR_SATP, a2\n",
+            )
+            head_text = head_text.replace(
+                "    la a0, handle_exception\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EVENT_STREAM_READY\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_STREAM_READY\n"
+                "    la a0, handle_exception\n",
+            )
+            head_text = head_text.replace(
+                "SYM_CODE_START(_start_kernel)\n",
+                "SYM_CODE_START(_start_kernel)\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_ENTRY_PRELUDE_PHASE_STARTED\n",
+            )
+            head_text = head_text.replace(
+                "    csrw CSR_TVEC, a3\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EVENT_STREAM_PREPARED\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_STREAM_PREPARED\n"
+                "    csrw CSR_TVEC, a3\n",
+            )
+            head_text = head_text.replace(
+                "    tail start_kernel\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_ENTRY_PRELUDE_PHASE_READY\n"
+                "    tail start_kernel\n",
+            )
+            head_text = head_text.replace(
+                "SYM_CODE_END(_start_kernel)\n",
+                "SYM_CODE_END(_start_kernel)\n\n"
+                "#ifdef CONFIG_LKM_CHECKPOINTS\n"
+                ".pushsection .data, \"aw\"\n"
+                "lkm_checkpoint_count:\n"
+                "    RISCV_PTR 0\n"
+                ".popsection\n"
+                "#endif\n",
+            )
+            head_path.write_text(head_text, encoding="utf-8")
+
+            instrumented = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+
+        self.assertEqual(baseline, instrumented)
+
     def test_range_rule_requires_ordered_anchors(self) -> None:
         record = map_linux_checkpoints.CheckpointInventoryRecord(
             index=10,

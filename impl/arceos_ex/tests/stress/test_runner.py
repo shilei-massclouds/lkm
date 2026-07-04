@@ -86,6 +86,18 @@ class StressRunnerTests(unittest.TestCase):
         )
         self.assertEqual(events[0]["source"], "legacy-trace")
 
+    def test_extracts_early_byte_checkpoint_events(self) -> None:
+        events = runner._extract_events("AV9\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            [
+                "checkpoint:EntryPreludePhase.Started",
+                "checkpoint:EventStream.Prepared",
+                "checkpoint:ExceptionStream.Prepared",
+            ],
+        )
+        self.assertEqual(events[0]["source"], "early-byte")
+
     def test_extracts_ready_check_failed_event(self) -> None:
         events = runner._extract_events(
             "ready_check_failed phase=InitcallPhase "
@@ -137,6 +149,23 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(
             [runner._event_token(event) for event in events],
             ["smoke_result:SmokeResult:passed=2:failed=0:total=2"],
+        )
+
+    def test_uses_stress_mem_text_with_early_byte_prefix(self) -> None:
+        text = "checkpoint: EntryPreludePhase.Ready\n"
+        size = len(text.encode())
+        line = (
+            f"AIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
+            f"overflow=0 dropped=0 data={text.encode().hex()}\n"
+        )
+        observed, stress_mem = runner._observed_text(line)
+
+        self.assertEqual(observed, "AIKOZHTS\n" + text)
+        self.assertIsNotNone(stress_mem)
+        events = runner._extract_events(observed)
+        self.assertEqual(
+            runner._event_token(events[0]),
+            "checkpoint:EntryPreludePhase.Started",
         )
 
     def test_failure_rules_take_precedence_over_success_rules(self) -> None:
@@ -207,6 +236,168 @@ class StressRunnerTests(unittest.TestCase):
         assert config is not None
         self.assertEqual(config.ready_marker, "ready")
         self.assertEqual(config.payload, "input\n")
+
+    def test_capture_until_stress_mem_terminates_process(self) -> None:
+        text = "checkpoint: EntryPreludePhase.Ready\n"
+        line = (
+            "stress_mem: v=1 encoding=hex "
+            f"bytes={len(text.encode())} total={len(text.encode())} "
+            f"overflow=0 dropped=0 data={text.encode().hex()}"
+        )
+        script = (
+            "import sys, time\n"
+            f"print({line!r}, flush=True)\n"
+            "time.sleep(30)\n"
+        )
+        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
+            [sys.executable, "-c", script],
+            Path.cwd(),
+            {},
+            5,
+        )
+        self.assertFalse(timed_out)
+        self.assertTrue(capture["terminated_after_stress_mem"])
+        self.assertIn("stress_mem: v=1", stdout)
+
+    def test_capture_until_stress_mem_waits_for_complete_hex_data(self) -> None:
+        text = "checkpoint: A\ncheckpoint: B\n"
+        encoded = text.encode().hex()
+        split = len("checkpoint: A\n".encode().hex())
+        prefix = (
+            "stress_mem: v=1 encoding=hex "
+            f"bytes={len(text.encode())} total={len(text.encode())} "
+            "overflow=0 dropped=0 data="
+        )
+        script = (
+            "import sys, time\n"
+            f"sys.stdout.write({(prefix + encoded[:split])!r})\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(0.2)\n"
+            f"print({encoded[split:]!r}, flush=True)\n"
+            "time.sleep(30)\n"
+        )
+        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
+            [sys.executable, "-c", script],
+            Path.cwd(),
+            {},
+            5,
+        )
+        observed, stress_mem = runner._observed_text(stdout)
+
+        self.assertFalse(timed_out)
+        self.assertTrue(capture["terminated_after_stress_mem"])
+        self.assertEqual(observed, text)
+        self.assertIsNotNone(stress_mem)
+
+    def test_paired_config_parses_linux_build_command(self) -> None:
+        case = {
+            "paired": {
+                "checkpoint_scope": ["EntryPreludePhase.Started"],
+                "arceos_ex": {"command": ["make", "run"]},
+                "linux": {
+                    "working_directory": "../linux-6.12",
+                    "build_command": [
+                        "make",
+                        "ARCH=riscv",
+                        "CROSS_COMPILE=riscv64-linux-gnu-",
+                        "-j",
+                        "$(nproc)",
+                    ],
+                    "command": ["qemu-system-riscv64"],
+                    "stop_after_stress_mem": True,
+                },
+            }
+        }
+        config = runner._paired_config(case, Path("case.toml"), Path.cwd(), Path.cwd())
+        self.assertEqual(config["checkpoint_scope"], ["EntryPreludePhase.Started"])
+        self.assertIn("ARCH=riscv", config["linux"]["build_command"])
+        self.assertTrue(config["linux"]["stop_after_stress_mem"])
+
+    def test_paired_stress_mem_parses_both_sides(self) -> None:
+        arceos_text = "AV9\ncheckpoint: TrampolineVm.Online\n"
+        linux_text = (
+            "checkpoint: EntryPreludePhase.Started\n"
+            "checkpoint: EventStream.Prepared\n"
+            "checkpoint: ExceptionStream.Prepared\n"
+            "checkpoint: TrampolineVm.Online\n"
+        )
+        arceos_line = (
+            "stress_mem: v=1 encoding=hex "
+            f"bytes={len(arceos_text.encode())} total={len(arceos_text.encode())} "
+            f"overflow=0 dropped=0 data={arceos_text.encode().hex()}"
+        )
+        linux_line = (
+            "stress_mem: v=1 encoding=hex "
+            f"bytes={len(linux_text.encode())} total={len(linux_text.encode())} "
+            f"overflow=0 dropped=0 data={linux_text.encode().hex()}"
+        )
+        arceos_observed, _ = runner._observed_text(arceos_line)
+        linux_observed, _ = runner._observed_text(linux_line)
+        diff = runner._paired_checkpoint_diff(
+            runner._extract_events(arceos_observed),
+            runner._extract_events(linux_observed),
+            [
+                "EntryPreludePhase.Started",
+                "EventStream.Prepared",
+                "ExceptionStream.Prepared",
+                "TrampolineVm.Online",
+            ],
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        self.assertTrue(diff["passed"])
+
+    def test_paired_checkpoint_diff_ignores_left_extra_outside_scope(self) -> None:
+        left = runner._extract_events(
+            "checkpoint: EntryPreludePhase.Started\n"
+            "checkpoint: Internal.Only\n"
+            "checkpoint: EntryPreludePhase.Ready\n"
+        )
+        right = runner._extract_events(
+            "checkpoint: EntryPreludePhase.Started\n"
+            "checkpoint: EntryPreludePhase.Ready\n"
+        )
+        diff = runner._paired_checkpoint_diff(
+            left,
+            right,
+            ["EntryPreludePhase.Started", "EntryPreludePhase.Ready"],
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        self.assertTrue(diff["passed"])
+
+    def test_paired_checkpoint_diff_reports_missing_extra_and_order(self) -> None:
+        scope = ["A", "B"]
+        missing = runner._paired_checkpoint_diff(
+            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
+            runner._extract_events("checkpoint: A\n"),
+            scope,
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        self.assertFalse(missing["passed"])
+        self.assertEqual(missing["missing_from_linux"], ["B"])
+
+        extra = runner._paired_checkpoint_diff(
+            runner._extract_events("checkpoint: A\n"),
+            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
+            scope,
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        self.assertFalse(extra["passed"])
+        self.assertEqual(extra["extra_in_linux"], ["B"])
+
+        order = runner._paired_checkpoint_diff(
+            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
+            runner._extract_events("checkpoint: B\ncheckpoint: A\n"),
+            scope,
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        self.assertFalse(order["passed"])
+        self.assertTrue(order["order_mismatch"])
+        self.assertEqual(order["first_divergence"]["index"], 0)
 
     def test_records_duplicate_sequence_once(self) -> None:
         events = runner._extract_events("user hello\nuser exit status=0\n")

@@ -3626,6 +3626,9 @@ Linux 侧 runtime recorder 必须适配 head/trampoline 约束。入口先导期
 临时映射、early kernel page table 和 C 运行环境恢复等边界；因此 recorder 的写路径不得依赖 heap、普通锁、完整
 printk、普通 C runtime 或会被 BSS 清零破坏的早期状态。记录路径应只写入固定容量、早期可访问、映射切换后仍可导出的
 紧凑事件序列；容量不足只能记录 overflow/dropped 事实，不得动态扩容、阻塞热路径或改变原 Linux 启动语义。
+在 trampoline 临时映射已经生效、但 early kernel page table 尚未生效的 no-write 窗口内，runtime checkpoint
+不得访问普通 `.data/.bss/.init.data` 记录区；若该窗口内存在必须覆盖的逻辑 checkpoint，v1 可以在 early kernel page
+table 生效后的第一个安全点按声明顺序补记这些事件，但不得提前终止启动流或改变 Linux 原有 trap-vector 切换语义。
 
 checkpoint handler 注册模型必须稳定。每个被 runtime 插桩支持的 checkpoint 都应有注册 handler；条件编译只决定该
 checkpoint 注册真实 handler、stress-mem recorder handler、announce handler、其它 probe handler，还是 dummy handler。
@@ -3640,6 +3643,7 @@ handler 过滤应作为 handler 配置能力设计，而不是通过删除 check
 
 多类过滤条件同时存在时，采集集合以条件交集为准。若后续确认第三类过滤条件，例如 observation domain、结果类别、
 运行 profile 或其它维度，必须先在本章或更细的 model/coding 规格中命名并定义语义；在确认前不得臆造第三类过滤行为。
+v1 不实现通用过滤引擎，只固定启用入口先导期 entry-prelude scope；其它 scope 和第三类条件只保留接口方向。
 
 Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，形成一行可由 stress runner 解码的紧凑输出：
 `stress_mem: v=1 encoding=hex bytes=<n> total=<n> overflow=<0|1> dropped=<n> data=<hex>`。`data`
@@ -3653,6 +3657,12 @@ Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，�
 case 元数据。paired stress 报告至少应输出双方 checkpoint 序列、缺失事件、额外事件、相对顺序不一致和首个可见分叉点。
 首个分叉点只说明当前观测模型下最早可见差异，不能直接等同于根因；若差异来自缺少观测点，应先补长期 checkpoint 或
 handler 字段，再继续推进更细粒度 Linux 插桩。
+
+Linux 侧构建命令以该树当前交叉编译入口为准：`make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j $(nproc)`；
+首批 runtime checkpoint 构建在此基础上追加 `KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS`，不改 menuconfig/Kconfig UI。
+Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 使用 `-m 128M -smp 1 -machine virt -bios default`
+和 `./arch/riscv/boot/Image`，virtio-blk 磁盘指向同一 `arceos_ex` raw rootfs，并通过
+`earlycon=sbi root=/dev/vda rw console=ttyS0 init=/sbin/init` 进入同一 PID1 输入。
 
 ## 兼容性策略
 
