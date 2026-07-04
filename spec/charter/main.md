@@ -3609,6 +3609,51 @@ checkpoint 的选择标准是长期内部可见性，而不是一次性 debug �
 
 model/coding 规格应允许同一 block request 的 completion 来源不同：可能来自 IRQ handler，也可能由任务侧 polling 观察到 used buffer。若事件字段已经支持结构化记录，可使用 `completion_source = irq | task_poll`；若暂时只能表达事件名，则至少应区分 `BlockIoIrqCompletionEnd` 与 `BlockIoTaskPollCompletionObserved`。这些点位应按 read/write block I/O 的通用契约设计，当前实现可以先覆盖 read，但命名和规格不得绑定 DF-0001 或 `/sbin/init`。
 
+## Linux runtime checkpoint 插桩与横向差分
+
+Linux runtime checkpoint 插桩阶段必须以已经同步的外部 Linux tree 为基线。当前基线固定为
+`/home/cloud/gitLKM/linux-6.12` 的 `lkm/checkpoint-markers` 分支；该分支中的 `LKM_CHECKPOINT` marker
+既是静态审阅锚点，也是后续 runtime 插桩的定位基线。首批 runtime 插桩不另开 Linux 分支，不重新维护独立 checkpoint
+列表，也不绕过本项目已提交的 checkpoint inventory、Linux mapping 和 instrumentation plan。
+
+首批 runtime 插桩范围只覆盖 RISC-V64 入口先导期汇编路径：`arch/riscv/kernel/head.S` 中从 `_start`
+进入到 `tail start_kernel` 之前的 marker。该范围包括 `_start` 入口、`_start_kernel` 的临时 trap-vector
+准备、`setup_vm()` 前后的早期 VM 切换、`relocate_enable_mmu` 中 trampoline/early kernel `satp` 切换、
+正式 trap vector 准备，以及交给 `start_kernel()` 的边界。该首批不得顺手扩展到 `arch/riscv/kernel/entry.S`
+的用户态返回路径、`init/main.c`、ELF exec、syscall 或其它 88 个 marker；这些只能在首批差分报告证明需要后再分批推进。
+
+Linux 侧 runtime recorder 必须适配 head/trampoline 约束。入口先导期会跨越 BSS 清零、MMU 未开启、trampoline
+临时映射、early kernel page table 和 C 运行环境恢复等边界；因此 recorder 的写路径不得依赖 heap、普通锁、完整
+printk、普通 C runtime 或会被 BSS 清零破坏的早期状态。记录路径应只写入固定容量、早期可访问、映射切换后仍可导出的
+紧凑事件序列；容量不足只能记录 overflow/dropped 事实，不得动态扩容、阻塞热路径或改变原 Linux 启动语义。
+
+checkpoint handler 注册模型必须稳定。每个被 runtime 插桩支持的 checkpoint 都应有注册 handler；条件编译只决定该
+checkpoint 注册真实 handler、stress-mem recorder handler、announce handler、其它 probe handler，还是 dummy handler。
+dummy handler 的效果等价于空函数，用于保持 checkpoint 调用点和控制流形态稳定。默认构建不得启用重型 handler；
+显式 probe/stress 配置才允许打开会记录或输出事件的 handler。handler 读取和记录事实时不得推进被观察对象生命周期，
+不得把测试专用状态写入普通对象 API，也不得为了观测方便改变 Linux 或 arceos_ex 的正式行为。
+
+handler 过滤应作为 handler 配置能力设计，而不是通过删除 checkpoint 调用点实现。当前明确的过滤条件至少包括两类：
+
+1. 阶段/子阶段过滤：可以只采集指定 phase/subphase 内的 checkpoint。
+2. 粒度过滤：可以按全系统、子系统/模块、对象、迁移/动作方法、内部细节筛选；其中全系统表示不过滤，后续层级逐步收窄。
+
+多类过滤条件同时存在时，采集集合以条件交集为准。若后续确认第三类过滤条件，例如 observation domain、结果类别、
+运行 profile 或其它维度，必须先在本章或更细的 model/coding 规格中命名并定义语义；在确认前不得臆造第三类过滤行为。
+
+Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，形成一行可由 stress runner 解码的紧凑输出：
+`stress_mem: v=1 encoding=hex bytes=<n> total=<n> overflow=<0|1> dropped=<n> data=<hex>`。`data`
+解码后的文本事件首批应使用现有 runner 可识别的 checkpoint 形态，例如 `checkpoint: EntryPreludePhase.Started`。
+这样 Linux 与 arceos_ex 可以复用同一事件提取、序列 hash、去重归档和差分报告机制。首批允许在安全的后续导出点把
+早期 recorder 内容一次性 dump 到 console；长期可演进为共享内存或 monitor 抽取，但不能把共享内存作为首批前置条件。
+
+横向差分 stress case 必须使用同一测试输入。首批 paired case 应复用同一 rootfs raw image 分别启动 arceos_ex 和 Linux，
+避免把 rootfs 构造、文件系统格式、init 参数或 QEMU 设备差异误判为 checkpoint 差异。Linux 当前配置中
+`CONFIG_EXT4_USE_FOR_EXT2=y`，因此可以先挂载现有 ext2 raw rootfs；若后续切换 rootfs 格式，必须同时更新双方命令和
+case 元数据。paired stress 报告至少应输出双方 checkpoint 序列、缺失事件、额外事件、相对顺序不一致和首个可见分叉点。
+首个分叉点只说明当前观测模型下最早可见差异，不能直接等同于根因；若差异来自缺少观测点，应先补长期 checkpoint 或
+handler 字段，再继续推进更细粒度 Linux 插桩。
+
 ## 兼容性策略
 
 待补充。
