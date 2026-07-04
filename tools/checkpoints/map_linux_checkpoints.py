@@ -19,6 +19,7 @@ MARKDOWN_NAME = "linux_checkpoint_mapping.md"
 INSTRUMENTATION_INCLUDE = "#include <linux/lkm_checkpoints.h>"
 INSTRUMENTATION_CONFIG = "CONFIG_LKM_CHECKPOINTS"
 INSTRUMENTATION_CALL = "LKM_RUNTIME_CHECKPOINT"
+INSTRUMENTATION_RECORD_CALL = "lkm_checkpoint_record("
 LKM_CHECKPOINT_MARKER_LINE_RE = re.compile(
     r"^[ \t]*/\* LKM_CHECKPOINT\b.*\*/[ \t]*(?:\r?\n|\r)?$"
 )
@@ -132,7 +133,7 @@ def _strip_lkm_runtime_instrumentation_lines(text: str) -> str:
         if re.match(r"#\s*if(?:def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
             block_depth = 1
             continue
-        if INSTRUMENTATION_CALL in line:
+        if INSTRUMENTATION_CALL in line or INSTRUMENTATION_RECORD_CALL in line:
             continue
 
         kept.append(line)

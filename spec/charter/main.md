@@ -3616,11 +3616,12 @@ Linux runtime checkpoint 插桩阶段必须以已经同步的外部 Linux tree �
 既是静态审阅锚点，也是后续 runtime 插桩的定位基线。首批 runtime 插桩不另开 Linux 分支，不重新维护独立 checkpoint
 列表，也不绕过本项目已提交的 checkpoint inventory、Linux mapping 和 instrumentation plan。
 
-首批 runtime 插桩范围只覆盖 RISC-V64 入口先导期汇编路径：`arch/riscv/kernel/head.S` 中从 `_start`
-进入到 `tail start_kernel` 之前的 marker。该范围包括 `_start` 入口、`_start_kernel` 的临时 trap-vector
-准备、`setup_vm()` 前后的早期 VM 切换、`relocate_enable_mmu` 中 trampoline/early kernel `satp` 切换、
-正式 trap vector 准备，以及交给 `start_kernel()` 的边界。该首批不得顺手扩展到 `arch/riscv/kernel/entry.S`
-的用户态返回路径、`init/main.c`、ELF exec、syscall 或其它 88 个 marker；这些只能在首批差分报告证明需要后再分批推进。
+v2 runtime 插桩范围固定为 `tools/out/checkpoints/linux_checkpoint_instrumentation_plan.json` 中的
+88 个 `exact` mapping marker。该范围覆盖 RISC-V64 入口先导期、`start_kernel()` C 阶段、`rest_init()`/
+`kernel_init_freeable()` 后续阶段、rootfs/finalize 边界，以及 payload/exec/syscall 的首批稳定 exact 点。
+该范围是当前 runtime coverage 目标，不等同于 checkpoint inventory 的 402 项全量语义覆盖；`range` 与
+`unmapped` checkpoint 继续作为后续 mapping/anchor 任务，不能在本轮 runtime 插桩中猜测落点或以临时
+probe 代替正式映射。
 
 Linux 侧 runtime recorder 必须适配 head/trampoline 约束。入口先导期会跨越 BSS 清零、MMU 未开启、trampoline
 临时映射、early kernel page table 和 C 运行环境恢复等边界；因此 recorder 的写路径不得依赖 heap、普通锁、完整
@@ -3643,7 +3644,10 @@ handler 过滤应作为 handler 配置能力设计，而不是通过删除 check
 
 多类过滤条件同时存在时，采集集合以条件交集为准。若后续确认第三类过滤条件，例如 observation domain、结果类别、
 运行 profile 或其它维度，必须先在本章或更细的 model/coding 规格中命名并定义语义；在确认前不得臆造第三类过滤行为。
-v1 不实现通用过滤引擎，只固定启用入口先导期 entry-prelude scope；其它 scope 和第三类条件只保留接口方向。
+v2 不实现通用过滤引擎，只固定启用 88 个 exact-mapped runtime checkpoint；paired stress case 通过
+显式 `checkpoint_scope` 声明每个 case 的顺序兼容交集。scope 外 runtime 事件只能进入 observed-but-not-compared
+报告，不能直接作为 paired diff 失败条件。若某个额外事件需要进入硬门禁，必须先更新对应 case 的
+`checkpoint_scope` 和说明。
 
 Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，形成一行可由 stress runner 解码的紧凑输出：
 `stress_mem: v=1 encoding=hex bytes=<n> total=<n> overflow=<0|1> dropped=<n> data=<hex>`。`data`
@@ -3651,12 +3655,12 @@ Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，�
 这样 Linux 与 arceos_ex 可以复用同一事件提取、序列 hash、去重归档和差分报告机制。首批允许在安全的后续导出点把
 早期 recorder 内容一次性 dump 到 console；长期可演进为共享内存或 monitor 抽取，但不能把共享内存作为首批前置条件。
 
-横向差分 stress case 必须使用同一测试输入。首批 paired case 应复用同一 rootfs raw image 分别启动 arceos_ex 和 Linux，
+横向差分 stress case 必须使用同一测试输入。paired case 应按阶段分批复用同一 rootfs raw image 分别启动 arceos_ex 和 Linux，
 避免把 rootfs 构造、文件系统格式、init 参数或 QEMU 设备差异误判为 checkpoint 差异。Linux 当前配置中
 `CONFIG_EXT4_USE_FOR_EXT2=y`，因此可以先挂载现有 ext2 raw rootfs；若后续切换 rootfs 格式，必须同时更新双方命令和
-case 元数据。paired stress 报告至少应输出双方 checkpoint 序列、缺失事件、额外事件、相对顺序不一致和首个可见分叉点。
-首个分叉点只说明当前观测模型下最早可见差异，不能直接等同于根因；若差异来自缺少观测点，应先补长期 checkpoint 或
-handler 字段，再继续推进更细粒度 Linux 插桩。
+case 元数据。paired stress 报告至少应输出双方 scope 内 checkpoint 序列、缺失事件、额外事件、相对顺序不一致、首个
+可见分叉点，以及双方 observed-but-not-compared checkpoint 与排除原因。首个分叉点只说明当前观测模型下最早可见差异，
+不能直接等同于根因；若差异来自缺少观测点，应先补长期 checkpoint 或 handler 字段，再继续推进更细粒度 Linux 插桩。
 
 Linux 侧构建命令以该树当前交叉编译入口为准：`make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j $(nproc)`；
 首批 runtime checkpoint 构建在此基础上追加 `KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS`，不改 menuconfig/Kconfig UI。

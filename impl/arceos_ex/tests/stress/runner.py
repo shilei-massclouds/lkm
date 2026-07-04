@@ -554,7 +554,7 @@ def _execute_paired_side(
     start_monotonic = time.monotonic()
     if stop_after_stress_mem:
         stdout, returncode, timed_out, capture_result = _run_command_capture_until_stress_mem(
-            command, workdir, env, timeout
+            command, workdir, env, timeout, delayed_stdin
         )
     else:
         stdout, returncode, timed_out, capture_result = _run_command_capture(
@@ -670,11 +670,15 @@ def _run_command_capture_until_stress_mem(
     workdir: Path,
     env: dict[str, str],
     timeout: int,
+    delayed_stdin: DelayedStdin | None = None,
 ) -> tuple[str, int | None, bool, dict[str, Any]]:
+    marker = delayed_stdin.ready_marker.encode() if delayed_stdin is not None else None
+    payload = delayed_stdin.payload.encode() if delayed_stdin is not None else None
     process = subprocess.Popen(
         command,
         cwd=workdir,
         env=env,
+        stdin=subprocess.PIPE if delayed_stdin is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -687,6 +691,7 @@ def _run_command_capture_until_stress_mem(
     deadline = time.monotonic() + timeout
     timed_out = False
     terminated_after_stress_mem = False
+    stdin_sent = False
 
     while True:
         now = time.monotonic()
@@ -707,6 +712,14 @@ def _run_command_capture_until_stress_mem(
                 continue
             stdout_parts.append(chunk)
             tail = (tail + chunk)[-131072:]
+            if marker is not None and payload is not None and not stdin_sent and marker in tail:
+                try:
+                    assert process.stdin is not None
+                    process.stdin.write(payload)
+                    process.stdin.flush()
+                except BrokenPipeError:
+                    pass
+                stdin_sent = True
             if _parse_stress_mem(tail.decode("utf-8", errors="replace")) is not None:
                 terminated_after_stress_mem = True
                 _kill_process_group(process)
@@ -727,7 +740,18 @@ def _run_command_capture_until_stress_mem(
         stdout,
         process.returncode,
         timed_out,
-        {"terminated_after_stress_mem": terminated_after_stress_mem},
+        {
+            "terminated_after_stress_mem": terminated_after_stress_mem,
+            **(
+                {}
+                if delayed_stdin is None
+                else {
+                    "stdin_ready_marker": delayed_stdin.ready_marker,
+                    "stdin_payload_bytes": len(payload or b""),
+                    "stdin_sent": stdin_sent,
+                }
+            ),
+        },
     )
 
 
@@ -1291,6 +1315,30 @@ def _checkpoint_sequence(events: list[dict[str, Any]], scope: list[str]) -> list
     ]
 
 
+def _checkpoint_observed_but_not_compared(
+    events: list[dict[str, Any]], scope: list[str]
+) -> list[dict[str, Any]]:
+    scope_set = set(scope)
+    observed: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event.get("kind") != "checkpoint":
+            continue
+        name = str(event.get("name"))
+        if name in scope_set:
+            continue
+        entry = observed.setdefault(
+            name,
+            {
+                "name": name,
+                "count": 0,
+                "first_line": event.get("line", 0),
+                "excluded_reason": "outside_checkpoint_scope",
+            },
+        )
+        entry["count"] += 1
+    return list(observed.values())
+
+
 def _ordered_missing(expected: list[str], actual: list[str]) -> list[str]:
     remaining = Counter(actual)
     missing: list[str] = []
@@ -1355,6 +1403,10 @@ def _paired_checkpoint_diff(
         f"missing_from_{right_label}": missing_from_right,
         f"extra_in_{left_label}": extra_in_left,
         f"extra_in_{right_label}": extra_in_right,
+        "observed_but_not_compared": {
+            left_label: _checkpoint_observed_but_not_compared(left_events, checkpoint_scope),
+            right_label: _checkpoint_observed_but_not_compared(right_events, checkpoint_scope),
+        },
         "order_mismatch": order_mismatch,
         "first_divergence": first_divergence,
         "passed": passed,
@@ -1421,6 +1473,21 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
             )
             if diff.get("first_divergence") is not None:
                 lines.append(f"  - first_divergence: {diff['first_divergence']}")
+            observed = diff.get("observed_but_not_compared")
+            if isinstance(observed, dict):
+                for side_label, items in observed.items():
+                    if not isinstance(items, list) or not items:
+                        continue
+                    rendered = ", ".join(
+                        f"{item.get('name')} x{item.get('count')} "
+                        f"({item.get('excluded_reason')})"
+                        for item in items
+                        if isinstance(item, dict)
+                    )
+                    if rendered:
+                        lines.append(
+                            f"  - {side_label} observed_but_not_compared: {rendered}"
+                        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1494,18 +1561,30 @@ def _paired_manifest(
             "arceos_ex": {
                 "command": paired["arceos_ex"]["command"],
                 "working_directory": str(paired["arceos_ex"]["workdir"]),
+                "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["arceos_ex"])),
             },
             "linux": {
                 "build_command": paired["linux"].get("build_command"),
                 "command": paired["linux"]["command"],
                 "working_directory": str(paired["linux"]["workdir"]),
                 "stop_after_stress_mem": paired["linux"].get("stop_after_stress_mem", False),
+                "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["linux"])),
             },
         },
         "git": {
             "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
             "status_short": _git_output(repo_root, ["status", "--short"]),
         },
+}
+
+
+def _delayed_stdin_summary(delayed_stdin: DelayedStdin | None) -> dict[str, Any] | None:
+    if delayed_stdin is None:
+        return None
+    return {
+        "ready_marker": delayed_stdin.ready_marker,
+        "payload": delayed_stdin.payload,
+        "payload_bytes": len(delayed_stdin.payload.encode()),
     }
 
 

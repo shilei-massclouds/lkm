@@ -1,0 +1,134 @@
+name = "pd-0005-linux-exact-cumulative-paired"
+description = "Run arceos_ex and Linux against the same default-overlay rootfs and diff the cumulative stable exact runtime checkpoint intersection."
+mode = "paired_checkpoint_diff"
+default_runs = 1
+timeout_seconds = 360
+working_directory = "."
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
+  "ROOTFS_OVERLAY=default",
+]
+
+[paired]
+checkpoint_scope = [
+  "EntryPreludePhase.Started",
+  "EventStream.Prepared",
+  "ExceptionStream.Prepared",
+  "TrampolineVm.Online",
+  "KernelImage.Online",
+  "EventStream.Ready",
+  "ExceptionStream.Ready",
+  "StartupTimeline.Started",
+  "CorePreparePhase.Started",
+  "CorePreparePhase.Ready",
+  "MmCoreInitPhase.Started",
+  "MmCoreInitPhase.Ready",
+  "SchedInitPhase.Started",
+  "SchedInitPhase.Ready",
+  "IrqTimeInitPhase.Started",
+  "LocalIrqEnablePhase.Started",
+  "LocalIrqEnablePhase.Ready",
+  "ProcessPreparePhase.Started",
+  "BootInitRestInitPhase.Ready",
+  "PreSmpInitPhase.Started",
+  "SmpBringupPhase.Started",
+  "SmpBringupPhase.Ready",
+  "RuntimeCorePhase.Started",
+  "Scheduler.SmpReady",
+  "Workqueue.TopologyReady",
+  "AsyncCore.DeferredReady",
+  "PadataCore.DeferredReady",
+  "PageAllocator.LateReady",
+  "RuntimeCoreBoundary.Ready",
+  "InitcallPhase.Started",
+  "CpusetSmp.TrimmedReady",
+  "DriverCore.DeferredReady",
+  "IrqProcView.DeferredReady",
+  "CtorTable.Ready",
+  "InitcallTable.Ready",
+  "InitcallBoundary.Ready",
+  "RootfsPhase.Started",
+  "KUnitRuntime.TrimmedReady",
+  "InitramfsSync.DeferredReady",
+  "RootfsConsole.DeferredReady",
+  "RamdiskExecuteCommand.EaccessCheckpoint",
+  "RootFS.Online",
+  "IntegrityKeys.DeferredReady",
+  "RootfsBoundary.Ready",
+  "FinalizePhase.Started",
+  "AsyncFullSync.DeferredReady",
+  "SystemState.FreeingInitmemCheckpoint",
+  "InitMemoryCleanup.DeferredReady",
+  "KernelMappingProtection.DeferredReady",
+  "PtiFinalize.TrimmedReady",
+  "SystemState.Online",
+  "RcuCore.InkernelBootEnded",
+  "RcuBootEnd.Ready",
+  "SysctlArgs.DeferredReady",
+  "PayloadPhase.Ready",
+  "PayloadPhase.Online",
+  "UserBoot.MainElfReady",
+  "UserBoot.InterpreterReady",
+  "UserBoot.AddressSpaceSetupStart",
+  "UserAddressSpace.Ready",
+]
+
+[paired.arceos_ex]
+working_directory = "."
+command = [
+  "make",
+  "run",
+  "APP=user-boot",
+  "PROBE=announce,stress-mem",
+  "STRESS_MEM_BYTES=65536",
+  "QEMU_SMP=1",
+  "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
+  "QEMU_APPEND=earlycon=sbi init=/sbin/init",
+]
+
+[paired.linux]
+working_directory = "../linux-6.12"
+build_command = [
+  "make",
+  "ARCH=riscv",
+  "CROSS_COMPILE=riscv64-linux-gnu-",
+  "KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS",
+  "-j",
+  "$(nproc)",
+]
+command = [
+  "qemu-system-riscv64",
+  "-m",
+  "128M",
+  "-smp",
+  "1",
+  "-machine",
+  "virt",
+  "-bios",
+  "default",
+  "-kernel",
+  "./arch/riscv/boot/Image",
+  "-device",
+  "virtio-blk-device,drive=disk0",
+  "-drive",
+  "id=disk0,if=none,format=raw,file=../lkm/impl/arceos_ex/build/stress-linux-exact-cumulative.raw",
+  "-device",
+  "virtio-net-device,netdev=net0",
+  "-netdev",
+  "user,id=net0,hostfwd=tcp::5555-:5555",
+  "-nographic",
+  "-append",
+  "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/sbin/init",
+]
+stop_after_stress_mem = true
+
+[metadata]
+observation_mode = "paired-checkpoint-diff"
+linux_exact_runtime_target_count = 88
+excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
+cumulative_scope = "stable exact-mapped checkpoint intersection declared by pd-0001 through pd-0004"

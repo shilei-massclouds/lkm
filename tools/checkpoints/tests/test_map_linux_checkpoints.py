@@ -654,6 +654,11 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
     def test_mapping_ignores_runtime_instrumentation_lines(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
+                index=0,
+                variant="StartupTimelineStarted",
+                name="StartupTimeline.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
                 variant="EntryPreludePhaseStarted",
                 name="EntryPreludePhase.Started",
@@ -698,11 +703,35 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
                 variant="ExceptionStreamPrepared",
                 name="ExceptionStream.Prepared",
             ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=80,
+                variant="CorePreparePhaseStarted",
+                name="CorePreparePhase.Started",
+            ),
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
             linux_tree = self._write_linux_fixture(tmp)
             baseline = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+
+            main_path = linux_tree / "init" / "main.c"
+            main_text = main_path.read_text(encoding="utf-8")
+            main_text = main_text.replace(
+                "void setup_arch(char **cmdline) {}\n",
+                "#include <linux/lkm_checkpoints.h>\n"
+                "void setup_arch(char **cmdline) {}\n",
+            )
+            main_text = main_text.replace(
+                "void start_kernel(void)\n{\n",
+                "void start_kernel(void)\n{\n"
+                "    lkm_checkpoint_record(LKM_CHECKPOINT_STARTUP_TIMELINE_STARTED);\n",
+            )
+            main_text = main_text.replace(
+                "    setup_arch(&command_line);\n",
+                "    lkm_checkpoint_record(LKM_CHECKPOINT_CORE_PREPARE_PHASE_STARTED);\n"
+                "    setup_arch(&command_line);\n",
+            )
+            main_path.write_text(main_text, encoding="utf-8")
 
             head_path = linux_tree / "arch" / "riscv" / "kernel" / "head.S"
             head_text = head_path.read_text(encoding="utf-8")

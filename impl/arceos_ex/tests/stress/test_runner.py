@@ -289,6 +289,36 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(observed, text)
         self.assertIsNotNone(stress_mem)
 
+    def test_capture_until_stress_mem_supports_delayed_stdin(self) -> None:
+        script = (
+            "import sys, time\n"
+            "print('/ #', flush=True)\n"
+            "line = sys.stdin.readline().strip()\n"
+            "text = f'checkpoint: {line}\\n'\n"
+            "encoded = text.encode().hex()\n"
+            "print(\n"
+            "    f'stress_mem: v=1 encoding=hex bytes={len(text.encode())} '\n"
+            "    f'total={len(text.encode())} overflow=0 dropped=0 data={encoded}',\n"
+            "    flush=True,\n"
+            ")\n"
+            "time.sleep(30)\n"
+        )
+        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
+            [sys.executable, "-c", script],
+            Path.cwd(),
+            {},
+            5,
+            runner.DelayedStdin(ready_marker="/ #", payload="PayloadPhase.Online\n"),
+        )
+        observed, stress_mem = runner._observed_text(stdout)
+
+        self.assertFalse(timed_out)
+        self.assertTrue(capture["terminated_after_stress_mem"])
+        self.assertTrue(capture["stdin_sent"])
+        self.assertEqual(capture["stdin_payload_bytes"], len("PayloadPhase.Online\n".encode()))
+        self.assertEqual(observed, "checkpoint: PayloadPhase.Online\n")
+        self.assertIsNotNone(stress_mem)
+
     def test_paired_config_parses_linux_build_command(self) -> None:
         case = {
             "paired": {
@@ -365,6 +395,74 @@ class StressRunnerTests(unittest.TestCase):
             right_label="linux",
         )
         self.assertTrue(diff["passed"])
+        observed = diff["observed_but_not_compared"]
+        self.assertEqual(observed["arceos_ex"][0]["name"], "Internal.Only")
+        self.assertEqual(observed["arceos_ex"][0]["excluded_reason"], "outside_checkpoint_scope")
+        self.assertEqual(observed["linux"], [])
+
+    def test_paired_checkpoint_diff_counts_duplicate_outside_scope_events(self) -> None:
+        left = runner._extract_events(
+            "checkpoint: A\n"
+            "checkpoint: SyscallTable.Read\n"
+            "checkpoint: SyscallTable.Read\n"
+        )
+        right = runner._extract_events(
+            "checkpoint: A\n"
+            "checkpoint: SyscallTable.Write\n"
+        )
+        diff = runner._paired_checkpoint_diff(
+            left,
+            right,
+            ["A"],
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+
+        self.assertTrue(diff["passed"])
+        self.assertEqual(
+            diff["observed_but_not_compared"]["arceos_ex"],
+            [
+                {
+                    "name": "SyscallTable.Read",
+                    "count": 2,
+                    "first_line": 2,
+                    "excluded_reason": "outside_checkpoint_scope",
+                }
+            ],
+        )
+        self.assertEqual(diff["observed_but_not_compared"]["linux"][0]["count"], 1)
+
+    def test_report_lists_observed_but_not_compared_checkpoints(self) -> None:
+        diff = runner._paired_checkpoint_diff(
+            runner._extract_events("checkpoint: A\ncheckpoint: SyscallTable.Read\n"),
+            runner._extract_events("checkpoint: A\n"),
+            ["A"],
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.md"
+            runner._write_report(
+                report,
+                "case",
+                {
+                    "dry_run": False,
+                    "requested_runs": 1,
+                    "completed_runs": 1,
+                    "started_at": "now",
+                    "ended_at": "later",
+                    "total_seconds": 1.0,
+                    "average_run_seconds": 1.0,
+                    "totals": {"success": 1, "failure": 0},
+                    "classes": [],
+                    "failure_vs_success": [],
+                    "paired_checkpoint_diff": [diff],
+                },
+            )
+            text = report.read_text(encoding="utf-8")
+
+        self.assertIn("observed_but_not_compared", text)
+        self.assertIn("SyscallTable.Read x1 (outside_checkpoint_scope)", text)
 
     def test_paired_checkpoint_diff_reports_missing_extra_and_order(self) -> None:
         scope = ["A", "B"]

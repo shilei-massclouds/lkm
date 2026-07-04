@@ -70,6 +70,27 @@ make test-stress \
   STRESS_TIMEOUT=240
 ```
 
+The current Linux paired cases are staged by exact-mapped runtime scope:
+
+- `pd-0001-linux-entry-prelude-paired.toml`: entry-prelude intersection.
+- `pd-0002-linux-boot-c-paired.toml`: boot C phase landmarks through process prepare.
+- `pd-0003-linux-runtime-rootfs-paired.toml`: SMP, runtime core, initcall, rootfs, finalize, and payload handoff landmarks.
+- `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed `/bin/ls\nexit\n`; syscall and repeated exec markers are reported as observed coverage unless explicitly in scope.
+- `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped intersection for the default-overlay rootfs path.
+
+Paired diffs only compare the declared `checkpoint_scope` for each case.
+Runtime checkpoints outside that scope are listed as
+`observed_but_not_compared` with `outside_checkpoint_scope`; they are useful
+coverage evidence, but they do not make a run fail until a case explicitly adds
+them to its scope.
+
+A paired mismatch caused by an arceos_ex/Linux semantic or implementation gap is
+treated as diagnostic evidence, not as an instruction to automatically extend
+arceos_ex. Preserve the report and summarize the first divergence, missing or
+extra scoped checkpoints, and observed coverage. Only runner/reporting defects
+or incorrect Linux checkpoint instrumentation should be fixed as part of these
+paired cases.
+
 Each case output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
 contains:
 
