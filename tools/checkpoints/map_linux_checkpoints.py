@@ -840,9 +840,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes=(
                 "Linux kernel_init() default init candidate handoff anchor. "
-                "A successful requested-init path from init= returns before this "
-                "fallback block, so requested-init paired cases must not include "
-                "this checkpoint in the hard diff scope."
+                "Requested-init paths record the same runtime checkpoint before "
+                "run_init_process(execute_command), but the single-fingerprint "
+                "LKM_CHECKPOINT marker remains on this canonical fallback anchor."
             ),
         ),
         "CorePreparePhase.Started": MappingRule(

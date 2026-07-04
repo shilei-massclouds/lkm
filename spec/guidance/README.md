@@ -35,6 +35,8 @@ Linux marker patch 只能由已提交 `linux_checkpoint_instrumentation_plan.jso
 `--emit-marker-patch <path>` 模式下输出可审阅 unified diff。marker 插入位置固定为对应 anchor line 的前一行并继承 anchor
 缩进；同一 anchor 上的多条 marker 必须按 `checkpoint_index` 排序。已存在完全相同 marker 时不得重复插入；若 Linux tree 中存在
 同一 `checkpoint_name + checkpoint_variant` 但 fingerprint 不同的 marker，或存在不属于当前 plan 的 stale marker，patch 生成必须失败。
+若同一个运行时 checkpoint 必须覆盖 Linux 同一语义的多个分支等价 call-site，mapping/plan 仍只能选择一个规范 marker anchor；
+其它分支只能添加同一 checkpoint id 的 runtime record call，不得添加第二个不同 fingerprint 的 `LKM_CHECKPOINT` marker。
 
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 

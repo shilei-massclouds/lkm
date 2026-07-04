@@ -32,13 +32,13 @@ command = [
   "APP=user-boot",
   "PROBE=announce,stress-mem",
   "STRESS_MEM_BYTES=65536",
-  "QEMU_SMP=1",
+  "QEMU_SMP=2",
   "VIRTIO_BLK_IMAGE=build/stress-linux-payload-syscall.raw",
   "QEMU_APPEND=earlycon=sbi init=/bin/sh",
 ]
 
 [paired.arceos_ex.delayed_stdin]
-ready_marker = "/ #"
+ready_marker = "~ #"
 payload = "/bin/ls\nexit\n"
 
 [paired.linux]
@@ -56,7 +56,7 @@ command = [
   "-m",
   "128M",
   "-smp",
-  "1",
+  "2",
   "-machine",
   "virt",
   "-bios",
@@ -78,7 +78,7 @@ command = [
 stop_after_stress_mem = true
 
 [paired.linux.delayed_stdin]
-ready_marker = "/ #"
+ready_marker = "~ #"
 payload = "/bin/ls\nexit\n"
 
 [metadata]

@@ -4419,6 +4419,6 @@
     "linux_anchor": "kernel_init() line 1525: if (!try_to_run_init_process(\"/sbin/init\") ||",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Linux kernel_init() default init candidate handoff anchor. A successful requested-init path from init= returns before this fallback block, so requested-init paired cases must not include this checkpoint in the hard diff scope."
+    "notes": "Linux kernel_init() default init candidate handoff anchor. Requested-init paths record the same runtime checkpoint before run_init_process(execute_command), but the single-fingerprint LKM_CHECKPOINT marker remains on this canonical fallback anchor."
   }
 ]

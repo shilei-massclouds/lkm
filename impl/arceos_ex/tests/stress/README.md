@@ -94,13 +94,13 @@ Current active stage:
 
 - `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed
   `/bin/ls\nexit\n`; syscall and repeated exec markers are reported as
-  observed coverage unless explicitly in scope. This queued case now needs a
-  harness refresh before semantic payload work: it still runs arceos_ex with
-  `QEMU_SMP=1` after the SMP bringup baseline moved to a 2-vCPU topology, and
-  its Linux delayed-stdin marker `/ #` does not match the observed BusyBox
-  prompt `~ #`. After that refresh, the next expected semantic gap is the
-  requested-init payload handoff boundary: the case still scopes
-  `PayloadPhase.Online`, but the current Linux anchor is fallback-only.
+  observed coverage unless explicitly in scope. The harness uses a 2-vCPU
+  topology on both sides and waits for the observed BusyBox prompt `~ #`.
+  `PayloadPhase.Online` remains in hard scope because Linux now records the
+  selected-payload handoff before the requested-init
+  `run_init_process(execute_command)` path as well as before the default
+  fallback block; the single-fingerprint `LKM_CHECKPOINT` comment remains on
+  the canonical mapping anchor.
 
 Queued later stages:
 
