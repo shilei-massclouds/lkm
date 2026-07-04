@@ -16,6 +16,9 @@ DEFAULT_LINUX_TREE = REPO_ROOT.parent / "linux-6.12"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "out" / "checkpoints"
 JSON_NAME = "linux_checkpoint_mapping.json"
 MARKDOWN_NAME = "linux_checkpoint_mapping.md"
+LKM_CHECKPOINT_MARKER_LINE_RE = re.compile(
+    r"^[ \t]*/\* LKM_CHECKPOINT\b.*\*/[ \t]*(?:\r?\n|\r)?$"
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,14 @@ def _line_text(text: str, offset: int) -> str:
     if line_end == -1:
         line_end = len(text)
     return text[line_start:line_end].strip()
+
+
+def _strip_lkm_checkpoint_marker_lines(text: str) -> str:
+    return "".join(
+        line
+        for line in text.splitlines(keepends=True)
+        if not LKM_CHECKPOINT_MARKER_LINE_RE.fullmatch(line)
+    )
 
 
 def _find_matching_delimiter(text: str, open_index: int, open_char: str, close_char: str) -> int:
@@ -212,7 +223,9 @@ class LinuxSourceIndex:
         path = self.root / relative_file
         if not path.is_file():
             return None
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _strip_lkm_checkpoint_marker_lines(
+            path.read_text(encoding="utf-8", errors="replace")
+        )
         self._texts[relative_file] = text
         return text
 

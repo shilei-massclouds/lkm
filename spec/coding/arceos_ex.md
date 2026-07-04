@@ -92,6 +92,9 @@ arceos_ex checkpoint 输出一个候选映射行，并保持原 checkpoint 顺�
 不得猜测。该阶段不得修改 Linux tree、不得加入 instrumentation、不得改变 arceos_ex 运行时行为、不得新增
 checkpoint handler、不得实现内存采集 runtime，也不得把候选映射当作后续插点已经完成的证明。
 该阶段的只读源码解析可以解析 C 函数定义、`SYSCALL_DEFINE*` syscall wrapper macro 定义和 assembly symbol/label。
+若参考 Linux tree 已包含本项目生成的整行 `/* LKM_CHECKPOINT ... */` marker 注释，mapping 工具必须在解析符号、anchor
+和行号前从内存视图中忽略这些 marker 行，使已提交 mapping 产物不因 marker 同步阶段的注释插入而漂移；这不代表 marker
+已通过校验，stale/mismatch 仍只能由显式 `--check-markers` 路径报告。
 用户态 syscall 边界可以映射到对应 `SYSCALL_DEFINE*` wrapper 的核心 helper 调用；当 syscall ABI wrapper 受
 arch/config 条件化影响而不能稳定代表 RISC-V64 语义时，必须映射到共同实现 helper 或保持 `unmapped`，并用
 `medium` 或更低 confidence 在 notes 中说明条件化 ABI 层。用户态 exec/return/wait 边界可以使用 RISC-V64

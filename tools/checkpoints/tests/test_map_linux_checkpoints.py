@@ -592,6 +592,65 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(mapped[3].linux_symbol, "prepare_namespace")
         self.assertIn('try_to_run_init_process("/sbin/init")', mapped[4].linux_anchor)
 
+    def test_mapping_ignores_generated_marker_comment_lines(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=0,
+                variant="StartupTimelineStarted",
+                name="StartupTimeline.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=8,
+                variant="EntryPreludePhaseStarted",
+                name="EntryPreludePhase.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=80,
+                variant="CorePreparePhaseStarted",
+                name="CorePreparePhase.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=400,
+                variant="PayloadPhaseReady",
+                name="PayloadPhase.Ready",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            baseline = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+
+            main_path = linux_tree / "init" / "main.c"
+            main_text = main_path.read_text(encoding="utf-8")
+            main_text = main_text.replace(
+                "void start_kernel(void)\n",
+                "/* LKM_CHECKPOINT name=StartupTimeline.Started variant=StartupTimelineStarted fingerprint=sha256:demo */\n"
+                "void start_kernel(void)\n",
+            )
+            main_text = main_text.replace(
+                "    setup_arch(&command_line);\n",
+                "    /* LKM_CHECKPOINT name=CorePreparePhase.Started variant=CorePreparePhaseStarted fingerprint=sha256:demo */\n"
+                "    setup_arch(&command_line);\n",
+            )
+            main_text = main_text.replace(
+                "    do_sysctl_args();\n",
+                "    /* LKM_CHECKPOINT name=PayloadPhase.Ready variant=PayloadPhaseReady fingerprint=sha256:demo */\n"
+                "    do_sysctl_args();\n",
+            )
+            main_path.write_text(main_text, encoding="utf-8")
+
+            head_path = linux_tree / "arch" / "riscv" / "kernel" / "head.S"
+            head_text = head_path.read_text(encoding="utf-8").replace(
+                "SYM_CODE_START(_start)\n",
+                "/* LKM_CHECKPOINT name=EntryPreludePhase.Started variant=EntryPreludePhaseStarted fingerprint=sha256:demo */\n"
+                "SYM_CODE_START(_start)\n",
+            )
+            head_path.write_text(head_text, encoding="utf-8")
+
+            annotated = map_linux_checkpoints.map_checkpoints(records, linux_tree=linux_tree)
+
+        self.assertEqual(baseline, annotated)
+
     def test_range_rule_requires_ordered_anchors(self) -> None:
         record = map_linux_checkpoints.CheckpointInventoryRecord(
             index=10,
