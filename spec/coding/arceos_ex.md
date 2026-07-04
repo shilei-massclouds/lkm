@@ -100,6 +100,10 @@ architecture-scoped anchor，但必须保守使用 `range` 或 `medium` confiden
 `do_initcalls()` 等 anchor，notes 必须分别说明 trimmed/no-op 位置保留、deferred boundary、constructor
 table dispatch、initcall dispatcher/table object fact 或 `do_basic_setup()` 结束边界，不能暗示 Linux 暴露了
 多个独立对象。
+`RootfsPhase` / `FinalizePhase` 后半对象级 checkpoint 也可以复用 `kernel_init_freeable()`、
+`prepare_namespace()` 或 `kernel_init()` 内的同一 Linux 函数或直接 call-site；若多个 checkpoint 共享
+`integrity_load_keys()`、`rcu_end_inkernel_boot()` 等 anchor，notes 必须分别说明 trimmed/no-op 位置保留、
+deferred boundary、路径分类范围、对象 fact 或阶段结束边界，不能暗示 Linux 暴露了多个独立对象。
 
 MUST：Linux differential checkpoint 工作的第三子阶段只汇总已提交 Linux checkpoint mapping 的覆盖率审阅视图。该阶段消费
 `tools/out/checkpoints/linux_checkpoint_mapping.json`，不得读取或修改 Linux tree，不得改变任何 checkpoint 的

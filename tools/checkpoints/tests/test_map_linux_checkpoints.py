@@ -43,6 +43,13 @@ void driver_init(void) {}
 void init_irq_proc(void) {}
 void do_ctors(void) {}
 void do_initcalls(void) {}
+void kunit_run_all_tests(void) {}
+void wait_for_initramfs(void) {}
+void console_on_rootfs(void) {}
+int init_eaccess(const char *path) { return 0; }
+void prepare_namespace(void) {}
+void integrity_load_keys(void) {}
+char *ramdisk_execute_command;
 
 static int try_to_run_init_process(const char *init_filename)
 {
@@ -120,7 +127,14 @@ static noinline void __init kernel_init_freeable(void)
     padata_init();
     page_alloc_init_late();
     do_basic_setup();
-    prepare_namespace();
+    kunit_run_all_tests();
+    wait_for_initramfs();
+    console_on_rootfs();
+    if (init_eaccess(ramdisk_execute_command) != 0) {
+        ramdisk_execute_command = NULL;
+        prepare_namespace();
+    }
+    integrity_load_keys();
 }
 
 static void __init do_basic_setup(void)
@@ -153,7 +167,15 @@ void __init sched_init(void)
 DO_MOUNTS_C = """
 void __init prepare_namespace(void)
 {
-    mount_root();
+    wait_for_device_probe();
+    md_run_setup();
+    if (initrd_load(saved_root_name))
+        goto out;
+    mount_root(saved_root_name);
+out:
+    devtmpfs_mount();
+    init_mount(".", "/", NULL, MS_MOVE, NULL);
+    init_chroot(".");
 }
 """
 
@@ -754,9 +776,34 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
                 name="InitMemoryCleanup.DeferredReady",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
+                index=366,
+                variant="KernelMappingProtectionDeferredReady",
+                name="KernelMappingProtection.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=367,
+                variant="PtiFinalizeTrimmedReady",
+                name="PtiFinalize.TrimmedReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
                 index=368,
                 variant="SystemStateOnline",
                 name="SystemState.Online",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=369,
+                variant="RcuInkernelBootEnded",
+                name="RcuCore.InkernelBootEnded",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=370,
+                variant="RcuBootEndReady",
+                name="RcuBootEnd.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=371,
+                variant="SysctlArgsDeferredReady",
+                name="SysctlArgs.DeferredReady",
             ),
         ]
 
@@ -786,10 +833,44 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("free_initmem", cleanup.linux_anchor)
         self.assertIn("deferred cleanup boundary", cleanup.notes)
 
+        mapping_protection = by_name["KernelMappingProtection.DeferredReady"]
+        self.assertEqual(mapping_protection.linux_file, "init/main.c")
+        self.assertEqual(mapping_protection.linux_symbol, "kernel_init")
+        self.assertEqual(mapping_protection.mapping_kind, "exact")
+        self.assertEqual(mapping_protection.confidence, "medium")
+        self.assertIn("mark_readonly", mapping_protection.linux_anchor)
+        self.assertIn("mapping-protection path", mapping_protection.notes)
+        self.assertIn("deferred finalize boundary", mapping_protection.notes)
+
+        pti = by_name["PtiFinalize.TrimmedReady"]
+        self.assertEqual(pti.mapping_kind, "exact")
+        self.assertEqual(pti.confidence, "medium")
+        self.assertIn("pti_finalize", pti.linux_anchor)
+        self.assertIn("trimmed/no-op fact", pti.notes)
+
         online = by_name["SystemState.Online"]
         self.assertEqual(online.linux_symbol, "kernel_init")
         self.assertEqual(online.confidence, "high")
         self.assertIn("SYSTEM_RUNNING", online.linux_anchor)
+
+        rcu_core = by_name["RcuCore.InkernelBootEnded"]
+        self.assertEqual(rcu_core.mapping_kind, "exact")
+        self.assertEqual(rcu_core.confidence, "medium")
+        self.assertIn("rcu_end_inkernel_boot", rcu_core.linux_anchor)
+        self.assertIn("RcuCore object fact", rcu_core.notes)
+
+        rcu_boundary = by_name["RcuBootEnd.Ready"]
+        self.assertEqual(rcu_boundary.mapping_kind, "exact")
+        self.assertEqual(rcu_boundary.confidence, "medium")
+        self.assertIn("rcu_end_inkernel_boot", rcu_boundary.linux_anchor)
+        self.assertIn("RCU boot-end boundary", rcu_boundary.notes)
+        self.assertIn("reuses the RcuCore anchor", rcu_boundary.notes)
+
+        sysctl = by_name["SysctlArgs.DeferredReady"]
+        self.assertEqual(sysctl.mapping_kind, "exact")
+        self.assertEqual(sysctl.confidence, "medium")
+        self.assertIn("do_sysctl_args", sysctl.linux_anchor)
+        self.assertIn("deferred finalize boundary", sysctl.notes)
 
     def test_runtime_core_object_rules_map_to_kernel_init_freeable(self) -> None:
         records = [
@@ -937,6 +1018,114 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("do_initcalls", boundary.linux_anchor)
         self.assertIn("do_basic_setup() end boundary", boundary.notes)
         self.assertIn("kunit_run_all_tests", boundary.notes)
+        self.assertIn("not an independent Linux object", boundary.notes)
+
+    def test_rootfs_tail_rules_map_to_kernel_init_freeable_and_prepare_namespace(self) -> None:
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=353,
+                variant="KUnitRuntimeTrimmedReady",
+                name="KUnitRuntime.TrimmedReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=354,
+                variant="InitramfsSyncDeferredReady",
+                name="InitramfsSync.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=355,
+                variant="RootfsConsoleDeferredReady",
+                name="RootfsConsole.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=356,
+                variant="RootfsPrepareNamespacePathsReady",
+                name="RootfsPrepareNamespacePaths.Ready",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=357,
+                variant="RamdiskExecuteCommandEaccessCheckpoint",
+                name="RamdiskExecuteCommand.EaccessCheckpoint",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=358,
+                variant="RootFSOnline",
+                name="RootFS.Online",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=359,
+                variant="IntegrityKeysDeferredReady",
+                name="IntegrityKeys.DeferredReady",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=360,
+                variant="RootfsBoundaryReady",
+                name="RootfsBoundary.Ready",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        by_name = {record.checkpoint_name: record for record in mapped}
+        for name in (
+            "KUnitRuntime.TrimmedReady",
+            "InitramfsSync.DeferredReady",
+            "RootfsConsole.DeferredReady",
+            "RamdiskExecuteCommand.EaccessCheckpoint",
+            "IntegrityKeys.DeferredReady",
+            "RootfsBoundary.Ready",
+        ):
+            record = by_name[name]
+            self.assertEqual(record.linux_file, "init/main.c")
+            self.assertEqual(record.linux_symbol, "kernel_init_freeable")
+            self.assertEqual(record.mapping_kind, "exact")
+            self.assertEqual(record.confidence, "medium")
+
+        kunit = by_name["KUnitRuntime.TrimmedReady"]
+        self.assertIn("kunit_run_all_tests", kunit.linux_anchor)
+        self.assertIn("trimmed/no-op fact", kunit.notes)
+
+        initramfs = by_name["InitramfsSync.DeferredReady"]
+        self.assertIn("wait_for_initramfs", initramfs.linux_anchor)
+        self.assertIn("deferred initramfs synchronization boundary", initramfs.notes)
+
+        console = by_name["RootfsConsole.DeferredReady"]
+        self.assertIn("console_on_rootfs", console.linux_anchor)
+        self.assertIn("deferred boundary", console.notes)
+
+        paths = by_name["RootfsPrepareNamespacePaths.Ready"]
+        self.assertEqual(paths.linux_file, "init/do_mounts.c")
+        self.assertEqual(paths.linux_symbol, "prepare_namespace")
+        self.assertEqual(paths.mapping_kind, "range")
+        self.assertEqual(paths.confidence, "medium")
+        self.assertIn("wait_for_device_probe", paths.linux_anchor)
+        self.assertIn('init_chroot(".")', paths.linux_anchor)
+        self.assertIn("path-classification interval", paths.notes)
+        self.assertIn("devtmpfs classifications", paths.notes)
+
+        ramdisk = by_name["RamdiskExecuteCommand.EaccessCheckpoint"]
+        self.assertIn("init_eaccess", ramdisk.linux_anchor)
+        self.assertIn("prepare_namespace", ramdisk.notes)
+
+        rootfs = by_name["RootFS.Online"]
+        self.assertEqual(rootfs.linux_file, "init/do_mounts.c")
+        self.assertEqual(rootfs.linux_symbol, "prepare_namespace")
+        self.assertEqual(rootfs.mapping_kind, "exact")
+        self.assertEqual(rootfs.confidence, "medium")
+        self.assertIn('init_chroot(".")', rootfs.linux_anchor)
+        self.assertIn("RootFS object online fact", rootfs.notes)
+
+        integrity = by_name["IntegrityKeys.DeferredReady"]
+        self.assertIn("integrity_load_keys", integrity.linux_anchor)
+        self.assertIn("deferred/trimmed boundary", integrity.notes)
+
+        boundary = by_name["RootfsBoundary.Ready"]
+        self.assertIn("integrity_load_keys", boundary.linux_anchor)
+        self.assertIn("Rootfs end boundary", boundary.notes)
         self.assertIn("not an independent Linux object", boundary.notes)
 
     def test_user_boot_rules_map_to_linux_init_exec_anchors(self) -> None:
@@ -1329,6 +1518,17 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["SchedInitPhase.Ready"].linux_file, "kernel/sched/core.c")
         self.assertEqual(by_name["BootInitRestInitPhase.Ready"].linux_symbol, "rest_init")
         self.assertEqual(by_name["RootfsPhase.Ready"].linux_symbol, "prepare_namespace")
+        self.assertEqual(by_name["KUnitRuntime.TrimmedReady"].linux_symbol, "kernel_init_freeable")
+        self.assertEqual(by_name["InitramfsSync.DeferredReady"].linux_symbol, "kernel_init_freeable")
+        self.assertEqual(by_name["RootfsConsole.DeferredReady"].linux_symbol, "kernel_init_freeable")
+        self.assertEqual(by_name["RootfsPrepareNamespacePaths.Ready"].mapping_kind, "range")
+        self.assertEqual(
+            by_name["RamdiskExecuteCommand.EaccessCheckpoint"].confidence,
+            "medium",
+        )
+        self.assertEqual(by_name["RootFS.Online"].linux_symbol, "prepare_namespace")
+        self.assertEqual(by_name["IntegrityKeys.DeferredReady"].linux_symbol, "kernel_init_freeable")
+        self.assertEqual(by_name["RootfsBoundary.Ready"].confidence, "medium")
         self.assertEqual(by_name["PayloadPhase.Online"].linux_symbol, "kernel_init")
         self.assertEqual(by_name["SyscallTable.Read"].linux_symbol, "SYSCALL_DEFINE3(read)")
         self.assertEqual(by_name["SyscallTable.Write"].linux_symbol, "SYSCALL_DEFINE3(write)")
@@ -1340,7 +1540,15 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             "high",
         )
         self.assertEqual(by_name["InitMemoryCleanup.DeferredReady"].linux_symbol, "kernel_init")
+        self.assertEqual(
+            by_name["KernelMappingProtection.DeferredReady"].linux_symbol,
+            "kernel_init",
+        )
+        self.assertEqual(by_name["PtiFinalize.TrimmedReady"].confidence, "medium")
         self.assertEqual(by_name["SystemState.Online"].confidence, "high")
+        self.assertEqual(by_name["RcuCore.InkernelBootEnded"].linux_symbol, "kernel_init")
+        self.assertEqual(by_name["RcuBootEnd.Ready"].confidence, "medium")
+        self.assertEqual(by_name["SysctlArgs.DeferredReady"].linux_symbol, "kernel_init")
         self.assertEqual(by_name["UserBoot.MainElfReady"].linux_symbol, "load_elf_binary")
         self.assertEqual(by_name["UserBoot.InitAttemptFailed"].mapping_kind, "range")
         self.assertEqual(by_name["UserBoot.AddressSpaceSetupStart"].confidence, "medium")

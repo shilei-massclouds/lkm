@@ -6,35 +6,35 @@
 
 | mapping_kind | count |
 | --- | ---: |
-| exact | 76 |
-| range | 11 |
-| unmapped | 315 |
+| exact | 88 |
+| range | 12 |
+| unmapped | 302 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 315 |
-| medium | 47 |
+| none | 302 |
+| medium | 60 |
 | high | 40 |
 
 ## Mapped Linux File Counts
 
 | linux_file | count |
 | --- | ---: |
-| init/main.c | 42 |
+| init/main.c | 53 |
 | arch/riscv/kernel/head.S | 10 |
 | arch/riscv/mm/init.c | 7 |
 | fs/binfmt_elf.c | 6 |
 | fs/exec.c | 4 |
 | arch/riscv/kernel/entry.S | 3 |
 | fs/read_write.c | 3 |
+| init/do_mounts.c | 3 |
 | kernel/exit.c | 3 |
 | fs/open.c | 2 |
 | kernel/fork.c | 2 |
 | arch/riscv/kernel/process.c | 1 |
 | fs/stat.c | 1 |
-| init/do_mounts.c | 1 |
 | kernel/sched/core.c | 1 |
 | mm/mm_init.c | 1 |
 
@@ -57,7 +57,6 @@
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
-| RcuCore | 3 |
 | SlubSubsystem | 3 |
 | Vm | 3 |
 | BootCurrentCPU | 2 |
@@ -77,6 +76,7 @@
 | PreparePhase | 2 |
 | PrintkBuffer | 2 |
 | Randomness | 2 |
+| RcuCore | 2 |
 | SecondaryCpuOnlineAck | 2 |
 | Serial8250Console | 2 |
 | SignalCore | 2 |
@@ -92,4 +92,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 183
+- singleton unmapped families: 171

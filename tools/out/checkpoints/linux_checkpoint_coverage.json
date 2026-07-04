@@ -3,25 +3,25 @@
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 76
+      "count": 88
     },
     {
       "mapping_kind": "range",
-      "count": 11
+      "count": 12
     },
     {
       "mapping_kind": "unmapped",
-      "count": 315
+      "count": 302
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 315
+      "count": 302
     },
     {
       "confidence": "medium",
-      "count": 47
+      "count": 60
     },
     {
       "confidence": "high",
@@ -31,7 +31,7 @@
   "mapped_linux_file_counts": [
     {
       "linux_file": "init/main.c",
-      "count": 42
+      "count": 53
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
@@ -58,6 +58,10 @@
       "count": 3
     },
     {
+      "linux_file": "init/do_mounts.c",
+      "count": 3
+    },
+    {
       "linux_file": "kernel/exit.c",
       "count": 3
     },
@@ -75,10 +79,6 @@
     },
     {
       "linux_file": "fs/stat.c",
-      "count": 1
-    },
-    {
-      "linux_file": "init/do_mounts.c",
       "count": 1
     },
     {
@@ -149,10 +149,6 @@
     },
     {
       "family": "KernelInitTask",
-      "count": 3
-    },
-    {
-      "family": "RcuCore",
       "count": 3
     },
     {
@@ -229,6 +225,10 @@
     },
     {
       "family": "Randomness",
+      "count": 2
+    },
+    {
+      "family": "RcuCore",
       "count": 2
     },
     {
@@ -496,15 +496,7 @@
       "count": 1
     },
     {
-      "family": "InitramfsSync",
-      "count": 1
-    },
-    {
       "family": "InitrdBounds",
-      "count": 1
-    },
-    {
-      "family": "IntegrityKeys",
       "count": 1
     },
     {
@@ -532,10 +524,6 @@
       "count": 1
     },
     {
-      "family": "KUnitRuntime",
-      "count": 1
-    },
-    {
       "family": "Kcsan",
       "count": 1
     },
@@ -549,10 +537,6 @@
     },
     {
       "family": "KernelInitTaskPiLock",
-      "count": 1
-    },
-    {
-      "family": "KernelMappingProtection",
       "count": 1
     },
     {
@@ -724,19 +708,7 @@
       "count": 1
     },
     {
-      "family": "PtiFinalize",
-      "count": 1
-    },
-    {
       "family": "RadixTree",
-      "count": 1
-    },
-    {
-      "family": "RamdiskExecuteCommand",
-      "count": 1
-    },
-    {
-      "family": "RcuBootEnd",
       "count": 1
     },
     {
@@ -760,27 +732,11 @@
       "count": 1
     },
     {
-      "family": "RootFS",
-      "count": 1
-    },
-    {
       "family": "RootPidNamespace",
       "count": 1
     },
     {
       "family": "RootStream",
-      "count": 1
-    },
-    {
-      "family": "RootfsBoundary",
-      "count": 1
-    },
-    {
-      "family": "RootfsConsole",
-      "count": 1
-    },
-    {
-      "family": "RootfsPrepareNamespacePaths",
       "count": 1
     },
     {
@@ -912,10 +868,6 @@
       "count": 1
     },
     {
-      "family": "SysctlArgs",
-      "count": 1
-    },
-    {
       "family": "TaskFileContext",
       "count": 1
     },
@@ -1020,5 +972,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 183
+  "unmapped_singleton_family_count": 171
 }
