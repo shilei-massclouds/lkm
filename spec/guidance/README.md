@@ -24,11 +24,15 @@ Linux mapping 可以只读解析 C 函数、`SYSCALL_DEFINE*` macro 和 assembly
 Linux checkpoint mapping coverage 也是 mapping-only 审阅产物，只能从已提交 mapping JSON 聚合覆盖率视图，不得读取
 或修改 Linux tree、不得重解释 mapping 语义、不得新增 runtime 采集或 checkpoint handler；其测试模式同样只能做只读漂移检测。
 
-后续若进入 Linux 侧 checkpoint 插桩阶段，插桩清单和 Linux marker 必须从本项目 checkpoint inventory 与已提交
+后续若进入 Linux 侧 checkpoint 插桩同步阶段，插桩清单和 Linux marker 必须从本项目 checkpoint inventory 与已提交
 Linux mapping 派生，不得在 Linux tree 内维护独立 checkpoint 列表。同步工具必须能从 mapping 生成或校验
 instrumentation plan，并报告三类漂移：mapping 中已有可插桩 anchor 但 Linux marker 缺失、checkpoint 已删除或重命名但
 Linux marker 仍残留、Linux anchor/fingerprint 已移动导致 marker 不再对应原 mapping。新增 checkpoint 默认只能先表现为
 inventory/mapping/coverage 漂移或 `unmapped`，不得被静默视为 Linux 已插桩；删除 checkpoint 必须触发 stale marker 清理。
+Linux marker patch 只能由已提交 `linux_checkpoint_instrumentation_plan.json` 派生，默认不得修改参考 Linux tree；工具只能在显式
+`--emit-marker-patch <path>` 模式下输出可审阅 unified diff。marker 插入位置固定为对应 anchor line 的前一行并继承 anchor
+缩进；同一 anchor 上的多条 marker 必须按 `checkpoint_index` 排序。已存在完全相同 marker 时不得重复插入；若 Linux tree 中存在
+同一 `checkpoint_name + checkpoint_variant` 但 fingerprint 不同的 marker，或存在不属于当前 plan 的 stale marker，patch 生成必须失败。
 
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 

@@ -242,6 +242,12 @@ predicate arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check() -
 predicate arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact() -> bool;
 predicate arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only() -> bool;
 predicate arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_patch_derive_from_plan() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_patch_not_mutate_linux_tree() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_patch_insert_before_anchor() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_patch_sort_same_anchor_by_index() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_patch_reject_stale_or_mismatched_markers() -> bool;
+predicate arceos_ex_must_linux_checkpoint_marker_check_report_summary_counts() -> bool;
 predicate arceos_ex_must_define_observation_levels() -> bool;
 predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
 predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
@@ -2411,6 +2417,38 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact();
         arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only();
         arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check();
+
+        /*
+         * Linux checkpoint marker patch generation:
+         *
+         * Marker patch generation is an explicit synchronization action. It
+         * must consume the tracked
+         * tools/out/checkpoints/linux_checkpoint_instrumentation_plan.json
+         * artifact and a reference Linux tree, then write only a caller-named
+         * unified diff. It must not directly mutate the reference Linux tree
+         * or maintain an independent checkpoint list outside the plan.
+         *
+         * The patch may insert only markers present in the plan. Markers are
+         * inserted immediately before their anchor line and inherit that line's
+         * indentation. When multiple planned markers share an anchor, their
+         * generated insertion order must be checkpoint_index order. An
+         * already-present identical marker must not be duplicated.
+         *
+         * Patch generation must fail before writing the patch if the Linux
+         * tree contains a marker with the same checkpoint_name +
+         * checkpoint_variant but a different fingerprint, or if it contains
+         * a stale marker whose identity is absent from the current plan.
+         * The explicit marker check mode must report missing marker, stale
+         * marker and fingerprint mismatch counts as a summary. It must remain
+         * outside the default test-checkpoints gate while the reference Linux
+         * tree is not a controlled repository artifact.
+         */
+        arceos_ex_must_linux_checkpoint_marker_patch_derive_from_plan();
+        arceos_ex_must_linux_checkpoint_marker_patch_not_mutate_linux_tree();
+        arceos_ex_must_linux_checkpoint_marker_patch_insert_before_anchor();
+        arceos_ex_must_linux_checkpoint_marker_patch_sort_same_anchor_by_index();
+        arceos_ex_must_linux_checkpoint_marker_patch_reject_stale_or_mismatched_markers();
+        arceos_ex_must_linux_checkpoint_marker_check_report_summary_counts();
 
         /*
          * Observation levels and domains:

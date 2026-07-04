@@ -38,6 +38,15 @@ make test-checkpoints
 
 `test-checkpoints` 会先跑 checkpoint 工具单元测试，再以只读 `--check` 模式比较 `tools/out/checkpoints/` 下的 JSON/Markdown；它不会重写已提交产物。Linux marker 扫描通过 `tools/checkpoints/plan_linux_instrumentation.py --check-markers` 显式运行，当前不属于默认门禁，因为 `../linux-6.12` 尚未插入 marker。`make test` 会在 QEMU/runtime 用例前运行 artifact drift 门禁。
 
+需要生成 Linux marker 补丁时，先更新本仓库审阅产物，再从已提交 instrumentation plan 输出可审阅 patch；该流程不会直接修改 `../linux-6.12`：
+
+```sh
+make checkpoints
+python3 tools/checkpoints/plan_linux_instrumentation.py --emit-marker-patch /tmp/lkm-linux-markers.patch
+```
+
+随后人工审阅 `/tmp/lkm-linux-markers.patch`，确认无误后再显式应用到参考 Linux tree。
+
 ## 运行目标内核
 
 默认运行 hello 应用：

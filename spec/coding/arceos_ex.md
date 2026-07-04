@@ -122,6 +122,13 @@ instrumentation plan 和 marker 只能从这两者派生，不得手写独立 ch
 fingerprint；同步检查必须报告 missing marker、stale marker 和 anchor moved/fingerprint mismatch。默认只有
 `exact` 映射可以直接进入插桩计划；`range` 映射必须经过人工确认或降级为区间审阅项；`unmapped` 不得生成 Linux 插点。
 checkpoint 删除或重命名必须通过同步检查暴露并清理 stale marker，不能在 Linux tree 中保留孤立插桩。
+Linux marker patch 生成是显式同步动作，必须读取已提交的 `linux_checkpoint_instrumentation_plan.json` 与参考 Linux tree，
+只输出调用方指定路径的 unified diff，不得默认写回或重写 `../linux-6.12`。patch 只能包含 plan 中的 exact marker；range/unmapped
+不会生成插入。marker 插在 anchor line 前一行并继承 anchor 缩进；同一 anchor 的多条 marker 按 `checkpoint_index`
+排序。已存在完全相同 marker 时必须跳过，不得重复插入；已存在同一 `checkpoint_name + checkpoint_variant` 但 fingerprint
+不同的 marker，或存在不属于当前 plan 的 stale marker 时，patch 生成必须失败且不得写出误导性 patch。`--check-markers`
+是显式外部 Linux tree 校验入口，必须继续报告 missing/stale/fingerprint mismatch 并输出摘要计数；它不得进入默认
+`make test-checkpoints`，除非参考 Linux tree 已成为仓库内受控产物。
 
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters

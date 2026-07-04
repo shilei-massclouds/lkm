@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -16,9 +17,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAPPING = REPO_ROOT / "tools" / "out" / "checkpoints" / "linux_checkpoint_mapping.json"
 DEFAULT_LINUX_TREE = REPO_ROOT.parent / "linux-6.12"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "out" / "checkpoints"
+DEFAULT_PLAN = DEFAULT_OUT_DIR / "linux_checkpoint_instrumentation_plan.json"
 JSON_NAME = "linux_checkpoint_instrumentation_plan.json"
 MARKDOWN_NAME = "linux_checkpoint_instrumentation_plan.md"
 MARKER_PREFIX = "LKM_CHECKPOINT"
+FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 MARKER_PATTERN = re.compile(
     r"/\*\s*"
     + re.escape(MARKER_PREFIX)
@@ -74,6 +77,14 @@ class MarkerCheckProblem:
     line: int | None
     expected_fingerprint: str | None
     actual_fingerprint: str | None
+
+
+@dataclass(frozen=True)
+class MarkerPatchResult:
+    diff: str
+    inserted_markers: int
+    changed_files: int
+    skipped_existing_markers: int
 
 
 class LinuxInstrumentationPlanError(ValueError):
@@ -148,6 +159,67 @@ def load_mapping(path: Path = DEFAULT_MAPPING) -> list[LinuxCheckpointMappingRow
     return records
 
 
+def _require_fingerprint(row: dict[str, object], row_number: int, field: str) -> str:
+    value = _require_str(row, row_number, field)
+    if FINGERPRINT_PATTERN.fullmatch(value) is None:
+        raise LinuxInstrumentationPlanError(
+            f"plan row {row_number} field {field} must be a sha256 fingerprint"
+        )
+    return value
+
+
+def load_plan(path: Path = DEFAULT_PLAN) -> list[LinuxInstrumentationPlanEntry]:
+    raw_rows = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw_rows, list):
+        raise LinuxInstrumentationPlanError("Linux instrumentation plan must be a JSON array")
+
+    plan: list[LinuxInstrumentationPlanEntry] = []
+    seen: set[tuple[str, str]] = set()
+    for row_number, row in enumerate(raw_rows, start=1):
+        if not isinstance(row, dict):
+            raise LinuxInstrumentationPlanError(f"plan row {row_number} must be an object")
+
+        checkpoint_index = _require_int(row, row_number, "checkpoint_index")
+        checkpoint_name = _require_str(row, row_number, "checkpoint_name")
+        checkpoint_variant = _require_str(row, row_number, "checkpoint_variant")
+        linux_file = _require_str(row, row_number, "linux_file")
+        linux_symbol = _require_str(row, row_number, "linux_symbol")
+        linux_anchor = _require_str(row, row_number, "linux_anchor")
+        confidence = _require_str(row, row_number, "confidence")
+        marker = _require_str(row, row_number, "marker")
+        anchor_fingerprint = _require_fingerprint(row, row_number, "anchor_fingerprint")
+
+        identity = (checkpoint_name, checkpoint_variant)
+        if identity in seen:
+            raise LinuxInstrumentationPlanError(
+                "duplicate checkpoint marker identity in plan: "
+                f"{checkpoint_name} {checkpoint_variant}"
+            )
+        seen.add(identity)
+
+        expected_marker = marker_for(checkpoint_name, checkpoint_variant, anchor_fingerprint)
+        if marker != expected_marker:
+            raise LinuxInstrumentationPlanError(
+                f"plan row {row_number} marker does not match checkpoint identity/fingerprint"
+            )
+
+        plan.append(
+            LinuxInstrumentationPlanEntry(
+                checkpoint_index=checkpoint_index,
+                checkpoint_name=checkpoint_name,
+                checkpoint_variant=checkpoint_variant,
+                linux_file=linux_file,
+                linux_symbol=linux_symbol,
+                linux_anchor=linux_anchor,
+                confidence=confidence,
+                marker=marker,
+                anchor_fingerprint=anchor_fingerprint,
+            )
+        )
+
+    return plan
+
+
 def _anchor_line(linux_anchor: str) -> int:
     match = re.search(r"\bline\s+([0-9]+)(?::|\b)", linux_anchor)
     if match is None:
@@ -157,16 +229,22 @@ def _anchor_line(linux_anchor: str) -> int:
     return int(match.group(1))
 
 
+def _anchor_physical_index(lines: list[str], line_number: int) -> int:
+    logical_line = 0
+    for index, line in enumerate(lines):
+        if MARKER_PREFIX in line:
+            continue
+        logical_line += 1
+        if logical_line == line_number:
+            return index
+    raise LinuxInstrumentationPlanError(
+        f"Linux anchor line {line_number} is outside source file with "
+        f"{logical_line} non-marker lines"
+    )
+
+
 def _source_context(lines: list[str], line_number: int, radius: int = 2) -> list[str]:
-    if line_number < 1 or line_number > len(lines):
-        raise LinuxInstrumentationPlanError(
-            f"Linux anchor line {line_number} is outside source file with {len(lines)} lines"
-        )
-    anchor_index = line_number - 1
-    if MARKER_PREFIX in lines[anchor_index]:
-        raise LinuxInstrumentationPlanError(
-            f"Linux anchor line {line_number} is a checkpoint marker line"
-        )
+    anchor_index = _anchor_physical_index(lines, line_number)
 
     before: list[str] = []
     index = anchor_index - 1
@@ -418,20 +496,20 @@ def check_markers(
                 )
             )
             continue
-        if any(marker.anchor_fingerprint == entry.anchor_fingerprint for marker in markers):
-            continue
-        marker = markers[0]
-        problems.append(
-            MarkerCheckProblem(
-                kind="fingerprint mismatch",
-                checkpoint_name=entry.checkpoint_name,
-                checkpoint_variant=entry.checkpoint_variant,
-                linux_file=marker.linux_file,
-                line=marker.line,
-                expected_fingerprint=entry.anchor_fingerprint,
-                actual_fingerprint=marker.anchor_fingerprint,
+        for marker in markers:
+            if marker.anchor_fingerprint == entry.anchor_fingerprint:
+                continue
+            problems.append(
+                MarkerCheckProblem(
+                    kind="fingerprint mismatch",
+                    checkpoint_name=entry.checkpoint_name,
+                    checkpoint_variant=entry.checkpoint_variant,
+                    linux_file=marker.linux_file,
+                    line=marker.line,
+                    expected_fingerprint=entry.anchor_fingerprint,
+                    actual_fingerprint=marker.anchor_fingerprint,
+                )
             )
-        )
 
     for identity, markers in actual.items():
         if identity in expected:
@@ -461,6 +539,28 @@ def check_markers(
     )
 
 
+def marker_problem_counts(
+    problems: Iterable[MarkerCheckProblem],
+) -> dict[str, int]:
+    counts = {
+        "missing marker": 0,
+        "stale marker": 0,
+        "fingerprint mismatch": 0,
+    }
+    for problem in problems:
+        counts[problem.kind] = counts.get(problem.kind, 0) + 1
+    return counts
+
+
+def format_marker_summary(problems: Iterable[MarkerCheckProblem]) -> str:
+    counts = marker_problem_counts(problems)
+    return (
+        f"{counts.get('missing marker', 0)} missing / "
+        f"{counts.get('stale marker', 0)} stale / "
+        f"{counts.get('fingerprint mismatch', 0)} mismatch"
+    )
+
+
 def format_marker_problem(problem: MarkerCheckProblem) -> str:
     location = problem.linux_file
     if problem.line is not None:
@@ -475,6 +575,176 @@ def format_marker_problem(problem: MarkerCheckProblem) -> str:
     if problem.actual_fingerprint is not None:
         parts.append(f"actual={problem.actual_fingerprint}")
     return " ".join(parts)
+
+
+def _line_indent(line: str) -> str:
+    match = re.match(r"[ \t]*", line)
+    if match is None:
+        return ""
+    return match.group(0)
+
+
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    if line.endswith("\n"):
+        return "\n"
+    if line.endswith("\r"):
+        return "\r"
+    return "\n"
+
+
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _anchor_fingerprint_problems(
+    plan: Iterable[LinuxInstrumentationPlanEntry],
+    linux_tree: Path,
+) -> list[MarkerCheckProblem]:
+    problems: list[MarkerCheckProblem] = []
+    for entry in plan:
+        actual = anchor_fingerprint(
+            linux_tree,
+            entry.linux_file,
+            entry.linux_symbol,
+            entry.linux_anchor,
+        )
+        if actual == entry.anchor_fingerprint:
+            continue
+        problems.append(
+            MarkerCheckProblem(
+                kind="fingerprint mismatch",
+                checkpoint_name=entry.checkpoint_name,
+                checkpoint_variant=entry.checkpoint_variant,
+                linux_file=entry.linux_file,
+                line=_anchor_line(entry.linux_anchor),
+                expected_fingerprint=entry.anchor_fingerprint,
+                actual_fingerprint=actual,
+            )
+        )
+    return problems
+
+
+def marker_patch_blockers(
+    plan: list[LinuxInstrumentationPlanEntry],
+    linux_tree: Path,
+) -> list[MarkerCheckProblem]:
+    problems = [
+        problem
+        for problem in check_markers(plan, linux_tree)
+        if problem.kind != "missing marker"
+    ]
+    problems.extend(_anchor_fingerprint_problems(plan, linux_tree))
+    return sorted(
+        problems,
+        key=lambda problem: (
+            problem.kind,
+            problem.checkpoint_name,
+            problem.checkpoint_variant,
+            problem.linux_file,
+            problem.line or 0,
+        ),
+    )
+
+
+def render_marker_patch(
+    plan: list[LinuxInstrumentationPlanEntry],
+    linux_tree: Path = DEFAULT_LINUX_TREE,
+    check_blockers: bool = True,
+) -> MarkerPatchResult:
+    if check_blockers:
+        blockers = marker_patch_blockers(plan, linux_tree)
+        if blockers:
+            raise LinuxInstrumentationPlanError(
+                "refusing to emit Linux marker patch with blocking marker problems: "
+                + format_marker_summary(blockers)
+            )
+
+    existing_markers = {marker.marker for marker in scan_markers(linux_tree)}
+    by_file: dict[str, dict[int, list[LinuxInstrumentationPlanEntry]]] = {}
+    skipped_existing = 0
+    for entry in plan:
+        if entry.marker in existing_markers:
+            skipped_existing += 1
+            continue
+        anchor_line = _anchor_line(entry.linux_anchor)
+        by_file.setdefault(entry.linux_file, {}).setdefault(anchor_line, []).append(entry)
+
+    diff_parts: list[str] = []
+    inserted_markers = 0
+    changed_files = 0
+    for linux_file in sorted(by_file):
+        path = linux_tree / linux_file
+        if not path.is_file():
+            raise LinuxInstrumentationPlanError(f"Linux source file is missing: {path}")
+
+        original_text = path.read_text(encoding="utf-8", errors="replace")
+        original_lines = original_text.splitlines(keepends=True)
+        insertions: dict[int, list[str]] = {}
+        for anchor_line, entries in by_file[linux_file].items():
+            anchor_index = _anchor_physical_index(original_lines, anchor_line)
+            anchor_source_line = original_lines[anchor_index]
+            indent = _line_indent(anchor_source_line)
+            ending = _line_ending(anchor_source_line)
+            sorted_entries = sorted(
+                entries,
+                key=lambda entry: (
+                    entry.checkpoint_index,
+                    entry.checkpoint_name,
+                    entry.checkpoint_variant,
+                ),
+            )
+            insertions[anchor_index] = [
+                f"{indent}{entry.marker}{ending}" for entry in sorted_entries
+            ]
+            inserted_markers += len(sorted_entries)
+
+        new_lines: list[str] = []
+        for index, line in enumerate(original_lines):
+            new_lines.extend(insertions.get(index, []))
+            new_lines.append(line)
+        new_text = "".join(new_lines)
+        if new_text == original_text:
+            continue
+
+        changed_files += 1
+        diff_lines = difflib.unified_diff(
+            original_text.splitlines(),
+            new_text.splitlines(),
+            fromfile=f"a/{linux_file}",
+            tofile=f"b/{linux_file}",
+            lineterm="",
+        )
+        diff_parts.append("\n".join(diff_lines) + "\n")
+
+    return MarkerPatchResult(
+        diff="".join(diff_parts),
+        inserted_markers=inserted_markers,
+        changed_files=changed_files,
+        skipped_existing_markers=skipped_existing,
+    )
+
+
+def write_marker_patch(
+    plan: list[LinuxInstrumentationPlanEntry],
+    linux_tree: Path,
+    patch_path: Path,
+    check_blockers: bool = True,
+) -> MarkerPatchResult:
+    if _path_is_relative_to(patch_path, linux_tree):
+        raise LinuxInstrumentationPlanError(
+            f"refusing to write marker patch inside Linux tree: {patch_path}"
+        )
+
+    result = render_marker_patch(plan, linux_tree, check_blockers=check_blockers)
+    patch_path.parent.mkdir(parents=True, exist_ok=True)
+    patch_path.write_text(result.diff, encoding="utf-8")
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -500,6 +770,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory for JSON and Markdown instrumentation plan outputs.",
     )
     parser.add_argument(
+        "--plan",
+        type=Path,
+        default=None,
+        help=(
+            "Instrumentation plan JSON for --emit-marker-patch "
+            "(default: <out-dir>/linux_checkpoint_instrumentation_plan.json)."
+        ),
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Regenerate in memory and fail if tracked outputs have drifted.",
@@ -509,44 +788,86 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Scan the Linux tree for missing, stale or moved checkpoint markers.",
     )
+    parser.add_argument(
+        "--emit-marker-patch",
+        type=Path,
+        default=None,
+        help="Write a reviewable unified diff that inserts missing Linux markers.",
+    )
     args = parser.parse_args(argv)
+
+    if args.emit_marker_patch is not None and (args.check or args.check_markers):
+        print("--emit-marker-patch cannot be combined with --check or --check-markers", file=sys.stderr)
+        return 1
 
     if not args.linux_tree.is_dir():
         print(f"Linux reference tree is missing: {args.linux_tree}", file=sys.stderr)
         return 1
 
-    records = load_mapping(args.input)
-    plan = build_plan(records, args.linux_tree)
+    try:
+        if args.emit_marker_patch is not None:
+            plan_path = args.plan if args.plan is not None else args.out_dir / JSON_NAME
+            plan = load_plan(plan_path)
+            blockers = marker_patch_blockers(plan, args.linux_tree)
+            if blockers:
+                print("Linux checkpoint marker patch generation failed:", file=sys.stderr)
+                print(f"marker summary: {format_marker_summary(blockers)}", file=sys.stderr)
+                for problem in blockers:
+                    print(format_marker_problem(problem), file=sys.stderr)
+                return 1
 
-    if args.check:
-        drift = check_outputs(plan, args.out_dir)
-        if drift:
-            print("Linux checkpoint instrumentation plan artifact drift detected:", file=sys.stderr)
-            for item in drift:
-                print(f"{item.reason}: {item.path}", file=sys.stderr)
-            return 1
-        print(
-            "Linux checkpoint instrumentation plan artifacts are current "
-            f"({len(plan)} planned exact checkpoints)"
-        )
-        if not args.check_markers:
+            result = write_marker_patch(
+                plan,
+                args.linux_tree,
+                args.emit_marker_patch,
+                check_blockers=False,
+            )
+            print(
+                "wrote Linux checkpoint marker patch "
+                f"({result.inserted_markers} insertions, "
+                f"{result.skipped_existing_markers} existing, "
+                f"{result.changed_files} files changed)"
+            )
+            print(args.emit_marker_patch)
             return 0
 
-    if args.check_markers:
-        problems = check_markers(plan, args.linux_tree)
-        if problems:
-            print("Linux checkpoint marker check failed:", file=sys.stderr)
-            for problem in problems:
-                print(format_marker_problem(problem), file=sys.stderr)
-            return 1
-        print(f"Linux checkpoint markers are current ({len(plan)} planned markers)")
-        return 0
+        records = load_mapping(args.input)
+        plan = build_plan(records, args.linux_tree)
 
-    json_path, markdown_path = write_outputs(plan, args.out_dir)
-    print(f"wrote Linux checkpoint instrumentation plan for {len(plan)} exact mappings")
-    print(json_path)
-    print(markdown_path)
-    return 0
+        if args.check:
+            drift = check_outputs(plan, args.out_dir)
+            if drift:
+                print("Linux checkpoint instrumentation plan artifact drift detected:", file=sys.stderr)
+                for item in drift:
+                    print(f"{item.reason}: {item.path}", file=sys.stderr)
+                return 1
+            print(
+                "Linux checkpoint instrumentation plan artifacts are current "
+                f"({len(plan)} planned exact checkpoints)"
+            )
+            if not args.check_markers:
+                return 0
+
+        if args.check_markers:
+            problems = check_markers(plan, args.linux_tree)
+            if problems:
+                print("Linux checkpoint marker check failed:", file=sys.stderr)
+                print(f"marker summary: {format_marker_summary(problems)}", file=sys.stderr)
+                for problem in problems:
+                    print(format_marker_problem(problem), file=sys.stderr)
+                return 1
+            print("marker summary: 0 missing / 0 stale / 0 mismatch")
+            print(f"Linux checkpoint markers are current ({len(plan)} planned markers)")
+            return 0
+
+        json_path, markdown_path = write_outputs(plan, args.out_dir)
+        print(f"wrote Linux checkpoint instrumentation plan for {len(plan)} exact mappings")
+        print(json_path)
+        print(markdown_path)
+        return 0
+    except (json.JSONDecodeError, OSError, LinuxInstrumentationPlanError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

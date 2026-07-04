@@ -79,6 +79,15 @@ class PlanLinuxInstrumentationTests(unittest.TestCase):
         path.write_text(json.dumps(rows), encoding="utf-8")
         return path
 
+    def _write_plan_outputs(
+        self,
+        tmp: str,
+        plan: list[plan_linux_instrumentation.LinuxInstrumentationPlanEntry],
+    ) -> Path:
+        out_dir = Path(tmp) / "out"
+        plan_linux_instrumentation.write_outputs(plan, out_dir)
+        return out_dir
+
     def test_exact_mapping_generates_plan_and_skips_range_unmapped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             linux_tree = self._write_linux_fixture(tmp)
@@ -186,7 +195,7 @@ class PlanLinuxInstrumentationTests(unittest.TestCase):
             main_c = linux_tree / "init" / "main.c"
             lines = main_c.read_text(encoding="utf-8").splitlines()
             anchor_line = self._line_for(main_c, "setup_arch(&command_line);")
-            lines.insert(anchor_line, "    " + entry.marker)
+            lines.insert(anchor_line - 1, "    " + entry.marker)
             main_c.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
             recomputed = plan_linux_instrumentation.build_plan(
@@ -371,6 +380,262 @@ class PlanLinuxInstrumentationTests(unittest.TestCase):
         self.assertIn("fingerprint mismatch", stderr.getvalue())
         self.assertIn("missing marker", stderr.getvalue())
         self.assertIn("stale marker", stderr.getvalue())
+        self.assertIn("1 missing / 1 stale / 1 mismatch", stderr.getvalue())
+
+    def test_emit_marker_patch_only_inserts_exact_plan_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            exact = self._exact_row(
+                linux_tree,
+                42,
+                "Demo.Started",
+                "DemoStarted",
+                "setup_arch(&command_line);",
+            )
+            rows = [
+                exact,
+                {
+                    **self._exact_row(
+                        linux_tree,
+                        43,
+                        "Demo.Range",
+                        "DemoRange",
+                        "mm_core_init();",
+                    ),
+                    "mapping_kind": "range",
+                },
+                {
+                    "checkpoint_index": 44,
+                    "checkpoint_name": "Demo.Unmapped",
+                    "checkpoint_variant": "DemoUnmapped",
+                    "linux_file": None,
+                    "linux_symbol": None,
+                    "linux_anchor": None,
+                    "mapping_kind": "unmapped",
+                    "confidence": "none",
+                    "notes": "fixture",
+                },
+            ]
+            plan = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(self._write_mapping(tmp, rows)),
+                linux_tree,
+            )
+            out_dir = self._write_plan_outputs(tmp, plan)
+            patch_path = Path(tmp) / "markers.patch"
+            main_c = linux_tree / "init" / "main.c"
+            before = main_c.read_text(encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = plan_linux_instrumentation.main(
+                    [
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--emit-marker-patch",
+                        str(patch_path),
+                    ]
+                )
+            after = main_c.read_text(encoding="utf-8")
+            patch = patch_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(after, before)
+        self.assertIn("--- a/init/main.c", patch)
+        self.assertIn("+++ b/init/main.c", patch)
+        self.assertIn("Demo.Started", patch)
+        self.assertIn("+    /* LKM_CHECKPOINT", patch)
+        self.assertNotIn("Demo.Range", patch)
+        self.assertNotIn("Demo.Unmapped", patch)
+        self.assertIn("1 insertions", stdout.getvalue())
+
+    def test_emit_marker_patch_sorts_same_anchor_by_checkpoint_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            rows = [
+                self._exact_row(
+                    linux_tree,
+                    20,
+                    "Demo.Second",
+                    "DemoSecond",
+                    "setup_arch(&command_line);",
+                ),
+                self._exact_row(
+                    linux_tree,
+                    10,
+                    "Demo.First",
+                    "DemoFirst",
+                    "setup_arch(&command_line);",
+                ),
+            ]
+            plan = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(self._write_mapping(tmp, rows)),
+                linux_tree,
+            )
+            out_dir = self._write_plan_outputs(tmp, plan)
+            patch_path = Path(tmp) / "markers.patch"
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = plan_linux_instrumentation.main(
+                    [
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--emit-marker-patch",
+                        str(patch_path),
+                    ]
+                )
+            patch = patch_path.read_text(encoding="utf-8")
+
+        added_markers = [
+            line for line in patch.splitlines()
+            if line.startswith("+") and "LKM_CHECKPOINT" in line
+        ]
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(added_markers), 2)
+        self.assertIn("Demo.First", added_markers[0])
+        self.assertIn("Demo.Second", added_markers[1])
+
+    def test_emit_marker_patch_skips_existing_clean_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            rows = [
+                self._exact_row(
+                    linux_tree,
+                    1,
+                    "Demo.Started",
+                    "DemoStarted",
+                    "setup_arch(&command_line);",
+                )
+            ]
+            mapping_path = self._write_mapping(tmp, rows)
+            plan = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(mapping_path),
+                linux_tree,
+            )
+            out_dir = self._write_plan_outputs(tmp, plan)
+            entry = plan[0]
+            main_c = linux_tree / "init" / "main.c"
+            lines = main_c.read_text(encoding="utf-8").splitlines()
+            anchor_line = self._line_for(main_c, "setup_arch(&command_line);")
+            lines.insert(anchor_line - 1, "    " + entry.marker)
+            main_c.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            before = main_c.read_text(encoding="utf-8")
+            patch_path = Path(tmp) / "markers.patch"
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = plan_linux_instrumentation.main(
+                    [
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--emit-marker-patch",
+                        str(patch_path),
+                    ]
+                )
+            after = main_c.read_text(encoding="utf-8")
+            patch = patch_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(after, before)
+        self.assertEqual(patch, "")
+        self.assertIn("0 insertions", stdout.getvalue())
+        self.assertIn("1 existing", stdout.getvalue())
+
+    def test_emit_marker_patch_rejects_stale_marker_without_writing_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            rows = [
+                self._exact_row(
+                    linux_tree,
+                    1,
+                    "Demo.Started",
+                    "DemoStarted",
+                    "setup_arch(&command_line);",
+                )
+            ]
+            plan = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(self._write_mapping(tmp, rows)),
+                linux_tree,
+            )
+            out_dir = self._write_plan_outputs(tmp, plan)
+            stale_marker = plan_linux_instrumentation.marker_for(
+                "Demo.Stale",
+                "DemoStale",
+                "sha256:" + "1" * 64,
+            )
+            main_c = linux_tree / "init" / "main.c"
+            before = main_c.read_text(encoding="utf-8")
+            main_c.write_text(before + stale_marker + "\n", encoding="utf-8")
+            patch_path = Path(tmp) / "markers.patch"
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = plan_linux_instrumentation.main(
+                    [
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--emit-marker-patch",
+                        str(patch_path),
+                    ]
+                )
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(patch_path.exists())
+        self.assertIn("stale marker", stderr.getvalue())
+
+    def test_emit_marker_patch_rejects_same_identity_fingerprint_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            linux_tree = self._write_linux_fixture(tmp)
+            rows = [
+                self._exact_row(
+                    linux_tree,
+                    1,
+                    "Demo.Started",
+                    "DemoStarted",
+                    "setup_arch(&command_line);",
+                )
+            ]
+            plan = plan_linux_instrumentation.build_plan(
+                plan_linux_instrumentation.load_mapping(self._write_mapping(tmp, rows)),
+                linux_tree,
+            )
+            out_dir = self._write_plan_outputs(tmp, plan)
+            mismatch_marker = plan_linux_instrumentation.marker_for(
+                "Demo.Started",
+                "DemoStarted",
+                "sha256:" + "0" * 64,
+            )
+            main_c = linux_tree / "init" / "main.c"
+            main_c.write_text(
+                main_c.read_text(encoding="utf-8") + mismatch_marker + "\n",
+                encoding="utf-8",
+            )
+            patch_path = Path(tmp) / "markers.patch"
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = plan_linux_instrumentation.main(
+                    [
+                        "--linux-tree",
+                        str(linux_tree),
+                        "--out-dir",
+                        str(out_dir),
+                        "--emit-marker-patch",
+                        str(patch_path),
+                    ]
+                )
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(patch_path.exists())
+        self.assertIn("fingerprint mismatch", stderr.getvalue())
 
 
 if __name__ == "__main__":
