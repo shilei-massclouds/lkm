@@ -4,6 +4,10 @@
  * This is SMP Runtime Phase subphase 3. It covers the boot processor side of
  * kernel_init_freeable() from sched_init_smp() through page_alloc_init_late(),
  * after secondary CPUs have become online and before do_basic_setup().
+ * For Linux paired-diff ordering, SchedulerSmpRuntime.Setup is the first
+ * action and `Scheduler.SmpReady` precedes the `RuntimeCorePhase.Started`
+ * checkpoint, whose exact Linux anchor is the following
+ * workqueue_init_topology() call-site.
  */
 
 /*

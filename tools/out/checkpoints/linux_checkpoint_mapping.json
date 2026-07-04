@@ -4166,7 +4166,7 @@
     "linux_anchor": "ret_from_exception line 279: sret",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff."
+    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0 and record before the final general-register restore."
   },
   {
     "checkpoint_index": 379,
@@ -4265,7 +4265,7 @@
     "linux_anchor": "ret_from_exception line 265: csrw CSR_STATUS, a0",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V return-to-user path restores trap CSRs before sret; this is architecture-scoped and not a separate Linux satp object boundary."
+    "notes": "RISC-V return-to-user path restores trap CSRs before sret; runtime instrumentation must guard on saved SR_SPP == 0 and record before restoring temporary registers."
   },
   {
     "checkpoint_index": 388,
@@ -4276,7 +4276,7 @@
     "linux_anchor": "ret_from_exception line 279: sret",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V ret_from_exception reaches the final sret return-to-user boundary."
+    "notes": "RISC-V ret_from_exception reaches the final sret return-to-user boundary; runtime instrumentation must guard on saved SR_SPP == 0 and record before the final general-register restore."
   },
   {
     "checkpoint_index": 389,
@@ -4419,6 +4419,6 @@
     "linux_anchor": "kernel_init() line 1525: if (!try_to_run_init_process(\"/sbin/init\") ||",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Linux kernel_init() default init candidate handoff anchor."
+    "notes": "Linux kernel_init() default init candidate handoff anchor. A successful requested-init path from init= returns before this fallback block, so requested-init paired cases must not include this checkpoint in the hard diff scope."
   }
 ]

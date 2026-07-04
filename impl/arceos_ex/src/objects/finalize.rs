@@ -153,7 +153,8 @@ impl InitMemoryCleanupDeferred {
             || async_full_sync.state() != State::Ready
             || !async_full_sync.synchronize_full_deferred()
             || system_state.state() != State::Ready
-            || system_state.value() != SystemStateValue::Scheduling
+            || system_state.value() != SystemStateValue::FreeingInitmem
+            || !system_state.freeing_initmem_window_entered()
         {
             return failed_condition(
                 LifecycleEvent::Setup,

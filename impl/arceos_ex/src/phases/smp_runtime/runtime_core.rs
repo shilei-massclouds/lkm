@@ -13,7 +13,6 @@ static RUNTIME_CORE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::RuntimeCorePhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex runtime core event failed\n",
@@ -33,6 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 
     ctx.scheduler
         .enable_smp(&mut ctx.kernel_init_task, &ctx.cpu_group)?;
+    crate::trace::checkpoint(Checkpoint::RuntimeCorePhaseStarted);
     ctx.workqueue
         .setup_topology(&ctx.scheduler, &ctx.cpu_group)?;
     ctx.async_core_deferred.setup(&ctx.workqueue)?;

@@ -315,6 +315,7 @@ object FinalizePhase: PhaseObject {
 
                 drives {
                     AsyncFullSyncDeferred.Transition::Setup;
+                    SystemState.Action::EnterFreeingInitmem;
                     InitMemoryCleanupDeferred.Transition::Setup;
                     KernelMappingProtectionDeferred.Transition::Setup;
                     PtiFinalizeTrimmed.Transition::Setup;

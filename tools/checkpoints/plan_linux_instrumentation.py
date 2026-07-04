@@ -247,13 +247,13 @@ def _ignored_context_lines(lines: list[str]) -> set[int]:
         if INSTRUMENTATION_INCLUDE in line:
             ignored.add(index)
             continue
-        if re.match(r"#\s*if(?:def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
+        if re.match(r"#\s*if(?:n?def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
             instrumentation_block_depth = 1
             ignored.add(index)
             continue
         if instrumentation_block_depth:
             ignored.add(index)
-            if re.match(r"#\s*if(?:def)?\b", stripped):
+            if re.match(r"#\s*if(?:n?def)?\b", stripped):
                 instrumentation_block_depth += 1
             elif re.match(r"#\s*endif\b", stripped):
                 instrumentation_block_depth -= 1

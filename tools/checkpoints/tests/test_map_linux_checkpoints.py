@@ -739,9 +739,11 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
                 "__HEAD\n",
                 "#include <linux/lkm_checkpoints.h>\n"
                 "#ifdef CONFIG_LKM_CHECKPOINTS\n"
+                "#ifndef CONFIG_RISCV_M_MODE\n"
                 ".macro LKM_RUNTIME_CHECKPOINT checkpoint_id\n"
                 "    nop\n"
                 ".endm\n"
+                "#endif\n"
                 "#else\n"
                 ".macro LKM_RUNTIME_CHECKPOINT checkpoint_id\n"
                 ".endm\n"

@@ -12,7 +12,6 @@ use core::sync::atomic::AtomicU8;
 static ROOTFS_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::RootfsPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex rootfs event failed\n",
@@ -35,6 +34,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.kunit_runtime_trimmed, &ctx.workqueue)?;
     ctx.rootfs_console_deferred
         .setup(&ctx.initramfs_sync_deferred, &ctx.kernel_init_task)?;
+    crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
+    crate::trace::checkpoint(Checkpoint::RootfsPhaseStarted);
     ctx.rootfs_prepare_namespace_paths.setup(
         &ctx.rootfs_console_deferred,
         &ctx.saved_command_line,

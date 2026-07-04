@@ -3647,7 +3647,9 @@ handler 过滤应作为 handler 配置能力设计，而不是通过删除 check
 v2 不实现通用过滤引擎，只固定启用 88 个 exact-mapped runtime checkpoint；paired stress case 通过
 显式 `checkpoint_scope` 声明每个 case 的顺序兼容交集。scope 外 runtime 事件只能进入 observed-but-not-compared
 报告，不能直接作为 paired diff 失败条件。若某个额外事件需要进入硬门禁，必须先更新对应 case 的
-`checkpoint_scope` 和说明。
+`checkpoint_scope` 和说明。`pd-*` paired stress case 是分阶段推进脚手架，不作为长期回归资产；每次只保持当前
+阶段 case 为 active，已通过的阶段 case 应删除并在测试说明中记录由后续更深阶段继续推进，后续 queued case
+只有在当前 active case 通过并删除后才进入处理。
 
 Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，形成一行可由 stress runner 解码的紧凑输出：
 `stress_mem: v=1 encoding=hex bytes=<n> total=<n> overflow=<0|1> dropped=<n> data=<hex>`。`data`
@@ -3661,6 +3663,17 @@ Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，�
 case 元数据。paired stress 报告至少应输出双方 scope 内 checkpoint 序列、缺失事件、额外事件、相对顺序不一致、首个
 可见分叉点，以及双方 observed-but-not-compared checkpoint 与排除原因。首个分叉点只说明当前观测模型下最早可见差异，
 不能直接等同于根因；若差异来自缺少观测点，应先补长期 checkpoint 或 handler 字段，再继续推进更细粒度 Linux 插桩。
+当 active paired case 将 `SmpBringupPhase.Ready` 纳入硬门禁时，双方 QEMU 拓扑必须使用相同且至少包含一个 secondary
+CPU 的 `-smp` 配置；单 vCPU 运行只能观察 Linux `smp_init()` call-site marker，不能满足 arceos_ex
+`secondary_cpus_online` / `smp_concurrency_open` 的阶段边界。
+若当前 Linux checkpoint tree 在某个已到达的稳定边界之后崩溃，而崩溃发生在后续候选边界之前，则 active case
+不得把后续候选边界硬纳入当前 `checkpoint_scope`；应先把当前阶段收束到已证明的稳定交集，在 stress 说明中记录
+崩溃证据和被推迟的候选边界，再由后续 active case 或 Linux checkpoint tree 诊断继续推进。该规则不得用于掩盖
+scope 内 checkpoint 差异。
+若当前 Linux checkpoint tree 的无关内核 initcall 在已到达的稳定边界之后触发崩溃或导致 `stress_mem` 溢出，
+active case 可以使用 Linux-only `initcall_blacklist=` 作为诊断运行参数，但必须在 case metadata 和 stress
+说明中记录被排除的 initcall、崩溃或溢出证据，以及该 initcall 不属于当前 hard diff scope；不得用它掩盖
+scope 内 checkpoint 差异。
 
 Linux 侧构建命令以该树当前交叉编译入口为准：`make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j $(nproc)`；
 首批 runtime checkpoint 构建在此基础上追加 `KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS`，不改 menuconfig/Kconfig UI。

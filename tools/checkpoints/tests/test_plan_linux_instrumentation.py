@@ -228,7 +228,9 @@ class PlanLinuxInstrumentationTests(unittest.TestCase):
             lines.insert(0, "#include <linux/lkm_checkpoints.h>")
             lines[1:1] = (
                 "#ifdef CONFIG_LKM_CHECKPOINTS",
+                "#ifndef CONFIG_RISCV_M_MODE",
                 "#define LKM_RUNTIME_CHECKPOINT(id) do { } while (0)",
+                "#endif",
                 "#endif",
                 "",
             )

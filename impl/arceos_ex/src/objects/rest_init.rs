@@ -4,7 +4,10 @@ use super::{
         BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock, RcuReadSide,
     },
     cpu_group::CpuGroup,
-    finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
+    finalize::{
+        AsyncFullSyncDeferred, InitMemoryCleanupDeferred, KernelMappingProtectionDeferred,
+        PtiFinalizeTrimmed,
+    },
     init_task::InitTask,
     process_prepare::{
         CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCopyProcessInputs,
@@ -734,6 +737,7 @@ impl KthreaddTask {
 pub struct SystemState {
     lifecycle: Lifecycle,
     value: SystemStateValue,
+    freeing_initmem_window_entered: bool,
 }
 
 impl SystemState {
@@ -741,6 +745,7 @@ impl SystemState {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             value: SystemStateValue::Booting,
+            freeing_initmem_window_entered: false,
         }
     }
 
@@ -750,6 +755,10 @@ impl SystemState {
 
     pub const fn value(&self) -> SystemStateValue {
         self.value
+    }
+
+    pub const fn freeing_initmem_window_entered(&self) -> bool {
+        self.freeing_initmem_window_entered
     }
 
     pub fn preset(&mut self) -> EventResult {
@@ -763,6 +772,7 @@ impl SystemState {
         }
 
         self.value = SystemStateValue::Booting;
+        self.freeing_initmem_window_entered = false;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -789,12 +799,37 @@ impl SystemState {
         }
 
         self.value = SystemStateValue::Scheduling;
+        self.freeing_initmem_window_entered = false;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
             Checkpoint::SystemStateReady,
         )
+    }
+
+    pub fn enter_freeing_initmem(
+        &mut self,
+        async_full_sync: &AsyncFullSyncDeferred,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.value != SystemStateValue::Scheduling
+            || self.freeing_initmem_window_entered
+            || async_full_sync.state() != State::Ready
+            || !async_full_sync.synchronize_full_deferred()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.value = SystemStateValue::FreeingInitmem;
+        self.freeing_initmem_window_entered = true;
+        crate::trace::checkpoint(Checkpoint::SystemStateFreeingInitmemCheckpoint);
+        Ok(())
     }
 
     pub fn enable(
@@ -804,7 +839,8 @@ impl SystemState {
         pti_finalize: &PtiFinalizeTrimmed,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
-            || self.value != SystemStateValue::Scheduling
+            || self.value != SystemStateValue::FreeingInitmem
+            || !self.freeing_initmem_window_entered
             || init_memory.state() != State::Ready
             || !init_memory.system_state_freeing_window_entered()
             || mapping.state() != State::Ready
@@ -820,8 +856,6 @@ impl SystemState {
             );
         }
 
-        self.value = SystemStateValue::FreeingInitmem;
-        crate::trace::checkpoint(Checkpoint::SystemStateFreeingInitmemCheckpoint);
         self.value = SystemStateValue::Running;
         self.lifecycle.transition(
             LifecycleEvent::Enable,

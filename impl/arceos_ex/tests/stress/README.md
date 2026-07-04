@@ -65,18 +65,47 @@ suite. Select them explicitly, for example:
 
 ```sh
 make test-stress \
-  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0001-linux-entry-prelude-paired.toml \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0004-linux-payload-syscall-paired.toml \
   STRESS_RUNS=1 \
   STRESS_TIMEOUT=240
 ```
 
-The current Linux paired cases are staged by exact-mapped runtime scope:
+The Linux paired cases are staged by exact-mapped runtime scope and are
+temporary progression scaffolds, not long-term regression assets. Completed
+stages are deleted after a passing paired run; later stages stay queued until
+the current active case passes and is removed.
 
-- `pd-0001-linux-entry-prelude-paired.toml`: entry-prelude intersection.
-- `pd-0002-linux-boot-c-paired.toml`: boot C phase landmarks through process prepare.
-- `pd-0003-linux-runtime-rootfs-paired.toml`: SMP, runtime core, initcall, rootfs, finalize, and payload handoff landmarks.
-- `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed `/bin/ls\nexit\n`; syscall and repeated exec markers are reported as observed coverage unless explicitly in scope.
-- `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped intersection for the default-overlay rootfs path.
+Completed stages:
+
+- `pd-0001-linux-entry-prelude-paired.toml`: entry-prelude front segment. Its
+  stage is complete; later boot-path `pd-*` cases continue from deeper and
+  partially overlapping checkpoints.
+- `pd-0002-linux-boot-c-paired.toml`: boot C phase landmarks from
+  `CorePreparePhase.Started` through `ProcessPreparePhase.Started`. Its stage
+  is complete; `StartupTimeline.Started` remains a Linux-side runtime marker
+  outside the current hard diff intersection.
+- `pd-0003-linux-runtime-rootfs-paired.toml`: SMP, runtime core, initcall,
+  rootfs, finalize, and `PayloadPhase.Ready` landmarks. Its stage is complete;
+  `PayloadPhase.Online` is not part of that requested-init hard scope because
+  the current Linux anchor is on the default fallback `/sbin/init` block, while
+  `init=/sbin/init` succeeds before that block.
+
+Current active stage:
+
+- `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed
+  `/bin/ls\nexit\n`; syscall and repeated exec markers are reported as
+  observed coverage unless explicitly in scope. This queued case now needs a
+  harness refresh before semantic payload work: it still runs arceos_ex with
+  `QEMU_SMP=1` after the SMP bringup baseline moved to a 2-vCPU topology, and
+  its Linux delayed-stdin marker `/ #` does not match the observed BusyBox
+  prompt `~ #`. After that refresh, the next expected semantic gap is the
+  requested-init payload handoff boundary: the case still scopes
+  `PayloadPhase.Online`, but the current Linux anchor is fallback-only.
+
+Queued later stages:
+
+- `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped
+  intersection for the default-overlay rootfs path.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as

@@ -1382,6 +1382,11 @@ type ArceosExStartupPhaseCodingMust {
          * UserBootPayload. It is driven by PayloadPhase setup/enable and must
          * not be implemented as an unrelated phase or as a second root
          * startup chain.
+         * The current Linux PayloadPhase.Online paired anchor is on the
+         * default fallback try_to_run_init_process("/sbin/init") branch.
+         * Requested-init cases that pass init= return before that branch and
+         * must not include PayloadPhase.Online in a hard diff scope without an
+         * equivalent requested-init anchor.
          */
         arceos_ex_must_user_boot_payload_be_selected_payload_variant();
 
@@ -2351,6 +2356,13 @@ type ArceosExIrqTimeInitCodingMust {
          * architecture-scoped anchors, but must keep range/medium confidence
          * where the correspondence is phase-level rather than a single exact
          * object boundary.
+         * RISC-V64 ret_from_exception return-to-user Linux checkpoints must
+         * be guarded by the saved SPP bit so they only record the user return
+         * path. They must be emitted before restoring general registers, or
+         * through an equivalent register-preserving recorder; placing the
+         * current LKM_RUNTIME_CHECKPOINT macro after t4/t5/t6 restoration
+         * corrupts the return frame, and placing it after the kernel/user
+         * merge label misreports supervisor returns as user events.
          *
          * The mapping stage may include explicitly architecture-scoped RISC-V64
          * entry anchors. For that scope it must be able to resolve
@@ -4556,6 +4568,12 @@ type ArceosExRootfsCodingMust {
          *
          * RootfsPhase must run after InitcallPhase.Ready and preserve the
          * kunit_run_all_tests() entry position inside RootfsPhase.
+         * Its RootfsPhase.Started paired-diff checkpoint is not a Rust phase
+         * function-entry marker: it is anchored to the Linux
+         * init_eaccess(ramdisk_execute_command) branch immediately before
+         * prepare_namespace(). Therefore RamdiskExecuteCommand.EaccessCheckpoint
+         * must precede RootfsPhase.Started, and prepare_namespace
+         * classification/rootfs enable must follow it.
          */
         arceos_ex_must_rootfs_run_after_initcall();
 
@@ -4710,8 +4728,10 @@ type ArceosExFinalizeCodingMust {
         /*
          * System state:
          *
-         * SystemState.enable() must publish the SYSTEM_FREEING_INITMEM window
-         * and end with SystemState.state == Online and value == SYSTEM_RUNNING.
+         * SystemState.enter_freeing_initmem() must run immediately after
+         * AsyncFullSyncDeferred.Ready and before init-only memory cleanup.
+         * SystemState.enable() must run after PTI finalize and end with
+         * SystemState.state == Online and value == SYSTEM_RUNNING.
          * RcuCore.end_inkernel_boot() must expose rcu_unexpedite_gp() atomic
          * decrement, CONFIG_RCU_LAZY related rcu_async_relax() trimming,
          * rcu_normal_after_boot WRITE_ONCE handling and rcu_boot_ended publish

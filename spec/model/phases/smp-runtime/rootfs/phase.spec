@@ -106,6 +106,11 @@ object RootfsConsoleDeferred: KernelObject {
  * RootfsPhase: RootFS.Transition::Enable remains the formal prepare_namespace
  * event, while this object preserves the classification and synchronization
  * obligations of the surrounding Linux calls.
+ * For Linux paired-diff ordering, the `RootfsPhase.Started` checkpoint is not
+ * emitted at the Rust phase function entry. Its exact Linux anchor is the
+ * prepare_namespace() branch after init_eaccess(ramdisk_execute_command), so
+ * `RamdiskExecuteCommand.EaccessCheckpoint` must precede it and this
+ * classification object follows it.
  */
 object RootfsPrepareNamespacePaths: KernelObject {
     initial_state: State::Base;
@@ -375,7 +380,10 @@ object RootfsBoundary: KernelObject {
 
 /*
  * RootfsPhase is the minimal object-level boundary for the rootfs preparation
- * part of kernel_init_freeable().
+ * part of kernel_init_freeable(). The phase object begins after
+ * InitcallPhase.Ready, but the paired-diff `RootfsPhase.Started` checkpoint is
+ * anchored to Linux's prepare_namespace() branch after the KUnit/initramfs/
+ * console prelude and the ramdisk eaccess checkpoint.
  */
 object RootfsPhase: PhaseObject {
     initial_state: State::Base;

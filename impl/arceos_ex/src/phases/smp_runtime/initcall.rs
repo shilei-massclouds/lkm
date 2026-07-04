@@ -271,7 +271,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         "InitcallBoundary",
         "initcall_boundary.setup",
     )?;
-    crate::checkpoint::dispatch(Checkpoint::InitcallBoundaryReady, ctx);
     Ok(())
 }
 

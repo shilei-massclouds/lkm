@@ -1018,8 +1018,8 @@ object KthreaddTask: Task {
 
 /*
  * SystemState 表示 Linux 全局 system_state 枚举。生命周期 Ready 对应本阶段
- * 把内部值推进到 SYSTEM_SCHEDULING；后续 FinalizePhase 通过 Enable
- * 推进到 SYSTEM_RUNNING / Online。
+ * 把内部值推进到 SYSTEM_SCHEDULING；后续 FinalizePhase 先在 Ready 生命周期内
+ * 记录 SYSTEM_FREEING_INITMEM 窗口，再通过 Enable 推进到 SYSTEM_RUNNING / Online。
  */
 object SystemState: KernelObject {
     initial_state: State::Base;
@@ -1069,6 +1069,8 @@ object SystemState: KernelObject {
 
     /*
      * Ready 表示系统已进入 SYSTEM_SCHEDULING，UP 多任务调度边界打开。
+     * FinalizePhase 可在该生命周期内把内部值推进到 SYSTEM_FREEING_INITMEM，
+     * 但只有 Enable 会把对象生命周期推进到 Online。
      */
     state State::Ready {
         invariant {
@@ -1079,10 +1081,12 @@ object SystemState: KernelObject {
 
         transitions {
             /*
-             * Enable 预留给 FinalizePhase 将 system_state 推进到 SYSTEM_RUNNING。
+             * Enable 预留给 FinalizePhase 将 system_state 从
+             * SYSTEM_FREEING_INITMEM 推进到 SYSTEM_RUNNING。
              */
             on Transition::Enable -> State::Online {
                 depends_on {
+                    system_state_freeing_initmem_window_entered(SystemState);
                     InitMemoryCleanupDeferred.state == State::Ready;
                     KernelMappingProtectionDeferred.state == State::Ready;
                     PtiFinalizeTrimmed.state == State::Ready;
@@ -1095,6 +1099,7 @@ object SystemState: KernelObject {
                 }
             }
         }
+
     }
 
     /*
@@ -1105,6 +1110,29 @@ object SystemState: KernelObject {
             system_state_running(SystemState);
             up_multitask_scheduling_open();
             smp_concurrency_open(CpuGroup);
+        }
+    }
+
+    actions {
+        /*
+         * EnterFreeingInitmem 对应 kernel_init() 中 async_synchronize_full()
+         * 之后、free_initmem() 之前的 system_state =
+         * SYSTEM_FREEING_INITMEM 赋值；它不改变对象生命周期，只改变
+         * SystemState 的内部枚举值并发布 paired checkpoint。
+         */
+        Action::EnterFreeingInitmem {
+            state_effect: StateEffect::None;
+            depends_on {
+                SystemState.state == State::Ready;
+                AsyncFullSyncDeferred.state == State::Ready;
+                system_state_scheduling(SystemState);
+            }
+
+            ensures {
+                system_state_freeing_initmem_window_entered(SystemState);
+                up_multitask_scheduling_open();
+                smp_concurrency_closed();
+            }
         }
     }
 }

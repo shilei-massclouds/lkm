@@ -673,7 +673,6 @@ impl RootFS {
         self.ms_move_done = true;
         self.chroot_dot_done = true;
         self.current_root_is_real_ext2 = true;
-        crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,

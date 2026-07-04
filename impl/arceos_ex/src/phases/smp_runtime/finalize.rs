@@ -32,6 +32,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 
     ctx.async_full_sync_deferred
         .setup(&ctx.rootfs_boundary, &ctx.async_core_deferred)?;
+    ctx.system_state
+        .enter_freeing_initmem(&ctx.async_full_sync_deferred)?;
     ctx.init_memory_cleanup_deferred
         .setup(&ctx.async_full_sync_deferred, &ctx.system_state)?;
     ctx.kernel_mapping_protection_deferred

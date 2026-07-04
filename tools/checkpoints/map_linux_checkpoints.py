@@ -120,7 +120,7 @@ def _strip_lkm_runtime_instrumentation_lines(text: str) -> str:
             ignore_next_blank = False
 
         if block_depth:
-            if re.match(r"#\s*if(?:def)?\b", stripped):
+            if re.match(r"#\s*if(?:n?def)?\b", stripped):
                 block_depth += 1
             elif re.match(r"#\s*endif\b", stripped):
                 block_depth -= 1
@@ -130,7 +130,7 @@ def _strip_lkm_runtime_instrumentation_lines(text: str) -> str:
 
         if INSTRUMENTATION_INCLUDE in line:
             continue
-        if re.match(r"#\s*if(?:def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
+        if re.match(r"#\s*if(?:n?def)?\b", stripped) and INSTRUMENTATION_CONFIG in stripped:
             block_depth = 1
             continue
         if INSTRUMENTATION_CALL in line or INSTRUMENTATION_RECORD_CALL in line:
@@ -838,7 +838,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="kernel_init",
             anchor_pattern=r'try_to_run_init_process\s*\(\s*"/sbin/init"',
             confidence="medium",
-            notes="Linux kernel_init() default init candidate handoff anchor.",
+            notes=(
+                "Linux kernel_init() default init candidate handoff anchor. "
+                "A successful requested-init path from init= returns before this "
+                "fallback block, so requested-init paired cases must not include "
+                "this checkpoint in the hard diff scope."
+            ),
         ),
         "CorePreparePhase.Started": MappingRule(
             mapping_kind="exact",
@@ -1219,7 +1224,11 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="ret_from_exception",
             anchor_pattern=r"^[ \t]*csrw[ \t]+CSR_STATUS,\s*a0\b",
             confidence="medium",
-            notes="RISC-V return-to-user path restores trap CSRs before sret; this is architecture-scoped and not a separate Linux satp object boundary.",
+            notes=(
+                "RISC-V return-to-user path restores trap CSRs before sret; "
+                "runtime instrumentation must guard on saved SR_SPP == 0 and "
+                "record before restoring temporary registers."
+            ),
         ),
         "UserExec.ReturnFrameReady": MappingRule(
             mapping_kind="exact",
@@ -1227,7 +1236,11 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="ret_from_exception",
             anchor_pattern=r"^[ \t]*sret\b",
             confidence="medium",
-            notes="RISC-V ret_from_exception reaches the final sret return-to-user boundary.",
+            notes=(
+                "RISC-V ret_from_exception reaches the final sret return-to-user "
+                "boundary; runtime instrumentation must guard on saved SR_SPP == 0 "
+                "and record before the final general-register restore."
+            ),
         ),
         "UserBoot.MainElfReady": MappingRule(
             mapping_kind="exact",
@@ -1268,7 +1281,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="ret_from_exception",
             anchor_pattern=r"^[ \t]*sret\b",
             confidence="medium",
-            notes="RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff.",
+            notes=(
+                "RISC-V ret_from_exception final sret is the architecture-scoped "
+                "boot init return-to-user handoff; runtime instrumentation must "
+                "guard on saved SR_SPP == 0 and record before the final "
+                "general-register restore."
+            ),
         ),
         "UserAddressSpace.Ready": MappingRule(
             mapping_kind="exact",
