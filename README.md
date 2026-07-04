@@ -168,28 +168,28 @@ make run PLIC_PROVIDER=linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 压力测试根目录位于 `impl/arceos_ex/tests/stress/`。日常入口是：
 
 ```sh
-make stress-test
+make test-stress
 ```
 
-默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前覆盖 DF-0001 的非 probe `APP=user-boot` overlay `/sbin/init` 路径、DF-0002 的非 probe `APP=smoke` 路径，以及 DF-0003 的非 PTY `/bin/sh` delayed-input `/bin/ls` 外部命令路径。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。
+`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前覆盖 DF-0001 的非 probe `APP=user-boot` overlay `/sbin/init` 路径、DF-0002 的非 probe `APP=smoke` 路径，以及 DF-0003 的非 PTY `/bin/sh` delayed-input `/bin/ls` 外部命令路径。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
 
 常用覆盖方式：
 
 ```sh
-make stress-test STRESS_RUNS=30
-make stress-test STRESS_TIMEOUT=60
+make test-stress STRESS_RUNS=30
+make test-stress STRESS_TIMEOUT=60
 ```
 
 只检查配置和输出目录生成、不执行 QEMU：
 
 ```sh
-make stress-test STRESS_RUNS=0
+make test-stress STRESS_RUNS=0
 ```
 
 也可以显式指定 case；此时只运行指定 case：
 
 ```sh
-make stress-test \
+make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml \
   STRESS_RUNS=30
 ```

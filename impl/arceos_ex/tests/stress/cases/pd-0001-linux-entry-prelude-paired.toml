@@ -1,4 +1,4 @@
-name = "df-0004-linux-entry-prelude-paired"
+name = "pd-0001-linux-entry-prelude-paired"
 description = "Run arceos_ex and Linux against the same rootfs and diff entry-prelude runtime checkpoints."
 mode = "paired_checkpoint_diff"
 default_runs = 1

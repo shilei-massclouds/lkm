@@ -8,7 +8,7 @@ compare failure classes against successful runs.
 Default suite from the repository root:
 
 ```sh
-make stress-test
+make test-stress
 ```
 
 When no case is specified, the runner executes the standard stress suite. The
@@ -18,11 +18,12 @@ current suite covers:
 - `cases/df-0002-smoke-initcall.toml`
 - `cases/df-0003-distro-sh-ls.toml`
 
-`make stress-test` defaults to `STRESS_RUNS=10`, which applies to each case in
+`make stress-test` remains as a compatibility alias. `make test-stress` defaults
+to `STRESS_RUNS=10`, which applies to each case in
 the suite. Use `STRESS_RUNS=N` to override it:
 
 ```sh
-make stress-test STRESS_RUNS=30
+make test-stress STRESS_RUNS=30
 ```
 
 `STRESS_TIMEOUT` is optional; when it is unset, each case keeps its own
@@ -31,14 +32,14 @@ make stress-test STRESS_RUNS=30
 Fast configuration check without executing QEMU:
 
 ```sh
-make stress-test STRESS_RUNS=0
+make test-stress STRESS_RUNS=0
 ```
 
 A case can still be passed explicitly; in that mode only the requested case
 runs:
 
 ```sh
-make stress-test \
+make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml \
   STRESS_RUNS=30
 ```
@@ -46,7 +47,7 @@ make stress-test \
 DF-0002 can also be selected directly:
 
 ```sh
-make stress-test \
+make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml \
   STRESS_RUNS=30
 ```
@@ -54,9 +55,19 @@ make stress-test \
 DF-0003 exercises the non-PTY distro shell delayed-input path:
 
 ```sh
-make stress-test \
+make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/df-0003-distro-sh-ls.toml \
   STRESS_RUNS=30
+```
+
+Paired differential cases use the `pd-*` prefix and are not part of the default
+suite. Select them explicitly, for example:
+
+```sh
+make test-stress \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0001-linux-entry-prelude-paired.toml \
+  STRESS_RUNS=1 \
+  STRESS_TIMEOUT=240
 ```
 
 Each case output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and

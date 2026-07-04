@@ -23,7 +23,7 @@ STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke stress-test clean
+.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -77,8 +77,10 @@ test-kunit:
 test-smoke:
 	$(MAKE) run APP=$(SMOKE_APP)
 
-stress-test:
+test-stress:
 	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_TIMEOUT_ARG)
+
+stress-test: test-stress
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean
