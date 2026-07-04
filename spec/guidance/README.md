@@ -24,6 +24,12 @@ Linux mapping 可以只读解析 C 函数、`SYSCALL_DEFINE*` macro 和 assembly
 Linux checkpoint mapping coverage 也是 mapping-only 审阅产物，只能从已提交 mapping JSON 聚合覆盖率视图，不得读取
 或修改 Linux tree、不得重解释 mapping 语义、不得新增 runtime 采集或 checkpoint handler；其测试模式同样只能做只读漂移检测。
 
+后续若进入 Linux 侧 checkpoint 插桩阶段，插桩清单和 Linux marker 必须从本项目 checkpoint inventory 与已提交
+Linux mapping 派生，不得在 Linux tree 内维护独立 checkpoint 列表。同步工具必须能从 mapping 生成或校验
+instrumentation plan，并报告三类漂移：mapping 中已有可插桩 anchor 但 Linux marker 缺失、checkpoint 已删除或重命名但
+Linux marker 仍残留、Linux anchor/fingerprint 已移动导致 marker 不再对应原 mapping。新增 checkpoint 默认只能先表现为
+inventory/mapping/coverage 漂移或 `unmapped`，不得被静默视为 Linux 已插桩；删除 checkpoint 必须触发 stale marker 清理。
+
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 
 ## 用户态启动代码生成

@@ -114,6 +114,15 @@ singleton unmapped family 总数，不得复制逐 checkpoint 明细，不得包
 的 unmapped family，并汇总 singleton family 数。该工具的 `--check` 模式必须只在内存中重新生成 JSON/Markdown 并比较
 tracked coverage 产物，发现漂移时报具体文件并非零退出，不得重写 stale tracked 输出。
 
+MUST：后续 Linux checkpoint 插桩同步阶段必须把 `impl/arceos_ex/src/trace/mod.rs` 导出的 checkpoint inventory 作为唯一
+checkpoint 源头，把 `tools/out/checkpoints/linux_checkpoint_mapping.json` 作为唯一 Linux anchor 源头。Linux 侧
+instrumentation plan 和 marker 只能从这两者派生，不得手写独立 checkpoint list。插桩同步主键必须使用
+`checkpoint_name` 和/或 `checkpoint_variant`；`checkpoint_index` 只能用于启动顺序审阅和输出排序，不得作为 Linux marker
+身份主键，以免插入 checkpoint 时造成无意义 churn。插桩计划必须携带 Linux file/symbol/anchor 和可复核的 anchor
+fingerprint；同步检查必须报告 missing marker、stale marker 和 anchor moved/fingerprint mismatch。默认只有
+`exact` 映射可以直接进入插桩计划；`range` 映射必须经过人工确认或降级为区间审阅项；`unmapped` 不得生成 Linux 插点。
+checkpoint 删除或重命名必须通过同步检查暴露并清理 stale marker，不能在 Linux tree 中保留孤立插桩。
+
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters
 和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`
