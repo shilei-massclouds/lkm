@@ -123,7 +123,16 @@ Current active stage:
   BusyBox prompt marker `~ #`. Its hard scope keeps the cumulative
   boot/rootfs/payload checkpoints and includes the exact `UserExec.*` anchors
   completed by `pd-0004`. Range and unmapped checkpoints remain outside hard
-  scope and are only reported as observed coverage.
+  scope and are only reported as observed coverage. Architecture-front markers
+  remain formal RISC-V exact anchors with arceos_ex early-byte or Linux mapping
+  coverage, but the current shell cumulative paired runner does not capture
+  them as a stable one-to-one hard-gate sequence. `EntryPreludePhase.Started`
+  is covered by the completed `pd-0001` stage; `TrampolineVm.Online`,
+  `KernelImage.Online`, `EventStream.Ready`, and `ExceptionStream.Ready` stay
+  outside this hard scope because Linux 2-vCPU runs can report the same head.S
+  markers again on the AP path or in a different entry-vs-C ordering. The
+  Linux-only `StartupTimeline.Started` C-entry marker is likewise observed
+  coverage, not a `pd-0005` hard gate.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as
