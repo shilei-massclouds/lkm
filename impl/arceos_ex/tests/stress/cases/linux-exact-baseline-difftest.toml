@@ -1,5 +1,5 @@
-name = "pd-0005-linux-exact-cumulative-paired"
-description = "Run arceos_ex and Linux distro /bin/sh with delayed /bin/ls input and diff the cumulative stable exact runtime checkpoint intersection, including absorbed payload exec anchors."
+name = "linux-exact-baseline-difftest"
+description = "Run the long-term Linux/arceos_ex baseline difftest for distro /bin/sh with delayed /bin/ls input, comparing the cumulative stable exact runtime checkpoint intersection."
 mode = "paired_checkpoint_diff"
 default_runs = 1
 timeout_seconds = 360
@@ -135,8 +135,9 @@ ready_marker = "~ #"
 payload = "/bin/ls\nexit\n"
 
 [metadata]
-observation_mode = "paired-checkpoint-diff"
+observation_mode = "baseline-paired-checkpoint-diff"
+baseline_role = "long-term-linux-exact"
 linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
-cumulative_scope = "stable same-semantic exact-mapped checkpoint intersection declared by completed stages; architecture-front, early-byte-only, Linux C-entry timeline, and AP-repeatable head.S markers remain observed coverage outside this active shell hard gate; pd-0004 payload exec hard scope is absorbed into the active cumulative shell case"
+cumulative_scope = "long-term stable same-semantic exact-mapped checkpoint intersection converged from pd-0005; architecture-front, early-byte-only, Linux C-entry timeline, and AP-repeatable head.S markers remain observed coverage outside this baseline hard gate; pd-0004 payload exec hard scope remains absorbed into the cumulative shell baseline"
 payload = "/bin/sh delayed /bin/ls then exit"

@@ -16,14 +16,18 @@ TEST_PLIC_PROVIDERS ?= $(strip $(foreach provider,$(PROVIDER_NAMES),$(if $(filte
 STRESS_RUNS ?= 10
 STRESS_CASES ?=
 STRESS_TIMEOUT ?=
+DIFFTEST_CASE ?= impl/arceos_ex/tests/stress/cases/linux-exact-baseline-difftest.toml
+DIFFTEST_RUNS ?= 1
+DIFFTEST_TIMEOUT ?=
 
 KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
 STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
+DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test clean
+.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -81,6 +85,9 @@ test-stress:
 	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_TIMEOUT_ARG)
 
 stress-test: test-stress
+
+difftest:
+	$(STRESS_RUNNER) $(DIFFTEST_CASE) --runs $(DIFFTEST_RUNS) $(DIFFTEST_TIMEOUT_ARG)
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean

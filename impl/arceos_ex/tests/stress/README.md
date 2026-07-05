@@ -60,20 +60,28 @@ make test-stress \
   STRESS_RUNS=30
 ```
 
-Paired differential cases use the `pd-*` prefix and are not part of the default
-suite. Select them explicitly, for example:
+Linux/arceos_ex baseline differential testing has a dedicated entry point:
 
 ```sh
-make test-stress \
-  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0005-linux-exact-cumulative-paired.toml \
-  STRESS_RUNS=1 \
-  STRESS_TIMEOUT=240
+make difftest
 ```
 
-The Linux paired cases are staged by exact-mapped runtime scope and are
-temporary progression scaffolds, not long-term regression assets. Completed
-stages are deleted after a passing paired run; later stages stay queued until
-the current active case passes and is removed.
+`make difftest` defaults to one real paired run of
+`cases/linux-exact-baseline-difftest.toml`. Use `DIFFTEST_RUNS=0` for a fast
+configuration check without executing QEMU:
+
+```sh
+make difftest DIFFTEST_RUNS=0
+```
+
+`DIFFTEST_TIMEOUT` is optional; when it is unset, the case keeps its own
+`timeout_seconds` value.
+
+The earlier Linux paired `pd-*` cases were staged by exact-mapped runtime scope
+and served as progression scaffolds. Completed staged cases are deleted after a
+passing paired run. `pd-0005` has now converged into the long-term
+`linux-exact-baseline-difftest.toml` regression asset and is kept through the
+dedicated `make difftest` target.
 
 Completed stages:
 
@@ -108,31 +116,32 @@ Completed stages:
   The latest recorded run at
   `impl/arceos_ex/tests/stress/out/20260705T122918Z-pd-0004-linux-payload-syscall-paired/`
   completed with `success: 1` and `failure: 0`. The case file has been deleted;
-  its payload/syscall hard scope is now absorbed by the active cumulative
-  `pd-0005-linux-exact-cumulative-paired.toml` case. Future payload/syscall
-  localization should use `pd-0005` first-divergence data and
+  its payload/syscall hard scope is now absorbed by the long-term
+  `linux-exact-baseline-difftest.toml` case. Future payload/syscall
+  localization should use baseline first-divergence data and
   `observed_but_not_compared` coverage instead of rerunning this completed
   stage.
 
-Current active stage:
+Long-term baseline difftest:
 
-- `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped
-  intersection for the distro `/bin/sh` path with delayed `/bin/ls\nexit\n`.
-  It uses the shell rootfs image without the default `/sbin/init` overlay,
-  2-vCPU topology on both sides, arceos_ex prompt marker `/ #`, and Linux
-  BusyBox prompt marker `~ #`. Its hard scope keeps the cumulative
-  boot/rootfs/payload checkpoints and includes the exact `UserExec.*` anchors
-  completed by `pd-0004`. Range and unmapped checkpoints remain outside hard
-  scope and are only reported as observed coverage. Architecture-front markers
-  remain formal RISC-V exact anchors with arceos_ex early-byte or Linux mapping
-  coverage, but the current shell cumulative paired runner does not capture
-  them as a stable one-to-one hard-gate sequence. `EntryPreludePhase.Started`
-  is covered by the completed `pd-0001` stage; `TrampolineVm.Online`,
-  `KernelImage.Online`, `EventStream.Ready`, and `ExceptionStream.Ready` stay
-  outside this hard scope because Linux 2-vCPU runs can report the same head.S
-  markers again on the AP path or in a different entry-vs-C ordering. The
-  Linux-only `StartupTimeline.Started` C-entry marker is likewise observed
-  coverage, not a `pd-0005` hard gate.
+- `linux-exact-baseline-difftest.toml`: long-term baseline differential test
+  for the cumulative stable exact-mapped intersection on the distro `/bin/sh`
+  path with delayed `/bin/ls\nexit\n`. It uses the shell rootfs image without
+  the default `/sbin/init` overlay, 2-vCPU topology on both sides, arceos_ex
+  prompt marker `/ #`, and Linux BusyBox prompt marker `~ #`. Its hard scope is
+  the converged `pd-0005` cumulative boot/rootfs/payload checkpoint set and
+  includes the exact `UserExec.*` anchors completed by `pd-0004`. Range and
+  unmapped checkpoints remain outside hard scope and are only reported as
+  observed coverage. Architecture-front markers remain formal RISC-V exact
+  anchors with arceos_ex early-byte or Linux mapping coverage, but the current
+  shell cumulative paired runner does not capture them as a stable one-to-one
+  hard-gate sequence. `EntryPreludePhase.Started` is covered by the completed
+  `pd-0001` stage; `TrampolineVm.Online`, `KernelImage.Online`,
+  `EventStream.Ready`, and `ExceptionStream.Ready` stay outside this hard scope
+  because Linux 2-vCPU runs can report the same head.S markers again on the AP
+  path or in a different entry-vs-C ordering. The Linux-only
+  `StartupTimeline.Started` C-entry marker is likewise observed coverage, not a
+  baseline hard gate.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as
