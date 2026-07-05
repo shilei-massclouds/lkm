@@ -1,5 +1,5 @@
 name = "pd-0005-linux-exact-cumulative-paired"
-description = "Run arceos_ex and Linux against the same default-overlay rootfs and diff the cumulative stable exact runtime checkpoint intersection."
+description = "Run arceos_ex and Linux distro /bin/sh with delayed /bin/ls input and diff the cumulative stable exact runtime checkpoint intersection, including absorbed payload exec anchors."
 mode = "paired_checkpoint_diff"
 default_runs = 1
 timeout_seconds = 360
@@ -11,7 +11,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
-  "ROOTFS_OVERLAY=default",
+  "ROOTFS_OVERLAY=none",
 ]
 
 [paired]
@@ -76,6 +76,11 @@ checkpoint_scope = [
   "UserBoot.InterpreterReady",
   "UserBoot.AddressSpaceSetupStart",
   "UserAddressSpace.Ready",
+  "UserExec.MainElfReady",
+  "UserExec.InterpreterReady",
+  "UserExec.ContextReplaced",
+  "UserExec.SatpReady",
+  "UserExec.TrapFrameReady",
 ]
 
 [paired.arceos_ex]
@@ -85,11 +90,15 @@ command = [
   "run",
   "APP=user-boot",
   "PROBE=announce,stress-mem",
-  "STRESS_MEM_BYTES=65536",
-  "QEMU_SMP=1",
+  "STRESS_MEM_BYTES=131072",
+  "QEMU_SMP=2",
   "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
-  "QEMU_APPEND=earlycon=sbi init=/sbin/init",
+  "QEMU_APPEND=earlycon=sbi init=/bin/sh",
 ]
+
+[paired.arceos_ex.delayed_stdin]
+ready_marker = "/ #"
+payload = "/bin/ls\nexit\n"
 
 [paired.linux]
 working_directory = "../linux-6.12"
@@ -106,7 +115,7 @@ command = [
   "-m",
   "128M",
   "-smp",
-  "1",
+  "2",
   "-machine",
   "virt",
   "-bios",
@@ -123,12 +132,17 @@ command = [
   "user,id=net0,hostfwd=tcp::5555-:5555",
   "-nographic",
   "-append",
-  "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/sbin/init",
+  "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/bin/sh",
 ]
 stop_after_stress_mem = true
+
+[paired.linux.delayed_stdin]
+ready_marker = "~ #"
+payload = "/bin/ls\nexit\n"
 
 [metadata]
 observation_mode = "paired-checkpoint-diff"
 linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
-cumulative_scope = "stable exact-mapped checkpoint intersection declared by pd-0001 through pd-0004"
+cumulative_scope = "stable exact-mapped checkpoint intersection declared by pd-0001 through pd-0004, plus pd-0004 payload exec hard scope absorbed into the active cumulative shell case"
+payload = "/bin/sh delayed /bin/ls then exit"

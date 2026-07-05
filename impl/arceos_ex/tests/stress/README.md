@@ -65,7 +65,7 @@ suite. Select them explicitly, for example:
 
 ```sh
 make test-stress \
-  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0004-linux-payload-syscall-paired.toml \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/pd-0005-linux-exact-cumulative-paired.toml \
   STRESS_RUNS=1 \
   STRESS_TIMEOUT=240
 ```
@@ -107,12 +107,23 @@ Completed stages:
   the canonical mapping anchor.
   The latest recorded run at
   `impl/arceos_ex/tests/stress/out/20260705T122918Z-pd-0004-linux-payload-syscall-paired/`
-  completed with `success: 1` and `failure: 0`.
+  completed with `success: 1` and `failure: 0`. The case file has been deleted;
+  its payload/syscall hard scope is now absorbed by the active cumulative
+  `pd-0005-linux-exact-cumulative-paired.toml` case. Future payload/syscall
+  localization should use `pd-0005` first-divergence data and
+  `observed_but_not_compared` coverage instead of rerunning this completed
+  stage.
 
 Current active stage:
 
 - `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped
-  intersection for the default-overlay rootfs path.
+  intersection for the distro `/bin/sh` path with delayed `/bin/ls\nexit\n`.
+  It uses the shell rootfs image without the default `/sbin/init` overlay,
+  2-vCPU topology on both sides, arceos_ex prompt marker `/ #`, and Linux
+  BusyBox prompt marker `~ #`. Its hard scope keeps the cumulative
+  boot/rootfs/payload checkpoints and includes the exact `UserExec.*` anchors
+  completed by `pd-0004`. Range and unmapped checkpoints remain outside hard
+  scope and are only reported as observed coverage.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as
