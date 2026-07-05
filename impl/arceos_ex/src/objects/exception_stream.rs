@@ -120,11 +120,11 @@ const EXECVE_OBS_STAGE_INTERPRETER_READY: usize = 3;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_ADDRESS_SPACE_READY: usize = 4;
 #[cfg(app_user_boot)]
-const EXECVE_OBS_STAGE_TRAP_FRAME_READY: usize = 5;
+const EXECVE_OBS_STAGE_CONTEXT_REPLACED: usize = 5;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_SATP_READY: usize = 6;
 #[cfg(app_user_boot)]
-const EXECVE_OBS_STAGE_CONTEXT_REPLACED: usize = 7;
+const EXECVE_OBS_STAGE_TRAP_FRAME_READY: usize = 7;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_SATP_SWITCHED: usize = 8;
 #[cfg(app_user_boot)]
@@ -4622,8 +4622,6 @@ fn replace_current_user_exec_image(
     new_trap_frame
         .setup(&ctx.user_exec_staging_address_space, &new_elf, &new_stack)
         .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-    record_execve_trap_frame(&new_trap_frame);
-    crate::checkpoint::dispatch(Checkpoint::UserExecTrapFrameReady, ctx);
     new_elf
         .enable(
             &ctx.user_exec_staging_address_space,
@@ -4640,11 +4638,6 @@ fn replace_current_user_exec_image(
             &ctx.page_metadata_map,
         )
         .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-    record_execve_address_space(
-        EXECVE_OBS_STAGE_SATP_READY,
-        &ctx.user_exec_staging_address_space,
-    );
-    crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
 
     let entry = new_trap_frame.entry();
     let sp = new_trap_frame.sp();
@@ -4654,10 +4647,14 @@ fn replace_current_user_exec_image(
     ctx.elf_object = new_elf;
     ctx.elf_interpreter_object = new_interpreter;
     ctx.user_stack = new_stack;
-    ctx.user_trap_frame = new_trap_frame;
     commit_execve_staging_address_space(ctx);
     record_execve_context_replaced(old_satp, satp);
     crate::checkpoint::dispatch(Checkpoint::UserExecContextReplaced, ctx);
+    record_execve_address_space(EXECVE_OBS_STAGE_SATP_READY, &ctx.user_address_space);
+    crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
+    ctx.user_trap_frame = new_trap_frame;
+    record_execve_trap_frame(&ctx.user_trap_frame);
+    crate::checkpoint::dispatch(Checkpoint::UserExecTrapFrameReady, ctx);
 
     crate::arch::riscv64::csr::write_satp(satp);
     crate::arch::riscv64::csr::sfence_vma();

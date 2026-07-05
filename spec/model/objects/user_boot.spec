@@ -2293,14 +2293,17 @@ object SyscallTable: ResourceObject {
                  * shape to build a replacement user mm.  This follows the
                  * local Linux 6.12 shape where fs/exec.c::alloc_bprm()
                  * heap-allocates linux_binprm, bprm_mm_init() installs a
-                 * nascent bprm->mm from mm_alloc(), and begin_new_exec()
-                 * commits it through exec_mmap(bprm->mm).  The replacement
-                 * UserAddressSpace is staged in Context-owned storage rather
-                 * than on the syscall/trap stack, then committed without
-                 * materializing the whole object as a large stack temporary.
-                 * The action switches satp to the replacement page table and
-                 * updates the trap frame to the RISC-V start_thread-style
-                 * entry/sp.  It does not model the
+                 * nascent bprm->mm from mm_alloc(), begin_new_exec() crosses
+                 * the point-of-no-return/context handoff, exec_mmap(bprm->mm)
+                 * installs the new mm, and RISC-V start_thread() installs
+                 * the return pt_regs.  The replacement UserAddressSpace is
+                 * staged in Context-owned storage rather than on the
+                 * syscall/trap stack, then committed without materializing
+                 * the whole object as a large stack temporary.  The runtime
+                 * checkpoint order is ContextReplaced, SatpReady, then
+                 * TrapFrameReady; live satp switch and final return-frame
+                 * diagnostics remain later return-path boundaries.  It does
+                 * not model the
                  * full point-of-no-return rollback, credentials, signal table,
                  * do_close_on_exec(), task comm, perf/audit/accounting or
                  * old-mm reclamation paths.
