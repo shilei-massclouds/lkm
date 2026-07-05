@@ -3647,7 +3647,7 @@ handler 过滤应作为 handler 配置能力设计，而不是通过删除 check
 
 多类过滤条件同时存在时，采集集合以条件交集为准。若后续确认第三类过滤条件，例如 observation domain、结果类别、
 运行 profile 或其它维度，必须先在本章或更细的 model/coding 规格中命名并定义语义；在确认前不得臆造第三类过滤行为。
-v2 不实现通用过滤引擎，只固定启用 88 个 exact-mapped runtime checkpoint；paired stress case 通过
+v2 不实现通用过滤引擎，只固定启用 103 个 exact-mapped runtime checkpoint；paired stress case 通过
 显式 `checkpoint_scope` 声明每个 case 的顺序兼容交集。scope 外 runtime 事件只能进入 observed-but-not-compared
 报告，不能直接作为 paired diff 失败条件。若某个额外事件需要进入硬门禁，必须先更新对应 case 的
 `checkpoint_scope` 和说明。`pd-*` paired stress case 是分阶段推进脚手架，不作为长期回归资产；每次只保持当前

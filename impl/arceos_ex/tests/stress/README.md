@@ -89,9 +89,6 @@ Completed stages:
   `PayloadPhase.Online` is not part of that requested-init hard scope because
   the current Linux anchor is on the default fallback `/sbin/init` block, while
   `init=/sbin/init` succeeds before that block.
-
-Current active stage:
-
 - `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed
   `/bin/ls\nexit\n`; runtime exec comparison now extends through the exact
   `UserExec.MainElfReady`, `UserExec.InterpreterReady`,
@@ -108,8 +105,11 @@ Current active stage:
   `run_init_process(execute_command)` path as well as before the default
   fallback block; the single-fingerprint `LKM_CHECKPOINT` comment remains on
   the canonical mapping anchor.
+  The latest recorded run at
+  `impl/arceos_ex/tests/stress/out/20260705T122918Z-pd-0004-linux-payload-syscall-paired/`
+  completed with `success: 1` and `failure: 0`.
 
-Queued later stages:
+Current active stage:
 
 - `pd-0005-linux-exact-cumulative-paired.toml`: cumulative stable exact-mapped
   intersection for the default-overlay rootfs path.

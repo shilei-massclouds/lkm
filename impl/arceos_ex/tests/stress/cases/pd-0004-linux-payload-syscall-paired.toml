@@ -88,6 +88,6 @@ payload = "/bin/ls\nexit\n"
 
 [metadata]
 observation_mode = "paired-checkpoint-diff"
-linux_exact_runtime_target_count = 88
+linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
 payload = "/bin/sh delayed /bin/ls then exit"

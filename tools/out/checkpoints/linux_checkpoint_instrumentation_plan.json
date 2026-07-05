@@ -304,8 +304,8 @@
     "linux_symbol": "start_secondary_cpu",
     "linux_anchor": "start_secondary_cpu() line 177: return cpu_ops->cpu_start(cpu, tidle);",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=CpuStartProvider.Ready variant=CpuStartProviderReady fingerprint=sha256:a1c8cac03c43916e14c99a05d7df86de9c94e0626d32703de3902e5fb612f1a7 */",
-    "anchor_fingerprint": "sha256:a1c8cac03c43916e14c99a05d7df86de9c94e0626d32703de3902e5fb612f1a7"
+    "marker": "/* LKM_CHECKPOINT name=CpuStartProvider.Ready variant=CpuStartProviderReady fingerprint=sha256:8529db6ec0d62d253c3a3cb1938062e69c8f8bddc0d1c902132b088bfbed14db */",
+    "anchor_fingerprint": "sha256:8529db6ec0d62d253c3a3cb1938062e69c8f8bddc0d1c902132b088bfbed14db"
   },
   {
     "checkpoint_index": 312,
@@ -379,7 +379,7 @@
     "checkpoint_variant": "ApSmpCallinPhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() definition line 210",
+    "linux_anchor": "smp_callin() definition line 211",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=ApSmpCallinPhase.Started variant=ApSmpCallinPhaseStarted fingerprint=sha256:f4bf2211aef4b017758b962e54d4af03ab7a672269c53ad5e14f58e0cd965555 */",
     "anchor_fingerprint": "sha256:f4bf2211aef4b017758b962e54d4af03ab7a672269c53ad5e14f58e0cd965555"
@@ -390,7 +390,7 @@
     "checkpoint_variant": "ApSmpCallinCpuRunningProduced",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 244: complete(&cpu_running);",
+    "linux_anchor": "smp_callin() line 245: complete(&cpu_running);",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=ApSmpCallinPhase.CpuRunningProduced variant=ApSmpCallinCpuRunningProduced fingerprint=sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66 */",
     "anchor_fingerprint": "sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66"
@@ -401,7 +401,7 @@
     "checkpoint_variant": "ApSmpCallinPhaseReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 244: complete(&cpu_running);",
+    "linux_anchor": "smp_callin() line 245: complete(&cpu_running);",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=ApSmpCallinPhase.Ready variant=ApSmpCallinPhaseReady fingerprint=sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66 */",
     "anchor_fingerprint": "sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66"
@@ -412,7 +412,7 @@
     "checkpoint_variant": "ApOnlineIdlePhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 249: local_irq_enable();",
+    "linux_anchor": "smp_callin() line 250: local_irq_enable();",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=ApOnlineIdlePhase.Started variant=ApOnlineIdlePhaseStarted fingerprint=sha256:986de6743ce3873bbe3119396afa419f702147c83cda21b8c340a4cabc85b0a5 */",
     "anchor_fingerprint": "sha256:986de6743ce3873bbe3119396afa419f702147c83cda21b8c340a4cabc85b0a5"
@@ -445,7 +445,7 @@
     "checkpoint_variant": "SecondaryCpuStartupAckReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "__cpu_up",
-    "linux_anchor": "__cpu_up() line 189: wait_for_completion_timeout(&cpu_running,",
+    "linux_anchor": "__cpu_up() line 190: wait_for_completion_timeout(&cpu_running,",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=SecondaryCpuStartupAck.Ready variant=SecondaryCpuStartupAckReady fingerprint=sha256:7a8abb5e3cd4ddd182a1a1479f40e4a9de925349905b0aa307ae1d0bea39fcca */",
     "anchor_fingerprint": "sha256:7a8abb5e3cd4ddd182a1a1479f40e4a9de925349905b0aa307ae1d0bea39fcca"

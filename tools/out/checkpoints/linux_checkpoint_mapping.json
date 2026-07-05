@@ -3525,7 +3525,7 @@
     "checkpoint_variant": "ApSmpCallinPhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() definition line 210",
+    "linux_anchor": "smp_callin() definition line 211",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux RISC-V C entry point for a secondary processor."
@@ -3536,7 +3536,7 @@
     "checkpoint_variant": "ApSmpCallinCpuRunningProduced",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 244: complete(&cpu_running);",
+    "linux_anchor": "smp_callin() line 245: complete(&cpu_running);",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux RISC-V AP completes cpu_running after online, IPI, cache and TLB setup."
@@ -3547,7 +3547,7 @@
     "checkpoint_variant": "ApSmpCallinPhaseReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 244: complete(&cpu_running);",
+    "linux_anchor": "smp_callin() line 245: complete(&cpu_running);",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux RISC-V smp_callin reaches the cpu_running completion boundary before enabling local IRQs."
@@ -3558,7 +3558,7 @@
     "checkpoint_variant": "ApOnlineIdlePhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "smp_callin",
-    "linux_anchor": "smp_callin() line 249: local_irq_enable();",
+    "linux_anchor": "smp_callin() line 250: local_irq_enable();",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux RISC-V AP online-idle path begins by enabling local interrupts after cpu_running."
@@ -3613,7 +3613,7 @@
     "checkpoint_variant": "SecondaryCpuStartupAckReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
     "linux_symbol": "__cpu_up",
-    "linux_anchor": "__cpu_up() line 189: wait_for_completion_timeout(&cpu_running,",
+    "linux_anchor": "__cpu_up() line 190: wait_for_completion_timeout(&cpu_running,",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux RISC-V BP-side __cpu_up waits for the AP cpu_running completion."

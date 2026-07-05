@@ -129,6 +129,6 @@ stop_after_stress_mem = true
 
 [metadata]
 observation_mode = "paired-checkpoint-diff"
-linux_exact_runtime_target_count = 88
+linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
 cumulative_scope = "stable exact-mapped checkpoint intersection declared by pd-0001 through pd-0004"
