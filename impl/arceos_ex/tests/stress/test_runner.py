@@ -168,6 +168,25 @@ class StressRunnerTests(unittest.TestCase):
             "checkpoint:EntryPreludePhase.Started",
         )
 
+    def test_uses_stress_mem_text_with_interleaved_prompt_echo(self) -> None:
+        text = (
+            "checkpoint: EntryPreludePhase.Started\n"
+            "checkpoint: PayloadPhase.Ready\n"
+        )
+        size = len(text.encode())
+        encoded = text.encode().hex()
+        split = len("checkpoint: EntryPrelude".encode().hex())
+        line = (
+            f"stress_mem: v=1 encoding=hex bytes={size} total={size} "
+            f"overflow=0 dropped=0 data={encoded[:split]}~ # exit\n"
+            f"{encoded[split:]}\n"
+            "[    1.548514] ---[ end Kernel panic ]---\n"
+        )
+        observed, stress_mem = runner._observed_text(line)
+
+        self.assertEqual(observed, text)
+        self.assertIsNotNone(stress_mem)
+
     def test_failure_rules_take_precedence_over_success_rules(self) -> None:
         rules = [
             {
@@ -317,6 +336,34 @@ class StressRunnerTests(unittest.TestCase):
         self.assertTrue(capture["stdin_sent"])
         self.assertEqual(capture["stdin_payload_bytes"], len("PayloadPhase.Online\n".encode()))
         self.assertEqual(observed, "checkpoint: PayloadPhase.Online\n")
+        self.assertIsNotNone(stress_mem)
+
+    def test_capture_until_stress_mem_tolerates_interleaved_prompt_echo(self) -> None:
+        text = "checkpoint: PayloadPhase.Ready\n"
+        encoded = text.encode().hex()
+        split = len("checkpoint: Payload".encode().hex())
+        prefix = (
+            "stress_mem: v=1 encoding=hex "
+            f"bytes={len(text.encode())} total={len(text.encode())} "
+            "overflow=0 dropped=0 data="
+        )
+        script = (
+            "import sys, time\n"
+            f"sys.stdout.write({(prefix + encoded[:split] + '~ # exit\n' + encoded[split:])!r})\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(30)\n"
+        )
+        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
+            [sys.executable, "-c", script],
+            Path.cwd(),
+            {},
+            5,
+        )
+        observed, stress_mem = runner._observed_text(stdout)
+
+        self.assertFalse(timed_out)
+        self.assertTrue(capture["terminated_after_stress_mem"])
+        self.assertEqual(observed, text)
         self.assertIsNotNone(stress_mem)
 
     def test_paired_config_parses_linux_build_command(self) -> None:

@@ -42,6 +42,14 @@ pub fn dispatch_pre_context(_checkpoint: Checkpoint) {
 }
 
 pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) {
+    dispatch_inner(checkpoint, ctx, true);
+}
+
+pub fn dispatch_after_trace(checkpoint: Checkpoint, ctx: &Context) {
+    dispatch_inner(checkpoint, ctx, false);
+}
+
+fn dispatch_inner(checkpoint: Checkpoint, ctx: &Context, include_announce: bool) {
     if !POST_VM_CHECKPOINTS_ENABLED.load(Ordering::Acquire) || !handlers::has_post_vm_handlers() {
         return;
     }
@@ -50,7 +58,11 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) {
         checkpoint_reentry_shutdown();
     }
 
-    let outcome = handlers::dispatch(checkpoint, ctx);
+    let outcome = if include_announce {
+        handlers::dispatch(checkpoint, ctx)
+    } else {
+        handlers::dispatch_without_announce(checkpoint, ctx)
+    };
     CHECKPOINT_HANDLER_ACTIVE.store(false, Ordering::Release);
     apply_outcome(checkpoint, outcome);
 }

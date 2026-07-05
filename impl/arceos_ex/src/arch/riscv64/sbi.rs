@@ -1,6 +1,8 @@
 const EID_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 const EID_LEGACY_SET_TIMER: usize = 0;
+const EID_HSM: usize = 0x4853_4d;
 const EID_SRST: usize = 0x5352_5354;
+const FID_HSM_HART_START: usize = 0;
 const FID_SYSTEM_RESET: usize = 0;
 const RESET_TYPE_SHUTDOWN: usize = 0;
 const RESET_REASON_NONE: usize = 0;
@@ -17,6 +19,15 @@ pub fn read_time() -> u64 {
     }
 
     value as u64
+}
+
+pub fn hart_start(hartid: usize, start_addr: usize, opaque: usize) -> Result<usize, usize> {
+    let (error, value) = sbi_call_3(EID_HSM, FID_HSM_HART_START, hartid, start_addr, opaque);
+    if error == 0 {
+        Ok(value)
+    } else {
+        Err(error)
+    }
 }
 
 pub fn putchar(byte: u8) {
@@ -88,6 +99,26 @@ fn sbi_call_2(eid: usize, fid: usize, arg0: usize, arg1: usize) -> (usize, usize
             "ecall",
             inlateout("a0") arg0 => error,
             inlateout("a1") arg1 => value,
+            in("a6") fid,
+            in("a7") eid,
+            options(nostack)
+        );
+    }
+
+    (error, value)
+}
+
+#[inline(always)]
+fn sbi_call_3(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> (usize, usize) {
+    let error: usize;
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            inlateout("a0") arg0 => error,
+            inlateout("a1") arg1 => value,
+            in("a2") arg2,
             in("a6") fid,
             in("a7") eid,
             options(nostack)

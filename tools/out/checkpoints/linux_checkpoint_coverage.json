@@ -1,31 +1,31 @@
 {
-  "total_checkpoints": 402,
+  "total_checkpoints": 415,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
-      "count": 88
+      "count": 103
     },
     {
       "mapping_kind": "range",
-      "count": 12
+      "count": 14
     },
     {
       "mapping_kind": "unmapped",
-      "count": 302
+      "count": 298
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 302
+      "count": 298
     },
     {
       "confidence": "medium",
-      "count": 60
+      "count": 62
     },
     {
       "confidence": "high",
-      "count": 40
+      "count": 55
     }
   ],
   "mapped_linux_file_counts": [
@@ -35,15 +35,23 @@
     },
     {
       "linux_file": "arch/riscv/kernel/head.S",
-      "count": 10
+      "count": 14
     },
     {
       "linux_file": "arch/riscv/mm/init.c",
       "count": 7
     },
     {
+      "linux_file": "arch/riscv/kernel/smpboot.c",
+      "count": 6
+    },
+    {
       "linux_file": "fs/binfmt_elf.c",
       "count": 6
+    },
+    {
+      "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
+      "count": 4
     },
     {
       "linux_file": "fs/exec.c",
@@ -70,6 +78,10 @@
       "count": 2
     },
     {
+      "linux_file": "kernel/cpu.c",
+      "count": 2
+    },
+    {
       "linux_file": "kernel/fork.c",
       "count": 2
     },
@@ -83,6 +95,10 @@
     },
     {
       "linux_file": "kernel/sched/core.c",
+      "count": 1
+    },
+    {
+      "linux_file": "kernel/sched/idle.c",
       "count": 1
     },
     {
@@ -129,10 +145,6 @@
     },
     {
       "family": "Completion",
-      "count": 3
-    },
-    {
-      "family": "CpuStartProvider",
       "count": 3
     },
     {
@@ -229,10 +241,6 @@
     },
     {
       "family": "RcuCore",
-      "count": 2
-    },
-    {
-      "family": "SecondaryCpuOnlineAck",
       "count": 2
     },
     {
@@ -417,6 +425,10 @@
     },
     {
       "family": "CpuRunningWaitLock",
+      "count": 1
+    },
+    {
+      "family": "CpuStartProvider",
       "count": 1
     },
     {
@@ -772,7 +784,7 @@
       "count": 1
     },
     {
-      "family": "SecondaryCpuStartupAck",
+      "family": "SecondaryCpuOnlineAck",
       "count": 1
     },
     {
@@ -972,5 +984,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 171
+  "unmapped_singleton_family_count": 172
 }

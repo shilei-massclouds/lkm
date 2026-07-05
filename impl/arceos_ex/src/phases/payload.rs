@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU8;
 use crate::{
     objects::{
         printk,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
@@ -14,7 +14,7 @@ static PAYLOAD_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encod
 pub fn setup_then_enable() -> ! {
     crate::phases::shutdown_on_error(setup(), "arceos_ex payload setup failed\n");
     crate::phases::shutdown_on_error(enable(), "arceos_ex payload enable failed\n");
-    crate::checkpoint::dispatch(
+    crate::checkpoint::dispatch_after_trace(
         Checkpoint::PayloadPhaseOnline,
         crate::context::context_ref(),
     );

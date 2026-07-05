@@ -16,6 +16,9 @@ pub fn run() -> SmokeResult {
     if ctx.secondary_idle_tasks.state() != State::Prepared
         || ctx.secondary_idle_tasks.prepared_count() != ctx.cpu_group.secondary_count()
         || !ctx.secondary_idle_tasks.inactive()
+        || !ctx.secondary_idle_tasks.per_secondary_idle_task()
+        || !ctx.secondary_idle_tasks.dedicated_stack()
+        || !ctx.secondary_idle_tasks.pt_regs_stack_pointer()
     {
         printk::write_str("secondary idle task facts invalid\n");
         return SmokeResult::Failed;
@@ -61,19 +64,43 @@ pub fn run() -> SmokeResult {
 
     if ctx.cpu_start_provider.state() != State::Ready
         || !ctx.cpu_start_provider.start_requests_issued()
-        || !ctx.cpu_start_provider.ap_entry_detail_deferred()
+        || !ctx.cpu_start_provider.secondary_start_sbi_selected()
+        || !ctx.cpu_start_provider.boot_data_selected()
+        || !ctx.cpu_start_provider.hsm_start_requests_issued()
+        || !ctx.cpu_start_provider.hsm_start_return_observed()
+        || !ctx.cpu_start_provider.boot_data_per_secondary_cpu()
+        || !ctx.cpu_start_provider.boot_data_task_ptr_is_idle_task()
+        || !ctx
+            .cpu_start_provider
+            .boot_data_stack_ptr_is_pt_regs_stack()
         || !ctx.cpu_start_provider.cpu_add_remove_mutex_guard_used()
         || !ctx.cpu_start_provider.cpu_hotplug_write_guard_used()
         || !ctx
             .cpu_start_provider
             .sbi_boot_data_publish_barriers_observed()
+        || ctx.ap_entry_prelude_phase.state() != State::Ready
+        || !ctx.ap_entry_prelude_phase.entry_reached()
+        || !ctx.ap_entry_prelude_phase.boot_data_consumed()
+        || !ctx.ap_entry_prelude_phase.current_stack_established()
+        || !ctx.ap_entry_prelude_phase.swapper_vm_selected()
+        || !ctx.ap_entry_prelude_phase.formal_event_entry_installed()
+        || ctx.ap_smp_callin_phase.state() != State::Ready
+        || !ctx.ap_smp_callin_phase.cpu_running_completion_produced()
+        || !ctx.ap_smp_callin_phase.ipi_enable_observed()
+        || !ctx.ap_smp_callin_phase.cache_tlb_flush_observed()
+        || ctx.ap_online_idle_phase.state() != State::Ready
+        || !ctx.ap_online_idle_phase.done_up_completion_produced()
+        || !ctx.ap_online_idle_phase.idle_or_park_loop_entered()
         || ctx.secondary_cpu_startup_ack.state() != State::Ready
         || !ctx.secondary_cpu_startup_ack.acknowledged()
-        || !ctx.secondary_cpu_startup_ack.ap_entry_detail_deferred()
+        || !ctx
+            .secondary_cpu_startup_ack
+            .ap_smp_callin_ack_matches_secondary_cpu()
         || ctx.secondary_cpu_online_ack.state() != State::Ready
         || !ctx.secondary_cpu_online_ack.acknowledged()
-        || !ctx.secondary_cpu_online_ack.ap_idle_detail_deferred()
-        || !ctx.secondary_cpu_online_ack.ap_local_irq_enable_deferred()
+        || !ctx.secondary_cpu_online_ack.online_after_ap_ack()
+        || !ctx.secondary_cpu_online_ack.ap_idle_or_park_loop_entered()
+        || !ctx.secondary_cpu_online_ack.ap_local_irq_enable_observed()
         || !ctx
             .secondary_cpu_online_ack
             .ap_cache_tlb_flush_summary_observed()

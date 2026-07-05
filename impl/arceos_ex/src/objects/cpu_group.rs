@@ -268,7 +268,7 @@ impl CpuGroup {
         Ok(())
     }
 
-    pub fn mark_secondary_cpus_online(
+    pub fn mark_secondary_cpus_online_after_ap_ack(
         &mut self,
         secondary_cpus: &mut SecondaryCpuStore,
     ) -> EventResult {

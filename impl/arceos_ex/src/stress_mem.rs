@@ -38,6 +38,8 @@ pub fn capture_byte(byte: u8) {
         return;
     }
 
+    sbi::putchar_raw(byte);
+
     let index = WRITE.fetch_add(1, Ordering::Relaxed);
     if index >= BUFFER_CAPACITY {
         OVERFLOWED.store(true, Ordering::Release);

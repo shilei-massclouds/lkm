@@ -54,6 +54,11 @@ STRESS_MEM_RE = re.compile(
     r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
     r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data=(?P<data>[0-9a-f]*)$"
 )
+STRESS_MEM_HEADER_RE = re.compile(
+    r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
+    r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data="
+)
+STRESS_MEM_PROMPT_ECHO_RE = re.compile(r"(?:~|/) # [^\r\n]*(?:\r?\n)?")
 EARLY_CHECKPOINT_BYTES = {
     "A": "EntryPreludePhase.Started",
     "I": "InterruptStream.Prepared",
@@ -891,6 +896,48 @@ def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
             "overflow": match.group("overflow") == "1",
             "dropped": int(match.group("dropped")),
         }
+    parsed = _parse_stress_mem_stream(stdout)
+    if parsed is not None:
+        return parsed
+    return None
+
+
+def _parse_stress_mem_stream(stdout: str) -> tuple[str, dict[str, Any]] | None:
+    normalized = ANSI_RE.sub("", stdout)
+    matches = list(STRESS_MEM_HEADER_RE.finditer(normalized))
+    for match in reversed(matches):
+        expected_bytes = int(match.group("bytes"))
+        expected_hex_len = expected_bytes * 2
+        data_segment = STRESS_MEM_PROMPT_ECHO_RE.sub("", normalized[match.end() :])
+        hex_data = _take_hex_payload(data_segment, expected_hex_len)
+        if hex_data is None:
+            continue
+        data = bytes.fromhex(hex_data)
+        text = data.decode("utf-8", errors="replace")
+        line_start = normalized.rfind("\n", 0, match.start()) + 1
+        early_prefix = _stress_mem_early_prefix(normalized[line_start : match.start()].strip())
+        if early_prefix:
+            text = early_prefix + "\n" + text
+        return text, {
+            "bytes": expected_bytes,
+            "total": int(match.group("total")),
+            "overflow": match.group("overflow") == "1",
+            "dropped": int(match.group("dropped")),
+        }
+    return None
+
+
+def _take_hex_payload(data_segment: str, expected_hex_len: int) -> str | None:
+    chars: list[str] = []
+    for char in data_segment:
+        if char in "0123456789abcdef":
+            chars.append(char)
+            if len(chars) == expected_hex_len:
+                return "".join(chars)
+            continue
+        if char.isspace():
+            continue
+        return None
     return None
 
 

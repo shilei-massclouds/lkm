@@ -57,12 +57,37 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.cpu_group,
         &ctx.secondary_idle_tasks,
         &ctx.cpu_hotplug_sync,
+        &ctx.sbi,
         &ctx.sbi_ipi,
+        &ctx.kernel_image,
+        &ctx.static_objects,
+        &ctx.lds,
         &mut ctx.cpu_add_remove_lock,
         &mut ctx.cpu_hotplug_lock,
     )?;
+    ctx.ap_entry_prelude_phase.setup(
+        &ctx.cpu_start_provider,
+        &ctx.cpu_group,
+        &ctx.secondary_idle_tasks,
+        &ctx.vm,
+        &ctx.event_stream,
+        &ctx.exception_stream,
+    )?;
+    ctx.ap_smp_callin_phase.setup(
+        &ctx.ap_entry_prelude_phase,
+        &ctx.cpu_group,
+        &ctx.cpu_hotplug_sync,
+        &ctx.sbi_ipi,
+        &ctx.init_mm,
+    )?;
+    ctx.ap_online_idle_phase.setup(
+        &ctx.ap_smp_callin_phase,
+        &ctx.cpu_group,
+        &ctx.cpu_hotplug_sync,
+    )?;
     ctx.secondary_cpu_startup_ack.setup(
         &ctx.cpu_start_provider,
+        &ctx.ap_smp_callin_phase,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_running_wait_lock,
         &mut ctx.boot_cpu_local_interrupt,
@@ -70,6 +95,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.secondary_cpu_online_ack.setup(
         &ctx.secondary_cpu_startup_ack,
+        &ctx.ap_online_idle_phase,
+        &ctx.ap_smp_callin_phase,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_group,
         &mut ctx.secondary_cpus,
@@ -117,6 +144,9 @@ fn smp_bringup_phase_ready(ctx: &Context) -> bool {
         &ctx.cpu_running_wait_lock,
         &ctx.done_up_wait_lock,
         &ctx.cpu_start_provider,
+        &ctx.ap_entry_prelude_phase,
+        &ctx.ap_smp_callin_phase,
+        &ctx.ap_online_idle_phase,
         &ctx.secondary_cpu_startup_ack,
         &ctx.secondary_cpu_online_ack,
         &ctx.smp_bringup_boundary,

@@ -94,6 +94,14 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 - SBI 能力探测应集中形成 `SBI` 能力视图。
 - `SBI` 对象负责记录能力事实，不把每一次具体 SBI 调用都建模为自身生命周期 transition。
 - Early console、timer、IPI、rfence 等对象应依赖 SBI 能力事实，而不是各自重复探测固件能力。
+- SMP AP 启动必须使用 OpenSBI ordered booting + SBI HSM hart_start 语义。BP 侧为每个 secondary CPU 发布
+  Linux-like `sbi_hart_boot_data { task_ptr, stack_ptr }`，其中 `task_ptr` 指向该 AP 自己的 idle task，
+  `stack_ptr` 指向该 AP task 的 pt_regs/栈顶边界；随后以 `secondary_start_sbi` 作为 AP 汇编入口调用
+  HSM `hart_start(hartid, entry_pa, boot_data_pa)`。实现不得把 BP `_start` 复用于 AP，也不得在当前规格下
+  新增 spinwait booting fallback。
+- AP 入口路径应对齐 Linux RISC-V `secondary_start_sbi -> smp_callin -> cpu_startup_entry` 的阶段划分：
+  AP 先消费 HSM boot data 并建立自己的 current task/stack，再在 `smp_callin()` 产生 `cpu_running`，
+  最后进入 `CPUHP_AP_ONLINE_IDLE` 产生 `done_up`。这些边界必须能通过 checkpoint 定位。
 - 第一轮 `EarlyCon` 使用 SBI early console 后端，不继承 ArceOS RISC-V64 QEMU virt 当前的 NS16550 UART console 路径。
 
 ## Checkpoint Announce

@@ -257,12 +257,65 @@ pub const fn kunit_case_count() -> usize {
     checkpoint_handler_user_boot_failure
 ))]
 pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+    dispatch_filtered(checkpoint, ctx, true)
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain,
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_blk,
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
+))]
+pub fn dispatch_without_announce(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+    dispatch_filtered(checkpoint, ctx, false)
+}
+
+#[cfg(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain,
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_blk,
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
+))]
+fn dispatch_filtered(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    include_announce: bool,
+) -> CheckpointOutcome {
     let mut current_priority = next_priority(checkpoint, None);
     while let Some(priority) = current_priority {
         let mut index = 0usize;
         while index < POST_VM_HANDLERS.len() {
             let handler = &POST_VM_HANDLERS[index];
-            if handler.priority == priority && handler_matches(handler, checkpoint) {
+            if (!include_announce && handler.name == "announce")
+                || handler.priority != priority
+                || !handler_matches(handler, checkpoint)
+            {
+                index += 1;
+                continue;
+            }
+            {
                 let outcome = match handler.run {
                     HandlerRun::Observe(run) => {
                         let mut sink = KtapSink;
@@ -299,6 +352,27 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     checkpoint_handler_user_boot_failure
 )))]
 pub fn dispatch(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
+    CheckpointOutcome::Continue
+}
+
+#[cfg(not(any(
+    checkpoint_handler_announce,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain,
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_blk,
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot,
+    checkpoint_handler_user_boot_failure
+)))]
+pub fn dispatch_without_announce(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
     CheckpointOutcome::Continue
 }
 

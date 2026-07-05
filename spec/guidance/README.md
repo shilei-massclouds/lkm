@@ -59,7 +59,8 @@ Linux marker patch 只能由已提交 `linux_checkpoint_instrumentation_plan.jso
 - [`../model/SEMANTICS.md`](../model/SEMANTICS.md) 中 `SEM-CURRENT-CPU-MODEL-001`
 - [`../model/boot/entry-prelude/phase.spec`](../model/boot/entry-prelude/phase.spec)
 - [`../model/boot/entry-successor/phase.spec`](../model/boot/entry-successor/phase.spec)
+- [`../model/phases/smp-runtime/smp-bringup/phase.spec`](../model/phases/smp-runtime/smp-bringup/phase.spec)
 - [`../coding/arceos_ex.spec`](../coding/arceos_ex.spec)
 - [`../coding/arceos_ex.md`](../coding/arceos_ex.md)
 
-生成结果必须使用统一 CPU 实例模型：`BootCPU` 是 logical id `0` 的 bootstrap-role CPU 实例，secondary CPU 复用同一类型。`CpuGroup` 维护 `CpuGroup.Cpu[id]` 引用索引和 possible/present/online 集合视图；集合元素是 CPU 引用，不是新的 CPU 本体对象。AP 真实进入 secondary entry 前，不得生成 live AP `CurrentCPU` 或 CPU-local 控制链。测试生成必须覆盖 index 0、CpuRef target、possible/present/online 集合视图、secondary not-online 和 logical-id/hartid 唯一性边界。
+生成结果必须使用统一 CPU 实例模型：`BootCPU` 是 logical id `0` 的 bootstrap-role CPU 实例，secondary CPU 复用同一类型。`CpuGroup` 维护 `CpuGroup.Cpu[id]` 引用索引和 possible/present/online 集合视图；集合元素是 CPU 引用，不是新的 CPU 本体对象。AP 真实进入 `ApEntryPreludePhase` 前，不得生成 live AP `CurrentCPU` 或 CPU-local 控制链；AP current/task/stack facts 必须来自 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`，不能从 possible/present membership 或 BP HSM request 直接推断。测试生成必须覆盖 index 0、CpuRef target、possible/present/online 集合视图、secondary not-online、per-AP idle task/stack、AP ack 后 online 和 logical-id/hartid 唯一性边界。

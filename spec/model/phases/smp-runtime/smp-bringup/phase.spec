@@ -1,10 +1,12 @@
 /*
  * SMP Bringup Phase Specification
  *
- * This is SMP Runtime Phase subphase 2. It covers smp_init() on the boot
- * processor side, from idle_threads_init() through smp_cpus_done(). AP-side
- * internals are summarized as ack-producing actions, but the BP/AP
- * synchronization completions remain explicit model facts.
+ * This is SMP Runtime Phase subphase 2. It covers BP-side smp_init() from
+ * idle_threads_init() through smp_cpus_done(), plus the AP-side bringup phases
+ * reached through RISC-V SBI HSM ordered booting. BP and AP execution are
+ * separate phase lines: the BP issues hart_start requests and waits on Linux
+ * completion gates, while each AP runs its own secondary_start_sbi entry,
+ * smp_callin() body and online-idle handoff before producing the ack facts.
  */
 
 lock CpuRunningWaitLock: RawSpinLock;
@@ -242,7 +244,10 @@ context DoneUpCompletionWaitLockContext: ResourceExclusiveContext {
 
 /*
  * SecondaryIdleTaskSet 表示 idle_threads_init() 为 possible non-boot CPU
- * 准备 inactive idle task。它不启动 CPU，也不让 idle task 进入运行。
+ * 准备 inactive idle task。每个 secondary CPU 都有自己的 idle task 和
+ * 对应 kernel stack / pt_regs 栈顶；这些对象是 CPU 关联的 per-CPU
+ * task/stack 事实，不是 CpuGroup 拥有的 CPU 本体。它不启动 CPU，也不让
+ * idle task 进入运行。
  */
 object SecondaryIdleTaskSet: TaskObject {
     initial_state: State::Base;
@@ -260,6 +265,10 @@ object SecondaryIdleTaskSet: TaskObject {
 
                 ensures {
                     secondary_idle_tasks_prepared(CpuGroup);
+                    secondary_idle_task_per_secondary_cpu(CpuGroup);
+                    secondary_idle_task_bound_to_cpu_ref(CpuGroup);
+                    secondary_idle_task_has_dedicated_stack(CpuGroup);
+                    secondary_idle_task_pt_regs_stack_pointer_ready(CpuGroup);
                     secondary_idle_tasks_inactive(CpuGroup);
                     secondary_cpus_present_but_not_online(CpuGroup);
                 }
@@ -270,6 +279,10 @@ object SecondaryIdleTaskSet: TaskObject {
     state State::Prepared {
         invariant {
             secondary_idle_tasks_prepared(CpuGroup);
+            secondary_idle_task_per_secondary_cpu(CpuGroup);
+            secondary_idle_task_bound_to_cpu_ref(CpuGroup);
+            secondary_idle_task_has_dedicated_stack(CpuGroup);
+            secondary_idle_task_pt_regs_stack_pointer_ready(CpuGroup);
             secondary_idle_tasks_inactive(CpuGroup);
             secondary_cpus_present_but_not_online(CpuGroup);
         }
@@ -341,8 +354,11 @@ object CpuHotplugSyncSet: KernelObject {
 }
 
 /*
- * CpuStartProvider 表示 BP side 的 arch/SBI CPU start provider。本轮只
- * 记录 BP 已发出启动请求，AP 入口内部按 summary action 处理。
+ * CpuStartProvider 表示 BP side 的 arch/SBI CPU start provider。RISC-V
+ * ordered booting 路径必须对齐 Linux cpu_ops_sbi.cpu_start():
+ * 为每个目标 secondary CPU 写入 struct sbi_hart_boot_data 等价事实
+ * { task_ptr, stack_ptr }，用 smp_mb() 等价 ordering 发布，然后调用
+ * SBI_EXT_HSM_HART_START(hartid, __pa_symbol(secondary_start_sbi), hsm_data)。
  */
 object CpuStartProvider: HardwareObject {
     initial_state: State::Base;
@@ -355,6 +371,8 @@ object CpuStartProvider: HardwareObject {
                     CpuGroup.state == State::Ready;
                     SecondaryIdleTaskSet.state == State::Prepared;
                     CpuHotplugSyncSet.state == State::Prepared;
+                    SBI.state == State::Ready;
+                    sbi_hsm_extension_available(SBI);
                     SbiIpi.state == State::Ready;
                     CpuAddRemoveLock.state == State::Ready;
                     CpuHotplugLock.state == State::Ready;
@@ -378,7 +396,18 @@ object CpuStartProvider: HardwareObject {
                 ensures {
                     cpu_start_provider_ready(CpuStartProvider);
                     bp_cpu_start_requests_issued(CpuStartProvider, CpuGroup);
-                    ap_entry_detail_deferred(CpuStartProvider);
+                    bp_selects_secondary_start_sbi_entry(CpuStartProvider);
+                    sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
+                    sbi_hsm_hart_start_return_observed(CpuStartProvider, CpuGroup);
+                    sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
+                    sbi_hart_boot_data_task_ptr_is_secondary_idle_task(
+                        CpuStartProvider,
+                        SecondaryIdleTaskSet
+                    );
+                    sbi_hart_boot_data_stack_ptr_is_secondary_pt_regs_stack(
+                        CpuStartProvider,
+                        SecondaryIdleTaskSet
+                    );
                     cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
@@ -391,7 +420,18 @@ object CpuStartProvider: HardwareObject {
         invariant {
             cpu_start_provider_ready(CpuStartProvider);
             bp_cpu_start_requests_issued(CpuStartProvider, CpuGroup);
-            ap_entry_detail_deferred(CpuStartProvider);
+            bp_selects_secondary_start_sbi_entry(CpuStartProvider);
+            sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
+            sbi_hsm_hart_start_return_observed(CpuStartProvider, CpuGroup);
+            sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
+            sbi_hart_boot_data_task_ptr_is_secondary_idle_task(
+                CpuStartProvider,
+                SecondaryIdleTaskSet
+            );
+            sbi_hart_boot_data_stack_ptr_is_secondary_pt_regs_stack(
+                CpuStartProvider,
+                SecondaryIdleTaskSet
+            );
             cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
             cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
             sbi_boot_data_publish_barriers_observed(CpuStartProvider);
@@ -400,8 +440,158 @@ object CpuStartProvider: HardwareObject {
 }
 
 /*
- * SecondaryCpuStartupAck 表示 AP summary path 完成 cpu_running。
- * 它不展开 secondary_start_sbi/smp_callin 内部细节。
+ * ApEntryPreludePhase 是每个 AP 从 SBI HSM 进入 secondary_start_sbi 后
+ * 执行的 AP 专属入口先导期。它不同于 BP EntryPreludePhase：不建立
+ * BootCurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
+ * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
+ * SwapperVm，并安装正式 trap vector。
+ */
+object ApEntryPreludePhase: PhaseObject {
+    initial_state: State::Base;
+    parent: SmpBringupPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    CpuStartProvider.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    SwapperVm.state == State::Online;
+                    EventStream.state == State::Ready;
+                    ExceptionStream.state == State::Ready;
+                    sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
+                    sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
+                    secondary_idle_task_per_secondary_cpu(CpuGroup);
+                    secondary_cpus_present_but_not_online(CpuGroup);
+                }
+
+                ensures {
+                    ap_secondary_start_sbi_entry_reached(CpuGroup);
+                    ap_entry_uses_logical_secondary_cpu(CpuGroup);
+                    ap_entry_does_not_create_boot_current_cpu(CpuGroup);
+                    ap_entry_consumes_sbi_hart_boot_data(CpuStartProvider, CpuGroup);
+                    ap_current_task_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+                    ap_stack_is_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+                    ap_pt_regs_pointer_established(CpuGroup, SecondaryIdleTaskSet);
+                    ap_kernel_fpu_vector_disabled(CpuGroup);
+                    ap_interrupts_masked_on_entry(CpuGroup);
+                    ap_switches_to_swapper_vm(SwapperVm);
+                    ap_formal_event_entry_installed(EventStream, ExceptionStream);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ap_secondary_start_sbi_entry_reached(CpuGroup);
+            ap_entry_uses_logical_secondary_cpu(CpuGroup);
+            ap_entry_does_not_create_boot_current_cpu(CpuGroup);
+            ap_entry_consumes_sbi_hart_boot_data(CpuStartProvider, CpuGroup);
+            ap_current_task_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+            ap_stack_is_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_pt_regs_pointer_established(CpuGroup, SecondaryIdleTaskSet);
+            ap_switches_to_swapper_vm(SwapperVm);
+            ap_formal_event_entry_installed(EventStream, ExceptionStream);
+        }
+    }
+}
+
+/*
+ * ApSmpCallinPhase 是 AP 的 C/Rust bringup 主体，对齐 Linux smp_callin()。
+ * 它在 AP 已经具备 current idle task 和正式 trap vector 后运行，发布
+ * set_cpu_online() 与 complete(cpu_running) 事实。
+ */
+object ApSmpCallinPhase: PhaseObject {
+    initial_state: State::Base;
+    parent: SmpBringupPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    ApEntryPreludePhase.state == State::Ready;
+                    CpuHotplugSyncSet.state == State::Prepared;
+                    SbiIpi.state == State::Ready;
+                    InitMM.state == State::Ready;
+                    cpu_hotplug_cpu_running_completion_ready(CpuGroup);
+                }
+
+                ensures {
+                    ap_smp_callin_reached(CpuGroup);
+                    ap_current_active_mm_is_init_mm(CpuGroup, InitMM);
+                    ap_topology_recorded(CpuGroup);
+                    ap_notify_cpu_starting_observed(CpuGroup);
+                    ap_ipi_enable_observed(ApSmpCallinPhase);
+                    ap_cpu_online_fact_published(CpuGroup);
+                    ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ap_smp_callin_reached(CpuGroup);
+            ap_current_active_mm_is_init_mm(CpuGroup, InitMM);
+            ap_topology_recorded(CpuGroup);
+            ap_ipi_enable_observed(ApSmpCallinPhase);
+            ap_cpu_online_fact_published(CpuGroup);
+            ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+            ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+        }
+    }
+}
+
+/*
+ * ApOnlineIdlePhase 表示 AP 在 complete(cpu_running) 之后打开本地中断，
+ * 进入 cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)，并由 CPUHP AP online
+ * idle 边界产生 done_up completion。当前不展开完整 idle loop、AP 调度
+ * 或 hotplug callback，只要求 AP 已进入独立 idle/park 运行线。
+ */
+object ApOnlineIdlePhase: PhaseObject {
+    initial_state: State::Base;
+    parent: SmpBringupPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    ApSmpCallinPhase.state == State::Ready;
+                    CpuHotplugSyncSet.state == State::Prepared;
+                    cpu_hotplug_done_up_completion_ready(CpuGroup);
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                }
+
+                ensures {
+                    ap_local_irq_enable_observed(ApOnlineIdlePhase);
+                    ap_cpu_startup_entry_reached(ApOnlineIdlePhase);
+                    ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
+                    ap_done_up_completion_produced(CpuHotplugSyncSet);
+                    ap_idle_or_park_loop_entered(CpuGroup);
+                    ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ap_local_irq_enable_observed(ApOnlineIdlePhase);
+            ap_cpu_startup_entry_reached(ApOnlineIdlePhase);
+            ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
+            ap_done_up_completion_produced(CpuHotplugSyncSet);
+            ap_idle_or_park_loop_entered(CpuGroup);
+            ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
+        }
+    }
+}
+
+/*
+ * SecondaryCpuStartupAck 表示 BP 侧观察 AP 已完成 cpu_running。AP 生产
+ * 该 completion 的路径由 ApSmpCallinPhase 建模；本对象只覆盖 BP
+ * wait_for_completion_timeout() 一侧的 wait.lock 观察边界。
  */
 object SecondaryCpuStartupAck: HardwareObject {
     initial_state: State::Base;
@@ -412,9 +602,11 @@ object SecondaryCpuStartupAck: HardwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuStartProvider.state == State::Ready;
+                    ApSmpCallinPhase.state == State::Ready;
                     CpuHotplugSyncSet.state == State::Prepared;
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
                 }
 
                 within CpuRunningCompletionWaitLockContext {
@@ -438,7 +630,7 @@ object SecondaryCpuStartupAck: HardwareObject {
                 ensures {
                     ap_startup_acknowledged(CpuGroup);
                     cpu_running_completion_observed(CpuGroup);
-                    ap_secondary_entry_details_deferred(CpuGroup);
+                    ap_smp_callin_ack_matches_secondary_cpu(CpuGroup);
                     cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
                 }
             }
@@ -449,15 +641,16 @@ object SecondaryCpuStartupAck: HardwareObject {
         invariant {
             ap_startup_acknowledged(CpuGroup);
             cpu_running_completion_observed(CpuGroup);
-            ap_secondary_entry_details_deferred(CpuGroup);
+            ap_smp_callin_ack_matches_secondary_cpu(CpuGroup);
             cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
         }
     }
 }
 
 /*
- * SecondaryCpuOnlineAck 表示 AP 到达 CPUHP_AP_ONLINE_IDLE 并 complete done_up。
- * 当前只发布 BP 可继续执行所需的 online 边界和同步事实。
+ * SecondaryCpuOnlineAck 表示 BP 侧观察 AP 已到达 CPUHP_AP_ONLINE_IDLE 并
+ * complete done_up。CpuGroup online 集合只能在该 AP ack 事实之后更新；
+ * BP 不得仅凭 start request 模拟推进 secondary online。
  */
 object SecondaryCpuOnlineAck: HardwareObject {
     initial_state: State::Base;
@@ -468,9 +661,11 @@ object SecondaryCpuOnlineAck: HardwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     SecondaryCpuStartupAck.state == State::Ready;
+                    ApOnlineIdlePhase.state == State::Ready;
                     CpuHotplugSyncSet.state == State::Prepared;
                     SbiIpi.state == State::Ready;
                     cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
+                    ap_done_up_completion_produced(CpuHotplugSyncSet);
                 }
 
                 within DoneUpCompletionWaitLockContext {
@@ -491,13 +686,14 @@ object SecondaryCpuOnlineAck: HardwareObject {
                 ensures {
                     ap_online_acknowledged(CpuGroup);
                     done_up_completion_observed(CpuGroup);
+                    secondary_cpus_online_after_ap_ack(CpuGroup);
                     secondary_cpus_online(CpuGroup);
                     smp_concurrency_open(CpuGroup);
                     ap_idle_entry_detail_deferred(CpuGroup);
                     done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-                    ap_local_irq_enable_summary_deferred(SecondaryCpuOnlineAck);
-                    ap_cache_tlb_flush_summary_observed(SecondaryCpuOnlineAck);
-                    ap_ipi_enable_observed(SecondaryCpuOnlineAck);
+                    ap_local_irq_enable_observed(ApOnlineIdlePhase);
+                    ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+                    ap_ipi_enable_observed(ApSmpCallinPhase);
                     ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
                 }
             }
@@ -508,13 +704,14 @@ object SecondaryCpuOnlineAck: HardwareObject {
         invariant {
             ap_online_acknowledged(CpuGroup);
             done_up_completion_observed(CpuGroup);
+            secondary_cpus_online_after_ap_ack(CpuGroup);
             secondary_cpus_online(CpuGroup);
             smp_concurrency_open(CpuGroup);
             ap_idle_entry_detail_deferred(CpuGroup);
             done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-            ap_local_irq_enable_summary_deferred(SecondaryCpuOnlineAck);
-            ap_cache_tlb_flush_summary_observed(SecondaryCpuOnlineAck);
-            ap_ipi_enable_observed(SecondaryCpuOnlineAck);
+            ap_local_irq_enable_observed(ApOnlineIdlePhase);
+            ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+            ap_ipi_enable_observed(ApSmpCallinPhase);
             ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
         }
     }
@@ -553,8 +750,11 @@ object SmpBringupBoundary: KernelObject {
 }
 
 /*
- * SmpBringupPhase 表示 smp_init() 的 BP-focused 最小正式边界。AP side
- * 细节暂不展开，但 cpu_running/done_up 等同步事实必须保留。
+ * SmpBringupPhase 表示 smp_init() 的 BP/AP 组合边界。BP side 由
+ * KernelInitTask 驱动 idle_threads_init()/bringup_nonboot_cpus() 并等待
+ * completions；AP side 由 HSM 启动后的 ApEntryPreludePhase、
+ * ApSmpCallinPhase 和 ApOnlineIdlePhase 驱动。二者通过 cpu_running
+ * 和 done_up completion 连接。
  */
 object SmpBringupPhase: PhaseObject {
     initial_state: State::Base;
@@ -585,6 +785,9 @@ object SmpBringupPhase: PhaseObject {
                     CpuAddRemoveLock.Transition::Preset;
                     CpuAddRemoveLock.Transition::Setup;
                     CpuStartProvider.Transition::Setup;
+                    ApEntryPreludePhase.Transition::Setup;
+                    ApSmpCallinPhase.Transition::Setup;
+                    ApOnlineIdlePhase.Transition::Setup;
                     SecondaryCpuStartupAck.Transition::Setup;
                     SecondaryCpuOnlineAck.Transition::Setup;
                     SmpBringupBoundary.Transition::Setup;
@@ -593,9 +796,18 @@ object SmpBringupPhase: PhaseObject {
                 ensures {
                     smp_bringup_phase_ready(SmpBringupPhase);
                     secondary_idle_tasks_prepared(CpuGroup);
+                    secondary_idle_task_per_secondary_cpu(CpuGroup);
+                    secondary_idle_task_has_dedicated_stack(CpuGroup);
+                    sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
+                    sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
+                    ap_secondary_start_sbi_entry_reached(CpuGroup);
+                    ap_smp_callin_reached(CpuGroup);
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                    ap_done_up_completion_produced(CpuHotplugSyncSet);
                     cpu_hotplug_sync_gates_prepared(CpuGroup);
                     cpu_running_completion_observed(CpuGroup);
                     done_up_completion_observed(CpuGroup);
+                    secondary_cpus_online_after_ap_ack(CpuGroup);
                     secondary_cpus_online(CpuGroup);
                     smp_concurrency_open(CpuGroup);
                     cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
@@ -605,13 +817,13 @@ object SmpBringupPhase: PhaseObject {
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
                     cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
                     done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-                    ap_cache_tlb_flush_summary_observed(SecondaryCpuOnlineAck);
-                    ap_ipi_enable_observed(SecondaryCpuOnlineAck);
+                    ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+                    ap_ipi_enable_observed(ApSmpCallinPhase);
+                    ap_local_irq_enable_observed(ApOnlineIdlePhase);
                 }
 
                 deferred {
-                    "AP secondary_start_sbi / smp_callin() 内部细节留给后续 AP 侧展开。";
-                    "AP local_irq_enable() 的真实 live AP LocalInterruptControl 边界留给后续 AP 当前 CPU 模型，本轮只保留 summary fact。";
+                    "AP full local CurrentCPU/LocalInterruptControl/CurrentTaskSlot 对象链在 AP phase 内只记录最小事实；完整 CPU-local 控制对象后续展开。";
                     "AP hotplug thread should_run smp_mb() 配对和 callbacks 内部细节留给后续 CPU hotplug 模型，本轮保留 memory-ordering deferred fact。";
                     "AP hotplug thread callback 细节留给后续 CPU hotplug 模型。";
                     "FinalizePhase 内部的 async/initmem/mapping/sysctl 细节逐步展开，AP 侧仍留给后续模型。";
@@ -627,10 +839,19 @@ object SmpBringupPhase: PhaseObject {
             CpuHotplugSyncSet.state == State::Prepared;
             CpuAddRemoveLock.state == State::Ready;
             CpuStartProvider.state == State::Ready;
+            ApEntryPreludePhase.state == State::Ready;
+            ApSmpCallinPhase.state == State::Ready;
+            ApOnlineIdlePhase.state == State::Ready;
             SecondaryCpuStartupAck.state == State::Ready;
             SecondaryCpuOnlineAck.state == State::Ready;
             SmpBringupBoundary.state == State::Ready;
             smp_bringup_phase_ready(SmpBringupPhase);
+            sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
+            ap_secondary_start_sbi_entry_reached(CpuGroup);
+            ap_smp_callin_reached(CpuGroup);
+            ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+            ap_done_up_completion_produced(CpuHotplugSyncSet);
+            secondary_cpus_online_after_ap_ack(CpuGroup);
             secondary_cpus_online(CpuGroup);
             smp_concurrency_open(CpuGroup);
             cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
@@ -640,9 +861,9 @@ object SmpBringupPhase: PhaseObject {
             sbi_boot_data_publish_barriers_observed(CpuStartProvider);
             cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
             done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-            ap_local_irq_enable_summary_deferred(SecondaryCpuOnlineAck);
-            ap_cache_tlb_flush_summary_observed(SecondaryCpuOnlineAck);
-            ap_ipi_enable_observed(SecondaryCpuOnlineAck);
+            ap_local_irq_enable_observed(ApOnlineIdlePhase);
+            ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+            ap_ipi_enable_observed(ApSmpCallinPhase);
             ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
         }
     }

@@ -364,6 +364,13 @@ predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
 predicate arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase() -> bool;
 predicate arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree() -> bool;
 predicate arceos_ex_must_smp_bringup_focus_bp_side_flow() -> bool;
+predicate arceos_ex_must_smp_bringup_split_bp_and_ap_phase_lines() -> bool;
+predicate arceos_ex_must_smp_bringup_prepare_per_ap_idle_task_and_stack() -> bool;
+predicate arceos_ex_must_smp_bringup_use_sbi_hsm_hart_start() -> bool;
+predicate arceos_ex_must_smp_bringup_generate_ap_entry_prelude_callin_online_idle_phases() -> bool;
+predicate arceos_ex_must_smp_bringup_online_only_after_ap_done_up_ack() -> bool;
+predicate arceos_ex_must_smp_bringup_checkpoint_ap_subphases() -> bool;
+predicate arceos_ex_must_smp_bringup_keep_hotplug_callbacks_deferred() -> bool;
 predicate arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit() -> bool;
 predicate arceos_ex_must_smp_bringup_preserve_hotplug_guards() -> bool;
 predicate arceos_ex_must_smp_bringup_preserve_completion_wait_locks() -> bool;
@@ -3464,6 +3471,9 @@ type ArceosExRestInitCodingMust {
          * before bringup, but generated code must not create a live AP
          * CurrentCPU, LocalInterruptControl, CurrentTaskSlot or
          * PreemptionControl chain before that AP enters secondary entry.
+         * Once generated, those live AP facts must be tied to
+         * ApEntryPreludePhase/ApSmpCallinPhase/ApOnlineIdlePhase, not to
+         * possible/present membership or BP HSM request issuance alone.
          */
         arceos_ex_must_not_generate_live_ap_current_cpu_before_entry();
 
@@ -3915,12 +3925,44 @@ type ArceosExSmpBringupCodingMust {
         arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree();
 
         /*
-         * BP-side focus:
+         * BP/AP phase split:
          *
-         * The current implementation should follow the boot processor side of
-         * smp_init(), not expand AP entry internals.
+         * The implementation must keep the BP smp_init()/__cpu_up() line and
+         * the AP secondary_start_sbi -> smp_callin() -> online-idle line
+         * separate. BP code prepares resources, issues HSM hart_start and
+         * waits for completions; AP code owns the AP entry phases and produces
+         * those completions.
          */
-        arceos_ex_must_smp_bringup_focus_bp_side_flow();
+        arceos_ex_must_smp_bringup_split_bp_and_ap_phase_lines();
+
+        /*
+         * Per-AP idle task and stack:
+         *
+         * Each secondary CPU must have its own inactive IdleTask and dedicated
+         * stack/pt_regs pointer prepared before hart_start. BootCPU's idle
+         * task/stack must not be reused for AP boot data.
+         */
+        arceos_ex_must_smp_bringup_prepare_per_ap_idle_task_and_stack();
+
+        /*
+         * SBI HSM start path:
+         *
+         * RISC-V cpu_ops_sbi.cpu_start() must be lowered through SBI HSM
+         * hart_start with secondary_start_sbi as entry and per-AP boot data
+         * as opaque data. The current ordered booting path must not add a
+         * spinwait fallback unless the model is extended first.
+         */
+        arceos_ex_must_smp_bringup_use_sbi_hsm_hart_start();
+
+        /*
+         * AP subphases:
+         *
+         * AP startup is not a single BP-side summary. The implementation must
+         * expose minimal ApEntryPreludePhase, ApSmpCallinPhase and
+         * ApOnlineIdlePhase checkpoints/facts, even if full CPU-local object
+         * chains remain deferred.
+         */
+        arceos_ex_must_smp_bringup_generate_ap_entry_prelude_callin_online_idle_phases();
 
         /*
          * Synchronization:
@@ -3945,8 +3987,8 @@ type ArceosExSmpBringupCodingMust {
          * Completion wait locks:
          *
          * cpu_running and done_up are completions. Their wait.lock raw
-         * spinlock irqsave/irqrestore guard must stay observable even though
-         * AP internals are summarized.
+         * spinlock irqsave/irqrestore guard must stay observable on the BP
+         * wait side, while AP phases produce the matching completion facts.
          */
         arceos_ex_must_smp_bringup_preserve_completion_wait_locks();
 
@@ -3973,17 +4015,30 @@ type ArceosExSmpBringupCodingMust {
          * Online boundary:
          *
          * This phase must move secondary CPUs from present/not-online to
-         * online and publish the opening of SMP concurrency.
+         * online only after the AP online-idle done_up fact is observed, then
+         * publish the opening of SMP concurrency.
          */
         arceos_ex_must_smp_bringup_make_secondary_cpus_online();
+        arceos_ex_must_smp_bringup_online_only_after_ap_done_up_ack();
 
         /*
-         * AP internals:
+         * AP checkpoints:
          *
-         * secondary_start_sbi, smp_callin(), AP local IRQ enable, AP idle and
-         * AP hotplug callback details remain deferred summary paths.
+         * Long-term diagnostics must distinguish BP HSM request/return, AP
+         * secondary entry reached, boot data consumed, AP current/stack
+         * established, smp_callin cpu_running completion and online-idle
+         * done_up completion.
          */
-        arceos_ex_must_smp_bringup_keep_ap_internals_deferred();
+        arceos_ex_must_smp_bringup_checkpoint_ap_subphases();
+
+        /*
+         * Deferred hotplug callbacks:
+         *
+         * The CPUHP callbacks after CPUHP_AP_ONLINE_IDLE, per-thread callback
+         * bodies and full CPU hotplug offline/rollback remain deferred; the
+         * AP entry/callin/online-idle path itself is in scope.
+         */
+        arceos_ex_must_smp_bringup_keep_hotplug_callbacks_deferred();
 
         /*
          * Later runtime:

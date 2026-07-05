@@ -8,6 +8,17 @@ pub fn checkpoint(checkpoint: Checkpoint) {
     crate::checkpoint::dispatch_pre_context(checkpoint);
 }
 
+pub fn ap_checkpoint(checkpoint: Checkpoint, logical_id: usize) {
+    #[cfg(checkpoint_handler_announce)]
+    crate::checkpoint::handlers::announce::emit_with_ap_idle_task(checkpoint, logical_id);
+
+    #[cfg(not(checkpoint_handler_announce))]
+    {
+        let _ = checkpoint;
+        let _ = logical_id;
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Checkpoint {
@@ -332,7 +343,20 @@ pub enum Checkpoint {
     CpuRunningWaitLockReady,
     CpuDoneUpWaitLockReady,
     CpuStartProviderReady,
+    CpuStartProviderBootDataSelected,
     CpuStartProviderBootDataPublished,
+    CpuStartProviderHsmStartIssued,
+    CpuStartProviderHsmStartReturned,
+    ApEntryPreludePhaseStarted,
+    ApEntryPreludeBootDataConsumed,
+    ApEntryPreludeCurrentStackEstablished,
+    ApEntryPreludePhaseReady,
+    ApSmpCallinPhaseStarted,
+    ApSmpCallinCpuRunningProduced,
+    ApSmpCallinPhaseReady,
+    ApOnlineIdlePhaseStarted,
+    ApOnlineIdleDoneUpProduced,
+    ApOnlineIdlePhaseReady,
     CpuRunningObserved,
     CpuRunningWaitLockGuardUsed,
     SecondaryCpuStartupAckReady,
@@ -763,7 +787,22 @@ impl Checkpoint {
             Self::CpuRunningWaitLockReady => "CpuRunningWaitLock.Ready",
             Self::CpuDoneUpWaitLockReady => "CpuDoneUpWaitLock.Ready",
             Self::CpuStartProviderReady => "CpuStartProvider.Ready",
+            Self::CpuStartProviderBootDataSelected => "CpuStartProvider.BootDataSelected",
             Self::CpuStartProviderBootDataPublished => "CpuStartProvider.BootDataPublished",
+            Self::CpuStartProviderHsmStartIssued => "CpuStartProvider.HsmStartIssued",
+            Self::CpuStartProviderHsmStartReturned => "CpuStartProvider.HsmStartReturned",
+            Self::ApEntryPreludePhaseStarted => "ApEntryPreludePhase.Started",
+            Self::ApEntryPreludeBootDataConsumed => "ApEntryPreludePhase.BootDataConsumed",
+            Self::ApEntryPreludeCurrentStackEstablished => {
+                "ApEntryPreludePhase.CurrentStackEstablished"
+            }
+            Self::ApEntryPreludePhaseReady => "ApEntryPreludePhase.Ready",
+            Self::ApSmpCallinPhaseStarted => "ApSmpCallinPhase.Started",
+            Self::ApSmpCallinCpuRunningProduced => "ApSmpCallinPhase.CpuRunningProduced",
+            Self::ApSmpCallinPhaseReady => "ApSmpCallinPhase.Ready",
+            Self::ApOnlineIdlePhaseStarted => "ApOnlineIdlePhase.Started",
+            Self::ApOnlineIdleDoneUpProduced => "ApOnlineIdlePhase.DoneUpProduced",
+            Self::ApOnlineIdlePhaseReady => "ApOnlineIdlePhase.Ready",
             Self::CpuRunningObserved => "CpuHotplugSync.CpuRunningObserved",
             Self::CpuRunningWaitLockGuardUsed => "CpuHotplugSync.CpuRunningWaitLockGuardUsed",
             Self::SecondaryCpuStartupAckReady => "SecondaryCpuStartupAck.Ready",

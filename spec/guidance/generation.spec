@@ -24,6 +24,7 @@ predicate guidance_cpu_group_codegen_must_read_cpu_model_specs_first() -> bool;
 predicate guidance_cpu_group_codegen_must_generate_unified_cpu_instances() -> bool;
 predicate guidance_cpu_group_codegen_must_preserve_logical_id_index_view() -> bool;
 predicate guidance_cpu_group_codegen_must_not_create_live_ap_current_cpu_early() -> bool;
+predicate guidance_cpu_group_codegen_must_use_ap_entry_phases_before_live_ap_current_cpu() -> bool;
 predicate guidance_cpu_group_codegen_must_generate_index_and_set_tests() -> bool;
 
 type GenerationAgentWorkflow {
@@ -192,6 +193,16 @@ type CpuGroupGenerationWorkflow {
          * generated.
          */
         guidance_cpu_group_codegen_must_not_create_live_ap_current_cpu_early();
+
+        /*
+         * AP secondary entry is an explicit phase boundary:
+         *
+         * When AP current/task/stack facts are generated, they must be tied to
+         * ApEntryPreludePhase/ApSmpCallinPhase/ApOnlineIdlePhase facts rather
+         * than inferred from CpuGroup possible/present membership or BP HSM
+         * request issuance alone.
+         */
+        guidance_cpu_group_codegen_must_use_ap_entry_phases_before_live_ap_current_cpu();
 
         /*
          * The generated validation surface must include checks for boot CPU

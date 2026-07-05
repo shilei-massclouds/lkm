@@ -1007,6 +1007,7 @@ object SBI: PlatformServiceObject {
 
                 ensures {
                     sbi_capability_view_ready(SBI, SbiSpec, OpenSbiFirmware);
+                    sbi_hsm_extension_available(SBI);
                 }
             }
         }
@@ -1018,6 +1019,7 @@ object SBI: PlatformServiceObject {
     state State::Ready {
         invariant {
             sbi_capability_view_ready(SBI, SbiSpec, OpenSbiFirmware);
+            sbi_hsm_extension_available(SBI);
         }
     }
 }

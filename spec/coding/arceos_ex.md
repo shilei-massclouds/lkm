@@ -378,32 +378,39 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 `SmpBringupPhase` 是 `SMP Runtime Phase` 的第二个子阶段，formal model 路径为
 `spec/model/phases/smp-runtime/smp-bringup/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。该阶段从 `smp_init()` 开始，由
-`KernelInitTask` 在 boot CPU 上驱动，当前对象级实现只展开 BP 侧主线和 BP/AP 同步边界。
+`KernelInitTask` 在 boot CPU 上发起，但对象级实现必须把 BP side 和 AP side 分开：BP 准备
+secondary idle task、stack/pt_regs、CPU hotplug 同步量和 HSM boot data；AP 从区别于 BP `_start`
+的 `secondary_start_sbi` 入口进入自己的启动阶段。
 
 本阶段必须覆盖 `SecondaryIdleTaskSet.preset()`、`CpuHotplugSyncSet.preset()`、
-`CpuStartProvider.setup()`、`SecondaryCpuStartupAck.setup()`、`SecondaryCpuOnlineAck.setup()` 和
-`SmpBringupBoundary.setup()`。AP 侧 `secondary_start_sbi`、`smp_callin()`、本地中断打开、AP idle 入口和
-AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见的同步量不得省略，至少要发布
-`cpu_running` observed、`done_up` observed、`done_down` reserved/deferred、secondary CPU online 和
-`smp_concurrency_open` 事实。
+`CpuStartProvider.setup()`、`ApEntryPreludePhase.setup()`、`ApSmpCallinPhase.setup()`、
+`ApOnlineIdlePhase.setup()`、`SecondaryCpuStartupAck.setup()`、`SecondaryCpuOnlineAck.setup()` 和
+`SmpBringupBoundary.setup()`。每个 secondary CPU 必须有独立的 inactive IdleTask 和 dedicated stack；
+`CpuStartProvider` 发布的 Linux-like `sbi_hart_boot_data { task_ptr, stack_ptr }` 必须指向该 AP 的
+idle task 与 pt_regs/栈顶边界，不得复用 BootCPU 的 idle task 或栈。`SecondaryCpuStartupAck` 与
+`SecondaryCpuOnlineAck` 只是 BP wait side 的观察结果；secondary CPU online 集合只能在 AP 已经到达
+online-idle 并产生 `done_up` 之后更新。
 
 `cpuhp_threads_init()` 的 Linux 路径必须保留 `cpus_read_lock()` 与 `smpboot_threads_lock` mutex guard；
 `bringup_nonboot_cpus()` / `cpu_up()` 必须保留 `cpu_add_remove_lock` 与 `cpus_write_lock()` 的 writer
 guard。RISC-V `__cpu_up()` / AP `smp_callin()` 的 `cpu_running` completion，以及 generic CPUHP
 `done_up` completion，必须保留 wait.lock 的 raw spinlock irqsave/irqrestore 观测。`cpu_ops_sbi.cpu_start()`
-发布 secondary boot data 前后的 `smp_mb()` 顺序必须作为可观察 fact 或等价内存顺序边界保留；AP
-侧 `riscv_ipi_enable()`、`local_flush_icache_all()`、`local_flush_tlb_all()`、`local_irq_enable()` 和
-AP hotplug thread `should_run` memory-barrier 配对当前可作为 summary/deferred fact，但不得默认为
-不存在。
+发布 secondary boot data 前后的 `smp_mb()` 顺序必须作为可观察 fact 或等价内存顺序边界保留，并通过
+SBI HSM `hart_start(hartid, secondary_start_sbi, boot_data)` 启动 AP。AP 侧至少要通过 checkpoint/fact
+区分 HSM request issued、boot data address/entry selected、HSM return observed、secondary entry reached、
+boot data consumed、AP current/stack established、`smp_callin()` cpu_running produced、online-idle
+done_up produced。AP hotplug thread `should_run` memory-barrier 配对和 CPUHP_AP_ONLINE_IDLE 之后的
+callback 细节当前可作为 deferred fact，但不得把 AP entry/callin/online-idle 本身当作 BP summary。
 
 `SmpRuntimePhase` 当前已经继续串联 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和
 `FinalizePhase`。各子阶段未展开的完整运行期服务仍保持显式 deferred 边界，不得伪装为已经实现。
 
-测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
-观察、secondary CPU 从 present/not-online 推进到 online、`smp_concurrency_open` 成立，以及 AP 内部路径仍为
-deferred summary。smoke 还应覆盖 hotplug read/write guard、`smpboot_threads_lock` / `cpu_add_remove_lock`
-mutex guard、`cpu_running` / `done_up` completion wait-lock irqsave guard、SBI boot-data publish ordering
-和 AP local sync summary facts。
+测试应覆盖 BP 侧 bringup 主线已经闭合、每个 AP 有自己的 idle task 和 stack、CPU hotplug 同步量已建立、
+SBI HSM start request/return 已观测、AP 三阶段 checkpoint 已产生、secondary CPU 只在 AP done_up ack 后
+从 present/not-online 推进到 online、`smp_concurrency_open` 成立。smoke 还应覆盖 hotplug read/write
+guard、`smpboot_threads_lock` / `cpu_add_remove_lock` mutex guard、`cpu_running` / `done_up` completion
+wait-lock irqsave guard、SBI boot-data publish ordering、AP IPI/cache/TLB/local-IRQ 边界和 AP 不运行 BP
+payload/syscall 的事实。
 
 ## RuntimeCorePhase 编码约束
 

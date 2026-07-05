@@ -4,7 +4,8 @@
  * This top-level phase starts from the KernelInitTask execution line forked
  * by rest_init()'s first scheduler handoff. The currently expanded subphases
  * are PreSmpInitPhase, SmpBringupPhase, RuntimeCorePhase, InitcallPhase,
- * RootfsPhase and FinalizePhase. AP-side details remain future work.
+ * RootfsPhase and FinalizePhase. AP-side bringup is owned by subphases inside
+ * SmpBringupPhase, not by the BP KernelInitTask execution line.
  */
 
 include "pre-smp-init/main.spec";
