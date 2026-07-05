@@ -22,6 +22,11 @@ checkpoint_scope = [
   "UserBoot.InterpreterReady",
   "UserBoot.AddressSpaceSetupStart",
   "UserAddressSpace.Ready",
+  "UserExec.MainElfReady",
+  "UserExec.InterpreterReady",
+  "UserExec.ContextReplaced",
+  "UserExec.SatpReady",
+  "UserExec.TrapFrameReady",
 ]
 
 [paired.arceos_ex]

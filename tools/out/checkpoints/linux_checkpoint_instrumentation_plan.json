@@ -852,10 +852,10 @@
     "checkpoint_variant": "UserBootMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
+    "linux_anchor": "load_elf_binary() line 856: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=UserBoot.MainElfReady variant=UserBootMainElfReady fingerprint=sha256:70c7a48954553725b3dd6e1cd78f576a622a38c6f07a5ca250432c9981b36653 */",
-    "anchor_fingerprint": "sha256:70c7a48954553725b3dd6e1cd78f576a622a38c6f07a5ca250432c9981b36653"
+    "marker": "/* LKM_CHECKPOINT name=UserBoot.MainElfReady variant=UserBootMainElfReady fingerprint=sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554 */",
+    "anchor_fingerprint": "sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554"
   },
   {
     "checkpoint_index": 388,
@@ -863,10 +863,10 @@
     "checkpoint_variant": "UserBootInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
+    "linux_anchor": "load_elf_binary() line 957: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=UserBoot.InterpreterReady variant=UserBootInterpreterReady fingerprint=sha256:91cca162296f4afdd0504ffb586f55efaa5b012ac2438a5a0339885b02e2b373 */",
-    "anchor_fingerprint": "sha256:91cca162296f4afdd0504ffb586f55efaa5b012ac2438a5a0339885b02e2b373"
+    "marker": "/* LKM_CHECKPOINT name=UserBoot.InterpreterReady variant=UserBootInterpreterReady fingerprint=sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62 */",
+    "anchor_fingerprint": "sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62"
   },
   {
     "checkpoint_index": 390,
@@ -874,10 +874,10 @@
     "checkpoint_variant": "UserBootAddressSpaceSetupStart",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 996: retval = begin_new_exec(bprm);",
+    "linux_anchor": "load_elf_binary() line 999: retval = begin_new_exec(bprm);",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=UserBoot.AddressSpaceSetupStart variant=UserBootAddressSpaceSetupStart fingerprint=sha256:ab2cc91a9abd25c39e3da418d8678e7581e123de06b320ae20026134c5df01af */",
-    "anchor_fingerprint": "sha256:ab2cc91a9abd25c39e3da418d8678e7581e123de06b320ae20026134c5df01af"
+    "marker": "/* LKM_CHECKPOINT name=UserBoot.AddressSpaceSetupStart variant=UserBootAddressSpaceSetupStart fingerprint=sha256:dd94ba13a9d9a3e9a1328f6ff0c4746447dc6e1fbd0b8028cfa6e223bb7e7685 */",
+    "anchor_fingerprint": "sha256:dd94ba13a9d9a3e9a1328f6ff0c4746447dc6e1fbd0b8028cfa6e223bb7e7685"
   },
   {
     "checkpoint_index": 391,
@@ -896,10 +896,10 @@
     "checkpoint_variant": "UserAddressSpaceReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "exec_mmap",
-    "linux_anchor": "exec_mmap() line 1003: activate_mm(active_mm, mm);",
+    "linux_anchor": "exec_mmap() line 1004: activate_mm(active_mm, mm);",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=UserAddressSpace.Ready variant=UserAddressSpaceReady fingerprint=sha256:52cc76b167b557bf6e99444af6b8fdeacb40cb2438cd269db2d82c18e83087b0 */",
-    "anchor_fingerprint": "sha256:52cc76b167b557bf6e99444af6b8fdeacb40cb2438cd269db2d82c18e83087b0"
+    "marker": "/* LKM_CHECKPOINT name=UserAddressSpace.Ready variant=UserAddressSpaceReady fingerprint=sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0 */",
+    "anchor_fingerprint": "sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0"
   },
   {
     "checkpoint_index": 393,
@@ -907,7 +907,7 @@
     "checkpoint_variant": "SyscallTableExecveArgsReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "do_execveat_common",
-    "linux_anchor": "do_execveat_common() line 1935: retval = copy_strings(bprm->argc, argv, bprm);",
+    "linux_anchor": "do_execveat_common() line 1937: retval = copy_strings(bprm->argc, argv, bprm);",
     "confidence": "high",
     "marker": "/* LKM_CHECKPOINT name=SyscallTable.ExecveArgsReady variant=SyscallTableExecveArgsReady fingerprint=sha256:2d2c94cdb267cdef959204ef3e71fa55fd3651475e0483a4c02ae522e8760c1f */",
     "anchor_fingerprint": "sha256:2d2c94cdb267cdef959204ef3e71fa55fd3651475e0483a4c02ae522e8760c1f"
@@ -918,10 +918,10 @@
     "checkpoint_variant": "UserExecMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
+    "linux_anchor": "load_elf_binary() line 856: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=UserExec.MainElfReady variant=UserExecMainElfReady fingerprint=sha256:70c7a48954553725b3dd6e1cd78f576a622a38c6f07a5ca250432c9981b36653 */",
-    "anchor_fingerprint": "sha256:70c7a48954553725b3dd6e1cd78f576a622a38c6f07a5ca250432c9981b36653"
+    "marker": "/* LKM_CHECKPOINT name=UserExec.MainElfReady variant=UserExecMainElfReady fingerprint=sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554 */",
+    "anchor_fingerprint": "sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554"
   },
   {
     "checkpoint_index": 395,
@@ -929,10 +929,10 @@
     "checkpoint_variant": "UserExecInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
+    "linux_anchor": "load_elf_binary() line 957: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=UserExec.InterpreterReady variant=UserExecInterpreterReady fingerprint=sha256:91cca162296f4afdd0504ffb586f55efaa5b012ac2438a5a0339885b02e2b373 */",
-    "anchor_fingerprint": "sha256:91cca162296f4afdd0504ffb586f55efaa5b012ac2438a5a0339885b02e2b373"
+    "marker": "/* LKM_CHECKPOINT name=UserExec.InterpreterReady variant=UserExecInterpreterReady fingerprint=sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62 */",
+    "anchor_fingerprint": "sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62"
   },
   {
     "checkpoint_index": 397,
@@ -940,10 +940,10 @@
     "checkpoint_variant": "UserExecTrapFrameReady",
     "linux_file": "arch/riscv/kernel/process.c",
     "linux_symbol": "start_thread",
-    "linux_anchor": "start_thread() line 151: regs->epc = pc;",
+    "linux_anchor": "start_thread() line 152: regs->epc = pc;",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=UserExec.TrapFrameReady variant=UserExecTrapFrameReady fingerprint=sha256:24ef597d20f2af8416983b020dd49bf0705b28e8a0fe067fe20b5280034c6d8d */",
-    "anchor_fingerprint": "sha256:24ef597d20f2af8416983b020dd49bf0705b28e8a0fe067fe20b5280034c6d8d"
+    "marker": "/* LKM_CHECKPOINT name=UserExec.TrapFrameReady variant=UserExecTrapFrameReady fingerprint=sha256:bae39591e723d1fadcc0d5140a4ba2900f1b3da392f6d64909e702058ea114ec */",
+    "anchor_fingerprint": "sha256:bae39591e723d1fadcc0d5140a4ba2900f1b3da392f6d64909e702058ea114ec"
   },
   {
     "checkpoint_index": 398,
@@ -951,10 +951,10 @@
     "checkpoint_variant": "UserExecSatpReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "exec_mmap",
-    "linux_anchor": "exec_mmap() line 1003: activate_mm(active_mm, mm);",
+    "linux_anchor": "exec_mmap() line 1004: activate_mm(active_mm, mm);",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=UserExec.SatpReady variant=UserExecSatpReady fingerprint=sha256:52cc76b167b557bf6e99444af6b8fdeacb40cb2438cd269db2d82c18e83087b0 */",
-    "anchor_fingerprint": "sha256:52cc76b167b557bf6e99444af6b8fdeacb40cb2438cd269db2d82c18e83087b0"
+    "marker": "/* LKM_CHECKPOINT name=UserExec.SatpReady variant=UserExecSatpReady fingerprint=sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0 */",
+    "anchor_fingerprint": "sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0"
   },
   {
     "checkpoint_index": 399,
@@ -962,10 +962,10 @@
     "checkpoint_variant": "UserExecContextReplaced",
     "linux_file": "fs/exec.c",
     "linux_symbol": "begin_new_exec",
-    "linux_anchor": "begin_new_exec() line 1280: retval = exec_mmap(bprm->mm);",
+    "linux_anchor": "begin_new_exec() line 1282: retval = exec_mmap(bprm->mm);",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=UserExec.ContextReplaced variant=UserExecContextReplaced fingerprint=sha256:379cd75c60d96e53ce2a0a48369812f4ed1507169fa9f5d6adac77cb33711934 */",
-    "anchor_fingerprint": "sha256:379cd75c60d96e53ce2a0a48369812f4ed1507169fa9f5d6adac77cb33711934"
+    "marker": "/* LKM_CHECKPOINT name=UserExec.ContextReplaced variant=UserExecContextReplaced fingerprint=sha256:77d4a9a31a51d96fe31d7555248b5983de5f3dcb999ef88de32be4f5abf58d26 */",
+    "anchor_fingerprint": "sha256:77d4a9a31a51d96fe31d7555248b5983de5f3dcb999ef88de32be4f5abf58d26"
   },
   {
     "checkpoint_index": 400,

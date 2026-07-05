@@ -1311,7 +1311,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="load_elf_binary",
             anchor_pattern=r"\belf_phdata\s*=\s*load_elf_phdrs\s*\(\s*elf_ex\s*,\s*bprm->file\s*\)\s*;",
             confidence="high",
-            notes="Linux ELF loader has read the main executable program headers.",
+            notes=(
+                "Linux ELF loader has read the runtime exec main executable "
+                "program headers; instrumentation must guard this shared "
+                "load_elf_binary() anchor so kernel_execve() boot init records "
+                "only UserBoot.MainElfReady."
+            ),
         ),
         "UserExec.InterpreterReady": MappingRule(
             mapping_kind="exact",
@@ -1319,7 +1324,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="load_elf_binary",
             anchor_pattern=r"\binterp_elf_phdata\s*=\s*load_elf_phdrs\s*\(\s*interp_elf_ex\s*,\s*interpreter\s*\)\s*;",
             confidence="high",
-            notes="Linux PT_INTERP path has opened and parsed the interpreter ELF program headers when an interpreter is present.",
+            notes=(
+                "Linux PT_INTERP path has opened and parsed the runtime exec "
+                "interpreter ELF program headers when an interpreter is present; "
+                "instrumentation must guard this shared load_elf_binary() anchor "
+                "so kernel_execve() boot init records only UserBoot.InterpreterReady."
+            ),
         ),
         "UserExec.AddressSpaceReady": MappingRule(
             mapping_kind="range",
@@ -1336,7 +1346,11 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="start_thread",
             anchor_pattern=r"\bregs->epc\s*=\s*pc\s*;",
             confidence="high",
-            notes="RISC-V start_thread() installs the user entry PC and stack in pt_regs for exec return.",
+            notes=(
+                "RISC-V start_thread() installs the user entry PC and stack in "
+                "pt_regs for runtime exec return; instrumentation must guard "
+                "against boot init kernel_execve() ownership."
+            ),
         ),
         "UserExec.SatpReady": MappingRule(
             mapping_kind="exact",
@@ -1344,7 +1358,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="exec_mmap",
             anchor_pattern=r"\bactivate_mm\s*\(\s*active_mm\s*,\s*mm\s*\)\s*;",
             confidence="medium",
-            notes="Linux exec_mmap() installs and activates the new mm; Linux has no separate arceos_ex satp token boundary.",
+            notes=(
+                "Linux exec_mmap() installs and activates the runtime exec mm; "
+                "Linux has no separate arceos_ex satp token boundary, and "
+                "instrumentation must guard against boot init kernel_execve() "
+                "ownership."
+            ),
         ),
         "UserExec.ContextReplaced": MappingRule(
             mapping_kind="exact",
@@ -1352,7 +1371,11 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="begin_new_exec",
             anchor_pattern=r"\bretval\s*=\s*exec_mmap\s*\(\s*bprm->mm\s*\)\s*;",
             confidence="medium",
-            notes="Linux begin_new_exec() crosses the point-of-no-return and hands the nascent exec mm to exec_mmap().",
+            notes=(
+                "Linux begin_new_exec() crosses the runtime exec point-of-no-return "
+                "and hands the nascent exec mm to exec_mmap(); instrumentation "
+                "must guard against boot init kernel_execve() ownership."
+            ),
         ),
         "UserExec.SatpSwitched": MappingRule(
             mapping_kind="exact",
@@ -1362,8 +1385,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes=(
                 "RISC-V return-to-user path restores trap CSRs before sret; "
-                "runtime instrumentation must guard on saved SR_SPP == 0 and "
-                "record before restoring temporary registers."
+                "runtime instrumentation must guard on saved SR_SPP == 0, record "
+                "before restoring temporary registers and avoid treating every "
+                "ordinary syscall return as a UserExec return."
             ),
         ),
         "UserExec.ReturnFrameReady": MappingRule(
@@ -1374,8 +1398,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes=(
                 "RISC-V ret_from_exception reaches the final sret return-to-user "
-                "boundary; runtime instrumentation must guard on saved SR_SPP == 0 "
-                "and record before the final general-register restore."
+                "boundary; runtime instrumentation must guard on saved SR_SPP == 0, "
+                "record before the final general-register restore and avoid treating "
+                "every ordinary syscall return as a UserExec return."
             ),
         ),
         "UserBoot.MainElfReady": MappingRule(
@@ -1384,7 +1409,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="load_elf_binary",
             anchor_pattern=r"\belf_phdata\s*=\s*load_elf_phdrs\s*\(\s*elf_ex\s*,\s*bprm->file\s*\)\s*;",
             confidence="high",
-            notes="Boot-time init exec view of the main ELF program-header parse; this reuses the UserExec.MainElfReady Linux anchor but is reached from kernel_init() via kernel_execve().",
+            notes=(
+                "Boot-time init exec view of the main ELF program-header parse; "
+                "this shares the runtime UserExec.MainElfReady Linux anchor but "
+                "is reached from kernel_init() via kernel_execve(), so runtime "
+                "instrumentation must not emit UserExec.MainElfReady for this owner."
+            ),
         ),
         "UserBoot.InterpreterReady": MappingRule(
             mapping_kind="exact",
@@ -1392,7 +1422,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="load_elf_binary",
             anchor_pattern=r"\binterp_elf_phdata\s*=\s*load_elf_phdrs\s*\(\s*interp_elf_ex\s*,\s*interpreter\s*\)\s*;",
             confidence="high",
-            notes="Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec.",
+            notes=(
+                "Boot-time init exec view of the PT_INTERP program-header parse "
+                "when an interpreter is present; the same Linux loader anchor is "
+                "used by runtime UserExec, so runtime instrumentation must not "
+                "emit UserExec.InterpreterReady for this owner."
+            ),
         ),
         "UserBoot.InitAttemptFailed": MappingRule(
             mapping_kind="range",
@@ -1409,7 +1444,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             linux_symbol="load_elf_binary",
             anchor_pattern=r"\bretval\s*=\s*begin_new_exec\s*\(\s*bprm\s*\)\s*;",
             confidence="medium",
-            notes="Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary.",
+            notes=(
+                "Boot-time init exec reaches the first new-exec/address-space "
+                "handoff in load_elf_binary(); Linux has no UserBoot-specific "
+                "address-space object boundary, and runtime UserExec records "
+                "must be guarded out for this owner."
+            ),
         ),
         "UserInitProcess.EnterUserMode": MappingRule(
             mapping_kind="exact",
@@ -1420,8 +1460,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             notes=(
                 "RISC-V ret_from_exception final sret is the architecture-scoped "
                 "boot init return-to-user handoff; runtime instrumentation must "
-                "guard on saved SR_SPP == 0 and record before the final "
-                "general-register restore."
+                "guard on saved SR_SPP == 0, record before the final "
+                "general-register restore and avoid reporting every later "
+                "ordinary syscall return as another UserInitProcess entry."
             ),
         ),
         "UserAddressSpace.Ready": MappingRule(

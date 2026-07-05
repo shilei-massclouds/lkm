@@ -4262,10 +4262,10 @@
     "checkpoint_variant": "UserBootMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
+    "linux_anchor": "load_elf_binary() line 856: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Boot-time init exec view of the main ELF program-header parse; this reuses the UserExec.MainElfReady Linux anchor but is reached from kernel_init() via kernel_execve()."
+    "notes": "Boot-time init exec view of the main ELF program-header parse; this shares the runtime UserExec.MainElfReady Linux anchor but is reached from kernel_init() via kernel_execve(), so runtime instrumentation must not emit UserExec.MainElfReady for this owner."
   },
   {
     "checkpoint_index": 388,
@@ -4273,10 +4273,10 @@
     "checkpoint_variant": "UserBootInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
+    "linux_anchor": "load_elf_binary() line 957: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec."
+    "notes": "Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec, so runtime instrumentation must not emit UserExec.InterpreterReady for this owner."
   },
   {
     "checkpoint_index": 389,
@@ -4295,10 +4295,10 @@
     "checkpoint_variant": "UserBootAddressSpaceSetupStart",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 996: retval = begin_new_exec(bprm);",
+    "linux_anchor": "load_elf_binary() line 999: retval = begin_new_exec(bprm);",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary."
+    "notes": "Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary, and runtime UserExec records must be guarded out for this owner."
   },
   {
     "checkpoint_index": 391,
@@ -4309,7 +4309,7 @@
     "linux_anchor": "ret_from_exception line 279: sret",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0 and record before the final general-register restore."
+    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another UserInitProcess entry."
   },
   {
     "checkpoint_index": 392,
@@ -4317,7 +4317,7 @@
     "checkpoint_variant": "UserAddressSpaceReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "exec_mmap",
-    "linux_anchor": "exec_mmap() line 1003: activate_mm(active_mm, mm);",
+    "linux_anchor": "exec_mmap() line 1004: activate_mm(active_mm, mm);",
     "mapping_kind": "exact",
     "confidence": "medium",
     "notes": "Linux exec_mmap() installs and activates the new mm; Linux does not expose a separate UserAddressSpace object boundary."
@@ -4328,7 +4328,7 @@
     "checkpoint_variant": "SyscallTableExecveArgsReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "do_execveat_common",
-    "linux_anchor": "do_execveat_common() line 1935: retval = copy_strings(bprm->argc, argv, bprm);",
+    "linux_anchor": "do_execveat_common() line 1937: retval = copy_strings(bprm->argc, argv, bprm);",
     "mapping_kind": "exact",
     "confidence": "high",
     "notes": "Linux do_execveat_common() has copied filename, envp and argv into linux_binprm before bprm_execve()."
@@ -4339,10 +4339,10 @@
     "checkpoint_variant": "UserExecMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 855: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
+    "linux_anchor": "load_elf_binary() line 856: elf_phdata = load_elf_phdrs(elf_ex, bprm->file);",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Linux ELF loader has read the main executable program headers."
+    "notes": "Linux ELF loader has read the runtime exec main executable program headers; instrumentation must guard this shared load_elf_binary() anchor so kernel_execve() boot init records only UserBoot.MainElfReady."
   },
   {
     "checkpoint_index": 395,
@@ -4350,10 +4350,10 @@
     "checkpoint_variant": "UserExecInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() line 955: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
+    "linux_anchor": "load_elf_binary() line 957: interp_elf_phdata = load_elf_phdrs(interp_elf_ex,",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Linux PT_INTERP path has opened and parsed the interpreter ELF program headers when an interpreter is present."
+    "notes": "Linux PT_INTERP path has opened and parsed the runtime exec interpreter ELF program headers when an interpreter is present; instrumentation must guard this shared load_elf_binary() anchor so kernel_execve() boot init records only UserBoot.InterpreterReady."
   },
   {
     "checkpoint_index": 396,
@@ -4361,7 +4361,7 @@
     "checkpoint_variant": "UserExecAddressSpaceReady",
     "linux_file": "fs/binfmt_elf.c",
     "linux_symbol": "load_elf_binary",
-    "linux_anchor": "load_elf_binary() lines 1014-1286: retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP), .. mm->start_stack = bprm->p;",
+    "linux_anchor": "load_elf_binary() lines 1017-1289: retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP), .. mm->start_stack = bprm->p;",
     "mapping_kind": "range",
     "confidence": "medium",
     "notes": "Linux load_elf_binary() stack setup, PT_LOAD mapping, interpreter load, ELF tables and mm layout interval."
@@ -4372,10 +4372,10 @@
     "checkpoint_variant": "UserExecTrapFrameReady",
     "linux_file": "arch/riscv/kernel/process.c",
     "linux_symbol": "start_thread",
-    "linux_anchor": "start_thread() line 151: regs->epc = pc;",
+    "linux_anchor": "start_thread() line 152: regs->epc = pc;",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "RISC-V start_thread() installs the user entry PC and stack in pt_regs for exec return."
+    "notes": "RISC-V start_thread() installs the user entry PC and stack in pt_regs for runtime exec return; instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
     "checkpoint_index": 398,
@@ -4383,10 +4383,10 @@
     "checkpoint_variant": "UserExecSatpReady",
     "linux_file": "fs/exec.c",
     "linux_symbol": "exec_mmap",
-    "linux_anchor": "exec_mmap() line 1003: activate_mm(active_mm, mm);",
+    "linux_anchor": "exec_mmap() line 1004: activate_mm(active_mm, mm);",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Linux exec_mmap() installs and activates the new mm; Linux has no separate arceos_ex satp token boundary."
+    "notes": "Linux exec_mmap() installs and activates the runtime exec mm; Linux has no separate arceos_ex satp token boundary, and instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
     "checkpoint_index": 399,
@@ -4394,10 +4394,10 @@
     "checkpoint_variant": "UserExecContextReplaced",
     "linux_file": "fs/exec.c",
     "linux_symbol": "begin_new_exec",
-    "linux_anchor": "begin_new_exec() line 1280: retval = exec_mmap(bprm->mm);",
+    "linux_anchor": "begin_new_exec() line 1282: retval = exec_mmap(bprm->mm);",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Linux begin_new_exec() crosses the point-of-no-return and hands the nascent exec mm to exec_mmap()."
+    "notes": "Linux begin_new_exec() crosses the runtime exec point-of-no-return and hands the nascent exec mm to exec_mmap(); instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
     "checkpoint_index": 400,
@@ -4408,7 +4408,7 @@
     "linux_anchor": "ret_from_exception line 265: csrw CSR_STATUS, a0",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V return-to-user path restores trap CSRs before sret; runtime instrumentation must guard on saved SR_SPP == 0 and record before restoring temporary registers."
+    "notes": "RISC-V return-to-user path restores trap CSRs before sret; runtime instrumentation must guard on saved SR_SPP == 0, record before restoring temporary registers and avoid treating every ordinary syscall return as a UserExec return."
   },
   {
     "checkpoint_index": 401,
@@ -4419,7 +4419,7 @@
     "linux_anchor": "ret_from_exception line 279: sret",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V ret_from_exception reaches the final sret return-to-user boundary; runtime instrumentation must guard on saved SR_SPP == 0 and record before the final general-register restore."
+    "notes": "RISC-V ret_from_exception reaches the final sret return-to-user boundary; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid treating every ordinary syscall return as a UserExec return."
   },
   {
     "checkpoint_index": 402,

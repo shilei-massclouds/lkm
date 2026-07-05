@@ -236,6 +236,7 @@ predicate arceos_ex_must_linux_checkpoint_mapping_preserve_checkpoint_order() ->
 predicate arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_export_stable_fields() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime() -> bool;
+predicate arceos_ex_must_linux_checkpoint_mapping_guard_userboot_userexec_ownership() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit() -> bool;
 predicate arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check() -> bool;
@@ -2363,6 +2364,20 @@ type ArceosExIrqTimeInitCodingMust {
          * architecture-scoped anchors, but must keep range/medium confidence
          * where the correspondence is phase-level rather than a single exact
          * object boundary.
+         * Linux runtime instrumentation must keep boot-time kernel_execve()
+         * ownership separate from user syscall execve()/execveat()
+         * ownership even when both paths share load_elf_binary(),
+         * begin_new_exec(), exec_mmap(), start_thread() or
+         * ret_from_exception anchors. Records emitted while kernel_init()
+         * reaches run_init_process()/kernel_execve() belong to UserBoot.*,
+         * UserAddressSpace.Ready and the single UserInitProcess entry
+         * boundary; they must not also emit UserExec.*. UserExec.* records
+         * belong only to a runtime user exec that entered through
+         * do_execveat_common() after SyscallTable.ExecveArgsReady.
+         * Return-to-user markers used for UserExec or UserInitProcess must
+         * also avoid flooding every ordinary syscall return; if the Linux
+         * instrumentation cannot apply that ownership guard, those events
+         * must remain outside active paired hard scope.
          * RISC-V64 ret_from_exception return-to-user Linux checkpoints must
          * be guarded by the saved SPP bit so they only record the user return
          * path. They must be emitted before restoring general registers, or
@@ -2411,6 +2426,7 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_linux_checkpoint_mapping_classify_exact_range_unmapped();
         arceos_ex_must_linux_checkpoint_mapping_export_stable_fields();
         arceos_ex_must_linux_checkpoint_mapping_not_instrument_or_collect_runtime();
+        arceos_ex_must_linux_checkpoint_mapping_guard_userboot_userexec_ownership();
         arceos_ex_must_linux_checkpoint_mapping_support_riscv64_entry_anchors();
         arceos_ex_must_linux_checkpoint_mapping_keep_entry_arch_scope_explicit();
         arceos_ex_must_linux_checkpoint_mapping_ignore_marker_comment_lines();

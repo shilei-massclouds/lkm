@@ -93,9 +93,16 @@ Completed stages:
 Current active stage:
 
 - `pd-0004-linux-payload-syscall-paired.toml`: distro `/bin/sh` with delayed
-  `/bin/ls\nexit\n`; syscall and repeated exec markers are reported as
-  observed coverage unless explicitly in scope. The harness uses a 2-vCPU
-  topology on both sides and waits for the observed BusyBox prompt `~ #`.
+  `/bin/ls\nexit\n`; runtime exec comparison now extends through the exact
+  `UserExec.MainElfReady`, `UserExec.InterpreterReady`,
+  `UserExec.ContextReplaced`, `UserExec.SatpReady`, and
+  `UserExec.TrapFrameReady` anchors. Other syscall and repeated exec markers
+  are reported as observed coverage unless explicitly in scope. The harness
+  uses a 2-vCPU topology on both sides and waits for the observed BusyBox
+  prompt `~ #`. `UserExec.AddressSpaceReady` remains outside hard scope
+  because its Linux mapping is range, not exact. Linux runtime instrumentation
+  must keep `kernel_execve()` ownership separate from user
+  `execve()/execveat()` ownership before extending this stage deeper.
   `PayloadPhase.Online` remains in hard scope because Linux now records the
   selected-payload handoff before the requested-init
   `run_init_process(execute_command)` path as well as before the default
