@@ -21,6 +21,14 @@ static int say(const char *message, size_t len)
 
 static int smoke_tty_open_alias(void)
 {
+	struct termios tty_termios;
+	int tty_fds[16];
+	int next_tty_fd = 3;
+	int extra_fd;
+	for (int i = 0; i < (int)(sizeof(tty_fds) / sizeof(tty_fds[0])); i++) {
+		tty_fds[i] = -1;
+	}
+
 	int fd = syscall(SYS_openat, AT_FDCWD, "/dev/tty1",
 			 O_RDWR | O_NONBLOCK | O_LARGEFILE | O_CLOEXEC, 0);
 	if (fd < 0) {
@@ -58,6 +66,89 @@ static int smoke_tty_open_alias(void)
 	}
 	if (close(fd) < 0) {
 		return 101;
+	}
+
+	tty_fds[0] = syscall(SYS_openat, AT_FDCWD, "/dev/tty1",
+			     O_RDWR | O_NONBLOCK | O_LARGEFILE, 0);
+	tty_fds[1] = syscall(SYS_openat, AT_FDCWD, "/dev/tty2",
+			     O_RDWR | O_LARGEFILE, 0);
+	tty_fds[2] = syscall(SYS_openat, AT_FDCWD, "/dev/tty3",
+			     O_RDWR | O_NONBLOCK | O_LARGEFILE, 0);
+	if (tty_fds[0] < 3 || tty_fds[1] < 3 || tty_fds[2] < 3) {
+		return 118;
+	}
+	if (tty_fds[0] == tty_fds[1] || tty_fds[0] == tty_fds[2] ||
+	    tty_fds[1] == tty_fds[2]) {
+		return 119;
+	}
+	for (int i = 0; i < 3; i++) {
+		if (ioctl(tty_fds[i], TCGETS, &tty_termios) < 0) {
+			return 120;
+		}
+	}
+
+	flags = fcntl(tty_fds[1], F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) != 0) {
+		return 121;
+	}
+	if (fcntl(tty_fds[1], F_SETFL,
+		  O_RDWR | O_NONBLOCK | O_LARGEFILE) < 0) {
+		return 122;
+	}
+	flags = fcntl(tty_fds[1], F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) == 0) {
+		return 123;
+	}
+	if (fcntl(tty_fds[2], F_SETFL, O_RDWR | O_LARGEFILE) < 0) {
+		return 124;
+	}
+	flags = fcntl(tty_fds[2], F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) != 0) {
+		return 125;
+	}
+	flags = fcntl(tty_fds[0], F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) == 0) {
+		return 126;
+	}
+
+	if (close(tty_fds[1]) < 0) {
+		return 127;
+	}
+	errno = 0;
+	if (fcntl(tty_fds[1], F_GETFL, 0) >= 0 || errno != EBADF) {
+		return 128;
+	}
+	tty_fds[1] = -1;
+	if (fcntl(tty_fds[0], F_GETFL, 0) < 0 ||
+	    ioctl(tty_fds[2], TCGETS, &tty_termios) < 0) {
+		return 129;
+	}
+
+	while (next_tty_fd < (int)(sizeof(tty_fds) / sizeof(tty_fds[0]))) {
+		fd = syscall(SYS_openat, AT_FDCWD, "/dev/tty9",
+			     O_RDWR | O_NONBLOCK | O_LARGEFILE, 0);
+		if (fd < 0) {
+			break;
+		}
+		tty_fds[next_tty_fd++] = fd;
+	}
+	if (next_tty_fd != 14) {
+		return 130;
+	}
+	errno = 0;
+	extra_fd = syscall(SYS_openat, AT_FDCWD, "/dev/tty9",
+			   O_RDWR | O_NONBLOCK | O_LARGEFILE, 0);
+	if (extra_fd >= 0) {
+		close(extra_fd);
+		return 131;
+	}
+	if (errno != EMFILE) {
+		return 132;
+	}
+	for (int i = 0; i < next_tty_fd; i++) {
+		if (tty_fds[i] >= 0 && close(tty_fds[i]) < 0) {
+			return 133;
+		}
 	}
 
 	errno = 0;

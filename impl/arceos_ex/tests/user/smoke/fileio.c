@@ -52,6 +52,16 @@ static int smoke_directory_fileio(void)
 	if (SAY_LITERAL("syscall openat directory ok\n") < 0) {
 		return 41;
 	}
+	errno = 0;
+	int second_dir_fd = syscall(SYS_openat, AT_FDCWD, "/",
+				    O_RDONLY | O_DIRECTORY, 0);
+	if (second_dir_fd >= 0) {
+		close(second_dir_fd);
+		return 89;
+	}
+	if (errno != EMFILE) {
+		return 90;
+	}
 
 	if (fstatat(AT_FDCWD, "/", &st, 0) < 0) {
 		return 49;
@@ -291,6 +301,15 @@ int smoke_fileio(void)
 	}
 	if (SAY_LITERAL("syscall openat ok\n") < 0) {
 		return 21;
+	}
+	errno = 0;
+	int second_fd = open(path, O_RDONLY);
+	if (second_fd >= 0) {
+		close(second_fd);
+		return 91;
+	}
+	if (errno != EMFILE) {
+		return 92;
 	}
 
 	ssize_t read_len = read(fd, read_buf, sizeof(read_buf));

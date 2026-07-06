@@ -1680,13 +1680,20 @@ type ArceosExStartupPhaseCodingMust {
          * be a TTY. The current slice may special-case
          * openat(AT_FDCWD, "/dev/tty" or "/dev/tty[0-9]+",
          * O_RDWR|O_NONBLOCK|O_LARGEFILE) to install a console-like
-         * FileBackend::CharDevice fd; O_NONBLOCK is preserved in the opened
-         * file flags for F_GETFL diagnostics. Regular and directory paths do
-         * not gain nonblocking read/write semantics from this slice. The TTY
-         * path must still route through FilesStruct, FileDescriptorTable and
-         * OpenFileDescription. This is not devtmpfs, /dev/console, real VT
-         * allocation, multiple TTY instances, major/minor device lookup,
-         * controlling tty allocation or canonical N_TTY readiness.
+         * FileBackend::CharDevice fd entry in the first free fixed-capacity
+         * fd table slot from 3 through 15. Multiple /dev/ttyN aliases may
+         * therefore coexist as separate fd entries with independent status
+         * flags and close-on-exec bits, but they still share the same
+         * console-like Tty0 backend and do not allocate real VT instances.
+         * Full fd table returns EMFILE; invalid fd paths still return EBADF.
+         * O_NONBLOCK is preserved in each opened fd entry for F_GETFL
+         * diagnostics. Regular and directory paths do not gain nonblocking
+         * read/write semantics or generalized multi-open support from this
+         * slice. The TTY path must still route through FilesStruct,
+         * FileDescriptorTable and OpenFileDescription. This is not devtmpfs,
+         * /dev/console, real VT allocation, multiple TTY instances,
+         * major/minor device lookup, controlling tty allocation or canonical
+         * N_TTY readiness.
          *
          * fcntl(F_DUPFD) and fcntl(F_DUPFD_CLOEXEC) must duplicate the fd
          * entry to the lowest free fixed-capacity slot at or above arg,
@@ -1700,13 +1707,15 @@ type ArceosExStartupPhaseCodingMust {
          * fcntl(F_SETFL) must reference local Linux 6.12
          * include/uapi/asm-generic/fcntl.h and fs/fcntl.c::setfl(). This
          * first slice accepts only the current console-like TTY char-device
-         * fd and only mutates the persisted O_NONBLOCK status bit according
-         * to arg & O_NONBLOCK. It must preserve the original access mode and
-         * already persisted flags such as O_LARGEFILE/O_DIRECTORY, must not
-         * persist O_CLOEXEC as a file status flag, and must leave regular
-         * files, directories, stdio fds, O_APPEND, O_DIRECT, O_NOATIME,
-         * FASYNC, owner/signal state, locks, leases and complete TTY/N_TTY
-         * nonblocking read semantics trimmed.
+         * fd and only mutates the persisted O_NONBLOCK status bit in that fd
+         * entry according to arg & O_NONBLOCK. It must preserve the original
+         * access mode and already persisted flags such as O_LARGEFILE/
+         * O_DIRECTORY, must not persist O_CLOEXEC as a file status flag, and
+         * must keep multiple /dev/ttyN alias fd entries' F_GETFL/F_SETFL
+         * state independent even though they share the same Tty0 backend. It
+         * must leave regular files, directories, stdio fds, O_APPEND,
+         * O_DIRECT, O_NOATIME, FASYNC, owner/signal state, locks, leases and
+         * complete TTY/N_TTY nonblocking read semantics trimmed.
          *
          * ioctl(TCGETS/TCSETS) must be accepted only on char-device fds and
          * use the riscv64/generic 36-byte struct termios described by

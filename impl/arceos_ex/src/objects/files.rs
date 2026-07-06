@@ -895,19 +895,23 @@ impl FileDescriptorTable {
         {
             return Err(FileError::NotReady);
         }
-        if self.entries[FdRef::Regular0.index()].is_some() {
-            return Err(FileError::AlreadyOpen);
-        }
 
-        self.entries[FdRef::Regular0.index()] = Some(FileDescriptorEntry::opened(
-            ofd_ref,
-            readable,
-            writable,
-            flags,
-            close_on_exec,
-        ));
-        self.fd_installed.fetch_add(1, Ordering::AcqRel);
-        Ok(REGULAR0_FD)
+        let mut candidate = REGULAR0_FD;
+        while candidate < FILE_FD_COUNT {
+            if self.entries[candidate].is_none() {
+                self.entries[candidate] = Some(FileDescriptorEntry::opened(
+                    ofd_ref,
+                    readable,
+                    writable,
+                    flags,
+                    close_on_exec,
+                ));
+                self.fd_installed.fetch_add(1, Ordering::AcqRel);
+                return Ok(candidate);
+            }
+            candidate += 1;
+        }
+        Err(FileError::TooManyOpenFiles)
     }
 
     fn dup_fd(&mut self, fd: usize, min_fd: usize, close_on_exec: bool) -> FileResult<usize> {
@@ -1066,6 +1070,7 @@ pub struct FilesStruct {
     regular_file_stat_observed: AtomicUsize,
     directory_fd_installed: AtomicUsize,
     directory_getdents_observed: AtomicUsize,
+    tty_alias_fd_installed: AtomicUsize,
     pidfd_installed: AtomicUsize,
     pidfd_ready: AtomicUsize,
     pidfd_closed: AtomicUsize,
@@ -1131,6 +1136,7 @@ impl FilesStruct {
             regular_file_stat_observed: AtomicUsize::new(0),
             directory_fd_installed: AtomicUsize::new(0),
             directory_getdents_observed: AtomicUsize::new(0),
+            tty_alias_fd_installed: AtomicUsize::new(0),
             pidfd_installed: AtomicUsize::new(0),
             pidfd_ready: AtomicUsize::new(0),
             pidfd_closed: AtomicUsize::new(0),
@@ -1260,6 +1266,10 @@ impl FilesStruct {
 
     pub fn directory_getdents_observed(&self) -> bool {
         self.directory_getdents_observed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn tty_alias_fd_installed(&self) -> bool {
+        self.tty_alias_fd_installed.load(Ordering::Acquire) != 0
     }
 
     pub fn pidfd_installed(&self) -> bool {
@@ -1746,9 +1756,6 @@ impl FilesStruct {
         {
             return Err(FileError::PathUnavailable);
         }
-        if self.fd_table.fd_bound(FdRef::Regular0) {
-            return Err(FileError::AlreadyOpen);
-        }
         if open_flags & FILE_O_DIRECTORY != 0 {
             return Err(FileError::InvalidArgument);
         }
@@ -1764,14 +1771,7 @@ impl FilesStruct {
             persistent_open_flags(open_flags),
             open_flags & FILE_O_CLOEXEC != 0,
         )?;
-        self.filesystem0_kind = FilesystemFdKind::None;
-        self.directory0_file_ref = None;
-        self.directory0_offset = 0;
-        self.directory0_last_getdents_len = 0;
-        self.regular0_path.fill(0);
-        self.regular0_path[..path.len()].copy_from_slice(path);
-        self.regular0_path_len = path.len();
-        self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+        self.tty_alias_fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(fd)
     }
 

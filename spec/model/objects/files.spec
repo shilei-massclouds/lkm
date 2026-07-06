@@ -51,9 +51,12 @@
  *     -> TtyFlipBuffer bounded ready-data
  *
  * The current TTY open slice treats /dev/tty and /dev/tty[0-9]+ as aliases for
- * the same console-like FileBackend::CharDevice opened instance. This is only
- * for staged BusyBox/OpenRC probing; it is not devtmpfs, VT allocation,
- * /dev/console, major/minor lookup or a multiple-TTY driver registry.
+ * the same console-like Tty0 FileBackend::CharDevice. Opening an alias installs
+ * a new fd entry in the first free fixed-capacity fd table slot from 3 through
+ * 15; each fd entry keeps independent status flags and close-on-exec state,
+ * while all entries share the same staged backend. This is only for staged
+ * BusyBox/OpenRC probing; it is not devtmpfs, VT allocation, /dev/console,
+ * major/minor lookup or a multiple-TTY driver registry.
  */
 
 enum FileBackendKind {
@@ -83,6 +86,7 @@ predicate files_struct_regular_file_slot_ready<T>(files: T) -> bool;
 predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
 predicate files_struct_tty_alias_fd_installed<T>(files: T) -> bool;
+predicate files_struct_tty_alias_entries_share_backend<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_stat_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
@@ -105,6 +109,8 @@ predicate fd_table_fd_bound<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
 predicate fd_table_lookup_returns<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
 predicate fd_table_stdio_fds_bound<T>(table: T) -> bool;
 predicate fd_table_fd_installed<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
+predicate fd_table_first_free_user_fd_installed<T, O>(table: T, ofd: O) -> bool;
+predicate fd_table_fd_entries_have_independent_status_flags<T>(table: T) -> bool;
 predicate fd_table_cloexec_bit_set_on_install<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_cloexec_not_reported_by_fgetfl<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_cloexec_bit_returned_by_fgetfd<T>(table: T, fd: FdRef) -> bool;
@@ -222,6 +228,37 @@ object FilesStruct: ResourceObject {
                     file_backend_regular_file_read_supported(FileBackend);
                     file_backend_regular_file_stat_supported(FileBackend);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                }
+            }
+
+            on Action::OpenTtyAliasPath {
+                /*
+                 * /dev/tty and /dev/tty[0-9]+ are staged aliases for the
+                 * existing console-like Tty0 backend. This action allocates
+                 * only a fd-table entry: it does not create a real virtual
+                 * terminal, a devtmpfs inode, a /dev/console object, or a new
+                 * TTY driver instance. The fd table chooses the first free
+                 * user fd slot in its fixed 3..15 range; no free slot is the
+                 * EMFILE boundary. Each fd entry owns its status flags, so
+                 * F_SETFL on one alias fd must not mutate another alias fd.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(FileBackend, FileBackendKind::CharDevice);
+                    file_backend_char_device_console_bound(FileBackend);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::InstallFirstFreeCharDevice;
+                }
+
+                ensures {
+                    files_struct_tty_alias_fd_installed(self);
+                    files_struct_tty_alias_entries_share_backend(self);
+                    fd_table_first_free_user_fd_installed(FileDescriptorTable, OpenFileDescription);
+                    fd_table_fd_entries_have_independent_status_flags(FileDescriptorTable);
                 }
             }
 
@@ -536,6 +573,21 @@ object FileDescriptorTable: ResourceObject {
                     fd_table_fd_bound(self, fd, OpenFileDescription);
                     fd_table_cloexec_bit_set_on_install(self, fd);
                     fd_table_cloexec_not_reported_by_fgetfl(self, fd);
+                }
+            }
+
+            on Action::InstallFirstFreeCharDevice {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    OpenFileDescription.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(FileBackend, FileBackendKind::CharDevice);
+                    file_backend_char_device_console_bound(FileBackend);
+                }
+
+                ensures {
+                    fd_table_first_free_user_fd_installed(self, OpenFileDescription);
+                    fd_table_fd_entries_have_independent_status_flags(self);
                 }
             }
 
