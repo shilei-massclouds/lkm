@@ -9,12 +9,12 @@ use crate::{
         files::{FdRef, FileBackendKind, FileError},
         state::State,
         user_boot::{
-            ElfObjectRole, UserMappingKind, UserRtSigtimedwaitResult, USER_BOOT_READ_MAX,
-            USER_CHILD_PID, USER_CLONE_SIGCHLD, USER_COMPLETED_CHILD_RECORD_CAPACITY,
-            USER_EXEC_ARG_MAX, USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE,
-            USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
-            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
-            USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN,
+            ElfObjectRole, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
+            UserRtSigtimedwaitResult, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
+            USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_EXEC_ARG_MAX, USER_HEAP_BASE,
+            USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
+            USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
+            USER_STACK_SIZE, USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN,
         },
         vfs::VfsError,
         virtio_blk,
@@ -924,6 +924,43 @@ impl SmokeScenario for UserBootElfScenario {
                 && !process.runtime_entered()
                 && !ctx.syscall_table.write_observed()
                 && !ctx.syscall_table.exit_observed(),
+        );
+        let pid1_pid = ctx.user_init_process.read_pid(false);
+        let pid1_sid = ctx.user_init_process.read_session_id(0, false);
+        let pid1_explicit_sid = ctx.user_init_process.read_session_id(1, false);
+        let pid1_setsid = ctx.user_init_process.set_session_id_first_slice(false);
+        let child_visible = ctx
+            .user_init_process
+            .observe_child_process_group_visible(USER_CHILD_PID);
+        let child_pid = ctx.user_init_process.read_pid(true);
+        let child_initial_sid = ctx.user_init_process.read_session_id(0, true);
+        let child_setsid = ctx.user_init_process.set_session_id_first_slice(true);
+        let child_current_sid = ctx.user_init_process.read_session_id(0, true);
+        let child_explicit_sid = ctx.user_init_process.read_session_id(USER_CHILD_PID, false);
+        let child_current_pgrp = ctx.user_init_process.read_process_group(0, true);
+        let repeat_child_setsid = ctx.user_init_process.set_session_id_first_slice(true);
+        let unknown_sid = ctx.user_init_process.read_session_id(999, false);
+        assertions.assert(
+            "process identity getsid and child setsid first slice",
+            pid1_pid == Some(1)
+                && pid1_sid == UserProcessGroupLookup::Found(1)
+                && pid1_explicit_sid == UserProcessGroupLookup::Found(1)
+                && pid1_setsid == UserProcessGroupUpdate::PermissionDenied
+                && ctx.user_init_process.setsid_eperm_observed()
+                && child_visible
+                && child_pid == Some(USER_CHILD_PID)
+                && child_initial_sid == UserProcessGroupLookup::Found(1)
+                && child_setsid == UserProcessGroupUpdate::Updated(USER_CHILD_PID)
+                && child_current_sid == UserProcessGroupLookup::Found(USER_CHILD_PID)
+                && child_explicit_sid == UserProcessGroupLookup::Found(USER_CHILD_PID)
+                && child_current_pgrp == UserProcessGroupLookup::Found(USER_CHILD_PID)
+                && repeat_child_setsid == UserProcessGroupUpdate::PermissionDenied
+                && unknown_sid == UserProcessGroupLookup::NoSuchProcess
+                && ctx.user_init_process.child_process_group() == USER_CHILD_PID
+                && ctx.user_init_process.child_process_session_id() == USER_CHILD_PID
+                && ctx.user_init_process.child_session_leader_first_slice()
+                && ctx.user_init_process.child_setsid_success_observed()
+                && ctx.user_init_process.session_id_read_observed(),
         );
         assertions.assert(
             "sigchld pending from child exit",

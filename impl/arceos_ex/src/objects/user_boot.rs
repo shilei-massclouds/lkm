@@ -3419,6 +3419,8 @@ pub struct UserInitProcess {
     ppid_zero_first_slice: bool,
     ppid_read_observed: bool,
     session_leader_first_slice: bool,
+    session_id: usize,
+    session_id_read_observed: bool,
     process_group_leader_first_slice: bool,
     process_group: usize,
     process_group_read_observed: bool,
@@ -3427,7 +3429,10 @@ pub struct UserInitProcess {
     child_process_pid: usize,
     child_process_group_visible: bool,
     child_process_group: usize,
+    child_process_session_id: usize,
+    child_session_leader_first_slice: bool,
     child_process_group_set_observed: bool,
+    child_setsid_success_observed: bool,
     controlling_tty_bound: bool,
     foreground_pgrp_bound: bool,
     foreground_pgrp: usize,
@@ -5430,6 +5435,8 @@ impl UserInitProcess {
             ppid_zero_first_slice: false,
             ppid_read_observed: false,
             session_leader_first_slice: false,
+            session_id: 0,
+            session_id_read_observed: false,
             process_group_leader_first_slice: false,
             process_group: 0,
             process_group_read_observed: false,
@@ -5438,7 +5445,10 @@ impl UserInitProcess {
             child_process_pid: 0,
             child_process_group_visible: false,
             child_process_group: 0,
+            child_process_session_id: 0,
+            child_session_leader_first_slice: false,
             child_process_group_set_observed: false,
+            child_setsid_success_observed: false,
             controlling_tty_bound: false,
             foreground_pgrp_bound: false,
             foreground_pgrp: 0,
@@ -5646,6 +5656,14 @@ impl UserInitProcess {
         self.session_leader_first_slice
     }
 
+    pub const fn session_id(&self) -> usize {
+        self.session_id
+    }
+
+    pub const fn session_id_read_observed(&self) -> bool {
+        self.session_id_read_observed
+    }
+
     pub const fn process_group_leader_first_slice(&self) -> bool {
         self.process_group_leader_first_slice
     }
@@ -5678,8 +5696,20 @@ impl UserInitProcess {
         self.child_process_group
     }
 
+    pub const fn child_process_session_id(&self) -> usize {
+        self.child_process_session_id
+    }
+
+    pub const fn child_session_leader_first_slice(&self) -> bool {
+        self.child_session_leader_first_slice
+    }
+
     pub const fn child_process_group_set_observed(&self) -> bool {
         self.child_process_group_set_observed
+    }
+
+    pub const fn child_setsid_success_observed(&self) -> bool {
+        self.child_setsid_success_observed
     }
 
     pub const fn controlling_tty_bound(&self) -> bool {
@@ -5954,12 +5984,17 @@ impl UserInitProcess {
         self.fsuid = 0;
         self.fsgid = 0;
         self.session_leader_first_slice = true;
+        self.session_id = super::rest_init::KERNEL_INIT_PID;
+        self.session_id_read_observed = false;
         self.process_group_leader_first_slice = true;
         self.process_group = super::rest_init::KERNEL_INIT_PID;
         self.child_process_pid = 0;
         self.child_process_group_visible = false;
         self.child_process_group = 0;
+        self.child_process_session_id = 0;
+        self.child_session_leader_first_slice = false;
         self.child_process_group_set_observed = false;
+        self.child_setsid_success_observed = false;
         self.controlling_tty_bound = true;
         self.foreground_pgrp_bound = true;
         self.foreground_pgrp = super::rest_init::KERNEL_INIT_PID;
@@ -6057,12 +6092,20 @@ impl UserInitProcess {
         Some(self.uid)
     }
 
-    pub fn read_pid(&mut self) -> Option<usize> {
+    pub fn read_pid(&mut self, current_child_continuation: bool) -> Option<usize> {
         if self.lifecycle.state() != State::Online || !self.pid1_preserved {
             return None;
         }
+        let pid = if current_child_continuation {
+            if self.child_process_pid == 0 || !self.child_process_group_visible {
+                return None;
+            }
+            self.child_process_pid
+        } else {
+            super::rest_init::KERNEL_INIT_PID
+        };
         self.pid_read_observed = true;
-        Some(super::rest_init::KERNEL_INIT_PID)
+        Some(pid)
     }
 
     pub fn read_ppid(&mut self) -> Option<usize> {
@@ -6074,7 +6117,11 @@ impl UserInitProcess {
         Some(0)
     }
 
-    pub fn read_process_group(&mut self, pid: usize) -> UserProcessGroupLookup {
+    pub fn read_process_group(
+        &mut self,
+        pid_arg: usize,
+        current_child_continuation: bool,
+    ) -> UserProcessGroupLookup {
         if self.lifecycle.state() != State::Online
             || !self.pid1_preserved
             || !self.process_group_leader_first_slice
@@ -6082,15 +6129,84 @@ impl UserInitProcess {
         {
             return UserProcessGroupLookup::NotReady;
         }
-        if pid != 0 && pid != super::rest_init::KERNEL_INIT_PID {
-            if pid == self.child_process_pid && self.child_process_group_visible {
-                self.process_group_read_observed = true;
-                return UserProcessGroupLookup::Found(self.child_process_group);
-            }
+
+        let pid = pid_t_arg(pid_arg);
+        if pid < 0 {
             return UserProcessGroupLookup::NoSuchProcess;
         }
+        let normalized_pid = if pid == 0 {
+            if current_child_continuation {
+                if self.child_process_pid == 0 || !self.child_process_group_visible {
+                    return UserProcessGroupLookup::NotReady;
+                }
+                self.child_process_pid
+            } else {
+                super::rest_init::KERNEL_INIT_PID
+            }
+        } else {
+            pid as usize
+        };
+
+        if normalized_pid == self.child_process_pid && self.child_process_group_visible {
+            self.process_group_read_observed = true;
+            return UserProcessGroupLookup::Found(self.child_process_group);
+        }
+
+        if normalized_pid != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupLookup::NoSuchProcess;
+        }
+
         self.process_group_read_observed = true;
         UserProcessGroupLookup::Found(self.process_group)
+    }
+
+    pub fn read_session_id(
+        &mut self,
+        pid_arg: usize,
+        current_child_continuation: bool,
+    ) -> UserProcessGroupLookup {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || self.session_id == 0
+        {
+            return UserProcessGroupLookup::NotReady;
+        }
+
+        let pid = pid_t_arg(pid_arg);
+        if pid < 0 {
+            return UserProcessGroupLookup::NoSuchProcess;
+        }
+        let normalized_pid = if pid == 0 {
+            if current_child_continuation {
+                if self.child_process_pid == 0
+                    || !self.child_process_group_visible
+                    || self.child_process_session_id == 0
+                {
+                    return UserProcessGroupLookup::NotReady;
+                }
+                self.child_process_pid
+            } else {
+                super::rest_init::KERNEL_INIT_PID
+            }
+        } else {
+            pid as usize
+        };
+
+        if normalized_pid == self.child_process_pid && self.child_process_group_visible {
+            if self.child_process_session_id == 0 {
+                return UserProcessGroupLookup::NotReady;
+            }
+            self.session_id_read_observed = true;
+            return UserProcessGroupLookup::Found(self.child_process_session_id);
+        }
+
+        if normalized_pid != super::rest_init::KERNEL_INIT_PID {
+            return UserProcessGroupLookup::NoSuchProcess;
+        }
+
+        self.session_id_read_observed = true;
+        UserProcessGroupLookup::Found(self.session_id)
     }
 
     pub fn observe_child_process_group_visible(&mut self, child_pid: usize) -> bool {
@@ -6098,6 +6214,7 @@ impl UserInitProcess {
             || !self.pid1_preserved
             || child_pid == 0
             || self.process_group == 0
+            || self.session_id == 0
         {
             return false;
         }
@@ -6105,6 +6222,9 @@ impl UserInitProcess {
         self.child_process_pid = child_pid;
         self.child_process_group_visible = true;
         self.child_process_group = self.process_group;
+        self.child_process_session_id = self.session_id;
+        self.child_session_leader_first_slice = false;
+        self.child_setsid_success_observed = false;
         true
     }
 
@@ -6183,9 +6303,35 @@ impl UserInitProcess {
     ) -> UserProcessGroupUpdate {
         if self.lifecycle.state() != State::Online
             || !self.pid1_preserved
-            || current_child_continuation
             || !self.session_leader_first_slice
-            || !self.process_group_leader_first_slice
+            || self.session_id == 0
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+
+        if current_child_continuation {
+            let child_pid = self.child_process_pid;
+            if child_pid == 0
+                || !self.child_process_group_visible
+                || self.child_process_session_id == 0
+            {
+                return UserProcessGroupUpdate::NotReady;
+            }
+            if self.child_session_leader_first_slice
+                || self.process_group == child_pid
+                || self.child_process_group == child_pid
+            {
+                return UserProcessGroupUpdate::PermissionDenied;
+            }
+
+            self.child_process_session_id = child_pid;
+            self.child_process_group = child_pid;
+            self.child_session_leader_first_slice = true;
+            self.child_setsid_success_observed = true;
+            return UserProcessGroupUpdate::Updated(child_pid);
+        }
+
+        if !self.process_group_leader_first_slice
             || self.process_group != super::rest_init::KERNEL_INIT_PID
         {
             return UserProcessGroupUpdate::NotReady;

@@ -6,6 +6,10 @@
 
 #include "smoke.h"
 
+#ifndef SYS_getsid
+#define SYS_getsid 156
+#endif
+
 static int say(const char *message, size_t len)
 {
 	return write(STDOUT_FILENO, message, len) == (ssize_t)len ? 0 : -1;
@@ -40,6 +44,23 @@ int smoke_process_identity(void)
 	}
 	if (SAY_LITERAL("syscall getpgid ok\n") < 0) {
 		return 82;
+	}
+
+	rc = syscall(SYS_getsid, 0);
+	if (rc != 1) {
+		return 89;
+	}
+	rc = syscall(SYS_getsid, 1);
+	if (rc != 1) {
+		return 90;
+	}
+	errno = 0;
+	rc = syscall(SYS_getsid, 999);
+	if (rc != -1 || errno != ESRCH) {
+		return 91;
+	}
+	if (SAY_LITERAL("syscall getsid ok\n") < 0) {
+		return 92;
 	}
 
 	rc = syscall(SYS_setpgid, 0, 1);

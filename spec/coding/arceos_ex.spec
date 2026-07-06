@@ -131,6 +131,8 @@ predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> b
 predicate arceos_ex_must_syscall_table_support_getpgid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_setpgid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_setsid_eperm_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_getsid_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_child_setsid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
@@ -1839,32 +1841,48 @@ type ArceosExStartupPhaseCodingMust {
          *
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
-         * do_getpgid()/sys_getpgid()/sys_setpgid()/sys_geteuid()/sys_getegid()/
-         * ksys_setsid()/sys_getresuid()/sys_getresgid()/sys_newuname(),
+         * do_getpgid()/sys_getpgid()/SYSCALL_DEFINE1(getsid)/
+         * sys_setpgid()/sys_geteuid()/sys_getegid()/ksys_setsid()/
+         * sys_getresuid()/sys_getresgid()/sys_newuname(),
          * fs/d_path.c::sys_getcwd(), init/main.c::rest_init(),
          * init/version-timestamp.c::init_uts_ns and
-         * include/uapi/linux/utsname.h. getpid must return the current PID1
-         * UserInitProcess thread-group id. getppid must model PID1's visible
-         * boot idle/init_task parent as 0, without introducing a full task
-         * tree. getpgid(0) must read the current UserInitProcess process group
-         * and return PID1's pgrp. The first single-PID slice may also accept
-         * getpgid(1) as the same task and return 1; unknown or negative pid
-         * values must follow Linux's failed lookup shape and return ESRCH.
+         * include/uapi/linux/utsname.h. getpid must return the current
+         * syscall identity's thread-group id: PID1 current returns 1, while a
+         * visible observed-child continuation returns the child pid. Missing
+         * child identity remains an explicit unsupported boundary rather than
+         * silently returning PID1. getppid must model PID1's visible boot
+         * idle/init_task parent as 0, without introducing a full task tree.
+         * getpgid(0) must read the current UserInitProcess process group
+         * and return the current PID1/observed-child pgrp. The first bounded
+         * identity slice may also accept getpgid(1) as PID1 and the current
+         * visible child pid as the child task; unknown or negative pid values
+         * must follow Linux's failed lookup shape and return ESRCH. getsid(0)
+         * must read the current syscall identity sid; getsid(1) returns PID1's
+         * sid, the current visible child pid returns the child sid, and unknown
+         * or negative pid values return ESRCH.
          * setpgid(154) must preserve Linux sys_setpgid() argument
-         * normalization for pid/pgid zero: pid 0 means current PID1 and pgid
-         * 0 means the selected pid. The current single-PID slice may accept
-         * setpgid(0,0), setpgid(0,1), setpgid(1,0) and setpgid(1,1), all
-         * leaving PID1 in pgrp 1. Negative pgid must return EINVAL; unknown
-         * pid must return ESRCH; unknown target pgrp in the current single
+         * normalization for pid/pgid zero: pid 0 means current syscall
+         * identity and pgid 0 means the selected pid. The current bounded
+         * slice may accept setpgid(0,0), setpgid(0,1), setpgid(1,0) and
+         * setpgid(1,1), all leaving PID1 in pgrp 1, plus observed-child
+         * setpgid shapes already proven by OpenRC/getty. Negative pgid must
+         * return EINVAL; unknown pid must return ESRCH; unknown target pgrp in
+         * the current single
          * session must return EPERM. Full tasklist lookup, RCU protection,
          * security_task_getpgid()/security_task_setpgid(), pid namespaces,
          * PF_FORKNOEXEC/EACCES and multi-process process-group state remain
          * trimmed. setsid(157) must follow Linux ksys_setsid()'s conservative
-         * failure rule for the current first slice: because PID1 is already
-         * recorded as a session leader and process-group leader with pgrp 1,
-         * setsid() returns EPERM and must not create a new session, change
-         * SID/PGID or detach the controlling tty. Non-PID1 callers and
-         * complete successful setsid semantics remain out of slice.
+         * failure rule for PID1: because PID1 is already recorded as a session
+         * leader and process-group leader with pgrp 1, PID1 setsid() returns
+         * EPERM and must not create a new session, change SID/PGID or detach
+         * the controlling tty. The observed getty child continuation first
+         * slice may succeed when the child is visible, has a nonzero pid, is
+         * not already a session leader and no process group equal to the child
+         * pid exists; success returns the child pid and sets child SID/PGID to
+         * that pid. Repeated child setsid() or an existing same-pid child pgrp
+         * returns EPERM. Full tasklist/RCU, security_task_getsid(), pid
+         * namespaces, successful PID1 setsid, pty, controlling-tty detach,
+         * orphan pgrp and complete job-control semantics remain out of slice.
          * geteuid/getegid/getresuid/getresgid must read the existing root
          * credential substate and write uid_t/gid_t user results for getres*.
          * uname must copy the six-field 65-byte new_utsname layout using the
@@ -1963,6 +1981,8 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_getpgid_first_slice();
         arceos_ex_must_syscall_table_support_setpgid_first_slice();
         arceos_ex_must_syscall_table_support_setsid_eperm_first_slice();
+        arceos_ex_must_syscall_table_support_getsid_first_slice();
+        arceos_ex_must_syscall_table_support_child_setsid_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();

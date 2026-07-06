@@ -271,6 +271,7 @@ predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
 predicate syscall_table_getuid_supported<T>(table: T) -> bool;
 predicate syscall_table_getgid_supported<T>(table: T) -> bool;
 predicate syscall_table_getpgid_supported<T>(table: T) -> bool;
+predicate syscall_table_getsid_supported<T>(table: T) -> bool;
 predicate syscall_table_setpgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setsid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
@@ -344,10 +345,12 @@ predicate syscall_getrandom_full_random_core_deferred<T>(table: T) -> bool;
 predicate syscall_getuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_getgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_getpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_getsid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setpgid_child_plain_fork_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_setsid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setsid_process_group_leader_eperm_first_slice<T>(table: T) -> bool;
+predicate syscall_setsid_child_success_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
@@ -463,6 +466,7 @@ predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
 predicate syscall_table_getuid_observed<T>(table: T) -> bool;
 predicate syscall_table_getgid_observed<T>(table: T) -> bool;
 predicate syscall_table_getpgid_observed<T>(table: T) -> bool;
+predicate syscall_table_getsid_observed<T>(table: T) -> bool;
 predicate syscall_table_setpgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setsid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
@@ -509,7 +513,9 @@ predicate user_init_process_session_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_read_observed<T>(process: T) -> bool;
 predicate user_init_process_process_group_set_observed<T>(process: T) -> bool;
+predicate user_init_process_session_id_read_observed<T>(process: T) -> bool;
 predicate user_init_process_setsid_eperm_observed<T>(process: T) -> bool;
+predicate user_init_process_child_setsid_success_observed<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
@@ -758,7 +764,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。OpenRC 原生 /sbin/init 的当前新观察为 clone_flags=0x4111，实测 flags_without_csignal=0x4100，即 SIGCHLD=17 | CLONE_VM=0x100 | CLONE_VFORK=0x4000，newsp 为 child sp；它不是 CLONE_PIDFD。当前片采用单 active child execution slot + bounded completed-child records：child bounded exit/exit_group 恢复 parent clone frame、让 parent clone 返回 child pid 后，归档 pid/status/wait status/reaped=false，释放 internal UserChild runqueue fact，并把 slot 复位为 Prepared-like reusable；下一次顺序 vfork clone 分配递增 user-visible pid 并复用同一 internal UserChild task ref。新的可复现边界是 completed records 达到固定容量后停在 `clone_vfork stage=child_records_full`，诊断为 completed_records=8、record_capacity=8、active_slot_reusable=1、next_child_pid=11 且 first_unreaped_pid=0，说明历史已 reaped records 不能继续占用 bounded slot。wait4 成功 reaping 且 status copyout 成功后必须释放对应 completed record slot，保留 last/total archived、reaped、released 诊断；status copyout EFAULT 和 rt_sigtimedwait(SIGCHLD) 消费 signal 均不得 release record。真正含 CLONE_PIDFD=0x1000 的 vfork shape 才安装 pidfd-like fd、写回 parent_tidptr，并在对应 completed record exit 后记录 pidfd readable。active child 未完成、当前 occupied records 容量耗尽、child 长驻、parent/child 并发或多个 runnable user task refs 仍必须停在明确 unsupported/diagnostic 边界。完整 clone3、线程组、完整 CLONE_VM/vfork completion scheduler、pidfs/pidfd file ops、pidfd_send_signal/pidfd_getfd/waitid(P_PIDFD)、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task/pid hash/资源累计、完整地址空间复制/COW、setsid、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。OpenRC 原生 /sbin/init 的当前新观察为 clone_flags=0x4111，实测 flags_without_csignal=0x4100，即 SIGCHLD=17 | CLONE_VM=0x100 | CLONE_VFORK=0x4000，newsp 为 child sp；它不是 CLONE_PIDFD。当前片采用单 active child execution slot + bounded completed-child records：child bounded exit/exit_group 恢复 parent clone frame、让 parent clone 返回 child pid 后，归档 pid/status/wait status/reaped=false，释放 internal UserChild runqueue fact，并把 slot 复位为 Prepared-like reusable；下一次顺序 vfork clone 分配递增 user-visible pid 并复用同一 internal UserChild task ref。新的可复现边界是 completed records 达到固定容量后停在 `clone_vfork stage=child_records_full`，诊断为 completed_records=8、record_capacity=8、active_slot_reusable=1、next_child_pid=11 且 first_unreaped_pid=0，说明历史已 reaped records 不能继续占用 bounded slot。wait4 成功 reaping 且 status copyout 成功后必须释放对应 completed record slot，保留 last/total archived、reaped、released 诊断；status copyout EFAULT 和 rt_sigtimedwait(SIGCHLD) 消费 signal 均不得 release record。真正含 CLONE_PIDFD=0x1000 的 vfork shape 才安装 pidfd-like fd、写回 parent_tidptr，并在对应 completed record exit 后记录 pidfd readable。active child 未完成、当前 occupied records 容量耗尽、child 长驻、parent/child 并发或多个 runnable user task refs 仍必须停在明确 unsupported/diagnostic 边界。完整 clone3、线程组、完整 CLONE_VM/vfork completion scheduler、pidfs/pidfd file ops、pidfd_send_signal/pidfd_getfd/waitid(P_PIDFD)、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task/pid hash/资源累计、完整地址空间复制/COW、successful PID1 setsid、setsid controlling-tty detach、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
                 }
             }
         }
@@ -1189,6 +1195,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_getuid_supported(self);
                     syscall_table_getgid_supported(self);
                     syscall_table_getpgid_supported(self);
+                    syscall_table_getsid_supported(self);
                     syscall_table_setpgid_supported(self);
                     syscall_table_setsid_supported(self);
                     syscall_table_setuid_supported(self);
@@ -1256,6 +1263,7 @@ object SyscallTable: ResourceObject {
                     syscall_exit_records_status(self);
                     syscall_exit_group_pid1_shutdown_child_wait4_split(self);
                     syscall_setsid_process_group_leader_eperm_first_slice(self);
+                    syscall_setsid_child_success_first_slice(self, UserChildProcess);
                     syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
             }
@@ -1281,6 +1289,7 @@ object SyscallTable: ResourceObject {
             syscall_table_getuid_supported(self);
             syscall_table_getgid_supported(self);
             syscall_table_getpgid_supported(self);
+            syscall_table_getsid_supported(self);
             syscall_table_setpgid_supported(self);
             syscall_table_setsid_supported(self);
             syscall_table_setuid_supported(self);
@@ -1345,6 +1354,7 @@ object SyscallTable: ResourceObject {
             syscall_exit_records_status(self);
             syscall_exit_group_pid1_shutdown_child_wait4_split(self);
             syscall_setsid_process_group_leader_eperm_first_slice(self);
+            syscall_setsid_child_success_first_slice(self, UserChildProcess);
         }
 
         actions {
@@ -1843,9 +1853,11 @@ object SyscallTable: ResourceObject {
             on Action::GetPid {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_getpid() returns
-                 * task_tgid_vnr(current). The current user init is the
-                 * exec-transformed KernelInitTask, so this first slice returns
-                 * the preserved PID1 task identity.
+                 * task_tgid_vnr(current). The bounded first slice reads the
+                 * current syscall identity: PID1 current returns the preserved
+                 * PID1 task identity, and an observed visible child
+                 * continuation returns the child pid without introducing a
+                 * full task graph.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1913,6 +1925,30 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::GetSid {
+                /*
+                 * Linux 6.12 kernel/sys.c::SYSCALL_DEFINE1(getsid) treats
+                 * pid==0 as current and otherwise looks up the visible task's
+                 * session. The current first slice exposes PID1 and the
+                 * observed child identity; successful child setsid updates
+                 * only that bounded child SID.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadSessionId;
+                }
+
+                ensures {
+                    syscall_getsid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_session_id_read_observed(UserInitProcess);
+                    syscall_table_getsid_observed(self);
+                }
+            }
+
             on Action::SetPgid {
                 /*
                  * Linux 6.12 sys_setpgid() normalizes pid==0 to current and
@@ -1948,10 +1984,10 @@ object SyscallTable: ResourceObject {
                  * when the current group leader is already a session leader
                  * or when a process-group id equal to the proposed session id
                  * exists. The current first slice preserves PID1's existing
-                 * session-leader/process-group-leader identity and only
-                 * exposes that conservative EPERM result; creating a new
-                 * session, changing SID/PGID and detaching the controlling tty
-                 * remain deferred.
+                 * session-leader/process-group-leader EPERM result, and also
+                 * admits the observed getty child success path when no same
+                 * pid pgrp exists; full tasklist lookup and controlling tty
+                 * detach remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1965,7 +2001,9 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_setsid_routes_to_user_init_process(self, UserInitProcess);
                     syscall_setsid_process_group_leader_eperm_first_slice(self);
+                    syscall_setsid_child_success_first_slice(self, UserChildProcess);
                     user_init_process_setsid_eperm_observed(UserInitProcess);
+                    user_init_process_child_setsid_success_observed(UserInitProcess, UserChildProcess);
                     syscall_table_setsid_observed(self);
                 }
             }
@@ -3121,6 +3159,11 @@ object UserInitProcess: ResourceObject {
             }
 
             on Action::ReadProcessId {
+                /*
+                 * Read the current bounded user task identity. Missing child
+                 * continuation facts remain unsupported instead of silently
+                 * aliasing the child to PID1.
+                 */
                 depends_on {
                     UserInitProcess.state == State::Online;
                     SyscallException.state == State::Online;
@@ -3158,6 +3201,18 @@ object UserInitProcess: ResourceObject {
                 }
             }
 
+            on Action::ReadSessionId {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_session_leader_first_slice(self);
+                    user_init_process_session_id_read_observed(self);
+                }
+            }
+
             on Action::SetProcessGroup {
                 depends_on {
                     UserInitProcess.state == State::Online;
@@ -3183,6 +3238,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_session_leader_first_slice(self);
                     user_init_process_process_group_leader_first_slice(self);
                     user_init_process_setsid_eperm_observed(self);
+                    user_init_process_child_setsid_success_observed(self, UserChildProcess);
                 }
             }
 
