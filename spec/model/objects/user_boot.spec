@@ -527,6 +527,9 @@ predicate files_struct_stdin_ready_data_bound<T>(files: T) -> bool;
 predicate files_struct_stdin_char_device_read_observed<T>(files: T) -> bool;
 predicate files_struct_tty_termios_state_bound<T>(files: T) -> bool;
 predicate files_struct_tty_termios_mutation_observed<T>(files: T) -> bool;
+predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
+predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
+predicate files_struct_directory_fd_installed<T>(files: T) -> bool;
 predicate file_backend_char_device_read_returns_ready_data<T>(backend: T) -> bool;
 predicate tty_flip_buffer_ready_data_bound<T>(buffer: T) -> bool;
 predicate tty_flip_buffer_ready_data_consumed<T>(buffer: T) -> bool;
@@ -1280,6 +1283,19 @@ object SyscallTable: ResourceObject {
             }
 
             on Action::OpenAt {
+                /*
+                 * Linux 6.12 sys_openat() forces O_LARGEFILE on 64-bit and
+                 * then reaches fs/open.c::build_open_flags(). O_DIRECTORY is
+                 * only translated to LOOKUP_DIRECTORY, matching the uapi
+                 * comment "must be a directory"; it is not required in order
+                 * to open a directory. This slice therefore resolves the path
+                 * through VfsCore first and installs either the regular-file
+                 * or directory opened instance according to the target inode.
+                 * If O_DIRECTORY is present and the resolved target is not a
+                 * directory, the syscall must fail with ENOTDIR. Write/create
+                 * modes, O_PATH, O_TMPFILE, nofollow, permissions, LSM hooks,
+                 * mount namespaces and full errno detail remain trimmed.
+                 */
                 depends_on {
                     SyscallException.state == State::Online;
                     FilesStruct.state == State::Ready;
@@ -1297,7 +1313,7 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_openat_routes_to_files_struct(self, FilesStruct);
                     files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
-                    files_struct_regular_fd_installed(FilesStruct);
+                    files_struct_regular_fd_installed(FilesStruct) || files_struct_directory_fd_installed(FilesStruct);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
                     syscall_table_openat_observed(self);
                 }

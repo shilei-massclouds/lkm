@@ -1522,6 +1522,38 @@ impl VfsCore {
         Ok(file_ref)
     }
 
+    pub fn open_existing_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        must_be_directory: bool,
+    ) -> Result<(FileRef, VfsInodeKind), VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let kind = {
+            let dentry = self.positive_dentry(dentry_ref)?;
+            let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+            if inode.removed() {
+                return Err(VfsError::NotFound);
+            }
+            inode.kind()
+        };
+        if must_be_directory && kind != VfsInodeKind::Directory {
+            return Err(VfsError::NotDirectory);
+        }
+        let file_ref = match kind {
+            VfsInodeKind::RegularFile => self.open_file(dentry_ref)?,
+            VfsInodeKind::Directory => self.open_directory(dentry_ref)?,
+            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => {
+                return Err(VfsError::UnsupportedPath);
+            }
+        };
+        self.open_path_allocated_file = true;
+        Ok((file_ref, kind))
+    }
+
     pub fn read_path<P: BlockDeviceProvider>(
         &mut self,
         fs_struct: &FsStruct,
@@ -1532,17 +1564,30 @@ impl VfsCore {
         buffer: &mut [u8],
     ) -> Result<usize, VfsError> {
         let file_ref = self.open_path(fs_struct, fs, registry, provider, path)?;
+        let len = self.read_opened_file(fs, registry, provider, file_ref, 0, buffer)?;
+        self.read_path_returns_data = len != 0;
+        Ok(len)
+    }
+
+    pub fn read_opened_file<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        file_ref: FileRef,
+        offset: usize,
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
         let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
         let len = if self
             .inode(inode_ref)
             .ok_or(VfsError::InvalidRef)?
             .read_only_backed()
         {
-            self.read_ext2_file(fs, registry, provider, file_ref, 0, buffer)?
+            self.read_ext2_file(fs, registry, provider, file_ref, offset, buffer)?
         } else {
-            self.read_file(file_ref, 0, buffer)?
+            self.read_file(file_ref, offset, buffer)?
         };
-        self.read_path_returns_data = len != 0;
         Ok(len)
     }
 

@@ -9,6 +9,10 @@
 
 #include "smoke.h"
 
+#ifndef O_LARGEFILE
+#define O_LARGEFILE 0
+#endif
+
 static int say(const char *message, size_t len)
 {
 	return write(STDOUT_FILENO, message, len) == (ssize_t)len ? 0 : -1;
@@ -145,6 +149,29 @@ static int smoke_directory_fileio(void)
 	}
 	if (SAY_LITERAL("syscall close directory ok\n") < 0) {
 		return 48;
+	}
+
+	int plain_dir_fd = syscall(SYS_openat, AT_FDCWD, "/",
+				   O_RDONLY | O_LARGEFILE, 0);
+	if (plain_dir_fd < 0) {
+		return 83;
+	}
+	if (syscall(SYS_fstat, plain_dir_fd, &st) < 0) {
+		return 84;
+	}
+	if (!S_ISDIR(st.st_mode) || st.st_size <= 0) {
+		return 85;
+	}
+	long plain_bytes = syscall(SYS_getdents64, plain_dir_fd, dir_buf,
+				   sizeof(dir_buf));
+	if (plain_bytes <= 0) {
+		return 86;
+	}
+	if (close(plain_dir_fd) < 0) {
+		return 87;
+	}
+	if (SAY_LITERAL("syscall openat directory target ok\n") < 0) {
+		return 88;
 	}
 
 	int dot_dir_fd = syscall(SYS_openat, AT_FDCWD, ".",

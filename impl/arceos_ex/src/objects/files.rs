@@ -118,6 +118,7 @@ pub enum FileError {
     PermissionDenied,
     TooManySymlinks,
     TooManyOpenFiles,
+    NotDirectory,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -135,6 +136,7 @@ fn vfs_error_to_file_error(error: VfsError) -> FileError {
         VfsError::ShortBuffer => FileError::BufferTooSmall,
         VfsError::Backend => FileError::VfsBackendUnavailable,
         VfsError::SymlinkLoop => FileError::TooManySymlinks,
+        VfsError::NotDirectory => FileError::NotDirectory,
         _ => FileError::BackendUnavailable,
     }
 }
@@ -1454,6 +1456,115 @@ impl FilesStruct {
         self.regular0_path_len = path.len();
         self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
         self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_filesystem_path(
+        &mut self,
+        fs_struct: &FsStruct,
+        vfs_core: &mut VfsCore,
+        ext2_filesystem: &mut Ext2FileSystem,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+        path: &[u8],
+        open_flags: u32,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.regular_file_slot_ready
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+        {
+            return Err(FileError::NotReady);
+        }
+        if self.fd_table.fd_bound(FdRef::Regular0) {
+            return Err(FileError::AlreadyOpen);
+        }
+        if open_flags & FILE_O_ACCMODE != FILE_O_RDONLY {
+            return Err(FileError::PermissionDenied);
+        }
+
+        let mut provider = virtio_blk::live_provider(kernel_image);
+        let (file_ref, kind) = vfs_core
+            .open_existing_path(
+                fs_struct,
+                ext2_filesystem,
+                block_device_registry,
+                &mut provider,
+                path,
+                open_flags & FILE_O_DIRECTORY != 0,
+            )
+            .map_err(vfs_error_to_file_error)?;
+
+        let regular_len = match kind {
+            VfsInodeKind::RegularFile => {
+                self.regular0_buffer.fill(0);
+                Some(
+                    vfs_core
+                        .read_opened_file(
+                            ext2_filesystem,
+                            block_device_registry,
+                            &mut provider,
+                            file_ref,
+                            0,
+                            &mut self.regular0_buffer,
+                        )
+                        .map_err(vfs_error_to_file_error)?,
+                )
+            }
+            VfsInodeKind::Directory => None,
+            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => {
+                return Err(FileError::BackendUnavailable);
+            }
+        };
+
+        if self.regular0_backend.state() == State::Base {
+            self.regular0_backend
+                .bind_regular_file()
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+        if self.regular0.state() == State::Base {
+            self.regular0
+                .setup_regular(&self.regular0_backend)
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+
+        let fd = self.fd_table.install_regular(
+            &self.regular0,
+            persistent_open_flags(open_flags),
+            open_flags & FILE_O_CLOEXEC != 0,
+        )?;
+        self.regular0_path.fill(0);
+        self.regular0_path[..path.len()].copy_from_slice(path);
+        self.regular0_path_len = path.len();
+        self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+
+        match kind {
+            VfsInodeKind::RegularFile => {
+                let len = regular_len.ok_or(FileError::BackendUnavailable)?;
+                self.regular0_len = len;
+                self.regular0_offset = 0;
+                self.filesystem0_kind = FilesystemFdKind::RegularFile;
+                self.directory0_file_ref = None;
+                self.directory0_offset = 0;
+                self.directory0_last_getdents_len = 0;
+                self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
+            }
+            VfsInodeKind::Directory => {
+                self.regular0_len = 0;
+                self.regular0_offset = 0;
+                self.filesystem0_kind = FilesystemFdKind::Directory;
+                self.directory0_file_ref = Some(file_ref);
+                self.directory0_offset = 0;
+                self.directory0_last_getdents_len = 0;
+                self.directory_fd_installed.fetch_add(1, Ordering::AcqRel);
+            }
+            VfsInodeKind::DeviceNode | VfsInodeKind::Symlink => {
+                return Err(FileError::BackendUnavailable);
+            }
+        }
+
         Ok(fd)
     }
 

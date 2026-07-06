@@ -206,6 +206,7 @@ const ESPIPE: usize = 29;
 const ENOTTY: usize = 25;
 const ELOOP: usize = 40;
 const EMFILE: usize = 24;
+const ENOTDIR: usize = 20;
 const ECHILD: usize = 10;
 
 #[cfg(app_user_boot)]
@@ -2709,6 +2710,7 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::PermissionDenied => EACCES,
         FileError::TooManySymlinks => ELOOP,
         FileError::TooManyOpenFiles => EMFILE,
+        FileError::NotDirectory => ENOTDIR,
         FileError::NotReady
         | FileError::NotReadable
         | FileError::NotWritable
@@ -2751,18 +2753,8 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
             .open_tty_path(&path[..path_len], flags as u32)
     } else if flags & O_ACCMODE != 0 {
         Err(FileError::PermissionDenied)
-    } else if flags & O_DIRECTORY != 0 {
-        ctx.files_struct.open_directory_path(
-            &ctx.fs_struct,
-            &mut ctx.vfs_core,
-            &mut ctx.ext2_filesystem,
-            &mut ctx.block_device_registry,
-            &ctx.kernel_image,
-            &path[..path_len],
-            flags as u32,
-        )
     } else {
-        ctx.files_struct.open_regular_path(
+        ctx.files_struct.open_filesystem_path(
             &ctx.fs_struct,
             &mut ctx.vfs_core,
             &mut ctx.ext2_filesystem,
@@ -6146,6 +6138,7 @@ fn print_file_error_name(error: FileError) {
         FileError::PermissionDenied => "PermissionDenied",
         FileError::TooManySymlinks => "TooManySymlinks",
         FileError::TooManyOpenFiles => "TooManyOpenFiles",
+        FileError::NotDirectory => "NotDirectory",
     };
     crate::arch::riscv64::sbi::putstr(name);
 }
