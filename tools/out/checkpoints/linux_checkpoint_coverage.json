@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 415,
+  "total_checkpoints": 416,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 298
+      "count": 299
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 298
+      "count": 299
     },
     {
       "confidence": "medium",
@@ -880,6 +880,10 @@
       "count": 1
     },
     {
+      "family": "SyscallTable",
+      "count": 1
+    },
+    {
       "family": "TaskFileContext",
       "count": 1
     },
@@ -984,5 +988,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 172
+  "unmapped_singleton_family_count": 173
 }

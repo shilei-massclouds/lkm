@@ -511,6 +511,24 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 """
 
 
+SIGNAL_C = """
+SYSCALL_DEFINE4(rt_sigtimedwait, const sigset_t __user *, uthese,
+                siginfo_t __user *, uinfo,
+                const struct __kernel_timespec __user *, uts,
+                size_t, sigsetsize)
+{
+    sigset_t these;
+
+    if (sigsetsize != sizeof(sigset_t))
+        return -EINVAL;
+    if (copy_from_user(&these, uthese, sizeof(sigset_t)))
+        return -EFAULT;
+
+    return do_sigtimedwait(&these, uinfo, uts);
+}
+"""
+
+
 class MapLinuxCheckpointsTests(unittest.TestCase):
     def _write_linux_fixture(self, tmp: str) -> Path:
         root = Path(tmp) / "linux"
@@ -526,6 +544,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         (root / "kernel" / "sched" / "core.c").write_text(SCHED_CORE_C, encoding="utf-8")
         (root / "kernel" / "fork.c").write_text(FORK_C, encoding="utf-8")
         (root / "kernel" / "exit.c").write_text(EXIT_C, encoding="utf-8")
+        (root / "kernel" / "signal.c").write_text(SIGNAL_C, encoding="utf-8")
         (root / "fs" / "read_write.c").write_text(READ_WRITE_C, encoding="utf-8")
         (root / "fs" / "open.c").write_text(OPEN_C, encoding="utf-8")
         (root / "fs" / "stat.c").write_text(STAT_C, encoding="utf-8")
@@ -1514,16 +1533,21 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=397,
+                variant="SyscallTableRtSigtimedwait",
+                name="SyscallTable.RtSigtimedwait",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=398,
                 variant="SyscallTableWait4",
                 name="SyscallTable.Wait4",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
-                index=398,
+                index=399,
                 variant="UserChildParentWaitResumed",
                 name="UserChild.ParentWaitResumed",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
-                index=399,
+                index=400,
                 variant="SyscallTableExit",
                 name="SyscallTable.Exit",
             ),
@@ -1560,6 +1584,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")
         self.assertEqual(by_name["SyscallTable.Clone"].confidence, "medium")
         self.assertIn("conditional", by_name["SyscallTable.Clone"].notes)
+        self.assertEqual(by_name["SyscallTable.RtSigtimedwait"].linux_file, "kernel/signal.c")
+        self.assertIn("do_sigtimedwait", by_name["SyscallTable.RtSigtimedwait"].linux_anchor)
         self.assertIn("kernel_wait4", by_name["SyscallTable.Wait4"].linux_anchor)
         self.assertEqual(by_name["UserChild.ParentWaitResumed"].linux_symbol, "kernel_wait4")
         self.assertEqual(by_name["UserChild.ParentWaitResumed"].confidence, "medium")

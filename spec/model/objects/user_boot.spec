@@ -268,6 +268,7 @@ predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
+predicate syscall_table_rt_sigtimedwait_supported<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_supported<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_supported<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_supported<T>(table: T) -> bool;
@@ -350,6 +351,13 @@ predicate syscall_rt_sigaction_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_layout_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_unblockable_signals_cleared<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_kernel_only_signals_rejected<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigtimedwait_sigsetsize_bound<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_copies_wait_mask<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_empty_pending_wait_boundary<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_scheduler_sleep_deferred<T>(table: T) -> bool;
 predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
 predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
@@ -441,6 +449,7 @@ predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
+predicate syscall_table_rt_sigtimedwait_observed<T>(table: T) -> bool;
 predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
 predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_nanosleep_observed<T>(table: T) -> bool;
@@ -473,6 +482,7 @@ predicate user_init_process_process_signal_state_deferred<T>(process: T) -> bool
 predicate user_init_process_signal_action_table_bound<T>(process: T) -> bool;
 predicate user_init_process_signal_action_table_layout_bound<T>(process: T) -> bool;
 predicate user_init_process_blocked_signal_mask_bound<T>(process: T) -> bool;
+predicate user_init_process_pending_signal_set_empty_first_slice<T>(process: T) -> bool;
 predicate user_init_process_signal_delivery_deferred<T>(process: T) -> bool;
 predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
 predicate user_init_process_session_leader_first_slice<T>(process: T) -> bool;
@@ -528,6 +538,12 @@ predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_set_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigprocmask_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigaction_observed<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_observed<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_mask_observed<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_uinfo_null<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_uts_null<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_pending_match_empty<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_infinite_wait<T>(process: T) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
 predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
 predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
@@ -1120,6 +1136,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_setgid_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
                     syscall_table_rt_sigaction_supported(self);
+                    syscall_table_rt_sigtimedwait_supported(self);
                     syscall_table_clock_gettime_supported(self);
                     syscall_table_gettimeofday_supported(self);
                     syscall_table_nanosleep_supported(self);
@@ -1159,6 +1176,12 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
+                    syscall_rt_sigtimedwait_sigsetsize_bound(self);
+                    syscall_rt_sigtimedwait_copies_wait_mask(self);
+                    syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
+                    syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
+                    syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
+                    syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
                     syscall_execve_envp_full_copy_deferred(self);
                     syscall_execve_close_on_exec_deferred(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
@@ -1202,6 +1225,7 @@ object SyscallTable: ResourceObject {
             syscall_table_setgid_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
             syscall_table_rt_sigaction_supported(self);
+            syscall_table_rt_sigtimedwait_supported(self);
             syscall_table_clock_gettime_supported(self);
             syscall_table_gettimeofday_supported(self);
             syscall_table_nanosleep_supported(self);
@@ -1239,6 +1263,12 @@ object SyscallTable: ResourceObject {
             syscall_ppoll_blocking_wait_deferred(self);
             syscall_ioctl_tty_full_linux_model_deferred(self);
             syscall_nanosleep_full_hrtimer_deferred(self);
+            syscall_rt_sigtimedwait_sigsetsize_bound(self);
+            syscall_rt_sigtimedwait_copies_wait_mask(self);
+            syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
+            syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
+            syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
+            syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
             syscall_execve_envp_full_copy_deferred(self);
             syscall_execve_close_on_exec_deferred(self);
             syscall_execve_old_mm_reclaim_deferred(self);
@@ -2138,19 +2168,49 @@ object SyscallTable: ResourceObject {
                 }
             }
 
-            /*
-             * Linux 6.12 RISC-V/asm-generic syscall identity note:
-             * rt_sigsuspend is number 133 and rt_sigtimedwait is number
-             * 137. The current native /sbin/init/OpenRC diagnostic reaches
-             * number 137 after setsid(157) with uthese=a0, uinfo=NULL,
-             * uts=NULL and sigsetsize=8. This is intentionally not modeled
-             * as a supported SyscallTable action in this slice. The runtime
-             * may add a best-effort, side-effect-free unsupported diagnostic
-             * for rt_sigtimedwait arguments while still returning ENOSYS.
-             * Signal wait queues, pending signal selection, scheduler sleep,
-             * timeout handling, restart and rt_siginfo_t copyout remain
-             * deferred.
-             */
+            on Action::RtSigtimedwait {
+                /*
+                 * Linux 6.12 RISC-V exposes rt_sigtimedwait(2) as syscall
+                 * number 137. kernel/signal.c::sys_rt_sigtimedwait() checks
+                 * sigsetsize == sizeof(sigset_t), copies the user signal set,
+                 * then waits for a matching pending signal or timeout. A
+                 * NULL uinfo does not require siginfo_t copyout. A NULL uts
+                 * is an infinite wait rather than an immediate EAGAIN.
+                 *
+                 * The current OpenRC evidence reaches
+                 * rt_sigtimedwait(uthese, NULL, NULL, 8) after setsid(157).
+                 * This first slice copies and records the wait mask, models
+                 * the current pending signal set as empty, and therefore must
+                 * not return success, EAGAIN or ENOSYS for that shape. It
+                 * records a Linux-like wait reason and stops at the observable
+                 * wait boundary. Signal generation/delivery, SIGCHLD pending
+                 * creation, real scheduler sleep/wakeup, timeout expiry,
+                 * restart and siginfo_t copyout remain deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_signal_mask_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::RtSigtimedwait;
+                }
+
+                ensures {
+                    syscall_rt_sigtimedwait_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_rt_sigtimedwait_sigsetsize_bound(self);
+                    syscall_rt_sigtimedwait_copies_wait_mask(self);
+                    syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
+                    syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
+                    syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
+                    syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
+                    user_init_process_rt_sigtimedwait_observed(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_pending_match_empty(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_infinite_wait(UserInitProcess);
+                    syscall_table_rt_sigtimedwait_observed(self);
+                }
+            }
 
             on Action::ClockGettime {
                 /*
@@ -2647,6 +2707,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_signal_action_table_bound(self);
                     user_init_process_signal_action_table_layout_bound(self);
                     user_init_process_blocked_signal_mask_bound(self);
+                    user_init_process_pending_signal_set_empty_first_slice(self);
                     user_init_process_signal_delivery_deferred(self);
                     user_init_process_session_leader_first_slice(self);
                     user_init_process_process_group_leader_first_slice(self);
@@ -2683,6 +2744,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_signal_action_table_bound(self);
             user_init_process_signal_action_table_layout_bound(self);
             user_init_process_blocked_signal_mask_bound(self);
+            user_init_process_pending_signal_set_empty_first_slice(self);
             user_init_process_signal_delivery_deferred(self);
             user_init_process_session_leader_first_slice(self);
             user_init_process_process_group_leader_first_slice(self);
@@ -2718,6 +2780,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_signal_action_table_bound(self);
                     user_init_process_signal_action_table_layout_bound(self);
                     user_init_process_blocked_signal_mask_bound(self);
+                    user_init_process_pending_signal_set_empty_first_slice(self);
                     user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
                     user_init_process_session_leader_first_slice(self);
                     user_init_process_process_group_leader_first_slice(self);
@@ -2758,6 +2821,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_signal_action_table_bound(self);
             user_init_process_signal_action_table_layout_bound(self);
             user_init_process_blocked_signal_mask_bound(self);
+            user_init_process_pending_signal_set_empty_first_slice(self);
             user_init_process_signal_delivery_deferred(self);
             user_init_process_session_leader_first_slice(self);
             user_init_process_process_group_leader_first_slice(self);
@@ -3041,6 +3105,26 @@ object UserInitProcess: ResourceObject {
                     user_init_process_signal_action_table_layout_bound(self);
                     user_init_process_signal_delivery_deferred(self);
                     user_init_process_rt_sigaction_observed(self);
+                }
+            }
+
+            on Action::RtSigtimedwait {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_signal_runtime_bound(self);
+                    user_init_process_thread_signal_state_bound(self);
+                    user_init_process_pending_signal_set_empty_first_slice(self);
+                    user_init_process_signal_delivery_deferred(self);
+                    user_init_process_rt_sigtimedwait_observed(self);
+                    user_init_process_rt_sigtimedwait_mask_observed(self);
+                    user_init_process_rt_sigtimedwait_uinfo_null(self);
+                    user_init_process_rt_sigtimedwait_uts_null(self);
+                    user_init_process_rt_sigtimedwait_pending_match_empty(self);
+                    user_init_process_rt_sigtimedwait_infinite_wait(self);
                 }
             }
 

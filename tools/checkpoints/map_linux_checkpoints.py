@@ -1537,6 +1537,14 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="Mapped to shared kernel_clone() because the legacy clone syscall ABI wrapper is arch/config conditional on CONFIG_CLONE_BACKWARDS variants.",
         ),
+        "SyscallTable.RtSigtimedwait": MappingRule(
+            mapping_kind="exact",
+            linux_file="kernel/signal.c",
+            linux_symbol="SYSCALL_DEFINE4(rt_sigtimedwait)",
+            anchor_pattern=r"\breturn\s+do_sigtimedwait\s*\(\s*&these\s*,\s*uinfo\s*,\s*uts\s*\)\s*;",
+            confidence="high",
+            notes="Linux rt_sigtimedwait syscall wrapper validates sigset size, copies the user mask, and dispatches to do_sigtimedwait().",
+        ),
         "SyscallTable.Wait4": MappingRule(
             mapping_kind="exact",
             linux_file="kernel/exit.c",

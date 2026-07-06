@@ -3243,10 +3243,17 @@ pub struct UserInitProcess {
     signal_action_table_layout_bound: bool,
     blocked_signal_mask_bound: bool,
     signal_delivery_deferred: bool,
+    pending_signal_set_empty_first_slice: bool,
     blocked_signal_mask: usize,
     signal_actions: [UserSignalAction; USER_SIGNAL_COUNT],
     rt_sigprocmask_observed: bool,
     rt_sigaction_observed: bool,
+    rt_sigtimedwait_observed: bool,
+    rt_sigtimedwait_mask: usize,
+    rt_sigtimedwait_uinfo_null: bool,
+    rt_sigtimedwait_uts_null: bool,
+    rt_sigtimedwait_pending_match: bool,
+    rt_sigtimedwait_infinite_wait: bool,
     clear_child_tid_bound: bool,
     clear_child_tid: usize,
     root_cwd_first_slice: bool,
@@ -4587,10 +4594,17 @@ impl UserInitProcess {
             signal_action_table_layout_bound: false,
             blocked_signal_mask_bound: false,
             signal_delivery_deferred: false,
+            pending_signal_set_empty_first_slice: false,
             blocked_signal_mask: 0,
             signal_actions: [UserSignalAction::default(); USER_SIGNAL_COUNT],
             rt_sigprocmask_observed: false,
             rt_sigaction_observed: false,
+            rt_sigtimedwait_observed: false,
+            rt_sigtimedwait_mask: 0,
+            rt_sigtimedwait_uinfo_null: false,
+            rt_sigtimedwait_uts_null: false,
+            rt_sigtimedwait_pending_match: false,
+            rt_sigtimedwait_infinite_wait: false,
             clear_child_tid_bound: false,
             clear_child_tid: 0,
             root_cwd_first_slice: false,
@@ -4874,6 +4888,10 @@ impl UserInitProcess {
         self.signal_delivery_deferred
     }
 
+    pub const fn pending_signal_set_empty_first_slice(&self) -> bool {
+        self.pending_signal_set_empty_first_slice
+    }
+
     pub const fn blocked_signal_mask(&self) -> usize {
         self.blocked_signal_mask
     }
@@ -4884,6 +4902,30 @@ impl UserInitProcess {
 
     pub const fn rt_sigaction_observed(&self) -> bool {
         self.rt_sigaction_observed
+    }
+
+    pub const fn rt_sigtimedwait_observed(&self) -> bool {
+        self.rt_sigtimedwait_observed
+    }
+
+    pub const fn rt_sigtimedwait_mask(&self) -> usize {
+        self.rt_sigtimedwait_mask
+    }
+
+    pub const fn rt_sigtimedwait_uinfo_null(&self) -> bool {
+        self.rt_sigtimedwait_uinfo_null
+    }
+
+    pub const fn rt_sigtimedwait_uts_null(&self) -> bool {
+        self.rt_sigtimedwait_uts_null
+    }
+
+    pub const fn rt_sigtimedwait_pending_match(&self) -> bool {
+        self.rt_sigtimedwait_pending_match
+    }
+
+    pub const fn rt_sigtimedwait_infinite_wait(&self) -> bool {
+        self.rt_sigtimedwait_infinite_wait
     }
 
     pub fn credentials_syscall_ready(&self) -> bool {
@@ -4906,6 +4948,16 @@ impl UserInitProcess {
             && self.signal_runtime_bound
             && self.signal_action_table_bound
             && self.signal_action_table_layout_bound
+    }
+
+    pub fn signal_wait_syscall_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.signal_state_inherited
+            && self.signal_runtime_bound
+            && self.thread_signal_state_bound
+            && self.blocked_signal_mask_bound
+            && self.pending_signal_set_empty_first_slice
+            && self.signal_delivery_deferred
     }
 
     pub const fn clear_child_tid_bound(&self) -> bool {
@@ -4996,6 +5048,7 @@ impl UserInitProcess {
         self.signal_action_table_layout_bound = true;
         self.blocked_signal_mask_bound = true;
         self.signal_delivery_deferred = true;
+        self.pending_signal_set_empty_first_slice = true;
         self.blocked_signal_mask = 0;
         self.signal_actions = [UserSignalAction::default(); USER_SIGNAL_COUNT];
         self.lifecycle
@@ -5360,6 +5413,26 @@ impl UserInitProcess {
             return false;
         }
         self.rt_sigaction_observed = true;
+        true
+    }
+
+    pub fn observe_rt_sigtimedwait(
+        &mut self,
+        mask: usize,
+        uinfo_null: bool,
+        uts_null: bool,
+        pending_match: bool,
+        infinite_wait: bool,
+    ) -> bool {
+        if !self.signal_wait_syscall_ready() {
+            return false;
+        }
+        self.rt_sigtimedwait_mask = mask;
+        self.rt_sigtimedwait_uinfo_null = uinfo_null;
+        self.rt_sigtimedwait_uts_null = uts_null;
+        self.rt_sigtimedwait_pending_match = pending_match;
+        self.rt_sigtimedwait_infinite_wait = infinite_wait;
+        self.rt_sigtimedwait_observed = true;
         true
     }
 

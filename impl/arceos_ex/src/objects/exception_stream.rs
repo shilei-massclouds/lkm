@@ -608,6 +608,7 @@ pub struct SyscallTable {
     setgid_supported: bool,
     rt_sigprocmask_supported: bool,
     rt_sigaction_supported: bool,
+    rt_sigtimedwait_supported: bool,
     clock_gettime_supported: bool,
     gettimeofday_supported: bool,
     nanosleep_supported: bool,
@@ -692,6 +693,13 @@ pub struct SyscallTable {
     rt_sigaction_layout_bound: bool,
     rt_sigaction_unblockable_signals_cleared: bool,
     rt_sigaction_kernel_only_signals_rejected: bool,
+    rt_sigtimedwait_routes_to_user_init_process: bool,
+    rt_sigtimedwait_sigsetsize_bound: bool,
+    rt_sigtimedwait_copies_wait_mask: bool,
+    rt_sigtimedwait_uinfo_null_no_copyout_first_slice: bool,
+    rt_sigtimedwait_uts_null_infinite_wait_first_slice: bool,
+    rt_sigtimedwait_empty_pending_wait_boundary: bool,
+    rt_sigtimedwait_scheduler_sleep_deferred: bool,
     signal_delivery_deferred: bool,
     clock_gettime_routes_to_timer_provider: bool,
     gettimeofday_routes_to_timer_provider: bool,
@@ -756,6 +764,7 @@ pub struct SyscallTable {
     setgid_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
     rt_sigaction_observed: AtomicU8,
+    rt_sigtimedwait_observed: AtomicU8,
     clock_gettime_observed: AtomicU8,
     gettimeofday_observed: AtomicU8,
     nanosleep_observed: AtomicU8,
@@ -804,6 +813,7 @@ impl SyscallTable {
             setgid_supported: false,
             rt_sigprocmask_supported: false,
             rt_sigaction_supported: false,
+            rt_sigtimedwait_supported: false,
             clock_gettime_supported: false,
             gettimeofday_supported: false,
             nanosleep_supported: false,
@@ -888,6 +898,13 @@ impl SyscallTable {
             rt_sigaction_layout_bound: false,
             rt_sigaction_unblockable_signals_cleared: false,
             rt_sigaction_kernel_only_signals_rejected: false,
+            rt_sigtimedwait_routes_to_user_init_process: false,
+            rt_sigtimedwait_sigsetsize_bound: false,
+            rt_sigtimedwait_copies_wait_mask: false,
+            rt_sigtimedwait_uinfo_null_no_copyout_first_slice: false,
+            rt_sigtimedwait_uts_null_infinite_wait_first_slice: false,
+            rt_sigtimedwait_empty_pending_wait_boundary: false,
+            rt_sigtimedwait_scheduler_sleep_deferred: false,
             signal_delivery_deferred: false,
             clock_gettime_routes_to_timer_provider: false,
             gettimeofday_routes_to_timer_provider: false,
@@ -952,6 +969,7 @@ impl SyscallTable {
             setgid_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
             rt_sigaction_observed: AtomicU8::new(0),
+            rt_sigtimedwait_observed: AtomicU8::new(0),
             clock_gettime_observed: AtomicU8::new(0),
             gettimeofday_observed: AtomicU8::new(0),
             nanosleep_observed: AtomicU8::new(0),
@@ -1066,6 +1084,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn rt_sigaction_supported(&self) -> bool {
         self.rt_sigaction_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_supported(&self) -> bool {
+        self.rt_sigtimedwait_supported
     }
 
     #[allow(dead_code)]
@@ -1369,6 +1392,41 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_routes_to_user_init_process(&self) -> bool {
+        self.rt_sigtimedwait_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_sigsetsize_bound(&self) -> bool {
+        self.rt_sigtimedwait_sigsetsize_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_copies_wait_mask(&self) -> bool {
+        self.rt_sigtimedwait_copies_wait_mask
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_uinfo_null_no_copyout_first_slice(&self) -> bool {
+        self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_uts_null_infinite_wait_first_slice(&self) -> bool {
+        self.rt_sigtimedwait_uts_null_infinite_wait_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_empty_pending_wait_boundary(&self) -> bool {
+        self.rt_sigtimedwait_empty_pending_wait_boundary
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_scheduler_sleep_deferred(&self) -> bool {
+        self.rt_sigtimedwait_scheduler_sleep_deferred
+    }
+
+    #[allow(dead_code)]
     pub const fn signal_delivery_deferred(&self) -> bool {
         self.signal_delivery_deferred
     }
@@ -1579,6 +1637,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn rt_sigtimedwait_observed(&self) -> bool {
+        self.rt_sigtimedwait_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn clock_gettime_observed(&self) -> bool {
         self.clock_gettime_observed.load(Ordering::Acquire) != 0
     }
@@ -1678,6 +1741,7 @@ impl SyscallTable {
         self.setgid_supported = true;
         self.rt_sigprocmask_supported = true;
         self.rt_sigaction_supported = true;
+        self.rt_sigtimedwait_supported = true;
         self.clock_gettime_supported = true;
         self.gettimeofday_supported = true;
         self.nanosleep_supported = true;
@@ -1762,6 +1826,13 @@ impl SyscallTable {
         self.rt_sigaction_layout_bound = true;
         self.rt_sigaction_unblockable_signals_cleared = true;
         self.rt_sigaction_kernel_only_signals_rejected = true;
+        self.rt_sigtimedwait_routes_to_user_init_process = true;
+        self.rt_sigtimedwait_sigsetsize_bound = true;
+        self.rt_sigtimedwait_copies_wait_mask = true;
+        self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice = true;
+        self.rt_sigtimedwait_uts_null_infinite_wait_first_slice = true;
+        self.rt_sigtimedwait_empty_pending_wait_boundary = true;
+        self.rt_sigtimedwait_scheduler_sleep_deferred = true;
         self.signal_delivery_deferred = true;
         self.clock_gettime_routes_to_timer_provider = true;
         self.gettimeofday_routes_to_timer_provider = true;
@@ -2184,6 +2255,26 @@ impl SyscallTable {
         }
 
         syscall_table_rt_sigaction(self, frame);
+    }
+
+    pub fn rt_sigtimedwait(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.rt_sigtimedwait_supported
+            || !self.rt_sigtimedwait_routes_to_user_init_process
+            || !self.rt_sigtimedwait_sigsetsize_bound
+            || !self.rt_sigtimedwait_copies_wait_mask
+            || !self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice
+            || !self.rt_sigtimedwait_uts_null_infinite_wait_first_slice
+            || !self.rt_sigtimedwait_empty_pending_wait_boundary
+            || !self.rt_sigtimedwait_scheduler_sleep_deferred
+            || !self.signal_delivery_deferred
+            || !self.signal_mask_usercopy_ready
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_rt_sigtimedwait(self, frame);
     }
 
     pub fn clock_gettime(&self, frame: &mut TrapFrame) {
@@ -2733,6 +2824,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
         SYSCALL_RT_SIGACTION => table.rt_sigaction(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
+        SYSCALL_RT_SIGTIMEDWAIT => table.rt_sigtimedwait(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
         SYSCALL_GETRESUID => table.getresuid(frame),
@@ -3778,6 +3870,51 @@ fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.rt_sigaction_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_rt_sigtimedwait(table: &SyscallTable, frame: &mut TrapFrame) {
+    let uthese = frame.reg(10);
+    let uinfo = frame.reg(11);
+    let uts = frame.reg(12);
+    let sigset_size = frame.reg(13);
+    if sigset_size != RT_SIGSET_SIZE {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let Some(mask) = read_user_usize(uthese) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+    if uinfo != 0 || uts != 0 {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let pending_match = false;
+    let infinite_wait = true;
+    if !crate::context::context()
+        .user_init_process
+        .observe_rt_sigtimedwait(mask, true, true, pending_match, infinite_wait)
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.rt_sigtimedwait_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(
+        Checkpoint::SyscallTableRtSigtimedwait,
+        crate::context::context_ref(),
+    );
+    print_rt_sigtimedwait_wait_boundary(mask, pending_match, infinite_wait);
+    enter_rt_sigtimedwait_wait_boundary()
+}
+
+fn enter_rt_sigtimedwait_wait_boundary() -> ! {
+    crate::arch::riscv64::csr::enable_supervisor_interrupts();
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 fn syscall_table_clock_gettime(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -5733,6 +5870,20 @@ fn print_rt_sigtimedwait_unsupported_detail(frame: &TrapFrame) {
     } else {
         crate::arch::riscv64::sbi::putstr("failed");
     }
+}
+
+fn print_rt_sigtimedwait_wait_boundary(mask: usize, pending_match: bool, infinite_wait: bool) {
+    crate::arch::riscv64::sbi::putstr("rt_sigtimedwait waiting uthese_copy=ok uthese_mask=0x");
+    print_hex(mask);
+    crate::arch::riscv64::sbi::putstr(" uinfo=NULL uts=NULL pending_match=");
+    print_bool_digit(pending_match);
+    crate::arch::riscv64::sbi::putstr(" wait=");
+    if infinite_wait {
+        crate::arch::riscv64::sbi::putstr("infinite");
+    } else {
+        crate::arch::riscv64::sbi::putstr("bounded");
+    }
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 fn print_execve_unsupported_detail(frame: &TrapFrame) {

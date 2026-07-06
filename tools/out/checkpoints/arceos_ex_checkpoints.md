@@ -412,8 +412,9 @@
 | 407 | SyscallTableNewFstatAt | SyscallTable.NewFstatAt | null | impl/arceos_ex/src/trace/mod.rs |
 | 408 | SyscallTableSetTidAddress | SyscallTable.SetTidAddress | null | impl/arceos_ex/src/trace/mod.rs |
 | 409 | SyscallTableClone | SyscallTable.Clone | null | impl/arceos_ex/src/trace/mod.rs |
-| 410 | SyscallTableWait4 | SyscallTable.Wait4 | null | impl/arceos_ex/src/trace/mod.rs |
-| 411 | UserChildParentWaitResumed | UserChild.ParentWaitResumed | null | impl/arceos_ex/src/trace/mod.rs |
-| 412 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/trace/mod.rs |
-| 413 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/trace/mod.rs |
-| 414 | PayloadPhaseOnline | PayloadPhase.Online | null | impl/arceos_ex/src/trace/mod.rs |
+| 410 | SyscallTableRtSigtimedwait | SyscallTable.RtSigtimedwait | null | impl/arceos_ex/src/trace/mod.rs |
+| 411 | SyscallTableWait4 | SyscallTable.Wait4 | null | impl/arceos_ex/src/trace/mod.rs |
+| 412 | UserChildParentWaitResumed | UserChild.ParentWaitResumed | null | impl/arceos_ex/src/trace/mod.rs |
+| 413 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/trace/mod.rs |
+| 414 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/trace/mod.rs |
+| 415 | PayloadPhaseOnline | PayloadPhase.Online | null | impl/arceos_ex/src/trace/mod.rs |

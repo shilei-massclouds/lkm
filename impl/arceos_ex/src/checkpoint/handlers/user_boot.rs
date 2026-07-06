@@ -79,6 +79,8 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableNewFstatAt,
     #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableRtSigtimedwait,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableWait4,
     #[cfg(app_user_boot)]
     Checkpoint::UserChildParentWaitResumed,
@@ -86,7 +88,7 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 22;
+pub const KUNIT_CASE_COUNT: usize = 23;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
@@ -108,6 +110,8 @@ static FILES_WRITE_PATH_REPORTED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_CLOSE_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_NEWFSTATAT_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_RT_SIGTIMEDWAIT_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_WAIT4_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -207,6 +211,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::SyscallTableNewFstatAt => {
             run_once(&SYSCALL_NEWFSTATAT_REPORTED, || {
                 run_syscall_table_newfstatat(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableRtSigtimedwait => {
+            run_once(&SYSCALL_RT_SIGTIMEDWAIT_REPORTED, || {
+                run_syscall_table_rt_sigtimedwait(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -1149,6 +1159,66 @@ fn run_syscall_table_newfstatat(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "syscall table newfstatat facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_rt_sigtimedwait(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.rt_sigtimedwait";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let process = &ctx.user_init_process;
+    let valid = table.state() == State::Ready
+        && table.rt_sigtimedwait_supported()
+        && table.signal_mask_usercopy_ready()
+        && table.rt_sigtimedwait_routes_to_user_init_process()
+        && table.rt_sigtimedwait_sigsetsize_bound()
+        && table.rt_sigtimedwait_copies_wait_mask()
+        && table.rt_sigtimedwait_uinfo_null_no_copyout_first_slice()
+        && table.rt_sigtimedwait_uts_null_infinite_wait_first_slice()
+        && table.rt_sigtimedwait_empty_pending_wait_boundary()
+        && table.rt_sigtimedwait_scheduler_sleep_deferred()
+        && table.signal_delivery_deferred()
+        && table.rt_sigtimedwait_observed()
+        && process.pending_signal_set_empty_first_slice()
+        && process.rt_sigtimedwait_observed()
+        && process.rt_sigtimedwait_mask() != 0
+        && process.rt_sigtimedwait_uinfo_null()
+        && process.rt_sigtimedwait_uts_null()
+        && !process.rt_sigtimedwait_pending_match()
+        && process.rt_sigtimedwait_infinite_wait();
+
+    sink.diag_usize(
+        "rt_sigtimedwait_observed",
+        table.rt_sigtimedwait_observed() as usize,
+    );
+    sink.diag_usize("rt_sigtimedwait_mask", process.rt_sigtimedwait_mask());
+    sink.diag_usize(
+        "rt_sigtimedwait_uinfo_null",
+        process.rt_sigtimedwait_uinfo_null() as usize,
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_uts_null",
+        process.rt_sigtimedwait_uts_null() as usize,
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_pending_match",
+        process.rt_sigtimedwait_pending_match() as usize,
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_infinite_wait",
+        process.rt_sigtimedwait_infinite_wait() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "rt_sigtimedwait wait facts invalid");
     }
 }
 
