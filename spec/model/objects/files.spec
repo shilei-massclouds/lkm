@@ -62,6 +62,7 @@ enum FdRef {
     Stdout,
     Stderr,
     Regular0,
+    Pidfd0,
 }
 
 predicate files_struct_allocated<T>(files: T) -> bool;
@@ -83,6 +84,10 @@ predicate files_struct_readlink_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bo
 predicate files_struct_regular_file_read_observed<T>(files: T) -> bool;
 predicate files_struct_regular_file_closed<T>(files: T) -> bool;
 predicate files_struct_regular_file_stat_observed<T>(files: T) -> bool;
+predicate files_struct_pidfd_installed<T>(files: T) -> bool;
+predicate files_struct_pidfd_child_bound<T, C>(files: T, child: C) -> bool;
+predicate files_struct_pidfd_readable_after_exit<T, C>(files: T, child: C) -> bool;
+predicate user_pidfd_ready<T, C>(files: T, child: C) -> bool;
 predicate files_struct_stdin_probe_ready_data_cleared<T>(files: T) -> bool;
 predicate files_struct_user_smoke_stdin_fixture_bound<T>(files: T) -> bool;
 predicate files_struct_stdin_blocking_wait_enabled<T>(files: T) -> bool;
@@ -99,6 +104,8 @@ predicate fd_table_cloexec_not_reported_by_fgetfl<T>(table: T, fd: FdRef) -> boo
 predicate fd_table_cloexec_bit_returned_by_fgetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_cloexec_bit_updated_by_fsetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_pidfd_entry_installed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_pidfd_entry_closed<T>(table: T, fd: FdRef) -> bool;
 
 predicate open_file_description_allocated<T>(ofd: T) -> bool;
 predicate open_file_description_backend_bound<T, B>(ofd: T, backend: B) -> bool;
@@ -209,6 +216,49 @@ object FilesStruct: ResourceObject {
                     file_backend_regular_file_read_supported(FileBackend);
                     file_backend_regular_file_stat_supported(FileBackend);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                }
+            }
+
+            on Action::InstallPidfd {
+                /*
+                 * Linux 6.12 CLONE_PIDFD allocates a pidfd in the parent's fd
+                 * table and writes that fd to legacy clone parent_tidptr.
+                 * This first slice installs one pidfd-like fd table entry for
+                 * the single UserChildProcess slot. It supports fd visibility,
+                 * close, F_GETFD/F_SETFD through the common fd flag path, and
+                 * immediate ppoll readability after the child has exited.
+                 * Full pidfs file operations, pidfd_send_signal, pidfd_getfd,
+                 * waitid(P_PIDFD), refcounting and waitqueue poll remain
+                 * deferred.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    UserChildProcess.state == State::Ready;
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Install(FdRef::Pidfd0);
+                }
+
+                ensures {
+                    files_struct_pidfd_installed(self);
+                    files_struct_pidfd_child_bound(self, UserChildProcess);
+                    fd_table_pidfd_entry_installed(FileDescriptorTable, FdRef::Pidfd0);
+                    fd_table_cloexec_bit_set_on_install(FileDescriptorTable, FdRef::Pidfd0);
+                }
+            }
+
+            on Action::MarkPidfdReady {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    UserChildProcess.state == State::Ready;
+                    files_struct_pidfd_child_bound(self, UserChildProcess);
+                }
+
+                ensures {
+                    files_struct_pidfd_readable_after_exit(self, UserChildProcess);
+                    user_pidfd_ready(self, UserChildProcess);
                 }
             }
 

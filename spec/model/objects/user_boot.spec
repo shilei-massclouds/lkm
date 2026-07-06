@@ -140,15 +140,21 @@ predicate user_clone_deferred_boundaries_ready<T>(boundaries: T) -> bool;
 predicate user_clone_linux_6_12_legacy_clone_bound<T>(boundaries: T) -> bool;
 predicate user_clone_riscv_abi_argument_order_bound<T>(boundaries: T) -> bool;
 predicate user_clone_observed_plain_fork_args_bound<T>(boundaries: T) -> bool;
+predicate user_clone_observed_vfork_vm_args_bound<T>(boundaries: T) -> bool;
+predicate user_clone_observed_vfork_pidfd_args_bound<T>(boundaries: T) -> bool;
 predicate user_clone_plain_fork_first_slice_bound<T>(boundaries: T) -> bool;
+predicate user_clone_vfork_vm_first_slice_bound<T>(boundaries: T) -> bool;
+predicate user_clone_vfork_pidfd_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_csignal_split_bound<T>(boundaries: T) -> bool;
 predicate user_clone_sigchld_exit_signal_bound<T>(boundaries: T) -> bool;
 predicate user_clone_newsp_zero_inherits_parent_sp<T>(boundaries: T) -> bool;
+predicate user_clone_newsp_sets_child_sp<T>(boundaries: T) -> bool;
+predicate user_clone_legacy_pidfd_uses_parent_tidptr<T>(boundaries: T) -> bool;
 predicate user_clone_tls_ignored_without_clone_settls<T>(boundaries: T) -> bool;
 predicate user_clone_thread_group_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_cow_mm_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_pidfd_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_pidfd_file_ops_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_ptrace_seccomp_cgroup_audit_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_namespace_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_robust_futex_deferred<T>(boundaries: T) -> bool;
@@ -382,8 +388,13 @@ predicate syscall_clone_routes_to_task_creation_core<T, C>(table: T, core: C) ->
 predicate syscall_clone_routes_to_user_clone_deferred_boundaries<T, B>(table: T, boundaries: B) -> bool;
 predicate syscall_clone_legacy_args_decoded<T>(table: T) -> bool;
 predicate syscall_clone_plain_fork_first_slice<T>(table: T) -> bool;
+predicate syscall_clone_vfork_vm_first_slice<T>(table: T) -> bool;
+predicate syscall_clone_vfork_pidfd_first_slice<T>(table: T) -> bool;
 predicate syscall_clone_parent_returns_child_pid<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_child_return_zero_bound<T, P>(table: T, process: P) -> bool;
+predicate syscall_clone_pidfd_copyout_bound<T, F>(table: T, files: F) -> bool;
+predicate syscall_clone_vfork_parent_frame_saved<T, C>(table: T, child: C) -> bool;
+predicate syscall_clone_vfork_child_handoff<T, C>(table: T, child: C) -> bool;
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
 predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
@@ -514,10 +525,15 @@ predicate user_child_process_user_stack_snapshot_copied<T, A>(process: T, space:
 predicate user_child_process_user_stack_snapshot_restored<T, A>(process: T, space: A) -> bool;
 predicate user_child_process_trap_frame_copied<T, R>(process: T, frame: R) -> bool;
 predicate user_child_process_trap_frame_child_return_zero<T>(process: T) -> bool;
+predicate user_child_process_trap_frame_child_sp_set<T>(process: T) -> bool;
 predicate user_child_process_tls_inherited<T>(process: T) -> bool;
 predicate user_child_process_enqueued<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_wait4_parent_wait_observed<T>(process: T) -> bool;
 predicate user_child_process_child_continuation_taken<T>(process: T) -> bool;
+predicate user_child_process_vfork_parent_frame_saved<T>(process: T) -> bool;
+predicate user_child_process_vfork_child_handoff<T>(process: T) -> bool;
+predicate user_child_process_vfork_parent_resumed<T>(process: T) -> bool;
+predicate user_child_process_pidfd_copyout_observed<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_frame_saved<T>(process: T) -> bool;
 predicate user_child_process_parent_address_space_snapshot_saved<T, A>(process: T, space: A) -> bool;
@@ -697,15 +713,21 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_linux_6_12_legacy_clone_bound(self);
                     user_clone_riscv_abi_argument_order_bound(self);
                     user_clone_observed_plain_fork_args_bound(self);
+                    user_clone_observed_vfork_vm_args_bound(self);
+                    user_clone_observed_vfork_pidfd_args_bound(self);
                     user_clone_plain_fork_first_slice_bound(self);
+                    user_clone_vfork_vm_first_slice_bound(self);
+                    user_clone_vfork_pidfd_first_slice_bound(self);
                     user_clone_csignal_split_bound(self);
                     user_clone_sigchld_exit_signal_bound(self);
                     user_clone_newsp_zero_inherits_parent_sp(self);
+                    user_clone_newsp_sets_child_sp(self);
+                    user_clone_legacy_pidfd_uses_parent_tidptr(self);
                     user_clone_tls_ignored_without_clone_settls(self);
                     user_clone_thread_group_deferred(self);
-                    user_clone_clone_vm_vfork_deferred(self);
+                    user_clone_full_clone_vm_vfork_deferred(self);
                     user_clone_cow_mm_deferred(self);
-                    user_clone_pidfd_deferred(self);
+                    user_clone_full_pidfd_file_ops_deferred(self);
                     user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
                     user_clone_namespace_deferred(self);
                     user_clone_robust_futex_deferred(self);
@@ -715,7 +737,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid 并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum 并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。完整 clone3、CLONE_VM/vfork、线程组、COW mm、pidfd、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task、完整地址空间复制/COW、setsid、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
+                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum 并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。OpenRC 原生 /sbin/init 的当前新观察为 clone_flags=0x4111，实测 flags_without_csignal=0x4100，即 SIGCHLD=17 | CLONE_VM=0x100 | CLONE_VFORK=0x4000，newsp 为 child sp；它不是 CLONE_PIDFD。该 vfork+vm 首片只接受 flags_without_csignal == CLONE_VM|CLONE_VFORK 且 exit_signal=SIGCHLD 的形状：clone 创建同一个 UserChildProcess slot、保存 parent clone frame 和 parent address-space/writable-page snapshot，然后直接切到 child clone-return continuation；child bounded exit/exit_group 后恢复 parent clone frame，使 parent clone 返回 child pid，并产生真实 SIGCHLD pending/wake。真正含 CLONE_PIDFD=0x1000 的 vfork shape 才安装 pidfd-like fd、写回 parent_tidptr，并在 child exit 后记录 pidfd readable。若 child 长驻、需要 parent/child 并发或需要第二个 child/task graph，必须停在明确 unsupported/diagnostic 边界。完整 clone3、线程组、完整 CLONE_VM/vfork completion scheduler、pidfs/pidfd file ops、pidfd_send_signal/pidfd_getfd/waitid(P_PIDFD)、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task、完整地址空间复制/COW、setsid、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
                 }
             }
         }
@@ -727,15 +749,21 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_linux_6_12_legacy_clone_bound(self);
             user_clone_riscv_abi_argument_order_bound(self);
             user_clone_observed_plain_fork_args_bound(self);
+            user_clone_observed_vfork_vm_args_bound(self);
+            user_clone_observed_vfork_pidfd_args_bound(self);
             user_clone_plain_fork_first_slice_bound(self);
+            user_clone_vfork_vm_first_slice_bound(self);
+            user_clone_vfork_pidfd_first_slice_bound(self);
             user_clone_csignal_split_bound(self);
             user_clone_sigchld_exit_signal_bound(self);
             user_clone_newsp_zero_inherits_parent_sp(self);
+            user_clone_newsp_sets_child_sp(self);
+            user_clone_legacy_pidfd_uses_parent_tidptr(self);
             user_clone_tls_ignored_without_clone_settls(self);
             user_clone_thread_group_deferred(self);
-            user_clone_clone_vm_vfork_deferred(self);
+            user_clone_full_clone_vm_vfork_deferred(self);
             user_clone_cow_mm_deferred(self);
-            user_clone_pidfd_deferred(self);
+            user_clone_full_pidfd_file_ops_deferred(self);
             user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
             user_clone_namespace_deferred(self);
             user_clone_robust_futex_deferred(self);
@@ -2440,6 +2468,19 @@ object SyscallTable: ResourceObject {
                  * ABI shape, then drives TaskCreationCore.CopyUserProcess;
                  * it must not synthesize a PID return without creating a
                  * child task boundary.
+                 *
+                 * The OpenRC native /sbin/init boundary observes
+                 * clone_flags=0x4111 and diagnostics decode
+                 * flags_without_csignal=0x4100: SIGCHLD plus CLONE_VM and
+                 * CLONE_VFORK, not CLONE_PIDFD.  Linux 6.12 legacy clone
+                 * maps CLONE_PIDFD to parent_tidptr only when the 0x1000 bit
+                 * is actually present, and kernel_clone() waits for vfork
+                 * completion before returning to parent.  This first slice
+                 * implements only the bounded child lifecycle: save the
+                 * parent clone frame, set child a0=0 and child sp=newsp, then
+                 * hand off directly to the child.  A true vfork+pidfd shape
+                 * additionally installs a pidfd-like fd in FilesStruct and
+                 * copies it to parent_tidptr.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2474,8 +2515,13 @@ object SyscallTable: ResourceObject {
                     syscall_clone_routes_to_user_clone_deferred_boundaries(self, UserCloneDeferredBoundaries);
                     syscall_clone_legacy_args_decoded(self);
                     syscall_clone_plain_fork_first_slice(self);
+                    syscall_clone_vfork_vm_first_slice(self);
+                    syscall_clone_vfork_pidfd_first_slice(self);
                     syscall_clone_parent_returns_child_pid(self, UserInitProcess);
                     syscall_clone_child_return_zero_bound(self, UserChildProcess);
+                    syscall_clone_pidfd_copyout_bound(self, FilesStruct);
+                    syscall_clone_vfork_parent_frame_saved(self, UserChildProcess);
+                    syscall_clone_vfork_child_handoff(self, UserChildProcess);
                     syscall_clone_wake_up_new_task_shape(self, Scheduler);
                     user_child_process_process_group_visible_to_parent(UserChildProcess, UserInitProcess);
                     user_init_process_child_process_group_visible(UserInitProcess, UserChildProcess);
@@ -2696,6 +2742,30 @@ object UserChildProcess: ResourceObject {
             user_child_process_trap_frame_child_return_zero(self);
             user_child_process_tls_inherited(self);
             user_child_process_enqueued(self, Scheduler);
+        }
+    }
+
+    actions {
+        on Action::VforkPidfdChildExit {
+            /*
+             * Bounded OpenRC vfork completion: child exit records exit
+             * status, produces real SIGCHLD pending/wake for PID1, restores
+             * the saved parent clone frame and makes parent clone(220) return
+             * child pid.  True vfork+pidfd shapes additionally mark the pidfd
+             * ready for read-interest ppoll.
+             */
+            depends_on {
+                UserChildProcess.state == State::Ready;
+                UserInitProcess.state == State::Online;
+                FilesStruct.state == State::Ready;
+            }
+
+            ensures {
+                user_child_process_exit_status_observed(self);
+                user_child_process_vfork_parent_resumed(self);
+                user_init_process_rt_sigtimedwait_woken_by_sigchld(UserInitProcess);
+                user_pidfd_ready(FilesStruct, self);
+            }
         }
     }
 }

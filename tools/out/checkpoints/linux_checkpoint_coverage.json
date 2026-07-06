@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 419,
+  "total_checkpoints": 425,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 302
+      "count": 308
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 302
+      "count": 308
     },
     {
       "confidence": "medium",
@@ -133,6 +133,10 @@
     },
     {
       "family": "MemBlock",
+      "count": 4
+    },
+    {
+      "family": "SyscallTable",
       "count": 4
     },
     {
@@ -264,10 +268,6 @@
       "count": 2
     },
     {
-      "family": "SyscallTable",
-      "count": 2
-    },
-    {
       "family": "SystemState",
       "count": 2
     },
@@ -289,6 +289,10 @@
     },
     {
       "family": "UpMultitaskPhase",
+      "count": 2
+    },
+    {
+      "family": "UserClone",
       "count": 2
     },
     {
@@ -497,6 +501,10 @@
     },
     {
       "family": "ExceptionTable",
+      "count": 1
+    },
+    {
+      "family": "FilesStruct",
       "count": 1
     },
     {
@@ -932,6 +940,10 @@
       "count": 1
     },
     {
+      "family": "UserPidfd",
+      "count": 1
+    },
+    {
       "family": "UtsNamespace",
       "count": 1
     },
@@ -992,5 +1004,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 172
+  "unmapped_singleton_family_count": 174
 }

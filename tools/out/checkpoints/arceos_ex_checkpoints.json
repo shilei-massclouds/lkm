@@ -2871,62 +2871,104 @@
   },
   {
     "index": 410,
+    "variant": "SyscallTableCloneVforkVm",
+    "name": "SyscallTable.CloneVforkVm",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 411,
+    "variant": "SyscallTableCloneVforkPidfd",
+    "name": "SyscallTable.CloneVforkPidfd",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 412,
+    "variant": "FilesStructPidfdInstall",
+    "name": "FilesStruct.PidfdInstall",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 413,
+    "variant": "UserCloneVforkChildHandoff",
+    "name": "UserClone.VforkChildHandoff",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 414,
     "variant": "SyscallTableRtSigtimedwait",
     "name": "SyscallTable.RtSigtimedwait",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 411,
+    "index": 415,
     "variant": "UserSignalWaitSleep",
     "name": "UserSignalWait.Sleep",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 412,
+    "index": 416,
     "variant": "UserSignalWaitWakeSigchld",
     "name": "UserSignalWait.WakeSigchld",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 413,
+    "index": 417,
+    "variant": "UserPidfdReady",
+    "name": "UserPidfd.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 418,
     "variant": "SyscallTableRtSigtimedwaitReturnSignal",
     "name": "SyscallTable.RtSigtimedwaitReturnSignal",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 414,
+    "index": 419,
     "variant": "SyscallTableWait4",
     "name": "SyscallTable.Wait4",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 415,
+    "index": 420,
     "variant": "UserChildParentWaitResumed",
     "name": "UserChild.ParentWaitResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 416,
+    "index": 421,
+    "variant": "UserCloneVforkParentResumed",
+    "name": "UserClone.VforkParentResumed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 422,
     "variant": "SyscallTableExit",
     "name": "SyscallTable.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 417,
+    "index": 423,
     "variant": "PayloadPhaseReady",
     "name": "PayloadPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 418,
+    "index": 424,
     "variant": "PayloadPhaseOnline",
     "name": "PayloadPhase.Online",
     "early_byte": null,

@@ -236,6 +236,9 @@ const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
 const MAX_MAPPING_BACKING_PAGES: usize = 512;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
 const USER_CLONE_CSIGNAL_MASK: usize = 0xff;
+const USER_CLONE_VM: usize = 0x0000_0100;
+const USER_CLONE_PIDFD: usize = 0x0000_1000;
+const USER_CLONE_VFORK: usize = 0x0000_4000;
 const USER_CLONE_SETTLS: usize = 0x0008_0000;
 
 pub struct PayloadExecSyncBoundaries {
@@ -471,15 +474,21 @@ pub struct UserCloneDeferredBoundaries {
     linux_6_12_legacy_clone_bound: bool,
     riscv_abi_argument_order_bound: bool,
     observed_plain_fork_args_bound: bool,
+    observed_vfork_vm_args_bound: bool,
+    observed_vfork_pidfd_args_bound: bool,
     plain_fork_first_slice_bound: bool,
+    vfork_vm_first_slice_bound: bool,
+    vfork_pidfd_first_slice_bound: bool,
     csignal_split_bound: bool,
     sigchld_exit_signal_bound: bool,
     newsp_zero_inherits_parent_sp: bool,
+    newsp_sets_child_sp: bool,
+    legacy_pidfd_uses_parent_tidptr: bool,
     tls_ignored_without_clone_settls: bool,
     thread_group_deferred: bool,
     clone_vm_vfork_deferred: bool,
     cow_mm_deferred: bool,
-    pidfd_deferred: bool,
+    full_pidfd_file_ops_deferred: bool,
     ptrace_seccomp_cgroup_audit_deferred: bool,
     namespace_deferred: bool,
     robust_futex_deferred: bool,
@@ -496,15 +505,21 @@ impl UserCloneDeferredBoundaries {
             linux_6_12_legacy_clone_bound: false,
             riscv_abi_argument_order_bound: false,
             observed_plain_fork_args_bound: false,
+            observed_vfork_vm_args_bound: false,
+            observed_vfork_pidfd_args_bound: false,
             plain_fork_first_slice_bound: false,
+            vfork_vm_first_slice_bound: false,
+            vfork_pidfd_first_slice_bound: false,
             csignal_split_bound: false,
             sigchld_exit_signal_bound: false,
             newsp_zero_inherits_parent_sp: false,
+            newsp_sets_child_sp: false,
+            legacy_pidfd_uses_parent_tidptr: false,
             tls_ignored_without_clone_settls: false,
             thread_group_deferred: true,
             clone_vm_vfork_deferred: true,
             cow_mm_deferred: true,
-            pidfd_deferred: true,
+            full_pidfd_file_ops_deferred: true,
             ptrace_seccomp_cgroup_audit_deferred: true,
             namespace_deferred: true,
             robust_futex_deferred: true,
@@ -520,6 +535,14 @@ impl UserCloneDeferredBoundaries {
 
     pub const fn plain_fork_first_slice_bound(&self) -> bool {
         self.plain_fork_first_slice_bound
+    }
+
+    pub const fn vfork_pidfd_first_slice_bound(&self) -> bool {
+        self.vfork_pidfd_first_slice_bound
+    }
+
+    pub const fn vfork_vm_first_slice_bound(&self) -> bool {
+        self.vfork_vm_first_slice_bound
     }
 
     pub const fn wait_exit_reap_deferred(&self) -> bool {
@@ -539,15 +562,21 @@ impl UserCloneDeferredBoundaries {
         self.linux_6_12_legacy_clone_bound = true;
         self.riscv_abi_argument_order_bound = true;
         self.observed_plain_fork_args_bound = true;
+        self.observed_vfork_vm_args_bound = true;
+        self.observed_vfork_pidfd_args_bound = true;
         self.plain_fork_first_slice_bound = true;
+        self.vfork_vm_first_slice_bound = true;
+        self.vfork_pidfd_first_slice_bound = true;
         self.csignal_split_bound = true;
         self.sigchld_exit_signal_bound = true;
         self.newsp_zero_inherits_parent_sp = true;
+        self.newsp_sets_child_sp = true;
+        self.legacy_pidfd_uses_parent_tidptr = true;
         self.tls_ignored_without_clone_settls = true;
         self.thread_group_deferred = true;
         self.clone_vm_vfork_deferred = true;
         self.cow_mm_deferred = true;
-        self.pidfd_deferred = true;
+        self.full_pidfd_file_ops_deferred = true;
         self.ptrace_seccomp_cgroup_audit_deferred = true;
         self.namespace_deferred = true;
         self.robust_futex_deferred = true;
@@ -566,6 +595,28 @@ impl UserCloneDeferredBoundaries {
             && self.clone_flags_without_csignal(clone_flags) == 0
             && self.exit_signal(clone_flags) == USER_CLONE_SIGCHLD
             && newsp == 0
+            && self.tls_inherited_without_clone_settls(clone_flags)
+    }
+
+    pub fn accepts_vfork_pidfd_first_slice(&self, clone_flags: usize) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.linux_6_12_legacy_clone_bound
+            && self.riscv_abi_argument_order_bound
+            && self.vfork_pidfd_first_slice_bound
+            && self.legacy_pidfd_uses_parent_tidptr
+            && self.clone_flags_without_csignal(clone_flags)
+                == (USER_CLONE_PIDFD | USER_CLONE_VFORK)
+            && self.exit_signal(clone_flags) == USER_CLONE_SIGCHLD
+            && self.tls_inherited_without_clone_settls(clone_flags)
+    }
+
+    pub fn accepts_vfork_vm_first_slice(&self, clone_flags: usize) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.linux_6_12_legacy_clone_bound
+            && self.riscv_abi_argument_order_bound
+            && self.vfork_vm_first_slice_bound
+            && self.clone_flags_without_csignal(clone_flags) == (USER_CLONE_VM | USER_CLONE_VFORK)
+            && self.exit_signal(clone_flags) == USER_CLONE_SIGCHLD
             && self.tls_inherited_without_clone_settls(clone_flags)
     }
 
@@ -3391,6 +3442,16 @@ pub struct UserChildProcess {
     child_exit_status_observed: bool,
     wait4_status_copied: bool,
     parent_wait_resumed: bool,
+    vfork_vm_clone: bool,
+    vfork_pidfd_clone: bool,
+    vfork_parent_frame: Option<TrapFrame>,
+    vfork_parent_frame_saved: bool,
+    vfork_child_handoff: bool,
+    vfork_parent_resumed: bool,
+    vfork_child_sp: usize,
+    pidfd_fd: usize,
+    pidfd_copyout: bool,
+    parent_clone_return: usize,
     enqueued: bool,
     wait4_parent_wait_observed: bool,
     child_continuation_taken: bool,
@@ -3463,6 +3524,16 @@ impl UserChildProcess {
             child_exit_status_observed: false,
             wait4_status_copied: false,
             parent_wait_resumed: false,
+            vfork_vm_clone: false,
+            vfork_pidfd_clone: false,
+            vfork_parent_frame: None,
+            vfork_parent_frame_saved: false,
+            vfork_child_handoff: false,
+            vfork_parent_resumed: false,
+            vfork_child_sp: 0,
+            pidfd_fd: usize::MAX,
+            pidfd_copyout: false,
+            parent_clone_return: 0,
             enqueued: false,
             wait4_parent_wait_observed: false,
             child_continuation_taken: false,
@@ -3567,6 +3638,50 @@ impl UserChildProcess {
 
     pub const fn child_continuation_taken(&self) -> bool {
         self.child_continuation_taken
+    }
+
+    pub const fn current_child_continuation(&self) -> bool {
+        self.child_continuation_taken && !self.parent_wait_resumed && !self.vfork_parent_resumed
+    }
+
+    pub const fn vfork_pidfd_clone(&self) -> bool {
+        self.vfork_pidfd_clone
+    }
+
+    pub const fn vfork_vm_clone(&self) -> bool {
+        self.vfork_vm_clone
+    }
+
+    pub const fn vfork_clone(&self) -> bool {
+        self.vfork_vm_clone || self.vfork_pidfd_clone
+    }
+
+    pub const fn vfork_parent_frame_saved(&self) -> bool {
+        self.vfork_parent_frame_saved
+    }
+
+    pub const fn vfork_child_handoff(&self) -> bool {
+        self.vfork_child_handoff
+    }
+
+    pub const fn vfork_parent_resumed(&self) -> bool {
+        self.vfork_parent_resumed
+    }
+
+    pub const fn vfork_child_sp(&self) -> usize {
+        self.vfork_child_sp
+    }
+
+    pub const fn pidfd_fd(&self) -> usize {
+        self.pidfd_fd
+    }
+
+    pub const fn pidfd_copyout_observed(&self) -> bool {
+        self.pidfd_copyout
+    }
+
+    pub const fn parent_clone_return(&self) -> usize {
+        self.parent_clone_return
     }
 
     pub const fn user_stack_snapshot_copied(&self) -> bool {
@@ -3831,6 +3946,16 @@ impl UserChildProcess {
         self.child_exit_status_observed = false;
         self.wait4_status_copied = false;
         self.parent_wait_resumed = false;
+        self.vfork_vm_clone = false;
+        self.vfork_pidfd_clone = false;
+        self.vfork_parent_frame = None;
+        self.vfork_parent_frame_saved = false;
+        self.vfork_child_handoff = false;
+        self.vfork_parent_resumed = false;
+        self.vfork_child_sp = 0;
+        self.pidfd_fd = usize::MAX;
+        self.pidfd_copyout = false;
+        self.parent_clone_return = 0;
 
         if self
             .lifecycle
@@ -3840,6 +3965,156 @@ impl UserChildProcess {
             return None;
         }
         Some(self.pid)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_vfork_from_parent(
+        &mut self,
+        parent: &UserInitProcess,
+        boundaries: &UserCloneDeferredBoundaries,
+        address_space: &UserAddressSpace,
+        trap_frame: &UserTrapFrame,
+        fs_struct: &FsStruct,
+        files_struct: &FilesStruct,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        current_frame: &TrapFrame,
+        clone_flags: usize,
+        newsp: usize,
+        pidfd_fd: usize,
+        pidfd_copyout: bool,
+        task_struct_allocated: bool,
+        thread_context_ready: bool,
+        sched_entity_ready: bool,
+        task_state_new: bool,
+    ) -> Option<TrapFrame> {
+        if self.lifecycle.state() != State::Prepared
+            || !self.prepared
+            || self.task_entry != TaskEntry::UserChild
+            || parent.state() != State::Online
+            || !parent.pid1_preserved()
+            || boundaries.state() != State::Ready
+            || !(boundaries.accepts_vfork_pidfd_first_slice(clone_flags)
+                || boundaries.accepts_vfork_vm_first_slice(clone_flags))
+            || newsp == 0
+            || (boundaries.accepts_vfork_pidfd_first_slice(clone_flags)
+                && (!pidfd_copyout || pidfd_fd == usize::MAX))
+            || (boundaries.accepts_vfork_vm_first_slice(clone_flags)
+                && (pidfd_copyout || pidfd_fd != usize::MAX))
+            || address_space.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
+            || !task_struct_allocated
+            || !thread_context_ready
+            || !sched_entity_ready
+            || !task_state_new
+        {
+            return None;
+        }
+
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        child_frame.set_reg(2, newsp);
+        let stack_snapshot_len = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.user_stack_snapshot,
+        )?;
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                address_space as *const UserAddressSpace,
+                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
+                1,
+            );
+        }
+        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+            address_space,
+            page_allocator,
+            page_metadata_map,
+            &mut self.parent_wait_writable_page_snapshot_pages,
+            &mut self.parent_wait_writable_page_checksums,
+        ) else {
+            return None;
+        };
+
+        self.pid = USER_CHILD_PID;
+        self.parent_pid = super::rest_init::KERNEL_INIT_PID;
+        self.tgid = USER_CHILD_PID;
+        self.exit_signal = boundaries.exit_signal(clone_flags);
+        self.task_struct_allocated = task_struct_allocated;
+        self.pid_allocated = true;
+        self.thread_context_ready = thread_context_ready;
+        self.sched_entity_ready = sched_entity_ready;
+        self.task_state_new = task_state_new;
+        self.files_struct_copied = true;
+        self.fs_struct_copied = true;
+        self.credentials_copied = parent.credentials_inherited();
+        self.signal_state_copied = parent.signal_state_inherited();
+        self.user_address_space_snapshot = true;
+        self.user_stack_snapshot_len = stack_snapshot_len;
+        self.user_stack_snapshot_copied = true;
+        self.user_stack_snapshot_restored = true;
+        self.trap_frame_copied = true;
+        self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
+        self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
+        self.child_trap_frame = Some(child_frame);
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_address_space_snapshot_saved = true;
+        self.parent_wait_stack_snapshot_len = 0;
+        self.parent_wait_stack_snapshot_copied = false;
+        self.parent_wait_stack_snapshot_restored = false;
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+        self.parent_wait_writable_page_count = writable_page_count;
+        self.parent_wait_writable_page_snapshot_saved = true;
+        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        self.parent_wait_resumed = false;
+        self.vfork_vm_clone = boundaries.accepts_vfork_vm_first_slice(clone_flags);
+        self.vfork_pidfd_clone = boundaries.accepts_vfork_pidfd_first_slice(clone_flags);
+        self.vfork_parent_frame = Some(*current_frame);
+        self.vfork_parent_frame_saved = true;
+        self.vfork_child_handoff = true;
+        self.vfork_parent_resumed = false;
+        self.vfork_child_sp = newsp;
+        self.pidfd_fd = pidfd_fd;
+        self.pidfd_copyout = pidfd_copyout;
+        self.parent_clone_return = 0;
+        self.enqueued = false;
+        self.wait4_parent_wait_observed = false;
+        self.child_continuation_taken = true;
+
+        if self
+            .lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+            .is_err()
+        {
+            return None;
+        }
+        Some(child_frame)
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
@@ -3989,6 +4264,36 @@ impl UserChildProcess {
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
         Some((parent_frame, self.parent_wait_status_ptr, self.pid))
+    }
+
+    pub fn child_exit_to_vfork_parent(
+        &mut self,
+        address_space: &mut UserAddressSpace,
+        exit_status: usize,
+    ) -> Option<(TrapFrame, usize)> {
+        if self.lifecycle.state() != State::Ready
+            || !self.vfork_clone()
+            || !self.child_continuation_taken
+            || !self.vfork_parent_frame_saved
+            || self.vfork_parent_resumed
+            || !self.parent_address_space_snapshot_saved
+            || self.pid != USER_CHILD_PID
+            || self.parent_pid != super::rest_init::KERNEL_INIT_PID
+        {
+            return None;
+        }
+
+        let parent_frame = self.vfork_parent_frame?;
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &self.parent_address_space_snapshot as *const UserAddressSpace,
+                address_space as *mut UserAddressSpace,
+                1,
+            );
+        }
+        self.child_exit_status = exit_status;
+        self.child_exit_status_observed = true;
+        Some((parent_frame, self.pid))
     }
 
     pub fn compare_parent_wait_stack_window(
@@ -4144,6 +4449,20 @@ impl UserChildProcess {
         }
         self.wait4_status_copied = status_copied;
         self.parent_wait_resumed = true;
+        true
+    }
+
+    pub fn mark_vfork_parent_resumed(&mut self) -> bool {
+        if !self.vfork_clone()
+            || !self.child_exit_status_observed
+            || !self.parent_wait_writable_page_snapshot_restored
+            || self.vfork_parent_resumed
+        {
+            return false;
+        }
+
+        self.vfork_parent_resumed = true;
+        self.parent_clone_return = self.pid;
         true
     }
 

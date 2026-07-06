@@ -70,6 +70,14 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableClone,
     #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableCloneVforkVm,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableCloneVforkPidfd,
+    #[cfg(app_user_boot)]
+    Checkpoint::FilesStructPidfdInstall,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserCloneVforkChildHandoff,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableOpenAt,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableRead,
@@ -86,16 +94,20 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserSignalWaitWakeSigchld,
     #[cfg(app_user_boot)]
+    Checkpoint::UserPidfdReady,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableRtSigtimedwaitReturnSignal,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableWait4,
     #[cfg(app_user_boot)]
     Checkpoint::UserChildParentWaitResumed,
     #[cfg(app_user_boot)]
+    Checkpoint::UserCloneVforkParentResumed,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 26;
+pub const KUNIT_CASE_COUNT: usize = 32;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
@@ -103,6 +115,14 @@ pub const KUNIT_CASE_COUNT: usize = 5;
 static SYSCALL_SET_TID_ADDRESS_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_CLONE_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_CLONE_VFORK_VM_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_CLONE_VFORK_PIDFD_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static FILES_PIDFD_INSTALL_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CLONE_VFORK_CHILD_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_OPENAT_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -124,11 +144,15 @@ static USER_SIGNAL_WAIT_SLEEP_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static USER_SIGNAL_WAIT_WAKE_SIGCHLD_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
+static USER_PIDFD_READY_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
 static SYSCALL_RT_SIGTIMEDWAIT_RETURN_SIGNAL_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_WAIT4_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static USER_CHILD_PARENT_WAIT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CLONE_VFORK_PARENT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_EXIT_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -191,6 +215,30 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             });
         }
         #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableCloneVforkVm => {
+            run_once(&SYSCALL_CLONE_VFORK_VM_REPORTED, || {
+                run_syscall_table_clone_vfork_vm(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableCloneVforkPidfd => {
+            run_once(&SYSCALL_CLONE_VFORK_PIDFD_REPORTED, || {
+                run_syscall_table_clone_vfork_pidfd(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::FilesStructPidfdInstall => {
+            run_once(&FILES_PIDFD_INSTALL_REPORTED, || {
+                run_files_struct_pidfd_install(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserCloneVforkChildHandoff => {
+            run_once(&USER_CLONE_VFORK_CHILD_HANDOFF_REPORTED, || {
+                run_user_clone_vfork_child_handoff(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
         Checkpoint::SyscallTableOpenAt => {
             run_once(&SYSCALL_OPENAT_REPORTED, || {
                 run_syscall_table_openat(checkpoint, ctx, sink, total)
@@ -245,6 +293,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             });
         }
         #[cfg(app_user_boot)]
+        Checkpoint::UserPidfdReady => {
+            run_once(&USER_PIDFD_READY_REPORTED, || {
+                run_user_pidfd_ready(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
         Checkpoint::SyscallTableRtSigtimedwaitReturnSignal => {
             run_once(&SYSCALL_RT_SIGTIMEDWAIT_RETURN_SIGNAL_REPORTED, || {
                 run_syscall_table_rt_sigtimedwait_return_signal(checkpoint, ctx, sink, total)
@@ -260,6 +314,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::UserChildParentWaitResumed => {
             run_once(&USER_CHILD_PARENT_WAIT_RESUMED_REPORTED, || {
                 run_user_child_parent_wait_resumed(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserCloneVforkParentResumed => {
+            run_once(&USER_CLONE_VFORK_PARENT_RESUMED_REPORTED, || {
+                run_user_clone_vfork_parent_resumed(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -939,6 +999,207 @@ fn run_syscall_table_clone(
 }
 
 #[cfg(app_user_boot)]
+fn run_files_struct_pidfd_install(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.files_struct.pidfd_install";
+    sink.start_case(total, "", name, checkpoint);
+
+    let files = &ctx.files_struct;
+    let valid = files.state() == State::Ready
+        && files.pidfd_installed()
+        && files.pidfd_fd() != usize::MAX
+        && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+        && !files.pidfd_ready();
+
+    sink.diag_usize("pidfd_installed", files.pidfd_installed() as usize);
+    sink.diag_usize("pidfd_fd", files.pidfd_fd());
+    sink.diag_usize("pidfd_child_pid", files.pidfd_child_pid());
+    sink.diag_usize("pidfd_ready", files.pidfd_ready() as usize);
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "pidfd install facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_clone_vfork_pidfd(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.clone_vfork_pidfd";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let child = &ctx.user_child_process;
+    let files = &ctx.files_struct;
+    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
+    let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
+    let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
+    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+
+    let valid = table.state() == State::Ready
+        && table.clone_supported()
+        && table.clone_routes_to_task_creation_core()
+        && table.clone_routes_to_user_clone_deferred_boundaries()
+        && table.clone_vfork_pidfd_first_slice()
+        && table.clone_legacy_pidfd_parent_tidptr_bound()
+        && table.clone_vfork_parent_frame_saved()
+        && table.clone_pidfd_copyout_first_slice()
+        && table.clone_full_vfork_scheduler_deferred()
+        && table.clone_full_pidfd_file_ops_deferred()
+        && table.clone_observed()
+        && ctx.task_creation_core.user_child_created()
+        && child.state() == State::Ready
+        && child.vfork_pidfd_clone()
+        && child.vfork_parent_frame_saved()
+        && child.pidfd_copyout_observed()
+        && child.pidfd_fd() == files.pidfd_fd()
+        && child.pid() == child_pid
+        && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && child.current_child_continuation()
+        && child.trap_frame_child_return_zero()
+        && child_a0 == 0
+        && child_sp == child.vfork_child_sp()
+        && child_sp != 0
+        && child.enqueued()
+        && files.pidfd_installed()
+        && files.pidfd_child_pid() == child_pid
+        && runqueue_contains_child;
+
+    sink.diag_usize(
+        "clone_vfork_pidfd_observed",
+        table.clone_observed() as usize,
+    );
+    sink.diag_usize("clone_vfork_child_pid", child.pid());
+    sink.diag_usize("clone_vfork_exit_signal", child.exit_signal());
+    sink.diag_usize("clone_vfork_pidfd_fd", child.pidfd_fd());
+    sink.diag_usize(
+        "clone_vfork_pidfd_copyout",
+        child.pidfd_copyout_observed() as usize,
+    );
+    sink.diag_hex_pair("clone_vfork_child_sepc_sp", child_sepc, child_sp);
+    sink.diag_usize("clone_vfork_child_a0", child_a0);
+    sink.diag_usize(
+        "clone_vfork_parent_frame_saved",
+        child.vfork_parent_frame_saved() as usize,
+    );
+    sink.diag_usize(
+        "clone_vfork_runqueue_contains_child",
+        runqueue_contains_child as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "vfork pidfd clone facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_clone_vfork_vm(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.clone_vfork_vm";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let child = &ctx.user_child_process;
+    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
+    let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
+    let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
+    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+
+    let valid = table.state() == State::Ready
+        && table.clone_supported()
+        && table.clone_routes_to_task_creation_core()
+        && table.clone_routes_to_user_clone_deferred_boundaries()
+        && table.clone_vfork_vm_first_slice()
+        && table.clone_observed()
+        && ctx.task_creation_core.user_child_created()
+        && child.state() == State::Ready
+        && child.vfork_vm_clone()
+        && !child.vfork_pidfd_clone()
+        && child.vfork_parent_frame_saved()
+        && !child.pidfd_copyout_observed()
+        && child.pidfd_fd() == usize::MAX
+        && child.pid() == child_pid
+        && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && child.current_child_continuation()
+        && child.trap_frame_child_return_zero()
+        && child_a0 == 0
+        && child_sp == child.vfork_child_sp()
+        && child_sp != 0
+        && child.enqueued()
+        && runqueue_contains_child;
+
+    sink.diag_usize("clone_vfork_vm_observed", table.clone_observed() as usize);
+    sink.diag_usize("clone_vfork_vm_child_pid", child.pid());
+    sink.diag_usize("clone_vfork_vm_exit_signal", child.exit_signal());
+    sink.diag_hex_pair("clone_vfork_vm_child_sepc_sp", child_sepc, child_sp);
+    sink.diag_usize("clone_vfork_vm_child_a0", child_a0);
+    sink.diag_usize(
+        "clone_vfork_vm_parent_frame_saved",
+        child.vfork_parent_frame_saved() as usize,
+    );
+    sink.diag_usize(
+        "clone_vfork_vm_runqueue_contains_child",
+        runqueue_contains_child as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "vfork vm clone facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_clone_vfork_child_handoff(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_clone.vfork_child_handoff";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let valid = child.vfork_clone()
+        && child.vfork_child_handoff()
+        && child.current_child_continuation()
+        && child.child_continuation_taken()
+        && child.vfork_child_sp() != 0
+        && !child.vfork_parent_resumed()
+        && child.parent_clone_return() == 0;
+
+    sink.diag_usize("vfork_child_handoff", child.vfork_child_handoff() as usize);
+    sink.diag_usize(
+        "vfork_current_child_continuation",
+        child.current_child_continuation() as usize,
+    );
+    sink.diag_usize("vfork_child_sp", child.vfork_child_sp());
+    sink.diag_usize(
+        "vfork_parent_resumed",
+        child.vfork_parent_resumed() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "vfork child handoff facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
 fn run_syscall_table_openat(
     checkpoint: Checkpoint,
     ctx: &Context,
@@ -1373,6 +1634,42 @@ fn run_user_signal_wait_wake_sigchld(
 }
 
 #[cfg(app_user_boot)]
+fn run_user_pidfd_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink, total: usize) {
+    let name = "user_boot.user_pidfd.ready";
+    sink.start_case(total, "", name, checkpoint);
+
+    let files = &ctx.files_struct;
+    let child = &ctx.user_child_process;
+    let process = &ctx.user_init_process;
+    let valid = files.pidfd_installed()
+        && files.pidfd_ready()
+        && files.pidfd_fd() == child.pidfd_fd()
+        && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+        && files.pidfd_exit_status() == child.child_exit_status()
+        && child.child_exit_status_observed()
+        && child.vfork_pidfd_clone();
+
+    sink.diag_usize("pidfd_ready", files.pidfd_ready() as usize);
+    sink.diag_usize("pidfd_fd", files.pidfd_fd());
+    sink.diag_usize("pidfd_child_pid", files.pidfd_child_pid());
+    sink.diag_usize("pidfd_child_exit_status", files.pidfd_exit_status());
+    sink.diag_usize(
+        "pidfd_child_exit_status_observed",
+        child.child_exit_status_observed() as usize,
+    );
+    sink.diag_usize("pending_sigchld", process.pending_sigchld() as usize);
+    sink.diag_usize(
+        "rt_sigtimedwait_wake_signal",
+        process.rt_sigtimedwait_wake_signal(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "pidfd ready facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
 fn run_syscall_table_rt_sigtimedwait_return_signal(
     checkpoint: Checkpoint,
     ctx: &Context,
@@ -1610,6 +1907,53 @@ fn run_user_child_parent_wait_resumed(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "parent wait resumed facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_clone_vfork_parent_resumed(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_clone.vfork_parent_resumed";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let files = &ctx.files_struct;
+    let pidfd_ok = if child.vfork_pidfd_clone() {
+        files.pidfd_ready() && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+    } else {
+        child.vfork_vm_clone() && !files.pidfd_ready()
+    };
+    let valid = child.vfork_clone()
+        && child.child_exit_status_observed()
+        && child.vfork_parent_resumed()
+        && !child.current_child_continuation()
+        && child.parent_clone_return() == crate::objects::user_boot::USER_CHILD_PID
+        && child.parent_wait_writable_page_snapshot_restored()
+        && pidfd_ok;
+
+    sink.diag_usize(
+        "vfork_parent_resumed",
+        child.vfork_parent_resumed() as usize,
+    );
+    sink.diag_usize(
+        "vfork_current_child_continuation",
+        child.current_child_continuation() as usize,
+    );
+    sink.diag_usize("vfork_parent_clone_return", child.parent_clone_return());
+    sink.diag_usize("vfork_child_exit_status", child.child_exit_status());
+    sink.diag_usize(
+        "vfork_writable_snapshot_restored",
+        child.parent_wait_writable_page_snapshot_restored() as usize,
+    );
+    sink.diag_usize("vfork_pidfd_ready", files.pidfd_ready() as usize);
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "vfork parent resumed facts invalid");
     }
 }
 

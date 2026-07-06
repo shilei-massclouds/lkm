@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 302
+- unmapped: 308
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -416,12 +416,18 @@
 | 407 | SyscallTable.NewFstatAt | SyscallTableNewFstatAt | exact | high | fs/stat.c | SYSCALL_DEFINE4(newfstatat) | SYSCALL_DEFINE4(newfstatat) line 505: error = vfs_fstatat(dfd, filename, &stat, flag); | Linux newfstatat syscall wrapper dispatches to vfs_fstatat() before stat copyout. |
 | 408 | SyscallTable.SetTidAddress | SyscallTableSetTidAddress | exact | high | kernel/fork.c | SYSCALL_DEFINE1(set_tid_address) | SYSCALL_DEFINE1(set_tid_address) line 1922: current->clear_child_tid = tidptr; | Linux set_tid_address syscall wrapper records current->clear_child_tid and returns task_pid_vnr(). |
 | 409 | SyscallTable.Clone | SyscallTableClone | exact | medium | kernel/fork.c | kernel_clone | kernel_clone() line 2786: p = copy_process(NULL, trace, NUMA_NO_NODE, args); | Mapped to shared kernel_clone() because the legacy clone syscall ABI wrapper is arch/config conditional on CONFIG_CLONE_BACKWARDS variants. |
-| 410 | SyscallTable.RtSigtimedwait | SyscallTableRtSigtimedwait | unmapped | none | null | null | null | Linux anchor for kernel/signal.c::SYSCALL_DEFINE4(rt_sigtimedwait) was not found. |
-| 411 | UserSignalWait.Sleep | UserSignalWaitSleep | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 412 | UserSignalWait.WakeSigchld | UserSignalWaitWakeSigchld | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 413 | SyscallTable.RtSigtimedwaitReturnSignal | SyscallTableRtSigtimedwaitReturnSignal | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 414 | SyscallTable.Wait4 | SyscallTableWait4 | exact | high | kernel/exit.c | SYSCALL_DEFINE4(wait4) | SYSCALL_DEFINE4(wait4) line 1879: long err = kernel_wait4(upid, stat_addr, options, ru ? &r : NULL); | Linux wait4 syscall wrapper dispatches to kernel_wait4(). |
-| 415 | UserChild.ParentWaitResumed | UserChildParentWaitResumed | exact | medium | kernel/exit.c | kernel_wait4 | kernel_wait4() line 1853: if (ret > 0 && stat_addr && put_user(wo.wo_stat, stat_addr)) | Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent. |
-| 416 | SyscallTable.Exit | SyscallTableExit | exact | medium | kernel/exit.c | do_group_exit | do_group_exit() line 1088: do_exit(exit_code); | Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit(). |
-| 417 | PayloadPhase.Ready | PayloadPhaseReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1492: do_sysctl_args(); | Linux kernel_init() reaches the post-finalize payload-selection boundary. |
-| 418 | PayloadPhase.Online | PayloadPhaseOnline | exact | medium | init/main.c | kernel_init | kernel_init() line 1525: if (!try_to_run_init_process("/sbin/init") \|\| | Linux kernel_init() default init candidate handoff anchor. Requested-init paths record the same runtime checkpoint before run_init_process(execute_command), but the single-fingerprint LKM_CHECKPOINT marker remains on this canonical fallback anchor. |
+| 410 | SyscallTable.CloneVforkVm | SyscallTableCloneVforkVm | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 411 | SyscallTable.CloneVforkPidfd | SyscallTableCloneVforkPidfd | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 412 | FilesStruct.PidfdInstall | FilesStructPidfdInstall | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 413 | UserClone.VforkChildHandoff | UserCloneVforkChildHandoff | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 414 | SyscallTable.RtSigtimedwait | SyscallTableRtSigtimedwait | unmapped | none | null | null | null | Linux anchor for kernel/signal.c::SYSCALL_DEFINE4(rt_sigtimedwait) was not found. |
+| 415 | UserSignalWait.Sleep | UserSignalWaitSleep | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 416 | UserSignalWait.WakeSigchld | UserSignalWaitWakeSigchld | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 417 | UserPidfd.Ready | UserPidfdReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 418 | SyscallTable.RtSigtimedwaitReturnSignal | SyscallTableRtSigtimedwaitReturnSignal | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 419 | SyscallTable.Wait4 | SyscallTableWait4 | exact | high | kernel/exit.c | SYSCALL_DEFINE4(wait4) | SYSCALL_DEFINE4(wait4) line 1879: long err = kernel_wait4(upid, stat_addr, options, ru ? &r : NULL); | Linux wait4 syscall wrapper dispatches to kernel_wait4(). |
+| 420 | UserChild.ParentWaitResumed | UserChildParentWaitResumed | exact | medium | kernel/exit.c | kernel_wait4 | kernel_wait4() line 1853: if (ret > 0 && stat_addr && put_user(wo.wo_stat, stat_addr)) | Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent. |
+| 421 | UserClone.VforkParentResumed | UserCloneVforkParentResumed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 422 | SyscallTable.Exit | SyscallTableExit | exact | medium | kernel/exit.c | do_group_exit | do_group_exit() line 1088: do_exit(exit_code); | Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit(). |
+| 423 | PayloadPhase.Ready | PayloadPhaseReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1492: do_sysctl_args(); | Linux kernel_init() reaches the post-finalize payload-selection boundary. |
+| 424 | PayloadPhase.Online | PayloadPhaseOnline | exact | medium | init/main.c | kernel_init | kernel_init() line 1525: if (!try_to_run_init_process("/sbin/init") \|\| | Linux kernel_init() default init candidate handoff anchor. Requested-init paths record the same runtime checkpoint before run_init_process(execute_command), but the single-fingerprint LKM_CHECKPOINT marker remains on this canonical fallback anchor. |

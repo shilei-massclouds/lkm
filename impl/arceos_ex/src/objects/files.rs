@@ -159,6 +159,7 @@ struct FileDescriptorEntry {
     writable: bool,
     flags: u32,
     close_on_exec: bool,
+    pid: usize,
 }
 
 impl FileDescriptorEntry {
@@ -176,6 +177,7 @@ impl FileDescriptorEntry {
             writable,
             flags: access_mode,
             close_on_exec: false,
+            pid: 0,
         }
     }
 
@@ -186,6 +188,7 @@ impl FileDescriptorEntry {
             writable: false,
             flags,
             close_on_exec,
+            pid: 0,
         }
     }
 
@@ -202,6 +205,18 @@ impl FileDescriptorEntry {
             writable,
             flags,
             close_on_exec,
+            pid: 0,
+        }
+    }
+
+    const fn pidfd(child_pid: usize) -> Self {
+        Self {
+            ofd: OpenFileDescriptionRef::Pidfd0,
+            readable: true,
+            writable: false,
+            flags: FILE_O_RDWR,
+            close_on_exec: true,
+            pid: child_pid,
         }
     }
 }
@@ -213,6 +228,7 @@ pub enum OpenFileDescriptionRef {
     Stderr,
     Regular0,
     Tty0,
+    Pidfd0,
 }
 
 #[derive(Clone, Copy)]
@@ -903,6 +919,23 @@ impl FileDescriptorTable {
         Err(FileError::TooManyOpenFiles)
     }
 
+    fn install_pidfd(&mut self, child_pid: usize) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || child_pid == 0 {
+            return Err(FileError::NotReady);
+        }
+
+        let mut candidate = REGULAR0_FD;
+        while candidate < FILE_FD_COUNT {
+            if self.entries[candidate].is_none() {
+                self.entries[candidate] = Some(FileDescriptorEntry::pidfd(child_pid));
+                self.fd_installed.fetch_add(1, Ordering::AcqRel);
+                return Ok(candidate);
+            }
+            candidate += 1;
+        }
+        Err(FileError::TooManyOpenFiles)
+    }
+
     fn get_fd_flags(&self, fd: usize) -> FileResult<u32> {
         let entry = self.lookup(fd)?;
         Ok(if entry.close_on_exec {
@@ -967,6 +1000,9 @@ pub struct FilesStruct {
     directory0_file_ref: Option<FileRef>,
     directory0_offset: usize,
     directory0_last_getdents_len: usize,
+    pidfd_fd: usize,
+    pidfd_child_pid: usize,
+    pidfd_exit_status: usize,
     tty_termios: [u8; TERMIOS_SIZE],
     allocated: bool,
     owned_by_kernel_init_task: bool,
@@ -998,6 +1034,9 @@ pub struct FilesStruct {
     regular_file_stat_observed: AtomicUsize,
     directory_fd_installed: AtomicUsize,
     directory_getdents_observed: AtomicUsize,
+    pidfd_installed: AtomicUsize,
+    pidfd_ready: AtomicUsize,
+    pidfd_closed: AtomicUsize,
     tty_termios_mutation_observed: AtomicUsize,
 }
 
@@ -1026,6 +1065,9 @@ impl FilesStruct {
             directory0_file_ref: None,
             directory0_offset: 0,
             directory0_last_getdents_len: 0,
+            pidfd_fd: usize::MAX,
+            pidfd_child_pid: 0,
+            pidfd_exit_status: 0,
             tty_termios: [0; TERMIOS_SIZE],
             allocated: false,
             owned_by_kernel_init_task: false,
@@ -1057,6 +1099,9 @@ impl FilesStruct {
             regular_file_stat_observed: AtomicUsize::new(0),
             directory_fd_installed: AtomicUsize::new(0),
             directory_getdents_observed: AtomicUsize::new(0),
+            pidfd_installed: AtomicUsize::new(0),
+            pidfd_ready: AtomicUsize::new(0),
+            pidfd_closed: AtomicUsize::new(0),
             tty_termios_mutation_observed: AtomicUsize::new(0),
         }
     }
@@ -1183,6 +1228,30 @@ impl FilesStruct {
 
     pub fn directory_getdents_observed(&self) -> bool {
         self.directory_getdents_observed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn pidfd_installed(&self) -> bool {
+        self.pidfd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn pidfd_ready(&self) -> bool {
+        self.pidfd_ready.load(Ordering::Acquire) != 0
+    }
+
+    pub fn pidfd_closed(&self) -> bool {
+        self.pidfd_closed.load(Ordering::Acquire) != 0
+    }
+
+    pub const fn pidfd_fd(&self) -> usize {
+        self.pidfd_fd
+    }
+
+    pub const fn pidfd_child_pid(&self) -> usize {
+        self.pidfd_child_pid
+    }
+
+    pub const fn pidfd_exit_status(&self) -> usize {
+        self.pidfd_exit_status
     }
 
     pub fn tty_termios_state_bound(&self) -> bool {
@@ -1672,6 +1741,40 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    pub fn install_pidfd(&mut self, child_pid: usize) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound || child_pid == 0 {
+            return Err(FileError::NotReady);
+        }
+        if self.pidfd_child_pid != 0 && self.pidfd_fd != usize::MAX {
+            return Err(FileError::AlreadyOpen);
+        }
+
+        let fd = self.fd_table.install_pidfd(child_pid)?;
+        self.pidfd_fd = fd;
+        self.pidfd_child_pid = child_pid;
+        self.pidfd_exit_status = 0;
+        self.pidfd_ready.store(0, Ordering::Release);
+        self.pidfd_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
+    pub fn mark_pidfd_child_exited(
+        &mut self,
+        child_pid: usize,
+        exit_status: usize,
+    ) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+        if self.pidfd_child_pid != child_pid || self.pidfd_child_pid == 0 {
+            return Err(FileError::BadFd);
+        }
+
+        self.pidfd_exit_status = exit_status;
+        self.pidfd_ready.store(1, Ordering::Release);
+        Ok(())
+    }
+
     pub fn read_fd(&mut self, fd: usize, buffer: &mut [u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -1720,6 +1823,7 @@ impl FilesStruct {
                 }
                 Ok(read)
             }
+            OpenFileDescriptionRef::Pidfd0 => Err(FileError::Unsupported),
             _ => Err(FileError::Unsupported),
         }
     }
@@ -1747,6 +1851,13 @@ impl FilesStruct {
                         ready |= FILE_POLLIN | FILE_POLLRDNORM;
                     }
                 }
+                OpenFileDescriptionRef::Pidfd0 => {
+                    if entry.pid == self.pidfd_child_pid
+                        && self.pidfd_ready.load(Ordering::Acquire) != 0
+                    {
+                        ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                    }
+                }
                 OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {}
             }
         }
@@ -1760,11 +1871,30 @@ impl FilesStruct {
                         ready |= FILE_POLLOUT | FILE_POLLWRNORM;
                     }
                 }
-                OpenFileDescriptionRef::Stdin | OpenFileDescriptionRef::Regular0 => {}
+                OpenFileDescriptionRef::Stdin
+                | OpenFileDescriptionRef::Regular0
+                | OpenFileDescriptionRef::Pidfd0 => {}
             }
         }
 
         Ok(ready & (events | FILE_POLLERR | FILE_POLLHUP))
+    }
+
+    pub fn fd_is_tty_read_wait_candidate(&self, fd: usize) -> bool {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return false;
+        }
+
+        match self.fd_table.lookup(fd) {
+            Ok(entry) => {
+                entry.readable
+                    && matches!(
+                        entry.ofd,
+                        OpenFileDescriptionRef::Stdin | OpenFileDescriptionRef::Tty0
+                    )
+            }
+            Err(_) => false,
+        }
     }
 
     pub fn getdents64_fd(
@@ -1822,6 +1952,10 @@ impl FilesStruct {
             self.directory0_offset = 0;
             self.directory0_file_ref = None;
             self.filesystem0_kind = FilesystemFdKind::None;
+        }
+        if entry.ofd == OpenFileDescriptionRef::Pidfd0 {
+            self.pidfd_fd = usize::MAX;
+            self.pidfd_closed.fetch_add(1, Ordering::AcqRel);
         }
         self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
         if entry.ofd == OpenFileDescriptionRef::Regular0 {
@@ -1893,6 +2027,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stderr => &self.stderr_backend,
             OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
             OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
+            OpenFileDescriptionRef::Pidfd0 => return Err(FileError::NotTty),
         };
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
             return Err(FileError::NotTty);
@@ -2063,6 +2198,7 @@ impl FilesStruct {
                 }
                 Ok(stat)
             }
+            OpenFileDescriptionRef::Pidfd0 => Ok(FileStat::new(0, VfsInodeKind::DeviceNode)),
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
             | OpenFileDescriptionRef::Stderr
@@ -2088,6 +2224,7 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stderr => self.stderr.write(&self.stderr_backend, bytes),
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
             OpenFileDescriptionRef::Tty0 => self.tty0.write(&self.tty0_backend, bytes),
+            OpenFileDescriptionRef::Pidfd0 => Err(FileError::NotWritable),
         }
     }
 

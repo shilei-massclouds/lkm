@@ -1559,10 +1559,18 @@ type ArceosExStartupPhaseCodingMust {
          * the next observation is an instruction page fault in the child
          * continuation with a7=135, which makes copied trap-frame-adjacent
          * child address-space/stack snapshot the next boundary instead of an
-         * ad-hoc child exec shortcut. clone3, CLONE_VM/vfork, thread groups,
-         * COW mm, pidfd,
+         * ad-hoc child exec shortcut. OpenRC /sbin/init additionally observes
+         * legacy clone flags 0x4111 with flags_without_csignal=0x4100:
+         * SIGCHLD | CLONE_VM | CLONE_VFORK, not CLONE_PIDFD.  The first slice
+         * for that shape saves the parent clone frame, hands off directly to
+         * the child continuation, and lets bounded child exit resume parent
+         * clone with a real SIGCHLD pending/wake.  A true vfork shape that
+         * includes CLONE_PIDFD(0x1000) additionally uses parent_tidptr as the
+         * pidfd copyout address and installs a pidfd-like fd table entry.
+         * clone3, thread groups, full CLONE_VM/vfork completion scheduling,
+         * COW mm, full pidfd file operations,
          * ptrace/seccomp/cgroup/audit, namespace, robust futex,
-         * clear-child futex wake, exit/reap/status copyout, failure rollback
+         * clear-child futex wake, full exit/reap/status copyout, failure rollback
          * and unobserved flag combinations must be recorded by
          * UserCloneDeferredBoundaries or SyscallTable wait4 facts as deferred,
          * trimmed or unsupported-first-slice.
