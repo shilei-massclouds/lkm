@@ -2899,76 +2899,104 @@
   },
   {
     "index": 414,
+    "variant": "UserCloneVforkNextChildAccepted",
+    "name": "UserClone.VforkNextChildAccepted",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 415,
     "variant": "SyscallTableRtSigtimedwait",
     "name": "SyscallTable.RtSigtimedwait",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 415,
+    "index": 416,
     "variant": "UserSignalWaitSleep",
     "name": "UserSignalWait.Sleep",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 416,
+    "index": 417,
     "variant": "UserSignalWaitWakeSigchld",
     "name": "UserSignalWait.WakeSigchld",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 417,
+    "index": 418,
     "variant": "UserPidfdReady",
     "name": "UserPidfd.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 418,
+    "index": 419,
     "variant": "SyscallTableRtSigtimedwaitReturnSignal",
     "name": "SyscallTable.RtSigtimedwaitReturnSignal",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 419,
+    "index": 420,
     "variant": "SyscallTableWait4",
     "name": "SyscallTable.Wait4",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 420,
+    "index": 421,
     "variant": "UserChildParentWaitResumed",
     "name": "UserChild.ParentWaitResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 421,
+    "index": 422,
     "variant": "UserCloneVforkParentResumed",
     "name": "UserClone.VforkParentResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 422,
+    "index": 423,
+    "variant": "UserChildRecordArchived",
+    "name": "UserChildRecord.Archived",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 424,
+    "variant": "UserChildSlotReusable",
+    "name": "UserChildSlot.Reusable",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 425,
+    "variant": "UserChildRecordReaped",
+    "name": "UserChildRecord.Reaped",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 426,
     "variant": "SyscallTableExit",
     "name": "SyscallTable.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 423,
+    "index": 427,
     "variant": "PayloadPhaseReady",
     "name": "PayloadPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 424,
+    "index": 428,
     "variant": "PayloadPhaseOnline",
     "name": "PayloadPhase.Online",
     "early_byte": null,

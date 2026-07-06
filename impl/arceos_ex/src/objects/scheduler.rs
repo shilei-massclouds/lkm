@@ -12,7 +12,7 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     rest_init::{KernelInitTask, KthreaddTask},
     state::{
-        EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
+        failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
     },
     static_branch::StaticBranch,
     task::TaskCpuState,
@@ -1320,6 +1320,26 @@ impl Scheduler {
             );
         };
         self.boot_runqueue.enqueue_task_ref(runqueue_ref, task_ref)
+    }
+
+    pub fn dequeue_user_child_from_runqueue(&mut self, cpu_group: &CpuGroup) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || self.boot_runqueue.state() != State::Ready
+        {
+            return Err(self.failed_enable_condition());
+        }
+
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return Err(self.failed_enable_condition());
+        };
+        let Some(runqueue_ref) =
+            self.resolve_selected_runqueue_ref_for_cpu(cpu_group, boot_cpu.logical_id())
+        else {
+            return Err(self.failed_enable_condition());
+        };
+        self.boot_runqueue
+            .dequeue_task_ref(runqueue_ref, CurrentTaskRef::UserChild)
     }
 
     fn resolve_runqueue_ref_for_cpu(

@@ -17,8 +17,9 @@ use super::{
     user_boot::{
         UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
         UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
-        USER_CHILD_PID, USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
-        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
+        USER_CHILD_PID, USER_SIGNAL_COUNT,
+        USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_WAIT4_ALL_CHILDREN,
+        USER_WAIT4_WUNTRACED,
     },
 };
 
@@ -4754,9 +4755,18 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, EFAULT);
         return;
     }
+    if crate::context::context_ref()
+        .user_child_process
+        .completed_child_records_full()
+    {
+        print_clone_vfork_boundary(frame, "child_records_full");
+        complete_unsupported_syscall(frame);
+        return;
+    }
 
     let child_frame = {
         let ctx = crate::context::context();
+        let child_pid = ctx.user_child_process.next_child_pid();
         let copy_result = match ctx.task_creation_core.copy_user_process(
             TaskCopyUserProcessInputs {
                 src_process: &ctx.user_init_process,
@@ -4783,7 +4793,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         };
 
         let (pidfd_fd, pidfd_copyout) = if clone_is_vfork_pidfd {
-            let pidfd_fd = match ctx.files_struct.install_pidfd(USER_CHILD_PID) {
+            let pidfd_fd = match ctx.files_struct.install_pidfd(child_pid) {
                 Ok(fd) => fd,
                 Err(_) => {
                     print_clone_vfork_boundary(frame, "pidfd_install");
@@ -4853,7 +4863,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         }
         if !ctx
             .user_init_process
-            .observe_child_process_group_visible(USER_CHILD_PID)
+            .observe_child_process_group_visible(child_pid)
         {
             print_clone_vfork_boundary(frame, "process_group_visible");
             complete_unsupported_syscall(frame);
@@ -4882,6 +4892,15 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         Checkpoint::UserCloneVforkChildHandoff,
         crate::context::context_ref(),
     );
+    if crate::context::context_ref()
+        .user_child_process
+        .vfork_next_child_accepted()
+    {
+        crate::checkpoint::dispatch(
+            Checkpoint::UserCloneVforkNextChildAccepted,
+            crate::context::context_ref(),
+        );
+    }
     *frame = child_frame;
 }
 
@@ -5365,7 +5384,7 @@ fn record_wait4_parent_wait_resumed(
 
 fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     let upid = frame.reg(10);
-    let _stat_addr = frame.reg(11);
+    let stat_addr = frame.reg(11);
     let options = frame.reg(12);
     let rusage = frame.reg(13);
 
@@ -5377,14 +5396,36 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, EINVAL);
         return;
     }
-    if crate::context::context_ref()
+
+    if let Some((child_pid, _exit_status, wait_status, _pidfd_fd)) = crate::context::context_ref()
         .user_child_process
-        .parent_wait_resumed()
+        .first_unreaped_completed_child()
     {
+        let status_copied = stat_addr == 0 || write_user_u32(stat_addr, wait_status as u32);
         table.wait4_observed.store(1, Ordering::Release);
-        complete_error_syscall(frame, ECHILD);
+        crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+        if !status_copied {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        {
+            let ctx = crate::context::context();
+            if !ctx
+                .user_child_process
+                .mark_completed_child_reaped(child_pid)
+            {
+                complete_unsupported_syscall(frame);
+                return;
+            }
+        }
+        crate::checkpoint::dispatch(
+            Checkpoint::UserChildRecordReaped,
+            crate::context::context_ref(),
+        );
+        complete_successful_syscall(frame, child_pid);
         return;
     }
+
     if options == WAIT4_WNOHANG {
         let child_eligible_but_not_waitable = {
             let child = &crate::context::context_ref().user_child_process;
@@ -5415,7 +5456,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             frame,
-            _stat_addr,
+            stat_addr,
             upid,
             options,
             rusage,
@@ -5432,8 +5473,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let child = &crate::context::context_ref().user_child_process;
         record_wait4_parent_wait_saved(
             frame,
-            _stat_addr,
-            USER_CHILD_PID,
+            stat_addr,
+            child.pid(),
             child.parent_wait_stack_window_checkpoint_bound(),
             child.parent_wait_stack_window_start(),
             child.parent_wait_stack_window_len(),
@@ -5506,22 +5547,6 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
             return false;
         }
     }
-    let signal_wait_woken = {
-        let ctx = crate::context::context();
-        ctx.user_init_process
-            .record_child_exit_sigchld()
-            .unwrap_or(false)
-    };
-    if signal_wait_woken {
-        crate::checkpoint::dispatch(
-            Checkpoint::UserSignalWaitWakeSigchld,
-            crate::context::context_ref(),
-        );
-    }
-    if has_pidfd {
-        crate::checkpoint::dispatch(Checkpoint::UserPidfdReady, crate::context::context_ref());
-    }
-
     crate::arch::riscv64::csr::write_satp(parent_satp);
     crate::arch::riscv64::csr::sfence_vma();
 
@@ -5549,6 +5574,48 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
     *frame = parent_frame;
     crate::checkpoint::dispatch(
         Checkpoint::UserCloneVforkParentResumed,
+        crate::context::context_ref(),
+    );
+    {
+        let ctx = crate::context::context();
+        if !ctx.user_child_process.archive_completed_child_record() {
+            return false;
+        }
+    }
+    crate::checkpoint::dispatch(
+        Checkpoint::UserChildRecordArchived,
+        crate::context::context_ref(),
+    );
+
+    let signal_wait_woken = {
+        let ctx = crate::context::context();
+        ctx.user_init_process
+            .record_child_exit_sigchld()
+            .unwrap_or(false)
+    };
+    if signal_wait_woken {
+        crate::checkpoint::dispatch(
+            Checkpoint::UserSignalWaitWakeSigchld,
+            crate::context::context_ref(),
+        );
+    }
+    if has_pidfd {
+        crate::checkpoint::dispatch(Checkpoint::UserPidfdReady, crate::context::context_ref());
+    }
+
+    {
+        let ctx = crate::context::context();
+        if ctx
+            .scheduler
+            .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+            .is_err()
+            || !ctx.user_child_process.mark_active_slot_reusable()
+        {
+            return false;
+        }
+    }
+    crate::checkpoint::dispatch(
+        Checkpoint::UserChildSlotReusable,
         crate::context::context_ref(),
     );
     true
@@ -6211,6 +6278,29 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     print_bool_digit(process.pending_sigchld());
     crate::arch::riscv64::sbi::putstr(" parent_clone_return=");
     print_decimal(child.parent_clone_return());
+    crate::arch::riscv64::sbi::putstr(" active_slot_state=");
+    print_decimal(child.state() as usize);
+    crate::arch::riscv64::sbi::putstr(" active_slot_reusable=");
+    print_bool_digit(child.active_slot_reusable());
+    crate::arch::riscv64::sbi::putstr(" next_child_pid=");
+    print_decimal(child.next_child_pid());
+    crate::arch::riscv64::sbi::putstr(" completed_records=");
+    print_decimal(child.completed_child_record_count());
+    crate::arch::riscv64::sbi::putstr(" record_capacity=");
+    print_decimal(child.completed_child_record_capacity());
+    if let Some((pid, status, wait_status, pidfd_fd)) = child.first_unreaped_completed_child() {
+        crate::arch::riscv64::sbi::putstr(" first_unreaped_pid=");
+        print_decimal(pid);
+        crate::arch::riscv64::sbi::putstr(" first_unreaped_status=");
+        print_decimal(status);
+        crate::arch::riscv64::sbi::putstr(" first_unreaped_wait_status=");
+        print_decimal(wait_status);
+        crate::arch::riscv64::sbi::putstr(" first_unreaped_pidfd_fd=");
+        print_decimal(pidfd_fd);
+    } else {
+        crate::arch::riscv64::sbi::putstr(" first_unreaped_pid=0 first_unreaped_status=0 first_unreaped_wait_status=0 first_unreaped_pidfd_fd=");
+        print_decimal(usize::MAX);
+    }
 }
 
 fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {

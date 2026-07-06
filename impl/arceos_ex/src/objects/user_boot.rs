@@ -56,6 +56,7 @@ pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
 pub const USER_PARENT_WAIT_STACK_PROBE_LEN: usize = 512;
 pub const USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX: usize = 768;
+pub const USER_COMPLETED_CHILD_RECORD_CAPACITY: usize = 8;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 2;
 #[cfg(app_user_boot)]
@@ -240,6 +241,40 @@ const USER_CLONE_VM: usize = 0x0000_0100;
 const USER_CLONE_PIDFD: usize = 0x0000_1000;
 const USER_CLONE_VFORK: usize = 0x0000_4000;
 const USER_CLONE_SETTLS: usize = 0x0008_0000;
+
+#[derive(Clone, Copy)]
+struct UserCompletedChildRecord {
+    occupied: bool,
+    pid: usize,
+    exit_status: usize,
+    wait_status: usize,
+    pidfd_fd: usize,
+    reaped: bool,
+}
+
+impl UserCompletedChildRecord {
+    const fn empty() -> Self {
+        Self {
+            occupied: false,
+            pid: 0,
+            exit_status: 0,
+            wait_status: 0,
+            pidfd_fd: usize::MAX,
+            reaped: false,
+        }
+    }
+
+    const fn archived(pid: usize, exit_status: usize, pidfd_fd: usize) -> Self {
+        Self {
+            occupied: true,
+            pid,
+            exit_status,
+            wait_status: (exit_status & 0xff) << 8,
+            pidfd_fd,
+            reaped: false,
+        }
+    }
+}
 
 pub struct PayloadExecSyncBoundaries {
     lifecycle: Lifecycle,
@@ -3328,6 +3363,7 @@ pub struct UserInitProcess {
     process_group_read_observed: bool,
     process_group_set_observed: bool,
     setsid_eperm_observed: bool,
+    child_process_pid: usize,
     child_process_group_visible: bool,
     child_process_group: usize,
     child_process_group_set_observed: bool,
@@ -3455,6 +3491,19 @@ pub struct UserChildProcess {
     enqueued: bool,
     wait4_parent_wait_observed: bool,
     child_continuation_taken: bool,
+    next_child_pid: usize,
+    completed_child_records: [UserCompletedChildRecord; USER_COMPLETED_CHILD_RECORD_CAPACITY],
+    completed_child_record_count: usize,
+    completed_child_record_archived: bool,
+    completed_child_record_reaped: bool,
+    last_archived_child_pid: usize,
+    last_archived_child_exit_status: usize,
+    last_archived_child_wait_status: usize,
+    last_reaped_child_pid: usize,
+    last_reaped_child_wait_status: usize,
+    active_slot_reusable: bool,
+    active_slot_reuse_count: usize,
+    vfork_next_child_accepted: bool,
 }
 
 #[allow(dead_code)]
@@ -3537,6 +3586,20 @@ impl UserChildProcess {
             enqueued: false,
             wait4_parent_wait_observed: false,
             child_continuation_taken: false,
+            next_child_pid: USER_CHILD_PID,
+            completed_child_records: [UserCompletedChildRecord::empty();
+                USER_COMPLETED_CHILD_RECORD_CAPACITY],
+            completed_child_record_count: 0,
+            completed_child_record_archived: false,
+            completed_child_record_reaped: false,
+            last_archived_child_pid: 0,
+            last_archived_child_exit_status: 0,
+            last_archived_child_wait_status: 0,
+            last_reaped_child_pid: 0,
+            last_reaped_child_wait_status: 0,
+            active_slot_reusable: false,
+            active_slot_reuse_count: 0,
+            vfork_next_child_accepted: false,
         }
     }
 
@@ -3642,6 +3705,82 @@ impl UserChildProcess {
 
     pub const fn current_child_continuation(&self) -> bool {
         self.child_continuation_taken && !self.parent_wait_resumed && !self.vfork_parent_resumed
+    }
+
+    pub fn active_slot_reusable(&self) -> bool {
+        self.active_slot_reusable
+            && self.lifecycle.state() == State::Prepared
+            && self.prepared
+            && self.task_entry == TaskEntry::UserChild
+    }
+
+    pub const fn active_slot_reuse_count(&self) -> usize {
+        self.active_slot_reuse_count
+    }
+
+    pub const fn next_child_pid(&self) -> usize {
+        self.next_child_pid
+    }
+
+    pub const fn completed_child_record_capacity(&self) -> usize {
+        USER_COMPLETED_CHILD_RECORD_CAPACITY
+    }
+
+    pub const fn completed_child_record_count(&self) -> usize {
+        self.completed_child_record_count
+    }
+
+    pub const fn completed_child_records_full(&self) -> bool {
+        self.completed_child_record_count >= USER_COMPLETED_CHILD_RECORD_CAPACITY
+    }
+
+    pub const fn completed_child_record_archived(&self) -> bool {
+        self.completed_child_record_archived
+    }
+
+    pub const fn completed_child_record_reaped(&self) -> bool {
+        self.completed_child_record_reaped
+    }
+
+    pub const fn last_archived_child_pid(&self) -> usize {
+        self.last_archived_child_pid
+    }
+
+    pub const fn last_archived_child_exit_status(&self) -> usize {
+        self.last_archived_child_exit_status
+    }
+
+    pub const fn last_archived_child_wait_status(&self) -> usize {
+        self.last_archived_child_wait_status
+    }
+
+    pub const fn last_reaped_child_pid(&self) -> usize {
+        self.last_reaped_child_pid
+    }
+
+    pub const fn last_reaped_child_wait_status(&self) -> usize {
+        self.last_reaped_child_wait_status
+    }
+
+    pub const fn vfork_next_child_accepted(&self) -> bool {
+        self.vfork_next_child_accepted
+    }
+
+    pub fn first_unreaped_completed_child(&self) -> Option<(usize, usize, usize, usize)> {
+        let mut index = 0usize;
+        while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
+            let record = self.completed_child_records[index];
+            if record.occupied && !record.reaped {
+                return Some((
+                    record.pid,
+                    record.exit_status,
+                    record.wait_status,
+                    record.pidfd_fd,
+                ));
+            }
+            index += 1;
+        }
+        None
     }
 
     pub const fn vfork_pidfd_clone(&self) -> bool {
@@ -3839,6 +3978,7 @@ impl UserChildProcess {
         self.prepared = true;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
+        self.active_slot_reusable = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
@@ -3863,6 +4003,7 @@ impl UserChildProcess {
     ) -> Option<usize> {
         if self.lifecycle.state() != State::Prepared
             || !self.prepared
+            || !self.active_slot_reusable
             || self.task_entry != TaskEntry::UserChild
             || parent.state() != State::Online
             || !parent.pid1_preserved()
@@ -3956,6 +4097,8 @@ impl UserChildProcess {
         self.pidfd_fd = usize::MAX;
         self.pidfd_copyout = false;
         self.parent_clone_return = 0;
+        self.active_slot_reusable = false;
+        self.vfork_next_child_accepted = false;
 
         if self
             .lifecycle
@@ -3990,6 +4133,7 @@ impl UserChildProcess {
     ) -> Option<TrapFrame> {
         if self.lifecycle.state() != State::Prepared
             || !self.prepared
+            || !self.active_slot_reusable
             || self.task_entry != TaskEntry::UserChild
             || parent.state() != State::Online
             || !parent.pid1_preserved()
@@ -4040,9 +4184,12 @@ impl UserChildProcess {
             return None;
         };
 
-        self.pid = USER_CHILD_PID;
+        let child_pid = self.next_child_pid;
+        let next_child_accepted = self.completed_child_record_count != 0;
+
+        self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
-        self.tgid = USER_CHILD_PID;
+        self.tgid = child_pid;
         self.exit_signal = boundaries.exit_signal(clone_flags);
         self.task_struct_allocated = task_struct_allocated;
         self.pid_allocated = true;
@@ -4106,6 +4253,9 @@ impl UserChildProcess {
         self.enqueued = false;
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = true;
+        self.active_slot_reusable = false;
+        self.vfork_next_child_accepted = next_child_accepted;
+        self.next_child_pid = child_pid.saturating_add(1);
 
         if self
             .lifecycle
@@ -4118,7 +4268,7 @@ impl UserChildProcess {
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
-        if self.lifecycle.state() != State::Ready || self.pid != USER_CHILD_PID {
+        if self.lifecycle.state() != State::Ready || self.pid == 0 || self.active_slot_reusable {
             return false;
         }
         self.enqueued = true;
@@ -4140,9 +4290,9 @@ impl UserChildProcess {
         if self.lifecycle.state() != State::Ready
             || !self.enqueued
             || self.child_continuation_taken
-            || self.pid != USER_CHILD_PID
+            || self.pid == 0
             || self.parent_pid != super::rest_init::KERNEL_INIT_PID
-            || self.tgid != USER_CHILD_PID
+            || self.tgid != self.pid
             || self.exit_signal != USER_CLONE_SIGCHLD
             || !self.task_struct_allocated
             || !self.pid_allocated
@@ -4159,6 +4309,7 @@ impl UserChildProcess {
             || !self.trap_frame_copied
             || !self.trap_frame_child_return_zero
             || self.parent_wait_resumed
+            || self.pid == 0
             || parent.state() != State::Online
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
@@ -4247,7 +4398,7 @@ impl UserChildProcess {
             || !self.child_continuation_taken
             || self.parent_wait_resumed
             || !self.parent_address_space_snapshot_saved
-            || self.pid != USER_CHILD_PID
+            || self.pid == 0
             || self.parent_pid != super::rest_init::KERNEL_INIT_PID
         {
             return None;
@@ -4277,7 +4428,7 @@ impl UserChildProcess {
             || !self.vfork_parent_frame_saved
             || self.vfork_parent_resumed
             || !self.parent_address_space_snapshot_saved
-            || self.pid != USER_CHILD_PID
+            || self.pid == 0
             || self.parent_pid != super::rest_init::KERNEL_INIT_PID
         {
             return None;
@@ -4463,6 +4614,141 @@ impl UserChildProcess {
 
         self.vfork_parent_resumed = true;
         self.parent_clone_return = self.pid;
+        true
+    }
+
+    pub fn archive_completed_child_record(&mut self) -> bool {
+        if !self.vfork_parent_resumed
+            || !self.child_exit_status_observed
+            || self.pid == 0
+            || self.completed_child_records_full()
+        {
+            return false;
+        }
+
+        let record =
+            UserCompletedChildRecord::archived(self.pid, self.child_exit_status, self.pidfd_fd);
+        let mut index = 0usize;
+        while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
+            if !self.completed_child_records[index].occupied {
+                self.completed_child_records[index] = record;
+                self.completed_child_record_count += 1;
+                self.completed_child_record_archived = true;
+                self.last_archived_child_pid = record.pid;
+                self.last_archived_child_exit_status = record.exit_status;
+                self.last_archived_child_wait_status = record.wait_status;
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub fn mark_completed_child_reaped(&mut self, pid: usize) -> bool {
+        if pid == 0 {
+            return false;
+        }
+
+        let mut index = 0usize;
+        while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
+            let record = &mut self.completed_child_records[index];
+            if record.occupied && record.pid == pid && !record.reaped {
+                record.reaped = true;
+                self.completed_child_record_reaped = true;
+                self.last_reaped_child_pid = record.pid;
+                self.last_reaped_child_wait_status = record.wait_status;
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub fn mark_active_slot_reusable(&mut self) -> bool {
+        if !self.vfork_parent_resumed
+            || !self.completed_child_record_archived
+            || !self.parent_wait_writable_page_snapshot_restored
+        {
+            return false;
+        }
+
+        self.lifecycle = Lifecycle::new(State::Prepared);
+        self.prepared = true;
+        self.task_entry = TaskEntry::UserChild;
+        self.task_entry_bound = true;
+        self.pid = 0;
+        self.parent_pid = 0;
+        self.tgid = 0;
+        self.exit_signal = 0;
+        self.task_struct_allocated = false;
+        self.pid_allocated = false;
+        self.thread_context_ready = false;
+        self.sched_entity_ready = false;
+        self.task_state_new = false;
+        self.files_struct_copied = false;
+        self.fs_struct_copied = false;
+        self.credentials_copied = false;
+        self.signal_state_copied = false;
+        self.user_address_space_snapshot = false;
+        self.user_stack_snapshot_len = 0;
+        self.user_stack_snapshot_copied = false;
+        self.user_stack_snapshot_restored = false;
+        self.trap_frame_copied = false;
+        self.trap_frame_child_return_zero = false;
+        self.tls_inherited = false;
+        self.child_trap_frame = None;
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_address_space_snapshot = UserAddressSpace::new();
+        self.parent_address_space_snapshot_saved = false;
+        self.parent_wait_stack_snapshot_len = 0;
+        self.parent_wait_stack_snapshot_copied = false;
+        self.parent_wait_stack_snapshot_restored = false;
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+        self.parent_wait_writable_page_snapshot_pages =
+            [None; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX];
+        self.parent_wait_writable_page_checksums = [0; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX];
+        self.parent_wait_writable_page_count = 0;
+        self.parent_wait_writable_page_snapshot_saved = false;
+        self.parent_wait_writable_page_snapshot_truncated = false;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        self.parent_wait_resumed = false;
+        self.vfork_vm_clone = false;
+        self.vfork_pidfd_clone = false;
+        self.vfork_parent_frame = None;
+        self.vfork_parent_frame_saved = false;
+        self.vfork_child_handoff = false;
+        self.vfork_parent_resumed = false;
+        self.vfork_child_sp = 0;
+        self.pidfd_fd = usize::MAX;
+        self.pidfd_copyout = false;
+        self.parent_clone_return = 0;
+        self.enqueued = false;
+        self.wait4_parent_wait_observed = false;
+        self.child_continuation_taken = false;
+        self.vfork_next_child_accepted = false;
+        self.active_slot_reusable = true;
+        self.active_slot_reuse_count += 1;
         true
     }
 
@@ -4955,6 +5241,7 @@ impl UserInitProcess {
             process_group_read_observed: false,
             process_group_set_observed: false,
             setsid_eperm_observed: false,
+            child_process_pid: 0,
             child_process_group_visible: false,
             child_process_group: 0,
             child_process_group_set_observed: false,
@@ -5187,6 +5474,10 @@ impl UserInitProcess {
 
     pub const fn child_process_group_visible(&self) -> bool {
         self.child_process_group_visible
+    }
+
+    pub const fn child_process_pid(&self) -> usize {
+        self.child_process_pid
     }
 
     pub const fn child_process_group(&self) -> usize {
@@ -5471,6 +5762,7 @@ impl UserInitProcess {
         self.session_leader_first_slice = true;
         self.process_group_leader_first_slice = true;
         self.process_group = super::rest_init::KERNEL_INIT_PID;
+        self.child_process_pid = 0;
         self.child_process_group_visible = false;
         self.child_process_group = 0;
         self.child_process_group_set_observed = false;
@@ -5597,7 +5889,7 @@ impl UserInitProcess {
             return UserProcessGroupLookup::NotReady;
         }
         if pid != 0 && pid != super::rest_init::KERNEL_INIT_PID {
-            if pid == USER_CHILD_PID && self.child_process_group_visible {
+            if pid == self.child_process_pid && self.child_process_group_visible {
                 self.process_group_read_observed = true;
                 return UserProcessGroupLookup::Found(self.child_process_group);
             }
@@ -5610,12 +5902,13 @@ impl UserInitProcess {
     pub fn observe_child_process_group_visible(&mut self, child_pid: usize) -> bool {
         if self.lifecycle.state() != State::Online
             || !self.pid1_preserved
-            || child_pid != USER_CHILD_PID
+            || child_pid == 0
             || self.process_group == 0
         {
             return false;
         }
 
+        self.child_process_pid = child_pid;
         self.child_process_group_visible = true;
         self.child_process_group = self.process_group;
         true
@@ -5642,7 +5935,7 @@ impl UserInitProcess {
             return UserProcessGroupUpdate::Invalid;
         }
         let current_pid = if current_child_continuation {
-            USER_CHILD_PID
+            self.child_process_pid
         } else {
             super::rest_init::KERNEL_INIT_PID
         };
@@ -5654,7 +5947,7 @@ impl UserInitProcess {
             pid as usize
         };
 
-        if normalized_pid == USER_CHILD_PID {
+        if normalized_pid == self.child_process_pid && self.child_process_group_visible {
             if !self.child_process_group_visible {
                 return UserProcessGroupUpdate::NoSuchProcess;
             }
@@ -5663,7 +5956,7 @@ impl UserInitProcess {
             } else {
                 pgid as usize
             };
-            if normalized_pgid != USER_CHILD_PID {
+            if normalized_pgid != self.child_process_pid {
                 return UserProcessGroupUpdate::PermissionDenied;
             }
             self.child_process_group = normalized_pgid;

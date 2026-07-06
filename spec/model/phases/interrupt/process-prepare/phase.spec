@@ -319,8 +319,11 @@ object TaskCreationCore: TaskObject {
              * copy_process() 变体。它复用 TaskCreationCore.Ready 内的
              * shared creation contract，但输入从 rest_init 内核线程 entry
              * 切换为当前 UserInitProcess 的 trap frame、mm/files/fs/signal
-             * 可见状态。当前只覆盖 BusyBox /bin/sh 触发的 plain fork：
-             * clone_flags 去掉 CSIGNAL 后为 0，exit_signal 为 SIGCHLD。
+             * 可见状态。当前覆盖 BusyBox /bin/sh 触发的 plain fork
+             * 以及 OpenRC 顺序 CLONE_VM|CLONE_VFORK child。后者仍只有
+             * 一个 internal UserChild execution slot；每次 bounded child
+             * exit 后由 UserChildProcess 归档 completed-child record，
+             * 释放 active slot，再允许下一次 CopyUserProcess。
              */
             Action::CopyUserProcess(
                 src_process: UserInitProcess,
@@ -347,6 +350,8 @@ object TaskCreationCore: TaskObject {
                     task_clone_args_ready(dst_process);
                     task_entry_bound(dst_process, TaskEntry::UserChild);
                     user_clone_plain_fork_first_slice_bound(boundaries);
+                    user_clone_bounded_sequential_vfork_records_bound(boundaries);
+                    user_child_process_active_slot_reusable(dst_process);
                 }
 
                 drives {
@@ -379,6 +384,9 @@ object TaskCreationCore: TaskObject {
                     user_child_process_tls_inherited(dst_process);
                     user_child_process_enqueued(dst_process, BootRunQueue);
                     task_enqueued_on_runqueue(UserChildTaskRef, BootRunQueue);
+                    user_child_process_single_active_slot(dst_process);
+                    user_child_process_next_child_pid_bound(dst_process);
+                    user_child_process_completed_records_capacity_bound(dst_process);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
                     task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
@@ -386,7 +394,7 @@ object TaskCreationCore: TaskObject {
                 }
 
                 deferred {
-                    "用户态 CopyUserProcess 当前只覆盖 observed plain fork。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、wait/exit/reap 后续按真实 guest 证据展开。";
+                    "用户态 CopyUserProcess 当前只覆盖 observed plain fork 和顺序 OpenRC vfork active-slot reuse。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
                 }
             }
         }

@@ -19,8 +19,9 @@ use crate::objects::user_boot::{
     user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_guard_base,
     user_kernel_trap_stack_guard_size, user_kernel_trap_stack_guard_unmapped,
     user_kernel_trap_stack_ready, user_kernel_trap_stack_top, user_kernel_trap_stack_vmapped,
-    UserStack, USER_KERNEL_IRQ_STACK_SIZE, USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED,
-    USER_KERNEL_TRAP_GUARD_PAGE_READY, USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACKS,
+    UserStack, USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_KERNEL_IRQ_STACK_SIZE,
+    USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED, USER_KERNEL_TRAP_GUARD_PAGE_READY,
+    USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACKS,
     USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
     USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
     USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
@@ -78,6 +79,8 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserCloneVforkChildHandoff,
     #[cfg(app_user_boot)]
+    Checkpoint::UserCloneVforkNextChildAccepted,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableOpenAt,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableRead,
@@ -104,10 +107,16 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserCloneVforkParentResumed,
     #[cfg(app_user_boot)]
+    Checkpoint::UserChildRecordArchived,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserChildSlotReusable,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserChildRecordReaped,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 32;
+pub const KUNIT_CASE_COUNT: usize = 36;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
@@ -123,6 +132,8 @@ static SYSCALL_CLONE_VFORK_PIDFD_REPORTED: AtomicBool = AtomicBool::new(false);
 static FILES_PIDFD_INSTALL_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static USER_CLONE_VFORK_CHILD_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CLONE_VFORK_NEXT_CHILD_ACCEPTED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_OPENAT_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -153,6 +164,12 @@ static SYSCALL_WAIT4_REPORTED: AtomicBool = AtomicBool::new(false);
 static USER_CHILD_PARENT_WAIT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static USER_CLONE_VFORK_PARENT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CHILD_RECORD_ARCHIVED_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CHILD_SLOT_REUSABLE_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_CHILD_RECORD_REAPED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_EXIT_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -239,6 +256,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             });
         }
         #[cfg(app_user_boot)]
+        Checkpoint::UserCloneVforkNextChildAccepted => {
+            run_once(&USER_CLONE_VFORK_NEXT_CHILD_ACCEPTED_REPORTED, || {
+                run_user_clone_vfork_next_child_accepted(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
         Checkpoint::SyscallTableOpenAt => {
             run_once(&SYSCALL_OPENAT_REPORTED, || {
                 run_syscall_table_openat(checkpoint, ctx, sink, total)
@@ -320,6 +343,24 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::UserCloneVforkParentResumed => {
             run_once(&USER_CLONE_VFORK_PARENT_RESUMED_REPORTED, || {
                 run_user_clone_vfork_parent_resumed(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserChildRecordArchived => {
+            run_once(&USER_CHILD_RECORD_ARCHIVED_REPORTED, || {
+                run_user_child_record_archived(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserChildSlotReusable => {
+            run_once(&USER_CHILD_SLOT_REUSABLE_REPORTED, || {
+                run_user_child_slot_reusable(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserChildRecordReaped => {
+            run_once(&USER_CHILD_RECORD_REAPED_REPORTED, || {
+                run_user_child_record_reaped(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -1200,6 +1241,41 @@ fn run_user_clone_vfork_child_handoff(
 }
 
 #[cfg(app_user_boot)]
+fn run_user_clone_vfork_next_child_accepted(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_clone.vfork_next_child_accepted";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let valid = child.vfork_clone()
+        && child.vfork_next_child_accepted()
+        && child.completed_child_record_count() != 0
+        && child.pid() >= crate::objects::user_boot::USER_CHILD_PID + 1
+        && child.current_child_continuation()
+        && child.vfork_child_handoff();
+
+    sink.diag_usize(
+        "vfork_next_child_accepted",
+        child.vfork_next_child_accepted() as usize,
+    );
+    sink.diag_usize("vfork_next_child_pid", child.pid());
+    sink.diag_usize(
+        "completed_child_record_count",
+        child.completed_child_record_count(),
+    );
+    sink.diag_usize("next_child_pid", child.next_child_pid());
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "next vfork child facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
 fn run_syscall_table_openat(
     checkpoint: Checkpoint,
     ctx: &Context,
@@ -1954,6 +2030,122 @@ fn run_user_clone_vfork_parent_resumed(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "vfork parent resumed facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_child_record_archived(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_child_record.archived";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let valid = child.completed_child_record_archived()
+        && child.completed_child_record_count() != 0
+        && child.completed_child_record_count() <= USER_COMPLETED_CHILD_RECORD_CAPACITY
+        && child.last_archived_child_pid() >= crate::objects::user_boot::USER_CHILD_PID
+        && child.last_archived_child_wait_status()
+            == ((child.last_archived_child_exit_status() & 0xff) << 8);
+
+    sink.diag_usize(
+        "completed_child_record_archived",
+        child.completed_child_record_archived() as usize,
+    );
+    sink.diag_usize(
+        "completed_child_record_count",
+        child.completed_child_record_count(),
+    );
+    sink.diag_usize(
+        "completed_child_record_capacity",
+        USER_COMPLETED_CHILD_RECORD_CAPACITY,
+    );
+    sink.diag_usize("last_archived_child_pid", child.last_archived_child_pid());
+    sink.diag_usize(
+        "last_archived_child_exit_status",
+        child.last_archived_child_exit_status(),
+    );
+    sink.diag_usize(
+        "last_archived_child_wait_status",
+        child.last_archived_child_wait_status(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "completed child archive facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_child_slot_reusable(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_child_slot.reusable";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let runqueue_contains_internal_child = ctx
+        .scheduler
+        .boot_runqueue()
+        .contains_task(crate::objects::user_boot::USER_CHILD_PID);
+    let valid = child.state() == State::Prepared
+        && child.active_slot_reusable()
+        && child.completed_child_record_archived()
+        && child.active_slot_reuse_count() != 0
+        && child.next_child_pid() > child.last_archived_child_pid()
+        && !runqueue_contains_internal_child;
+
+    sink.diag_usize(
+        "active_slot_reusable",
+        child.active_slot_reusable() as usize,
+    );
+    sink.diag_usize("active_slot_reuse_count", child.active_slot_reuse_count());
+    sink.diag_usize("next_child_pid", child.next_child_pid());
+    sink.diag_usize(
+        "runqueue_contains_internal_child",
+        runqueue_contains_internal_child as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "child slot reusable facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_child_record_reaped(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_child_record.reaped";
+    sink.start_case(total, "", name, checkpoint);
+
+    let child = &ctx.user_child_process;
+    let valid = child.completed_child_record_reaped()
+        && child.last_reaped_child_pid() >= crate::objects::user_boot::USER_CHILD_PID
+        && child.last_reaped_child_wait_status() != usize::MAX;
+
+    sink.diag_usize(
+        "completed_child_record_reaped",
+        child.completed_child_record_reaped() as usize,
+    );
+    sink.diag_usize("last_reaped_child_pid", child.last_reaped_child_pid());
+    sink.diag_usize(
+        "last_reaped_child_wait_status",
+        child.last_reaped_child_wait_status(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "completed child reap facts invalid");
     }
 }
 

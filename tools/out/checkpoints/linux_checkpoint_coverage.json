@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 425,
+  "total_checkpoints": 429,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 308
+      "count": 312
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 308
+      "count": 312
     },
     {
       "confidence": "medium",
@@ -172,6 +172,10 @@
       "count": 3
     },
     {
+      "family": "UserClone",
+      "count": 3
+    },
+    {
       "family": "Vm",
       "count": 3
     },
@@ -292,7 +296,7 @@
       "count": 2
     },
     {
-      "family": "UserClone",
+      "family": "UserChildRecord",
       "count": 2
     },
     {
@@ -940,6 +944,10 @@
       "count": 1
     },
     {
+      "family": "UserChildSlot",
+      "count": 1
+    },
+    {
       "family": "UserPidfd",
       "count": 1
     },
@@ -1004,5 +1012,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 174
+  "unmapped_singleton_family_count": 175
 }
