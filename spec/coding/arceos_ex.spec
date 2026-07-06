@@ -1564,11 +1564,22 @@ type ArceosExStartupPhaseCodingMust {
          * SIGCHLD | CLONE_VM | CLONE_VFORK, not CLONE_PIDFD.  The first slice
          * for that shape saves the parent clone frame, hands off directly to
          * the child continuation, and lets bounded child exit resume parent
-         * clone with a real SIGCHLD pending/wake.  A true vfork shape that
-         * includes CLONE_PIDFD(0x1000) additionally uses parent_tidptr as the
-         * pidfd copyout address and installs a pidfd-like fd table entry.
+         * clone with a real SIGCHLD pending/wake.  The later observed
+         * boundary is clone_vfork stage=child_records_full with
+         * completed_records=8, record_capacity=8, active_slot_reusable=1,
+         * next_child_pid=11 and no first_unreaped_pid.  Therefore completed
+         * record capacity is the current occupied unreaped/diagnostic slot
+         * count, not a monotonic lifetime history.  Successful wait4 reaping
+         * of a completed vfork record must preserve last/total diagnostics
+         * while releasing the slot for later sequential vfork reuse; EFAULT
+         * status copyout and rt_sigtimedwait(SIGCHLD) consumption must not
+         * release it.  A true vfork shape that includes CLONE_PIDFD(0x1000)
+         * additionally uses parent_tidptr as the pidfd copyout address and
+         * installs a pidfd-like fd table entry.
          * clone3, thread groups, full CLONE_VM/vfork completion scheduling,
-         * COW mm, full pidfd file operations,
+         * COW mm, full zombie/release_task lifecycle, pid hash,
+         * resource accounting, wait queues, multi-child concurrency,
+         * full pidfd file operations,
          * ptrace/seccomp/cgroup/audit, namespace, robust futex,
          * clear-child futex wake, full exit/reap/status copyout, failure rollback
          * and unobserved flag combinations must be recorded by

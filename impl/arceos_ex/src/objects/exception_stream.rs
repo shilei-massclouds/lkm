@@ -6286,6 +6286,16 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     print_decimal(child.next_child_pid());
     crate::arch::riscv64::sbi::putstr(" completed_records=");
     print_decimal(child.completed_child_record_count());
+    crate::arch::riscv64::sbi::putstr(" completed_records_occupied=");
+    print_decimal(child.completed_child_record_occupied_count());
+    crate::arch::riscv64::sbi::putstr(" completed_records_total_archived=");
+    print_decimal(child.completed_child_record_total_archived());
+    crate::arch::riscv64::sbi::putstr(" completed_records_reaped=");
+    print_decimal(child.completed_child_record_reaped_count());
+    crate::arch::riscv64::sbi::putstr(" completed_records_released=");
+    print_decimal(child.completed_child_record_released_count());
+    crate::arch::riscv64::sbi::putstr(" completed_record_free_slots=");
+    print_decimal(child.completed_child_record_free_count());
     crate::arch::riscv64::sbi::putstr(" record_capacity=");
     print_decimal(child.completed_child_record_capacity());
     if let Some((pid, status, wait_status, pidfd_fd)) = child.first_unreaped_completed_child() {

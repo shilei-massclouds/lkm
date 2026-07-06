@@ -3496,11 +3496,17 @@ pub struct UserChildProcess {
     completed_child_record_count: usize,
     completed_child_record_archived: bool,
     completed_child_record_reaped: bool,
+    completed_child_record_released: bool,
+    completed_child_record_total_archived: usize,
+    completed_child_record_reaped_count: usize,
+    completed_child_record_released_count: usize,
     last_archived_child_pid: usize,
     last_archived_child_exit_status: usize,
     last_archived_child_wait_status: usize,
     last_reaped_child_pid: usize,
     last_reaped_child_wait_status: usize,
+    last_released_child_pid: usize,
+    last_released_child_wait_status: usize,
     active_slot_reusable: bool,
     active_slot_reuse_count: usize,
     vfork_next_child_accepted: bool,
@@ -3592,11 +3598,17 @@ impl UserChildProcess {
             completed_child_record_count: 0,
             completed_child_record_archived: false,
             completed_child_record_reaped: false,
+            completed_child_record_released: false,
+            completed_child_record_total_archived: 0,
+            completed_child_record_reaped_count: 0,
+            completed_child_record_released_count: 0,
             last_archived_child_pid: 0,
             last_archived_child_exit_status: 0,
             last_archived_child_wait_status: 0,
             last_reaped_child_pid: 0,
             last_reaped_child_wait_status: 0,
+            last_released_child_pid: 0,
+            last_released_child_wait_status: 0,
             active_slot_reusable: false,
             active_slot_reuse_count: 0,
             vfork_next_child_accepted: false,
@@ -3730,6 +3742,18 @@ impl UserChildProcess {
         self.completed_child_record_count
     }
 
+    pub const fn completed_child_record_occupied_count(&self) -> usize {
+        self.completed_child_record_count
+    }
+
+    pub const fn completed_child_record_free_count(&self) -> usize {
+        if self.completed_child_record_count >= USER_COMPLETED_CHILD_RECORD_CAPACITY {
+            0
+        } else {
+            USER_COMPLETED_CHILD_RECORD_CAPACITY - self.completed_child_record_count
+        }
+    }
+
     pub const fn completed_child_records_full(&self) -> bool {
         self.completed_child_record_count >= USER_COMPLETED_CHILD_RECORD_CAPACITY
     }
@@ -3740,6 +3764,22 @@ impl UserChildProcess {
 
     pub const fn completed_child_record_reaped(&self) -> bool {
         self.completed_child_record_reaped
+    }
+
+    pub const fn completed_child_record_released(&self) -> bool {
+        self.completed_child_record_released
+    }
+
+    pub const fn completed_child_record_total_archived(&self) -> usize {
+        self.completed_child_record_total_archived
+    }
+
+    pub const fn completed_child_record_reaped_count(&self) -> usize {
+        self.completed_child_record_reaped_count
+    }
+
+    pub const fn completed_child_record_released_count(&self) -> usize {
+        self.completed_child_record_released_count
     }
 
     pub const fn last_archived_child_pid(&self) -> usize {
@@ -3760,6 +3800,14 @@ impl UserChildProcess {
 
     pub const fn last_reaped_child_wait_status(&self) -> usize {
         self.last_reaped_child_wait_status
+    }
+
+    pub const fn last_released_child_pid(&self) -> usize {
+        self.last_released_child_pid
+    }
+
+    pub const fn last_released_child_wait_status(&self) -> usize {
+        self.last_released_child_wait_status
     }
 
     pub const fn vfork_next_child_accepted(&self) -> bool {
@@ -4185,7 +4233,8 @@ impl UserChildProcess {
         };
 
         let child_pid = self.next_child_pid;
-        let next_child_accepted = self.completed_child_record_count != 0;
+        let next_child_accepted =
+            self.completed_child_record_total_archived != 0 || self.active_slot_reuse_count != 0;
 
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
@@ -4634,6 +4683,7 @@ impl UserChildProcess {
                 self.completed_child_records[index] = record;
                 self.completed_child_record_count += 1;
                 self.completed_child_record_archived = true;
+                self.completed_child_record_total_archived += 1;
                 self.last_archived_child_pid = record.pid;
                 self.last_archived_child_exit_status = record.exit_status;
                 self.last_archived_child_wait_status = record.wait_status;
@@ -4653,10 +4703,20 @@ impl UserChildProcess {
         while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
             let record = &mut self.completed_child_records[index];
             if record.occupied && record.pid == pid && !record.reaped {
+                if self.completed_child_record_count == 0 {
+                    return false;
+                }
                 record.reaped = true;
                 self.completed_child_record_reaped = true;
+                self.completed_child_record_released = true;
+                self.completed_child_record_reaped_count += 1;
+                self.completed_child_record_released_count += 1;
                 self.last_reaped_child_pid = record.pid;
                 self.last_reaped_child_wait_status = record.wait_status;
+                self.last_released_child_pid = record.pid;
+                self.last_released_child_wait_status = record.wait_status;
+                self.completed_child_records[index] = UserCompletedChildRecord::empty();
+                self.completed_child_record_count -= 1;
                 return true;
             }
             index += 1;

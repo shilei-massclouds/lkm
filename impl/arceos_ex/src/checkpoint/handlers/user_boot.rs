@@ -1253,7 +1253,7 @@ fn run_user_clone_vfork_next_child_accepted(
     let child = &ctx.user_child_process;
     let valid = child.vfork_clone()
         && child.vfork_next_child_accepted()
-        && child.completed_child_record_count() != 0
+        && child.completed_child_record_total_archived() != 0
         && child.pid() >= crate::objects::user_boot::USER_CHILD_PID + 1
         && child.current_child_continuation()
         && child.vfork_child_handoff();
@@ -1267,6 +1267,15 @@ fn run_user_clone_vfork_next_child_accepted(
         "completed_child_record_count",
         child.completed_child_record_count(),
     );
+    sink.diag_usize(
+        "completed_child_record_total_archived",
+        child.completed_child_record_total_archived(),
+    );
+    sink.diag_usize(
+        "completed_child_record_released_count",
+        child.completed_child_record_released_count(),
+    );
+    sink.diag_usize("active_slot_reuse_count", child.active_slot_reuse_count());
     sink.diag_usize("next_child_pid", child.next_child_pid());
     if valid {
         sink.pass(total, "", name);
@@ -2047,6 +2056,7 @@ fn run_user_child_record_archived(
     let valid = child.completed_child_record_archived()
         && child.completed_child_record_count() != 0
         && child.completed_child_record_count() <= USER_COMPLETED_CHILD_RECORD_CAPACITY
+        && child.completed_child_record_total_archived() != 0
         && child.last_archived_child_pid() >= crate::objects::user_boot::USER_CHILD_PID
         && child.last_archived_child_wait_status()
             == ((child.last_archived_child_exit_status() & 0xff) << 8);
@@ -2062,6 +2072,14 @@ fn run_user_child_record_archived(
     sink.diag_usize(
         "completed_child_record_capacity",
         USER_COMPLETED_CHILD_RECORD_CAPACITY,
+    );
+    sink.diag_usize(
+        "completed_child_record_free_count",
+        child.completed_child_record_free_count(),
+    );
+    sink.diag_usize(
+        "completed_child_record_total_archived",
+        child.completed_child_record_total_archived(),
     );
     sink.diag_usize("last_archived_child_pid", child.last_archived_child_pid());
     sink.diag_usize(
@@ -2130,17 +2148,48 @@ fn run_user_child_record_reaped(
 
     let child = &ctx.user_child_process;
     let valid = child.completed_child_record_reaped()
+        && child.completed_child_record_released()
+        && child.completed_child_record_reaped_count() != 0
+        && child.completed_child_record_released_count() != 0
         && child.last_reaped_child_pid() >= crate::objects::user_boot::USER_CHILD_PID
-        && child.last_reaped_child_wait_status() != usize::MAX;
+        && child.last_reaped_child_wait_status() != usize::MAX
+        && child.last_released_child_pid() == child.last_reaped_child_pid()
+        && child.last_released_child_wait_status() == child.last_reaped_child_wait_status()
+        && child.completed_child_record_count() < USER_COMPLETED_CHILD_RECORD_CAPACITY;
 
     sink.diag_usize(
         "completed_child_record_reaped",
         child.completed_child_record_reaped() as usize,
     );
+    sink.diag_usize(
+        "completed_child_record_released",
+        child.completed_child_record_released() as usize,
+    );
+    sink.diag_usize(
+        "completed_child_record_count",
+        child.completed_child_record_count(),
+    );
+    sink.diag_usize(
+        "completed_child_record_free_count",
+        child.completed_child_record_free_count(),
+    );
+    sink.diag_usize(
+        "completed_child_record_reaped_count",
+        child.completed_child_record_reaped_count(),
+    );
+    sink.diag_usize(
+        "completed_child_record_released_count",
+        child.completed_child_record_released_count(),
+    );
     sink.diag_usize("last_reaped_child_pid", child.last_reaped_child_pid());
     sink.diag_usize(
         "last_reaped_child_wait_status",
         child.last_reaped_child_wait_status(),
+    );
+    sink.diag_usize("last_released_child_pid", child.last_released_child_pid());
+    sink.diag_usize(
+        "last_released_child_wait_status",
+        child.last_released_child_wait_status(),
     );
     if valid {
         sink.pass(total, "", name);

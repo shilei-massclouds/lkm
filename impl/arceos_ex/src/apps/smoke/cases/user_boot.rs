@@ -10,15 +10,21 @@ use crate::{
         state::State,
         user_boot::{
             ElfObjectRole, UserMappingKind, UserRtSigtimedwaitResult, USER_BOOT_READ_MAX,
-            USER_CLONE_SIGCHLD, USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE,
-            USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
+            USER_CHILD_PID, USER_CLONE_SIGCHLD, USER_COMPLETED_CHILD_RECORD_CAPACITY,
+            USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH,
+            USER_PAGE_SIZE, USER_SIGCHLD_MASK,
             USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
-            USER_STACK_TOP,
+            USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN,
         },
         vfs::VfsError,
         virtio_blk,
     },
 };
+
+const USER_OPENRC_VFORK_FLAGS: usize = 0x4111;
+const USER_WAIT4_WNOHANG: usize = 1;
+const USER_EFAULT_RETURN: usize = usize::MAX - 13;
+const USER_ECHILD_RETURN: usize = usize::MAX - 9;
 
 static mut USER_INIT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 static mut USER_INTERPRETER_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
@@ -795,9 +801,182 @@ impl SmokeScenario for UserBootElfScenario {
             "rt_sigtimedwait wake frame returns sigchld",
             resumed_signal == Some(USER_CLONE_SIGCHLD) && resumed_wait_frame.sepc == 0x2000,
         );
+        exercise_completed_child_record_reuse(assertions);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
+    let mut index = 0usize;
+    while index <= USER_COMPLETED_CHILD_RECORD_CAPACITY {
+        let Some(child_pid) = archive_completed_vfork_child(index) else {
+            assertions.assert("archive sequential vfork completed record", false);
+            return;
+        };
+
+        if index == 0 {
+            let mut sigwait_frame = TrapFrame::zeroed();
+            sigwait_frame.sepc = 0x3000;
+            let signal_consumed_without_release = {
+                let ctx = context();
+                let signal_recorded = ctx.user_init_process.record_child_exit_sigchld();
+                let signal_result = ctx.user_init_process.begin_rt_sigtimedwait(
+                    USER_SIGCHLD_MASK,
+                    true,
+                    true,
+                    &sigwait_frame,
+                );
+                signal_recorded == Some(false)
+                    && signal_result == UserRtSigtimedwaitResult::ReturnSignal(USER_CLONE_SIGCHLD)
+                    && ctx.user_child_process.completed_child_record_count() == 1
+                    && ctx
+                        .user_child_process
+                        .first_unreaped_completed_child()
+                        .map(|record| record.0)
+                        == Some(child_pid)
+            };
+            assertions.assert(
+                "rt_sigtimedwait does not release completed record",
+                signal_consumed_without_release,
+            );
+
+            let fault_ret = wait4_completed_record(usize::MAX, 0);
+            let ctx = context();
+            assertions.assert(
+                "wait4 EFAULT keeps completed record unreleased",
+                fault_ret == USER_EFAULT_RETURN
+                    && ctx.user_child_process.completed_child_record_count() == 1
+                    && ctx.user_child_process.completed_child_record_reaped_count() == 0
+                    && ctx
+                        .user_child_process
+                        .completed_child_record_released_count()
+                        == 0
+                    && ctx
+                        .user_child_process
+                        .first_unreaped_completed_child()
+                        .map(|record| record.0)
+                        == Some(child_pid),
+            );
+        }
+
+        let wait_ret = wait4_completed_record(0, 0);
+        let ctx = context();
+        assertions.assert(
+            "wait4 releases completed record slot",
+            wait_ret == child_pid
+                && ctx.user_child_process.completed_child_record_count() == 0
+                && ctx.user_child_process.completed_child_record_free_count()
+                    == USER_COMPLETED_CHILD_RECORD_CAPACITY
+                && ctx.user_child_process.last_reaped_child_pid() == child_pid
+                && ctx.user_child_process.last_released_child_pid() == child_pid,
+        );
+
+        index += 1;
+    }
+
+    let ctx = context();
+    assertions.assert(
+        "sequential vfork exceeds completed record capacity",
+        ctx.user_child_process
+            .completed_child_record_total_archived()
+            >= USER_COMPLETED_CHILD_RECORD_CAPACITY + 1
+            && ctx
+                .user_child_process
+                .completed_child_record_released_count()
+                >= USER_COMPLETED_CHILD_RECORD_CAPACITY + 1
+            && ctx.user_child_process.next_child_pid()
+                >= USER_CHILD_PID + USER_COMPLETED_CHILD_RECORD_CAPACITY + 1,
+    );
+
+    let no_child_ret = wait4_completed_record(0, USER_WAIT4_WNOHANG);
+    let ctx = context();
+    assertions.assert(
+        "wait4 no completed child returns ECHILD",
+        no_child_ret == USER_ECHILD_RETURN
+            && ctx.user_child_process.completed_child_record_count() == 0
+            && ctx
+                .user_child_process
+                .first_unreaped_completed_child()
+                .is_none(),
+    );
+}
+
+fn archive_completed_vfork_child(index: usize) -> Option<usize> {
+    let mut parent_frame = TrapFrame::zeroed();
+    parent_frame.sepc = 0x4000 + index * 4;
+    parent_frame.set_reg(2, USER_STACK_TOP - 0x100 - index * 16);
+    parent_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+    parent_frame.set_reg(11, USER_STACK_TOP - 0x200 - index * 16);
+    parent_frame.set_reg(17, 220);
+
+    {
+        let ctx = context();
+        ctx.user_child_process.copy_vfork_from_parent(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            &parent_frame,
+            USER_OPENRC_VFORK_FLAGS,
+            USER_STACK_TOP - 0x200 - index * 16,
+            usize::MAX,
+            false,
+            true,
+            true,
+            true,
+            true,
+        )?;
+    }
+
+    let child_pid = {
+        let ctx = context();
+        let (_parent_frame, child_pid) = ctx
+            .user_child_process
+            .child_exit_to_vfork_parent(&mut ctx.user_address_space, index)?;
+        child_pid
+    };
+
+    {
+        let ctx = context();
+        if !ctx
+            .user_child_process
+            .restore_parent_wait_writable_page_snapshot(
+                &ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+        {
+            return None;
+        }
+        if !ctx.user_child_process.mark_vfork_parent_resumed() {
+            return None;
+        }
+        if !ctx.user_child_process.archive_completed_child_record() {
+            return None;
+        }
+        if !ctx.user_child_process.mark_active_slot_reusable() {
+            return None;
+        }
+    }
+
+    Some(child_pid)
+}
+
+fn wait4_completed_record(stat_addr: usize, options: usize) -> usize {
+    let mut frame = TrapFrame::zeroed();
+    frame.sepc = 0x5000;
+    frame.set_reg(10, USER_WAIT4_ALL_CHILDREN);
+    frame.set_reg(11, stat_addr);
+    frame.set_reg(12, options);
+    frame.set_reg(13, 0);
+    frame.set_reg(17, 260);
+    context().syscall_table.wait4(&mut frame);
+    frame.reg(10)
 }
 
 fn mapping_contains(
