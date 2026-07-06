@@ -2136,6 +2136,20 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            /*
+             * Linux 6.12 RISC-V/asm-generic syscall identity note:
+             * rt_sigsuspend is number 133 and rt_sigtimedwait is number
+             * 137. The current native /sbin/init/OpenRC diagnostic reaches
+             * number 137 after setsid(157) with uthese=a0, uinfo=NULL,
+             * uts=NULL and sigsetsize=8. This is intentionally not modeled
+             * as a supported SyscallTable action in this slice. The runtime
+             * may add a best-effort, side-effect-free unsupported diagnostic
+             * for rt_sigtimedwait arguments while still returning ENOSYS.
+             * Signal wait queues, pending signal selection, scheduler sleep,
+             * timeout handling, restart and rt_siginfo_t copyout remain
+             * deferred.
+             */
+
             on Action::ClockGettime {
                 /*
                  * Linux 6.12 RISC-V exposes clock_gettime(2) as syscall

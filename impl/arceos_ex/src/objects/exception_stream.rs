@@ -84,6 +84,7 @@ const SYSCALL_NANOSLEEP: usize = 101;
 const SYSCALL_CLOCK_GETTIME: usize = 113;
 const SYSCALL_RT_SIGACTION: usize = 134;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
+const SYSCALL_RT_SIGTIMEDWAIT: usize = 137;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
 const SYSCALL_GETRESUID: usize = 148;
@@ -5639,6 +5640,7 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
 fn print_unsupported_syscall_detail(frame: &TrapFrame) {
     match frame.reg(17) {
         SYSCALL_NANOSLEEP => print_nanosleep_unsupported_detail(frame),
+        SYSCALL_RT_SIGTIMEDWAIT => print_rt_sigtimedwait_unsupported_detail(frame),
         SYSCALL_EXECVE => print_execve_unsupported_detail(frame),
         _ => {}
     }
@@ -5665,6 +5667,51 @@ fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {
         crate::arch::riscv64::sbi::putstr("ok req_sec=");
         print_i64(sec);
         crate::arch::riscv64::sbi::putstr(" req_nsec=");
+        print_i64(nsec);
+    } else {
+        crate::arch::riscv64::sbi::putstr("failed");
+    }
+}
+
+fn print_rt_sigtimedwait_unsupported_detail(frame: &TrapFrame) {
+    let uthese = frame.reg(10);
+    let uinfo = frame.reg(11);
+    let uts = frame.reg(12);
+    let sigsetsize = frame.reg(13);
+    crate::arch::riscv64::sbi::putstr(" name=rt_sigtimedwait uthese=0x");
+    print_hex(uthese);
+    crate::arch::riscv64::sbi::putstr(" uinfo=0x");
+    print_hex(uinfo);
+    crate::arch::riscv64::sbi::putstr(" uts=0x");
+    print_hex(uts);
+    crate::arch::riscv64::sbi::putstr(" sigsetsize=");
+    print_decimal(sigsetsize);
+    crate::arch::riscv64::sbi::putstr(" uthese_copy=");
+    if uthese == 0 {
+        crate::arch::riscv64::sbi::putstr("NULL");
+    } else if !crate::context::context_ref()
+        .user_address_space
+        .user_range_mapped(uthese, RT_SIGSET_SIZE)
+    {
+        crate::arch::riscv64::sbi::putstr("skipped");
+    } else if let Some(mask) = read_user_usize(uthese) {
+        crate::arch::riscv64::sbi::putstr("ok uthese_mask=0x");
+        print_hex(mask);
+    } else {
+        crate::arch::riscv64::sbi::putstr("failed");
+    }
+    crate::arch::riscv64::sbi::putstr(" uts_copy=");
+    if uts == 0 {
+        crate::arch::riscv64::sbi::putstr("NULL");
+    } else if !crate::context::context_ref()
+        .user_address_space
+        .user_range_mapped(uts, TIMESPEC_SIZE)
+    {
+        crate::arch::riscv64::sbi::putstr("skipped");
+    } else if let Some((sec, nsec)) = read_user_timespec_i64(uts) {
+        crate::arch::riscv64::sbi::putstr("ok uts_sec=");
+        print_i64(sec);
+        crate::arch::riscv64::sbi::putstr(" uts_nsec=");
         print_i64(nsec);
     } else {
         crate::arch::riscv64::sbi::putstr("failed");
@@ -6054,6 +6101,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_CLOCK_GETTIME => "clock_gettime",
         SYSCALL_RT_SIGACTION => "rt_sigaction",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
+        SYSCALL_RT_SIGTIMEDWAIT => "rt_sigtimedwait",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",
         SYSCALL_GETRESUID => "getresuid",
