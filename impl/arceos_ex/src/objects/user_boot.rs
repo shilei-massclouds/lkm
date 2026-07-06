@@ -3218,6 +3218,7 @@ pub struct UserInitProcess {
     process_group: usize,
     process_group_read_observed: bool,
     process_group_set_observed: bool,
+    setsid_eperm_observed: bool,
     child_process_group_visible: bool,
     child_process_group: usize,
     child_process_group_set_observed: bool,
@@ -4561,6 +4562,7 @@ impl UserInitProcess {
             process_group: 0,
             process_group_read_observed: false,
             process_group_set_observed: false,
+            setsid_eperm_observed: false,
             child_process_group_visible: false,
             child_process_group: 0,
             child_process_group_set_observed: false,
@@ -4770,6 +4772,10 @@ impl UserInitProcess {
 
     pub const fn process_group_set_observed(&self) -> bool {
         self.process_group_set_observed
+    }
+
+    pub const fn setsid_eperm_observed(&self) -> bool {
+        self.setsid_eperm_observed
     }
 
     pub const fn child_process_group_visible(&self) -> bool {
@@ -5184,6 +5190,24 @@ impl UserInitProcess {
         self.process_group = normalized_pgid;
         self.process_group_set_observed = true;
         UserProcessGroupUpdate::Updated(self.process_group)
+    }
+
+    pub fn set_session_id_first_slice(
+        &mut self,
+        current_child_continuation: bool,
+    ) -> UserProcessGroupUpdate {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || current_child_continuation
+            || !self.session_leader_first_slice
+            || !self.process_group_leader_first_slice
+            || self.process_group != super::rest_init::KERNEL_INIT_PID
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+
+        self.setsid_eperm_observed = true;
+        UserProcessGroupUpdate::PermissionDenied
     }
 
     pub fn read_foreground_pgrp(&mut self) -> Option<usize> {

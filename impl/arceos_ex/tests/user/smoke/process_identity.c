@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stddef.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
@@ -49,13 +50,22 @@ int smoke_process_identity(void)
 		return 84;
 	}
 
+	errno = 0;
+	rc = syscall(SYS_setsid);
+	if (rc != -1 || errno != EPERM) {
+		return 85;
+	}
+	if (SAY_LITERAL("syscall setsid pgrp leader eperm ok\n") < 0) {
+		return 86;
+	}
+
 	pgrp = 1;
 	rc = ioctl(STDOUT_FILENO, TIOCSPGRP, &pgrp);
 	if (rc != 0) {
-		return 85;
+		return 87;
 	}
 	if (SAY_LITERAL("syscall ioctl TIOCSPGRP ok\n") < 0) {
-		return 86;
+		return 88;
 	}
 
 	return 0;

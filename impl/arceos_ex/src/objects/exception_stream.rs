@@ -90,6 +90,7 @@ const SYSCALL_GETRESUID: usize = 148;
 const SYSCALL_GETRESGID: usize = 150;
 const SYSCALL_SETPGID: usize = 154;
 const SYSCALL_GETPGID: usize = 155;
+const SYSCALL_SETSID: usize = 157;
 const SYSCALL_UNAME: usize = 160;
 const SYSCALL_GETTIMEOFDAY: usize = 169;
 const SYSCALL_GETPID: usize = 172;
@@ -593,6 +594,7 @@ pub struct SyscallTable {
     getpid_supported: bool,
     getpgid_supported: bool,
     setpgid_supported: bool,
+    setsid_supported: bool,
     getppid_supported: bool,
     getuid_supported: bool,
     geteuid_supported: bool,
@@ -665,6 +667,8 @@ pub struct SyscallTable {
     getpid_routes_to_user_init_process: bool,
     getpgid_routes_to_user_init_process: bool,
     setpgid_routes_to_user_init_process: bool,
+    setsid_routes_to_user_init_process: bool,
+    setsid_process_group_leader_eperm_first_slice: bool,
     getppid_routes_to_user_init_process: bool,
     getuid_routes_to_user_init_process: bool,
     geteuid_routes_to_user_init_process: bool,
@@ -738,6 +742,7 @@ pub struct SyscallTable {
     getpid_observed: AtomicU8,
     getpgid_observed: AtomicU8,
     setpgid_observed: AtomicU8,
+    setsid_observed: AtomicU8,
     getppid_observed: AtomicU8,
     getuid_observed: AtomicU8,
     geteuid_observed: AtomicU8,
@@ -785,6 +790,7 @@ impl SyscallTable {
             getpid_supported: false,
             getpgid_supported: false,
             setpgid_supported: false,
+            setsid_supported: false,
             getppid_supported: false,
             getuid_supported: false,
             geteuid_supported: false,
@@ -857,6 +863,8 @@ impl SyscallTable {
             getpid_routes_to_user_init_process: false,
             getpgid_routes_to_user_init_process: false,
             setpgid_routes_to_user_init_process: false,
+            setsid_routes_to_user_init_process: false,
+            setsid_process_group_leader_eperm_first_slice: false,
             getppid_routes_to_user_init_process: false,
             getuid_routes_to_user_init_process: false,
             geteuid_routes_to_user_init_process: false,
@@ -930,6 +938,7 @@ impl SyscallTable {
             getpid_observed: AtomicU8::new(0),
             getpgid_observed: AtomicU8::new(0),
             setpgid_observed: AtomicU8::new(0),
+            setsid_observed: AtomicU8::new(0),
             getppid_observed: AtomicU8::new(0),
             getuid_observed: AtomicU8::new(0),
             geteuid_observed: AtomicU8::new(0),
@@ -1031,6 +1040,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn getgid_supported(&self) -> bool {
         self.getgid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn setsid_supported(&self) -> bool {
+        self.setsid_supported
     }
 
     #[allow(dead_code)]
@@ -1529,6 +1543,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn setsid_observed(&self) -> bool {
+        self.setsid_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn getuid_observed(&self) -> bool {
         self.getuid_observed.load(Ordering::Acquire) != 0
     }
@@ -1645,6 +1664,7 @@ impl SyscallTable {
         self.getpid_supported = true;
         self.getpgid_supported = true;
         self.setpgid_supported = true;
+        self.setsid_supported = true;
         self.getppid_supported = true;
         self.getuid_supported = true;
         self.geteuid_supported = true;
@@ -1717,6 +1737,8 @@ impl SyscallTable {
         self.getpid_routes_to_user_init_process = true;
         self.getpgid_routes_to_user_init_process = true;
         self.setpgid_routes_to_user_init_process = true;
+        self.setsid_routes_to_user_init_process = true;
+        self.setsid_process_group_leader_eperm_first_slice = true;
         self.getppid_routes_to_user_init_process = true;
         self.getuid_routes_to_user_init_process = true;
         self.geteuid_routes_to_user_init_process = true;
@@ -1986,6 +2008,19 @@ impl SyscallTable {
         }
 
         syscall_table_setpgid(self, frame);
+    }
+
+    pub fn setsid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setsid_supported
+            || !self.setsid_routes_to_user_init_process
+            || !self.setsid_process_group_leader_eperm_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setsid(self, frame);
     }
 
     pub fn getppid(&self, frame: &mut TrapFrame) {
@@ -2702,6 +2737,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_GETRESUID => table.getresuid(frame),
         SYSCALL_GETRESGID => table.getresgid(frame),
         SYSCALL_SETPGID => table.setpgid(frame),
+        SYSCALL_SETSID => table.setsid(frame),
         SYSCALL_UNAME => table.uname(frame),
         SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
         SYSCALL_GETPID => table.getpid(frame),
@@ -3455,6 +3491,25 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
         UserProcessGroupUpdate::NoSuchProcess => complete_error_syscall(frame, ESRCH),
         UserProcessGroupUpdate::PermissionDenied => complete_error_syscall(frame, EPERM),
         UserProcessGroupUpdate::NotReady => complete_unsupported_syscall(frame),
+    }
+}
+
+fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let update = {
+        let ctx = crate::context::context();
+        let current_child_continuation = ctx.user_child_process.child_continuation_taken();
+        ctx.user_init_process
+            .set_session_id_first_slice(current_child_continuation)
+    };
+    match update {
+        UserProcessGroupUpdate::PermissionDenied => {
+            table.setsid_observed.store(1, Ordering::Release);
+            complete_error_syscall(frame, EPERM);
+        }
+        UserProcessGroupUpdate::NotReady => complete_unsupported_syscall(frame),
+        UserProcessGroupUpdate::Updated(_)
+        | UserProcessGroupUpdate::Invalid
+        | UserProcessGroupUpdate::NoSuchProcess => complete_unsupported_syscall(frame),
     }
 }
 
@@ -6004,6 +6059,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_GETRESUID => "getresuid",
         SYSCALL_GETRESGID => "getresgid",
         SYSCALL_SETPGID => "setpgid",
+        SYSCALL_SETSID => "setsid",
         SYSCALL_UNAME => "uname",
         SYSCALL_GETTIMEOFDAY => "gettimeofday",
         SYSCALL_GETPID => "getpid",

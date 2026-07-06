@@ -263,6 +263,7 @@ predicate syscall_table_getuid_supported<T>(table: T) -> bool;
 predicate syscall_table_getgid_supported<T>(table: T) -> bool;
 predicate syscall_table_getpgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setpgid_supported<T>(table: T) -> bool;
+predicate syscall_table_setsid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
@@ -335,6 +336,8 @@ predicate syscall_getgid_routes_to_user_init_process<T, P>(table: T, process: P)
 predicate syscall_getpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setpgid_child_plain_fork_first_slice<T, P>(table: T, process: P) -> bool;
+predicate syscall_setsid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setsid_process_group_leader_eperm_first_slice<T>(table: T) -> bool;
 predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
@@ -432,6 +435,7 @@ predicate syscall_table_getuid_observed<T>(table: T) -> bool;
 predicate syscall_table_getgid_observed<T>(table: T) -> bool;
 predicate syscall_table_getpgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setpgid_observed<T>(table: T) -> bool;
+predicate syscall_table_setsid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
@@ -474,6 +478,7 @@ predicate user_init_process_session_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_read_observed<T>(process: T) -> bool;
 predicate user_init_process_process_group_set_observed<T>(process: T) -> bool;
+predicate user_init_process_setsid_eperm_observed<T>(process: T) -> bool;
 predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
@@ -1109,6 +1114,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_getgid_supported(self);
                     syscall_table_getpgid_supported(self);
                     syscall_table_setpgid_supported(self);
+                    syscall_table_setsid_supported(self);
                     syscall_table_setuid_supported(self);
                     syscall_table_setgid_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
@@ -1162,6 +1168,7 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_blocking_sleep_deferred(self);
                     syscall_exit_records_status(self);
                     syscall_exit_group_pid1_shutdown_child_wait4_split(self);
+                    syscall_setsid_process_group_leader_eperm_first_slice(self);
                     syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
             }
@@ -1188,6 +1195,7 @@ object SyscallTable: ResourceObject {
             syscall_table_getgid_supported(self);
             syscall_table_getpgid_supported(self);
             syscall_table_setpgid_supported(self);
+            syscall_table_setsid_supported(self);
             syscall_table_setuid_supported(self);
             syscall_table_setgid_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
@@ -1239,6 +1247,7 @@ object SyscallTable: ResourceObject {
             syscall_wait4_blocking_sleep_deferred(self);
             syscall_exit_records_status(self);
             syscall_exit_group_pid1_shutdown_child_wait4_split(self);
+            syscall_setsid_process_group_leader_eperm_first_slice(self);
         }
 
         actions {
@@ -1821,6 +1830,34 @@ object SyscallTable: ResourceObject {
                     user_init_process_process_group_set_observed(UserInitProcess);
                     user_init_process_child_process_group_set_observed(UserInitProcess, UserChildProcess);
                     syscall_table_setpgid_observed(self);
+                }
+            }
+
+            on Action::SetSid {
+                /*
+                 * Linux 6.12 kernel/sys.c::ksys_setsid() fails with EPERM
+                 * when the current group leader is already a session leader
+                 * or when a process-group id equal to the proposed session id
+                 * exists. The current first slice preserves PID1's existing
+                 * session-leader/process-group-leader identity and only
+                 * exposes that conservative EPERM result; creating a new
+                 * session, changing SID/PGID and detaching the controlling tty
+                 * remain deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::SetSessionId;
+                }
+
+                ensures {
+                    syscall_setsid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setsid_process_group_leader_eperm_first_slice(self);
+                    user_init_process_setsid_eperm_observed(UserInitProcess);
+                    syscall_table_setsid_observed(self);
                 }
             }
 
@@ -2823,6 +2860,19 @@ object UserInitProcess: ResourceObject {
                     user_init_process_process_group_set_observed(self);
                     user_init_process_child_process_group_visible(self, UserChildProcess);
                     user_init_process_child_process_group_set_observed(self, UserChildProcess);
+                }
+            }
+
+            on Action::SetSessionId {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_session_leader_first_slice(self);
+                    user_init_process_process_group_leader_first_slice(self);
+                    user_init_process_setsid_eperm_observed(self);
                 }
             }
 

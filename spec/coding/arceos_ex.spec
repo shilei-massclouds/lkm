@@ -130,6 +130,7 @@ predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool
 predicate arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_getpgid_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_setpgid_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_setsid_eperm_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigaction_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
@@ -1702,9 +1703,9 @@ type ArceosExStartupPhaseCodingMust {
          * with EPERM, then update the foreground pgrp fact. The current
          * single-PID slice only has pgrp 1 in the current session, so
          * TIOCSPGRP(pid_t=1) succeeds and records foreground pgrp 1. This is
-         * not full TTY job control: TIOCGSID, setsid, pty, orphan pgrp,
-         * canonical N_TTY behavior and job-control signal delivery remain
-         * trimmed.
+         * not full TTY job control: TIOCGSID, successful setsid, pty,
+         * orphan pgrp, canonical N_TTY behavior and job-control signal
+         * delivery remain trimmed.
          *
          * nanosleep(101) must reference local Linux 6.12
          * kernel/time/hrtimer.c::sys_nanosleep(),
@@ -1778,7 +1779,7 @@ type ArceosExStartupPhaseCodingMust {
          * The first process-identity/UTS/getcwd slice must reference local
          * Linux 6.12 kernel/sys.c::sys_getpid()/sys_getppid()/
          * do_getpgid()/sys_getpgid()/sys_setpgid()/sys_geteuid()/sys_getegid()/
-         * sys_getresuid()/sys_getresgid()/sys_newuname(),
+         * ksys_setsid()/sys_getresuid()/sys_getresgid()/sys_newuname(),
          * fs/d_path.c::sys_getcwd(), init/main.c::rest_init(),
          * init/version-timestamp.c::init_uts_ns and
          * include/uapi/linux/utsname.h. getpid must return the current PID1
@@ -1797,7 +1798,12 @@ type ArceosExStartupPhaseCodingMust {
          * session must return EPERM. Full tasklist lookup, RCU protection,
          * security_task_getpgid()/security_task_setpgid(), pid namespaces,
          * PF_FORKNOEXEC/EACCES and multi-process process-group state remain
-         * trimmed.
+         * trimmed. setsid(157) must follow Linux ksys_setsid()'s conservative
+         * failure rule for the current first slice: because PID1 is already
+         * recorded as a session leader and process-group leader with pgrp 1,
+         * setsid() returns EPERM and must not create a new session, change
+         * SID/PGID or detach the controlling tty. Non-PID1 callers and
+         * complete successful setsid semantics remain out of slice.
          * geteuid/getegid/getresuid/getresgid must read the existing root
          * credential substate and write uid_t/gid_t user results for getres*.
          * uname must copy the six-field 65-byte new_utsname layout using the
@@ -1895,6 +1901,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_pid_uts_getcwd_first_slice();
         arceos_ex_must_syscall_table_support_getpgid_first_slice();
         arceos_ex_must_syscall_table_support_setpgid_first_slice();
+        arceos_ex_must_syscall_table_support_setsid_eperm_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice();
         arceos_ex_must_syscall_table_support_rt_sigaction_first_slice();
         arceos_ex_must_syscall_table_support_time_read_first_slice();
