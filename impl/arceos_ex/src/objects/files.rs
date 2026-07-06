@@ -35,6 +35,7 @@ const FILE_O_RDONLY: u32 = 0;
 const FILE_O_WRONLY: u32 = 1;
 const FILE_O_RDWR: u32 = 2;
 const FILE_O_ACCMODE: u32 = 0o3;
+const FILE_O_NONBLOCK: u32 = 0o4000;
 const FILE_O_LARGEFILE: u32 = 0o100000;
 const FILE_O_DIRECTORY: u32 = 0o200000;
 const FILE_O_CLOEXEC: u32 = 0o2000000;
@@ -129,6 +130,19 @@ enum FilesystemFdKind {
 }
 
 pub type FileResult<T> = Result<T, FileError>;
+
+pub fn is_tty_path(path: &[u8]) -> bool {
+    if path == DEV_TTY_PATH {
+        return true;
+    }
+    if path.len() <= DEV_TTY_PATH.len() || !path.starts_with(DEV_TTY_PATH) {
+        return false;
+    }
+
+    path[DEV_TTY_PATH.len()..]
+        .iter()
+        .all(|byte| matches!(*byte, b'0'..=b'9'))
+}
 
 fn vfs_error_to_file_error(error: VfsError) -> FileError {
     match error {
@@ -1708,7 +1722,9 @@ impl FilesStruct {
         if self.lifecycle.state() != State::Ready
             || !self.fd_table_bound
             || !self.regular_file_slot_ready
-            || path != DEV_TTY_PATH
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+            || !is_tty_path(path)
         {
             return Err(FileError::PathUnavailable);
         }
@@ -2375,7 +2391,9 @@ fn serialize_linux_dirents64<'a>(
 }
 
 const fn persistent_open_flags(flags: u32) -> u32 {
-    flags & (FILE_O_ACCMODE | FILE_O_LARGEFILE | FILE_O_DIRECTORY) & !FILE_O_CLOEXEC
+    flags
+        & (FILE_O_ACCMODE | FILE_O_NONBLOCK | FILE_O_LARGEFILE | FILE_O_DIRECTORY)
+        & !FILE_O_CLOEXEC
 }
 
 const fn linux_dirent64_reclen(name_len: usize) -> usize {

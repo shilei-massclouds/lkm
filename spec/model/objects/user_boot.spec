@@ -1396,13 +1396,20 @@ object SyscallTable: ResourceObject {
                  * then reaches fs/open.c::build_open_flags(). O_DIRECTORY is
                  * only translated to LOOKUP_DIRECTORY, matching the uapi
                  * comment "must be a directory"; it is not required in order
-                 * to open a directory. This slice therefore resolves the path
-                 * through VfsCore first and installs either the regular-file
-                 * or directory opened instance according to the target inode.
-                 * If O_DIRECTORY is present and the resolved target is not a
-                 * directory, the syscall must fail with ENOTDIR. Write/create
-                 * modes, O_PATH, O_TMPFILE, nofollow, permissions, LSM hooks,
-                 * mount namespaces and full errno detail remain trimmed.
+                 * to open a directory. O_NONBLOCK is a file status flag in the
+                 * uapi fcntl header and is observed by tty open paths through
+                 * filp->f_flags. This slice therefore resolves ordinary paths
+                 * through VfsCore and installs either the regular-file or
+                 * directory opened instance according to the target inode,
+                 * while /dev/tty and /dev/tty[0-9]+ may install the existing
+                 * console-like character-device opened instance. If
+                 * O_DIRECTORY is present and the resolved non-TTY target is
+                 * not a directory, the syscall must fail with ENOTDIR. O_NONBLOCK
+                 * is consumed only by accepted TTY opens in this slice; regular
+                 * and directory opens do not gain nonblocking read/write
+                 * semantics. Write/create modes, O_PATH, O_TMPFILE, nofollow,
+                 * permissions, LSM hooks, mount namespaces, real VT/devtmpfs
+                 * and full errno detail remain trimmed.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1421,7 +1428,9 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_openat_routes_to_files_struct(self, FilesStruct);
                     files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
-                    files_struct_regular_fd_installed(FilesStruct) || files_struct_directory_fd_installed(FilesStruct);
+                    files_struct_regular_fd_installed(FilesStruct) ||
+                        files_struct_directory_fd_installed(FilesStruct) ||
+                        files_struct_tty_alias_fd_installed(FilesStruct);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
                     syscall_table_openat_observed(self);
                 }

@@ -49,6 +49,11 @@
  *     -> FileBackend.Action::ReadCharDevice
  *     -> NTtyLineDiscipline.Action::ReadLineOrBytes / EvaluateReadiness
  *     -> TtyFlipBuffer bounded ready-data
+ *
+ * The current TTY open slice treats /dev/tty and /dev/tty[0-9]+ as aliases for
+ * the same console-like FileBackend::CharDevice opened instance. This is only
+ * for staged BusyBox/OpenRC probing; it is not devtmpfs, VT allocation,
+ * /dev/console, major/minor lookup or a multiple-TTY driver registry.
  */
 
 enum FileBackendKind {
@@ -77,6 +82,7 @@ predicate files_struct_fd_lookup_routes_to_table<T, F>(files: T, table: F) -> bo
 predicate files_struct_regular_file_slot_ready<T>(files: T) -> bool;
 predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
+predicate files_struct_tty_alias_fd_installed<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_stat_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;

@@ -8,7 +8,7 @@ use crate::trace::{self, Checkpoint};
 use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{FileError, FILE_POLLIN, TERMIOS_SIZE},
+    files::{is_tty_path, FileError, FILE_POLLIN, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     process_prepare::TaskCopyUserProcessInputs,
@@ -139,6 +139,7 @@ const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
 const ACCESS_R_OK: usize = 4;
 const O_ACCMODE: usize = 0o3;
+const O_NONBLOCK: usize = 0o4000;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
@@ -3000,7 +3001,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
-    let supported_flags = O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_ACCMODE;
+    let supported_flags = O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_ACCMODE;
     if dirfd != AT_FDCWD || flags & !supported_flags != 0 {
         print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
@@ -3014,9 +3015,11 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     let ctx = crate::context::context();
-    let fd_result = if &path[..path_len] == b"/dev/tty" {
+    let fd_result = if is_tty_path(&path[..path_len]) {
         ctx.files_struct
             .open_tty_path(&path[..path_len], flags as u32)
+    } else if flags & O_NONBLOCK != 0 {
+        Err(FileError::InvalidArgument)
     } else if flags & O_ACCMODE != 0 {
         Err(FileError::PermissionDenied)
     } else {
@@ -3033,7 +3036,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = match fd_result {
         Ok(fd) => fd,
         Err(error) => {
-            print_path_syscall_error_detail(error, &path[..path_len]);
+            print_openat_path_error_detail(error, &path[..path_len], flags);
             complete_error_syscall(frame, file_error_to_errno(error));
             return;
         }
@@ -6992,6 +6995,23 @@ fn print_path_syscall_error_detail(error: FileError, path: &[u8]) {
     print_path_bytes(path);
     crate::arch::riscv64::sbi::putstr("\"\n");
 }
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_openat_path_error_detail(error: FileError, path: &[u8], flags: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall openat path error");
+    crate::arch::riscv64::sbi::putstr(" file_error=");
+    print_file_error_name(error);
+    crate::arch::riscv64::sbi::putstr(" flags=0x");
+    print_hex(flags);
+    crate::arch::riscv64::sbi::putstr(" access_mode=0x");
+    print_hex(flags & O_ACCMODE);
+    crate::arch::riscv64::sbi::putstr(" path=\"");
+    print_path_bytes(path);
+    crate::arch::riscv64::sbi::putstr("\"\n");
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_openat_path_error_detail(_error: FileError, _path: &[u8], _flags: usize) {}
 
 fn print_path_bytes(path: &[u8]) {
     for &byte in path {

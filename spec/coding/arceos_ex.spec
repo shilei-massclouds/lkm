@@ -1670,16 +1670,22 @@ type ArceosExStartupPhaseCodingMust {
          * The /dev/tty, fd-dup, termios and foreground-pgrp slice must reference local Linux
          * 6.12 fs/open.c::build_open_flags()/do_sys_openat2(),
          * fs/fcntl.c::do_fcntl()/f_dupfd(),
-         * drivers/tty/tty_io.c::tty_ioctl()/tiocgwinsz(),
+         * drivers/tty/tty_io.c::tty_open()/tty_ioctl()/tiocgwinsz(),
          * drivers/tty/tty_ioctl.c::tty_mode_ioctl(),
+         * drivers/tty/tty_port.c::tty_port_block_til_ready(),
          * drivers/tty/tty_jobctrl.c::tty_jobctrl_ioctl()/tiocgpgrp()/tiocspgrp() and the
          * asm-generic fcntl/ioctls/termbits UAPI headers. O_RDWR is a valid open access
-         * mode and must not be rejected as an invalid flag before pathname
-         * copy. The current slice may special-case
-         * openat(AT_FDCWD, "/dev/tty", O_RDWR|O_LARGEFILE) to install a
-         * console-like FileBackend::CharDevice fd; it must still route
-         * through FilesStruct, FileDescriptorTable and OpenFileDescription.
-         * This is not devtmpfs, /dev/console, major/minor device lookup,
+         * mode and O_NONBLOCK=00004000 is a file status flag; neither may be
+         * rejected as an invalid flag before pathname copy when the path may
+         * be a TTY. The current slice may special-case
+         * openat(AT_FDCWD, "/dev/tty" or "/dev/tty[0-9]+",
+         * O_RDWR|O_NONBLOCK|O_LARGEFILE) to install a console-like
+         * FileBackend::CharDevice fd; O_NONBLOCK is preserved in the opened
+         * file flags for F_GETFL diagnostics. Regular and directory paths do
+         * not gain nonblocking read/write semantics from this slice. The TTY
+         * path must still route through FilesStruct, FileDescriptorTable and
+         * OpenFileDescription. This is not devtmpfs, /dev/console, real VT
+         * allocation, multiple TTY instances, major/minor device lookup,
          * controlling tty allocation or canonical N_TTY readiness.
          *
          * fcntl(F_DUPFD) and fcntl(F_DUPFD_CLOEXEC) must duplicate the fd
