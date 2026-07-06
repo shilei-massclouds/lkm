@@ -1165,14 +1165,15 @@ fn run_syscall_table_wait4(
     let table = &ctx.syscall_table;
     let child = &ctx.user_child_process;
     let obs = wait4_checkpoint_observation();
-    let valid = table.state() == State::Ready
+    let table_ready = table.state() == State::Ready
         && table.wait4_supported()
+        && table.wait4_no_child_echild_first_slice()
+        && table.wait4_observed();
+    let parent_wait_valid = table_ready
         && table.wait4_parent_wait_chldexit_boundary()
         && table.wait4_yields_to_user_child_continuation()
         && table.wait4_child_exit_status_copyout_first_slice()
         && table.wait4_observed_child_reap_first_slice()
-        && table.wait4_no_child_echild_first_slice()
-        && table.wait4_observed()
         && child.wait4_parent_wait_observed()
         && child.child_continuation_taken()
         && child.parent_wait_frame_saved()
@@ -1195,7 +1196,25 @@ fn run_syscall_table_wait4(
         && obs.writable_pages_count == child.parent_wait_writable_page_count()
         && obs.writable_pages_count != 0
         && obs.writable_pages_truncated == 0;
+    let wnohang_valid = table_ready
+        && !child.wait4_parent_wait_observed()
+        && !child.child_continuation_taken()
+        && !child.parent_wait_frame_saved()
+        && obs.saved == 0
+        && obs.resumed == 0;
+    let valid = parent_wait_valid || wnohang_valid;
 
+    sink.diag_usize("wait4_parent_wait_path", parent_wait_valid as usize);
+    sink.diag_usize("wait4_wnohang_path", wnohang_valid as usize);
+    sink.diag_usize(
+        "wait4_parent_wait_observed",
+        child.wait4_parent_wait_observed() as usize,
+    );
+    sink.diag_usize("wait4_child_enqueued", child.enqueued() as usize);
+    sink.diag_usize(
+        "wait4_child_exit_status_observed",
+        child.child_exit_status_observed() as usize,
+    );
     sink.diag_hex_pair("wait4_saved_sepc_sp", obs.saved_sepc, obs.saved_sp);
     sink.diag_hex_pair("wait4_saved_s2_s4", obs.saved_s2, obs.saved_s4);
     sink.diag_hex_pair(

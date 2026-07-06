@@ -4977,6 +4977,23 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, ECHILD);
         return;
     }
+    if options == WAIT4_WNOHANG {
+        let child_eligible_but_not_waitable = {
+            let child = &crate::context::context_ref().user_child_process;
+            child.state() == State::Ready
+                && child.enqueued()
+                && !child.child_exit_status_observed()
+                && !child.parent_wait_resumed()
+        };
+        table.wait4_observed.store(1, Ordering::Release);
+        crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+        if child_eligible_but_not_waitable {
+            complete_successful_syscall(frame, 0);
+        } else {
+            complete_error_syscall(frame, ECHILD);
+        }
+        return;
+    }
     if options != USER_WAIT4_WUNTRACED {
         complete_unsupported_syscall(frame);
         return;

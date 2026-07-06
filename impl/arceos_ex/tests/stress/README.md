@@ -142,6 +142,14 @@ Long-term baseline difftest:
   path or in a different entry-vs-C ordering. The Linux-only
   `StartupTimeline.Started` C-entry marker is likewise observed coverage, not a
   baseline hard gate.
+- `openrc-native-init-difftest.toml`: focused manual paired differential test
+  for native Alpine `/sbin/init` / OpenRC with no `init=/bin/sh` override. It
+  is intentionally separate from the long-term `/bin/sh -> /bin/ls` baseline
+  so OpenRC-specific signal/wait/process lifecycle gaps can be localized
+  without weakening the shell regression asset. Its initial hard scope extends
+  the boot/payload intersection only to the first OpenRC wait boundary currently
+  modeled as `SyscallTable.Wait4`; syscall trace/error lines remain diagnostic
+  evidence outside the checkpoint comparator.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as

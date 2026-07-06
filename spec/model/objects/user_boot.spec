@@ -393,6 +393,7 @@ predicate syscall_wait4_linux_6_12_kernel_wait4_bound<T>(table: T) -> bool;
 predicate syscall_wait4_observed_shell_args_bound<T>(table: T) -> bool;
 predicate syscall_wait4_pid_minus_one_all_children_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_options_wuntraced_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_wnohang_no_waitable_child_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_parent_wait_chldexit_boundary<T>(table: T) -> bool;
 predicate syscall_wait4_yields_to_user_child_continuation<T, P>(table: T, process: P) -> bool;
 predicate syscall_wait4_child_exit_status_copyout_first_slice<T>(table: T) -> bool;
@@ -1164,6 +1165,7 @@ object SyscallTable: ResourceObject {
                     syscall_execve_full_linux_model_deferred(self);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
                     syscall_wait4_observed_child_reap_first_slice(self);
+                    syscall_wait4_wnohang_no_waitable_child_first_slice(self);
                     syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
                     syscall_exit_records_status(self);
@@ -2482,6 +2484,14 @@ object SyscallTable: ResourceObject {
                  * wait4(-1, status, valid_options, NULL) has no eligible child
                  * and returns ECHILD, matching __do_wait()'s notask_error path
                  * after kernel_wait4() adds WEXITED internally.
+                 * The native OpenRC /sbin/init path reaches
+                 * wait4(-1, NULL, WNOHANG, NULL) after setsid and
+                 * rt_sigtimedwait. For that observed nonblocking shape, the
+                 * first slice follows __do_wait(): if an eligible child exists
+                 * but has no waitable event, return 0 without sleeping; if no
+                 * eligible child exists, return ECHILD. This does not create a
+                 * synthetic child, does not block, and does not consume signal
+                 * or scheduler wait state.
                  * It still does not model full wait queues or release_task().
                  */
                 depends_on {
@@ -2496,6 +2506,7 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_observed_shell_args_bound(self);
                     syscall_wait4_pid_minus_one_all_children_first_slice(self);
                     syscall_wait4_options_wuntraced_first_slice(self);
+                    syscall_wait4_wnohang_no_waitable_child_first_slice(self);
                     syscall_wait4_parent_wait_chldexit_boundary(self);
                     syscall_wait4_yields_to_user_child_continuation(self, UserChildProcess);
                     user_child_process_wait4_parent_wait_observed(UserChildProcess);
