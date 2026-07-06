@@ -1035,9 +1035,12 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
 
     let child_pid = {
         let ctx = context();
-        let (_parent_frame, child_pid) = ctx
-            .user_child_process
-            .child_exit_to_vfork_parent(&mut ctx.user_address_space, index)?;
+        let (_parent_frame, child_pid) = ctx.user_child_process.child_exit_to_vfork_parent(
+            &mut ctx.user_address_space,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            index,
+        )?;
         child_pid
     };
 

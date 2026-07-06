@@ -7,7 +7,7 @@ use crate::trace::{self, Checkpoint};
 #[cfg(checkpoint_handler_user_syscall_error)]
 use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
-use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
+use super::user_boot::{ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::{is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
@@ -136,6 +136,62 @@ const EXECVE_OBS_STAGE_TRAP_FRAME_READY: usize = 7;
 const EXECVE_OBS_STAGE_SATP_SWITCHED: usize = 8;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_RETURN_FRAME_READY: usize = 9;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_NONE: usize = 0;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_CHILD_CONTINUATION: usize = 1;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_PATH_KIND: usize = 2;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_PATH_READ: usize = 3;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_MAIN_PRESET: usize = 4;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_MAIN_SETUP: usize = 5;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_INTERPRETER_READ: usize = 6;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_INTERPRETER_PRESET: usize = 7;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_INTERPRETER_SETUP: usize = 8;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_INTERPRETER_BIND: usize = 9;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET: usize = 10;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_STACK_SETUP: usize = 11;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP: usize = 12;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP: usize = 13;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_ELF_ENABLE: usize = 14;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE: usize = 15;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_CLOSE_ON_EXEC: usize = 16;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_NONE: usize = 0;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION: usize = 1;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_RELATIVE_PATH: usize = 2;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_VFS_READ: usize = 3;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_UNSUPPORTED_ELF: usize = 4;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_INVALID_STATE: usize = 5;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_INTERPRETER_READ: usize = 6;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_ADDRESS_SPACE: usize = 7;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_STACK: usize = 8;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_TRAP_FRAME: usize = 9;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_CLOSE_ON_EXEC: usize = 10;
 const AT_FDCWD: usize = usize::MAX - 99;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
@@ -222,6 +278,11 @@ const ECHILD: usize = 10;
 #[derive(Clone, Copy)]
 pub struct ExecveCheckpointObservation {
     pub stage: usize,
+    pub failure_stage: usize,
+    pub failure_reason: usize,
+    pub failure_detail: usize,
+    pub failure_free_pages: usize,
+    pub failure_totalram_pages: usize,
     pub filename_len: usize,
     pub argv0_len: usize,
     pub main_elf_type: usize,
@@ -231,6 +292,7 @@ pub struct ExecveCheckpointObservation {
     pub main_runtime_entry: usize,
     pub main_segments: usize,
     pub main_interpreter_required: usize,
+    pub interpreter_path_len: usize,
     pub interpreter_input_len: usize,
     pub interpreter_load_bias: usize,
     pub interpreter_entry: usize,
@@ -259,6 +321,11 @@ pub struct ExecveCheckpointObservation {
 #[cfg(app_user_boot)]
 struct ExecveCheckpointObservationAtomics {
     stage: AtomicUsize,
+    failure_stage: AtomicUsize,
+    failure_reason: AtomicUsize,
+    failure_detail: AtomicUsize,
+    failure_free_pages: AtomicUsize,
+    failure_totalram_pages: AtomicUsize,
     filename_len: AtomicUsize,
     argv0_len: AtomicUsize,
     main_elf_type: AtomicUsize,
@@ -268,6 +335,7 @@ struct ExecveCheckpointObservationAtomics {
     main_runtime_entry: AtomicUsize,
     main_segments: AtomicUsize,
     main_interpreter_required: AtomicUsize,
+    interpreter_path_len: AtomicUsize,
     interpreter_input_len: AtomicUsize,
     interpreter_load_bias: AtomicUsize,
     interpreter_entry: AtomicUsize,
@@ -297,6 +365,11 @@ struct ExecveCheckpointObservationAtomics {
 static EXECVE_CHECKPOINT_OBSERVATION: ExecveCheckpointObservationAtomics =
     ExecveCheckpointObservationAtomics {
         stage: AtomicUsize::new(EXECVE_OBS_STAGE_NONE),
+        failure_stage: AtomicUsize::new(EXECVE_FAIL_STAGE_NONE),
+        failure_reason: AtomicUsize::new(EXECVE_FAIL_REASON_NONE),
+        failure_detail: AtomicUsize::new(0),
+        failure_free_pages: AtomicUsize::new(0),
+        failure_totalram_pages: AtomicUsize::new(0),
         filename_len: AtomicUsize::new(0),
         argv0_len: AtomicUsize::new(0),
         main_elf_type: AtomicUsize::new(0),
@@ -306,6 +379,7 @@ static EXECVE_CHECKPOINT_OBSERVATION: ExecveCheckpointObservationAtomics =
         main_runtime_entry: AtomicUsize::new(0),
         main_segments: AtomicUsize::new(0),
         main_interpreter_required: AtomicUsize::new(0),
+        interpreter_path_len: AtomicUsize::new(0),
         interpreter_input_len: AtomicUsize::new(0),
         interpreter_load_bias: AtomicUsize::new(0),
         interpreter_entry: AtomicUsize::new(0),
@@ -336,6 +410,11 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     ExecveCheckpointObservation {
         stage: obs.stage.load(Ordering::Acquire),
+        failure_stage: obs.failure_stage.load(Ordering::Acquire),
+        failure_reason: obs.failure_reason.load(Ordering::Acquire),
+        failure_detail: obs.failure_detail.load(Ordering::Acquire),
+        failure_free_pages: obs.failure_free_pages.load(Ordering::Acquire),
+        failure_totalram_pages: obs.failure_totalram_pages.load(Ordering::Acquire),
         filename_len: obs.filename_len.load(Ordering::Acquire),
         argv0_len: obs.argv0_len.load(Ordering::Acquire),
         main_elf_type: obs.main_elf_type.load(Ordering::Acquire),
@@ -345,6 +424,7 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
         main_runtime_entry: obs.main_runtime_entry.load(Ordering::Acquire),
         main_segments: obs.main_segments.load(Ordering::Acquire),
         main_interpreter_required: obs.main_interpreter_required.load(Ordering::Acquire),
+        interpreter_path_len: obs.interpreter_path_len.load(Ordering::Acquire),
         interpreter_input_len: obs.interpreter_input_len.load(Ordering::Acquire),
         interpreter_load_bias: obs.interpreter_load_bias.load(Ordering::Acquire),
         interpreter_entry: obs.interpreter_entry.load(Ordering::Acquire),
@@ -4930,6 +5010,11 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
         .user_child_process
         .current_child_continuation()
     {
+        reset_execve_checkpoint_observation();
+        record_execve_failure(
+            EXECVE_FAIL_STAGE_CHILD_CONTINUATION,
+            EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION,
+        );
         complete_unsupported_syscall(frame);
         return;
     }
@@ -4940,6 +5025,11 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     };
     if filename[0] != b'/' {
+        reset_execve_checkpoint_observation();
+        record_execve_failure(
+            EXECVE_FAIL_STAGE_PATH_KIND,
+            EXECVE_FAIL_REASON_RELATIVE_PATH,
+        );
         complete_unsupported_syscall(frame);
         return;
     }
@@ -4978,6 +5068,13 @@ enum ExecveFirstSliceError {
 fn reset_execve_checkpoint_observation() {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.stage.store(EXECVE_OBS_STAGE_NONE, Ordering::Release);
+    obs.failure_stage
+        .store(EXECVE_FAIL_STAGE_NONE, Ordering::Release);
+    obs.failure_reason
+        .store(EXECVE_FAIL_REASON_NONE, Ordering::Release);
+    obs.failure_detail.store(0, Ordering::Release);
+    obs.failure_free_pages.store(0, Ordering::Release);
+    obs.failure_totalram_pages.store(0, Ordering::Release);
     obs.filename_len.store(0, Ordering::Release);
     obs.argv0_len.store(0, Ordering::Release);
     obs.main_elf_type.store(0, Ordering::Release);
@@ -4987,6 +5084,7 @@ fn reset_execve_checkpoint_observation() {
     obs.main_runtime_entry.store(0, Ordering::Release);
     obs.main_segments.store(0, Ordering::Release);
     obs.main_interpreter_required.store(0, Ordering::Release);
+    obs.interpreter_path_len.store(0, Ordering::Release);
     obs.interpreter_input_len.store(0, Ordering::Release);
     obs.interpreter_load_bias.store(0, Ordering::Release);
     obs.interpreter_entry.store(0, Ordering::Release);
@@ -5020,6 +5118,53 @@ fn record_execve_stage(stage: usize) {
     obs.kernel_sp
         .store(crate::arch::riscv64::csr::read_sp(), Ordering::Release);
     obs.stage.store(stage, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_failure(stage: usize, reason: usize) {
+    record_execve_failure_detail(stage, reason, 0, 0, 0);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_failure_detail(
+    stage: usize,
+    reason: usize,
+    detail: usize,
+    free_pages: usize,
+    totalram_pages: usize,
+) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.current_satp
+        .store(crate::arch::riscv64::csr::read_satp(), Ordering::Release);
+    obs.kernel_sp
+        .store(crate::arch::riscv64::csr::read_sp(), Ordering::Release);
+    obs.failure_stage.store(stage, Ordering::Release);
+    obs.failure_reason.store(reason, Ordering::Release);
+    obs.failure_detail.store(detail, Ordering::Release);
+    obs.failure_free_pages.store(free_pages, Ordering::Release);
+    obs.failure_totalram_pages
+        .store(totalram_pages, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_main_image_read(len: usize) {
+    EXECVE_CHECKPOINT_OBSERVATION
+        .main_input_len
+        .store(len, Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_interpreter_path(path: &[u8]) {
+    EXECVE_CHECKPOINT_OBSERVATION
+        .interpreter_path_len
+        .store(path.len(), Ordering::Release);
+}
+
+#[cfg(app_user_boot)]
+fn record_execve_interpreter_image_read(len: usize) {
+    EXECVE_CHECKPOINT_OBSERVATION
+        .interpreter_input_len
+        .store(len, Ordering::Release);
 }
 
 #[cfg(app_user_boot)]
@@ -5128,18 +5273,39 @@ fn replace_current_user_exec_image(
         filename,
         false,
     )
-    .map_err(|_| ExecveFirstSliceError::NotFound)?;
+    .map_err(|_| {
+        record_execve_failure(EXECVE_FAIL_STAGE_PATH_READ, EXECVE_FAIL_REASON_VFS_READ);
+        ExecveFirstSliceError::NotFound
+    })?;
+    record_execve_main_image_read(image.len());
 
     let mut new_elf = ElfObject::new();
-    new_elf
-        .preset_from_vfs(image)
-        .and_then(|_| new_elf.setup(image))
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    if let Err(error) = new_elf.preset_from_vfs(image) {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_MAIN_PRESET,
+            EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
+            error.index(),
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
+    if let Err(error) = new_elf.setup(image) {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_MAIN_SETUP,
+            EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
+            error.index(),
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
     record_execve_main_elf(&new_elf);
     crate::checkpoint::dispatch(Checkpoint::UserExecMainElfReady, ctx);
 
     let mut new_interpreter = ElfObject::new();
     let interpreter_image = if let Some(interpreter_path) = new_elf.interpreter_path() {
+        record_execve_interpreter_path(interpreter_path);
         let image = super::user_boot::read_runtime_exec_path_image(
             &mut ctx.vfs_core,
             &ctx.fs_struct,
@@ -5149,14 +5315,44 @@ fn replace_current_user_exec_image(
             interpreter_path,
             true,
         )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-        new_interpreter
-            .preset_interpreter_from_vfs(image)
-            .and_then(|_| new_interpreter.setup(image))
-            .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-        new_elf
-            .bind_runtime_interpreter(&new_interpreter)
-            .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        .map_err(|_| {
+            record_execve_failure(
+                EXECVE_FAIL_STAGE_INTERPRETER_READ,
+                EXECVE_FAIL_REASON_INTERPRETER_READ,
+            );
+            ExecveFirstSliceError::Unsupported
+        })?;
+        record_execve_interpreter_image_read(image.len());
+        if let Err(error) = new_interpreter.preset_interpreter_from_vfs(image) {
+            record_execve_failure_detail(
+                EXECVE_FAIL_STAGE_INTERPRETER_PRESET,
+                EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
+                error.index(),
+                ctx.page_allocator.buddy_total_free_pages(),
+                ctx.page_allocator.totalram_pages(),
+            );
+            return Err(ExecveFirstSliceError::Unsupported);
+        }
+        if let Err(error) = new_interpreter.setup(image) {
+            record_execve_failure_detail(
+                EXECVE_FAIL_STAGE_INTERPRETER_SETUP,
+                EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
+                error.index(),
+                ctx.page_allocator.buddy_total_free_pages(),
+                ctx.page_allocator.totalram_pages(),
+            );
+            return Err(ExecveFirstSliceError::Unsupported);
+        }
+        if let Err(error) = new_elf.bind_runtime_interpreter(&new_interpreter) {
+            record_execve_failure_detail(
+                EXECVE_FAIL_STAGE_INTERPRETER_BIND,
+                EXECVE_FAIL_REASON_INVALID_STATE,
+                error.index(),
+                ctx.page_allocator.buddy_total_free_pages(),
+                ctx.page_allocator.totalram_pages(),
+            );
+            return Err(ExecveFirstSliceError::Unsupported);
+        }
         record_execve_interpreter(&new_interpreter);
         crate::checkpoint::dispatch(Checkpoint::UserExecInterpreterReady, ctx);
         Some(image)
@@ -5172,10 +5368,17 @@ fn replace_current_user_exec_image(
             &ctx.kernel_global_allocator,
             &ctx.kernel_init_task,
         )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        .map_err(|_| {
+            record_execve_failure(
+                EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET,
+                EXECVE_FAIL_REASON_ADDRESS_SPACE,
+            );
+            discard_execve_staging(ctx);
+            ExecveFirstSliceError::Unsupported
+        })?;
 
     let mut new_stack = UserStack::new();
-    new_stack
+    if new_stack
         .setup(
             &ctx.user_exec_staging_address_space,
             &new_elf,
@@ -5184,18 +5387,37 @@ fn replace_current_user_exec_image(
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
         )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-    ctx.user_exec_staging_address_space
-        .setup(
-            &new_elf,
-            interpreter_ref,
-            &new_stack,
-            image,
-            interpreter_image,
-            &mut ctx.page_allocator,
-            &ctx.page_metadata_map,
-        )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        .is_err()
+    {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_STACK_SETUP,
+            EXECVE_FAIL_REASON_STACK,
+            0,
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        discard_execve_staging(ctx);
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
+    if let Err(error) = ctx.user_exec_staging_address_space.setup(
+        &new_elf,
+        interpreter_ref,
+        &new_stack,
+        image,
+        interpreter_image,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    ) {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP,
+            EXECVE_FAIL_REASON_ADDRESS_SPACE,
+            error.index(),
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        discard_execve_staging(ctx);
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
     record_execve_address_space(
         EXECVE_OBS_STAGE_ADDRESS_SPACE_READY,
         &ctx.user_exec_staging_address_space,
@@ -5203,35 +5425,68 @@ fn replace_current_user_exec_image(
     crate::checkpoint::dispatch(Checkpoint::UserExecAddressSpaceReady, ctx);
 
     let mut new_trap_frame = UserTrapFrame::new();
-    new_trap_frame
+    if new_trap_frame
         .setup(&ctx.user_exec_staging_address_space, &new_elf, &new_stack)
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-    new_elf
+        .is_err()
+    {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP,
+            EXECVE_FAIL_REASON_TRAP_FRAME,
+            0,
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        discard_execve_staging(ctx);
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
+    if new_elf
         .enable(
             &ctx.user_exec_staging_address_space,
             &new_stack,
             &new_trap_frame,
         )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
-    ctx.user_exec_staging_address_space
-        .enable(
-            &new_trap_frame,
-            ctx.vm.swapper_vm(),
-            &ctx.kernel_image,
-            &mut ctx.page_allocator,
-            &ctx.page_metadata_map,
-        )
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+        .is_err()
+    {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_ELF_ENABLE,
+            EXECVE_FAIL_REASON_INVALID_STATE,
+            0,
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        discard_execve_staging(ctx);
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
+    if let Err(error) = ctx.user_exec_staging_address_space.enable(
+        &new_trap_frame,
+        ctx.vm.swapper_vm(),
+        &ctx.kernel_image,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    ) {
+        record_execve_failure_detail(
+            EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE,
+            EXECVE_FAIL_REASON_ADDRESS_SPACE,
+            error.index(),
+            ctx.page_allocator.buddy_total_free_pages(),
+            ctx.page_allocator.totalram_pages(),
+        );
+        discard_execve_staging(ctx);
+        return Err(ExecveFirstSliceError::Unsupported);
+    }
 
     let entry = new_trap_frame.entry();
     let sp = new_trap_frame.sp();
     let sstatus = new_trap_frame.sstatus();
     let old_satp = crate::arch::riscv64::csr::read_satp();
     let satp = ctx.user_exec_staging_address_space.satp_token();
-    let close_on_exec_report = ctx
-        .files_struct
-        .close_on_exec()
-        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    let close_on_exec_report = ctx.files_struct.close_on_exec().map_err(|_| {
+        record_execve_failure(
+            EXECVE_FAIL_STAGE_CLOSE_ON_EXEC,
+            EXECVE_FAIL_REASON_CLOSE_ON_EXEC,
+        );
+        ExecveFirstSliceError::Unsupported
+    })?;
     print_execve_close_on_exec_report(close_on_exec_report);
     ctx.elf_object = new_elf;
     ctx.elf_interpreter_object = new_interpreter;
@@ -5259,11 +5514,18 @@ fn replace_current_user_exec_image(
 fn commit_execve_staging_address_space(ctx: &mut crate::context::Context) {
     let staging = &ctx.user_exec_staging_address_space as *const UserAddressSpace;
     let current = &mut ctx.user_address_space as *mut UserAddressSpace;
-    // The first slice leaves old-mm reclamation and staging reset deferred; avoid a
-    // whole-UserAddressSpace stack temporary on the trap/syscall stack.
+    // Avoid a whole-UserAddressSpace stack temporary on the trap/syscall stack.
     unsafe {
         core::ptr::copy_nonoverlapping(staging, current, 1);
     }
+    ctx.user_exec_staging_address_space
+        .reset_staging_after_exec_commit();
+}
+
+#[cfg(app_user_boot)]
+fn discard_execve_staging(ctx: &mut crate::context::Context) {
+    ctx.user_exec_staging_address_space
+        .discard_staging_after_exec_failure(&mut ctx.page_allocator, &ctx.page_metadata_map);
 }
 
 #[cfg(app_user_boot)]
@@ -5558,10 +5820,12 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
 fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usize) -> bool {
     let (mut parent_frame, child_pid, parent_satp) = {
         let ctx = crate::context::context();
-        let Some((parent_frame, child_pid)) = ctx
-            .user_child_process
-            .child_exit_to_vfork_parent(&mut ctx.user_address_space, status)
-        else {
+        let Some((parent_frame, child_pid)) = ctx.user_child_process.child_exit_to_vfork_parent(
+            &mut ctx.user_address_space,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            status,
+        ) else {
             return false;
         };
         (parent_frame, child_pid, ctx.user_address_space.satp_token())
@@ -5671,9 +5935,13 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
     let wait_status = ((status & 0xff) << 8) as u32;
     let (mut parent_frame, status_ptr, child_pid, parent_satp) = {
         let ctx = crate::context::context();
-        let Some((parent_frame, status_ptr, child_pid)) = ctx
-            .user_child_process
-            .child_exit_to_parent_wait(&mut ctx.user_address_space, status)
+        let Some((parent_frame, status_ptr, child_pid)) =
+            ctx.user_child_process.child_exit_to_parent_wait(
+                &mut ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                status,
+            )
         else {
             return false;
         };
@@ -6478,9 +6746,163 @@ fn print_execve_unsupported_detail(frame: &TrapFrame) {
     print_hex(envp_ptr);
     crate::arch::riscv64::sbi::putstr(" child_cont=");
     print_bool_digit(child_continuation);
+    #[cfg(app_user_boot)]
+    {
+        let obs = execve_checkpoint_observation();
+        crate::arch::riscv64::sbi::putstr(" exec_stage=");
+        print_execve_obs_stage(obs.stage);
+        crate::arch::riscv64::sbi::putstr(" fail_stage=");
+        print_execve_fail_stage(obs.failure_stage);
+        crate::arch::riscv64::sbi::putstr(" fail_reason=");
+        print_execve_fail_reason(obs.failure_reason);
+        crate::arch::riscv64::sbi::putstr(" fail_detail=");
+        print_execve_failure_detail(obs.failure_detail);
+        crate::arch::riscv64::sbi::putstr(" fail_free_pages=");
+        print_decimal(obs.failure_free_pages);
+        crate::arch::riscv64::sbi::putstr(" fail_totalram_pages=");
+        print_decimal(obs.failure_totalram_pages);
+        crate::arch::riscv64::sbi::putstr(" filename_len=");
+        print_decimal(obs.filename_len);
+        crate::arch::riscv64::sbi::putstr(" argv0_len=");
+        print_decimal(obs.argv0_len);
+        crate::arch::riscv64::sbi::putstr(" main_len=");
+        print_decimal(obs.main_input_len);
+        crate::arch::riscv64::sbi::putstr(" main_elf_type=");
+        print_decimal(obs.main_elf_type);
+        crate::arch::riscv64::sbi::putstr(" main_interp=");
+        print_decimal(obs.main_interpreter_required);
+        crate::arch::riscv64::sbi::putstr(" interp_path_len=");
+        print_decimal(obs.interpreter_path_len);
+        crate::arch::riscv64::sbi::putstr(" interp_len=");
+        print_decimal(obs.interpreter_input_len);
+        crate::arch::riscv64::sbi::putstr(" mappings=");
+        print_decimal(obs.mapping_count);
+    }
     print_execve_cstr_copy(" filename", filename_ptr);
     print_execve_vector_prefix(" argv", argv_ptr);
     print_execve_vector_prefix(" envp", envp_ptr);
+}
+
+#[cfg(app_user_boot)]
+fn print_execve_obs_stage(stage: usize) {
+    match stage {
+        EXECVE_OBS_STAGE_NONE => crate::arch::riscv64::sbi::putstr("none"),
+        EXECVE_OBS_STAGE_ARGS_READY => crate::arch::riscv64::sbi::putstr("args_ready"),
+        EXECVE_OBS_STAGE_MAIN_ELF_READY => crate::arch::riscv64::sbi::putstr("main_elf_ready"),
+        EXECVE_OBS_STAGE_INTERPRETER_READY => {
+            crate::arch::riscv64::sbi::putstr("interpreter_ready");
+        }
+        EXECVE_OBS_STAGE_ADDRESS_SPACE_READY => {
+            crate::arch::riscv64::sbi::putstr("address_space_ready");
+        }
+        EXECVE_OBS_STAGE_CONTEXT_REPLACED => {
+            crate::arch::riscv64::sbi::putstr("context_replaced");
+        }
+        EXECVE_OBS_STAGE_SATP_READY => crate::arch::riscv64::sbi::putstr("satp_ready"),
+        EXECVE_OBS_STAGE_TRAP_FRAME_READY => {
+            crate::arch::riscv64::sbi::putstr("trap_frame_ready");
+        }
+        EXECVE_OBS_STAGE_SATP_SWITCHED => crate::arch::riscv64::sbi::putstr("satp_switched"),
+        EXECVE_OBS_STAGE_RETURN_FRAME_READY => {
+            crate::arch::riscv64::sbi::putstr("return_frame_ready");
+        }
+        _ => print_decimal(stage),
+    }
+}
+
+#[cfg(app_user_boot)]
+fn print_execve_fail_stage(stage: usize) {
+    match stage {
+        EXECVE_FAIL_STAGE_NONE => crate::arch::riscv64::sbi::putstr("none"),
+        EXECVE_FAIL_STAGE_CHILD_CONTINUATION => {
+            crate::arch::riscv64::sbi::putstr("child_continuation");
+        }
+        EXECVE_FAIL_STAGE_PATH_KIND => crate::arch::riscv64::sbi::putstr("path_kind"),
+        EXECVE_FAIL_STAGE_PATH_READ => crate::arch::riscv64::sbi::putstr("path_read"),
+        EXECVE_FAIL_STAGE_MAIN_PRESET => crate::arch::riscv64::sbi::putstr("main_preset"),
+        EXECVE_FAIL_STAGE_MAIN_SETUP => crate::arch::riscv64::sbi::putstr("main_setup"),
+        EXECVE_FAIL_STAGE_INTERPRETER_READ => {
+            crate::arch::riscv64::sbi::putstr("interpreter_read");
+        }
+        EXECVE_FAIL_STAGE_INTERPRETER_PRESET => {
+            crate::arch::riscv64::sbi::putstr("interpreter_preset");
+        }
+        EXECVE_FAIL_STAGE_INTERPRETER_SETUP => {
+            crate::arch::riscv64::sbi::putstr("interpreter_setup");
+        }
+        EXECVE_FAIL_STAGE_INTERPRETER_BIND => {
+            crate::arch::riscv64::sbi::putstr("interpreter_bind");
+        }
+        EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET => {
+            crate::arch::riscv64::sbi::putstr("address_space_preset");
+        }
+        EXECVE_FAIL_STAGE_STACK_SETUP => crate::arch::riscv64::sbi::putstr("stack_setup"),
+        EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP => {
+            crate::arch::riscv64::sbi::putstr("address_space_setup");
+        }
+        EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP => {
+            crate::arch::riscv64::sbi::putstr("trap_frame_setup");
+        }
+        EXECVE_FAIL_STAGE_ELF_ENABLE => crate::arch::riscv64::sbi::putstr("elf_enable"),
+        EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE => {
+            crate::arch::riscv64::sbi::putstr("address_space_enable");
+        }
+        EXECVE_FAIL_STAGE_CLOSE_ON_EXEC => crate::arch::riscv64::sbi::putstr("close_on_exec"),
+        _ => print_decimal(stage),
+    }
+}
+
+#[cfg(app_user_boot)]
+fn print_execve_fail_reason(reason: usize) {
+    match reason {
+        EXECVE_FAIL_REASON_NONE => crate::arch::riscv64::sbi::putstr("none"),
+        EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION => {
+            crate::arch::riscv64::sbi::putstr("not_child_continuation");
+        }
+        EXECVE_FAIL_REASON_RELATIVE_PATH => crate::arch::riscv64::sbi::putstr("relative_path"),
+        EXECVE_FAIL_REASON_VFS_READ => crate::arch::riscv64::sbi::putstr("vfs_read"),
+        EXECVE_FAIL_REASON_UNSUPPORTED_ELF => {
+            crate::arch::riscv64::sbi::putstr("unsupported_elf");
+        }
+        EXECVE_FAIL_REASON_INVALID_STATE => crate::arch::riscv64::sbi::putstr("invalid_state"),
+        EXECVE_FAIL_REASON_INTERPRETER_READ => {
+            crate::arch::riscv64::sbi::putstr("interpreter_read");
+        }
+        EXECVE_FAIL_REASON_ADDRESS_SPACE => crate::arch::riscv64::sbi::putstr("address_space"),
+        EXECVE_FAIL_REASON_STACK => crate::arch::riscv64::sbi::putstr("stack"),
+        EXECVE_FAIL_REASON_TRAP_FRAME => crate::arch::riscv64::sbi::putstr("trap_frame"),
+        EXECVE_FAIL_REASON_CLOSE_ON_EXEC => crate::arch::riscv64::sbi::putstr("close_on_exec"),
+        _ => print_decimal(reason),
+    }
+}
+
+#[cfg(app_user_boot)]
+fn print_execve_failure_detail(detail: usize) {
+    match detail {
+        0 => crate::arch::riscv64::sbi::putstr("none"),
+        1 => crate::arch::riscv64::sbi::putstr(ElfError::InvalidState.name()),
+        2 => crate::arch::riscv64::sbi::putstr(ElfError::ShortInput.name()),
+        3 => crate::arch::riscv64::sbi::putstr(ElfError::BadMagic.name()),
+        4 => crate::arch::riscv64::sbi::putstr(ElfError::UnsupportedClass.name()),
+        5 => crate::arch::riscv64::sbi::putstr(ElfError::UnsupportedEndian.name()),
+        6 => crate::arch::riscv64::sbi::putstr(ElfError::UnsupportedVersion.name()),
+        7 => crate::arch::riscv64::sbi::putstr(ElfError::UnsupportedType.name()),
+        8 => crate::arch::riscv64::sbi::putstr(ElfError::UnsupportedMachine.name()),
+        9 => crate::arch::riscv64::sbi::putstr(ElfError::InvalidHeader.name()),
+        10 => crate::arch::riscv64::sbi::putstr(ElfError::InvalidProgramHeader.name()),
+        11 => crate::arch::riscv64::sbi::putstr(ElfError::TooManyLoadSegments.name()),
+        12 => crate::arch::riscv64::sbi::putstr(ElfError::MissingLoadSegment.name()),
+        13 => crate::arch::riscv64::sbi::putstr(ElfError::EntryOutsideExecutableSegment.name()),
+        14 => crate::arch::riscv64::sbi::putstr(ElfError::TooManyMappings.name()),
+        15 => crate::arch::riscv64::sbi::putstr(ElfError::TooManyMappingPages.name()),
+        16 => crate::arch::riscv64::sbi::putstr(ElfError::MissingExecutableEntryMapping.name()),
+        17 => crate::arch::riscv64::sbi::putstr(ElfError::InvalidStack.name()),
+        18 => crate::arch::riscv64::sbi::putstr(ElfError::BackingAllocationFailed.name()),
+        19 => crate::arch::riscv64::sbi::putstr(ElfError::PageTableAllocationFailed.name()),
+        20 => crate::arch::riscv64::sbi::putstr(ElfError::PageTableInstallFailed.name()),
+        21 => crate::arch::riscv64::sbi::putstr(ElfError::UserCopyOutOfRange.name()),
+        _ => print_decimal(detail),
+    }
 }
 
 fn print_execve_vector_prefix(label: &str, vector_ptr: usize) {

@@ -402,6 +402,7 @@ predicate syscall_clone_vfork_next_child_accepted<T, C>(table: T, child: C) -> b
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
 predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
+predicate syscall_execve_observed_openrc_getty_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
@@ -412,6 +413,7 @@ predicate syscall_execve_stage_checkpoints_bound<T>(table: T) -> bool;
 predicate syscall_execve_return_path_diagnostic_bound<T>(table: T) -> bool;
 predicate syscall_execve_envp_full_copy_deferred<T>(table: T) -> bool;
 predicate syscall_execve_close_on_exec_deferred<T>(table: T) -> bool;
+predicate syscall_execve_old_user_backing_reclaimed_first_slice<T>(table: T) -> bool;
 predicate syscall_execve_old_mm_reclaim_deferred<T>(table: T) -> bool;
 predicate syscall_execve_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_wait4_linux_6_12_kernel_wait4_bound<T>(table: T) -> bool;
@@ -1243,6 +1245,7 @@ object SyscallTable: ResourceObject {
                     syscall_rt_sigtimedwait_return_signal_first_slice(self);
                     syscall_execve_envp_full_copy_deferred(self);
                     syscall_execve_close_on_exec_deferred(self);
+                    syscall_execve_old_user_backing_reclaimed_first_slice(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
                     syscall_execve_full_linux_model_deferred(self);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
@@ -1332,6 +1335,7 @@ object SyscallTable: ResourceObject {
             syscall_rt_sigtimedwait_return_signal_first_slice(self);
             syscall_execve_envp_full_copy_deferred(self);
             syscall_execve_close_on_exec_deferred(self);
+            syscall_execve_old_user_backing_reclaimed_first_slice(self);
             syscall_execve_old_mm_reclaim_deferred(self);
             syscall_execve_full_linux_model_deferred(self);
             syscall_wait4_child_exit_status_copyout_first_slice(self);
@@ -2606,8 +2610,11 @@ object SyscallTable: ResourceObject {
                  * installs the new mm, and RISC-V start_thread() installs
                  * the return pt_regs.  The replacement UserAddressSpace is
                  * staged in Context-owned storage rather than on the
-                 * syscall/trap stack, then committed without materializing
-                 * the whole object as a large stack temporary.  The runtime
+                 * syscall/trap stack.  Child exit paths release backing pages
+                 * for a child address space that exec replaced before
+                 * restoring the saved parent snapshot, while preserving a
+                 * vfork parent that still references the old mm; full
+                 * old-mm/page-table/VMA reclamation remains deferred.  The runtime
                  * checkpoint order is ContextReplaced, SatpReady, then
                  * TrapFrameReady; live satp switch and final return-frame
                  * diagnostics remain later return-path boundaries.  The
@@ -2618,7 +2625,7 @@ object SyscallTable: ResourceObject {
                  * not model the
                  * full point-of-no-return rollback, credentials, signal table,
                  * files unshare/refcounting, task comm, perf/audit/accounting or
-                 * old-mm reclamation paths.
+                 * complete old-mm reclamation paths.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2644,6 +2651,7 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_execve_linux_6_12_do_execveat_common_bound(self);
                     syscall_execve_observed_shell_ls_args_bound(self);
+                    syscall_execve_observed_openrc_getty_args_bound(self);
                     syscall_execve_child_continuation_first_slice(self, UserChildProcess);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
@@ -2654,6 +2662,7 @@ object SyscallTable: ResourceObject {
                     syscall_execve_return_path_diagnostic_bound(self);
                     syscall_execve_envp_full_copy_deferred(self);
                     syscall_execve_close_on_exec_deferred(self);
+                    syscall_execve_old_user_backing_reclaimed_first_slice(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
                     syscall_execve_full_linux_model_deferred(self);
                     syscall_table_execve_observed(self);

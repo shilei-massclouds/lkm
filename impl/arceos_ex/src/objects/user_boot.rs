@@ -1834,6 +1834,106 @@ impl UserAddressSpace {
         }
     }
 
+    fn reset_staging_metadata(&mut self) {
+        self.lifecycle = Lifecycle::new(State::Base);
+        self.allocated = false;
+        self.first_instance = false;
+        self.bound_to_kernel_init_task = false;
+        self.low_half_private = false;
+        self.high_half_shares_swapper = false;
+        self.kernel_pages_u_disabled = false;
+        self.user_pages_u_enabled = false;
+        self.elf_load_plan_consumed = false;
+        self.segment_mappings_bound = false;
+        self.entry_mapping_executable = false;
+        self.bss_zero_plan_consumed = false;
+        self.backing_pages_allocated = false;
+        self.elf_file_bytes_copied = false;
+        self.bss_bytes_zeroed = false;
+        self.page_table_view_ready = false;
+        self.elf_segments_mapped = false;
+        self.stack_mapped = false;
+        self.heap_mapped = false;
+        self.elf_mapped = false;
+        self.elf_bss_zeroed = false;
+        self.runtime_ready = false;
+        self.real_page_table_allocated = false;
+        self.user_leaf_ptes_installed = false;
+        self.high_half_root_entries_shared = false;
+        self.satp_token_ready = false;
+        self.prepared_but_not_current = false;
+        self.satp_token = 0;
+        self.user_leaf_pte_count = 0;
+        self.page_table_root = None;
+        self.page_table_l1 = None;
+        let mut index = 0usize;
+        while index < MAX_USER_L0_TABLES {
+            self.page_table_l0s[index] = UserL0TableSlot::empty();
+            index += 1;
+        }
+        self.page_table_l0_count = 0;
+        self.reset_mappings();
+        self.mapping_count = 0;
+        self.segment_mapping_count = 0;
+        self.stack_mapping_index = 0;
+        self.heap_mapping_index = 0;
+        self.heap_base = 0;
+        self.heap_size = 0;
+        self.heap_brk = 0;
+        self.mmap_next = 0;
+    }
+
+    pub fn reset_staging_after_exec_commit(&mut self) {
+        self.reset_staging_metadata();
+    }
+
+    pub fn discard_staging_after_exec_failure(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) {
+        release_mappings(
+            &mut self.mappings,
+            self.mapping_count,
+            page_allocator,
+            page_metadata_map,
+        );
+        self.release_page_table_pages(page_allocator, page_metadata_map);
+        self.reset_staging_metadata();
+    }
+
+    pub fn release_current_user_backing_for_exec_replacement(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> usize {
+        let released_pages = total_mapping_page_count(&self.mappings, self.mapping_count);
+        release_mappings(
+            &mut self.mappings,
+            self.mapping_count,
+            page_allocator,
+            page_metadata_map,
+        );
+        self.mapping_count = 0;
+        self.segment_mapping_count = 0;
+        self.stack_mapping_index = 0;
+        self.heap_mapping_index = 0;
+        self.backing_pages_allocated = false;
+        self.elf_file_bytes_copied = false;
+        self.bss_bytes_zeroed = false;
+        self.page_table_view_ready = false;
+        self.elf_segments_mapped = false;
+        self.stack_mapped = false;
+        self.heap_mapped = false;
+        self.elf_mapped = false;
+        self.elf_bss_zeroed = false;
+        self.heap_base = 0;
+        self.heap_size = 0;
+        self.heap_brk = 0;
+        self.mmap_next = 0;
+        released_pages
+    }
+
     pub const fn state(&self) -> State {
         self.lifecycle.state()
     }
@@ -4463,6 +4563,8 @@ impl UserChildProcess {
     pub fn child_exit_to_parent_wait(
         &mut self,
         address_space: &mut UserAddressSpace,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize)> {
         if self.lifecycle.state() != State::Ready
@@ -4476,6 +4578,12 @@ impl UserChildProcess {
         }
 
         let parent_frame = self.parent_wait_frame?;
+        release_replaced_child_address_space_backing(
+            address_space,
+            &self.parent_address_space_snapshot,
+            page_allocator,
+            page_metadata_map,
+        );
         unsafe {
             core::ptr::copy_nonoverlapping(
                 &self.parent_address_space_snapshot as *const UserAddressSpace,
@@ -4491,6 +4599,8 @@ impl UserChildProcess {
     pub fn child_exit_to_vfork_parent(
         &mut self,
         address_space: &mut UserAddressSpace,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize)> {
         if self.lifecycle.state() != State::Ready
@@ -4506,6 +4616,12 @@ impl UserChildProcess {
         }
 
         let parent_frame = self.vfork_parent_frame?;
+        release_replaced_child_address_space_backing(
+            address_space,
+            &self.parent_address_space_snapshot,
+            page_allocator,
+            page_metadata_map,
+        );
         unsafe {
             core::ptr::copy_nonoverlapping(
                 &self.parent_address_space_snapshot as *const UserAddressSpace,
@@ -4884,6 +5000,22 @@ impl UserChildProcess {
         self.parent_wait_stack_window_saved = true;
         true
     }
+}
+
+fn release_replaced_child_address_space_backing(
+    address_space: &mut UserAddressSpace,
+    parent_snapshot: &UserAddressSpace,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) -> usize {
+    if address_space.satp_token() == 0
+        || parent_snapshot.satp_token() == 0
+        || address_space.satp_token() == parent_snapshot.satp_token()
+    {
+        return 0;
+    }
+    address_space
+        .release_current_user_backing_for_exec_replacement(page_allocator, page_metadata_map)
 }
 
 struct WritablePageChecksumDiff {
