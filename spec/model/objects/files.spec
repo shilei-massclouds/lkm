@@ -52,11 +52,22 @@
  *
  * The current TTY open slice treats /dev/tty and /dev/tty[0-9]+ as aliases for
  * the same console-like Tty0 FileBackend::CharDevice. Opening an alias installs
- * a new fd entry in the first free fixed-capacity fd table slot from 3 through
- * 15; each fd entry keeps independent status flags and close-on-exec state,
- * while all entries share the same staged backend. This is only for staged
+ * a new fd entry in the first free fixed-capacity fd table slot. With stdio
+ * still installed this means the existing 3 through 15 range; after a Linux
+ * close(0/1/2) the vacated stdio slot may be reused by the next TTY open.
+ * Each fd entry keeps independent status flags and close-on-exec state, while
+ * all entries share the same staged backend. This is only for staged
  * BusyBox/OpenRC probing; it is not devtmpfs, VT allocation, /dev/console,
  * major/minor lookup or a multiple-TTY driver registry.
+ *
+ * Plain fork/vfork child execution currently reuses the same runtime
+ * FilesStruct object. To preserve Linux's user-visible rule that a child's
+ * execve close-on-exec pass does not close the parent's fd entries, the single
+ * active child slice saves a bounded parent fd table and regular-slot metadata
+ * snapshot at clone time and restores it when the child returns to the parent.
+ * This is a local rollback for the observed child continuation, not full
+ * copy_files(), CLONE_FILES, files_struct refcounting, fdtable expansion or
+ * OFD lifetime management.
  */
 
 enum FileBackendKind {
@@ -89,6 +100,10 @@ predicate files_struct_tty_alias_fd_installed<T>(files: T) -> bool;
 predicate files_struct_tty_alias_entries_share_backend<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
+predicate files_struct_stdio_fd_close_supported<T>(files: T) -> bool;
+predicate files_struct_close_on_exec_observed<T>(files: T) -> bool;
+predicate files_struct_parent_fd_snapshot_saved<T, C>(files: T, child: C) -> bool;
+predicate files_struct_parent_fd_snapshot_restored<T, C>(files: T, child: C) -> bool;
 predicate files_struct_stat_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_readlink_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_file_read_observed<T>(files: T) -> bool;
@@ -116,6 +131,11 @@ predicate fd_table_cloexec_not_reported_by_fgetfl<T>(table: T, fd: FdRef) -> boo
 predicate fd_table_cloexec_bit_returned_by_fgetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_cloexec_bit_updated_by_fsetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_stdio_fd_closed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_close_on_exec_scanned<T>(table: T) -> bool;
+predicate fd_table_close_on_exec_closed<T>(table: T) -> bool;
+predicate fd_table_parent_snapshot_saved<T>(table: T) -> bool;
+predicate fd_table_parent_snapshot_restored<T>(table: T) -> bool;
 predicate fd_table_pidfd_entry_installed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_pidfd_entry_closed<T>(table: T, fd: FdRef) -> bool;
 
@@ -348,7 +368,70 @@ object FilesStruct: ResourceObject {
                 ensures {
                     files_struct_close_fd_routes_to_table(self, FileDescriptorTable);
                     files_struct_regular_file_closed(self);
+                    files_struct_stdio_fd_close_supported(self);
                     fd_table_fd_closed(FileDescriptorTable, fd);
+                }
+            }
+
+            on Action::CloseOnExec {
+                /*
+                 * Runtime execve success follows Linux do_close_on_exec() only
+                 * far enough for the current fixed fd table: scan every slot,
+                 * clear entries whose fd close-on-exec bit is set, and retain
+                 * diagnostic scanned/closed/remaining facts. If the runtime is
+                 * executing the single child continuation, the parent fd table
+                 * must have a saved snapshot so the child's close-on-exec pass
+                 * can be rolled back before parent resume. Full files unshare,
+                 * file refcounts, locking and delayed fput remain deferred.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FileDescriptorTable.Action::CloseOnExec;
+                }
+
+                ensures {
+                    files_struct_close_on_exec_observed(self);
+                    fd_table_close_on_exec_scanned(FileDescriptorTable);
+                    fd_table_close_on_exec_closed(FileDescriptorTable);
+                }
+            }
+
+            on Action::SaveParentFdSnapshot {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    UserChildProcess.state == State::Prepared;
+                }
+
+                drives {
+                    FileDescriptorTable.Action::SaveParentSnapshot;
+                }
+
+                ensures {
+                    files_struct_parent_fd_snapshot_saved(self, UserChildProcess);
+                    fd_table_parent_snapshot_saved(FileDescriptorTable);
+                }
+            }
+
+            on Action::RestoreParentFdSnapshot {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    UserChildProcess.state == State::Ready;
+                    files_struct_parent_fd_snapshot_saved(self, UserChildProcess);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::RestoreParentSnapshot;
+                }
+
+                ensures {
+                    files_struct_parent_fd_snapshot_restored(self, UserChildProcess);
+                    fd_table_parent_snapshot_restored(FileDescriptorTable);
                 }
             }
 
@@ -599,6 +682,39 @@ object FileDescriptorTable: ResourceObject {
 
                 ensures {
                     fd_table_fd_closed(self, fd);
+                    fd_table_stdio_fd_closed(self, fd);
+                }
+            }
+
+            on Action::CloseOnExec {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                ensures {
+                    fd_table_close_on_exec_scanned(self);
+                    fd_table_close_on_exec_closed(self);
+                }
+            }
+
+            on Action::SaveParentSnapshot {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                ensures {
+                    fd_table_parent_snapshot_saved(self);
+                }
+            }
+
+            on Action::RestoreParentSnapshot {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_parent_snapshot_saved(self);
+                }
+
+                ensures {
+                    fd_table_parent_snapshot_restored(self);
                 }
             }
         }

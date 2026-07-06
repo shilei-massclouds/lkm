@@ -17,7 +17,7 @@ use super::{
 use super::{
     event_stream::TrapFrame,
     exception_stream::{ExceptionStream, SyscallTable},
-    files::FilesStruct,
+    files::{FilesStruct, FilesStructSnapshot},
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
@@ -3428,6 +3428,9 @@ pub struct UserChildProcess {
     sched_entity_ready: bool,
     task_state_new: bool,
     files_struct_copied: bool,
+    parent_fd_snapshot: FilesStructSnapshot,
+    parent_fd_snapshot_saved: bool,
+    parent_fd_snapshot_restored: bool,
     fs_struct_copied: bool,
     credentials_copied: bool,
     signal_state_copied: bool,
@@ -3530,6 +3533,9 @@ impl UserChildProcess {
             sched_entity_ready: false,
             task_state_new: false,
             files_struct_copied: false,
+            parent_fd_snapshot: FilesStructSnapshot::empty(),
+            parent_fd_snapshot_saved: false,
+            parent_fd_snapshot_restored: false,
             fs_struct_copied: false,
             credentials_copied: false,
             signal_state_copied: false,
@@ -3701,6 +3707,14 @@ impl UserChildProcess {
 
     pub const fn tls_inherited(&self) -> bool {
         self.tls_inherited
+    }
+
+    pub const fn parent_fd_snapshot_saved(&self) -> bool {
+        self.parent_fd_snapshot_saved
+    }
+
+    pub const fn parent_fd_snapshot_restored(&self) -> bool {
+        self.parent_fd_snapshot_restored
     }
 
     pub const fn enqueued(&self) -> bool {
@@ -4077,6 +4091,7 @@ impl UserChildProcess {
             page_metadata_map,
             &mut self.user_stack_snapshot,
         )?;
+        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
 
         self.pid = USER_CHILD_PID;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
@@ -4088,6 +4103,9 @@ impl UserChildProcess {
         self.sched_entity_ready = sched_entity_ready;
         self.task_state_new = task_state_new;
         self.files_struct_copied = true;
+        self.parent_fd_snapshot = parent_fd_snapshot;
+        self.parent_fd_snapshot_saved = true;
+        self.parent_fd_snapshot_restored = false;
         self.fs_struct_copied = true;
         self.credentials_copied = parent.credentials_inherited();
         self.signal_state_copied = parent.signal_state_inherited();
@@ -4214,6 +4232,7 @@ impl UserChildProcess {
             page_metadata_map,
             &mut self.user_stack_snapshot,
         )?;
+        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
 
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -4246,6 +4265,9 @@ impl UserChildProcess {
         self.sched_entity_ready = sched_entity_ready;
         self.task_state_new = task_state_new;
         self.files_struct_copied = true;
+        self.parent_fd_snapshot = parent_fd_snapshot;
+        self.parent_fd_snapshot_saved = true;
+        self.parent_fd_snapshot_restored = false;
         self.fs_struct_copied = true;
         self.credentials_copied = parent.credentials_inherited();
         self.signal_state_copied = parent.signal_state_inherited();
@@ -4639,10 +4661,25 @@ impl UserChildProcess {
         true
     }
 
+    pub fn restore_parent_fd_snapshot(&mut self, files_struct: &mut FilesStruct) -> bool {
+        if !self.parent_fd_snapshot_saved || self.parent_fd_snapshot_restored {
+            return false;
+        }
+        if files_struct
+            .restore_parent_fd_snapshot(&self.parent_fd_snapshot)
+            .is_err()
+        {
+            return false;
+        }
+        self.parent_fd_snapshot_restored = true;
+        true
+    }
+
     pub fn mark_parent_wait_resumed(&mut self, status_copied: bool) -> bool {
         if !self.child_exit_status_observed
             || !self.parent_wait_stack_snapshot_restored
             || !self.parent_wait_writable_page_snapshot_restored
+            || !self.parent_fd_snapshot_restored
             || self.parent_wait_resumed
         {
             return false;
@@ -4656,6 +4693,7 @@ impl UserChildProcess {
         if !self.vfork_clone()
             || !self.child_exit_status_observed
             || !self.parent_wait_writable_page_snapshot_restored
+            || !self.parent_fd_snapshot_restored
             || self.vfork_parent_resumed
         {
             return false;
@@ -4746,6 +4784,9 @@ impl UserChildProcess {
         self.sched_entity_ready = false;
         self.task_state_new = false;
         self.files_struct_copied = false;
+        self.parent_fd_snapshot = FilesStructSnapshot::empty();
+        self.parent_fd_snapshot_saved = false;
+        self.parent_fd_snapshot_restored = false;
         self.fs_struct_copied = false;
         self.credentials_copied = false;
         self.signal_state_copied = false;

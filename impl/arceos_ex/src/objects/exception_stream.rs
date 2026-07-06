@@ -4,11 +4,13 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::trace::{self, Checkpoint};
 
+#[cfg(checkpoint_handler_user_syscall_error)]
+use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
 use super::user_boot::{ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{is_tty_path, FileError, FILE_POLLIN, TERMIOS_SIZE},
+    files::{is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     process_prepare::TaskCopyUserProcessInputs,
@@ -3459,8 +3461,10 @@ fn first_read_interest_fd(pollfds: &[UserPollFd; USER_PPOLL_MAX], nfds: usize) -
 fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let ctx = crate::context::context();
-    if ctx.files_struct.close_fd(fd).is_err() {
-        complete_unsupported_syscall(frame);
+    if let Err(error) = ctx.files_struct.close_fd(fd) {
+        let errno = file_error_to_errno(error);
+        print_close_error_detail(fd, error, errno);
+        complete_error_syscall(frame, errno);
         return;
     }
 
@@ -5224,6 +5228,11 @@ fn replace_current_user_exec_image(
     let sstatus = new_trap_frame.sstatus();
     let old_satp = crate::arch::riscv64::csr::read_satp();
     let satp = ctx.user_exec_staging_address_space.satp_token();
+    let close_on_exec_report = ctx
+        .files_struct
+        .close_on_exec()
+        .map_err(|_| ExecveFirstSliceError::Unsupported)?;
+    print_execve_close_on_exec_report(close_on_exec_report);
     ctx.elf_object = new_elf;
     ctx.elf_interpreter_object = new_interpreter;
     ctx.user_stack = new_stack;
@@ -5442,14 +5451,14 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    if options == WAIT4_WNOHANG {
-        let child_eligible_but_not_waitable = {
-            let child = &crate::context::context_ref().user_child_process;
-            child.state() == State::Ready
-                && child.enqueued()
-                && !child.child_exit_status_observed()
-                && !child.parent_wait_resumed()
-        };
+    let child_eligible_but_not_waitable = {
+        let child = &crate::context::context_ref().user_child_process;
+        child.state() == State::Ready
+            && child.enqueued()
+            && !child.child_exit_status_observed()
+            && !child.parent_wait_resumed()
+    };
+    if options & WAIT4_WNOHANG != 0 {
         table.wait4_observed.store(1, Ordering::Release);
         crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
         if child_eligible_but_not_waitable {
@@ -5457,6 +5466,12 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         } else {
             complete_error_syscall(frame, ECHILD);
         }
+        return;
+    }
+    if !child_eligible_but_not_waitable {
+        table.wait4_observed.store(1, Ordering::Release);
+        crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+        complete_error_syscall(frame, ECHILD);
         return;
     }
     if options != USER_WAIT4_WUNTRACED {
@@ -5576,6 +5591,15 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
             )
     };
     if !writable_pages_restored {
+        return false;
+    }
+
+    let fd_snapshot_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
+    };
+    if !fd_snapshot_restored {
         return false;
     }
 
@@ -5708,6 +5732,15 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
             )
     };
     if !writable_pages_restored {
+        return false;
+    }
+
+    let fd_snapshot_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
+    };
+    if !fd_snapshot_restored {
         return false;
     }
 
@@ -6913,6 +6946,41 @@ fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
 fn print_ioctl_error_detail(_fd: usize, _cmd: usize, _arg: usize, _errno: usize) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
+fn print_close_error_detail(fd: usize, error: FileError, errno: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall close detail fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" file_error=");
+    print_file_error_name(error);
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    print_fd_table_diagnostic(true);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_close_error_detail(_fd: usize, _error: FileError, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
+    crate::arch::riscv64::sbi::putstr("execve close_on_exec scanned=");
+    print_decimal(report.scanned);
+    crate::arch::riscv64::sbi::putstr(" closed=");
+    print_decimal(report.closed);
+    crate::arch::riscv64::sbi::putstr(" first_closed_fd=");
+    if report.first_closed_fd == usize::MAX {
+        crate::arch::riscv64::sbi::putstr("none");
+    } else {
+        print_decimal(report.first_closed_fd);
+    }
+    crate::arch::riscv64::sbi::putstr(" remaining_open=");
+    print_decimal(report.remaining_open);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_execve_close_on_exec_report(_report: CloseOnExecReport) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
 fn print_dirfd(dirfd: usize) {
     if dirfd == AT_FDCWD {
         crate::arch::riscv64::sbi::putstr("AT_FDCWD(-100)");
@@ -6974,6 +7042,63 @@ fn print_probe_path_copy(path_ptr: usize) {
 }
 
 #[cfg(checkpoint_handler_user_syscall_error)]
+fn print_fd_table_diagnostic(detailed: bool) {
+    let files = &crate::context::context_ref().files_struct;
+    let capacity = files.fd_table_capacity();
+    crate::arch::riscv64::sbi::putstr(" fd_open=");
+    print_decimal(files.fd_table_open_count());
+    crate::arch::riscv64::sbi::putstr(" fd_capacity=");
+    print_decimal(capacity);
+    if !detailed {
+        return;
+    }
+
+    crate::arch::riscv64::sbi::putstr(" fd_entries=[");
+    let mut first = true;
+    let mut fd = 0usize;
+    while fd < capacity {
+        if let Some(entry) = files.fd_table_entry_diagnostic(fd) {
+            if !first {
+                crate::arch::riscv64::sbi::putchar(b',');
+            }
+            first = false;
+            crate::arch::riscv64::sbi::putstr("{fd=");
+            print_decimal(fd);
+            crate::arch::riscv64::sbi::putstr(",ofd=");
+            print_ofd_name(entry.ofd);
+            crate::arch::riscv64::sbi::putstr(",r=");
+            print_bool_digit(entry.readable);
+            crate::arch::riscv64::sbi::putstr(",w=");
+            print_bool_digit(entry.writable);
+            crate::arch::riscv64::sbi::putstr(",flags=0x");
+            print_hex(entry.flags as usize);
+            crate::arch::riscv64::sbi::putstr(",cloexec=");
+            print_bool_digit(entry.close_on_exec);
+            if entry.pid != 0 {
+                crate::arch::riscv64::sbi::putstr(",pid=");
+                print_decimal(entry.pid);
+            }
+            crate::arch::riscv64::sbi::putchar(b'}');
+        }
+        fd += 1;
+    }
+    crate::arch::riscv64::sbi::putchar(b']');
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_ofd_name(ofd: OpenFileDescriptionRef) {
+    let name = match ofd {
+        OpenFileDescriptionRef::Stdin => "stdin",
+        OpenFileDescriptionRef::Stdout => "stdout",
+        OpenFileDescriptionRef::Stderr => "stderr",
+        OpenFileDescriptionRef::Regular0 => "regular0",
+        OpenFileDescriptionRef::Tty0 => "tty0",
+        OpenFileDescriptionRef::Pidfd0 => "pidfd0",
+    };
+    crate::arch::riscv64::sbi::putstr(name);
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
 fn print_fcntl_cmd_name(cmd: usize) {
     let name = match cmd {
         F_DUPFD => "F_DUPFD",
@@ -7021,7 +7146,9 @@ fn print_openat_path_error_detail(error: FileError, path: &[u8], flags: usize) {
     print_hex(flags & O_ACCMODE);
     crate::arch::riscv64::sbi::putstr(" path=\"");
     print_path_bytes(path);
-    crate::arch::riscv64::sbi::putstr("\"\n");
+    crate::arch::riscv64::sbi::putchar(b'"');
+    print_fd_table_diagnostic(error == FileError::TooManyOpenFiles);
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]

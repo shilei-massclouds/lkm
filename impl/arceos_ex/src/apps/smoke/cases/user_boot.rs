@@ -6,7 +6,7 @@ use crate::{
     context::context,
     objects::{
         event_stream::TrapFrame,
-        files::{FdRef, FileBackendKind},
+        files::{FdRef, FileBackendKind, FileError},
         state::State,
         user_boot::{
             ElfObjectRole, UserMappingKind, UserRtSigtimedwaitResult, USER_BOOT_READ_MAX,
@@ -25,6 +25,12 @@ const USER_OPENRC_VFORK_FLAGS: usize = 0x4111;
 const USER_WAIT4_WNOHANG: usize = 1;
 const USER_EFAULT_RETURN: usize = usize::MAX - 13;
 const USER_ECHILD_RETURN: usize = usize::MAX - 9;
+const USER_TEST_WAIT4_WUNTRACED: usize = 2;
+const USER_TEST_O_RDWR: u32 = 0o2;
+const USER_TEST_O_NONBLOCK: u32 = 0o4000;
+const USER_TEST_O_LARGEFILE: u32 = 0o100000;
+const USER_TEST_O_CLOEXEC: u32 = 0o2000000;
+const USER_TEST_FD_CLOEXEC: u32 = 1;
 
 static mut USER_INIT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 static mut USER_INTERPRETER_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
@@ -677,6 +683,95 @@ impl SmokeScenario for UserBootElfScenario {
                     .regular_file_stat_returns_metadata(),
         );
         assertions.assert(
+            "invalid close badfd",
+            matches!(ctx.files_struct.close_fd(usize::MAX), Err(FileError::BadFd)),
+        );
+        assertions.assert("stdio close fd0", ctx.files_struct.close_fd(0).is_ok());
+        assertions.assert(
+            "stdio fd0 fgetfl badfd",
+            matches!(ctx.files_struct.fcntl_getfl_fd(0), Err(FileError::BadFd)),
+        );
+        let tty_fd = match ctx.files_struct.open_tty_path(
+            b"/dev/tty1",
+            USER_TEST_O_RDWR | USER_TEST_O_NONBLOCK | USER_TEST_O_LARGEFILE | USER_TEST_O_CLOEXEC,
+        ) {
+            Ok(fd) => fd,
+            Err(_) => {
+                assertions.assert("tty reopen fd0", false);
+                return;
+            }
+        };
+        let tty_status_flags = match ctx.files_struct.fcntl_getfl_fd(tty_fd) {
+            Ok(flags) => flags,
+            Err(_) => {
+                assertions.assert("tty fgetfl after reopen", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "tty fd0 reuses stdio slot",
+            tty_fd == 0
+                && tty_status_flags & USER_TEST_O_NONBLOCK != 0
+                && tty_status_flags & USER_TEST_O_CLOEXEC == 0,
+        );
+        assertions.assert(
+            "tty fd0 cloexec bit",
+            ctx.files_struct.fcntl_getfd_fd(tty_fd) == Ok(USER_TEST_FD_CLOEXEC),
+        );
+        let parent_fd_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                assertions.assert("parent fd snapshot save", false);
+                return;
+            }
+        };
+        let child_close_on_exec = match ctx.files_struct.close_on_exec() {
+            Ok(report) => report,
+            Err(_) => {
+                assertions.assert("child close on exec scan", false);
+                return;
+            }
+        };
+        let parent_fd_restored = ctx
+            .files_struct
+            .restore_parent_fd_snapshot(&parent_fd_snapshot)
+            .is_ok();
+        assertions.assert(
+            "child close on exec rollback keeps parent tty fd",
+            child_close_on_exec.scanned == ctx.files_struct.fd_table_capacity()
+                && child_close_on_exec.closed == 1
+                && child_close_on_exec.first_closed_fd == tty_fd
+                && child_close_on_exec.remaining_open == 2
+                && parent_fd_restored
+                && ctx.files_struct.parent_fd_snapshot_saved()
+                && ctx.files_struct.parent_fd_snapshot_restored()
+                && ctx.files_struct.close_on_exec_observed()
+                && ctx.files_struct.close_on_exec_report().closed == 1
+                && ctx.files_struct.fcntl_getfl_fd(tty_fd).is_ok()
+                && ctx.files_struct.fcntl_getfl_fd(1).is_ok()
+                && ctx.files_struct.fcntl_getfl_fd(2).is_ok(),
+        );
+        let close_on_exec = match ctx.files_struct.close_on_exec() {
+            Ok(report) => report,
+            Err(_) => {
+                assertions.assert("close on exec scan", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "close on exec closes tty fd",
+            close_on_exec.scanned == ctx.files_struct.fd_table_capacity()
+                && close_on_exec.closed == 1
+                && close_on_exec.first_closed_fd == tty_fd
+                && close_on_exec.remaining_open == 2
+                && matches!(
+                    ctx.files_struct.fcntl_getfl_fd(tty_fd),
+                    Err(FileError::BadFd)
+                )
+                && ctx.files_struct.fcntl_getfl_fd(1).is_ok()
+                && ctx.files_struct.fcntl_getfl_fd(2).is_ok(),
+        );
+        assertions.assert(
             "user init process setup",
             ctx.user_init_process
                 .setup(
@@ -890,10 +985,15 @@ fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
     );
 
     let no_child_ret = wait4_completed_record(0, USER_WAIT4_WNOHANG);
+    let no_child_blocking_ret = wait4_completed_record(0, 0);
+    let no_child_combo_ret =
+        wait4_completed_record(0, USER_WAIT4_WNOHANG | USER_TEST_WAIT4_WUNTRACED);
     let ctx = context();
     assertions.assert(
         "wait4 no completed child returns ECHILD",
         no_child_ret == USER_ECHILD_RETURN
+            && no_child_blocking_ret == USER_ECHILD_RETURN
+            && no_child_combo_ret == USER_ECHILD_RETURN
             && ctx.user_child_process.completed_child_record_count() == 0
             && ctx
                 .user_child_process
@@ -950,6 +1050,12 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
             )
+        {
+            return None;
+        }
+        if !ctx
+            .user_child_process
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
         {
             return None;
         }

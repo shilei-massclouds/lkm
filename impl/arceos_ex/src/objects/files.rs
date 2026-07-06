@@ -246,6 +246,70 @@ pub enum OpenFileDescriptionRef {
 }
 
 #[derive(Clone, Copy)]
+pub struct FdEntryDiagnostic {
+    pub ofd: OpenFileDescriptionRef,
+    pub readable: bool,
+    pub writable: bool,
+    pub flags: u32,
+    pub close_on_exec: bool,
+    pub pid: usize,
+}
+
+#[derive(Clone, Copy)]
+pub struct CloseOnExecReport {
+    pub scanned: usize,
+    pub closed: usize,
+    pub first_closed_fd: usize,
+    pub remaining_open: usize,
+}
+
+impl CloseOnExecReport {
+    const fn empty() -> Self {
+        Self {
+            scanned: 0,
+            closed: 0,
+            first_closed_fd: usize::MAX,
+            remaining_open: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct FilesStructSnapshot {
+    entries: [Option<FileDescriptorEntry>; FILE_FD_COUNT],
+    regular0_len: usize,
+    regular0_offset: usize,
+    regular0_path: [u8; FILE_PATH_MAX],
+    regular0_path_len: usize,
+    filesystem0_kind: FilesystemFdKind,
+    directory0_file_ref: Option<FileRef>,
+    directory0_offset: usize,
+    directory0_last_getdents_len: usize,
+    pidfd_fd: usize,
+    pidfd_child_pid: usize,
+    pidfd_exit_status: usize,
+}
+
+impl FilesStructSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            entries: [None; FILE_FD_COUNT],
+            regular0_len: 0,
+            regular0_offset: 0,
+            regular0_path: [0; FILE_PATH_MAX],
+            regular0_path_len: 0,
+            filesystem0_kind: FilesystemFdKind::None,
+            directory0_file_ref: None,
+            directory0_offset: 0,
+            directory0_last_getdents_len: 0,
+            pidfd_fd: usize::MAX,
+            pidfd_child_pid: 0,
+            pidfd_exit_status: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct FileStat {
     size: usize,
     mode: u32,
@@ -739,6 +803,8 @@ pub struct FileDescriptorTable {
     lookup_returns: AtomicUsize,
     fd_installed: AtomicUsize,
     fd_closed: AtomicUsize,
+    parent_snapshot_saved: AtomicUsize,
+    parent_snapshot_restored: AtomicUsize,
 }
 
 #[allow(dead_code)]
@@ -753,6 +819,8 @@ impl FileDescriptorTable {
             lookup_returns: AtomicUsize::new(0),
             fd_installed: AtomicUsize::new(0),
             fd_closed: AtomicUsize::new(0),
+            parent_snapshot_saved: AtomicUsize::new(0),
+            parent_snapshot_restored: AtomicUsize::new(0),
         }
     }
 
@@ -766,6 +834,10 @@ impl FileDescriptorTable {
 
     pub const fn capacity_bound(&self) -> bool {
         self.capacity_bound
+    }
+
+    pub const fn capacity(&self) -> usize {
+        FILE_FD_COUNT
     }
 
     pub const fn stdio_fds_bound(&self) -> bool {
@@ -782,6 +854,40 @@ impl FileDescriptorTable {
 
     pub fn fd_closed(&self) -> bool {
         self.fd_closed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn parent_snapshot_saved(&self) -> bool {
+        self.parent_snapshot_saved.load(Ordering::Acquire) != 0
+    }
+
+    pub fn parent_snapshot_restored(&self) -> bool {
+        self.parent_snapshot_restored.load(Ordering::Acquire) != 0
+    }
+
+    pub fn open_count(&self) -> usize {
+        let mut count = 0usize;
+        let mut fd = 0usize;
+        while fd < FILE_FD_COUNT {
+            if self.entries[fd].is_some() {
+                count += 1;
+            }
+            fd += 1;
+        }
+        count
+    }
+
+    pub fn entry_diagnostic(&self, fd: usize) -> Option<FdEntryDiagnostic> {
+        if fd >= FILE_FD_COUNT {
+            return None;
+        }
+        self.entries[fd].map(|entry| FdEntryDiagnostic {
+            ofd: entry.ofd,
+            readable: entry.readable,
+            writable: entry.writable,
+            flags: entry.flags,
+            close_on_exec: entry.close_on_exec,
+            pid: entry.pid,
+        })
     }
 
     const fn fd_bound(&self, fd: FdRef) -> bool {
@@ -896,7 +1002,7 @@ impl FileDescriptorTable {
             return Err(FileError::NotReady);
         }
 
-        let mut candidate = REGULAR0_FD;
+        let mut candidate = 0usize;
         while candidate < FILE_FD_COUNT {
             if self.entries[candidate].is_none() {
                 self.entries[candidate] = Some(FileDescriptorEntry::opened(
@@ -1003,14 +1109,43 @@ impl FileDescriptorTable {
         if fd >= FILE_FD_COUNT {
             return Err(FileError::BadFd);
         }
-        if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
-            return Err(FileError::Unsupported);
-        }
         let entry = self.entries[fd].ok_or(FileError::BadFd)?;
 
         self.entries[fd] = None;
         self.fd_closed.fetch_add(1, Ordering::AcqRel);
         Ok(entry)
+    }
+
+    fn close_on_exec_set(&self, fd: usize) -> FileResult<bool> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        Ok(self.entries[fd]
+            .map(|entry| entry.close_on_exec)
+            .unwrap_or(false))
+    }
+
+    fn snapshot_entries(&self) -> FileResult<[Option<FileDescriptorEntry>; FILE_FD_COUNT]> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+        self.parent_snapshot_saved.fetch_add(1, Ordering::AcqRel);
+        Ok(self.entries)
+    }
+
+    fn restore_entries(
+        &mut self,
+        entries: [Option<FileDescriptorEntry>; FILE_FD_COUNT],
+    ) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+        self.entries = entries;
+        self.parent_snapshot_restored.fetch_add(1, Ordering::AcqRel);
+        Ok(())
     }
 }
 
@@ -1074,6 +1209,14 @@ pub struct FilesStruct {
     pidfd_installed: AtomicUsize,
     pidfd_ready: AtomicUsize,
     pidfd_closed: AtomicUsize,
+    stdio_fd_closed: AtomicUsize,
+    close_on_exec_observed: AtomicUsize,
+    close_on_exec_scanned: AtomicUsize,
+    close_on_exec_closed: AtomicUsize,
+    close_on_exec_first_closed_fd: AtomicUsize,
+    close_on_exec_remaining_open: AtomicUsize,
+    parent_fd_snapshot_saved: AtomicUsize,
+    parent_fd_snapshot_restored: AtomicUsize,
     tty_termios_mutation_observed: AtomicUsize,
 }
 
@@ -1140,6 +1283,14 @@ impl FilesStruct {
             pidfd_installed: AtomicUsize::new(0),
             pidfd_ready: AtomicUsize::new(0),
             pidfd_closed: AtomicUsize::new(0),
+            stdio_fd_closed: AtomicUsize::new(0),
+            close_on_exec_observed: AtomicUsize::new(0),
+            close_on_exec_scanned: AtomicUsize::new(0),
+            close_on_exec_closed: AtomicUsize::new(0),
+            close_on_exec_first_closed_fd: AtomicUsize::new(usize::MAX),
+            close_on_exec_remaining_open: AtomicUsize::new(0),
+            parent_fd_snapshot_saved: AtomicUsize::new(0),
+            parent_fd_snapshot_restored: AtomicUsize::new(0),
             tty_termios_mutation_observed: AtomicUsize::new(0),
         }
     }
@@ -1284,6 +1435,33 @@ impl FilesStruct {
         self.pidfd_closed.load(Ordering::Acquire) != 0
     }
 
+    pub fn stdio_fd_closed(&self) -> bool {
+        self.stdio_fd_closed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn close_on_exec_observed(&self) -> bool {
+        self.close_on_exec_observed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn close_on_exec_report(&self) -> CloseOnExecReport {
+        CloseOnExecReport {
+            scanned: self.close_on_exec_scanned.load(Ordering::Acquire),
+            closed: self.close_on_exec_closed.load(Ordering::Acquire),
+            first_closed_fd: self.close_on_exec_first_closed_fd.load(Ordering::Acquire),
+            remaining_open: self.close_on_exec_remaining_open.load(Ordering::Acquire),
+        }
+    }
+
+    pub fn parent_fd_snapshot_saved(&self) -> bool {
+        self.parent_fd_snapshot_saved.load(Ordering::Acquire) != 0
+            && self.fd_table.parent_snapshot_saved()
+    }
+
+    pub fn parent_fd_snapshot_restored(&self) -> bool {
+        self.parent_fd_snapshot_restored.load(Ordering::Acquire) != 0
+            && self.fd_table.parent_snapshot_restored()
+    }
+
     pub const fn pidfd_fd(&self) -> usize {
         self.pidfd_fd
     }
@@ -1326,6 +1504,18 @@ impl FilesStruct {
 
     pub const fn fd_table(&self) -> &FileDescriptorTable {
         &self.fd_table
+    }
+
+    pub fn fd_table_open_count(&self) -> usize {
+        self.fd_table.open_count()
+    }
+
+    pub fn fd_table_capacity(&self) -> usize {
+        self.fd_table.capacity()
+    }
+
+    pub fn fd_table_entry_diagnostic(&self, fd: usize) -> Option<FdEntryDiagnostic> {
+        self.fd_table.entry_diagnostic(fd)
     }
 
     pub const fn stdin(&self) -> &OpenFileDescription {
@@ -1981,6 +2171,12 @@ impl FilesStruct {
         }
 
         let entry = self.fd_table.close(fd)?;
+        self.finish_closed_entry(fd, entry);
+        self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    fn finish_closed_entry(&mut self, fd: usize, entry: FileDescriptorEntry) {
         if fd == REGULAR0_FD && entry.ofd == OpenFileDescriptionRef::Regular0 {
             self.regular0_offset = 0;
             self.directory0_offset = 0;
@@ -1991,10 +2187,92 @@ impl FilesStruct {
             self.pidfd_fd = usize::MAX;
             self.pidfd_closed.fetch_add(1, Ordering::AcqRel);
         }
-        self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
+        if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
+            self.stdio_fd_closed.fetch_add(1, Ordering::AcqRel);
+        }
         if entry.ofd == OpenFileDescriptionRef::Regular0 {
             self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
         }
+    }
+
+    pub fn close_on_exec(&mut self) -> FileResult<CloseOnExecReport> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.close_on_exec_ready
+        {
+            return Err(FileError::NotReady);
+        }
+
+        let mut report = CloseOnExecReport::empty();
+        let mut fd = 0usize;
+        while fd < self.fd_table.capacity() {
+            report.scanned += 1;
+            if self.fd_table.close_on_exec_set(fd)? {
+                let entry = self.fd_table.close(fd)?;
+                self.finish_closed_entry(fd, entry);
+                if report.closed == 0 {
+                    report.first_closed_fd = fd;
+                }
+                report.closed += 1;
+            }
+            fd += 1;
+        }
+        report.remaining_open = self.fd_table.open_count();
+
+        self.close_on_exec_observed.fetch_add(1, Ordering::AcqRel);
+        self.close_on_exec_scanned
+            .store(report.scanned, Ordering::Release);
+        self.close_on_exec_closed
+            .store(report.closed, Ordering::Release);
+        self.close_on_exec_first_closed_fd
+            .store(report.first_closed_fd, Ordering::Release);
+        self.close_on_exec_remaining_open
+            .store(report.remaining_open, Ordering::Release);
+        Ok(report)
+    }
+
+    pub fn save_parent_fd_snapshot(&self) -> FileResult<FilesStructSnapshot> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let snapshot = FilesStructSnapshot {
+            entries: self.fd_table.snapshot_entries()?,
+            regular0_len: self.regular0_len,
+            regular0_offset: self.regular0_offset,
+            regular0_path: self.regular0_path,
+            regular0_path_len: self.regular0_path_len,
+            filesystem0_kind: self.filesystem0_kind,
+            directory0_file_ref: self.directory0_file_ref,
+            directory0_offset: self.directory0_offset,
+            directory0_last_getdents_len: self.directory0_last_getdents_len,
+            pidfd_fd: self.pidfd_fd,
+            pidfd_child_pid: self.pidfd_child_pid,
+            pidfd_exit_status: self.pidfd_exit_status,
+        };
+        self.parent_fd_snapshot_saved.fetch_add(1, Ordering::AcqRel);
+        Ok(snapshot)
+    }
+
+    pub fn restore_parent_fd_snapshot(&mut self, snapshot: &FilesStructSnapshot) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.restore_entries(snapshot.entries)?;
+        self.regular0_len = snapshot.regular0_len;
+        self.regular0_offset = snapshot.regular0_offset;
+        self.regular0_path = snapshot.regular0_path;
+        self.regular0_path_len = snapshot.regular0_path_len;
+        self.filesystem0_kind = snapshot.filesystem0_kind;
+        self.directory0_file_ref = snapshot.directory0_file_ref;
+        self.directory0_offset = snapshot.directory0_offset;
+        self.directory0_last_getdents_len = snapshot.directory0_last_getdents_len;
+        self.pidfd_fd = snapshot.pidfd_fd;
+        self.pidfd_child_pid = snapshot.pidfd_child_pid;
+        self.pidfd_exit_status = snapshot.pidfd_exit_status;
+        self.parent_fd_snapshot_restored
+            .fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 

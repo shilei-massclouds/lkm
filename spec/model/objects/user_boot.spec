@@ -523,6 +523,8 @@ predicate user_child_process_process_group_visible_to_parent<T, P>(process: T, p
 predicate user_child_process_exit_signal_sigchld<T>(process: T) -> bool;
 predicate user_child_process_files_struct_copied<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_fs_struct_copied<T, F>(process: T, fs: F) -> bool;
+predicate user_child_process_parent_fd_snapshot_saved<T, F>(process: T, files: F) -> bool;
+predicate user_child_process_parent_fd_snapshot_restored<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_credentials_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_signal_state_copied<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_user_address_space_snapshot<T, A>(process: T, space: A) -> bool;
@@ -2520,6 +2522,14 @@ object SyscallTable: ResourceObject {
                  * not that the lifetime archive counter reached capacity.  A
                  * true vfork+pidfd shape additionally installs a pidfd-like fd
                  * in FilesStruct and copies it to parent_tidptr.
+                 *
+                 * Because the current runtime still has one shared
+                 * FilesStruct object, CopyUserProcess also saves a bounded
+                 * parent fd table and regular-slot metadata snapshot for the
+                 * single active child. Child execve close-on-exec may mutate
+                 * the shared runtime table while the child runs, but child
+                 * exit must restore the parent snapshot before resuming the
+                 * parent.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2549,6 +2559,7 @@ object SyscallTable: ResourceObject {
                         trap_frame: UserTrapFrame,
                         boundaries: UserCloneDeferredBoundaries
                     );
+                    FilesStruct.Action::SaveParentFdSnapshot;
                 }
 
                 ensures {
@@ -2568,6 +2579,8 @@ object SyscallTable: ResourceObject {
                     user_child_process_process_group_visible_to_parent(UserChildProcess, UserInitProcess);
                     user_init_process_child_process_group_visible(UserInitProcess, UserChildProcess);
                     user_child_process_user_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_fd_snapshot_saved(UserChildProcess, FilesStruct);
+                    files_struct_parent_fd_snapshot_saved(FilesStruct, UserChildProcess);
                     user_child_process_single_active_slot(UserChildProcess);
                     user_child_process_next_child_pid_bound(UserChildProcess);
                     syscall_table_clone_observed(self);
@@ -2597,10 +2610,14 @@ object SyscallTable: ResourceObject {
                  * the whole object as a large stack temporary.  The runtime
                  * checkpoint order is ContextReplaced, SatpReady, then
                  * TrapFrameReady; live satp switch and final return-frame
-                 * diagnostics remain later return-path boundaries.  It does
+                 * diagnostics remain later return-path boundaries.  The
+                 * current first slice runs the fixed-table close-on-exec scan;
+                 * when this is a child continuation, the saved parent fd
+                 * snapshot is the rollback boundary that prevents child
+                 * close-on-exec from closing the parent's fd entries. It does
                  * not model the
                  * full point-of-no-return rollback, credentials, signal table,
-                 * do_close_on_exec(), task comm, perf/audit/accounting or
+                 * files unshare/refcounting, task comm, perf/audit/accounting or
                  * old-mm reclamation paths.
                  */
                 depends_on {
@@ -2745,6 +2762,8 @@ object SyscallTable: ResourceObject {
                     user_child_process_parent_wait_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
                     user_child_process_parent_wait_writable_page_snapshot_compared(UserChildProcess, UserAddressSpace);
                     user_child_process_parent_wait_writable_page_snapshot_restored(UserChildProcess, UserAddressSpace);
+                    user_child_process_parent_fd_snapshot_restored(UserChildProcess, FilesStruct);
+                    files_struct_parent_fd_snapshot_restored(FilesStruct, UserChildProcess);
                     user_child_process_completed_record_archived(UserChildProcess);
                     user_child_process_active_slot_reusable(UserChildProcess);
                     syscall_table_exit_observed(self);
@@ -2795,6 +2814,7 @@ object UserChildProcess: ResourceObject {
             user_child_process_exit_signal_sigchld(self);
             user_child_process_files_struct_copied(self, FilesStruct);
             user_child_process_fs_struct_copied(self, FsStruct);
+            user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
             user_child_process_credentials_copied(self, UserInitProcess);
             user_child_process_signal_state_copied(self, UserInitProcess);
             user_child_process_user_address_space_snapshot(self, UserAddressSpace);

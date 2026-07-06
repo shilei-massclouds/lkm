@@ -1680,12 +1680,19 @@ type ArceosExStartupPhaseCodingMust {
          * be a TTY. The current slice may special-case
          * openat(AT_FDCWD, "/dev/tty" or "/dev/tty[0-9]+",
          * O_RDWR|O_NONBLOCK|O_LARGEFILE) to install a console-like
-         * FileBackend::CharDevice fd entry in the first free fixed-capacity
-         * fd table slot from 3 through 15. Multiple /dev/ttyN aliases may
+         * FileBackend::CharDevice fd entry in the lowest free fixed-capacity
+         * fd table slot. With stdio still installed this is normally 3
+         * through 15; after close(0/1/2), the vacated low-numbered slot may
+         * be reused by the next TTY open. Multiple /dev/ttyN aliases may
          * therefore coexist as separate fd entries with independent status
          * flags and close-on-exec bits, but they still share the same
          * console-like Tty0 backend and do not allocate real VT instances.
          * Full fd table returns EMFILE; invalid fd paths still return EBADF.
+         * close(fd) follows Linux close_fd() only far enough to clear the
+         * current fd entry and return EBADF for invalid descriptors. Closing
+         * fd0/fd1/fd2 does not destroy the shared console-like backend and
+         * does not implement complete stdio rebinding, filp_flush/fput,
+         * fdtable locks, refcounts or cross-task files-copy semantics.
          * O_NONBLOCK is preserved in each opened fd entry for F_GETFL
          * diagnostics. Regular and directory paths do not gain nonblocking
          * read/write semantics or generalized multi-open support from this
@@ -1700,9 +1707,17 @@ type ArceosExStartupPhaseCodingMust {
          * keeping the same OpenFileDescription and setting the new fd's
          * close-on-exec bit only for F_DUPFD_CLOEXEC. Invalid source fd
          * returns EBADF; arg outside the fixed fdtable range returns EINVAL;
-         * no free slot returns EMFILE. Dynamic fdtable growth, dup2/dup3,
-         * file refcounts, fork inheritance and concurrent fdtable locking
-         * remain trimmed.
+         * no free slot returns EMFILE. Runtime execve success scans the
+         * current fixed fd table and closes entries whose close-on-exec bit
+         * is set, recording scanned/closed/first-closed/remaining-open
+         * diagnostics. Because the current single-child runtime still reuses
+         * one FilesStruct object, clone/vfork must save a bounded parent fd
+         * table and single regular/pidfd slot metadata snapshot, and child
+         * exit must restore it before parent resume. This prevents child execve
+         * close-on-exec from clearing the parent's fd entries, as observed by
+         * `/bin/sh` later using fd10 for TIOCSPGRP. Dynamic fdtable growth,
+         * dup2/dup3, file refcounts, full copy_files/CLONE_FILES, complete
+         * files unshare and concurrent fdtable locking remain trimmed.
          *
          * fcntl(F_SETFL) must reference local Linux 6.12
          * include/uapi/asm-generic/fcntl.h and fs/fcntl.c::setfl(). This

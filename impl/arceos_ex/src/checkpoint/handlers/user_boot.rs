@@ -444,6 +444,19 @@ fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
         obs.frame_after_sstatus,
     );
     sink.diag_usize("execve_kernel_sp", obs.kernel_sp);
+    let close_report = crate::context::context_ref()
+        .files_struct
+        .close_on_exec_report();
+    sink.diag_usize("execve_close_on_exec_scanned", close_report.scanned);
+    sink.diag_usize("execve_close_on_exec_closed", close_report.closed);
+    sink.diag_usize(
+        "execve_close_on_exec_first_closed_fd",
+        close_report.first_closed_fd,
+    );
+    sink.diag_usize(
+        "execve_close_on_exec_remaining_open",
+        close_report.remaining_open,
+    );
 }
 
 #[cfg(app_user_boot)]

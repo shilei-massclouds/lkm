@@ -226,6 +226,40 @@ static int smoke_tty_open_alias(void)
 		return 116;
 	}
 
+	errno = 0;
+	if (close(-1) >= 0 || errno != EBADF) {
+		return 134;
+	}
+
+	if (close(STDIN_FILENO) < 0) {
+		return 135;
+	}
+	errno = 0;
+	if (fcntl(STDIN_FILENO, F_GETFL, 0) >= 0 || errno != EBADF) {
+		return 136;
+	}
+	fd = syscall(SYS_openat, AT_FDCWD, "/dev/tty1",
+		     O_RDWR | O_NONBLOCK | O_LARGEFILE | O_CLOEXEC, 0);
+	if (fd != STDIN_FILENO) {
+		if (fd >= 0) {
+			close(fd);
+		}
+		return 137;
+	}
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) == 0 ||
+	    (flags & O_CLOEXEC) != 0) {
+		close(fd);
+		return 138;
+	}
+	if (close(fd) < 0) {
+		return 139;
+	}
+	errno = 0;
+	if (fcntl(STDIN_FILENO, F_GETFL, 0) >= 0 || errno != EBADF) {
+		return 140;
+	}
+
 	if (SAY_LITERAL("syscall fcntl F_SETFL tty nonblock ok\n") < 0) {
 		return 117;
 	}
