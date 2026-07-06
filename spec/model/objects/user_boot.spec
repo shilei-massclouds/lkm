@@ -1673,9 +1673,11 @@ object SyscallTable: ResourceObject {
             on Action::Fcntl {
                 /*
                  * Linux 6.12 routes fcntl(2) through fs/fcntl.c::do_fcntl().
-                 * This first slice covers F_GETFL, F_GETFD and F_SETFD. The
-                 * close-on-exec bit lives in FileDescriptorTable state, not in
-                 * struct file status flags.
+                 * This first slice covers F_GETFL, F_SETFL for the current
+                 * console-like TTY O_NONBLOCK status bit, F_GETFD and
+                 * F_SETFD. F_SETFL updates file status flags and does not
+                 * rewrite the access mode; the close-on-exec bit lives in
+                 * FileDescriptorTable state, not in struct file status flags.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1686,6 +1688,7 @@ object SyscallTable: ResourceObject {
                 drives {
                     FilesStruct.Action::LookupFd(FdRef::Regular0);
                     FilesStruct.Action::GetFdFlags(FdRef::Regular0);
+                    FilesStruct.Action::SetStatusFlags(FdRef::Regular0);
                     FilesStruct.Action::SetFdFlags(FdRef::Regular0);
                 }
 

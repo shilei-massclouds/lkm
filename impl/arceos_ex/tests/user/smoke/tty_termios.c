@@ -31,17 +31,33 @@ static int smoke_tty_open_alias(void)
 	    (flags & O_CLOEXEC) != 0) {
 		return 94;
 	}
-	if (close(fd) < 0) {
+	if (fcntl(fd, F_SETFL, O_RDWR | O_NONBLOCK | O_LARGEFILE) < 0) {
 		return 95;
+	}
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) == 0 ||
+	    (flags & O_CLOEXEC) != 0 || (flags & O_ACCMODE) != O_RDWR) {
+		return 96;
+	}
+	if (fcntl(fd, F_SETFL, O_RDWR | O_LARGEFILE) < 0) {
+		return 97;
+	}
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0 || (flags & O_NONBLOCK) != 0 ||
+	    (flags & O_CLOEXEC) != 0 || (flags & O_ACCMODE) != O_RDWR) {
+		return 98;
+	}
+	if (close(fd) < 0) {
+		return 99;
 	}
 
 	fd = syscall(SYS_openat, AT_FDCWD, "/dev/tty",
 		     O_RDWR | O_NONBLOCK | O_LARGEFILE, 0);
 	if (fd < 0) {
-		return 96;
+		return 100;
 	}
 	if (close(fd) < 0) {
-		return 97;
+		return 101;
 	}
 
 	errno = 0;
@@ -49,7 +65,7 @@ static int smoke_tty_open_alias(void)
 		     O_RDONLY | O_NONBLOCK | O_LARGEFILE, 0);
 	if (fd >= 0) {
 		close(fd);
-		return 98;
+		return 102;
 	}
 
 	errno = 0;
@@ -57,10 +73,10 @@ static int smoke_tty_open_alias(void)
 		     O_RDWR | O_DIRECTORY | O_NONBLOCK | O_LARGEFILE, 0);
 	if (fd >= 0) {
 		close(fd);
-		return 99;
+		return 103;
 	}
 	if (errno != EINVAL) {
-		return 100;
+		return 104;
 	}
 
 	errno = 0;
@@ -68,14 +84,59 @@ static int smoke_tty_open_alias(void)
 		     O_RDONLY | O_NONBLOCK | O_LARGEFILE, 0);
 	if (fd >= 0) {
 		close(fd);
-		return 101;
+		return 105;
 	}
 	if (errno != EINVAL) {
-		return 102;
+		return 106;
 	}
 
-	if (SAY_LITERAL("syscall openat tty alias nonblock ok\n") < 0) {
-		return 103;
+	fd = syscall(SYS_openat, AT_FDCWD, "/etc/alpine-release",
+		     O_RDONLY | O_LARGEFILE, 0);
+	if (fd < 0) {
+		return 107;
+	}
+	errno = 0;
+	if (fcntl(fd, F_SETFL, O_RDONLY | O_NONBLOCK | O_LARGEFILE) >= 0) {
+		close(fd);
+		return 108;
+	}
+	if (errno != EINVAL) {
+		close(fd);
+		return 109;
+	}
+	if (close(fd) < 0) {
+		return 110;
+	}
+
+	fd = syscall(SYS_openat, AT_FDCWD, "/",
+		     O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+	if (fd < 0) {
+		return 111;
+	}
+	errno = 0;
+	if (fcntl(fd, F_SETFL,
+		  O_RDONLY | O_DIRECTORY | O_NONBLOCK | O_LARGEFILE) >= 0) {
+		close(fd);
+		return 112;
+	}
+	if (errno != EINVAL) {
+		close(fd);
+		return 113;
+	}
+	if (close(fd) < 0) {
+		return 114;
+	}
+
+	errno = 0;
+	if (fcntl(99, F_SETFL, O_NONBLOCK) >= 0) {
+		return 115;
+	}
+	if (errno != EBADF) {
+		return 116;
+	}
+
+	if (SAY_LITERAL("syscall fcntl F_SETFL tty nonblock ok\n") < 0) {
+		return 117;
 	}
 
 	return 0;

@@ -973,6 +973,24 @@ impl FileDescriptorTable {
         Ok(())
     }
 
+    fn set_status_flags(&mut self, fd: usize, flags: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        let entry = self.entries[fd].as_mut().ok_or(FileError::BadFd)?;
+        if entry.ofd != OpenFileDescriptionRef::Tty0 {
+            return Err(FileError::InvalidArgument);
+        }
+
+        entry.flags = (entry.flags & !FILE_O_NONBLOCK) | (flags & FILE_O_NONBLOCK);
+        self.lookup_returns.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
     fn close(&mut self, fd: usize) -> FileResult<FileDescriptorEntry> {
         if self.lifecycle.state() != State::Ready {
             return Err(FileError::NotReady);
@@ -1987,6 +2005,19 @@ impl FilesStruct {
 
         let entry = self.fd_table.lookup(fd)?;
         Ok(entry.flags)
+    }
+
+    pub fn fcntl_setfl_fd(&mut self, fd: usize, flags: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        if entry.ofd != OpenFileDescriptionRef::Tty0 {
+            return Err(FileError::InvalidArgument);
+        }
+        self.char_backend_for_entry(entry)?;
+        self.fd_table.set_status_flags(fd, flags)
     }
 
     pub fn fcntl_getfd_fd(&self, fd: usize) -> FileResult<u32> {

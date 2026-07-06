@@ -148,6 +148,7 @@ const F_DUPFD: usize = 0;
 const F_GETFD: usize = 1;
 const F_SETFD: usize = 2;
 const F_GETFL: usize = 3;
+const F_SETFL: usize = 4;
 const F_LINUX_SPECIFIC_BASE: usize = 1024;
 const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
@@ -4252,6 +4253,18 @@ fn syscall_table_fcntl(table: &SyscallTable, frame: &mut TrapFrame) {
             table.fcntl_observed.store(1, Ordering::Release);
             complete_successful_syscall(frame, flags as usize);
         }
+        F_SETFL => {
+            let ctx = crate::context::context();
+            if let Err(error) = ctx.files_struct.fcntl_setfl_fd(fd, arg as u32) {
+                let errno = file_error_to_errno(error);
+                print_fcntl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+
+            table.fcntl_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
         F_GETFD => {
             let ctx = crate::context::context_ref();
             let flags = match ctx.files_struct.fcntl_getfd_fd(fd) {
@@ -6967,6 +6980,7 @@ fn print_fcntl_cmd_name(cmd: usize) {
         F_GETFD => "F_GETFD",
         F_SETFD => "F_SETFD",
         F_GETFL => "F_GETFL",
+        F_SETFL => "F_SETFL",
         F_DUPFD_CLOEXEC => "F_DUPFD_CLOEXEC",
         _ => "unknown",
     };
