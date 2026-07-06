@@ -408,7 +408,7 @@ predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, pay
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
 predicate syscall_execve_context_staging_address_space_bound<T, A>(table: T, space: A) -> bool;
 predicate syscall_execve_sets_start_thread_frame_first_slice<T, R>(table: T, frame: R) -> bool;
-predicate syscall_execve_argv0_first_slice<T>(table: T) -> bool;
+predicate syscall_execve_bounded_argv_first_slice<T>(table: T) -> bool;
 predicate syscall_execve_stage_checkpoints_bound<T>(table: T) -> bool;
 predicate syscall_execve_return_path_diagnostic_bound<T>(table: T) -> bool;
 predicate syscall_execve_envp_full_copy_deferred<T>(table: T) -> bool;
@@ -2600,9 +2600,16 @@ object SyscallTable: ResourceObject {
                  * envp={"SHLVL=1", "PWD=/", NULL}) and then tries
                  * "/usr/bin/ls" if the first attempt returns ENOSYS.  This
                  * first slice accepts the child-continuation path, copies the
-                 * filename and argv[0], reuses the current UserBootPayload
-                 * VFS/ELF/interpreter/UserStack/UserAddressSpace loading
-                 * shape to build a replacement user mm.  This follows the
+                 * filename and a bounded argv vector.  The bounded argv copy is
+                 * intentionally small but covers the observed OpenRC getty
+                 * shape argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is
+                 * only observed/deferred and is not copied into the new stack
+                 * in this slice.  The implementation returns EFAULT for argv
+                 * pointer/string copy failure and ENOSYS with stable diagnostics
+                 * when the bounded argv capacity is exceeded.  It reuses the
+                 * current UserBootPayload VFS/ELF/interpreter/UserStack/
+                 * UserAddressSpace loading shape to build a replacement user
+                 * mm.  This follows the
                  * local Linux 6.12 shape where fs/exec.c::alloc_bprm()
                  * heap-allocates linux_binprm, bprm_mm_init() installs a
                  * nascent bprm->mm from mm_alloc(), begin_new_exec() crosses
@@ -2622,9 +2629,10 @@ object SyscallTable: ResourceObject {
                  * when this is a child continuation, the saved parent fd
                  * snapshot is the rollback boundary that prevents child
                  * close-on-exec from closing the parent's fd entries. It does
-                 * not model the
-                 * full point-of-no-return rollback, credentials, signal table,
-                 * files unshare/refcounting, task comm, perf/audit/accounting or
+                 * not model PATH search, script binfmt, execveat, full Linux
+                 * argument/env stack limits, the full point-of-no-return
+                 * rollback, credentials, signal table, files
+                 * unshare/refcounting, task comm, perf/audit/accounting or
                  * complete old-mm reclamation paths.
                  */
                 depends_on {
@@ -2657,7 +2665,7 @@ object SyscallTable: ResourceObject {
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
                     syscall_execve_context_staging_address_space_bound(self, UserAddressSpace);
                     syscall_execve_sets_start_thread_frame_first_slice(self, UserTrapFrame);
-                    syscall_execve_argv0_first_slice(self);
+                    syscall_execve_bounded_argv_first_slice(self);
                     syscall_execve_stage_checkpoints_bound(self);
                     syscall_execve_return_path_diagnostic_bound(self);
                     syscall_execve_envp_full_copy_deferred(self);

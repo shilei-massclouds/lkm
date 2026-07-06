@@ -7,7 +7,9 @@ use crate::trace::{self, Checkpoint};
 #[cfg(checkpoint_handler_user_syscall_error)]
 use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
-use super::user_boot::{ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame};
+use super::user_boot::{
+    ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame, USER_EXEC_ARG_MAX,
+};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::{is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
@@ -171,6 +173,8 @@ const EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE: usize = 15;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_STAGE_CLOSE_ON_EXEC: usize = 16;
 #[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_ARGV_COPY: usize = 17;
+#[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NONE: usize = 0;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION: usize = 1;
@@ -192,6 +196,10 @@ const EXECVE_FAIL_REASON_STACK: usize = 8;
 const EXECVE_FAIL_REASON_TRAP_FRAME: usize = 9;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_CLOSE_ON_EXEC: usize = 10;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_ARGV_COPY: usize = 11;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_ARGV_CAPACITY: usize = 12;
 const AT_FDCWD: usize = usize::MAX - 99;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
@@ -285,6 +293,9 @@ pub struct ExecveCheckpointObservation {
     pub failure_totalram_pages: usize,
     pub filename_len: usize,
     pub argv0_len: usize,
+    pub argv_argc: usize,
+    pub argv_total_bytes: usize,
+    pub argv_capacity_exceeded: usize,
     pub main_elf_type: usize,
     pub main_input_len: usize,
     pub main_load_bias: usize,
@@ -328,6 +339,9 @@ struct ExecveCheckpointObservationAtomics {
     failure_totalram_pages: AtomicUsize,
     filename_len: AtomicUsize,
     argv0_len: AtomicUsize,
+    argv_argc: AtomicUsize,
+    argv_total_bytes: AtomicUsize,
+    argv_capacity_exceeded: AtomicUsize,
     main_elf_type: AtomicUsize,
     main_input_len: AtomicUsize,
     main_load_bias: AtomicUsize,
@@ -372,6 +386,9 @@ static EXECVE_CHECKPOINT_OBSERVATION: ExecveCheckpointObservationAtomics =
         failure_totalram_pages: AtomicUsize::new(0),
         filename_len: AtomicUsize::new(0),
         argv0_len: AtomicUsize::new(0),
+        argv_argc: AtomicUsize::new(0),
+        argv_total_bytes: AtomicUsize::new(0),
+        argv_capacity_exceeded: AtomicUsize::new(0),
         main_elf_type: AtomicUsize::new(0),
         main_input_len: AtomicUsize::new(0),
         main_load_bias: AtomicUsize::new(0),
@@ -417,6 +434,9 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
         failure_totalram_pages: obs.failure_totalram_pages.load(Ordering::Acquire),
         filename_len: obs.filename_len.load(Ordering::Acquire),
         argv0_len: obs.argv0_len.load(Ordering::Acquire),
+        argv_argc: obs.argv_argc.load(Ordering::Acquire),
+        argv_total_bytes: obs.argv_total_bytes.load(Ordering::Acquire),
+        argv_capacity_exceeded: obs.argv_capacity_exceeded.load(Ordering::Acquire),
         main_elf_type: obs.main_elf_type.load(Ordering::Acquire),
         main_input_len: obs.main_input_len.load(Ordering::Acquire),
         main_load_bias: obs.main_load_bias.load(Ordering::Acquire),
@@ -818,7 +838,7 @@ pub struct SyscallTable {
     execve_replaces_user_address_space_first_slice: bool,
     execve_context_staging_address_space_bound: bool,
     execve_sets_start_thread_frame_first_slice: bool,
-    execve_argv0_first_slice: bool,
+    execve_bounded_argv_first_slice: bool,
     execve_envp_full_copy_deferred: bool,
     execve_close_on_exec_deferred: bool,
     execve_old_mm_reclaim_deferred: bool,
@@ -1032,7 +1052,7 @@ impl SyscallTable {
             execve_replaces_user_address_space_first_slice: false,
             execve_context_staging_address_space_bound: false,
             execve_sets_start_thread_frame_first_slice: false,
-            execve_argv0_first_slice: false,
+            execve_bounded_argv_first_slice: false,
             execve_envp_full_copy_deferred: false,
             execve_close_on_exec_deferred: false,
             execve_old_mm_reclaim_deferred: false,
@@ -2014,7 +2034,7 @@ impl SyscallTable {
         self.execve_replaces_user_address_space_first_slice = true;
         self.execve_context_staging_address_space_bound = true;
         self.execve_sets_start_thread_frame_first_slice = true;
-        self.execve_argv0_first_slice = true;
+        self.execve_bounded_argv_first_slice = true;
         self.execve_envp_full_copy_deferred = true;
         self.execve_close_on_exec_deferred = true;
         self.execve_old_mm_reclaim_deferred = true;
@@ -2613,7 +2633,7 @@ impl SyscallTable {
             || !self.execve_replaces_user_address_space_first_slice
             || !self.execve_context_staging_address_space_bound
             || !self.execve_sets_start_thread_frame_first_slice
-            || !self.execve_argv0_first_slice
+            || !self.execve_bounded_argv_first_slice
             || !self.execve_envp_full_copy_deferred
             || !self.execve_close_on_exec_deferred
             || !self.execve_old_mm_reclaim_deferred
@@ -5033,19 +5053,58 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_unsupported_syscall(frame);
         return;
     }
-    let mut argv0 = [0u8; USER_PATH_MAX];
-    let Some(argv0_len) = copy_execve_argv0(frame.reg(11), &mut argv0) else {
-        complete_error_syscall(frame, EFAULT);
-        return;
+    let argv = match copy_execve_argv(frame.reg(11)) {
+        Ok(argv) => argv,
+        Err(ExecveArgvCopyError::Fault) => {
+            reset_execve_checkpoint_observation();
+            record_execve_failure(EXECVE_FAIL_STAGE_ARGV_COPY, EXECVE_FAIL_REASON_ARGV_COPY);
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(ExecveArgvCopyError::CapacityExceeded(argv)) => {
+            record_execve_args(
+                filename_len,
+                argv.argv0_len(),
+                argv.argc,
+                argv.total_bytes,
+                true,
+                frame,
+            );
+            record_execve_failure_detail(
+                EXECVE_FAIL_STAGE_ARGV_COPY,
+                EXECVE_FAIL_REASON_ARGV_CAPACITY,
+                argv.argc,
+                0,
+                0,
+            );
+            complete_unsupported_syscall(frame);
+            return;
+        }
     };
-    record_execve_args(filename_len, argv0_len, frame);
+    record_execve_args(
+        filename_len,
+        argv.argv0_len(),
+        argv.argc,
+        argv.total_bytes,
+        false,
+        frame,
+    );
     crate::checkpoint::dispatch(
         Checkpoint::SyscallTableExecveArgsReady,
         crate::context::context_ref(),
     );
 
-    let result =
-        replace_current_user_exec_image(&filename[..filename_len], &argv0[..argv0_len], frame);
+    let argv_slices = [
+        &argv.bytes[0][..argv.lens[0]],
+        &argv.bytes[1][..argv.lens[1]],
+        &argv.bytes[2][..argv.lens[2]],
+        &argv.bytes[3][..argv.lens[3]],
+    ];
+    let result = replace_current_user_exec_image(
+        &filename[..filename_len],
+        &argv_slices[..argv.argc],
+        frame,
+    );
     match result {
         Ok(()) => {
             table.execve_observed.store(1, Ordering::Release);
@@ -5077,6 +5136,9 @@ fn reset_execve_checkpoint_observation() {
     obs.failure_totalram_pages.store(0, Ordering::Release);
     obs.filename_len.store(0, Ordering::Release);
     obs.argv0_len.store(0, Ordering::Release);
+    obs.argv_argc.store(0, Ordering::Release);
+    obs.argv_total_bytes.store(0, Ordering::Release);
+    obs.argv_capacity_exceeded.store(0, Ordering::Release);
     obs.main_elf_type.store(0, Ordering::Release);
     obs.main_input_len.store(0, Ordering::Release);
     obs.main_load_bias.store(0, Ordering::Release);
@@ -5168,11 +5230,25 @@ fn record_execve_interpreter_image_read(len: usize) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_args(filename_len: usize, argv0_len: usize, frame: &TrapFrame) {
+fn record_execve_args(
+    filename_len: usize,
+    argv0_len: usize,
+    argv_argc: usize,
+    argv_total_bytes: usize,
+    argv_capacity_exceeded: bool,
+    frame: &TrapFrame,
+) {
     reset_execve_checkpoint_observation();
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.filename_len.store(filename_len, Ordering::Release);
     obs.argv0_len.store(argv0_len, Ordering::Release);
+    obs.argv_argc.store(argv_argc, Ordering::Release);
+    obs.argv_total_bytes
+        .store(argv_total_bytes, Ordering::Release);
+    obs.argv_capacity_exceeded.store(
+        if argv_capacity_exceeded { 1 } else { 0 },
+        Ordering::Release,
+    );
     obs.frame_before_sepc.store(frame.sepc, Ordering::Release);
     obs.frame_before_sp.store(frame.reg(2), Ordering::Release);
     obs.frame_before_ra.store(frame.reg(1), Ordering::Release);
@@ -5260,7 +5336,7 @@ fn record_execve_return_frame(frame: &TrapFrame) {
 #[cfg(app_user_boot)]
 fn replace_current_user_exec_image(
     filename: &[u8],
-    argv0: &[u8],
+    argv: &[&[u8]],
     frame: &mut TrapFrame,
 ) -> Result<(), ExecveFirstSliceError> {
     let ctx = crate::context::context();
@@ -5383,7 +5459,7 @@ fn replace_current_user_exec_image(
             &ctx.user_exec_staging_address_space,
             &new_elf,
             interpreter_ref,
-            argv0,
+            argv,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
         )
@@ -6276,19 +6352,91 @@ fn copy_execve_cstr(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
 }
 
 #[cfg(app_user_boot)]
-fn copy_execve_argv0(argv_ptr: usize, dst: &mut [u8]) -> Option<usize> {
-    if argv_ptr == 0
-        || !crate::context::context_ref()
+struct ExecveArgvCopy {
+    bytes: [[u8; USER_PATH_MAX]; USER_EXEC_ARG_MAX],
+    lens: [usize; USER_EXEC_ARG_MAX],
+    argc: usize,
+    total_bytes: usize,
+}
+
+#[cfg(app_user_boot)]
+impl ExecveArgvCopy {
+    const fn new() -> Self {
+        Self {
+            bytes: [[0u8; USER_PATH_MAX]; USER_EXEC_ARG_MAX],
+            lens: [0usize; USER_EXEC_ARG_MAX],
+            argc: 0,
+            total_bytes: 0,
+        }
+    }
+
+    fn argv0_len(&self) -> usize {
+        if self.argc == 0 {
+            0
+        } else {
+            self.lens[0]
+        }
+    }
+}
+
+#[cfg(app_user_boot)]
+enum ExecveArgvCopyError {
+    Fault,
+    CapacityExceeded(ExecveArgvCopy),
+}
+
+#[cfg(app_user_boot)]
+fn copy_execve_argv(argv_ptr: usize) -> Result<ExecveArgvCopy, ExecveArgvCopyError> {
+    if argv_ptr == 0 {
+        return Err(ExecveArgvCopyError::Fault);
+    }
+
+    let mut copied = ExecveArgvCopy::new();
+    let mut index = 0usize;
+    while index < USER_EXEC_ARG_MAX {
+        let entry_ptr = argv_ptr
+            .checked_add(index * core::mem::size_of::<usize>())
+            .ok_or(ExecveArgvCopyError::Fault)?;
+        if !crate::context::context_ref()
             .user_address_space
-            .user_range_mapped(argv_ptr, core::mem::size_of::<usize>())
+            .user_range_mapped(entry_ptr, core::mem::size_of::<usize>())
+        {
+            return Err(ExecveArgvCopyError::Fault);
+        }
+        let arg_ptr = read_user_usize(entry_ptr).ok_or(ExecveArgvCopyError::Fault)?;
+        if arg_ptr == 0 {
+            if copied.argc == 0 {
+                return Err(ExecveArgvCopyError::Fault);
+            }
+            return Ok(copied);
+        }
+        let arg_len = copy_execve_cstr(arg_ptr, &mut copied.bytes[index])
+            .ok_or(ExecveArgvCopyError::Fault)?;
+        copied.lens[index] = arg_len;
+        copied.argc += 1;
+        copied.total_bytes = copied
+            .total_bytes
+            .checked_add(arg_len)
+            .and_then(|bytes| bytes.checked_add(1))
+            .ok_or(ExecveArgvCopyError::Fault)?;
+        index += 1;
+    }
+
+    let sentinel_ptr = argv_ptr
+        .checked_add(USER_EXEC_ARG_MAX * core::mem::size_of::<usize>())
+        .ok_or(ExecveArgvCopyError::Fault)?;
+    if !crate::context::context_ref()
+        .user_address_space
+        .user_range_mapped(sentinel_ptr, core::mem::size_of::<usize>())
     {
-        return None;
+        return Err(ExecveArgvCopyError::Fault);
     }
-    let argv0_ptr = read_user_usize(argv_ptr)?;
-    if argv0_ptr == 0 {
-        return None;
+    let sentinel = read_user_usize(sentinel_ptr).ok_or(ExecveArgvCopyError::Fault)?;
+    if sentinel == 0 {
+        Ok(copied)
+    } else {
+        Err(ExecveArgvCopyError::CapacityExceeded(copied))
     }
-    copy_execve_cstr(argv0_ptr, dst)
 }
 
 fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32) {
@@ -6765,6 +6913,12 @@ fn print_execve_unsupported_detail(frame: &TrapFrame) {
         print_decimal(obs.filename_len);
         crate::arch::riscv64::sbi::putstr(" argv0_len=");
         print_decimal(obs.argv0_len);
+        crate::arch::riscv64::sbi::putstr(" argc=");
+        print_decimal(obs.argv_argc);
+        crate::arch::riscv64::sbi::putstr(" argv_total_bytes=");
+        print_decimal(obs.argv_total_bytes);
+        crate::arch::riscv64::sbi::putstr(" argv_capacity_exceeded=");
+        print_decimal(obs.argv_capacity_exceeded);
         crate::arch::riscv64::sbi::putstr(" main_len=");
         print_decimal(obs.main_input_len);
         crate::arch::riscv64::sbi::putstr(" main_elf_type=");
@@ -6848,6 +7002,7 @@ fn print_execve_fail_stage(stage: usize) {
             crate::arch::riscv64::sbi::putstr("address_space_enable");
         }
         EXECVE_FAIL_STAGE_CLOSE_ON_EXEC => crate::arch::riscv64::sbi::putstr("close_on_exec"),
+        EXECVE_FAIL_STAGE_ARGV_COPY => crate::arch::riscv64::sbi::putstr("argv_copy"),
         _ => print_decimal(stage),
     }
 }
@@ -6872,6 +7027,10 @@ fn print_execve_fail_reason(reason: usize) {
         EXECVE_FAIL_REASON_STACK => crate::arch::riscv64::sbi::putstr("stack"),
         EXECVE_FAIL_REASON_TRAP_FRAME => crate::arch::riscv64::sbi::putstr("trap_frame"),
         EXECVE_FAIL_REASON_CLOSE_ON_EXEC => crate::arch::riscv64::sbi::putstr("close_on_exec"),
+        EXECVE_FAIL_REASON_ARGV_COPY => crate::arch::riscv64::sbi::putstr("argv_copy"),
+        EXECVE_FAIL_REASON_ARGV_CAPACITY => {
+            crate::arch::riscv64::sbi::putstr("argv_capacity");
+        }
         _ => print_decimal(reason),
     }
 }

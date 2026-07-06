@@ -11,8 +11,8 @@ use crate::{
         user_boot::{
             ElfObjectRole, UserMappingKind, UserRtSigtimedwaitResult, USER_BOOT_READ_MAX,
             USER_CHILD_PID, USER_CLONE_SIGCHLD, USER_COMPLETED_CHILD_RECORD_CAPACITY,
-            USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH,
-            USER_PAGE_SIZE, USER_SIGCHLD_MASK,
+            USER_EXEC_ARG_MAX, USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE,
+            USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
             USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
             USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN,
         },
@@ -158,6 +158,7 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
+        let init_argv = [USER_INIT_PATH];
         assertions.assert(
             "user stack setup",
             ctx.user_stack
@@ -165,11 +166,83 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.user_address_space,
                     &ctx.elf_object,
                     interpreter_ref,
-                    USER_INIT_PATH,
+                    &init_argv,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
                 .is_ok(),
+        );
+        let setup_word = core::mem::size_of::<usize>();
+        let getty_argv: [&[u8]; 3] = [b"/sbin/getty", b"38400", b"tty1"];
+        let mut getty_stack = crate::objects::user_boot::UserStack::new();
+        let getty_stack_ready = getty_stack
+            .setup(
+                &ctx.user_address_space,
+                &ctx.elf_object,
+                interpreter_ref,
+                &getty_argv,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+            .is_ok();
+        let getty_sp = getty_stack.initial_sp();
+        let getty_argc = stack_usize_at(&getty_stack, &ctx.page_metadata_map, getty_sp);
+        let getty_argv0 =
+            stack_usize_at(&getty_stack, &ctx.page_metadata_map, getty_sp + setup_word);
+        let getty_argv1 = stack_usize_at(
+            &getty_stack,
+            &ctx.page_metadata_map,
+            getty_sp + 2 * setup_word,
+        );
+        let getty_argv2 = stack_usize_at(
+            &getty_stack,
+            &ctx.page_metadata_map,
+            getty_sp + 3 * setup_word,
+        );
+        let getty_argv_null = stack_usize_at(
+            &getty_stack,
+            &ctx.page_metadata_map,
+            getty_sp + 4 * setup_word,
+        );
+        let getty_envp_null = stack_usize_at(
+            &getty_stack,
+            &ctx.page_metadata_map,
+            getty_sp + 5 * setup_word,
+        );
+        assertions.assert(
+            "user stack bounded argv words",
+            getty_stack_ready
+                && getty_argc == Some(3)
+                && getty_argv0 == Some(getty_stack.arg0_ptr())
+                && getty_argv1.is_some_and(|ptr| {
+                    stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"38400\0")
+                })
+                && getty_argv2.is_some_and(|ptr| {
+                    stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"tty1\0")
+                })
+                && getty_argv_null == Some(0)
+                && getty_envp_null == Some(0),
+        );
+        assertions.assert(
+            "user stack bounded argv strings",
+            getty_argv0.is_some_and(|ptr| {
+                stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"/sbin/getty\0")
+            }),
+        );
+        let oversized_argv: [&[u8]; USER_EXEC_ARG_MAX + 1] = [b"a", b"b", b"c", b"d", b"e"];
+        let mut oversized_stack = crate::objects::user_boot::UserStack::new();
+        assertions.assert(
+            "user stack bounded argv rejects overflow",
+            oversized_stack
+                .setup(
+                    &ctx.user_address_space,
+                    &ctx.elf_object,
+                    interpreter_ref,
+                    &oversized_argv,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+                .is_err(),
         );
         assertions.assert(
             "address space setup",
@@ -476,6 +549,20 @@ impl SmokeScenario for UserBootElfScenario {
                 stack.arg0_ptr(),
                 b"/sbin/init\0",
             ),
+        );
+        let word = core::mem::size_of::<usize>();
+        let init_argc = stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp());
+        let init_argv0 = stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp() + word);
+        let init_argv_null =
+            stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp() + 2 * word);
+        let init_envp_null =
+            stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp() + 3 * word);
+        assertions.assert(
+            "user stack argc argv words",
+            init_argc == Some(1)
+                && init_argv0 == Some(stack.arg0_ptr())
+                && init_argv_null == Some(0)
+                && init_envp_null == Some(0),
         );
         let Some(stack_mapping) = space.stack_mapping() else {
             assertions.assert("stack mapping", false);
@@ -1188,6 +1275,35 @@ fn stack_contains_at(
         index += 1;
     }
     true
+}
+
+fn stack_usize_at(
+    stack: &crate::objects::user_boot::UserStack,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+    user_addr: usize,
+) -> Option<usize> {
+    let mut bytes = [0u8; core::mem::size_of::<usize>()];
+    if user_addr < stack.base()
+        || user_addr
+            .checked_add(bytes.len())
+            .filter(|end| *end <= stack.top())
+            .is_none()
+    {
+        return None;
+    }
+
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let stack_offset = user_addr - stack.base() + index;
+        let page_index = stack_offset / USER_PAGE_SIZE;
+        let page_offset = stack_offset % USER_PAGE_SIZE;
+        let page = stack.backing_page(page_index)?;
+        let linear = page_metadata_map.page_address(page)?;
+        bytes[index] = unsafe { *((linear + page_offset) as *const u8) };
+        index += 1;
+    }
+
+    Some(usize::from_ne_bytes(bytes))
 }
 
 fn bytes_eq(left: &[u8], right: &[u8]) -> bool {

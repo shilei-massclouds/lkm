@@ -200,7 +200,8 @@ pub const fn sigchld_mask_matches(mask: usize) -> bool {
 
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
 pub const USER_INTERPRETER_LOAD_BIAS: usize = 0x2000_0000;
-const USER_INITIAL_STACK_WORDS: usize = 18;
+pub const USER_EXEC_ARG_MAX: usize = 4;
+const USER_INITIAL_AUXV_WORDS: usize = 14;
 #[cfg(app_user_boot)]
 const USER_INIT_CANDIDATES: [UserInitPathRef; 4] = [
     UserInitPathRef::DefaultInit,
@@ -1455,7 +1456,7 @@ impl UserStack {
         address_space: &UserAddressSpace,
         elf: &ElfObject,
         interpreter: Option<&ElfObject>,
-        selected_path: &[u8],
+        argv: &[&[u8]],
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
@@ -1464,6 +1465,8 @@ impl UserStack {
             || page_allocator.state() != State::Ready
             || elf.state() != State::Ready
             || interpreter.is_some_and(|interp| interp.state() != State::Ready)
+            || argv.is_empty()
+            || argv.len() > USER_EXEC_ARG_MAX
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1512,7 +1515,7 @@ impl UserStack {
             index += 1;
         }
         let Some(initial_sp) =
-            self.write_initial_arg_env(elf, interpreter, selected_path, page_metadata_map)
+            self.write_initial_arg_env(elf, interpreter, argv, page_metadata_map)
         else {
             while self.backing_page_count > 0 {
                 self.backing_page_count -= 1;
@@ -1543,126 +1546,84 @@ impl UserStack {
         &mut self,
         elf: &ElfObject,
         interpreter: Option<&ElfObject>,
-        selected_path: &[u8],
+        argv: &[&[u8]],
         page_metadata_map: &PageMetadataMap,
     ) -> Option<usize> {
-        let arg0 = selected_path;
-        let arg0_len = arg0.len().checked_add(1)?;
-        let arg0_ptr = align_down(self.top.checked_sub(arg0_len)?, 8);
-        write_stack_bytes(self, page_metadata_map, arg0_ptr, arg0)?;
-        write_stack_bytes(self, page_metadata_map, arg0_ptr + arg0.len(), &[0])?;
+        if argv.is_empty() || argv.len() > USER_EXEC_ARG_MAX {
+            return None;
+        }
 
-        let words_size = USER_INITIAL_STACK_WORDS.checked_mul(core::mem::size_of::<usize>())?;
-        let initial_sp = align_down(arg0_ptr.checked_sub(words_size)?, 16);
+        let mut argv_ptrs = [0usize; USER_EXEC_ARG_MAX];
+        let mut string_top = self.top;
+        let mut index = argv.len();
+        while index > 0 {
+            index -= 1;
+            let arg = argv[index];
+            let arg_len = arg.len().checked_add(1)?;
+            let arg_ptr = align_down(string_top.checked_sub(arg_len)?, 8);
+            write_stack_bytes(self, page_metadata_map, arg_ptr, arg)?;
+            write_stack_bytes(self, page_metadata_map, arg_ptr + arg.len(), &[0])?;
+            argv_ptrs[index] = arg_ptr;
+            string_top = arg_ptr;
+        }
+
+        let word_count = 1usize
+            .checked_add(argv.len())?
+            .checked_add(1)?
+            .checked_add(1)?
+            .checked_add(USER_INITIAL_AUXV_WORDS)?;
+        let words_size = word_count.checked_mul(core::mem::size_of::<usize>())?;
+        let initial_sp = align_down(string_top.checked_sub(words_size)?, 16);
         if initial_sp < self.base {
             return None;
         }
 
-        write_stack_usize(self, page_metadata_map, initial_sp, 1)?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + core::mem::size_of::<usize>(),
-            arg0_ptr,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 2 * core::mem::size_of::<usize>(),
-            0,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 3 * core::mem::size_of::<usize>(),
-            0,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 4 * core::mem::size_of::<usize>(),
-            AT_PHDR,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 5 * core::mem::size_of::<usize>(),
-            elf.phdr_vaddr(),
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 6 * core::mem::size_of::<usize>(),
-            AT_PHENT,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 7 * core::mem::size_of::<usize>(),
-            elf.phentsize(),
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 8 * core::mem::size_of::<usize>(),
-            AT_PHNUM,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 9 * core::mem::size_of::<usize>(),
-            elf.program_header_count(),
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 10 * core::mem::size_of::<usize>(),
-            AT_ENTRY,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 11 * core::mem::size_of::<usize>(),
-            elf.entry(),
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 12 * core::mem::size_of::<usize>(),
-            AT_BASE,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 13 * core::mem::size_of::<usize>(),
-            interpreter.map_or(0, ElfObject::load_bias),
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 14 * core::mem::size_of::<usize>(),
-            AT_PAGESZ,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 15 * core::mem::size_of::<usize>(),
-            USER_PAGE_SIZE,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 16 * core::mem::size_of::<usize>(),
-            AT_NULL,
-        )?;
-        write_stack_usize(
-            self,
-            page_metadata_map,
-            initial_sp + 17 * core::mem::size_of::<usize>(),
-            0,
-        )?;
+        let word = core::mem::size_of::<usize>();
+        let mut word_index = 0usize;
+        write_stack_usize(self, page_metadata_map, initial_sp, argv.len())?;
+        word_index += 1;
 
-        self.arg0_ptr = arg0_ptr;
+        let mut argv_index = 0usize;
+        while argv_index < argv.len() {
+            write_stack_usize(
+                self,
+                page_metadata_map,
+                initial_sp + word_index * word,
+                argv_ptrs[argv_index],
+            )?;
+            word_index += 1;
+            argv_index += 1;
+        }
+        write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, 0)?;
+        word_index += 1;
+        write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, 0)?;
+        word_index += 1;
+
+        let auxv = [
+            (AT_PHDR, elf.phdr_vaddr()),
+            (AT_PHENT, elf.phentsize()),
+            (AT_PHNUM, elf.program_header_count()),
+            (AT_ENTRY, elf.entry()),
+            (AT_BASE, interpreter.map_or(0, ElfObject::load_bias)),
+            (AT_PAGESZ, USER_PAGE_SIZE),
+            (AT_NULL, 0),
+        ];
+        let mut aux_index = 0usize;
+        while aux_index < auxv.len() {
+            let (key, value) = auxv[aux_index];
+            write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, key)?;
+            word_index += 1;
+            write_stack_usize(
+                self,
+                page_metadata_map,
+                initial_sp + word_index * word,
+                value,
+            )?;
+            word_index += 1;
+            aux_index += 1;
+        }
+
+        self.arg0_ptr = argv_ptrs[0];
         Some(initial_sp)
     }
 }
@@ -6873,12 +6834,13 @@ pub fn run_first_user_init(
     {
         user_boot_panic("user address space preset failed\n");
     }
+    let init_argv = [selected.actual_path()];
     if stack
         .setup(
             address_space,
             elf,
             interpreter_ref,
-            selected.actual_path(),
+            &init_argv,
             page_allocator,
             page_metadata_map,
         )

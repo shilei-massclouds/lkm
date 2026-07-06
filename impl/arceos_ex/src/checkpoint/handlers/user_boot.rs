@@ -388,6 +388,9 @@ fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
     sink.diag_usize("execve_stage", obs.stage);
     sink.diag_usize("execve_filename_len", obs.filename_len);
     sink.diag_usize("execve_argv0_len", obs.argv0_len);
+    sink.diag_usize("execve_argc", obs.argv_argc);
+    sink.diag_usize("execve_argv_total_bytes", obs.argv_total_bytes);
+    sink.diag_usize("execve_argv_capacity_exceeded", obs.argv_capacity_exceeded);
     sink.diag_usize("execve_main_elf_type", obs.main_elf_type);
     sink.diag_usize("execve_main_input_len", obs.main_input_len);
     sink.diag_usize("execve_main_segments", obs.main_segments);
