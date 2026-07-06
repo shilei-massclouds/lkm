@@ -1078,7 +1078,7 @@
     "anchor_fingerprint": "sha256:c4bdc67063c7c38c2a9ff89eabef84cc7ca8286d110d0dc681e56a063e398bff"
   },
   {
-    "checkpoint_index": 411,
+    "checkpoint_index": 414,
     "checkpoint_name": "SyscallTable.Wait4",
     "checkpoint_variant": "SyscallTableWait4",
     "linux_file": "kernel/exit.c",
@@ -1089,7 +1089,7 @@
     "anchor_fingerprint": "sha256:92549b5d721968fa29152fb2746347e9f8866c16a82bf68bcc565087909aba19"
   },
   {
-    "checkpoint_index": 412,
+    "checkpoint_index": 415,
     "checkpoint_name": "UserChild.ParentWaitResumed",
     "checkpoint_variant": "UserChildParentWaitResumed",
     "linux_file": "kernel/exit.c",
@@ -1100,7 +1100,7 @@
     "anchor_fingerprint": "sha256:f59455758ea844d2ff8d6d95109a70ee4de1f4e90d1d7959792b73943146d908"
   },
   {
-    "checkpoint_index": 413,
+    "checkpoint_index": 416,
     "checkpoint_name": "SyscallTable.Exit",
     "checkpoint_variant": "SyscallTableExit",
     "linux_file": "kernel/exit.c",
@@ -1111,7 +1111,7 @@
     "anchor_fingerprint": "sha256:71e7f8adff875cc351cc7490c5b46ebe6a5f84fbe8bc61a6834ab11dac40f705"
   },
   {
-    "checkpoint_index": 414,
+    "checkpoint_index": 417,
     "checkpoint_name": "PayloadPhase.Ready",
     "checkpoint_variant": "PayloadPhaseReady",
     "linux_file": "init/main.c",
@@ -1122,7 +1122,7 @@
     "anchor_fingerprint": "sha256:f5f2e1079a8d270dad77c902a0fb62d625de4803905da5c7c92e34c0fa2a64fa"
   },
   {
-    "checkpoint_index": 415,
+    "checkpoint_index": 418,
     "checkpoint_name": "PayloadPhase.Online",
     "checkpoint_variant": "PayloadPhaseOnline",
     "linux_file": "init/main.c",

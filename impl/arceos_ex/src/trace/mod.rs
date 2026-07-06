@@ -442,6 +442,9 @@ pub enum Checkpoint {
     SyscallTableSetTidAddress,
     SyscallTableClone,
     SyscallTableRtSigtimedwait,
+    UserSignalWaitSleep,
+    UserSignalWaitWakeSigchld,
+    SyscallTableRtSigtimedwaitReturnSignal,
     SyscallTableWait4,
     UserChildParentWaitResumed,
     SyscallTableExit,
@@ -893,6 +896,11 @@ impl Checkpoint {
             Self::SyscallTableSetTidAddress => "SyscallTable.SetTidAddress",
             Self::SyscallTableClone => "SyscallTable.Clone",
             Self::SyscallTableRtSigtimedwait => "SyscallTable.RtSigtimedwait",
+            Self::UserSignalWaitSleep => "UserSignalWait.Sleep",
+            Self::UserSignalWaitWakeSigchld => "UserSignalWait.WakeSigchld",
+            Self::SyscallTableRtSigtimedwaitReturnSignal => {
+                "SyscallTable.RtSigtimedwaitReturnSignal"
+            }
             Self::SyscallTableWait4 => "SyscallTable.Wait4",
             Self::UserChildParentWaitResumed => "UserChild.ParentWaitResumed",
             Self::SyscallTableExit => "SyscallTable.Exit",

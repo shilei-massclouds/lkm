@@ -6,7 +6,7 @@ use super::{
     exception_stream::ExceptionStream,
     interrupt_stream::InterruptStream,
     kernel_image::KernelImage,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     vm::Vm,
 };
@@ -157,6 +157,16 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
+    pub const fn zeroed() -> Self {
+        Self {
+            regs: [0; 32],
+            sstatus: 0,
+            sepc: 0,
+            scause: 0,
+            stval: 0,
+        }
+    }
+
     pub fn reg(&self, index: usize) -> usize {
         if index < self.regs.len() {
             self.regs[index]

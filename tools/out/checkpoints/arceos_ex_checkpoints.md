@@ -413,8 +413,11 @@
 | 408 | SyscallTableSetTidAddress | SyscallTable.SetTidAddress | null | impl/arceos_ex/src/trace/mod.rs |
 | 409 | SyscallTableClone | SyscallTable.Clone | null | impl/arceos_ex/src/trace/mod.rs |
 | 410 | SyscallTableRtSigtimedwait | SyscallTable.RtSigtimedwait | null | impl/arceos_ex/src/trace/mod.rs |
-| 411 | SyscallTableWait4 | SyscallTable.Wait4 | null | impl/arceos_ex/src/trace/mod.rs |
-| 412 | UserChildParentWaitResumed | UserChild.ParentWaitResumed | null | impl/arceos_ex/src/trace/mod.rs |
-| 413 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/trace/mod.rs |
-| 414 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/trace/mod.rs |
-| 415 | PayloadPhaseOnline | PayloadPhase.Online | null | impl/arceos_ex/src/trace/mod.rs |
+| 411 | UserSignalWaitSleep | UserSignalWait.Sleep | null | impl/arceos_ex/src/trace/mod.rs |
+| 412 | UserSignalWaitWakeSigchld | UserSignalWait.WakeSigchld | null | impl/arceos_ex/src/trace/mod.rs |
+| 413 | SyscallTableRtSigtimedwaitReturnSignal | SyscallTable.RtSigtimedwaitReturnSignal | null | impl/arceos_ex/src/trace/mod.rs |
+| 414 | SyscallTableWait4 | SyscallTable.Wait4 | null | impl/arceos_ex/src/trace/mod.rs |
+| 415 | UserChildParentWaitResumed | UserChild.ParentWaitResumed | null | impl/arceos_ex/src/trace/mod.rs |
+| 416 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/trace/mod.rs |
+| 417 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/trace/mod.rs |
+| 418 | PayloadPhaseOnline | PayloadPhase.Online | null | impl/arceos_ex/src/trace/mod.rs |

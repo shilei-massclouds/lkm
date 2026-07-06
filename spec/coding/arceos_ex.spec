@@ -1569,7 +1569,8 @@ type ArceosExStartupPhaseCodingMust {
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, complete fork/wait
-         * or signal semantics.
+         * or signal semantics beyond the bounded rt_sigtimedwait SIGCHLD
+         * pending/dequeue/wake first slice.
          *
          * mmap(222) must reference local Linux 6.12
          * arch/riscv/kernel/sys_riscv.c::SYSCALL_DEFINE6(mmap),

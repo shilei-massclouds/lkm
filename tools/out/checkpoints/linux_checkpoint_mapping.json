@@ -4522,6 +4522,39 @@
   },
   {
     "checkpoint_index": 411,
+    "checkpoint_name": "UserSignalWait.Sleep",
+    "checkpoint_variant": "UserSignalWaitSleep",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 412,
+    "checkpoint_name": "UserSignalWait.WakeSigchld",
+    "checkpoint_variant": "UserSignalWaitWakeSigchld",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 413,
+    "checkpoint_name": "SyscallTable.RtSigtimedwaitReturnSignal",
+    "checkpoint_variant": "SyscallTableRtSigtimedwaitReturnSignal",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 414,
     "checkpoint_name": "SyscallTable.Wait4",
     "checkpoint_variant": "SyscallTableWait4",
     "linux_file": "kernel/exit.c",
@@ -4532,7 +4565,7 @@
     "notes": "Linux wait4 syscall wrapper dispatches to kernel_wait4()."
   },
   {
-    "checkpoint_index": 412,
+    "checkpoint_index": 415,
     "checkpoint_name": "UserChild.ParentWaitResumed",
     "checkpoint_variant": "UserChildParentWaitResumed",
     "linux_file": "kernel/exit.c",
@@ -4543,7 +4576,7 @@
     "notes": "Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent."
   },
   {
-    "checkpoint_index": 413,
+    "checkpoint_index": 416,
     "checkpoint_name": "SyscallTable.Exit",
     "checkpoint_variant": "SyscallTableExit",
     "linux_file": "kernel/exit.c",
@@ -4554,7 +4587,7 @@
     "notes": "Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit()."
   },
   {
-    "checkpoint_index": 414,
+    "checkpoint_index": 417,
     "checkpoint_name": "PayloadPhase.Ready",
     "checkpoint_variant": "PayloadPhaseReady",
     "linux_file": "init/main.c",
@@ -4565,7 +4598,7 @@
     "notes": "Linux kernel_init() reaches the post-finalize payload-selection boundary."
   },
   {
-    "checkpoint_index": 415,
+    "checkpoint_index": 418,
     "checkpoint_name": "PayloadPhase.Online",
     "checkpoint_variant": "PayloadPhaseOnline",
     "linux_file": "init/main.c",

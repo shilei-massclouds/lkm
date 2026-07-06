@@ -5,11 +5,14 @@ use crate::{
     },
     context::context,
     objects::{
+        event_stream::TrapFrame,
         files::{FdRef, FileBackendKind},
         state::State,
         user_boot::{
-            ElfObjectRole, UserMappingKind, USER_BOOT_READ_MAX, USER_HEAP_BASE, USER_HEAP_SIZE,
-            USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE, USER_STACK_SIZE,
+            ElfObjectRole, UserMappingKind, UserRtSigtimedwaitResult, USER_BOOT_READ_MAX,
+            USER_CLONE_SIGCHLD, USER_HEAP_BASE, USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE,
+            USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
+            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
             USER_STACK_TOP,
         },
         vfs::VfsError,
@@ -733,6 +736,64 @@ impl SmokeScenario for UserBootElfScenario {
                 && !process.runtime_entered()
                 && !ctx.syscall_table.write_observed()
                 && !ctx.syscall_table.exit_observed(),
+        );
+        assertions.assert(
+            "sigchld pending from child exit",
+            ctx.user_init_process.record_child_exit_sigchld() == Some(false)
+                && ctx.user_init_process.pending_sigchld(),
+        );
+        let mut immediate_wait_frame = TrapFrame::zeroed();
+        immediate_wait_frame.sepc = 0x1000;
+        let immediate = ctx.user_init_process.begin_rt_sigtimedwait(
+            USER_SIGCHLD_MASK,
+            true,
+            true,
+            &immediate_wait_frame,
+        );
+        assertions.assert(
+            "rt_sigtimedwait consumes pending sigchld",
+            immediate == UserRtSigtimedwaitResult::ReturnSignal(USER_CLONE_SIGCHLD)
+                && !ctx.user_init_process.pending_sigchld()
+                && ctx.user_init_process.rt_sigtimedwait_dequeued_signal() == USER_CLONE_SIGCHLD
+                && ctx.user_init_process.rt_sigtimedwait_return_signal() == USER_CLONE_SIGCHLD,
+        );
+        let mut sleeping_wait_frame = TrapFrame::zeroed();
+        sleeping_wait_frame.sepc = 0x2000;
+        sleeping_wait_frame.set_reg(17, 137);
+        let sleeping = ctx.user_init_process.begin_rt_sigtimedwait(
+            USER_SIGCHLD_MASK,
+            true,
+            true,
+            &sleeping_wait_frame,
+        );
+        assertions.assert(
+            "rt_sigtimedwait sleep waiter",
+            sleeping == UserRtSigtimedwaitResult::Sleep
+                && ctx.user_init_process.rt_sigtimedwait_sleeping()
+                && ctx.user_init_process.rt_sigtimedwait_waiter_enqueued()
+                && ctx.user_init_process.rt_sigtimedwait_saved_frame_bound()
+                && ctx.user_init_process.rt_sigtimedwait_sleep_reason()
+                    == USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE
+                && !ctx.user_init_process.pending_sigchld(),
+        );
+        assertions.assert(
+            "sigchld wakes waiting rt_sigtimedwait",
+            ctx.user_init_process.record_child_exit_sigchld() == Some(true)
+                && !ctx.user_init_process.rt_sigtimedwait_sleeping()
+                && ctx.user_init_process.rt_sigtimedwait_waiter_finished()
+                && ctx
+                    .user_init_process
+                    .rt_sigtimedwait_wake_sigchld_committed()
+                && ctx.user_init_process.rt_sigtimedwait_wake_signal() == USER_CLONE_SIGCHLD
+                && ctx.user_init_process.rt_sigtimedwait_dequeued_signal() == USER_CLONE_SIGCHLD,
+        );
+        let mut resumed_wait_frame = TrapFrame::zeroed();
+        let resumed_signal = ctx
+            .user_init_process
+            .complete_rt_sigtimedwait_wake(&mut resumed_wait_frame);
+        assertions.assert(
+            "rt_sigtimedwait wake frame returns sigchld",
+            resumed_signal == Some(USER_CLONE_SIGCHLD) && resumed_wait_frame.sepc == 0x2000,
         );
     }
 

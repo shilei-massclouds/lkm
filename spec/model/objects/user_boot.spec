@@ -357,7 +357,9 @@ predicate syscall_rt_sigtimedwait_copies_wait_mask<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_empty_pending_wait_boundary<T>(table: T) -> bool;
-predicate syscall_rt_sigtimedwait_scheduler_sleep_deferred<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_waitqueue_sleep_first_slice<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_sigchld_pending_first_slice<T>(table: T) -> bool;
+predicate syscall_rt_sigtimedwait_return_signal_first_slice<T>(table: T) -> bool;
 predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
 predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
 predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
@@ -544,6 +546,11 @@ predicate user_init_process_rt_sigtimedwait_uinfo_null<T>(process: T) -> bool;
 predicate user_init_process_rt_sigtimedwait_uts_null<T>(process: T) -> bool;
 predicate user_init_process_rt_sigtimedwait_pending_match_empty<T>(process: T) -> bool;
 predicate user_init_process_rt_sigtimedwait_infinite_wait<T>(process: T) -> bool;
+predicate user_init_process_pending_sigchld_first_slice<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_waiter_enqueued<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_sleep_reason_bound<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_woken_by_sigchld<T>(process: T) -> bool;
+predicate user_init_process_rt_sigtimedwait_dequeued_sigchld<T>(process: T) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
 predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
 predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
@@ -1181,7 +1188,9 @@ object SyscallTable: ResourceObject {
                     syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
                     syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
                     syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
-                    syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
+                    syscall_rt_sigtimedwait_waitqueue_sleep_first_slice(self);
+                    syscall_rt_sigtimedwait_sigchld_pending_first_slice(self);
+                    syscall_rt_sigtimedwait_return_signal_first_slice(self);
                     syscall_execve_envp_full_copy_deferred(self);
                     syscall_execve_close_on_exec_deferred(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
@@ -1268,7 +1277,9 @@ object SyscallTable: ResourceObject {
             syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
             syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
             syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
-            syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
+            syscall_rt_sigtimedwait_waitqueue_sleep_first_slice(self);
+            syscall_rt_sigtimedwait_sigchld_pending_first_slice(self);
+            syscall_rt_sigtimedwait_return_signal_first_slice(self);
             syscall_execve_envp_full_copy_deferred(self);
             syscall_execve_close_on_exec_deferred(self);
             syscall_execve_old_mm_reclaim_deferred(self);
@@ -2179,13 +2190,24 @@ object SyscallTable: ResourceObject {
                  *
                  * The current OpenRC evidence reaches
                  * rt_sigtimedwait(uthese, NULL, NULL, 8) after setsid(157).
-                 * This first slice copies and records the wait mask, models
-                 * the current pending signal set as empty, and therefore must
-                 * not return success, EAGAIN or ENOSYS for that shape. It
-                 * records a Linux-like wait reason and stops at the observable
-                 * wait boundary. Signal generation/delivery, SIGCHLD pending
-                 * creation, real scheduler sleep/wakeup, timeout expiry,
-                 * restart and siginfo_t copyout remain deferred.
+                 * This first slice copies and records the wait mask, supports
+                 * the Linux sigset bit rule 1 << (sig - 1), and recognizes
+                 * SIGCHLD as signal 17. If no matching pending SIGCHLD exists,
+                 * it records a Linux-like wait reason, enqueues the single
+                 * PID1 signal waiter, and stops at the observable waitqueue
+                 * sleep boundary rather than returning success, EAGAIN or
+                 * ENOSYS. Failed fork or unsupported clone paths are not
+                 * signal sources and must not fabricate SIGCHLD.
+                 *
+                 * A real observed UserChildProcess exit/exit_group may set
+                 * PID1 pending SIGCHLD. If PID1 is sleeping in this
+                 * rt_sigtimedwait shape and the saved mask contains
+                 * SIGCHLD, the waiter is woken, SIGCHLD is dequeued and the
+                 * syscall returns 17 without siginfo_t copyout because uinfo
+                 * is NULL. uinfo copyout, uts timeout/remaining timeout,
+                 * restart, fatal delivery, signal handlers, shared pending
+                 * queues, multithreaded signal semantics and general signal
+                 * delivery remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2204,10 +2226,17 @@ object SyscallTable: ResourceObject {
                     syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
                     syscall_rt_sigtimedwait_uts_null_infinite_wait_first_slice(self);
                     syscall_rt_sigtimedwait_empty_pending_wait_boundary(self);
-                    syscall_rt_sigtimedwait_scheduler_sleep_deferred(self);
+                    syscall_rt_sigtimedwait_waitqueue_sleep_first_slice(self);
+                    syscall_rt_sigtimedwait_sigchld_pending_first_slice(self);
+                    syscall_rt_sigtimedwait_return_signal_first_slice(self);
                     user_init_process_rt_sigtimedwait_observed(UserInitProcess);
                     user_init_process_rt_sigtimedwait_pending_match_empty(UserInitProcess);
                     user_init_process_rt_sigtimedwait_infinite_wait(UserInitProcess);
+                    user_init_process_pending_sigchld_first_slice(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_waiter_enqueued(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_sleep_reason_bound(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_woken_by_sigchld(UserInitProcess);
+                    user_init_process_rt_sigtimedwait_dequeued_sigchld(UserInitProcess);
                     syscall_table_rt_sigtimedwait_observed(self);
                 }
             }
@@ -3125,6 +3154,11 @@ object UserInitProcess: ResourceObject {
                     user_init_process_rt_sigtimedwait_uts_null(self);
                     user_init_process_rt_sigtimedwait_pending_match_empty(self);
                     user_init_process_rt_sigtimedwait_infinite_wait(self);
+                    user_init_process_pending_sigchld_first_slice(self);
+                    user_init_process_rt_sigtimedwait_waiter_enqueued(self);
+                    user_init_process_rt_sigtimedwait_sleep_reason_bound(self);
+                    user_init_process_rt_sigtimedwait_woken_by_sigchld(self);
+                    user_init_process_rt_sigtimedwait_dequeued_sigchld(self);
                 }
             }
 

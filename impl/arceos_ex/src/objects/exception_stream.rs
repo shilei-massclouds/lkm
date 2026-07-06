@@ -16,7 +16,8 @@ use super::{
     task::TaskEntry,
     user_boot::{
         UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserSignalAction, USER_SIGNAL_COUNT,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
+        USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
         USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
     },
 };
@@ -699,7 +700,9 @@ pub struct SyscallTable {
     rt_sigtimedwait_uinfo_null_no_copyout_first_slice: bool,
     rt_sigtimedwait_uts_null_infinite_wait_first_slice: bool,
     rt_sigtimedwait_empty_pending_wait_boundary: bool,
-    rt_sigtimedwait_scheduler_sleep_deferred: bool,
+    rt_sigtimedwait_waitqueue_sleep_first_slice: bool,
+    rt_sigtimedwait_sigchld_pending_first_slice: bool,
+    rt_sigtimedwait_return_signal_first_slice: bool,
     signal_delivery_deferred: bool,
     clock_gettime_routes_to_timer_provider: bool,
     gettimeofday_routes_to_timer_provider: bool,
@@ -904,7 +907,9 @@ impl SyscallTable {
             rt_sigtimedwait_uinfo_null_no_copyout_first_slice: false,
             rt_sigtimedwait_uts_null_infinite_wait_first_slice: false,
             rt_sigtimedwait_empty_pending_wait_boundary: false,
-            rt_sigtimedwait_scheduler_sleep_deferred: false,
+            rt_sigtimedwait_waitqueue_sleep_first_slice: false,
+            rt_sigtimedwait_sigchld_pending_first_slice: false,
+            rt_sigtimedwait_return_signal_first_slice: false,
             signal_delivery_deferred: false,
             clock_gettime_routes_to_timer_provider: false,
             gettimeofday_routes_to_timer_provider: false,
@@ -1422,8 +1427,18 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn rt_sigtimedwait_scheduler_sleep_deferred(&self) -> bool {
-        self.rt_sigtimedwait_scheduler_sleep_deferred
+    pub const fn rt_sigtimedwait_waitqueue_sleep_first_slice(&self) -> bool {
+        self.rt_sigtimedwait_waitqueue_sleep_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_sigchld_pending_first_slice(&self) -> bool {
+        self.rt_sigtimedwait_sigchld_pending_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn rt_sigtimedwait_return_signal_first_slice(&self) -> bool {
+        self.rt_sigtimedwait_return_signal_first_slice
     }
 
     #[allow(dead_code)]
@@ -1832,7 +1847,9 @@ impl SyscallTable {
         self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice = true;
         self.rt_sigtimedwait_uts_null_infinite_wait_first_slice = true;
         self.rt_sigtimedwait_empty_pending_wait_boundary = true;
-        self.rt_sigtimedwait_scheduler_sleep_deferred = true;
+        self.rt_sigtimedwait_waitqueue_sleep_first_slice = true;
+        self.rt_sigtimedwait_sigchld_pending_first_slice = true;
+        self.rt_sigtimedwait_return_signal_first_slice = true;
         self.signal_delivery_deferred = true;
         self.clock_gettime_routes_to_timer_provider = true;
         self.gettimeofday_routes_to_timer_provider = true;
@@ -2266,7 +2283,9 @@ impl SyscallTable {
             || !self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice
             || !self.rt_sigtimedwait_uts_null_infinite_wait_first_slice
             || !self.rt_sigtimedwait_empty_pending_wait_boundary
-            || !self.rt_sigtimedwait_scheduler_sleep_deferred
+            || !self.rt_sigtimedwait_waitqueue_sleep_first_slice
+            || !self.rt_sigtimedwait_sigchld_pending_first_slice
+            || !self.rt_sigtimedwait_return_signal_first_slice
             || !self.signal_delivery_deferred
             || !self.signal_mask_usercopy_ready
         {
@@ -3891,12 +3910,10 @@ fn syscall_table_rt_sigtimedwait(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let pending_match = false;
-    let infinite_wait = true;
-    if !crate::context::context()
+    let result = crate::context::context()
         .user_init_process
-        .observe_rt_sigtimedwait(mask, true, true, pending_match, infinite_wait)
-    {
+        .begin_rt_sigtimedwait(mask, true, true, frame);
+    if result == UserRtSigtimedwaitResult::Unsupported {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -3906,14 +3923,50 @@ fn syscall_table_rt_sigtimedwait(table: &SyscallTable, frame: &mut TrapFrame) {
         Checkpoint::SyscallTableRtSigtimedwait,
         crate::context::context_ref(),
     );
-    print_rt_sigtimedwait_wait_boundary(mask, pending_match, infinite_wait);
-    enter_rt_sigtimedwait_wait_boundary()
+
+    match result {
+        UserRtSigtimedwaitResult::ReturnSignal(signal) => {
+            crate::checkpoint::dispatch(
+                Checkpoint::SyscallTableRtSigtimedwaitReturnSignal,
+                crate::context::context_ref(),
+            );
+            complete_successful_syscall(frame, signal);
+        }
+        UserRtSigtimedwaitResult::Sleep => {
+            crate::checkpoint::dispatch(
+                Checkpoint::UserSignalWaitSleep,
+                crate::context::context_ref(),
+            );
+            print_rt_sigtimedwait_wait_boundary(mask);
+            enter_rt_sigtimedwait_wait_boundary(frame);
+        }
+        UserRtSigtimedwaitResult::Unsupported => {}
+    }
 }
 
-fn enter_rt_sigtimedwait_wait_boundary() -> ! {
+fn enter_rt_sigtimedwait_wait_boundary(frame: &mut TrapFrame) {
+    let saved_sstatus = crate::arch::riscv64::csr::read_sstatus();
     crate::arch::riscv64::csr::enable_supervisor_interrupts();
     loop {
-        core::hint::spin_loop();
+        let signal = crate::context::context()
+            .user_init_process
+            .complete_rt_sigtimedwait_wake(frame);
+        if let Some(signal) = signal {
+            crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+            crate::checkpoint::dispatch(
+                Checkpoint::SyscallTableRtSigtimedwaitReturnSignal,
+                crate::context::context_ref(),
+            );
+            complete_successful_syscall(frame, signal);
+            return;
+        }
+        wait_for_signal_wait_event();
+    }
+}
+
+fn wait_for_signal_wait_event() {
+    unsafe {
+        core::arch::asm!("wfi", options(nomem, nostack));
     }
 }
 
@@ -5227,6 +5280,19 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         )
     };
 
+    let signal_wait_woken = {
+        let ctx = crate::context::context();
+        ctx.user_init_process
+            .record_child_exit_sigchld()
+            .unwrap_or(false)
+    };
+    if signal_wait_woken {
+        crate::checkpoint::dispatch(
+            Checkpoint::UserSignalWaitWakeSigchld,
+            crate::context::context_ref(),
+        );
+    }
+
     crate::arch::riscv64::csr::write_satp(parent_satp);
     crate::arch::riscv64::csr::sfence_vma();
 
@@ -5872,13 +5938,28 @@ fn print_rt_sigtimedwait_unsupported_detail(frame: &TrapFrame) {
     }
 }
 
-fn print_rt_sigtimedwait_wait_boundary(mask: usize, pending_match: bool, infinite_wait: bool) {
+fn print_rt_sigtimedwait_wait_boundary(mask: usize) {
+    let process = &crate::context::context_ref().user_init_process;
     crate::arch::riscv64::sbi::putstr("rt_sigtimedwait waiting uthese_copy=ok uthese_mask=0x");
     print_hex(mask);
-    crate::arch::riscv64::sbi::putstr(" uinfo=NULL uts=NULL pending_match=");
-    print_bool_digit(pending_match);
+    crate::arch::riscv64::sbi::putstr(" uinfo=NULL uts=NULL sigchld=17 sigchld_mask=0x");
+    print_hex(crate::objects::user_boot::USER_SIGCHLD_MASK);
+    crate::arch::riscv64::sbi::putstr(" pending_sigchld=");
+    print_bool_digit(process.pending_sigchld());
+    crate::arch::riscv64::sbi::putstr(" pending_match=");
+    print_bool_digit(process.rt_sigtimedwait_pending_match());
+    crate::arch::riscv64::sbi::putstr(" waiter_enqueued=");
+    print_bool_digit(process.rt_sigtimedwait_waiter_enqueued());
+    crate::arch::riscv64::sbi::putstr(" sleep_reason=");
+    if process.rt_sigtimedwait_sleep_reason()
+        == USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE
+    {
+        crate::arch::riscv64::sbi::putstr("rt_sigtimedwait/SIGCHLD/infinite");
+    } else {
+        crate::arch::riscv64::sbi::putstr("none");
+    }
     crate::arch::riscv64::sbi::putstr(" wait=");
-    if infinite_wait {
+    if process.rt_sigtimedwait_infinite_wait() {
         crate::arch::riscv64::sbi::putstr("infinite");
     } else {
         crate::arch::riscv64::sbi::putstr("bounded");

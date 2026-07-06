@@ -2878,34 +2878,55 @@
   },
   {
     "index": 411,
+    "variant": "UserSignalWaitSleep",
+    "name": "UserSignalWait.Sleep",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 412,
+    "variant": "UserSignalWaitWakeSigchld",
+    "name": "UserSignalWait.WakeSigchld",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 413,
+    "variant": "SyscallTableRtSigtimedwaitReturnSignal",
+    "name": "SyscallTable.RtSigtimedwaitReturnSignal",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/trace/mod.rs"
+  },
+  {
+    "index": 414,
     "variant": "SyscallTableWait4",
     "name": "SyscallTable.Wait4",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 412,
+    "index": 415,
     "variant": "UserChildParentWaitResumed",
     "name": "UserChild.ParentWaitResumed",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 413,
+    "index": 416,
     "variant": "SyscallTableExit",
     "name": "SyscallTable.Exit",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 414,
+    "index": 417,
     "variant": "PayloadPhaseReady",
     "name": "PayloadPhase.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/trace/mod.rs"
   },
   {
-    "index": 415,
+    "index": 418,
     "variant": "PayloadPhaseOnline",
     "name": "PayloadPhase.Online",
     "early_byte": null,

@@ -25,6 +25,7 @@ use crate::objects::user_boot::{
     USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
     USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
     USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
+    USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
 };
 
 #[cfg(app_user_boot)]
@@ -81,6 +82,12 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableRtSigtimedwait,
     #[cfg(app_user_boot)]
+    Checkpoint::UserSignalWaitSleep,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserSignalWaitWakeSigchld,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableRtSigtimedwaitReturnSignal,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableWait4,
     #[cfg(app_user_boot)]
     Checkpoint::UserChildParentWaitResumed,
@@ -88,7 +95,7 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 23;
+pub const KUNIT_CASE_COUNT: usize = 26;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
@@ -112,6 +119,12 @@ static SYSCALL_CLOSE_REPORTED: AtomicBool = AtomicBool::new(false);
 static SYSCALL_NEWFSTATAT_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_RT_SIGTIMEDWAIT_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_SIGNAL_WAIT_SLEEP_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static USER_SIGNAL_WAIT_WAKE_SIGCHLD_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_RT_SIGTIMEDWAIT_RETURN_SIGNAL_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static SYSCALL_WAIT4_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -217,6 +230,24 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         Checkpoint::SyscallTableRtSigtimedwait => {
             run_once(&SYSCALL_RT_SIGTIMEDWAIT_REPORTED, || {
                 run_syscall_table_rt_sigtimedwait(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserSignalWaitSleep => {
+            run_once(&USER_SIGNAL_WAIT_SLEEP_REPORTED, || {
+                run_user_signal_wait_sleep(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserSignalWaitWakeSigchld => {
+            run_once(&USER_SIGNAL_WAIT_WAKE_SIGCHLD_REPORTED, || {
+                run_user_signal_wait_wake_sigchld(checkpoint, ctx, sink, total)
+            });
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableRtSigtimedwaitReturnSignal => {
+            run_once(&SYSCALL_RT_SIGTIMEDWAIT_RETURN_SIGNAL_REPORTED, || {
+                run_syscall_table_rt_sigtimedwait_return_signal(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -1183,7 +1214,9 @@ fn run_syscall_table_rt_sigtimedwait(
         && table.rt_sigtimedwait_uinfo_null_no_copyout_first_slice()
         && table.rt_sigtimedwait_uts_null_infinite_wait_first_slice()
         && table.rt_sigtimedwait_empty_pending_wait_boundary()
-        && table.rt_sigtimedwait_scheduler_sleep_deferred()
+        && table.rt_sigtimedwait_waitqueue_sleep_first_slice()
+        && table.rt_sigtimedwait_sigchld_pending_first_slice()
+        && table.rt_sigtimedwait_return_signal_first_slice()
         && table.signal_delivery_deferred()
         && table.rt_sigtimedwait_observed()
         && process.pending_signal_set_empty_first_slice()
@@ -1191,7 +1224,7 @@ fn run_syscall_table_rt_sigtimedwait(
         && process.rt_sigtimedwait_mask() != 0
         && process.rt_sigtimedwait_uinfo_null()
         && process.rt_sigtimedwait_uts_null()
-        && !process.rt_sigtimedwait_pending_match()
+        && process.rt_sigtimedwait_sigchld_mask_match()
         && process.rt_sigtimedwait_infinite_wait();
 
     sink.diag_usize(
@@ -1211,6 +1244,31 @@ fn run_syscall_table_rt_sigtimedwait(
         "rt_sigtimedwait_pending_match",
         process.rt_sigtimedwait_pending_match() as usize,
     );
+    sink.diag_usize("rt_sigtimedwait_sigchld_mask", USER_SIGCHLD_MASK);
+    sink.diag_usize(
+        "rt_sigtimedwait_pending_sigchld",
+        process.pending_sigchld() as usize,
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_waiter_enqueued",
+        process.rt_sigtimedwait_waiter_enqueued() as usize,
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_sleep_reason",
+        process.rt_sigtimedwait_sleep_reason(),
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_wake_signal",
+        process.rt_sigtimedwait_wake_signal(),
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_dequeued_signal",
+        process.rt_sigtimedwait_dequeued_signal(),
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_return_signal",
+        process.rt_sigtimedwait_return_signal(),
+    );
     sink.diag_usize(
         "rt_sigtimedwait_infinite_wait",
         process.rt_sigtimedwait_infinite_wait() as usize,
@@ -1219,6 +1277,137 @@ fn run_syscall_table_rt_sigtimedwait(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "rt_sigtimedwait wait facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_signal_wait_sleep(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_signal_wait.sleep";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let valid = process.rt_sigtimedwait_observed()
+        && process.rt_sigtimedwait_sleeping()
+        && process.rt_sigtimedwait_waiter_enqueued()
+        && process.rt_sigtimedwait_saved_frame_bound()
+        && process.rt_sigtimedwait_sleep_reason()
+            == USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE
+        && !process.pending_sigchld()
+        && !process.rt_sigtimedwait_pending_match();
+
+    sink.diag_usize("signal_wait_mask", process.rt_sigtimedwait_mask());
+    sink.diag_usize("signal_wait_sigchld_mask", USER_SIGCHLD_MASK);
+    sink.diag_usize(
+        "signal_wait_pending_sigchld",
+        process.pending_sigchld() as usize,
+    );
+    sink.diag_usize(
+        "signal_wait_pending_match",
+        process.rt_sigtimedwait_pending_match() as usize,
+    );
+    sink.diag_usize(
+        "signal_wait_waiter_enqueued",
+        process.rt_sigtimedwait_waiter_enqueued() as usize,
+    );
+    sink.diag_usize(
+        "signal_wait_sleep_reason",
+        process.rt_sigtimedwait_sleep_reason(),
+    );
+
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "signal wait sleep facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_signal_wait_wake_sigchld(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_signal_wait.wake_sigchld";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let valid = process.rt_sigtimedwait_observed()
+        && !process.rt_sigtimedwait_sleeping()
+        && !process.rt_sigtimedwait_waiter_enqueued()
+        && process.rt_sigtimedwait_waiter_finished()
+        && process.rt_sigtimedwait_wake_sigchld_committed()
+        && process.rt_sigtimedwait_wake_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && process.rt_sigtimedwait_dequeued_signal()
+            == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && process.rt_sigtimedwait_return_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && !process.pending_sigchld();
+
+    sink.diag_usize(
+        "signal_wait_wake_signal",
+        process.rt_sigtimedwait_wake_signal(),
+    );
+    sink.diag_usize(
+        "signal_wait_dequeued_signal",
+        process.rt_sigtimedwait_dequeued_signal(),
+    );
+    sink.diag_usize(
+        "signal_wait_return_signal",
+        process.rt_sigtimedwait_return_signal(),
+    );
+    sink.diag_usize(
+        "signal_wait_waiter_finished",
+        process.rt_sigtimedwait_waiter_finished() as usize,
+    );
+
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "signal wait wake facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_rt_sigtimedwait_return_signal(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.rt_sigtimedwait_return_signal";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let valid = ctx.syscall_table.rt_sigtimedwait_observed()
+        && process.rt_sigtimedwait_observed()
+        && process.rt_sigtimedwait_dequeued_signal()
+            == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && process.rt_sigtimedwait_return_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
+        && !process.pending_sigchld();
+
+    sink.diag_usize(
+        "rt_sigtimedwait_dequeued_signal",
+        process.rt_sigtimedwait_dequeued_signal(),
+    );
+    sink.diag_usize(
+        "rt_sigtimedwait_return_signal",
+        process.rt_sigtimedwait_return_signal(),
+    );
+
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(
+            total,
+            "",
+            name,
+            "rt_sigtimedwait return signal facts invalid",
+        );
     }
 }
 

@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 416,
+  "total_checkpoints": 419,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 299
+      "count": 302
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 299
+      "count": 302
     },
     {
       "confidence": "medium",
@@ -264,6 +264,10 @@
       "count": 2
     },
     {
+      "family": "SyscallTable",
+      "count": 2
+    },
+    {
       "family": "SystemState",
       "count": 2
     },
@@ -285,6 +289,10 @@
     },
     {
       "family": "UpMultitaskPhase",
+      "count": 2
+    },
+    {
+      "family": "UserSignalWait",
       "count": 2
     },
     {
@@ -880,10 +888,6 @@
       "count": 1
     },
     {
-      "family": "SyscallTable",
-      "count": 1
-    },
-    {
       "family": "TaskFileContext",
       "count": 1
     },
@@ -988,5 +992,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 173
+  "unmapped_singleton_family_count": 172
 }

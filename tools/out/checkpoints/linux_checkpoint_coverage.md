@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 416
+- total checkpoints: 419
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 299 |
+| unmapped | 302 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 299 |
+| none | 302 |
 | medium | 62 |
 | high | 55 |
 
@@ -85,13 +85,15 @@
 | SmpRuntimePhase | 2 |
 | Softirq | 2 |
 | SwapperVm | 2 |
+| SyscallTable | 2 |
 | SystemState | 2 |
 | TaskCreationCore | 2 |
 | TasksRcu | 2 |
 | Tick | 2 |
 | TickBroadcast | 2 |
 | UpMultitaskPhase | 2 |
+| UserSignalWait | 2 |
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 173
+- singleton unmapped families: 172

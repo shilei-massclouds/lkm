@@ -41,8 +41,11 @@ const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
 pub const USER_CHILD_PID: usize = 3;
 pub const USER_CLONE_SIGCHLD: usize = 17;
+pub const USER_SIGCHLD_MASK: usize = 1usize << (USER_CLONE_SIGCHLD - 1);
 pub const USER_WAIT4_ALL_CHILDREN: usize = usize::MAX;
 pub const USER_WAIT4_WUNTRACED: usize = 2;
+pub const USER_SIGNAL_WAIT_REASON_NONE: usize = 0;
+pub const USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE: usize = 1;
 
 pub const ELF_HEADER_LEN: usize = 64;
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
@@ -114,6 +117,57 @@ impl UserSignalAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserRtSigtimedwaitResult {
+    ReturnSignal(usize),
+    Sleep,
+    Unsupported,
+}
+
+#[derive(Clone, Copy)]
+struct UserSignalWaitQueue {
+    waiter_enqueued: bool,
+    waiter_finished: bool,
+    wake_sigchld_committed: bool,
+}
+
+impl UserSignalWaitQueue {
+    const fn new() -> Self {
+        Self {
+            waiter_enqueued: false,
+            waiter_finished: false,
+            wake_sigchld_committed: false,
+        }
+    }
+
+    const fn waiter_enqueued(&self) -> bool {
+        self.waiter_enqueued
+    }
+
+    const fn waiter_finished(&self) -> bool {
+        self.waiter_finished
+    }
+
+    const fn wake_sigchld_committed(&self) -> bool {
+        self.wake_sigchld_committed
+    }
+
+    fn prepare_wait(&mut self) {
+        self.waiter_enqueued = true;
+        self.waiter_finished = false;
+        self.wake_sigchld_committed = false;
+    }
+
+    fn wake_sigchld(&mut self) {
+        self.wake_sigchld_committed = true;
+    }
+
+    fn finish_wait(&mut self) {
+        self.waiter_finished = true;
+        self.waiter_enqueued = false;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserProcessGroupLookup {
     Found(usize),
     NoSuchProcess,
@@ -137,6 +191,10 @@ pub enum UserMmapError {
 
 fn pid_t_arg(value: usize) -> i32 {
     value as u32 as i32
+}
+
+pub const fn sigchld_mask_matches(mask: usize) -> bool {
+    mask & USER_SIGCHLD_MASK != 0
 }
 
 pub const USER_MAIN_PIE_LOAD_BIAS: usize = 0x1000_0000;
@@ -3254,6 +3312,14 @@ pub struct UserInitProcess {
     rt_sigtimedwait_uts_null: bool,
     rt_sigtimedwait_pending_match: bool,
     rt_sigtimedwait_infinite_wait: bool,
+    pending_sigchld: bool,
+    rt_sigtimedwait_sleeping: bool,
+    rt_sigtimedwait_wait_queue: UserSignalWaitQueue,
+    rt_sigtimedwait_saved_frame: Option<TrapFrame>,
+    rt_sigtimedwait_sleep_reason: usize,
+    rt_sigtimedwait_wake_signal: usize,
+    rt_sigtimedwait_dequeued_signal: usize,
+    rt_sigtimedwait_return_signal: usize,
     clear_child_tid_bound: bool,
     clear_child_tid: usize,
     root_cwd_first_slice: bool,
@@ -4605,6 +4671,14 @@ impl UserInitProcess {
             rt_sigtimedwait_uts_null: false,
             rt_sigtimedwait_pending_match: false,
             rt_sigtimedwait_infinite_wait: false,
+            pending_sigchld: false,
+            rt_sigtimedwait_sleeping: false,
+            rt_sigtimedwait_wait_queue: UserSignalWaitQueue::new(),
+            rt_sigtimedwait_saved_frame: None,
+            rt_sigtimedwait_sleep_reason: USER_SIGNAL_WAIT_REASON_NONE,
+            rt_sigtimedwait_wake_signal: 0,
+            rt_sigtimedwait_dequeued_signal: 0,
+            rt_sigtimedwait_return_signal: 0,
             clear_child_tid_bound: false,
             clear_child_tid: 0,
             root_cwd_first_slice: false,
@@ -4928,6 +5002,50 @@ impl UserInitProcess {
         self.rt_sigtimedwait_infinite_wait
     }
 
+    pub const fn pending_sigchld(&self) -> bool {
+        self.pending_sigchld
+    }
+
+    pub const fn rt_sigtimedwait_sleeping(&self) -> bool {
+        self.rt_sigtimedwait_sleeping
+    }
+
+    pub const fn rt_sigtimedwait_waiter_enqueued(&self) -> bool {
+        self.rt_sigtimedwait_wait_queue.waiter_enqueued()
+    }
+
+    pub const fn rt_sigtimedwait_waiter_finished(&self) -> bool {
+        self.rt_sigtimedwait_wait_queue.waiter_finished()
+    }
+
+    pub const fn rt_sigtimedwait_sleep_reason(&self) -> usize {
+        self.rt_sigtimedwait_sleep_reason
+    }
+
+    pub const fn rt_sigtimedwait_wake_signal(&self) -> usize {
+        self.rt_sigtimedwait_wake_signal
+    }
+
+    pub const fn rt_sigtimedwait_dequeued_signal(&self) -> usize {
+        self.rt_sigtimedwait_dequeued_signal
+    }
+
+    pub const fn rt_sigtimedwait_return_signal(&self) -> usize {
+        self.rt_sigtimedwait_return_signal
+    }
+
+    pub const fn rt_sigtimedwait_wake_sigchld_committed(&self) -> bool {
+        self.rt_sigtimedwait_wait_queue.wake_sigchld_committed()
+    }
+
+    pub const fn rt_sigtimedwait_saved_frame_bound(&self) -> bool {
+        self.rt_sigtimedwait_saved_frame.is_some()
+    }
+
+    pub const fn rt_sigtimedwait_sigchld_mask_match(&self) -> bool {
+        sigchld_mask_matches(self.rt_sigtimedwait_mask)
+    }
+
     pub fn credentials_syscall_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
             && self.credentials_inherited
@@ -5051,6 +5169,14 @@ impl UserInitProcess {
         self.pending_signal_set_empty_first_slice = true;
         self.blocked_signal_mask = 0;
         self.signal_actions = [UserSignalAction::default(); USER_SIGNAL_COUNT];
+        self.pending_sigchld = false;
+        self.rt_sigtimedwait_sleeping = false;
+        self.rt_sigtimedwait_wait_queue = UserSignalWaitQueue::new();
+        self.rt_sigtimedwait_saved_frame = None;
+        self.rt_sigtimedwait_sleep_reason = USER_SIGNAL_WAIT_REASON_NONE;
+        self.rt_sigtimedwait_wake_signal = 0;
+        self.rt_sigtimedwait_dequeued_signal = 0;
+        self.rt_sigtimedwait_return_signal = 0;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -5416,7 +5542,7 @@ impl UserInitProcess {
         true
     }
 
-    pub fn observe_rt_sigtimedwait(
+    fn observe_rt_sigtimedwait(
         &mut self,
         mask: usize,
         uinfo_null: bool,
@@ -5434,6 +5560,77 @@ impl UserInitProcess {
         self.rt_sigtimedwait_infinite_wait = infinite_wait;
         self.rt_sigtimedwait_observed = true;
         true
+    }
+
+    pub fn begin_rt_sigtimedwait(
+        &mut self,
+        mask: usize,
+        uinfo_null: bool,
+        uts_null: bool,
+        frame: &TrapFrame,
+    ) -> UserRtSigtimedwaitResult {
+        if !self.signal_wait_syscall_ready() {
+            return UserRtSigtimedwaitResult::Unsupported;
+        }
+
+        let pending_match = self.pending_sigchld && sigchld_mask_matches(mask);
+        if !self.observe_rt_sigtimedwait(mask, uinfo_null, uts_null, pending_match, uts_null) {
+            return UserRtSigtimedwaitResult::Unsupported;
+        }
+
+        self.rt_sigtimedwait_sleep_reason = USER_SIGNAL_WAIT_REASON_NONE;
+        self.rt_sigtimedwait_wake_signal = 0;
+        self.rt_sigtimedwait_dequeued_signal = 0;
+        self.rt_sigtimedwait_return_signal = 0;
+
+        if pending_match {
+            self.pending_sigchld = false;
+            self.rt_sigtimedwait_sleeping = false;
+            self.rt_sigtimedwait_saved_frame = None;
+            self.rt_sigtimedwait_dequeued_signal = USER_CLONE_SIGCHLD;
+            self.rt_sigtimedwait_return_signal = USER_CLONE_SIGCHLD;
+            return UserRtSigtimedwaitResult::ReturnSignal(USER_CLONE_SIGCHLD);
+        }
+
+        self.rt_sigtimedwait_sleeping = true;
+        self.rt_sigtimedwait_saved_frame = Some(*frame);
+        self.rt_sigtimedwait_sleep_reason =
+            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE;
+        self.rt_sigtimedwait_wait_queue.prepare_wait();
+        UserRtSigtimedwaitResult::Sleep
+    }
+
+    pub fn record_child_exit_sigchld(&mut self) -> Option<bool> {
+        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+            return None;
+        }
+
+        self.pending_sigchld = true;
+        if self.rt_sigtimedwait_sleeping && sigchld_mask_matches(self.rt_sigtimedwait_mask) {
+            self.pending_sigchld = false;
+            self.rt_sigtimedwait_pending_match = true;
+            self.rt_sigtimedwait_sleeping = false;
+            self.rt_sigtimedwait_wake_signal = USER_CLONE_SIGCHLD;
+            self.rt_sigtimedwait_dequeued_signal = USER_CLONE_SIGCHLD;
+            self.rt_sigtimedwait_return_signal = USER_CLONE_SIGCHLD;
+            self.rt_sigtimedwait_wait_queue.wake_sigchld();
+            self.rt_sigtimedwait_wait_queue.finish_wait();
+            return Some(true);
+        }
+        Some(false)
+    }
+
+    pub fn complete_rt_sigtimedwait_wake(&mut self, frame: &mut TrapFrame) -> Option<usize> {
+        if self.rt_sigtimedwait_sleeping
+            || self.rt_sigtimedwait_return_signal != USER_CLONE_SIGCHLD
+            || self.rt_sigtimedwait_dequeued_signal != USER_CLONE_SIGCHLD
+        {
+            return None;
+        }
+
+        let saved_frame = self.rt_sigtimedwait_saved_frame.take()?;
+        *frame = saved_frame;
+        Some(USER_CLONE_SIGCHLD)
     }
 
     pub fn observe_getcwd_root_slice(&mut self) -> bool {
