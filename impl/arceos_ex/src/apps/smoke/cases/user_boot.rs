@@ -6,7 +6,7 @@ use crate::{
     context::context,
     objects::{
         event_stream::TrapFrame,
-        files::{FdRef, FileBackendKind, FileError},
+        files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
         state::State,
         user_boot::{
             ElfObjectRole, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
@@ -769,6 +769,97 @@ impl SmokeScenario for UserBootElfScenario {
                     .regular0_backend()
                     .regular_file_stat_returns_metadata(),
         );
+        let null_fd = match ctx.files_struct.open_null_path(
+            b"/dev/null",
+            USER_TEST_O_RDWR | USER_TEST_O_NONBLOCK | USER_TEST_O_LARGEFILE | USER_TEST_O_CLOEXEC,
+        ) {
+            Ok(fd) => fd,
+            Err(_) => {
+                assertions.assert("null open path", false);
+                return;
+            }
+        };
+        let Some(null_diag) = ctx.files_struct.fd_table_entry_diagnostic(null_fd) else {
+            assertions.assert("null fd diagnostic", false);
+            return;
+        };
+        let null_status_flags = match ctx.files_struct.fcntl_getfl_fd(null_fd) {
+            Ok(flags) => flags,
+            Err(_) => {
+                assertions.assert("null fgetfl", false);
+                return;
+            }
+        };
+        let null_fd_flags = match ctx.files_struct.fcntl_getfd_fd(null_fd) {
+            Ok(flags) => flags,
+            Err(_) => {
+                assertions.assert("null fgetfd", false);
+                return;
+            }
+        };
+        let mut null_buffer = [0u8; 4];
+        let null_read = match ctx.files_struct.read_fd(null_fd, &mut null_buffer) {
+            Ok(len) => len,
+            Err(_) => {
+                assertions.assert("null read eof", false);
+                return;
+            }
+        };
+        let null_written = match ctx.files_struct.write_fd(null_fd, b"drop") {
+            Ok(len) => len,
+            Err(_) => {
+                assertions.assert("null write discard", false);
+                return;
+            }
+        };
+        let null_stat = match ctx.files_struct.fstat_fd(null_fd, &ctx.vfs_core) {
+            Ok(stat) => stat,
+            Err(_) => {
+                assertions.assert("null fstat", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "null tty ioctl enotty",
+            matches!(
+                ctx.files_struct.ioctl_tiocgwinsz_fd(null_fd),
+                Err(FileError::NotTty)
+            ),
+        );
+        assertions.assert(
+            "null fd semantics",
+            null_fd == 3
+                && null_diag.ofd == OpenFileDescriptionRef::Null
+                && null_diag.readable
+                && null_diag.writable
+                && null_diag.close_on_exec
+                && null_status_flags & USER_TEST_O_NONBLOCK != 0
+                && null_status_flags & USER_TEST_O_LARGEFILE != 0
+                && null_status_flags & USER_TEST_O_CLOEXEC == 0
+                && null_fd_flags == USER_TEST_FD_CLOEXEC
+                && null_read == 0
+                && null_written == 4
+                && null_stat.size() == 0
+                && null_stat.mode() & 0o170000 == 0o020000
+                && ctx.files_struct.null_fd_installed()
+                && ctx.files_struct.null_device_read_eof_observed()
+                && ctx.files_struct.null_device_write_discard_observed()
+                && ctx.files_struct.null_device_fstat_device_node()
+                && ctx.files_struct.null_device_tty_ioctl_enotty()
+                && ctx.files_struct.null().read_observed()
+                && ctx.files_struct.null().write_observed()
+                && ctx.files_struct.null_backend().char_device_null_bound()
+                && ctx
+                    .files_struct
+                    .null_backend()
+                    .null_device_read_returns_eof()
+                && ctx
+                    .files_struct
+                    .null_backend()
+                    .null_device_write_discards_data()
+                && !ctx.files_struct.null_backend().write_to_console(),
+        );
+        assertions.assert("null close fd", ctx.files_struct.close_fd(null_fd).is_ok());
         assertions.assert(
             "invalid close badfd",
             matches!(ctx.files_struct.close_fd(usize::MAX), Err(FileError::BadFd)),

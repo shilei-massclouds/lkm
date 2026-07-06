@@ -31,6 +31,7 @@ const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
 const DT_LNK: u8 = 10;
 const DEV_TTY_PATH: &[u8] = b"/dev/tty";
+const DEV_NULL_PATH: &[u8] = b"/dev/null";
 const FILE_O_RDONLY: u32 = 0;
 const FILE_O_WRONLY: u32 = 1;
 const FILE_O_RDWR: u32 = 2;
@@ -144,6 +145,10 @@ pub fn is_tty_path(path: &[u8]) -> bool {
         .all(|byte| matches!(*byte, b'0'..=b'9'))
 }
 
+pub fn is_null_path(path: &[u8]) -> bool {
+    path == DEV_NULL_PATH
+}
+
 fn vfs_error_to_file_error(error: VfsError) -> FileError {
     match error {
         VfsError::NotFound => FileError::PathUnavailable,
@@ -241,6 +246,7 @@ pub enum OpenFileDescriptionRef {
     Stdout,
     Stderr,
     Regular0,
+    Null,
     Tty0,
     Pidfd0,
 }
@@ -359,6 +365,7 @@ pub struct FileBackend {
     kind: FileBackendKind,
     allocated: bool,
     char_device_console_bound: bool,
+    char_device_null_bound: bool,
     char_device_write_supported: bool,
     char_device_read_supported: bool,
     regular_file_bound: bool,
@@ -371,6 +378,8 @@ pub struct FileBackend {
     char_device_read_returns_data: AtomicUsize,
     regular_file_read_returns_data: AtomicUsize,
     regular_file_stat_returns_metadata: AtomicUsize,
+    null_device_read_returns_eof: AtomicUsize,
+    null_device_write_discards_data: AtomicUsize,
     last_read_len: AtomicUsize,
     last_stat_size: AtomicUsize,
 }
@@ -383,6 +392,7 @@ impl FileBackend {
             kind,
             allocated: false,
             char_device_console_bound: false,
+            char_device_null_bound: false,
             char_device_write_supported: false,
             char_device_read_supported: false,
             regular_file_bound: false,
@@ -395,6 +405,8 @@ impl FileBackend {
             char_device_read_returns_data: AtomicUsize::new(0),
             regular_file_read_returns_data: AtomicUsize::new(0),
             regular_file_stat_returns_metadata: AtomicUsize::new(0),
+            null_device_read_returns_eof: AtomicUsize::new(0),
+            null_device_write_discards_data: AtomicUsize::new(0),
             last_read_len: AtomicUsize::new(0),
             last_stat_size: AtomicUsize::new(0),
         }
@@ -414,6 +426,10 @@ impl FileBackend {
 
     pub const fn char_device_console_bound(&self) -> bool {
         self.char_device_console_bound
+    }
+
+    pub const fn char_device_null_bound(&self) -> bool {
+        self.char_device_null_bound
     }
 
     pub const fn char_device_write_supported(&self) -> bool {
@@ -466,6 +482,14 @@ impl FileBackend {
             != 0
     }
 
+    pub fn null_device_read_returns_eof(&self) -> bool {
+        self.null_device_read_returns_eof.load(Ordering::Acquire) != 0
+    }
+
+    pub fn null_device_write_discards_data(&self) -> bool {
+        self.null_device_write_discards_data.load(Ordering::Acquire) != 0
+    }
+
     pub fn last_read_len(&self) -> usize {
         self.last_read_len.load(Ordering::Acquire)
     }
@@ -513,9 +537,30 @@ impl FileBackend {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
+    fn setup_null_device(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base || self.kind != FileBackendKind::CharDevice {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.allocated = true;
+        self.char_device_null_bound = true;
+        self.char_device_write_supported = true;
+        self.char_device_read_supported = true;
+        self.regular_file_deferred = true;
+        self.block_device_deferred = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
     fn write_char_device(&self, bytes: &[u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_console_bound
             || !self.char_device_write_supported
         {
             return Err(FileError::BackendUnavailable);
@@ -524,6 +569,21 @@ impl FileBackend {
         crate::objects::printk::write_bytes(bytes);
         self.last_write_len.store(bytes.len(), Ordering::Release);
         self.write_to_console.fetch_add(1, Ordering::AcqRel);
+        Ok(bytes.len())
+    }
+
+    fn write_null_device(&self, bytes: &[u8]) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_null_bound
+            || !self.char_device_write_supported
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        self.last_write_len.store(bytes.len(), Ordering::Release);
+        self.null_device_write_discards_data
+            .fetch_add(1, Ordering::AcqRel);
         Ok(bytes.len())
     }
 
@@ -546,6 +606,7 @@ impl FileBackend {
     fn read_char_device(&self, buffer: &mut [u8], canonical: bool) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_console_bound
             || !self.char_device_read_supported
         {
             return Err(FileError::BackendUnavailable);
@@ -564,9 +625,25 @@ impl FileBackend {
         Ok(len)
     }
 
+    fn read_null_device(&self) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_null_bound
+            || !self.char_device_read_supported
+        {
+            return Err(FileError::BackendUnavailable);
+        }
+
+        self.last_read_len.store(0, Ordering::Release);
+        self.null_device_read_returns_eof
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(0)
+    }
+
     fn char_device_read_ready(&self, canonical: bool) -> FileResult<bool> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_console_bound
             || !self.char_device_read_supported
         {
             return Err(FileError::BackendUnavailable);
@@ -579,6 +656,7 @@ impl FileBackend {
     fn char_device_write_ready(&self) -> FileResult<bool> {
         if self.lifecycle.state() != State::Ready
             || self.kind != FileBackendKind::CharDevice
+            || !self.char_device_console_bound
             || !self.char_device_write_supported
         {
             return Err(FileError::BackendUnavailable);
@@ -743,6 +821,30 @@ impl OpenFileDescription {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
+    fn setup_null_device(&mut self, backend: &FileBackend) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || backend.state() != State::Ready
+            || backend.kind() != FileBackendKind::CharDevice
+            || !backend.char_device_null_bound()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.allocated = true;
+        self.backend_bound = true;
+        self.flags_bound = true;
+        self.readable = true;
+        self.writable = true;
+        self.offset_ready = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
     fn write(&self, backend: &FileBackend, bytes: &[u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.backend_bound {
             return Err(FileError::NotReady);
@@ -752,6 +854,21 @@ impl OpenFileDescription {
         }
 
         let written = backend.write_char_device(bytes)?;
+        self.last_write_len.store(written, Ordering::Release);
+        self.write_dispatches_backend.fetch_add(1, Ordering::AcqRel);
+        self.write_observed.fetch_add(1, Ordering::AcqRel);
+        Ok(written)
+    }
+
+    fn write_null_device(&self, backend: &FileBackend, bytes: &[u8]) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.backend_bound {
+            return Err(FileError::NotReady);
+        }
+        if !self.writable {
+            return Err(FileError::NotWritable);
+        }
+
+        let written = backend.write_null_device(bytes)?;
         self.last_write_len.store(written, Ordering::Release);
         self.write_dispatches_backend.fetch_add(1, Ordering::AcqRel);
         self.write_observed.fetch_add(1, Ordering::AcqRel);
@@ -787,6 +904,21 @@ impl OpenFileDescription {
         }
 
         let read = backend.read_char_device(buffer, canonical)?;
+        self.last_read_len.store(read, Ordering::Release);
+        self.read_dispatches_backend.fetch_add(1, Ordering::AcqRel);
+        self.read_observed.fetch_add(1, Ordering::AcqRel);
+        Ok(read)
+    }
+
+    fn read_null_device(&self, backend: &FileBackend) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.backend_bound {
+            return Err(FileError::NotReady);
+        }
+        if !self.readable {
+            return Err(FileError::NotReadable);
+        }
+
+        let read = backend.read_null_device()?;
         self.last_read_len.store(read, Ordering::Release);
         self.read_dispatches_backend.fetch_add(1, Ordering::AcqRel);
         self.read_observed.fetch_add(1, Ordering::AcqRel);
@@ -1156,11 +1288,13 @@ pub struct FilesStruct {
     stdout: OpenFileDescription,
     stderr: OpenFileDescription,
     regular0: OpenFileDescription,
+    null: OpenFileDescription,
     tty0: OpenFileDescription,
     stdin_backend: FileBackend,
     stdout_backend: FileBackend,
     stderr_backend: FileBackend,
     regular0_backend: FileBackend,
+    null_backend: FileBackend,
     tty0_backend: FileBackend,
     regular0_buffer: [u8; REGULAR_FILE_BUFFER_SIZE],
     regular0_len: usize,
@@ -1199,6 +1333,11 @@ pub struct FilesStruct {
     stat_path_routes_to_vfs: AtomicUsize,
     readlink_path_routes_to_vfs: AtomicUsize,
     regular_fd_installed: AtomicUsize,
+    null_fd_installed: AtomicUsize,
+    null_device_read_eof_observed: AtomicUsize,
+    null_device_write_discard_observed: AtomicUsize,
+    null_device_fstat_device_node: AtomicUsize,
+    null_device_tty_ioctl_enotty: AtomicUsize,
     regular_file_read_observed: AtomicUsize,
     stdin_char_read_observed: AtomicUsize,
     regular_file_closed: AtomicUsize,
@@ -1230,11 +1369,13 @@ impl FilesStruct {
             stdout: OpenFileDescription::new(),
             stderr: OpenFileDescription::new(),
             regular0: OpenFileDescription::new(),
+            null: OpenFileDescription::new(),
             tty0: OpenFileDescription::new(),
             stdin_backend: FileBackend::new(FileBackendKind::CharDevice),
             stdout_backend: FileBackend::new(FileBackendKind::CharDevice),
             stderr_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_backend: FileBackend::new(FileBackendKind::RegularFile),
+            null_backend: FileBackend::new(FileBackendKind::CharDevice),
             tty0_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_buffer: [0; REGULAR_FILE_BUFFER_SIZE],
             regular0_len: 0,
@@ -1273,6 +1414,11 @@ impl FilesStruct {
             stat_path_routes_to_vfs: AtomicUsize::new(0),
             readlink_path_routes_to_vfs: AtomicUsize::new(0),
             regular_fd_installed: AtomicUsize::new(0),
+            null_fd_installed: AtomicUsize::new(0),
+            null_device_read_eof_observed: AtomicUsize::new(0),
+            null_device_write_discard_observed: AtomicUsize::new(0),
+            null_device_fstat_device_node: AtomicUsize::new(0),
+            null_device_tty_ioctl_enotty: AtomicUsize::new(0),
             regular_file_read_observed: AtomicUsize::new(0),
             stdin_char_read_observed: AtomicUsize::new(0),
             regular_file_closed: AtomicUsize::new(0),
@@ -1393,6 +1539,28 @@ impl FilesStruct {
 
     pub fn regular_fd_installed(&self) -> bool {
         self.regular_fd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn null_fd_installed(&self) -> bool {
+        self.null_fd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn null_device_read_eof_observed(&self) -> bool {
+        self.null_device_read_eof_observed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn null_device_write_discard_observed(&self) -> bool {
+        self.null_device_write_discard_observed
+            .load(Ordering::Acquire)
+            != 0
+    }
+
+    pub fn null_device_fstat_device_node(&self) -> bool {
+        self.null_device_fstat_device_node.load(Ordering::Acquire) != 0
+    }
+
+    pub fn null_device_tty_ioctl_enotty(&self) -> bool {
+        self.null_device_tty_ioctl_enotty.load(Ordering::Acquire) != 0
     }
 
     pub fn regular_file_read_observed(&self) -> bool {
@@ -1534,6 +1702,10 @@ impl FilesStruct {
         &self.regular0
     }
 
+    pub const fn null(&self) -> &OpenFileDescription {
+        &self.null
+    }
+
     pub const fn tty0(&self) -> &OpenFileDescription {
         &self.tty0
     }
@@ -1552,6 +1724,10 @@ impl FilesStruct {
 
     pub const fn regular0_backend(&self) -> &FileBackend {
         &self.regular0_backend
+    }
+
+    pub const fn null_backend(&self) -> &FileBackend {
+        &self.null_backend
     }
 
     pub const fn tty0_backend(&self) -> &FileBackend {
@@ -1581,10 +1757,12 @@ impl FilesStruct {
         self.stdout_backend.setup()?;
         self.stderr_backend.setup()?;
         self.tty0_backend.setup()?;
+        self.null_backend.setup_null_device()?;
         self.stdin.setup_stdio(&self.stdin_backend, true, false)?;
         self.stdout.setup_stdio(&self.stdout_backend, false, true)?;
         self.stderr.setup_stdio(&self.stderr_backend, false, true)?;
         self.tty0.setup_stdio(&self.tty0_backend, true, true)?;
+        self.null.setup_null_device(&self.null_backend)?;
         self.fd_table
             .install_stdio(&self.stdin, &self.stdout, &self.stderr)?;
         self.tty_termios = linux_std_termios();
@@ -1965,6 +2143,37 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    pub fn open_null_path(&mut self, path: &[u8], open_flags: u32) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+            || !is_null_path(path)
+        {
+            return Err(FileError::PathUnavailable);
+        }
+        if open_flags & FILE_O_DIRECTORY != 0 {
+            return Err(FileError::NotDirectory);
+        }
+
+        let access_mode = open_flags & FILE_O_ACCMODE;
+        if access_mode == FILE_O_ACCMODE {
+            return Err(FileError::InvalidArgument);
+        }
+        let readable = access_mode != FILE_O_WRONLY;
+        let writable = access_mode != FILE_O_RDONLY;
+        let fd = self.fd_table.install_opened(
+            &self.null,
+            OpenFileDescriptionRef::Null,
+            readable,
+            writable,
+            persistent_open_flags(open_flags),
+            open_flags & FILE_O_CLOEXEC != 0,
+        )?;
+        self.null_fd_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
     pub fn install_pidfd(&mut self, child_pid: usize) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound || child_pid == 0 {
             return Err(FileError::NotReady);
@@ -2047,6 +2256,12 @@ impl FilesStruct {
                 }
                 Ok(read)
             }
+            OpenFileDescriptionRef::Null => {
+                let read = self.null.read_null_device(&self.null_backend)?;
+                self.null_device_read_eof_observed
+                    .fetch_add(1, Ordering::AcqRel);
+                Ok(read)
+            }
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::Unsupported),
             _ => Err(FileError::Unsupported),
         }
@@ -2082,6 +2297,9 @@ impl FilesStruct {
                         ready |= FILE_POLLIN | FILE_POLLRDNORM;
                     }
                 }
+                OpenFileDescriptionRef::Null => {
+                    ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                }
                 OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {}
             }
         }
@@ -2097,7 +2315,11 @@ impl FilesStruct {
                 }
                 OpenFileDescriptionRef::Stdin
                 | OpenFileDescriptionRef::Regular0
+                | OpenFileDescriptionRef::Null
                 | OpenFileDescriptionRef::Pidfd0 => {}
+            }
+            if entry.ofd == OpenFileDescriptionRef::Null {
+                ready |= FILE_POLLOUT | FILE_POLLWRNORM;
             }
         }
 
@@ -2352,6 +2574,11 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stderr => &self.stderr_backend,
             OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
             OpenFileDescriptionRef::Tty0 => &self.tty0_backend,
+            OpenFileDescriptionRef::Null => {
+                self.null_device_tty_ioctl_enotty
+                    .fetch_add(1, Ordering::AcqRel);
+                return Err(FileError::NotTty);
+            }
             OpenFileDescriptionRef::Pidfd0 => return Err(FileError::NotTty),
         };
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
@@ -2524,6 +2751,11 @@ impl FilesStruct {
                 Ok(stat)
             }
             OpenFileDescriptionRef::Pidfd0 => Ok(FileStat::new(0, VfsInodeKind::DeviceNode)),
+            OpenFileDescriptionRef::Null => {
+                self.null_device_fstat_device_node
+                    .fetch_add(1, Ordering::AcqRel);
+                Ok(FileStat::new(0, VfsInodeKind::DeviceNode))
+            }
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
             | OpenFileDescriptionRef::Stderr
@@ -2548,6 +2780,12 @@ impl FilesStruct {
             OpenFileDescriptionRef::Stdout => self.stdout.write(&self.stdout_backend, bytes),
             OpenFileDescriptionRef::Stderr => self.stderr.write(&self.stderr_backend, bytes),
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
+            OpenFileDescriptionRef::Null => {
+                let written = self.null.write_null_device(&self.null_backend, bytes)?;
+                self.null_device_write_discard_observed
+                    .fetch_add(1, Ordering::AcqRel);
+                Ok(written)
+            }
             OpenFileDescriptionRef::Tty0 => self.tty0.write(&self.tty0_backend, bytes),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::NotWritable),
         }

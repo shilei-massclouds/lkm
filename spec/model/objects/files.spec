@@ -81,6 +81,7 @@ enum FdRef {
     Stdout,
     Stderr,
     Regular0,
+    Null,
     Pidfd0,
 }
 
@@ -96,6 +97,11 @@ predicate files_struct_fd_lookup_routes_to_table<T, F>(files: T, table: F) -> bo
 predicate files_struct_regular_file_slot_ready<T>(files: T) -> bool;
 predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
+predicate files_struct_null_fd_installed<T>(files: T) -> bool;
+predicate files_struct_null_device_read_eof_observed<T>(files: T) -> bool;
+predicate files_struct_null_device_write_discard_observed<T>(files: T) -> bool;
+predicate files_struct_null_device_fstat_device_node<T>(files: T) -> bool;
+predicate files_struct_null_device_tty_ioctl_enotty<T>(files: T) -> bool;
 predicate files_struct_tty_alias_fd_installed<T>(files: T) -> bool;
 predicate files_struct_tty_alias_entries_share_backend<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
@@ -152,11 +158,14 @@ predicate open_file_description_read_observed<T>(ofd: T) -> bool;
 predicate file_backend_allocated<T>(backend: T) -> bool;
 predicate file_backend_kind_bound<T>(backend: T, kind: FileBackendKind) -> bool;
 predicate file_backend_char_device_console_bound<T>(backend: T) -> bool;
+predicate file_backend_char_device_null_bound<T>(backend: T) -> bool;
 predicate file_backend_regular_file_deferred<T>(backend: T) -> bool;
 predicate file_backend_block_device_deferred<T>(backend: T) -> bool;
 predicate file_backend_char_device_write_supported<T>(backend: T) -> bool;
 predicate file_backend_char_device_read_supported<T>(backend: T) -> bool;
 predicate file_backend_write_to_console<T>(backend: T) -> bool;
+predicate file_backend_null_device_read_returns_eof<T>(backend: T) -> bool;
+predicate file_backend_null_device_write_discards_data<T>(backend: T) -> bool;
 predicate file_backend_regular_file_bound<T>(backend: T) -> bool;
 predicate file_backend_regular_file_read_supported<T>(backend: T) -> bool;
 predicate file_backend_regular_file_stat_supported<T>(backend: T) -> bool;
@@ -279,6 +288,77 @@ object FilesStruct: ResourceObject {
                     files_struct_tty_alias_entries_share_backend(self);
                     fd_table_first_free_user_fd_installed(FileDescriptorTable, OpenFileDescription);
                     fd_table_fd_entries_have_independent_status_flags(FileDescriptorTable);
+                }
+            }
+
+            on Action::OpenNullPath {
+                /*
+                 * /dev/null is a staged built-in character-device alias for
+                 * OpenRC/getty stdio redirection. It allocates only an fd
+                 * table entry pointing at the Null OFD/backend, preserves
+                 * status flags and close-on-exec, and does not create devtmpfs,
+                 * device-number, permission, LSM or generic char-device
+                 * registry state. O_DIRECTORY is rejected at the directory
+                 * target boundary instead of falling through to ordinary
+                 * filesystem permission denial.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(FileBackend, FileBackendKind::CharDevice);
+                    file_backend_char_device_null_bound(FileBackend);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::InstallFirstFreeCharDevice;
+                }
+
+                ensures {
+                    files_struct_null_fd_installed(self);
+                    fd_table_first_free_user_fd_installed(FileDescriptorTable, OpenFileDescription);
+                    fd_table_fd_entries_have_independent_status_flags(FileDescriptorTable);
+                }
+            }
+
+            on Action::ReadNullFd {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::Null, OpenFileDescription);
+                    open_file_description_readable(OpenFileDescription);
+                    file_backend_char_device_null_bound(FileBackend);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(FdRef::Null);
+                    FileBackend.Action::ReadNullDevice;
+                }
+
+                ensures {
+                    files_struct_read_fd_routes_to_table(self, FileDescriptorTable);
+                    files_struct_null_device_read_eof_observed(self);
+                    file_backend_null_device_read_returns_eof(FileBackend);
+                }
+            }
+
+            on Action::WriteNullFd {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::Null, OpenFileDescription);
+                    file_backend_char_device_null_bound(FileBackend);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(FdRef::Null);
+                    FileBackend.Action::WriteNullDevice;
+                }
+
+                ensures {
+                    files_struct_fd_lookup_routes_to_table(self, FileDescriptorTable);
+                    files_struct_null_device_write_discard_observed(self);
+                    file_backend_null_device_write_discards_data(FileBackend);
                 }
             }
 
@@ -665,7 +745,8 @@ object FileDescriptorTable: ResourceObject {
                     OpenFileDescription.state == State::Ready;
                     FileBackend.state == State::Ready;
                     file_backend_kind_bound(FileBackend, FileBackendKind::CharDevice);
-                    file_backend_char_device_console_bound(FileBackend);
+                    file_backend_char_device_console_bound(FileBackend) ||
+                        file_backend_char_device_null_bound(FileBackend);
                 }
 
                 ensures {
@@ -879,6 +960,32 @@ object FileBackend: ResourceObject {
                     file_backend_char_device_read_returns_ready_data(self);
                     n_tty_canonical_read_returns_through_newline(NTtyLineDiscipline);
                     n_tty_noncanonical_byte_readiness_first_slice(NTtyLineDiscipline);
+                }
+            }
+
+            on Action::ReadNullDevice {
+                depends_on {
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(self, FileBackendKind::CharDevice);
+                    file_backend_char_device_null_bound(self);
+                    file_backend_char_device_read_supported(self);
+                }
+
+                ensures {
+                    file_backend_null_device_read_returns_eof(self);
+                }
+            }
+
+            on Action::WriteNullDevice {
+                depends_on {
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(self, FileBackendKind::CharDevice);
+                    file_backend_char_device_null_bound(self);
+                    file_backend_char_device_write_supported(self);
+                }
+
+                ensures {
+                    file_backend_null_device_write_discards_data(self);
                 }
             }
 

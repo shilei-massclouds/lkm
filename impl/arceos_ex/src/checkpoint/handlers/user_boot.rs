@@ -1312,6 +1312,11 @@ fn run_syscall_table_openat(
 
     let table = &ctx.syscall_table;
     let files = &ctx.files_struct;
+    let opened_regular = files.open_path_routes_to_vfs()
+        && files.regular_fd_installed()
+        && files.fd_bound(FdRef::Regular0);
+    let opened_directory = files.open_path_routes_to_vfs() && files.directory_fd_installed();
+    let opened_special = files.tty_alias_fd_installed() || files.null_fd_installed();
     let valid = ctx.user_init_process.state() == State::Online
         && table.state() == State::Ready
         && table.bound_to_exception()
@@ -1319,15 +1324,14 @@ fn run_syscall_table_openat(
         && table.path_usercopy_ready()
         && table.openat_routes_to_files_struct()
         && table.openat_observed()
-        && files.open_path_routes_to_vfs()
-        && files.regular_fd_installed()
-        && files.fd_bound(FdRef::Regular0);
+        && (opened_regular || opened_directory || opened_special);
 
     sink.diag_usize(
         "syscall_table_openat_observed",
         table.openat_observed() as usize,
     );
     sink.diag_usize("regular0_len", files.regular0_len());
+    sink.diag_usize("null_fd_installed", files.null_fd_installed() as usize);
     if valid {
         sink.pass(total, "", name);
     } else {

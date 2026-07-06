@@ -605,6 +605,11 @@ predicate files_struct_tty_termios_mutation_observed<T>(files: T) -> bool;
 predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
 predicate files_struct_directory_fd_installed<T>(files: T) -> bool;
+predicate files_struct_null_fd_installed<T>(files: T) -> bool;
+predicate files_struct_null_device_read_eof_observed<T>(files: T) -> bool;
+predicate files_struct_null_device_write_discard_observed<T>(files: T) -> bool;
+predicate files_struct_null_device_fstat_device_node<T>(files: T) -> bool;
+predicate files_struct_null_device_tty_ioctl_enotty<T>(files: T) -> bool;
 predicate file_backend_char_device_read_returns_ready_data<T>(backend: T) -> bool;
 predicate tty_flip_buffer_ready_data_bound<T>(buffer: T) -> bool;
 predicate tty_flip_buffer_ready_data_consumed<T>(buffer: T) -> bool;
@@ -1367,6 +1372,7 @@ object SyscallTable: ResourceObject {
 
                 drives {
                     FilesStruct.Action::LookupFd(FdRef::Stdout);
+                    FilesStruct.Action::WriteNullFd;
                     FileDescriptorTable.Action::Lookup(FdRef::Stdout);
                     OpenFileDescription.Action::Write;
                     FileBackend.Action::WriteCharDevice;
@@ -1377,7 +1383,8 @@ object SyscallTable: ResourceObject {
                     files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
                     fd_table_lookup_returns(FileDescriptorTable, FdRef::Stdout, OpenFileDescription);
                     open_file_description_write_dispatches_backend(OpenFileDescription, FileBackend);
-                    file_backend_write_to_console(FileBackend);
+                    file_backend_write_to_console(FileBackend) ||
+                        files_struct_null_device_write_discard_observed(FilesStruct);
                     syscall_table_write_observed(self);
                 }
             }
@@ -1418,13 +1425,19 @@ object SyscallTable: ResourceObject {
                  * through VfsCore and installs either the regular-file or
                  * directory opened instance according to the target inode,
                  * while /dev/tty and /dev/tty[0-9]+ may install the existing
-                 * console-like character-device opened instance. If
+                 * console-like character-device opened instance. /dev/null is
+                 * a separate built-in character-device alias recognized before
+                 * ordinary filesystem write-permission rejection: O_RDONLY,
+                 * O_WRONLY and O_RDWR with O_LARGEFILE/O_CLOEXEC/O_NONBLOCK
+                 * install a Null OFD in the lowest free fd slot and preserve
+                 * status flags plus close-on-exec. If
                  * O_DIRECTORY is present and the resolved non-TTY target is
-                 * not a directory, the syscall must fail with ENOTDIR. O_NONBLOCK
-                 * is consumed only by accepted TTY opens in this slice; regular
-                 * and directory opens do not gain nonblocking read/write
-                 * semantics. Write/create modes, O_PATH, O_TMPFILE, nofollow,
-                 * permissions, LSM hooks, mount namespaces, real VT/devtmpfs
+                 * not a directory, including /dev/null, the syscall must fail
+                 * with ENOTDIR. O_NONBLOCK is consumed only by accepted TTY and
+                 * /dev/null opens in this slice; regular and directory opens do
+                 * not gain nonblocking read/write semantics. Write/create modes,
+                 * O_PATH, O_TMPFILE, nofollow, permissions, LSM hooks, mount
+                 * namespaces, real VT/devtmpfs, a generic char-device registry
                  * and full errno detail remain trimmed.
                  */
                 depends_on {
@@ -1438,6 +1451,7 @@ object SyscallTable: ResourceObject {
 
                 drives {
                     FilesStruct.Action::OpenPath;
+                    FilesStruct.Action::OpenNullPath;
                     FileDescriptorTable.Action::Install(FdRef::Regular0);
                 }
 
@@ -1446,7 +1460,8 @@ object SyscallTable: ResourceObject {
                     files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
                     files_struct_regular_fd_installed(FilesStruct) ||
                         files_struct_directory_fd_installed(FilesStruct) ||
-                        files_struct_tty_alias_fd_installed(FilesStruct);
+                        files_struct_tty_alias_fd_installed(FilesStruct) ||
+                        files_struct_null_fd_installed(FilesStruct);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
                     syscall_table_openat_observed(self);
                 }
@@ -1498,9 +1513,11 @@ object SyscallTable: ResourceObject {
                  * file operation enters drivers/tty/tty_io.c::tty_read() and
                  * the N_TTY line discipline read path in drivers/tty/n_tty.c.
                  *
-                 * This slice supports two already-open fd classes: the existing
-                 * Regular0 read-only file, and fd0 char-device stdin through
-                 * the minimal N_TTY line discipline. In canonical mode,
+                 * This slice supports three already-open fd classes: the
+                 * existing Regular0 read-only file, fd0/tty char-device stdin
+                 * through the minimal N_TTY line discipline, and /dev/null
+                 * Null fds. Null reads return EOF (0) immediately and do not
+                 * enter the TTY input wait path. In canonical mode,
                  * NTtyLineDiscipline only reports a line readable once bounded
                  * TtyFlipBuffer ready data contains a newline and read returns
                  * at most through that newline. In noncanonical mode, existing
@@ -1528,6 +1545,7 @@ object SyscallTable: ResourceObject {
                 drives {
                     FilesStruct.Action::ReadFd(FdRef::Regular0);
                     FilesStruct.Action::ReadFd(FdRef::Stdin);
+                    FilesStruct.Action::ReadNullFd;
                     FileBackend.Action::ReadCharDevice;
                     NTtyLineDiscipline.Action::ReadLineOrBytes;
                     TtyInputWait.Action::WaitReadable;
@@ -1538,6 +1556,7 @@ object SyscallTable: ResourceObject {
                     files_struct_regular_file_read_observed(FilesStruct);
                     syscall_read_stdin_ready_data_first_slice(self);
                     files_struct_stdin_char_device_read_observed(FilesStruct);
+                    files_struct_null_device_read_eof_observed(FilesStruct);
                     open_file_description_read_observed(OpenFileDescription);
                     file_backend_regular_file_read_returns_data(FileBackend);
                     file_backend_char_device_read_returns_ready_data(FileBackend);
@@ -1570,10 +1589,13 @@ object SyscallTable: ResourceObject {
                  * writes back revents, and returns the number of ready entries.
                  *
                  * This first slice observes immediately available readiness
-                 * from the existing fd table and char-device N_TTY readiness.
-                 * Canonical mode requires a newline-terminated bounded input
-                 * slice before fd0 reports POLLIN; noncanonical mode preserves
-                 * byte readiness. It parses and validates the optional timeout.
+                 * from the existing fd table, char-device N_TTY readiness and
+                 * /dev/null entry flags. Null fds report read/write readiness
+                 * immediately according to the fd entry access bits and never
+                 * enter the TTY input wait path. Canonical mode requires a
+                 * newline-terminated bounded input slice before fd0 reports
+                 * POLLIN; noncanonical mode preserves byte readiness. It
+                 * parses and validates the optional timeout.
                  * If no entry is ready, timeout={0,0} returns 0 as an immediate
                  * timeout, but timeout=NULL or a positive timeout must not be
                  * reported as successful timeout without an event. Sleeping
@@ -1731,9 +1753,11 @@ object SyscallTable: ResourceObject {
                  * riscv64/generic 36-byte old struct termios, TCGETS readback,
                  * TCSETS immediate mutation, and TIOCGPGRP/TIOCSPGRP against
                  * the UserInitProcess controlling-tty foreground-pgrp state.
-                 * TCSETSW/TCSETSF, drain/flush, driver and line-discipline
-                 * set_termios hooks, canonical N_TTY behavior, pty and real
-                 * TTY locking remain deferred.
+                 * /dev/null validates as an fd but is not a TTY; TTY ioctl
+                 * helpers must return ENOTTY for it. TCSETSW/TCSETSF,
+                 * drain/flush, driver and line-discipline set_termios hooks,
+                 * canonical N_TTY behavior, pty and real TTY locking remain
+                 * deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -1759,6 +1783,7 @@ object SyscallTable: ResourceObject {
                     syscall_ioctl_tiocspgrp_foreground_pgrp_update_first_slice(self);
                     files_struct_tty_termios_state_bound(FilesStruct);
                     files_struct_tty_termios_mutation_observed(FilesStruct);
+                    files_struct_null_device_tty_ioctl_enotty(FilesStruct);
                     user_init_process_controlling_tty_bound(UserInitProcess);
                     user_init_process_foreground_pgrp_read_observed(UserInitProcess);
                     user_init_process_foreground_pgrp_set_observed(UserInitProcess);

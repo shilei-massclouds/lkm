@@ -12,7 +12,7 @@ use super::user_boot::{
 };
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
+    files::{is_null_path, is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
     hwrng::HwRngError,
     init_stack::InitStack,
     process_prepare::TaskCopyUserProcessInputs,
@@ -3153,6 +3153,9 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd_result = if is_tty_path(&path[..path_len]) {
         ctx.files_struct
             .open_tty_path(&path[..path_len], flags as u32)
+    } else if is_null_path(&path[..path_len]) {
+        ctx.files_struct
+            .open_null_path(&path[..path_len], flags as u32)
     } else if flags & O_NONBLOCK != 0 {
         Err(FileError::InvalidArgument)
     } else if flags & O_ACCMODE != 0 {
@@ -7737,6 +7740,7 @@ fn print_ofd_name(ofd: OpenFileDescriptionRef) {
         OpenFileDescriptionRef::Stdout => "stdout",
         OpenFileDescriptionRef::Stderr => "stderr",
         OpenFileDescriptionRef::Regular0 => "regular0",
+        OpenFileDescriptionRef::Null => "null",
         OpenFileDescriptionRef::Tty0 => "tty0",
         OpenFileDescriptionRef::Pidfd0 => "pidfd0",
     };

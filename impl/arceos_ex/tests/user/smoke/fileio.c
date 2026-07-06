@@ -264,6 +264,31 @@ static int smoke_readlinkat(void)
 	return 0;
 }
 
+static int smoke_dev_null(void)
+{
+	char read_buf[4] = { 1, 2, 3, 4 };
+	int fd = syscall(SYS_openat, AT_FDCWD, "/dev/null",
+			 O_RDWR | O_LARGEFILE, 0);
+
+	if (fd < 0) {
+		return 93;
+	}
+	if (write(fd, "drop", 4) != 4) {
+		return 94;
+	}
+	if (read(fd, read_buf, sizeof(read_buf)) != 0) {
+		return 95;
+	}
+	if (close(fd) < 0) {
+		return 96;
+	}
+	if (SAY_LITERAL("syscall devnull ok\n") < 0) {
+		return 97;
+	}
+
+	return 0;
+}
+
 int smoke_fileio(void)
 {
 	static const char path[] = "/etc/alpine-release";
@@ -373,6 +398,11 @@ int smoke_fileio(void)
 	int readlink_status = smoke_readlinkat();
 	if (readlink_status != 0) {
 		return readlink_status;
+	}
+
+	int null_status = smoke_dev_null();
+	if (null_status != 0) {
+		return null_status;
 	}
 
 	if (SAY_LITERAL("syscall write ok\n") < 0) {
