@@ -49,5 +49,20 @@ int smoke_uts_cwd(void)
 		return 80;
 	}
 
+	rc = syscall(SYS_chdir, "/");
+	if (rc != 0) {
+		return 81;
+	}
+	if (SAY_LITERAL("syscall chdir root ok\n") < 0) {
+		return 82;
+	}
+
+	cwd[0] = 0;
+	cwd[1] = 0;
+	rc = syscall(SYS_getcwd, cwd, sizeof(cwd));
+	if (rc != 2 || cwd[0] != '/' || cwd[1] != '\0') {
+		return 83;
+	}
+
 	return 0;
 }

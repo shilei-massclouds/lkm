@@ -250,6 +250,7 @@ predicate syscall_table_bound_to_exception<T, E>(table: T, exception: E) -> bool
 predicate syscall_table_write_supported<T>(table: T) -> bool;
 predicate syscall_table_writev_supported<T>(table: T) -> bool;
 predicate syscall_table_openat_supported<T>(table: T) -> bool;
+predicate syscall_table_chdir_supported<T>(table: T) -> bool;
 predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_ppoll_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
@@ -291,6 +292,10 @@ predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_chdir_routes_to_fs_struct<T, F>(table: T, fs: F) -> bool;
+predicate syscall_chdir_linux_6_12_path_walk_bound<T>(table: T) -> bool;
+predicate syscall_chdir_root_first_slice<T>(table: T) -> bool;
+predicate syscall_chdir_permissions_lsm_deferred<T>(table: T) -> bool;
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_stdin_ready_data_first_slice<T>(table: T) -> bool;
 predicate syscall_read_no_ready_blocking_out_of_slice<T>(table: T) -> bool;
@@ -412,6 +417,7 @@ predicate user_kernel_trap_stack_irq_stack_switch_deferred<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
+predicate syscall_table_chdir_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_read_trace_probe_observes_result_without_side_effect<T>(table: T) -> bool;
 predicate syscall_trace_probe_observes_returns_without_side_effect<T>(table: T) -> bool;
@@ -1090,6 +1096,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_write_supported(self);
                     syscall_table_writev_supported(self);
                     syscall_table_openat_supported(self);
+                    syscall_table_chdir_supported(self);
                     syscall_table_read_supported(self);
                     syscall_table_ppoll_supported(self);
                     syscall_table_close_supported(self);
@@ -1168,6 +1175,7 @@ object SyscallTable: ResourceObject {
             syscall_table_write_supported(self);
             syscall_table_writev_supported(self);
             syscall_table_openat_supported(self);
+            syscall_table_chdir_supported(self);
             syscall_table_read_supported(self);
             syscall_table_ppoll_supported(self);
             syscall_table_close_supported(self);
@@ -1316,6 +1324,45 @@ object SyscallTable: ResourceObject {
                     files_struct_regular_fd_installed(FilesStruct) || files_struct_directory_fd_installed(FilesStruct);
                     fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
                     syscall_table_openat_observed(self);
+                }
+            }
+
+            on Action::Chdir {
+                /*
+                 * Linux 6.12 fs/open.c::SYSCALL_DEFINE1(chdir) obtains a
+                 * filename from user memory, resolves it through
+                 * user_path_at(AT_FDCWD, ..., LOOKUP_FOLLOW | LOOKUP_DIRECTORY),
+                 * checks path_permission(MAY_EXEC | MAY_CHDIR), then commits
+                 * current->fs pwd with set_fs_pwd().
+                 *
+                 * This first slice is intentionally narrower: it covers the
+                 * observed BusyBox/OpenRC chdir("/") path after native init has
+                 * opened and closed "/", reuses the existing AT_FDCWD/rooted
+                 * VfsCore path walk and requires the resolved target to be a
+                 * directory through FsStruct.Action::Chdir. Permission checks,
+                 * LSM hooks, refcount/seqcount locking and ESTALE retry remain
+                 * deferred. Unsupported path-walk shapes stay outside the slice
+                 * and may return ENOSYS instead of pretending to be complete
+                 * Linux chdir(2).
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    FsStruct.Action::Chdir(Dentry);
+                }
+
+                ensures {
+                    syscall_chdir_routes_to_fs_struct(self, FsStruct);
+                    syscall_chdir_linux_6_12_path_walk_bound(self);
+                    syscall_chdir_root_first_slice(self);
+                    syscall_chdir_permissions_lsm_deferred(self);
+                    fs_struct_pwd_dentry_set(FsStruct, Dentry);
+                    syscall_table_chdir_observed(self);
                 }
             }
 

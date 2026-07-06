@@ -65,6 +65,7 @@ const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FACCESSAT: usize = 48;
+const SYSCALL_CHDIR: usize = 49;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_GETDENTS64: usize = 61;
@@ -580,6 +581,7 @@ pub struct SyscallTable {
     write_supported: bool,
     writev_supported: bool,
     openat_supported: bool,
+    chdir_supported: bool,
     getdents64_supported: bool,
     read_supported: bool,
     ppoll_supported: bool,
@@ -640,6 +642,10 @@ pub struct SyscallTable {
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
     openat_routes_to_files_struct: bool,
+    chdir_routes_to_fs_struct: bool,
+    chdir_linux_6_12_path_walk_bound: bool,
+    chdir_root_first_slice: bool,
+    chdir_permissions_lsm_deferred: bool,
     getdents64_routes_to_files_struct: bool,
     read_routes_to_files_struct: bool,
     ppoll_routes_to_files_struct: bool,
@@ -720,6 +726,7 @@ pub struct SyscallTable {
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
     openat_observed: AtomicU8,
+    chdir_observed: AtomicU8,
     getdents64_observed: AtomicU8,
     read_observed: AtomicU8,
     ppoll_observed: AtomicU8,
@@ -766,6 +773,7 @@ impl SyscallTable {
             write_supported: false,
             writev_supported: false,
             openat_supported: false,
+            chdir_supported: false,
             getdents64_supported: false,
             read_supported: false,
             ppoll_supported: false,
@@ -826,6 +834,10 @@ impl SyscallTable {
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
             openat_routes_to_files_struct: false,
+            chdir_routes_to_fs_struct: false,
+            chdir_linux_6_12_path_walk_bound: false,
+            chdir_root_first_slice: false,
+            chdir_permissions_lsm_deferred: false,
             getdents64_routes_to_files_struct: false,
             read_routes_to_files_struct: false,
             ppoll_routes_to_files_struct: false,
@@ -906,6 +918,7 @@ impl SyscallTable {
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
             openat_observed: AtomicU8::new(0),
+            chdir_observed: AtomicU8::new(0),
             getdents64_observed: AtomicU8::new(0),
             read_observed: AtomicU8::new(0),
             ppoll_observed: AtomicU8::new(0),
@@ -968,6 +981,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn openat_supported(&self) -> bool {
         self.openat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn chdir_supported(&self) -> bool {
+        self.chdir_supported
     }
 
     #[allow(dead_code)]
@@ -1466,6 +1484,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn chdir_observed(&self) -> bool {
+        self.chdir_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn getdents64_observed(&self) -> bool {
         self.getdents64_observed.load(Ordering::Acquire) != 0
     }
@@ -1610,6 +1633,7 @@ impl SyscallTable {
         self.write_supported = true;
         self.writev_supported = true;
         self.openat_supported = true;
+        self.chdir_supported = true;
         self.getdents64_supported = true;
         self.read_supported = true;
         self.ppoll_supported = true;
@@ -1670,6 +1694,10 @@ impl SyscallTable {
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
         self.openat_routes_to_files_struct = true;
+        self.chdir_routes_to_fs_struct = true;
+        self.chdir_linux_6_12_path_walk_bound = true;
+        self.chdir_root_first_slice = true;
+        self.chdir_permissions_lsm_deferred = true;
         self.getdents64_routes_to_files_struct = true;
         self.read_routes_to_files_struct = true;
         self.ppoll_routes_to_files_struct = true;
@@ -1763,6 +1791,22 @@ impl SyscallTable {
         }
 
         syscall_table_openat(self, frame);
+    }
+
+    pub fn chdir(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.chdir_supported
+            || !self.path_usercopy_ready
+            || !self.chdir_routes_to_fs_struct
+            || !self.chdir_linux_6_12_path_walk_bound
+            || !self.chdir_root_first_slice
+            || !self.chdir_permissions_lsm_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_chdir(self, frame);
     }
 
     pub fn read(&self, frame: &mut TrapFrame) {
@@ -2636,6 +2680,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_FCNTL => table.fcntl(frame),
         SYSCALL_IOCTL => table.ioctl(frame),
         SYSCALL_FACCESSAT => table.faccessat(frame),
+        SYSCALL_CHDIR => table.chdir(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
@@ -2730,6 +2775,15 @@ fn hwrng_error_to_getrandom_errno(error: HwRngError) -> usize {
     }
 }
 
+fn vfs_error_to_chdir_errno(error: super::vfs::VfsError) -> Option<usize> {
+    match error {
+        super::vfs::VfsError::NotFound => Some(ENOENT),
+        super::vfs::VfsError::NotDirectory => Some(ENOTDIR),
+        super::vfs::VfsError::SymlinkLoop => Some(ELOOP),
+        _ => None,
+    }
+}
+
 fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
@@ -2779,6 +2833,41 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
     complete_successful_syscall(frame, fd);
+}
+
+fn syscall_table_chdir(table: &SyscallTable, frame: &mut TrapFrame) {
+    let path_ptr = frame.reg(10);
+    let mut path = [0u8; USER_PATH_MAX];
+    let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+
+    let result = {
+        let ctx = crate::context::context();
+        let mut provider = super::virtio_blk::live_provider(&ctx.kernel_image);
+        match ctx.vfs_core.walk_path(
+            &ctx.fs_struct,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &path[..path_len],
+        ) {
+            Ok(dentry_ref) => ctx.fs_struct.chdir(&ctx.vfs_core, dentry_ref),
+            Err(error) => Err(error),
+        }
+    };
+
+    match result {
+        Ok(()) => {
+            table.chdir_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => match vfs_error_to_chdir_errno(error) {
+            Some(errno) => complete_error_syscall(frame, errno),
+            None => complete_unsupported_syscall(frame),
+        },
+    }
 }
 
 fn syscall_table_getdents64(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -5893,6 +5982,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_FCNTL => "fcntl",
         SYSCALL_IOCTL => "ioctl",
         SYSCALL_FACCESSAT => "faccessat",
+        SYSCALL_CHDIR => "chdir",
         SYSCALL_OPENAT => "openat",
         SYSCALL_CLOSE => "close",
         SYSCALL_GETDENTS64 => "getdents64",

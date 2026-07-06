@@ -94,6 +94,7 @@ predicate fs_struct_initial_root_bound<T, D>(fs: T, dentry: D) -> bool;
 predicate fs_struct_root_dentry_set<T, D>(fs: T, dentry: D) -> bool;
 predicate fs_struct_pwd_dentry_set<T, D>(fs: T, dentry: D) -> bool;
 predicate fs_struct_root_pwd_same<T>(fs: T) -> bool;
+predicate fs_struct_root_pwd_same_recomputed<T>(fs: T) -> bool;
 predicate fs_struct_pwd_chdir_to_real_root<T, D>(fs: T, dentry: D) -> bool;
 predicate fs_struct_chroot_dot_done<T, D>(fs: T, dentry: D) -> bool;
 
@@ -792,6 +793,7 @@ object FsStruct: ResourceObject {
                 }
                 ensures {
                     fs_struct_pwd_dentry_set(FsStruct, dentry);
+                    fs_struct_root_pwd_same_recomputed(FsStruct);
                     fs_struct_pwd_chdir_to_real_root(FsStruct, dentry);
                 }
             }
