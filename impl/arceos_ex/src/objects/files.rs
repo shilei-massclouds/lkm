@@ -2686,6 +2686,16 @@ impl FilesStruct {
         Ok(())
     }
 
+    pub fn ioctl_tiocgsid_fd(&self, fd: usize) -> FileResult<()> {
+        self.char_backend_for_fd(fd)?;
+        Ok(())
+    }
+
+    pub fn ioctl_tiocsctty_fd(&self, fd: usize) -> FileResult<()> {
+        self.char_backend_for_fd(fd)?;
+        Ok(())
+    }
+
     pub fn lseek_fd(
         &mut self,
         fd: usize,

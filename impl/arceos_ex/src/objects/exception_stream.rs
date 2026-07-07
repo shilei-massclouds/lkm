@@ -222,9 +222,11 @@ const F_DUPFD_CLOEXEC: usize = F_LINUX_SPECIFIC_BASE + 6;
 const FD_CLOEXEC: usize = 1;
 const TCGETS: usize = 0x5401;
 const TCSETS: usize = 0x5402;
+const TIOCSCTTY: usize = 0x540e;
 const TIOCGPGRP: usize = 0x540f;
 const TIOCSPGRP: usize = 0x5410;
 const TIOCGWINSZ: usize = 0x5413;
+const TIOCGSID: usize = 0x5429;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
 const TIMESPEC_SIZE: usize = 16;
@@ -4678,6 +4680,79 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 }
             }
         }
+        TIOCGSID => {
+            if let Err(error) = crate::context::context_ref()
+                .files_struct
+                .ioctl_tiocgsid_fd(fd)
+            {
+                let errno = file_error_to_errno(error);
+                print_ioctl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+            let lookup = {
+                let ctx = crate::context::context();
+                let current_child_continuation =
+                    ctx.user_child_process.current_child_continuation();
+                ctx.user_init_process
+                    .read_tty_session_id_first_slice(current_child_continuation)
+            };
+            match lookup {
+                UserProcessGroupLookup::Found(sid) => {
+                    if !write_user_u32(arg, sid as u32) {
+                        print_ioctl_error_detail(fd, cmd, arg, EFAULT);
+                        complete_error_syscall(frame, EFAULT);
+                        return;
+                    }
+                }
+                UserProcessGroupLookup::NoSuchProcess | UserProcessGroupLookup::NotReady => {
+                    print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+                    complete_error_syscall(frame, ENOTTY);
+                    return;
+                }
+            }
+        }
+        TIOCSCTTY => {
+            if let Err(error) = crate::context::context_ref()
+                .files_struct
+                .ioctl_tiocsctty_fd(fd)
+            {
+                let errno = file_error_to_errno(error);
+                print_ioctl_error_detail(fd, cmd, arg, errno);
+                complete_error_syscall(frame, errno);
+                return;
+            }
+            let update = {
+                let ctx = crate::context::context();
+                let current_child_continuation =
+                    ctx.user_child_process.current_child_continuation();
+                ctx.user_init_process
+                    .bind_controlling_tty_first_slice(current_child_continuation, arg)
+            };
+            match update {
+                UserProcessGroupUpdate::Updated(_) => {}
+                UserProcessGroupUpdate::Invalid => {
+                    print_ioctl_error_detail(fd, cmd, arg, EINVAL);
+                    complete_error_syscall(frame, EINVAL);
+                    return;
+                }
+                UserProcessGroupUpdate::NoSuchProcess => {
+                    print_ioctl_error_detail(fd, cmd, arg, ESRCH);
+                    complete_error_syscall(frame, ESRCH);
+                    return;
+                }
+                UserProcessGroupUpdate::PermissionDenied => {
+                    print_ioctl_error_detail(fd, cmd, arg, EPERM);
+                    complete_error_syscall(frame, EPERM);
+                    return;
+                }
+                UserProcessGroupUpdate::NotReady => {
+                    print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
+                    complete_error_syscall(frame, ENOTTY);
+                    return;
+                }
+            }
+        }
         _ => {
             print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
             complete_error_syscall(frame, ENOTTY);
@@ -6310,7 +6385,7 @@ fn copy_from_user(user_ptr: usize, dst: &mut [u8]) -> bool {
     if dst.is_empty() {
         return true;
     }
-    if user_ptr == 0 || user_ptr.checked_add(dst.len()).is_none() {
+    if !user_copy_range_accessible(user_ptr, dst.len(), UserFaultAccess::Load) {
         return false;
     }
 
@@ -6328,7 +6403,7 @@ fn copy_to_user(user_ptr: usize, src: &[u8]) -> bool {
     if src.is_empty() {
         return true;
     }
-    if user_ptr == 0 || user_ptr.checked_add(src.len()).is_none() {
+    if !user_copy_range_accessible(user_ptr, src.len(), UserFaultAccess::Store) {
         return false;
     }
 
@@ -6340,6 +6415,26 @@ fn copy_to_user(user_ptr: usize, src: &[u8]) -> bool {
     }
     crate::arch::riscv64::csr::restore_user_memory_access(saved);
     true
+}
+
+fn user_copy_range_accessible(user_ptr: usize, len: usize, access: UserFaultAccess) -> bool {
+    if len == 0 || user_ptr == 0 {
+        return len == 0;
+    }
+    let Some(end) = user_ptr.checked_add(len) else {
+        return false;
+    };
+    let Some(last) = end.checked_sub(1) else {
+        return false;
+    };
+
+    let space = &crate::context::context_ref().user_address_space;
+    if !space.user_range_mapped(user_ptr, len) {
+        return false;
+    }
+    let first = space.fault_mapping_diagnostic(user_ptr, access);
+    let last = space.fault_mapping_diagnostic(last, access);
+    first.permission_satisfied() && last.permission_satisfied()
 }
 
 fn read_user_usize(user_ptr: usize) -> Option<usize> {
@@ -7849,9 +7944,11 @@ fn print_ioctl_cmd_name(cmd: usize) {
     let name = match cmd {
         TCGETS => "TCGETS",
         TCSETS => "TCSETS",
+        TIOCSCTTY => "TIOCSCTTY",
         TIOCGPGRP => "TIOCGPGRP",
         TIOCSPGRP => "TIOCSPGRP",
         TIOCGWINSZ => "TIOCGWINSZ",
+        TIOCGSID => "TIOCGSID",
         _ => "unknown",
     };
     crate::arch::riscv64::sbi::putstr(name);

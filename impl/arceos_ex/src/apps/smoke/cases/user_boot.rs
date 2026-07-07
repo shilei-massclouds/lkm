@@ -828,6 +828,12 @@ impl SmokeScenario for UserBootElfScenario {
             matches!(
                 ctx.files_struct.ioctl_tiocgwinsz_fd(null_fd),
                 Err(FileError::NotTty)
+            ) && matches!(
+                ctx.files_struct.ioctl_tiocgsid_fd(null_fd),
+                Err(FileError::NotTty)
+            ) && matches!(
+                ctx.files_struct.ioctl_tiocsctty_fd(null_fd),
+                Err(FileError::NotTty)
             ),
         );
         assertions.assert(
@@ -1105,6 +1111,18 @@ impl SmokeScenario for UserBootElfScenario {
         let child_pid = ctx.user_init_process.read_pid(true);
         let child_initial_sid = ctx.user_init_process.read_session_id(0, true);
         let child_setsid = ctx.user_init_process.set_session_id_first_slice(true);
+        let child_tty_sid_before_ctty = ctx.user_init_process.read_tty_session_id_first_slice(true);
+        let child_tiocsctty = ctx
+            .user_init_process
+            .bind_controlling_tty_first_slice(true, 1);
+        let child_tty_sid = ctx.user_init_process.read_tty_session_id_first_slice(true);
+        let repeat_child_tiocsctty = ctx
+            .user_init_process
+            .bind_controlling_tty_first_slice(true, 1);
+        let pid1_tty_sid = ctx.user_init_process.read_tty_session_id_first_slice(false);
+        let pid1_tiocsctty = ctx
+            .user_init_process
+            .bind_controlling_tty_first_slice(false, 1);
         let child_current_sid = ctx.user_init_process.read_session_id(0, true);
         let child_explicit_sid = ctx.user_init_process.read_session_id(USER_CHILD_PID, false);
         let child_current_pgrp = ctx.user_init_process.read_process_group(0, true);
@@ -1121,6 +1139,12 @@ impl SmokeScenario for UserBootElfScenario {
                 && child_pid == Some(USER_CHILD_PID)
                 && child_initial_sid == UserProcessGroupLookup::Found(1)
                 && child_setsid == UserProcessGroupUpdate::Updated(USER_CHILD_PID)
+                && child_tty_sid_before_ctty == UserProcessGroupLookup::NotReady
+                && child_tiocsctty == UserProcessGroupUpdate::Updated(USER_CHILD_PID)
+                && child_tty_sid == UserProcessGroupLookup::Found(USER_CHILD_PID)
+                && repeat_child_tiocsctty == UserProcessGroupUpdate::PermissionDenied
+                && pid1_tty_sid == UserProcessGroupLookup::Found(1)
+                && pid1_tiocsctty == UserProcessGroupUpdate::PermissionDenied
                 && child_current_sid == UserProcessGroupLookup::Found(USER_CHILD_PID)
                 && child_explicit_sid == UserProcessGroupLookup::Found(USER_CHILD_PID)
                 && child_current_pgrp == UserProcessGroupLookup::Found(USER_CHILD_PID)
@@ -1130,6 +1154,13 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.user_init_process.child_process_session_id() == USER_CHILD_PID
                 && ctx.user_init_process.child_session_leader_first_slice()
                 && ctx.user_init_process.child_setsid_success_observed()
+                && ctx
+                    .user_init_process
+                    .child_controlling_tty_cleared_on_setsid()
+                && ctx.user_init_process.child_controlling_tty_bound()
+                && ctx.user_init_process.foreground_pgrp() == USER_CHILD_PID
+                && ctx.user_init_process.tty_session_id_read_observed()
+                && ctx.user_init_process.tiocsctty_observed()
                 && ctx.user_init_process.session_id_read_observed(),
         );
         assertions.assert(

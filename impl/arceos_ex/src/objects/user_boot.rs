@@ -3433,11 +3433,15 @@ pub struct UserInitProcess {
     child_session_leader_first_slice: bool,
     child_process_group_set_observed: bool,
     child_setsid_success_observed: bool,
+    child_controlling_tty_bound: bool,
+    child_controlling_tty_cleared_on_setsid: bool,
     controlling_tty_bound: bool,
     foreground_pgrp_bound: bool,
     foreground_pgrp: usize,
     foreground_pgrp_read_observed: bool,
     foreground_pgrp_set_observed: bool,
+    tty_session_id_read_observed: bool,
+    tiocsctty_observed: bool,
     uid_read_observed: bool,
     euid_read_observed: bool,
     gid_read_observed: bool,
@@ -5449,11 +5453,15 @@ impl UserInitProcess {
             child_session_leader_first_slice: false,
             child_process_group_set_observed: false,
             child_setsid_success_observed: false,
+            child_controlling_tty_bound: false,
+            child_controlling_tty_cleared_on_setsid: false,
             controlling_tty_bound: false,
             foreground_pgrp_bound: false,
             foreground_pgrp: 0,
             foreground_pgrp_read_observed: false,
             foreground_pgrp_set_observed: false,
+            tty_session_id_read_observed: false,
+            tiocsctty_observed: false,
             uid_read_observed: false,
             euid_read_observed: false,
             gid_read_observed: false,
@@ -5712,6 +5720,14 @@ impl UserInitProcess {
         self.child_setsid_success_observed
     }
 
+    pub const fn child_controlling_tty_bound(&self) -> bool {
+        self.child_controlling_tty_bound
+    }
+
+    pub const fn child_controlling_tty_cleared_on_setsid(&self) -> bool {
+        self.child_controlling_tty_cleared_on_setsid
+    }
+
     pub const fn controlling_tty_bound(&self) -> bool {
         self.controlling_tty_bound
     }
@@ -5730,6 +5746,14 @@ impl UserInitProcess {
 
     pub const fn foreground_pgrp_set_observed(&self) -> bool {
         self.foreground_pgrp_set_observed
+    }
+
+    pub const fn tty_session_id_read_observed(&self) -> bool {
+        self.tty_session_id_read_observed
+    }
+
+    pub const fn tiocsctty_observed(&self) -> bool {
+        self.tiocsctty_observed
     }
 
     pub const fn uid_read_observed(&self) -> bool {
@@ -5995,9 +6019,13 @@ impl UserInitProcess {
         self.child_session_leader_first_slice = false;
         self.child_process_group_set_observed = false;
         self.child_setsid_success_observed = false;
+        self.child_controlling_tty_bound = false;
+        self.child_controlling_tty_cleared_on_setsid = false;
         self.controlling_tty_bound = true;
         self.foreground_pgrp_bound = true;
         self.foreground_pgrp = super::rest_init::KERNEL_INIT_PID;
+        self.tty_session_id_read_observed = false;
+        self.tiocsctty_observed = false;
         self.signal_state_inherited = true;
         self.signal_runtime_bound = true;
         self.thread_signal_state_bound = true;
@@ -6225,6 +6253,9 @@ impl UserInitProcess {
         self.child_process_session_id = self.session_id;
         self.child_session_leader_first_slice = false;
         self.child_setsid_success_observed = false;
+        self.child_controlling_tty_bound = self.controlling_tty_bound;
+        self.child_controlling_tty_cleared_on_setsid = false;
+        self.tiocsctty_observed = false;
         true
     }
 
@@ -6328,6 +6359,8 @@ impl UserInitProcess {
             self.child_process_group = child_pid;
             self.child_session_leader_first_slice = true;
             self.child_setsid_success_observed = true;
+            self.child_controlling_tty_bound = false;
+            self.child_controlling_tty_cleared_on_setsid = true;
             return UserProcessGroupUpdate::Updated(child_pid);
         }
 
@@ -6389,6 +6422,77 @@ impl UserInitProcess {
         self.foreground_pgrp_bound = true;
         self.foreground_pgrp_set_observed = true;
         UserProcessGroupUpdate::Updated(self.foreground_pgrp)
+    }
+
+    pub fn read_tty_session_id_first_slice(
+        &mut self,
+        current_child_continuation: bool,
+    ) -> UserProcessGroupLookup {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || self.session_id == 0
+        {
+            return UserProcessGroupLookup::NotReady;
+        }
+
+        if current_child_continuation {
+            if self.child_process_pid == 0
+                || !self.child_process_group_visible
+                || self.child_process_session_id == 0
+            {
+                return UserProcessGroupLookup::NotReady;
+            }
+            if !self.child_controlling_tty_bound {
+                return UserProcessGroupLookup::NotReady;
+            }
+            self.tty_session_id_read_observed = true;
+            return UserProcessGroupLookup::Found(self.child_process_session_id);
+        }
+
+        if !self.controlling_tty_bound {
+            return UserProcessGroupLookup::NotReady;
+        }
+        self.tty_session_id_read_observed = true;
+        UserProcessGroupLookup::Found(self.session_id)
+    }
+
+    pub fn bind_controlling_tty_first_slice(
+        &mut self,
+        current_child_continuation: bool,
+        _arg: usize,
+    ) -> UserProcessGroupUpdate {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || !self.session_leader_first_slice
+            || self.session_id == 0
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+
+        if !current_child_continuation {
+            return UserProcessGroupUpdate::PermissionDenied;
+        }
+        if self.child_process_pid == 0
+            || !self.child_process_group_visible
+            || self.child_process_session_id == 0
+        {
+            return UserProcessGroupUpdate::NotReady;
+        }
+        if !self.child_session_leader_first_slice
+            || !self.child_controlling_tty_cleared_on_setsid
+            || self.child_controlling_tty_bound
+            || self.child_process_session_id != self.child_process_pid
+            || self.child_process_group != self.child_process_pid
+        {
+            return UserProcessGroupUpdate::PermissionDenied;
+        }
+
+        self.child_controlling_tty_bound = true;
+        self.foreground_pgrp = self.child_process_group;
+        self.foreground_pgrp_bound = true;
+        self.tiocsctty_observed = true;
+        UserProcessGroupUpdate::Updated(self.child_process_session_id)
     }
 
     pub fn read_euid(&mut self) -> Option<usize> {

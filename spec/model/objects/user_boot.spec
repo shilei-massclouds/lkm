@@ -296,6 +296,7 @@ predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_fixed_usercopy_checks_mapping_permissions<T, A>(table: T, address_space: A) -> bool;
 predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_mask_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_action_usercopy_ready<T>(table: T) -> bool;
@@ -339,6 +340,8 @@ predicate syscall_ioctl_tcgets_termios_first_slice<T>(table: T) -> bool;
 predicate syscall_ioctl_tcsets_termios_mutation_first_slice<T>(table: T) -> bool;
 predicate syscall_ioctl_tiocgpgrp_foreground_pgrp_first_slice<T>(table: T) -> bool;
 predicate syscall_ioctl_tiocspgrp_foreground_pgrp_update_first_slice<T>(table: T) -> bool;
+predicate syscall_ioctl_tiocgsid_session_id_first_slice<T>(table: T) -> bool;
+predicate syscall_ioctl_tiocsctty_controlling_tty_first_slice<T>(table: T) -> bool;
 predicate syscall_ioctl_tty_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bool;
 predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
@@ -519,6 +522,7 @@ predicate user_init_process_process_group_set_observed<T>(process: T) -> bool;
 predicate user_init_process_session_id_read_observed<T>(process: T) -> bool;
 predicate user_init_process_setsid_eperm_observed<T>(process: T) -> bool;
 predicate user_init_process_child_setsid_success_observed<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_child_controlling_tty_clear_on_setsid_first_slice<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
@@ -526,6 +530,9 @@ predicate user_init_process_foreground_pgrp_bound<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_read_observed<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_set_observed<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_tty_session_id_read_observed<T>(process: T) -> bool;
+predicate user_init_process_tiocsctty_observed<T>(process: T) -> bool;
+predicate user_init_process_child_controlling_tty_bound<T, C>(process: T, child: C) -> bool;
 predicate user_child_process_prepared<T>(process: T) -> bool;
 predicate user_child_process_parent_pid1<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_pid_allocated<T, N>(process: T, pid_ns: N) -> bool;
@@ -1228,6 +1235,7 @@ object SyscallTable: ResourceObject {
                     syscall_write_usercopy_ready(self);
                     syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
+                    syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
                     syscall_ppoll_pollfd_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
                     syscall_signal_mask_usercopy_ready(self);
@@ -1323,6 +1331,7 @@ object SyscallTable: ResourceObject {
             syscall_write_usercopy_ready(self);
             syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
+            syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
             syscall_ppoll_pollfd_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
             syscall_signal_mask_usercopy_ready(self);
@@ -1786,10 +1795,11 @@ object SyscallTable: ResourceObject {
                  *
                  * The current slice covers console-like char-device fds, the
                  * riscv64/generic 36-byte old struct termios, TCGETS readback,
-                 * TCSETS immediate mutation, and TIOCGPGRP/TIOCSPGRP against
-                 * the UserInitProcess controlling-tty foreground-pgrp state.
-                 * /dev/null validates as an fd but is not a TTY; TTY ioctl
-                 * helpers must return ENOTTY for it. TCSETSW/TCSETSF,
+                 * TCSETS immediate mutation, TIOCGPGRP/TIOCSPGRP against the
+                 * UserInitProcess controlling-tty foreground-pgrp state, and
+                 * the observed getty TIOCGSID/TIOCSCTTY controlling-tty first
+                 * slice. /dev/null validates as an fd but is not a TTY; TTY
+                 * ioctl helpers must return ENOTTY for it. TCSETSW/TCSETSF,
                  * drain/flush, driver and line-discipline set_termios hooks,
                  * canonical N_TTY behavior, pty and real TTY locking remain
                  * deferred.
@@ -1807,6 +1817,8 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::SetTermios(FdRef::Stdout);
                     UserInitProcess.Action::ReadForegroundProcessGroup;
                     UserInitProcess.Action::SetForegroundProcessGroup;
+                    UserInitProcess.Action::ReadTtySessionId;
+                    UserInitProcess.Action::BindControllingTty;
                 }
 
                 ensures {
@@ -1816,6 +1828,8 @@ object SyscallTable: ResourceObject {
                     syscall_ioctl_tcsets_termios_mutation_first_slice(self);
                     syscall_ioctl_tiocgpgrp_foreground_pgrp_first_slice(self);
                     syscall_ioctl_tiocspgrp_foreground_pgrp_update_first_slice(self);
+                    syscall_ioctl_tiocgsid_session_id_first_slice(self);
+                    syscall_ioctl_tiocsctty_controlling_tty_first_slice(self);
                     files_struct_tty_termios_state_bound(FilesStruct);
                     files_struct_tty_termios_mutation_observed(FilesStruct);
                     files_struct_null_device_tty_ioctl_enotty(FilesStruct);
@@ -1823,6 +1837,9 @@ object SyscallTable: ResourceObject {
                     user_init_process_foreground_pgrp_read_observed(UserInitProcess);
                     user_init_process_foreground_pgrp_set_observed(UserInitProcess);
                     user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice(UserInitProcess, UserChildProcess);
+                    user_init_process_tty_session_id_read_observed(UserInitProcess);
+                    user_init_process_tiocsctty_observed(UserInitProcess);
+                    user_init_process_child_controlling_tty_bound(UserInitProcess, UserChildProcess);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_table_ioctl_observed(self);
                 }
@@ -3299,6 +3316,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_process_group_leader_first_slice(self);
                     user_init_process_setsid_eperm_observed(self);
                     user_init_process_child_setsid_success_observed(self, UserChildProcess);
+                    user_init_process_child_controlling_tty_clear_on_setsid_first_slice(self, UserChildProcess);
                 }
             }
 
@@ -3326,6 +3344,33 @@ object UserInitProcess: ResourceObject {
                     user_init_process_foreground_pgrp_bound(self);
                     user_init_process_foreground_pgrp_set_observed(self);
                     user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice(self, UserChildProcess);
+                }
+            }
+
+            on Action::ReadTtySessionId {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_controlling_tty_bound(self);
+                    user_init_process_tty_session_id_read_observed(self);
+                }
+            }
+
+            on Action::BindControllingTty {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_child_setsid_success_observed(self, UserChildProcess);
+                    user_init_process_child_controlling_tty_clear_on_setsid_first_slice(self, UserChildProcess);
+                    user_init_process_child_controlling_tty_bound(self, UserChildProcess);
+                    user_init_process_foreground_pgrp_bound(self);
+                    user_init_process_tiocsctty_observed(self);
                 }
             }
 

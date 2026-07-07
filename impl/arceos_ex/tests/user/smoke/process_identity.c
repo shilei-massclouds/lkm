@@ -10,6 +10,14 @@
 #define SYS_getsid 156
 #endif
 
+#ifndef TIOCSCTTY
+#define TIOCSCTTY 0x540e
+#endif
+
+#ifndef TIOCGSID
+#define TIOCGSID 0x5429
+#endif
+
 static int say(const char *message, size_t len)
 {
 	return write(STDOUT_FILENO, message, len) == (ssize_t)len ? 0 : -1;
@@ -20,6 +28,7 @@ static int say(const char *message, size_t len)
 int smoke_process_identity(void)
 {
 	int pgrp;
+	int sid;
 	long rc;
 
 	rc = syscall(SYS_getpid);
@@ -78,6 +87,29 @@ int smoke_process_identity(void)
 	}
 	if (SAY_LITERAL("syscall setsid pgrp leader eperm ok\n") < 0) {
 		return 86;
+	}
+
+	sid = 0;
+	rc = ioctl(STDOUT_FILENO, TIOCGSID, &sid);
+	if (rc != 0 || sid != 1) {
+		return 93;
+	}
+	errno = 0;
+	rc = ioctl(STDOUT_FILENO, TIOCGSID, (void *)1);
+	if (rc != -1 || errno != EFAULT) {
+		return 94;
+	}
+	if (SAY_LITERAL("syscall ioctl TIOCGSID ok\n") < 0) {
+		return 95;
+	}
+
+	errno = 0;
+	rc = ioctl(STDOUT_FILENO, TIOCSCTTY, 1);
+	if (rc != -1 || errno != EPERM) {
+		return 96;
+	}
+	if (SAY_LITERAL("syscall ioctl TIOCSCTTY eperm ok\n") < 0) {
+		return 97;
 	}
 
 	pgrp = 1;

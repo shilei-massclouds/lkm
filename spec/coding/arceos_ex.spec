@@ -122,6 +122,7 @@ predicate arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch() -> 
 predicate arceos_ex_must_not_generate_syscall_dispatcher_object() -> bool;
 predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
 predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
+predicate arceos_ex_must_user_syscall_fixed_usercopy_precheck_mapping_permissions() -> bool;
 predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
 predicate arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> bool;
@@ -139,6 +140,8 @@ predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_tiocspgrp_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_tiocgsid_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_tiocsctty_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_wait4_parent_wait_first_slice() -> bool;
@@ -1753,10 +1756,14 @@ type ArceosExStartupPhaseCodingMust {
          * path: copy one old struct termios from user memory, update the
          * current console-like termios state, and return 0. User copy failure
          * returns EFAULT; non char-device fds and unknown tty ioctls return
-         * ENOTTY. The next TCGETS must observe the updated value. TCSETSW,
-         * TCSETSF, output drain/wait, flush, driver and line-discipline
-         * set_termios callbacks, locked termios, real TTY locking,
-         * line-discipline behavior and isatty remain trimmed.
+         * ENOTTY. Fixed-length copy_from_user/copy_to_user helpers must
+         * precheck the current UserAddressSpace mapping and load/store
+         * permissions before touching the address, so unmapped, overflowing
+         * or permission-failing user pointers return EFAULT instead of a
+         * supervisor page fault. The next TCGETS must observe the updated
+         * value. TCSETSW, TCSETSF, output drain/wait, flush, driver and
+         * line-discipline set_termios callbacks, locked termios, real TTY
+         * locking, line-discipline behavior and isatty remain trimmed.
          *
          * ioctl(TIOCGPGRP) must be accepted only on char-device fds that match
          * the current UserInitProcess controlling tty facts. It copies a
@@ -1773,11 +1780,29 @@ type ArceosExStartupPhaseCodingMust {
          * from the user pointer, reject negative pgrp with EINVAL, reject
          * unknown pgrp with ESRCH, reject a pgrp outside the current session
          * with EPERM, then update the foreground pgrp fact. The current
-         * single-PID slice only has pgrp 1 in the current session, so
-         * TIOCSPGRP(pid_t=1) succeeds and records foreground pgrp 1. This is
-         * not full TTY job control: TIOCGSID, successful setsid, pty,
-         * orphan pgrp, canonical N_TTY behavior and job-control signal
-         * delivery remain trimmed.
+         * single-PID slice has pgrp 1 plus the observed child pgrp in the
+         * current bounded identity view, so TIOCSPGRP can record either
+         * supported foreground pgrp.
+         *
+         * ioctl(TIOCGSID) follows Linux 6.12 tiocgsid(): validate the fd as a
+         * console-like char-device tty, require the current syscall identity
+         * to own that controlling tty, and copy the tty session id as a
+         * riscv64 pid_t/int to the user pointer. No controlling tty/session
+         * returns ENOTTY; user copy failure returns EFAULT.
+         *
+         * ioctl(TIOCSCTTY) follows Linux 6.12 tiocsctty() only for the
+         * observed getty first slice: after child setsid() succeeds, the
+         * current child is a session leader with no controlling tty and may
+         * bind a console-like TTY fd. Success records child tty session id as
+         * child SID and foreground pgrp as child PGID. Non session leaders,
+         * existing child controlling tty, non tty fds and incompatible tty
+         * ownership return EPERM/ENOTTY. The observed arg == 1 is accepted but
+         * tty steal/CAP_SYS_ADMIN is not implemented.
+         *
+         * This is not full TTY job control: pty, TIOCNOTTY, real tty
+         * refcount/locks, session_clear_tty, multi-session contention, orphan
+         * pgrp, canonical N_TTY behavior and job-control signal delivery
+         * remain trimmed.
          *
          * nanosleep(101) must reference local Linux 6.12
          * kernel/time/hrtimer.c::sys_nanosleep(),
@@ -1826,7 +1851,7 @@ type ArceosExStartupPhaseCodingMust {
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
          * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, F_SETFL, TCGETS/TCSETS,
-         * TIOCGWINSZ and TIOCGPGRP/TIOCSPGRP. Syscall name decoding should
+         * TIOCGWINSZ and TIOCSCTTY/TIOCGPGRP/TIOCSPGRP/TIOCGSID. Syscall name decoding should
          * include dup3 so nr 24 traces no longer appear as unknown.
          *
          * A success-path trace such as PROBE=user-read-trace is separate from
@@ -1982,6 +2007,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_not_generate_syscall_dispatcher_object();
         arceos_ex_must_syscall_table_hold_concrete_syscall_actions();
         arceos_ex_must_user_syscall_write_copy_from_user_address_space();
+        arceos_ex_must_user_syscall_fixed_usercopy_precheck_mapping_permissions();
         arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
         arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice();
         arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core();
@@ -1999,6 +2025,8 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_support_stdin_ready_data_read_first_slice();
         arceos_ex_must_syscall_table_support_tiocgpgrp_first_slice();
         arceos_ex_must_syscall_table_support_tiocspgrp_first_slice();
+        arceos_ex_must_syscall_table_support_tiocgsid_first_slice();
+        arceos_ex_must_syscall_table_support_tiocsctty_first_slice();
         arceos_ex_must_syscall_table_support_mmap_fixed_prot_none_first_slice();
         arceos_ex_must_syscall_table_support_clone_plain_fork_first_slice();
         arceos_ex_must_syscall_table_support_wait4_parent_wait_first_slice();
