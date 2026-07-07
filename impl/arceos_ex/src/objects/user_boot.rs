@@ -3434,6 +3434,12 @@ pub struct UserInitProcess {
     child_process_group_visible: bool,
     child_process_group: usize,
     child_process_session_id: usize,
+    observed_child_parent_identity_saved: bool,
+    observed_child_parent_process_group: usize,
+    observed_child_parent_session_id: usize,
+    observed_child_parent_session_leader_first_slice: bool,
+    observed_child_parent_controlling_tty_bound: bool,
+    observed_child_parent_controlling_tty_cleared_on_setsid: bool,
     child_session_leader_first_slice: bool,
     child_process_group_set_observed: bool,
     child_setsid_success_observed: bool,
@@ -5060,7 +5066,12 @@ impl UserChildProcess {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        Some((parent_frame, self.parent_wait_status_ptr, child_pid, parent_pid))
+        Some((
+            parent_frame,
+            self.parent_wait_status_ptr,
+            child_pid,
+            parent_pid,
+        ))
     }
 
     pub fn child_exit_to_vfork_parent(
@@ -5995,6 +6006,12 @@ impl UserInitProcess {
             child_process_group_visible: false,
             child_process_group: 0,
             child_process_session_id: 0,
+            observed_child_parent_identity_saved: false,
+            observed_child_parent_process_group: 0,
+            observed_child_parent_session_id: 0,
+            observed_child_parent_session_leader_first_slice: false,
+            observed_child_parent_controlling_tty_bound: false,
+            observed_child_parent_controlling_tty_cleared_on_setsid: false,
             child_session_leader_first_slice: false,
             child_process_group_set_observed: false,
             child_setsid_success_observed: false,
@@ -6580,6 +6597,12 @@ impl UserInitProcess {
         self.child_process_group_visible = false;
         self.child_process_group = 0;
         self.child_process_session_id = 0;
+        self.observed_child_parent_identity_saved = false;
+        self.observed_child_parent_process_group = 0;
+        self.observed_child_parent_session_id = 0;
+        self.observed_child_parent_session_leader_first_slice = false;
+        self.observed_child_parent_controlling_tty_bound = false;
+        self.observed_child_parent_controlling_tty_cleared_on_setsid = false;
         self.child_session_leader_first_slice = false;
         self.child_process_group_set_observed = false;
         self.child_setsid_success_observed = false;
@@ -6815,6 +6838,12 @@ impl UserInitProcess {
         self.child_process_group_visible = true;
         self.child_process_group = self.process_group;
         self.child_process_session_id = self.session_id;
+        self.observed_child_parent_identity_saved = false;
+        self.observed_child_parent_process_group = 0;
+        self.observed_child_parent_session_id = 0;
+        self.observed_child_parent_session_leader_first_slice = false;
+        self.observed_child_parent_controlling_tty_bound = false;
+        self.observed_child_parent_controlling_tty_cleared_on_setsid = false;
         self.child_session_leader_first_slice = false;
         self.child_setsid_success_observed = false;
         self.child_controlling_tty_bound = self.controlling_tty_bound;
@@ -6841,6 +6870,12 @@ impl UserInitProcess {
         }
 
         self.child_process_pid = child_pid;
+        self.observed_child_parent_identity_saved = false;
+        self.observed_child_parent_process_group = 0;
+        self.observed_child_parent_session_id = 0;
+        self.observed_child_parent_session_leader_first_slice = false;
+        self.observed_child_parent_controlling_tty_bound = false;
+        self.observed_child_parent_controlling_tty_cleared_on_setsid = false;
         self.child_session_leader_first_slice = false;
         self.child_setsid_success_observed = false;
         true
@@ -6863,6 +6898,14 @@ impl UserInitProcess {
             return false;
         }
 
+        self.observed_child_parent_identity_saved = true;
+        self.observed_child_parent_process_group = self.child_process_group;
+        self.observed_child_parent_session_id = self.child_process_session_id;
+        self.observed_child_parent_session_leader_first_slice =
+            self.child_session_leader_first_slice;
+        self.observed_child_parent_controlling_tty_bound = self.child_controlling_tty_bound;
+        self.observed_child_parent_controlling_tty_cleared_on_setsid =
+            self.child_controlling_tty_cleared_on_setsid;
         self.child_process_pid = child_pid;
         true
     }
@@ -6885,6 +6928,21 @@ impl UserInitProcess {
         }
 
         self.child_process_pid = parent_pid;
+        if self.observed_child_parent_identity_saved {
+            self.child_process_group = self.observed_child_parent_process_group;
+            self.child_process_session_id = self.observed_child_parent_session_id;
+            self.child_session_leader_first_slice =
+                self.observed_child_parent_session_leader_first_slice;
+            self.child_controlling_tty_bound = self.observed_child_parent_controlling_tty_bound;
+            self.child_controlling_tty_cleared_on_setsid =
+                self.observed_child_parent_controlling_tty_cleared_on_setsid;
+            self.observed_child_parent_identity_saved = false;
+            self.observed_child_parent_process_group = 0;
+            self.observed_child_parent_session_id = 0;
+            self.observed_child_parent_session_leader_first_slice = false;
+            self.observed_child_parent_controlling_tty_bound = false;
+            self.observed_child_parent_controlling_tty_cleared_on_setsid = false;
+        }
         true
     }
 
@@ -6930,7 +6988,10 @@ impl UserInitProcess {
             } else {
                 pgid as usize
             };
-            if normalized_pgid != self.child_process_pid {
+            let joins_inherited_pgrp = self.child_process_session_id != 0
+                && ((self.child_process_group != 0 && normalized_pgid == self.child_process_group)
+                    || normalized_pgid == self.child_process_session_id);
+            if normalized_pgid != self.child_process_pid && !joins_inherited_pgrp {
                 return UserProcessGroupUpdate::PermissionDenied;
             }
             self.child_process_group = normalized_pgid;
@@ -7035,7 +7096,15 @@ impl UserInitProcess {
             return UserProcessGroupUpdate::Invalid;
         }
         if pgrp as usize != super::rest_init::KERNEL_INIT_PID {
-            if self.child_process_group_visible && self.child_process_group == pgrp as usize {
+            let pgrp_value = pgrp as usize;
+            let child_pgrp_matches =
+                self.child_process_group_visible && self.child_process_group == pgrp_value;
+            let saved_shell_pgrp_matches = self.observed_child_parent_identity_saved
+                && self.observed_child_parent_process_group == pgrp_value
+                && self.observed_child_parent_session_id != 0;
+            let inherited_session_pgrp_matches =
+                self.child_process_session_id != 0 && self.child_process_session_id == pgrp_value;
+            if child_pgrp_matches || saved_shell_pgrp_matches || inherited_session_pgrp_matches {
                 self.foreground_pgrp = pgrp as usize;
                 self.foreground_pgrp_bound = true;
                 self.foreground_pgrp_set_observed = true;

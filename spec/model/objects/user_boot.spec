@@ -542,17 +542,20 @@ predicate user_init_process_session_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_leader_first_slice<T>(process: T) -> bool;
 predicate user_init_process_process_group_read_observed<T>(process: T) -> bool;
 predicate user_init_process_process_group_set_observed<T>(process: T) -> bool;
+predicate user_init_process_child_same_session_pgrp_join_first_slice<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_session_id_read_observed<T>(process: T) -> bool;
 predicate user_init_process_setsid_eperm_observed<T>(process: T) -> bool;
 predicate user_init_process_child_setsid_success_observed<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_controlling_tty_clear_on_setsid_first_slice<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_observed_child_visible_pid_only_restore<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_bound<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_read_observed<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_set_observed<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_foreground_pgrp_accepts_shell_inherited_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_tty_session_id_read_observed<T>(process: T) -> bool;
 predicate user_init_process_tiocsctty_observed<T>(process: T) -> bool;
 predicate user_init_process_child_controlling_tty_bound<T, C>(process: T, child: C) -> bool;
@@ -1972,7 +1975,11 @@ object SyscallTable: ResourceObject {
                  * TCSETS immediate mutation, TIOCGPGRP/TIOCSPGRP against the
                  * UserInitProcess controlling-tty foreground-pgrp state, and
                  * the observed getty TIOCGSID/TIOCSCTTY controlling-tty first
-                 * slice. /dev/null validates as an fd but is not a TTY; TTY
+                 * slice. TIOCSPGRP accepts PID1 pgrp, the current visible
+                 * child pgrp, and the OpenRC login shell's inherited
+                 * same-session child pgrp after observed /bin/ls completion;
+                 * unknown pgrp stays ESRCH and cross-session pgrp stays EPERM.
+                 * /dev/null validates as an fd but is not a TTY; TTY
                  * ioctl helpers must return ENOTTY for it. TCSETSW/TCSETSF,
                  * drain/flush, driver and line-discipline set_termios hooks,
                  * canonical N_TTY behavior, pty and real TTY locking remain
@@ -3323,7 +3330,10 @@ object UserChildProcess: ResourceObject {
              * the saved shell parent address-space, stack, writable pages and
              * fd snapshot, copies wait status when requested, returns the
              * grandchild pid from shell wait4, and restores the visible
-             * current child pid to the login shell parent.
+             * current child pid to the login shell parent. The restore must
+             * be visible-pid-only: the shell's inherited pgrp, session id and
+             * controlling-tty facts remain the shell facts and are not
+             * overwritten by the grandchild pid.
              */
             depends_on {
                 UserChildProcess.state == State::Ready;
@@ -3337,6 +3347,7 @@ object UserChildProcess: ResourceObject {
                 user_child_process_parent_wait_stack_snapshot_restored(self, UserAddressSpace);
                 user_child_process_parent_wait_writable_page_snapshot_restored(self, UserAddressSpace);
                 user_child_process_parent_fd_snapshot_restored(self, FilesStruct);
+                user_init_process_observed_child_visible_pid_only_restore(UserInitProcess, self);
                 user_child_process_observed_child_plain_fork_parent_restored(self);
                 user_child_process_single_active_slot(self);
             }
@@ -3645,6 +3656,15 @@ object UserInitProcess: ResourceObject {
             }
 
             on Action::SetProcessGroup {
+                /*
+                 * setpgid keeps Linux pid/pgid zero normalization. In
+                 * addition to putting the visible child in its own pgrp, the
+                 * OpenRC login shell slice accepts setpgid(0,
+                 * inherited_child_pgrp) as a same-session join/no-op. This
+                 * covers the bounded shell job-control restore after staged
+                 * /bin/ls without introducing arbitrary process-group lookup
+                 * or lifetime.
+                 */
                 depends_on {
                     UserInitProcess.state == State::Online;
                     SyscallException.state == State::Online;
@@ -3656,6 +3676,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_process_group_set_observed(self);
                     user_init_process_child_process_group_visible(self, UserChildProcess);
                     user_init_process_child_process_group_set_observed(self, UserChildProcess);
+                    user_init_process_child_same_session_pgrp_join_first_slice(self, UserChildProcess);
                 }
             }
 
@@ -3688,6 +3709,13 @@ object UserInitProcess: ResourceObject {
             }
 
             on Action::SetForegroundProcessGroup {
+                /*
+                 * The bounded TIOCSPGRP update may restore foreground pgrp to
+                 * the login shell's inherited same-session pgrp after the
+                 * observed /bin/ls grandchild exits. It still accepts only
+                 * PID1 pgrp, the visible child pgrp, or that inherited child
+                 * pgrp; it does not implement a process-group table.
+                 */
                 depends_on {
                     UserInitProcess.state == State::Online;
                     SyscallException.state == State::Online;
@@ -3698,6 +3726,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_foreground_pgrp_bound(self);
                     user_init_process_foreground_pgrp_set_observed(self);
                     user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice(self, UserChildProcess);
+                    user_init_process_foreground_pgrp_accepts_shell_inherited_pgrp_first_slice(self, UserChildProcess);
                 }
             }
 

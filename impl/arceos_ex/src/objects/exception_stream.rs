@@ -4348,9 +4348,18 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
             table.setpgid_observed.store(1, Ordering::Release);
             complete_successful_syscall(frame, 0);
         }
-        UserProcessGroupUpdate::Invalid => complete_error_syscall(frame, EINVAL),
-        UserProcessGroupUpdate::NoSuchProcess => complete_error_syscall(frame, ESRCH),
-        UserProcessGroupUpdate::PermissionDenied => complete_error_syscall(frame, EPERM),
+        UserProcessGroupUpdate::Invalid => {
+            print_setpgid_error_detail(pid, pgid, EINVAL, update);
+            complete_error_syscall(frame, EINVAL);
+        }
+        UserProcessGroupUpdate::NoSuchProcess => {
+            print_setpgid_error_detail(pid, pgid, ESRCH, update);
+            complete_error_syscall(frame, ESRCH);
+        }
+        UserProcessGroupUpdate::PermissionDenied => {
+            print_setpgid_error_detail(pid, pgid, EPERM, update);
+            complete_error_syscall(frame, EPERM);
+        }
         UserProcessGroupUpdate::NotReady => complete_unsupported_syscall(frame),
     }
 }
@@ -8764,6 +8773,110 @@ fn print_dup3_error_detail(oldfd: usize, newfd: usize, flags: usize, errno: usiz
 fn print_dup3_error_detail(_oldfd: usize, _newfd: usize, _flags: usize, _errno: usize) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
+fn print_setpgid_error_detail(
+    pid_arg: usize,
+    pgid_arg: usize,
+    errno: usize,
+    update: UserProcessGroupUpdate,
+) {
+    let raw_pid = pid_arg as u32 as i32;
+    let raw_pgid = pgid_arg as u32 as i32;
+    let ctx = crate::context::context_ref();
+    let current_child = ctx.user_child_process.current_child_continuation();
+    let process = &ctx.user_init_process;
+    let current_pid = if current_child {
+        process.child_process_pid()
+    } else {
+        crate::objects::rest_init::KERNEL_INIT_PID
+    };
+    let normalized_pid = if raw_pid == 0 {
+        current_pid as i64
+    } else {
+        raw_pid as i64
+    };
+    let normalized_pgid = if raw_pgid == 0 {
+        normalized_pid
+    } else {
+        raw_pgid as i64
+    };
+
+    crate::arch::riscv64::sbi::putstr("syscall setpgid detail pid_arg=");
+    print_i64(raw_pid as i64);
+    crate::arch::riscv64::sbi::putstr(" pgid_arg=");
+    print_i64(raw_pgid as i64);
+    crate::arch::riscv64::sbi::putstr(" normalized_pid=");
+    print_i64(normalized_pid);
+    crate::arch::riscv64::sbi::putstr(" normalized_pgid=");
+    print_i64(normalized_pgid);
+    crate::arch::riscv64::sbi::putstr(" current_child=");
+    print_bool_digit(current_child);
+    crate::arch::riscv64::sbi::putstr(" child_visible=");
+    print_bool_digit(process.child_process_group_visible());
+    crate::arch::riscv64::sbi::putstr(" child_pid=");
+    print_decimal(process.child_process_pid());
+    crate::arch::riscv64::sbi::putstr(" child_pgrp=");
+    print_decimal(process.child_process_group());
+    crate::arch::riscv64::sbi::putstr(" child_session=");
+    print_decimal(process.child_process_session_id());
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    crate::arch::riscv64::sbi::putstr(" reason=");
+    print_setpgid_reject_reason(update, raw_pid, raw_pgid, normalized_pid, normalized_pgid);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_setpgid_reject_reason(
+    update: UserProcessGroupUpdate,
+    raw_pid: i32,
+    raw_pgid: i32,
+    normalized_pid: i64,
+    normalized_pgid: i64,
+) {
+    let process = &crate::context::context_ref().user_init_process;
+    match update {
+        UserProcessGroupUpdate::Invalid => {
+            crate::arch::riscv64::sbi::putstr("pgid_negative");
+        }
+        UserProcessGroupUpdate::NoSuchProcess => {
+            crate::arch::riscv64::sbi::putstr("pid_not_visible");
+        }
+        UserProcessGroupUpdate::PermissionDenied => {
+            if raw_pid < 0 {
+                crate::arch::riscv64::sbi::putstr("pid_negative");
+            } else if raw_pgid < 0 {
+                crate::arch::riscv64::sbi::putstr("pgid_negative");
+            } else if normalized_pid as usize == crate::objects::rest_init::KERNEL_INIT_PID {
+                crate::arch::riscv64::sbi::putstr("pid1_target_pgrp_not_pid1");
+            } else if normalized_pid as usize == process.child_process_pid() {
+                if normalized_pgid as usize == process.child_process_group() {
+                    crate::arch::riscv64::sbi::putstr("same_session_join_rejected");
+                } else {
+                    crate::arch::riscv64::sbi::putstr("target_pgrp_not_child_or_inherited");
+                }
+            } else {
+                crate::arch::riscv64::sbi::putstr("target_pgrp_permission");
+            }
+        }
+        UserProcessGroupUpdate::NotReady => {
+            crate::arch::riscv64::sbi::putstr("identity_not_ready");
+        }
+        UserProcessGroupUpdate::Updated(_) => {
+            crate::arch::riscv64::sbi::putstr("updated");
+        }
+    }
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_setpgid_error_detail(
+    _pid_arg: usize,
+    _pgid_arg: usize,
+    _errno: usize,
+    _update: UserProcessGroupUpdate,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
 fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
     crate::arch::riscv64::sbi::putstr("syscall ioctl detail");
     crate::arch::riscv64::sbi::putstr(" fd=");
@@ -8776,6 +8889,33 @@ fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
     print_hex(arg);
     crate::arch::riscv64::sbi::putstr(" errno=");
     print_decimal(errno);
+    if cmd == TIOCSPGRP {
+        let pgrp_value = read_user_u32(arg);
+        crate::arch::riscv64::sbi::putstr(" pgrp_copy=");
+        print_bool_digit(pgrp_value.is_some());
+        crate::arch::riscv64::sbi::putstr(" pgrp_value=");
+        match pgrp_value {
+            Some(value) => print_i64(value as i32 as i64),
+            None => crate::arch::riscv64::sbi::putstr("unreadable"),
+        }
+        let process = &crate::context::context_ref().user_init_process;
+        crate::arch::riscv64::sbi::putstr(" foreground_bound=");
+        print_bool_digit(process.foreground_pgrp_bound());
+        crate::arch::riscv64::sbi::putstr(" foreground_pgrp=");
+        print_decimal(process.foreground_pgrp());
+        crate::arch::riscv64::sbi::putstr(" child_visible=");
+        print_bool_digit(process.child_process_group_visible());
+        crate::arch::riscv64::sbi::putstr(" child_pid=");
+        print_decimal(process.child_process_pid());
+        crate::arch::riscv64::sbi::putstr(" child_pgrp=");
+        print_decimal(process.child_process_group());
+        crate::arch::riscv64::sbi::putstr(" child_session=");
+        print_decimal(process.child_process_session_id());
+        crate::arch::riscv64::sbi::putstr(" controlling_tty_bound=");
+        print_bool_digit(process.controlling_tty_bound());
+        crate::arch::riscv64::sbi::putstr(" child_tty_bound=");
+        print_bool_digit(process.child_controlling_tty_bound());
+    }
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
