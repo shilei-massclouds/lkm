@@ -770,9 +770,15 @@ unconnected UnixSocket fd/OFD/backend，并把 `SOCK_CLOEXEC` 作为 fd entry cl
 作为 file status flag 保存。focused run 复跑已确认 post-auth stream `socket(198)` 返回 fd 3；新的第一阻断是
 `connect(203)`，参数形态为 `fd=3, addrlen=0x18`，返回 `ENOSYS` 后 login 仍打印
 `login: can't set groups: Function not implemented` 并 `exit_group(1)`。早期 `AF_UNIX + SOCK_DGRAM` syslog path 暂不改变，仍走 unsupported diagnostic
-并返回 `ENOSYS`，避免把 tolerated noise 提前推进到 `sendto(206)` 阻断。该片不得实现 `connect(203)`、
-`sendto(206)`、socketpair/bind/listen/accept、sockaddr path namespace、sk_buff queue、network namespace、
-LSM、`setgroups(159)`、完整 credentials、TTY ownership 或 inode ownership/mode 持久化。OpenRC login shell case 仍只能作为 opt-in
+并返回 `ENOSYS`，避免把 tolerated noise 提前推进到 `sendto(206)` 阻断。当前 `connect(203)` 片只做 sockaddr 诊断分类：
+复用现有 user-copy helper，最多按 Linux `sockaddr_storage` 边界复制用户 sockaddr，打印 copy status、raw family、AF_UNIX 判断、
+Linux 6.12 `unix_validate_addr()` 长度/family 条件是否满足、`sockaddr_un` path/abstract path 的 bounded escaped 前缀，以及 fd 当前是否指向
+`UnixSocket0`；它仍返回 `ENOSYS`，不安装 fd、不改变 fd/backend 状态、不写用户内存。该片不得实现 `connect(203)` 成功路径、
+`sendto(206)`、socketpair/bind/listen/accept、sockaddr path namespace、Unix peer/listener lookup、sk_buff queue、network namespace、
+LSM、`setgroups(159)`、完整 credentials、TTY ownership 或 inode ownership/mode 持久化。focused 复跑已分类出早期
+`addrlen=110` connect 为 `/run/utmps/.utmpd-socket` / `.wtmpd-socket` pathname AF_UNIX 噪声；认证后
+`fchown/fchmod` 之后的直接阻断是 `addrlen=24`、path `/var/run/nscd/socket` 的 libc/NSS nscd pathname connect，
+仍在 `ENOSYS` 后直接进入 login failure。OpenRC login shell case 仍只能作为 opt-in
 诊断入口，不能进入默认 `make test` 硬门禁；若越过该边界后出现新的 syscall/TTY/wait/signal/shell 边界，必须记录为下一片。
 QEMU 启动命令行默认由 `QEMU_APPEND ?= earlycon=sbi` 提供，`run` 目标必须把它原样传给 QEMU
 `-append "$(QEMU_APPEND)"`；用户可以通过 make 命令行覆盖，例如

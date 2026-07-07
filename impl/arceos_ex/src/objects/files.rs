@@ -1907,6 +1907,13 @@ impl FilesStruct {
         self.socket0_fd
     }
 
+    pub fn fd_is_unix_socket0(&self, fd: usize) -> bool {
+        matches!(
+            self.fd_table_entry_diagnostic(fd),
+            Some(entry) if entry.ofd == OpenFileDescriptionRef::UnixSocket0
+        )
+    }
+
     pub fn tty_termios_state_bound(&self) -> bool {
         self.lifecycle.state() == State::Ready
     }

@@ -103,8 +103,10 @@
  * close-on-exec bit carried by the fd entry. The earlier syslog-like
  * SOCK_DGRAM path remains an unsupported diagnostic path for now, so this
  * slice does not claim sendto/connect/socketpair/bind/listen/accept,
- * pathname sockaddr handling, sk_buff queues, net namespaces, LSM or a
- * network stack.
+ * pathname sockaddr handling, peer lookup, sk_buff queues, net namespaces,
+ * LSM or a network stack. Unsupported connect(203) diagnostics may query
+ * whether a supplied fd currently points at UnixSocket0, but that query is
+ * read-only and must not change fd table, OFD/backend or user memory state.
  */
 
 enum FileBackendKind {

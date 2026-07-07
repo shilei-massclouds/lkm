@@ -1862,10 +1862,20 @@ type ArceosExStartupPhaseCodingMust {
          * stream socket fd via FilesStruct. Focused rerun after that slice
          * observes the post-auth stream socket returning fd 3, then the new
          * first boundary is connect(203) with fd=3 and addrlen=0x18.  DGRAM,
-         * sendto(206), connect(203) sockaddr handling and the network/socket
-         * operation backend remain unsupported. Unsupported connect
-         * diagnostics may name connect and print fd, sockaddr pointer and
-         * addrlen, but must not copy sockaddr or change the ENOSYS return.
+         * sendto(206), connect(203) successful-path sockaddr handling and the
+         * network/socket operation backend remain unsupported. Unsupported
+         * connect diagnostics may name connect, print fd, sockaddr pointer and
+         * addrlen, best-effort copy at most Linux sockaddr_storage-sized bytes
+         * from user memory, classify AF_UNIX sockaddr_un shape against Linux
+         * 6.12 unix_validate_addr() length/family conditions, print bounded
+         * escaped path or abstract-path prefix, and report whether the fd
+         * currently points at UnixSocket0. It must not change the ENOSYS
+         * return, install fds, mutate fd state, write user memory, create a
+         * Unix socket peer/listener lookup, implement sendto(206), setgroups
+         * (159), network stack or complete credentials. Focused evidence
+         * after this diagnostic classifies the early addrlen=110 connects as
+         * pathname AF_UNIX sockets under /run/utmps, and the post-auth
+         * fchown/fchmod boundary as addrlen=24 path /var/run/nscd/socket.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -3250,8 +3260,13 @@ type ArceosExBlockIoCodingMust {
          * is setgroups, so that text is not a reliable syscall name for the
          * next slice. The current socket slice is limited to fd creation; the
          * focused rerun records connect(203) as the new first unsupported
-         * boundary after socket returns fd 3, and still does not implement
-         * connect/sendto/setgroups.
+         * boundary after socket returns fd 3. The current connect slice is
+         * only a sockaddr diagnostic classifier: it copies no more than the
+         * Linux sockaddr_storage boundary, classifies AF_UNIX path versus
+         * abstract path, and still does not implement connect/sendto/
+         * setgroups. The diagnostic classifies the post-auth direct boundary
+         * as libc/NSS nscd pathname connect to /var/run/nscd/socket, not an
+         * abstract syslog socket and not setgroups(159).
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

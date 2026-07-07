@@ -217,6 +217,10 @@ const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
 const AF_UNIX: usize = 1;
+const SOCKADDR_STORAGE_SIZE: usize = 128;
+const SOCKADDR_UN_SIZE: usize = 110;
+const SOCKADDR_UN_PATH_OFFSET: usize = 2;
+const SOCKADDR_UN_PATH_PREFIX_MAX: usize = 64;
 const SOCK_STREAM: usize = 1;
 const SOCK_DGRAM: usize = 2;
 const SOCK_TYPE_MASK: usize = 0xf;
@@ -7293,12 +7297,132 @@ fn print_socket_unsupported_detail(frame: &TrapFrame) {
 }
 
 fn print_connect_unsupported_detail(frame: &TrapFrame) {
+    let fd = frame.reg(10);
+    let addr_ptr = frame.reg(11);
+    let addrlen = frame.reg(12);
+
     crate::arch::riscv64::sbi::putstr(" name=connect fd=");
-    print_decimal(frame.reg(10));
+    print_decimal(fd);
     crate::arch::riscv64::sbi::putstr(" addr_ptr=0x");
-    print_hex(frame.reg(11));
+    print_hex(addr_ptr);
     crate::arch::riscv64::sbi::putstr(" addrlen=");
-    print_decimal(frame.reg(12));
+    print_decimal(addrlen);
+    crate::arch::riscv64::sbi::putstr(" fd_unix_socket0=");
+    print_bool_digit(
+        crate::context::context_ref()
+            .files_struct
+            .fd_is_unix_socket0(fd),
+    );
+    print_connect_sockaddr_diagnostic(addr_ptr, addrlen);
+}
+
+fn print_connect_sockaddr_diagnostic(addr_ptr: usize, addrlen: usize) {
+    crate::arch::riscv64::sbi::putstr(" copy=");
+    if addrlen == 0 {
+        crate::arch::riscv64::sbi::putstr("zero_len");
+        print_connect_sockaddr_unavailable("zero_len");
+        return;
+    }
+    if addrlen > SOCKADDR_STORAGE_SIZE {
+        crate::arch::riscv64::sbi::putstr("too_long");
+        print_connect_sockaddr_unavailable("too_long");
+        return;
+    }
+
+    let mut storage = [0u8; SOCKADDR_STORAGE_SIZE];
+    if !copy_from_user(addr_ptr, &mut storage[..addrlen]) {
+        crate::arch::riscv64::sbi::putstr("fault");
+        print_connect_sockaddr_unavailable("copy_fault");
+        return;
+    }
+
+    crate::arch::riscv64::sbi::putstr("ok copied_len=");
+    print_decimal(addrlen);
+    if addrlen < SOCKADDR_UN_PATH_OFFSET {
+        crate::arch::riscv64::sbi::putstr(" family_raw=unavailable af_unix=0 unix_validate_addr=0");
+        print_connect_sockaddr_path_reason("no_family");
+        return;
+    }
+
+    let family_raw = u16::from_le_bytes([storage[0], storage[1]]) as usize;
+    let af_unix = family_raw == AF_UNIX;
+    let unix_validate_addr =
+        addrlen > SOCKADDR_UN_PATH_OFFSET && addrlen <= SOCKADDR_UN_SIZE && af_unix;
+
+    crate::arch::riscv64::sbi::putstr(" family_raw=");
+    print_decimal(family_raw);
+    crate::arch::riscv64::sbi::putstr(" af_unix=");
+    print_bool_digit(af_unix);
+    crate::arch::riscv64::sbi::putstr(" unix_validate_addr=");
+    print_bool_digit(unix_validate_addr);
+
+    if !af_unix {
+        print_connect_sockaddr_path_reason("non_af_unix");
+        return;
+    }
+    if addrlen <= SOCKADDR_UN_PATH_OFFSET {
+        print_connect_sockaddr_path_reason("no_sun_path");
+        return;
+    }
+
+    let path_input_len = addrlen - SOCKADDR_UN_PATH_OFFSET;
+    let path_len = core::cmp::min(path_input_len, SOCKADDR_UN_SIZE - SOCKADDR_UN_PATH_OFFSET);
+    let path = &storage[SOCKADDR_UN_PATH_OFFSET..SOCKADDR_UN_PATH_OFFSET + path_len];
+    let prefix_len = core::cmp::min(path_len, SOCKADDR_UN_PATH_PREFIX_MAX);
+    let abstract_path = path.first().copied() == Some(0);
+
+    crate::arch::riscv64::sbi::putstr(" path_input_len=");
+    print_decimal(path_input_len);
+    crate::arch::riscv64::sbi::putstr(" path_len=");
+    print_decimal(path_len);
+    crate::arch::riscv64::sbi::putstr(" abstract=");
+    print_bool_digit(abstract_path);
+    crate::arch::riscv64::sbi::putstr(" path_prefix_len=");
+    print_decimal(prefix_len);
+    crate::arch::riscv64::sbi::putstr(" path_truncated=");
+    print_bool_digit(path_len > prefix_len);
+    crate::arch::riscv64::sbi::putstr(" path_prefix=\"");
+    print_sockaddr_path_prefix(&path[..prefix_len]);
+    crate::arch::riscv64::sbi::putchar(b'"');
+    if addrlen > SOCKADDR_UN_SIZE {
+        crate::arch::riscv64::sbi::putstr(" path_reason=addrlen_gt_sockaddr_un");
+    }
+}
+
+fn print_connect_sockaddr_unavailable(reason: &str) {
+    crate::arch::riscv64::sbi::putstr(
+        " copied_len=0 family_raw=unavailable af_unix=0 unix_validate_addr=0",
+    );
+    print_connect_sockaddr_path_reason(reason);
+}
+
+fn print_connect_sockaddr_path_reason(reason: &str) {
+    crate::arch::riscv64::sbi::putstr(" path_reason=");
+    crate::arch::riscv64::sbi::putstr(reason);
+}
+
+fn print_sockaddr_path_prefix(path: &[u8]) {
+    for &byte in path {
+        match byte {
+            b'\0' => crate::arch::riscv64::sbi::putstr("\\0"),
+            b'\n' => crate::arch::riscv64::sbi::putstr("\\n"),
+            b'\r' => crate::arch::riscv64::sbi::putstr("\\r"),
+            b'\t' => crate::arch::riscv64::sbi::putstr("\\t"),
+            b'\\' => crate::arch::riscv64::sbi::putstr("\\\\"),
+            b'"' => crate::arch::riscv64::sbi::putstr("\\\""),
+            b' '..=b'~' => crate::arch::riscv64::sbi::putchar(byte),
+            _ => {
+                crate::arch::riscv64::sbi::putstr("\\x");
+                print_hex_byte(byte);
+            }
+        }
+    }
+}
+
+fn print_hex_byte(byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    crate::arch::riscv64::sbi::putchar(HEX[(byte >> 4) as usize]);
+    crate::arch::riscv64::sbi::putchar(HEX[(byte & 0xf) as usize]);
 }
 
 fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {
