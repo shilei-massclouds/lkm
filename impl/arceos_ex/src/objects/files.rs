@@ -935,6 +935,8 @@ pub struct FileDescriptorTable {
     lookup_returns: AtomicUsize,
     fd_installed: AtomicUsize,
     fd_closed: AtomicUsize,
+    fd_duplicated: AtomicUsize,
+    dup3_close_on_exec_bound: AtomicUsize,
     parent_snapshot_saved: AtomicUsize,
     parent_snapshot_restored: AtomicUsize,
 }
@@ -951,6 +953,8 @@ impl FileDescriptorTable {
             lookup_returns: AtomicUsize::new(0),
             fd_installed: AtomicUsize::new(0),
             fd_closed: AtomicUsize::new(0),
+            fd_duplicated: AtomicUsize::new(0),
+            dup3_close_on_exec_bound: AtomicUsize::new(0),
             parent_snapshot_saved: AtomicUsize::new(0),
             parent_snapshot_restored: AtomicUsize::new(0),
         }
@@ -986,6 +990,14 @@ impl FileDescriptorTable {
 
     pub fn fd_closed(&self) -> bool {
         self.fd_closed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn fd_duplicated(&self) -> bool {
+        self.fd_duplicated.load(Ordering::Acquire) != 0
+    }
+
+    pub fn dup3_close_on_exec_bound(&self) -> bool {
+        self.dup3_close_on_exec_bound.load(Ordering::Acquire) != 0
     }
 
     pub fn parent_snapshot_saved(&self) -> bool {
@@ -1175,6 +1187,32 @@ impl FileDescriptorTable {
         Err(FileError::TooManyOpenFiles)
     }
 
+    fn dup3_fd(
+        &mut self,
+        oldfd: usize,
+        newfd: usize,
+        close_on_exec: bool,
+    ) -> FileResult<(usize, Option<FileDescriptorEntry>)> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+        if oldfd == newfd {
+            return Err(FileError::InvalidArgument);
+        }
+        if newfd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+
+        let source = self.lookup(oldfd)?;
+        let replaced = self.entries[newfd];
+        let mut duplicate = source;
+        duplicate.close_on_exec = close_on_exec;
+        self.entries[newfd] = Some(duplicate);
+        self.fd_duplicated.fetch_add(1, Ordering::AcqRel);
+        self.dup3_close_on_exec_bound.fetch_add(1, Ordering::AcqRel);
+        Ok((newfd, replaced))
+    }
+
     fn install_pidfd(&mut self, child_pid: usize) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || child_pid == 0 {
             return Err(FileError::NotReady);
@@ -1330,6 +1368,7 @@ pub struct FilesStruct {
     open_path_routes_to_vfs: AtomicUsize,
     read_fd_routes_to_table: AtomicUsize,
     close_fd_routes_to_table: AtomicUsize,
+    dup3_routes_to_table: AtomicUsize,
     stat_path_routes_to_vfs: AtomicUsize,
     readlink_path_routes_to_vfs: AtomicUsize,
     regular_fd_installed: AtomicUsize,
@@ -1411,6 +1450,7 @@ impl FilesStruct {
             open_path_routes_to_vfs: AtomicUsize::new(0),
             read_fd_routes_to_table: AtomicUsize::new(0),
             close_fd_routes_to_table: AtomicUsize::new(0),
+            dup3_routes_to_table: AtomicUsize::new(0),
             stat_path_routes_to_vfs: AtomicUsize::new(0),
             readlink_path_routes_to_vfs: AtomicUsize::new(0),
             regular_fd_installed: AtomicUsize::new(0),
@@ -1527,6 +1567,10 @@ impl FilesStruct {
 
     pub fn close_fd_routes_to_table(&self) -> bool {
         self.close_fd_routes_to_table.load(Ordering::Acquire) != 0
+    }
+
+    pub fn dup3_routes_to_table(&self) -> bool {
+        self.dup3_routes_to_table.load(Ordering::Acquire) != 0
     }
 
     pub fn stat_path_routes_to_vfs(&self) -> bool {
@@ -2547,6 +2591,24 @@ impl FilesStruct {
         }
 
         self.fd_table.dup_fd(fd, min_fd, close_on_exec)
+    }
+
+    pub fn dup3_fd(
+        &mut self,
+        oldfd: usize,
+        newfd: usize,
+        close_on_exec: bool,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let (fd, replaced) = self.fd_table.dup3_fd(oldfd, newfd, close_on_exec)?;
+        if let Some(entry) = replaced {
+            self.finish_closed_entry(fd, entry);
+        }
+        self.dup3_routes_to_table.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
     }
 
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {

@@ -13,6 +13,10 @@
 #define O_LARGEFILE 0
 #endif
 
+#ifndef SYS_dup3
+#define SYS_dup3 24
+#endif
+
 static int say(const char *message, size_t len)
 {
 	return write(STDOUT_FILENO, message, len) == (ssize_t)len ? 0 : -1;
@@ -269,6 +273,8 @@ static int smoke_dev_null(void)
 	char read_buf[4] = { 1, 2, 3, 4 };
 	int fd = syscall(SYS_openat, AT_FDCWD, "/dev/null",
 			 O_RDWR | O_LARGEFILE, 0);
+	int dup_fd;
+	int cloexec_dup_fd;
 
 	if (fd < 0) {
 		return 93;
@@ -278,6 +284,51 @@ static int smoke_dev_null(void)
 	}
 	if (read(fd, read_buf, sizeof(read_buf)) != 0) {
 		return 95;
+	}
+	dup_fd = syscall(SYS_dup3, fd, 4, 0);
+	if (dup_fd != 4) {
+		return 98;
+	}
+	if (fcntl(dup_fd, F_GETFD, 0) != 0) {
+		return 99;
+	}
+	if (write(dup_fd, "dup", 3) != 3) {
+		return 100;
+	}
+	if (read(dup_fd, read_buf, sizeof(read_buf)) != 0) {
+		return 101;
+	}
+	cloexec_dup_fd = syscall(SYS_dup3, fd, 5, O_CLOEXEC);
+	if (cloexec_dup_fd != 5) {
+		return 102;
+	}
+	if ((fcntl(cloexec_dup_fd, F_GETFD, 0) & FD_CLOEXEC) == 0) {
+		return 103;
+	}
+	errno = 0;
+	if (syscall(SYS_dup3, fd, fd, 0) >= 0 || errno != EINVAL) {
+		return 104;
+	}
+	errno = 0;
+	if (syscall(SYS_dup3, 99, 4, 0) >= 0 || errno != EBADF) {
+		return 105;
+	}
+	errno = 0;
+	if (syscall(SYS_dup3, fd, 16, 0) >= 0 || errno != EBADF) {
+		return 106;
+	}
+	errno = 0;
+	if (syscall(SYS_dup3, fd, 4, O_NONBLOCK) >= 0 || errno != EINVAL) {
+		return 107;
+	}
+	if (close(dup_fd) < 0) {
+		return 108;
+	}
+	if (close(cloexec_dup_fd) < 0) {
+		return 109;
+	}
+	if (SAY_LITERAL("syscall dup3 devnull ok\n") < 0) {
+		return 110;
 	}
 	if (close(fd) < 0) {
 		return 96;

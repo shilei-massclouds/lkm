@@ -68,6 +68,7 @@ const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 #[cfg(not(app_user_boot))]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const SYSCALL_GETCWD: usize = 17;
+const SYSCALL_DUP3: usize = 24;
 const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FACCESSAT: usize = 48;
@@ -697,6 +698,7 @@ pub struct SyscallTable {
     close_supported: bool,
     newfstatat_supported: bool,
     readlinkat_supported: bool,
+    dup3_supported: bool,
     getrandom_supported: bool,
     getcwd_supported: bool,
     getpid_supported: bool,
@@ -768,6 +770,7 @@ pub struct SyscallTable {
     close_routes_to_files_struct: bool,
     newfstatat_routes_to_files_struct: bool,
     readlinkat_routes_to_files_struct: bool,
+    dup3_routes_to_files_struct: bool,
     getrandom_routes_to_hwrng_core: bool,
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
@@ -864,6 +867,7 @@ pub struct SyscallTable {
     close_observed: AtomicU8,
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
+    dup3_observed: AtomicU8,
     getrandom_observed: AtomicU8,
     getcwd_observed: AtomicU8,
     getpid_observed: AtomicU8,
@@ -914,6 +918,7 @@ impl SyscallTable {
             close_supported: false,
             newfstatat_supported: false,
             readlinkat_supported: false,
+            dup3_supported: false,
             getrandom_supported: false,
             getcwd_supported: false,
             getpid_supported: false,
@@ -985,6 +990,7 @@ impl SyscallTable {
             close_routes_to_files_struct: false,
             newfstatat_routes_to_files_struct: false,
             readlinkat_routes_to_files_struct: false,
+            dup3_routes_to_files_struct: false,
             getrandom_routes_to_hwrng_core: false,
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
@@ -1081,6 +1087,7 @@ impl SyscallTable {
             close_observed: AtomicU8::new(0),
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
+            dup3_observed: AtomicU8::new(0),
             getrandom_observed: AtomicU8::new(0),
             getcwd_observed: AtomicU8::new(0),
             getpid_observed: AtomicU8::new(0),
@@ -1175,6 +1182,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn readlinkat_supported(&self) -> bool {
         self.readlinkat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn dup3_supported(&self) -> bool {
+        self.dup3_supported
     }
 
     #[allow(dead_code)]
@@ -1470,6 +1482,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn readlinkat_routes_to_files_struct(&self) -> bool {
         self.readlinkat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn dup3_routes_to_files_struct(&self) -> bool {
+        self.dup3_routes_to_files_struct
     }
 
     #[allow(dead_code)]
@@ -1773,6 +1790,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn dup3_observed(&self) -> bool {
+        self.dup3_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn getrandom_observed(&self) -> bool {
         self.getrandom_observed.load(Ordering::Acquire) != 0
     }
@@ -1909,6 +1931,7 @@ impl SyscallTable {
         self.close_supported = true;
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
+        self.dup3_supported = true;
         self.getrandom_supported = true;
         self.getcwd_supported = true;
         self.getpid_supported = true;
@@ -1980,6 +2003,7 @@ impl SyscallTable {
         self.close_routes_to_files_struct = true;
         self.newfstatat_routes_to_files_struct = true;
         self.readlinkat_routes_to_files_struct = true;
+        self.dup3_routes_to_files_struct = true;
         self.getrandom_routes_to_hwrng_core = true;
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
@@ -2212,6 +2236,18 @@ impl SyscallTable {
         }
 
         syscall_table_readlinkat(self, frame);
+    }
+
+    pub fn dup3(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.dup3_supported
+            || !self.dup3_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_dup3(self, frame);
     }
 
     pub fn getrandom(&self, frame: &mut TrapFrame) {
@@ -3022,6 +3058,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
 
     match frame.reg(17) {
         SYSCALL_GETCWD => table.getcwd(frame),
+        SYSCALL_DUP3 => table.dup3(frame),
         SYSCALL_FCNTL => table.fcntl(frame),
         SYSCALL_IOCTL => table.ioctl(frame),
         SYSCALL_FACCESSAT => table.faccessat(frame),
@@ -3703,6 +3740,34 @@ fn syscall_table_readlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.readlinkat_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, read);
+}
+
+fn syscall_table_dup3(table: &SyscallTable, frame: &mut TrapFrame) {
+    let oldfd = frame.reg(10);
+    let newfd = frame.reg(11);
+    let flags = frame.reg(12);
+    if flags & !O_CLOEXEC != 0 {
+        print_dup3_error_detail(oldfd, newfd, flags, EINVAL);
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let ctx = crate::context::context();
+    let fd = match ctx
+        .files_struct
+        .dup3_fd(oldfd, newfd, flags & O_CLOEXEC != 0)
+    {
+        Ok(fd) => fd,
+        Err(error) => {
+            let errno = file_error_to_errno(error);
+            print_dup3_error_detail(oldfd, newfd, flags, errno);
+            complete_error_syscall(frame, errno);
+            return;
+        }
+    };
+
+    table.dup3_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, fd);
 }
 
 fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -7473,6 +7538,7 @@ fn print_syscall_error_diagnostic(_frame: &TrapFrame, _errno: usize) {}
 fn print_syscall_name(nr: usize) {
     let name = match nr {
         SYSCALL_GETCWD => "getcwd",
+        SYSCALL_DUP3 => "dup3",
         SYSCALL_FCNTL => "fcntl",
         SYSCALL_IOCTL => "ioctl",
         SYSCALL_FACCESSAT => "faccessat",
@@ -7573,6 +7639,23 @@ fn print_fcntl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_fcntl_error_detail(_fd: usize, _cmd: usize, _arg: usize, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_dup3_error_detail(oldfd: usize, newfd: usize, flags: usize, errno: usize) {
+    crate::arch::riscv64::sbi::putstr("syscall dup3 detail oldfd=");
+    print_decimal(oldfd);
+    crate::arch::riscv64::sbi::putstr(" newfd=");
+    print_decimal(newfd);
+    crate::arch::riscv64::sbi::putstr(" flags=0x");
+    print_hex(flags);
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    print_fd_table_diagnostic(true);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_dup3_error_detail(_oldfd: usize, _newfd: usize, _flags: usize, _errno: usize) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {

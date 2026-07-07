@@ -265,6 +265,7 @@ predicate syscall_table_ppoll_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
+predicate syscall_table_dup3_supported<T>(table: T) -> bool;
 predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
 predicate syscall_table_ioctl_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
@@ -330,6 +331,7 @@ predicate syscall_ppoll_blocking_wait_deferred<T>(table: T) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_dup3_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_usercopy_ready<T>(table: T) -> bool;
@@ -460,6 +462,7 @@ predicate syscall_table_ppoll_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
+predicate syscall_table_dup3_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
 predicate syscall_table_ioctl_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
@@ -1194,6 +1197,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
+                    syscall_table_dup3_supported(self);
                     syscall_table_fcntl_supported(self);
                     syscall_table_ioctl_supported(self);
                     syscall_table_getrandom_supported(self);
@@ -1288,6 +1292,7 @@ object SyscallTable: ResourceObject {
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
+            syscall_table_dup3_supported(self);
             syscall_table_fcntl_supported(self);
             syscall_table_ioctl_supported(self);
             syscall_table_getrandom_supported(self);
@@ -1705,6 +1710,36 @@ object SyscallTable: ResourceObject {
                     syscall_readlinkat_routes_to_files_struct(self, FilesStruct);
                     files_struct_readlink_path_routes_to_vfs(FilesStruct, VfsCore);
                     syscall_table_readlinkat_observed(self);
+                }
+            }
+
+            on Action::Dup3 {
+                /*
+                 * Linux 6.12 RISC-V exposes dup3 as __NR_dup3=24. The syscall
+                 * enters fs/file.c::ksys_dup3(), accepts only flags 0 or
+                 * O_CLOEXEC, rejects oldfd == newfd with EINVAL, rejects bad
+                 * oldfd or out-of-range newfd with EBADF, and otherwise
+                 * routes to do_dup2() to replace newfd with the same struct
+                 * file as oldfd. This first slice keeps that user-visible
+                 * fd-table shape through FilesStruct while deferring rlimit,
+                 * expand_files(), EBUSY, locking and file lifecycle details.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::Dup3Fd(FdRef::Stdin, FdRef::Stdout);
+                    FileDescriptorTable.Action::Dup3(FdRef::Stdin, FdRef::Stdout);
+                }
+
+                ensures {
+                    syscall_dup3_routes_to_files_struct(self, FilesStruct);
+                    files_struct_dup3_routes_to_table(FilesStruct, FileDescriptorTable);
+                    fd_table_fd_duplicated(FileDescriptorTable, FdRef::Stdin, FdRef::Stdout);
+                    syscall_table_dup3_observed(self);
                 }
             }
 

@@ -1671,7 +1671,7 @@ type ArceosExStartupPhaseCodingMust {
          *
          * The /dev/tty, fd-dup, termios and foreground-pgrp slice must reference local Linux
          * 6.12 fs/open.c::build_open_flags()/do_sys_openat2(),
-         * fs/fcntl.c::do_fcntl()/f_dupfd(),
+         * fs/file.c::ksys_dup3()/do_dup2(), fs/fcntl.c::do_fcntl()/f_dupfd(),
          * drivers/tty/tty_io.c::tty_open()/tty_ioctl()/tiocgwinsz(),
          * drivers/tty/tty_ioctl.c::tty_mode_ioctl(),
          * drivers/tty/tty_port.c::tty_port_block_til_ready(),
@@ -1712,13 +1712,22 @@ type ArceosExStartupPhaseCodingMust {
          * no free slot returns EMFILE. Runtime execve success scans the
          * current fixed fd table and closes entries whose close-on-exec bit
          * is set, recording scanned/closed/first-closed/remaining-open
-         * diagnostics. Because the current single-child runtime still reuses
+         * diagnostics. dup3(24) supports targeted fd table replacement:
+         * flags may be only 0 or O_CLOEXEC, oldfd == newfd returns EINVAL,
+         * invalid oldfd or newfd outside the fixed fdtable range returns
+         * EBADF, and success makes newfd point at the same
+         * OpenFileDescription/backend as oldfd while setting the new fd
+         * close-on-exec bit from flags & O_CLOEXEC. If newfd is already
+         * open, this first slice replaces only the fd table entry; Linux
+         * expand_files(), rlimit, EBUSY larval-fd detection, get_file(),
+         * filp_close(), fput(), refcounts and concurrent fdtable locking stay
+         * trimmed. Because the current single-child runtime still reuses
          * one FilesStruct object, clone/vfork must save a bounded parent fd
          * table and single regular/pidfd slot metadata snapshot, and child
          * exit must restore it before parent resume. This prevents child execve
          * close-on-exec from clearing the parent's fd entries, as observed by
          * `/bin/sh` later using fd10 for TIOCSPGRP. Dynamic fdtable growth,
-         * dup2/dup3, file refcounts, full copy_files/CLONE_FILES, complete
+         * dup(23), dup2, file refcounts, full copy_files/CLONE_FILES, complete
          * files unshare and concurrent fdtable locking remain trimmed.
          *
          * fcntl(F_SETFL) must reference local Linux 6.12
@@ -1817,7 +1826,8 @@ type ArceosExStartupPhaseCodingMust {
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
          * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, F_SETFL, TCGETS/TCSETS,
-         * TIOCGWINSZ and TIOCGPGRP/TIOCSPGRP.
+         * TIOCGWINSZ and TIOCGPGRP/TIOCSPGRP. Syscall name decoding should
+         * include dup3 so nr 24 traces no longer appear as unknown.
          *
          * A success-path trace such as PROBE=user-read-trace is separate from
          * user-syscall-error. It is required when a distro symptom can be

@@ -33,6 +33,9 @@
  *     -> FileBackend.Action::ReadRegularFile
  *   SyscallTable.Action::Close
  *     -> FileDescriptorTable.Action::Close(FdRef::Regular0)
+ *   SyscallTable.Action::Dup3
+ *     -> FilesStruct.Action::Dup3Fd
+ *     -> FileDescriptorTable.Action::Dup3
  *   SyscallTable.Action::NewFstatAt
  *     -> FilesStruct.Action::StatPath
  *     -> VfsCore.Action::ReadPath(Path, FsStruct)
@@ -68,6 +71,14 @@
  * This is a local rollback for the observed child continuation, not full
  * copy_files(), CLONE_FILES, files_struct refcounting, fdtable expansion or
  * OFD lifetime management.
+ *
+ * dup3(2) first slice follows local Linux 6.12 ksys_dup3()/do_dup2() only at
+ * fixed fd-table entry granularity: oldfd and newfd must differ, flags may be
+ * only 0 or O_CLOEXEC, newfd must fit the current fixed table, and success
+ * makes newfd point at the same staged OpenFileDescription/backend entry as
+ * oldfd. Replacing an already-open newfd only overwrites the fd table entry;
+ * full filp_close/fput/refcount/lock/EBUSY/rlimit/expand_files semantics stay
+ * deferred.
  */
 
 enum FileBackendKind {
@@ -106,6 +117,7 @@ predicate files_struct_tty_alias_fd_installed<T>(files: T) -> bool;
 predicate files_struct_tty_alias_entries_share_backend<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
+predicate files_struct_dup3_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_stdio_fd_close_supported<T>(files: T) -> bool;
 predicate files_struct_close_on_exec_observed<T>(files: T) -> bool;
 predicate files_struct_parent_fd_snapshot_saved<T, C>(files: T, child: C) -> bool;
@@ -138,6 +150,8 @@ predicate fd_table_cloexec_bit_returned_by_fgetfd<T>(table: T, fd: FdRef) -> boo
 predicate fd_table_cloexec_bit_updated_by_fsetfd<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_stdio_fd_closed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_fd_duplicated<T>(table: T, oldfd: FdRef, newfd: FdRef) -> bool;
+predicate fd_table_dup3_close_on_exec_bound<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_close_on_exec_scanned<T>(table: T) -> bool;
 predicate fd_table_close_on_exec_closed<T>(table: T) -> bool;
 predicate fd_table_parent_snapshot_saved<T>(table: T) -> bool;
@@ -453,6 +467,32 @@ object FilesStruct: ResourceObject {
                 }
             }
 
+            on Action::Dup3Fd(oldfd: FdRef, newfd: FdRef) {
+                /*
+                 * Linux 6.12 ksys_dup3()/do_dup2() performs a targeted
+                 * descriptor-table replacement, not a lowest-free-slot
+                 * allocation. The current model captures that fd-entry
+                 * replacement and close-on-exec bit update, while trimming
+                 * expand_files(), rlimit, EBUSY larval-fd detection,
+                 * get_file()/filp_close()/fput() and concurrent locking.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, oldfd, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Dup3(oldfd, newfd);
+                }
+
+                ensures {
+                    files_struct_dup3_routes_to_table(self, FileDescriptorTable);
+                    fd_table_fd_duplicated(FileDescriptorTable, oldfd, newfd);
+                    fd_table_dup3_close_on_exec_bound(FileDescriptorTable, newfd);
+                }
+            }
+
             on Action::CloseOnExec {
                 /*
                  * Runtime execve success follows Linux do_close_on_exec() only
@@ -764,6 +804,19 @@ object FileDescriptorTable: ResourceObject {
                 ensures {
                     fd_table_fd_closed(self, fd);
                     fd_table_stdio_fd_closed(self, fd);
+                }
+            }
+
+            on Action::Dup3(oldfd: FdRef, newfd: FdRef) {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(self, oldfd, OpenFileDescription);
+                }
+
+                ensures {
+                    fd_table_fd_duplicated(self, oldfd, newfd);
+                    fd_table_fd_bound(self, newfd, OpenFileDescription);
+                    fd_table_dup3_close_on_exec_bound(self, newfd);
                 }
             }
 

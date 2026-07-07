@@ -638,6 +638,10 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.syscall_table.munmap_supported(),
         );
         assertions.assert(
+            "dup3 syscall",
+            ctx.syscall_table.dup3_supported() && ctx.syscall_table.dup3_routes_to_files_struct(),
+        );
+        assertions.assert(
             "files struct setup",
             ctx.files_struct.setup(&ctx.kernel_init_task).is_ok(),
         );
@@ -858,6 +862,81 @@ impl SmokeScenario for UserBootElfScenario {
                     .null_backend()
                     .null_device_write_discards_data()
                 && !ctx.files_struct.null_backend().write_to_console(),
+        );
+        let dup3_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                assertions.assert("dup3 fd snapshot save", false);
+                return;
+            }
+        };
+        assertions.assert("dup3 close stdin", ctx.files_struct.close_fd(0).is_ok());
+        let dup3_null_fd = match ctx
+            .files_struct
+            .open_null_path(b"/dev/null", USER_TEST_O_RDWR | USER_TEST_O_LARGEFILE)
+        {
+            Ok(fd) => fd,
+            Err(_) => {
+                assertions.assert("dup3 null fd0 open", false);
+                return;
+            }
+        };
+        let dup3_stdout = ctx.files_struct.dup3_fd(dup3_null_fd, 1, false);
+        let dup3_stderr = ctx.files_struct.dup3_fd(dup3_null_fd, 2, true);
+        let dup3_stdout_flags = ctx.files_struct.fcntl_getfd_fd(1);
+        let dup3_stderr_flags = ctx.files_struct.fcntl_getfd_fd(2);
+        let dup3_stdout_diag = ctx.files_struct.fd_table_entry_diagnostic(1);
+        let dup3_stderr_diag = ctx.files_struct.fd_table_entry_diagnostic(2);
+        let dup3_stdout_write = ctx.files_struct.write_fd(1, b"o");
+        let dup3_stderr_write = ctx.files_struct.write_fd(2, b"e");
+        assertions.assert(
+            "dup3 null stdio semantics",
+            dup3_null_fd == 0
+                && dup3_stdout == Ok(1)
+                && dup3_stderr == Ok(2)
+                && dup3_stdout_flags == Ok(0)
+                && dup3_stderr_flags == Ok(USER_TEST_FD_CLOEXEC)
+                && dup3_stdout_diag
+                    .map(|entry| {
+                        entry.ofd == OpenFileDescriptionRef::Null
+                            && entry.readable
+                            && entry.writable
+                            && !entry.close_on_exec
+                    })
+                    .unwrap_or(false)
+                && dup3_stderr_diag
+                    .map(|entry| {
+                        entry.ofd == OpenFileDescriptionRef::Null
+                            && entry.readable
+                            && entry.writable
+                            && entry.close_on_exec
+                    })
+                    .unwrap_or(false)
+                && dup3_stdout_write == Ok(1)
+                && dup3_stderr_write == Ok(1)
+                && ctx.files_struct.dup3_routes_to_table()
+                && ctx.files_struct.fd_table().fd_duplicated()
+                && ctx.files_struct.fd_table().dup3_close_on_exec_bound(),
+        );
+        let dup3_capacity = ctx.files_struct.fd_table_capacity();
+        assertions.assert(
+            "dup3 negative fd semantics",
+            matches!(
+                ctx.files_struct.dup3_fd(dup3_null_fd, dup3_null_fd, false),
+                Err(FileError::InvalidArgument)
+            ) && matches!(
+                ctx.files_struct.dup3_fd(99, 1, false),
+                Err(FileError::BadFd)
+            ) && matches!(
+                ctx.files_struct.dup3_fd(dup3_null_fd, dup3_capacity, false),
+                Err(FileError::BadFd)
+            ),
+        );
+        assertions.assert(
+            "dup3 fd snapshot restore",
+            ctx.files_struct
+                .restore_parent_fd_snapshot(&dup3_snapshot)
+                .is_ok(),
         );
         assertions.assert("null close fd", ctx.files_struct.close_fd(null_fd).is_ok());
         assertions.assert(
