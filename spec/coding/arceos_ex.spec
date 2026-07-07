@@ -1985,9 +1985,16 @@ type ArceosExStartupPhaseCodingMust {
          * The focused OpenRC login rerun after this slice observes
          * /var/run/nscd/socket still returning ENOENT, setgroups(159)
          * returning 0, and the new direct boundary at setgid(144) with
-         * gid=100 returning EPERM and printing "setgid: Operation not
-         * permitted". That evidence is recorded only; this slice must not
-         * broaden setgid, credential or TTY ownership semantics.
+         * gid=100. The current setgid slice treats effective uid 0 as the
+         * bounded CAP_SETGID proxy and synchronizes only
+         * UserInitProcess.gid/egid/sgid/fsgid to the target gid; non-root
+         * effective uid still returns EPERM. This slice must not broaden
+         * capabilities, user namespace, LSM, credential COW/RCU, setuid,
+         * permission matrix, TTY ownership or inode ownership semantics.
+         * The post-setgid focused rerun records the next boundary at
+         * setuid(146) with uid=1000 returning EPERM and printing
+         * "login: setuid: Operation not permitted"; that evidence belongs to
+         * the next slice.
          * getgroups(158), full group_info allocation/sort, capabilities, user
          * namespaces, LSM, task cred COW/RCU, file permission checks, TTY
          * ownership and inode ownership/mode semantics remain trimmed.
@@ -3302,7 +3309,9 @@ type ArceosExBlockIoCodingMust {
          * shapes as ENOSYS diagnostics. That nscd pathname miss now returns
          * ENOENT; setgroups(159) now returns 0 for the observed
          * gidsetsize=1 shape, and the post-auth direct boundary has moved to
-         * setgid(144) with gid=100 returning EPERM.
+         * setgid(144) with gid=100. The current bounded setgid slice accepts
+         * that root-euid transition; focused rerun records the later boundary
+         * as setuid(146) with uid=1000 returning EPERM.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

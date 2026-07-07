@@ -76,12 +76,31 @@ int smoke_credentials(void)
 		return 72;
 	}
 
-	rc = syscall(SYS_setgid, 0);
+	rc = syscall(SYS_setgid, 100);
 	if (rc != 0) {
 		return 48;
 	}
 	if (SAY_LITERAL("syscall setgid ok\n") < 0) {
 		return 49;
+	}
+
+	rgid = 0;
+	egid = 0;
+	sgid = 0;
+	rc = syscall(SYS_getresgid, &rgid, &egid, &sgid);
+	if (rc != 0 || rgid != 100 || egid != 100 || sgid != 100) {
+		return 75;
+	}
+	if (SAY_LITERAL("syscall getresgid setgid ok\n") < 0) {
+		return 76;
+	}
+
+	rc = syscall(SYS_setgid, 0);
+	if (rc != 0) {
+		return 77;
+	}
+	if (SAY_LITERAL("syscall setgid restore ok\n") < 0) {
+		return 78;
 	}
 
 	groups[0] = 0;

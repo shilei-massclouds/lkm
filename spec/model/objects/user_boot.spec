@@ -1319,8 +1319,10 @@ object SyscallTable: ResourceObject {
                      * unmodeled. Focused rerun after the missing
                      * /var/run/nscd/socket case reaches setgroups(159)
                      * with gidsetsize=1 and a user gid_t list pointer; the
-                     * SetGroups action closes that shape, and the later
-                     * post-SetGroups rerun records setgid(144) gid=100 EPERM.
+                     * SetGroups action closes that shape. The current
+                     * SetGid slice then accepts setgid(144) gid=100 while the
+                     * effective uid remains 0 and updates only the bounded
+                     * UserInitProcess gid credential fields.
                      * Copy fault returns EFAULT. All invalid
                      * length/family, non-AF_UNIX, abstract, non-UnixSocket0
                      * and non-pathname shapes still return ENOSYS with the
@@ -1331,8 +1333,8 @@ object SyscallTable: ResourceObject {
                      * for /var/run/nscd/socket; both satisfy the AF_UNIX
                      * unix_validate_addr() length/family gate, and missing
                      * paths may now return ENOENT, exposing setgroups(159);
-                     * after the SetGroups slice that boundary moves to
-                     * setgid(144) gid=100 EPERM. The
+                     * after the SetGroups slice, setgid(144) gid=100 returns
+                     * 0 in the bounded root-euid credential slice. The
                      * earlier syslog-like AF_UNIX/SOCK_DGRAM path and all
                      * remaining socket operations keep using the unsupported
                      * diagnostic:
@@ -2403,7 +2405,9 @@ object SyscallTable: ResourceObject {
                  * root PID1 credential object on UserInitProcess and accepts
                  * the no-op/root setuid path required by BusyBox startup;
                  * namespaces, capability checks, LSM hooks, user accounting and
-                 * credential COW/RCU are explicit deferred facts.
+                 * credential COW/RCU are explicit deferred facts. The OpenRC
+                 * post-setgid focused rerun reaches setuid(146) uid=1000 and
+                 * still returns EPERM; that next boundary is evidence only.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2425,9 +2429,13 @@ object SyscallTable: ResourceObject {
             on Action::SetGid {
                 /*
                  * Linux 6.12 kernel/sys.c::__sys_setgid() mirrors setuid for
-                 * group credentials. The current first slice only preserves
-                 * the root/no-op path and records the remaining credential
-                 * machinery as deferred.
+                 * group credentials. The current first slice treats
+                 * effective uid 0 as the bounded CAP_SETGID proxy and accepts
+                 * the observed gid=100 transition, synchronizing only
+                 * UserInitProcess gid/egid/sgid/fsgid. Full capabilities,
+                 * user namespaces, LSM hooks and credential COW/RCU remain
+                 * deferred. The post-SetGid focused rerun records the next
+                 * boundary at setuid(146) uid=1000 returning EPERM.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2465,8 +2473,11 @@ object SyscallTable: ResourceObject {
                  * full NGROUPS_MAX credentials support. The focused rerun
                  * after this slice confirms /var/run/nscd/socket still
                  * returns ENOENT and setgroups returns 0; the new direct
-                 * boundary is setgid(144) with gid=100 returning EPERM, which
-                 * is recorded as evidence only for the next slice.
+                 * boundary is setgid(144) with gid=100. The following SetGid
+                 * slice accepts that observed root-euid transition without
+                 * implementing full credential semantics; the post-SetGid
+                 * focused rerun records setuid(146) uid=1000 EPERM as the
+                 * next boundary.
                  */
                 depends_on {
                     SyscallException.state == State::Online;

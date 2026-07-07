@@ -6794,7 +6794,10 @@ impl UserInitProcess {
     }
 
     pub fn set_gid_root_slice(&mut self, gid: usize) -> bool {
-        if !self.credentials_syscall_ready() || gid != 0 {
+        if !self.credentials_syscall_ready()
+            || self.euid != 0
+            || gid > u32::MAX as usize
+        {
             return false;
         }
         self.gid = gid;
