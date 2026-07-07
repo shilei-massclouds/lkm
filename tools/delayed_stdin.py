@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 import selectors
 import signal
@@ -12,11 +13,25 @@ import sys
 import time
 
 
+@dataclass(frozen=True)
+class InputStep:
+    marker: bytes
+    payload: bytes
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", required=True, help="timeout in seconds or with an s suffix")
-    parser.add_argument("--ready-marker", required=True)
-    parser.add_argument("--payload", required=True)
+    parser.add_argument("--ready-marker")
+    parser.add_argument("--payload")
+    parser.add_argument(
+        "--input-step",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("MARKER", "PAYLOAD"),
+        help="ordered marker/payload pair; may be repeated",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command
@@ -25,18 +40,49 @@ def main(argv: list[str] | None = None) -> int:
     if not command:
         parser.error("missing command after --")
 
-    stdout, returncode, timed_out, stdin_sent = run_delayed(
-        command,
-        timeout_seconds=parse_timeout(args.timeout),
-        ready_marker=args.ready_marker.encode(),
-        payload=args.payload.encode(),
-    )
+    if args.input_step:
+        if args.ready_marker is not None or args.payload is not None:
+            parser.error("use either --input-step or --ready-marker/--payload, not both")
+        step_labels = [marker for marker, _payload in args.input_step]
+        stdout, returncode, timed_out, sent_steps = run_delayed_steps(
+            command,
+            timeout_seconds=parse_timeout(args.timeout),
+            input_steps=[
+                InputStep(marker=marker.encode(), payload=payload.encode())
+                for marker, payload in args.input_step
+            ],
+        )
+    else:
+        if args.ready_marker is None or args.payload is None:
+            parser.error("missing --ready-marker/--payload or at least one --input-step")
+        step_labels = [args.ready_marker]
+        stdout, returncode, timed_out, stdin_sent = run_delayed(
+            command,
+            timeout_seconds=parse_timeout(args.timeout),
+            ready_marker=args.ready_marker.encode(),
+            payload=args.payload.encode(),
+        )
+        sent_steps = [stdin_sent]
+
     sys.stdout.write(stdout)
     if timed_out:
         sys.stdout.write(f"user-boot delayed input command timed out after {args.timeout}\n")
+        missing_index = first_missing_step(sent_steps)
+        if missing_index is not None:
+            sys.stdout.write(
+                "user-boot pending input step marker: "
+                f"step={missing_index + 1} marker={step_labels[missing_index]}\n"
+            )
         return 124
-    if not stdin_sent:
-        sys.stdout.write(f"user-boot input ready marker missing: {args.ready_marker}\n")
+    missing_index = first_missing_step(sent_steps)
+    if missing_index is not None:
+        if len(sent_steps) == 1 and not args.input_step:
+            sys.stdout.write(f"user-boot input ready marker missing: {step_labels[missing_index]}\n")
+        else:
+            sys.stdout.write(
+                "user-boot input step marker missing: "
+                f"step={missing_index + 1} marker={step_labels[missing_index]}\n"
+            )
         return 1 if returncode == 0 else int(returncode or 1)
     if returncode is None:
         return 1
@@ -53,6 +99,13 @@ def parse_timeout(raw: str) -> float:
     return timeout
 
 
+def first_missing_step(sent_steps: list[bool]) -> int | None:
+    for index, sent in enumerate(sent_steps):
+        if not sent:
+            return index
+    return None
+
+
 def run_delayed(
     command: list[str],
     *,
@@ -60,6 +113,20 @@ def run_delayed(
     ready_marker: bytes,
     payload: bytes,
 ) -> tuple[str, int | None, bool, bool]:
+    stdout, returncode, timed_out, sent_steps = run_delayed_steps(
+        command,
+        timeout_seconds=timeout_seconds,
+        input_steps=[InputStep(marker=ready_marker, payload=payload)],
+    )
+    return stdout, returncode, timed_out, sent_steps[0]
+
+
+def run_delayed_steps(
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    input_steps: list[InputStep],
+) -> tuple[str, int | None, bool, list[bool]]:
     process = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,
@@ -71,8 +138,10 @@ def run_delayed(
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
     stdout_parts: list[bytes] = []
-    tail = b""
-    stdin_sent = False
+    scan_buffer = b""
+    sent_steps = [False for _step in input_steps]
+    next_step = 0
+    max_scan_buffer = max(4096, max((len(step.marker) for step in input_steps), default=0) * 2)
     stdout_eof = False
     deadline = time.monotonic() + timeout_seconds
     timed_out = False
@@ -96,15 +165,18 @@ def run_delayed(
                 stdout_eof = True
                 continue
             stdout_parts.append(chunk)
-            tail = (tail + chunk)[-4096:]
-            if not stdin_sent and ready_marker in tail:
-                try:
-                    assert process.stdin is not None
-                    process.stdin.write(payload)
-                    process.stdin.flush()
-                except BrokenPipeError:
-                    pass
-                stdin_sent = True
+            scan_buffer += chunk
+            while next_step < len(input_steps):
+                step = input_steps[next_step]
+                marker_index = scan_buffer.find(step.marker)
+                if marker_index < 0:
+                    break
+                write_payload(process, step.payload)
+                sent_steps[next_step] = True
+                scan_buffer = scan_buffer[marker_index + len(step.marker) :]
+                next_step += 1
+            if len(scan_buffer) > max_scan_buffer:
+                scan_buffer = scan_buffer[-max_scan_buffer:]
 
     try:
         rest, _ = process.communicate(timeout=3)
@@ -115,7 +187,16 @@ def run_delayed(
         stdout_parts.append(rest)
     selector.close()
     stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
-    return stdout, process.returncode, timed_out, stdin_sent
+    return stdout, process.returncode, timed_out, sent_steps
+
+
+def write_payload(process: subprocess.Popen[bytes], payload: bytes) -> None:
+    try:
+        assert process.stdin is not None
+        process.stdin.write(payload)
+        process.stdin.flush()
+    except BrokenPipeError:
+        pass
 
 
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:

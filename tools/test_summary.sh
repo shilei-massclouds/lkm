@@ -9,6 +9,7 @@ kunit_handlers=$5
 smoke_app=$6
 test_plic_providers=${7:-}
 default_overlay_map="tests/user/rootfs-overlay.map"
+openrc_login_overlay_dir="tests/rootfs-overlays/openrc-login"
 input_timeout=${USER_BOOT_INPUT_TIMEOUT:-120s}
 
 tmpdir=$(mktemp -d)
@@ -59,6 +60,21 @@ run_with_delayed_input_log() {
         --ready-marker "$ready_marker" \
         --payload "$input" \
         -- "$@" > "$log"
+    rc=$?
+    cat "$log"
+    return "$rc"
+}
+
+run_with_delayed_input_steps_log() {
+    local log=$1
+    shift
+    local rc
+
+    : > "$log"
+    set +e
+    python3 tools/delayed_stdin.py \
+        --timeout "$input_timeout" \
+        "$@" > "$log"
     rc=$?
     cat "$log"
     return "$rc"
@@ -155,6 +171,48 @@ run_user_boot_input_case() {
     add_summary "$total" "$pass" "$fail"
 }
 
+run_user_boot_input_steps_case() {
+    local name=$1
+    local log=$2
+    local expected_markers=$3
+    shift 3
+    local marker
+    local markers_ok=1
+
+    run_with_delayed_input_steps_log "$log" "$@"
+    local rc=$?
+    local exit_status
+    local total=1
+    local pass=0
+    local fail=1
+    exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
+    if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
+        while IFS= read -r marker; do
+            if [ -z "$marker" ]; then
+                continue
+            fi
+            if ! grep -Fq "$marker" "$log"; then
+                markers_ok=0
+                status=1
+                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
+            fi
+        done <<< "$expected_markers"
+        if [ "$markers_ok" -eq 1 ]; then
+            pass=1
+            fail=0
+        fi
+    else
+        status=1
+        if [ -z "$exit_status" ]; then
+            printf 'user-boot exit status missing in %s\n' "$name"
+        else
+            printf 'user-boot exit status for %s: %s\n' "$name" "$exit_status"
+        fi
+    fi
+    record_row "$name" "$total" "$pass" "$fail"
+    add_summary "$total" "$pass" "$fail"
+}
+
 run_user_boot_overlay_case() {
     local name=$1
     local provider=$2
@@ -201,6 +259,24 @@ run_user_boot_no_overlay_input_append_case() {
 
     run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" "$make_cmd" run APP=user-boot \
         PLIC_PROVIDER="$provider" ROOTFS_OVERLAY=none VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
+}
+
+run_user_boot_openrc_login_case() {
+    local name=$1
+    local provider=$2
+    local log=$3
+    local image=$4
+    local login_input=$'test\n'
+    local password_input=$'test\n'
+    local shell_input=$'/bin/ls\nexit\n'
+
+    run_user_boot_input_steps_case "$name" "$log" $'lost+found' \
+        --input-step "login:" "$login_input" \
+        --input-step "Password:" "$password_input" \
+        --input-step '$ ' "$shell_input" \
+        -- "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
 run_kunit_case() {
@@ -294,6 +370,7 @@ distro_sh_input=$'/bin/ls\nexit\n'
 
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
+run_command_case "delayed stdin" "$tmpdir/delayed-stdin.log" env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools.tests.test_delayed_stdin
 run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkpoints
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
 run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
@@ -305,6 +382,10 @@ run_user_boot_no_overlay_append_case "run distro ls native" native \
 run_user_boot_no_overlay_input_append_case "run distro sh native" native \
     "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'lost+found' "/ #" \
     "$tmpdir/run-distro-sh-native.log" "$tmpdir/user-native-distro-sh.raw"
+if [ "${TEST_OPENRC_LOGIN:-0}" = "1" ]; then
+    run_user_boot_openrc_login_case "run openrc login" native \
+        "$tmpdir/run-openrc-login-native.log" "$tmpdir/user-native-openrc-login.raw"
+fi
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
 

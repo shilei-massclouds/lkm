@@ -1835,6 +1835,12 @@ type ArceosExStartupPhaseCodingMust {
          * advance sepc differently, treat the syscall as supported, or guess
          * whether zero-duration, short sleep or full hrtimer/scheduler sleep
          * is required before the observed values are reviewed.
+         * socket(198) and sendto(206), as currently observed in OpenRC/login
+         * logs, are tolerated unsupported noise when returning ENOSYS does not
+         * prevent the guest from reaching getty/login. They must not be used
+         * as justification for introducing a socket fd/backend or network
+         * stack in this slice unless later reproducible evidence shows they
+         * change OpenRC/login reachability.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -3149,6 +3155,21 @@ type ArceosExBlockIoCodingMust {
          * existing disk image. Explicit rebuild remains a command decision
          * through FORCE=1 or disk-clean.
          *
+         * ROOTFS_FILE_OVERLAY_DIR is a separate static file overlay for distro
+         * acceptance fixtures. It defaults to empty. When set, the Makefile
+         * must copy that directory's contents into the staged rootfs after the
+         * Alpine tarball is unpacked and after the existing compiled fixture
+         * overlay has run. ROOTFS_OVERLAY=none only disables the compiled
+         * fixture map; without ROOTFS_FILE_OVERLAY_DIR, the bare Alpine
+         * minirootfs account state, including locked root entries such as
+         * root:*, must remain unchanged. OpenRC getty/login shell acceptance
+         * must use an explicit static account overlay to provide a loginable
+         * test account, preferably a dedicated test user. If BusyBox login
+         * rejects an empty password, the overlay may use a checked-in
+         * test-only password hash, and the host harness must wait for the
+         * Password: marker before sending that test password. Kernel code must
+         * not bypass authentication.
+         *
          * QEMU_APPEND defaults to "earlycon=sbi" for ordinary APPs. For a
          * manual APP=user-boot run, the default MUST be
          * "earlycon=sbi init=/bin/sh" so plain "make run APP=user-boot"
@@ -3179,13 +3200,28 @@ type ArceosExBlockIoCodingMust {
          * the stable fixture injection mechanism for user_smoke and staged
          * probes.
          *
-         * Shell external-command closure and native /sbin/init/OpenRC are
-         * separate rollout stages. Until clone/vfork/fork, child execve,
-         * wait4, pipe/dup inheritance, close-on-exec propagation and
-         * job-control/signal requirements are located by reproducible guest
-         * diagnostics and specified against Linux 6.12, they must remain
-         * explicit diagnostic/manual entries rather than mandatory make test
-         * pass criteria.
+         * OpenRC getty/login shell closure is a distinct acceptance slice from
+         * the bare ROOTFS_OVERLAY=none distro image. The test harness may use
+         * ROOTFS_OVERLAY=none together with ROOTFS_FILE_OVERLAY_DIR pointing
+         * at a checked-in account-only overlay, then drive login and shell
+         * input in ordered host-side delayed-stdin stages: wait for login,
+         * provide the test account (and blank password when needed), wait for
+         * the BusyBox shell prompt, then run /bin/ls and exit. The case must
+         * require user exit status 0 and a stable rootfs marker such as
+         * lost+found. This harness input must not be injected before the
+         * relevant prompt marker and must not be replaced by kernel-side
+         * ready-data fixtures.
+         *
+         * The current focused run has advanced past login/password input and
+         * authentication; its next reproducible boundary is BusyBox login's
+         * post-auth clone(220) vfork while the existing OpenRC/getty child
+         * still occupies the single active child slot, which returns ENOSYS.
+         * Until nested vfork/child-slot semantics are specified and
+         * implemented, the OpenRC login shell case must remain an opt-in
+         * diagnostic entry rather than a default make test hard gate. After
+         * that behavior is closed, the staged-input case should become the
+         * login-shell acceptance gate with /bin/ls, lost+found and user exit
+         * status 0 as pass criteria.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
@@ -3203,6 +3239,8 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_qemu_append_default_user_boot_to_bin_sh_and_passthrough();
         arceos_ex_must_test_harness_pin_user_smoke_qemu_append();
         arceos_ex_must_test_harness_cover_no_overlay_bin_ls();
+        arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay();
+        arceos_ex_must_openrc_login_test_use_explicit_account_overlay();
         arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input();
         arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified();
         arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support();

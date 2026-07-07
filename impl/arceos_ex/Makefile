@@ -80,6 +80,7 @@ EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 ROOTFS_OVERLAY ?= default
 ROOTFS_OVERLAY_MAP ?= tests/user/rootfs-overlay.map
+ROOTFS_FILE_OVERLAY_DIR ?=
 ROOTFS_OVERLAY_OUTPUT_DIR ?= build/rootfs-user-tests
 ROOTFS_OVERLAY_TOOLCHAIN ?= gnu
 ROOTFS_OVERLAY_LINK ?= static
@@ -111,7 +112,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate disk disk-clean rootfs-tarball rootfs-overlay clean
+.PHONY: build run generate disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -181,6 +182,25 @@ rootfs-overlay:
 		chmod 0755 "$(ROOTFS_STAGING_DIR)$$target"; \
 	done < "$(ROOTFS_OVERLAY_MAP)"
 
+rootfs-file-overlay:
+	set -e; \
+	overlay_dir="$(ROOTFS_FILE_OVERLAY_DIR)"; \
+	if [ -z "$$overlay_dir" ]; then exit 0; fi; \
+	overlay_dir="$${overlay_dir%/}"; \
+	test -d "$$overlay_dir"; \
+	find "$$overlay_dir" -mindepth 1 | sort | while IFS= read -r src; do \
+		rel="$${src#$$overlay_dir/}"; \
+		dst="$(ROOTFS_STAGING_DIR)/$$rel"; \
+		if [ -d "$$src" ] && [ ! -L "$$src" ]; then \
+			mkdir -p "$$dst"; \
+		else \
+			mkdir -p "$$(dirname "$$dst")"; \
+			rm -rf "$$dst"; \
+			cp -a "$$src" "$$dst"; \
+			case "$$rel" in etc/shadow) chmod 0640 "$$dst";; esac; \
+		fi; \
+	done
+
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
 ifeq ($(FS_TYPE),ext2)
@@ -190,6 +210,9 @@ ifeq ($(FS_TYPE),ext2)
 	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
 ifneq ($(ROOTFS_OVERLAY),none)
 	$(MAKE) rootfs-overlay
+endif
+ifneq ($(strip $(ROOTFS_FILE_OVERLAY_DIR)),)
+	$(MAKE) rootfs-file-overlay ROOTFS_FILE_OVERLAY_DIR="$(ROOTFS_FILE_OVERLAY_DIR)" ROOTFS_STAGING_DIR="$(ROOTFS_STAGING_DIR)"
 endif
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@
