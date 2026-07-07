@@ -3378,6 +3378,11 @@ fn complete_unsupported_syscall(frame: &mut TrapFrame) {
     complete_successful_syscall(frame, 0usize.wrapping_sub(ENOSYS));
 }
 
+fn complete_unsupported_clone_syscall(frame: &mut TrapFrame, stage: &str) {
+    print_unsupported_syscall_diagnostic_with_clone_stage(frame, stage);
+    complete_successful_syscall(frame, 0usize.wrapping_sub(ENOSYS));
+}
+
 fn complete_successful_syscall(frame: &mut TrapFrame, value: usize) {
     print_syscall_trace_return(frame, value);
     frame.set_reg(10, value);
@@ -5469,6 +5474,14 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         .accepts_vfork_vm_first_slice(clone_flags);
 
     if clone_is_plain_fork {
+        if crate::context::context_ref()
+            .user_child_process
+            .current_child_continuation()
+        {
+            complete_unsupported_clone_syscall(frame, "child_context_unsupported");
+            return;
+        }
+
         let child_pid = {
             let ctx = crate::context::context();
             let copy_result = match ctx.task_creation_core.copy_user_process(
@@ -5491,7 +5504,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             ) {
                 Ok(result) => result,
                 Err(_) => {
-                    complete_unsupported_syscall(frame);
+                    complete_unsupported_clone_syscall(frame, "copy_user_process");
                     return;
                 }
             };
@@ -5512,7 +5525,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 copy_result.sched_entity_ready(),
                 copy_result.task_state_new(),
             ) else {
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "child_copy");
                 return;
             };
 
@@ -5522,7 +5535,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             {
                 Ok(runqueue_ref) => runqueue_ref,
                 Err(_) => {
-                    complete_unsupported_syscall(frame);
+                    complete_unsupported_clone_syscall(frame, "select_runqueue");
                     return;
                 }
             };
@@ -5531,18 +5544,18 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 .enqueue_task_on_runqueue(child_pid, runqueue_ref)
                 .is_err()
             {
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "enqueue");
                 return;
             }
             if !ctx.user_child_process.mark_enqueued() {
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "mark_enqueued");
                 return;
             }
             if !ctx
                 .user_init_process
                 .observe_child_process_group_visible(child_pid)
             {
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "process_group_visible");
                 return;
             }
             child_pid
@@ -5555,12 +5568,11 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     if !clone_is_vfork_pidfd && !clone_is_vfork_vm {
-        print_clone_vfork_boundary(frame, "shape_rejected");
-        complete_unsupported_syscall(frame);
+        complete_unsupported_clone_syscall(frame, "shape_rejected");
         return;
     }
     if clone_is_vfork_pidfd && parent_tidptr == 0 {
-        print_clone_vfork_boundary(frame, "parent_tidptr_null");
+        print_clone_boundary(frame, "parent_tidptr_null");
         complete_error_syscall(frame, EFAULT);
         return;
     }
@@ -5568,8 +5580,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         .user_child_process
         .completed_child_records_full()
     {
-        print_clone_vfork_boundary(frame, "child_records_full");
-        complete_unsupported_syscall(frame);
+        complete_unsupported_clone_syscall(frame, "child_records_full");
         return;
     }
     let clone_is_nested_vfork = clone_is_vfork_vm
@@ -5600,8 +5611,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         ) {
             Ok(result) => result,
             Err(_) => {
-                print_clone_vfork_boundary(frame, "copy_user_process");
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "copy_user_process");
                 return;
             }
         };
@@ -5610,14 +5620,13 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             let pidfd_fd = match ctx.files_struct.install_pidfd(child_pid) {
                 Ok(fd) => fd,
                 Err(_) => {
-                    print_clone_vfork_boundary(frame, "pidfd_install");
-                    complete_unsupported_syscall(frame);
+                    complete_unsupported_clone_syscall(frame, "pidfd_install");
                     return;
                 }
             };
             if !write_user_u32(parent_tidptr, pidfd_fd as u32) {
                 let _ = ctx.files_struct.close_fd(pidfd_fd);
-                print_clone_vfork_boundary(frame, "pidfd_copyout");
+                print_clone_boundary(frame, "pidfd_copyout");
                 complete_error_syscall(frame, EFAULT);
                 return;
             }
@@ -5646,8 +5655,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     copy_result.task_state_new(),
                 )
             else {
-                print_clone_vfork_boundary(frame, "nested_child_copy");
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "nested_child_copy");
                 return;
             };
             (child_frame, parent_pid)
@@ -5671,8 +5679,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 copy_result.sched_entity_ready(),
                 copy_result.task_state_new(),
             ) else {
-                print_clone_vfork_boundary(frame, "child_copy");
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "child_copy");
                 return;
             };
             (child_frame, 0)
@@ -5685,8 +5692,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             {
                 Ok(runqueue_ref) => runqueue_ref,
                 Err(_) => {
-                    print_clone_vfork_boundary(frame, "select_runqueue");
-                    complete_unsupported_syscall(frame);
+                    complete_unsupported_clone_syscall(frame, "select_runqueue");
                     return;
                 }
             };
@@ -5695,13 +5701,11 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
                 .is_err()
             {
-                print_clone_vfork_boundary(frame, "enqueue");
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "enqueue");
                 return;
             }
             if !ctx.user_child_process.mark_enqueued() {
-                print_clone_vfork_boundary(frame, "mark_enqueued");
-                complete_unsupported_syscall(frame);
+                complete_unsupported_clone_syscall(frame, "mark_enqueued");
                 return;
             }
         }
@@ -5713,8 +5717,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 .observe_child_process_group_visible(child_pid)
         };
         if !child_visible {
-            print_clone_vfork_boundary(frame, "process_group_visible");
-            complete_unsupported_syscall(frame);
+            complete_unsupported_clone_syscall(frame, "process_group_visible");
             return;
         }
         child_frame
@@ -7440,6 +7443,10 @@ fn print_bool_digit(value: bool) {
 }
 
 fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
+    print_unsupported_syscall_diagnostic_with_clone_stage(frame, "unsupported_detail");
+}
+
+fn print_unsupported_syscall_diagnostic_with_clone_stage(frame: &TrapFrame, clone_stage: &str) {
     crate::arch::riscv64::sbi::putstr("unsupported syscall");
     crate::arch::riscv64::sbi::putstr(" nr=");
     print_decimal(frame.reg(17));
@@ -7452,23 +7459,23 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
     print_hex(frame.stval);
-    print_unsupported_syscall_detail(frame);
+    print_unsupported_syscall_detail(frame, clone_stage);
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
-fn print_unsupported_syscall_detail(frame: &TrapFrame) {
+fn print_unsupported_syscall_detail(frame: &TrapFrame, clone_stage: &str) {
     match frame.reg(17) {
         SYSCALL_SOCKET => print_socket_unsupported_detail(frame),
         SYSCALL_CONNECT => print_connect_unsupported_detail(frame),
         SYSCALL_NANOSLEEP => print_nanosleep_unsupported_detail(frame),
         SYSCALL_RT_SIGTIMEDWAIT => print_rt_sigtimedwait_unsupported_detail(frame),
-        SYSCALL_CLONE => print_clone_vfork_boundary(frame, "unsupported_detail"),
+        SYSCALL_CLONE => print_clone_boundary(frame, clone_stage),
         SYSCALL_EXECVE => print_execve_unsupported_detail(frame),
         _ => {}
     }
 }
 
-fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
+fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     let ctx = crate::context::context_ref();
     let boundaries = &ctx.user_clone_deferred_boundaries;
     let flags = frame.reg(10);
@@ -7477,8 +7484,15 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     let child = &ctx.user_child_process;
     let files = &ctx.files_struct;
     let process = &ctx.user_init_process;
+    let clone_kind = clone_boundary_kind(boundaries, flags, frame.reg(11));
 
-    crate::arch::riscv64::sbi::putstr(" clone_vfork stage=");
+    crate::arch::riscv64::sbi::putstr(" clone_kind=");
+    crate::arch::riscv64::sbi::putstr(clone_kind);
+    match clone_kind {
+        "plain_fork" => crate::arch::riscv64::sbi::putstr(" clone_plain stage="),
+        "vfork_vm" | "vfork_pidfd" => crate::arch::riscv64::sbi::putstr(" clone_vfork stage="),
+        _ => crate::arch::riscv64::sbi::putstr(" clone_unsupported stage="),
+    }
     crate::arch::riscv64::sbi::putstr(stage);
     crate::arch::riscv64::sbi::putstr(" flags=0x");
     print_hex(flags);
@@ -7505,6 +7519,8 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     crate::arch::riscv64::sbi::putstr(" child_handoff=");
     print_bool_digit(child.vfork_child_handoff());
     crate::arch::riscv64::sbi::putstr(" current_child=");
+    print_bool_digit(child.current_child_continuation());
+    crate::arch::riscv64::sbi::putstr(" current_child_continuation=");
     print_bool_digit(child.current_child_continuation());
     crate::arch::riscv64::sbi::putstr(" child_pid=");
     print_decimal(child.pid());
@@ -7552,6 +7568,22 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     } else {
         crate::arch::riscv64::sbi::putstr(" first_unreaped_pid=0 first_unreaped_status=0 first_unreaped_wait_status=0 first_unreaped_pidfd_fd=");
         print_decimal(usize::MAX);
+    }
+}
+
+fn clone_boundary_kind(
+    boundaries: &crate::objects::user_boot::UserCloneDeferredBoundaries,
+    flags: usize,
+    newsp: usize,
+) -> &'static str {
+    if boundaries.accepts_plain_fork_first_slice(flags, newsp) {
+        "plain_fork"
+    } else if boundaries.accepts_vfork_pidfd_first_slice(flags) {
+        "vfork_pidfd"
+    } else if boundaries.accepts_vfork_vm_first_slice(flags) {
+        "vfork_vm"
+    } else {
+        "unsupported_shape"
     }
 }
 

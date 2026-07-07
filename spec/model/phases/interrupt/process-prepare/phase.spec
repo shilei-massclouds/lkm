@@ -327,6 +327,10 @@ object TaskCreationCore: TaskObject {
              * 若当前 UserChild 已是 getty/login continuation，则只允许
              * observed login post-auth nested vfork takeover：新 user-visible
              * pid 复用同一 execution slot，不创建第二个 runnable task ref。
+             * 后续 OpenRC login shell 中 /bin/ls 触发的 plain fork 也是
+             * current-child continuation，但不是该 supported takeover；本片
+             * 只允许 SyscallTable clone diagnostic 把它分类为 unsupported
+             * observed child plain-fork boundary，不进入 CopyUserProcess。
              */
             Action::CopyUserProcess(
                 src_process: UserInitProcess,
@@ -397,7 +401,7 @@ object TaskCreationCore: TaskObject {
                 }
 
                 deferred {
-                    "用户态 CopyUserProcess 当前只覆盖 observed plain fork、顺序 OpenRC vfork active-slot reuse 和单层 OpenRC login nested vfork takeover。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
+                    "用户态 CopyUserProcess 当前只覆盖 PID1 observed plain fork、顺序 OpenRC vfork active-slot reuse 和单层 OpenRC login nested vfork takeover。OpenRC login shell /bin/ls 在 child continuation 内发起的 plain fork 当前只作为 clone_kind=plain_fork 的 unsupported diagnostic boundary，不创建第二个 runnable UserChild task ref。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
                 }
             }
         }

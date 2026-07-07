@@ -1543,6 +1543,19 @@ type ArceosExStartupPhaseCodingMust {
          * BusyBox /bin/sh "ls" request is a0=0x11, a1=0, a2=0, a3=8,
          * a4=0x20096580, a5=1; implementations must decode this as
          * exit_signal=SIGCHLD with no CLONE_* flags after CSIGNAL removal.
+         * The OpenRC login shell focused baseline later observes the same
+         * plain-fork ABI shape for staged /bin/ls, but from an existing
+         * UserChild continuation: clone_flags=0x11, newsp=0,
+         * current_child=1, active_slot_reusable=0, nested_parent_pid set and
+         * completed records already archived/reaped. This is not the
+         * supported PID1 plain-fork slice and not the supported nested vfork
+         * slice. The current diagnostic slice must classify it as
+         * clone_kind=plain_fork and print a stable clone_plain stage such as
+         * child_context_unsupported or copy_user_process while preserving the
+         * ENOSYS return. It must not create a second runnable UserChild task
+         * ref, mutate the trap frame or user memory, produce successful clone
+         * checkpoints, or silently expand task graph, wait/reap, job-control
+         * or COW semantics.
          * SyscallTable.Action::Clone must drive TaskCreationCore.CopyUserProcess
          * rather than manufacturing a pid return. The child process must have
          * a copied user trap frame with a0=0, inherited user sp because
@@ -1597,6 +1610,15 @@ type ArceosExStartupPhaseCodingMust {
          * release it.  A true vfork shape that includes CLONE_PIDFD(0x1000)
          * additionally uses parent_tidptr as the pidfd copyout address and
          * installs a pidfd-like fd table entry.
+         * Unsupported clone diagnostics must remain generic rather than
+         * vfork-only: every clone ENOSYS detail must print clone_kind as one
+         * of plain_fork, vfork_vm, vfork_pidfd or unsupported_shape, then a
+         * shape-specific stage key such as clone_plain stage=... or
+         * clone_vfork stage=.... The detail must include flags,
+         * flags_without_csignal, exit_signal, newsp,
+         * current_child_continuation, active slot state/reusable, child pid,
+         * nested parent pid, next_child_pid and completed-record counters,
+         * and must be diagnostic-only.
          * clone3, thread groups, full CLONE_VM/vfork completion scheduling,
          * COW mm, full zombie/release_task lifecycle, pid hash,
          * resource accounting, wait queues, multi-child concurrency,

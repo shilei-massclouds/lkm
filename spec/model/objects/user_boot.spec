@@ -2847,6 +2847,15 @@ object SyscallTable: ResourceObject {
                  * ABI shape, then drives TaskCreationCore.CopyUserProcess;
                  * it must not synthesize a PID return without creating a
                  * child task boundary.
+                 * The later OpenRC login shell /bin/ls focused baseline has
+                 * the same plain-fork flags, but current_child=1 and the
+                 * single active UserChild slot is still the login shell
+                 * continuation. That observed child plain fork remains an
+                 * unsupported diagnostic boundary in this slice:
+                 * clone_kind=plain_fork plus clone_plain stage must identify
+                 * the child-context reason, preserve ENOSYS, and avoid
+                 * creating another runnable UserChild task ref or changing
+                 * task graph/COW/wait/job-control semantics.
                  *
                  * The OpenRC native /sbin/init boundary observes
                  * clone_flags=0x4111 and diagnostics decode
