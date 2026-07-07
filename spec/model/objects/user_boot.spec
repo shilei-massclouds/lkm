@@ -583,6 +583,11 @@ predicate user_child_process_vfork_parent_frame_saved<T>(process: T) -> bool;
 predicate user_child_process_vfork_child_handoff<T>(process: T) -> bool;
 predicate user_child_process_vfork_parent_resumed<T>(process: T) -> bool;
 predicate user_child_process_nested_vfork_child_handoff<T>(process: T) -> bool;
+predicate user_child_process_observed_child_plain_fork_bound<T>(process: T) -> bool;
+predicate user_child_process_observed_child_plain_fork_parent_saved<T>(process: T) -> bool;
+predicate user_child_process_observed_child_plain_fork_child_pid_bound<T>(process: T) -> bool;
+predicate user_child_process_observed_child_plain_fork_no_second_task<T>(process: T) -> bool;
+predicate user_child_process_observed_child_plain_fork_parent_restored<T>(process: T) -> bool;
 predicate user_child_process_pidfd_copyout_observed<T>(process: T) -> bool;
 predicate user_child_process_single_active_slot<T>(process: T) -> bool;
 predicate user_child_process_completed_records_capacity_bound<T>(process: T) -> bool;
@@ -2850,12 +2855,20 @@ object SyscallTable: ResourceObject {
                  * The later OpenRC login shell /bin/ls focused baseline has
                  * the same plain-fork flags, but current_child=1 and the
                  * single active UserChild slot is still the login shell
-                 * continuation. That observed child plain fork remains an
-                 * unsupported diagnostic boundary in this slice:
-                 * clone_kind=plain_fork plus clone_plain stage must identify
-                 * the child-context reason, preserve ENOSYS, and avoid
-                 * creating another runnable UserChild task ref or changing
-                 * task graph/COW/wait/job-control semantics.
+                 * continuation.  This slice supports only that observed child
+                 * plain-fork shape: flags must be SIGCHLD only, newsp must be
+                 * zero, the parent must be the current child continuation, and
+                 * the child must not already be inside a deeper observed
+                 * child.  clone records the shell parent pid, allocates the
+                 * next child pid for /bin/ls, copies the fork-time stack/trap
+                 * facts with child a0=0 and inherited TLS, then returns that
+                 * child pid to the shell parent.  It still reuses the single
+                 * internal UserChild execution slot: no second runnable task
+                 * ref is enqueued, and the grandchild continuation runs only
+                 * when the shell later reaches wait4(-1, status,
+                 * allowed_options, NULL).  Child exit restores the shell
+                 * address-space, writable pages, fd snapshot and visible pid,
+                 * then returns the grandchild pid from the shell wait4.
                  *
                  * The OpenRC native /sbin/init boundary observes
                  * clone_flags=0x4111 and diagnostics decode
@@ -3073,6 +3086,16 @@ object SyscallTable: ResourceObject {
                  * eligible child exists, return ECHILD. This does not create a
                  * synthetic child, does not block, and does not consume signal
                  * or scheduler wait state.
+                 * The OpenRC login shell observed child plain-fork shape is
+                 * eligible only after clone has recorded the grandchild pid
+                 * and the shell parent reaches wait4.  That wait4 is the
+                 * handoff point: save the shell wait frame, address-space,
+                 * stack and writable-page snapshots, restore the fork-time
+                 * grandchild stack snapshot, and switch the single internal
+                 * slot to the grandchild trap frame.  The grandchild exit path
+                 * must then restore the shell parent view and copy out the
+                 * wait status before returning the grandchild pid; this is not
+                 * a general wait queue, zombie list or runnable task graph.
                  * It still does not model full wait queues, zombie lists,
                  * pid hashes, resource aggregation or release_task().
                  */
@@ -3261,6 +3284,61 @@ object UserChildProcess: ResourceObject {
                 user_child_process_child_continuation_taken(self);
                 user_child_process_single_active_slot(self);
                 user_child_process_next_child_pid_bound(self);
+            }
+        }
+
+        on Action::ObservedChildPlainFork {
+            /*
+             * Observed OpenRC login shell /bin/ls reaches plain
+             * clone(SIGCHLD) from the already active login-shell child
+             * continuation.  The shell parent stays in the same internal
+             * UserChild slot and clone returns the allocated grandchild pid to
+             * that shell.  The grandchild is only an observed child
+             * continuation saved in the slot until the shell reaches wait4;
+             * no second UserChildTaskRef is enqueued and no full task graph,
+             * COW mm, job-control or generic wait/reap model is introduced.
+             */
+            depends_on {
+                UserChildProcess.state == State::Ready;
+                UserInitProcess.state == State::Online;
+                FilesStruct.state == State::Ready;
+            }
+
+            ensures {
+                user_child_process_observed_child_plain_fork_bound(self);
+                user_child_process_observed_child_plain_fork_parent_saved(self);
+                user_child_process_observed_child_plain_fork_child_pid_bound(self);
+                user_child_process_trap_frame_child_return_zero(self);
+                user_child_process_tls_inherited(self);
+                user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
+                user_child_process_single_active_slot(self);
+                user_child_process_observed_child_plain_fork_no_second_task(self);
+                user_child_process_next_child_pid_bound(self);
+            }
+        }
+
+        on Action::ObservedChildParentWaitResumed {
+            /*
+             * Completion path for the observed grandchild: child exit restores
+             * the saved shell parent address-space, stack, writable pages and
+             * fd snapshot, copies wait status when requested, returns the
+             * grandchild pid from shell wait4, and restores the visible
+             * current child pid to the login shell parent.
+             */
+            depends_on {
+                UserChildProcess.state == State::Ready;
+                UserInitProcess.state == State::Online;
+                FilesStruct.state == State::Ready;
+            }
+
+            ensures {
+                user_child_process_exit_status_observed(self);
+                user_child_process_wait4_status_copied(self);
+                user_child_process_parent_wait_stack_snapshot_restored(self, UserAddressSpace);
+                user_child_process_parent_wait_writable_page_snapshot_restored(self, UserAddressSpace);
+                user_child_process_parent_fd_snapshot_restored(self, FilesStruct);
+                user_child_process_observed_child_plain_fork_parent_restored(self);
+                user_child_process_single_active_slot(self);
             }
         }
 

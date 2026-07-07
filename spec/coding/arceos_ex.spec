@@ -1549,15 +1549,21 @@ type ArceosExStartupPhaseCodingMust {
          * current_child=1, active_slot_reusable=0, nested_parent_pid set and
          * completed records already archived/reaped. This is not the
          * supported PID1 plain-fork slice and not the supported nested vfork
-         * slice. The current diagnostic slice must classify it as
-         * clone_kind=plain_fork and print a stable clone_plain stage such as
-         * child_context_unsupported or copy_user_process while preserving the
-         * ENOSYS return. It must not create a second runnable UserChild task
-         * ref, mutate the trap frame or user memory, produce successful clone
-         * checkpoints, or silently expand task graph, wait/reap, job-control
-         * or COW semantics.
+         * slice. The supported child-continuation shape is a bounded observed
+         * child plain fork: only SIGCHLD with no other CLONE_* flags, newsp=0,
+         * current child continuation as parent, and no deeper observed child.
+         * It must save the shell parent pid/frame/stack/fd/address-space facts,
+         * allocate next_child_pid for the grandchild, prepare a copied child
+         * trap frame with a0=0 and inherited TLS, then return that pid to the
+         * shell parent. It must not create a second runnable UserChild task ref
+         * or enqueue; the grandchild continuation is taken only when the shell
+         * later reaches wait4(-1, status, allowed_options, NULL). Unsupported
+         * child-context shapes must still print stable clone_plain diagnostics.
          * SyscallTable.Action::Clone must drive TaskCreationCore.CopyUserProcess
-         * rather than manufacturing a pid return. The child process must have
+         * for PID1 plain fork and non-nested vfork rather than manufacturing a
+         * pid return. The observed child plain-fork exception is explicitly not
+         * a CopyUserProcess/runqueue path; it is a UserChildProcess single-slot
+         * continuation fact. The child process must have
          * a copied user trap frame with a0=0, inherited user sp because
          * newsp=0, inherited TLS because CLONE_SETTLS is absent, copied
          * files/fs/credentials/signal first-slice facts, a PID, and a

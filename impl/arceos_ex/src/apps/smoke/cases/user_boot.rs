@@ -24,6 +24,7 @@ use crate::{
 };
 
 const USER_OPENRC_VFORK_FLAGS: usize = 0x4111;
+const USER_PLAIN_FORK_FLAGS: usize = 0x11;
 const USER_WAIT4_WNOHANG: usize = 1;
 const USER_EFAULT_RETURN: usize = usize::MAX - 13;
 const USER_ECHILD_RETURN: usize = usize::MAX - 9;
@@ -1290,6 +1291,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         exercise_completed_child_record_reuse(assertions);
         exercise_nested_vfork_child_slot(assertions);
+        exercise_observed_child_plain_fork(assertions);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -1560,6 +1562,176 @@ fn exercise_nested_vfork_child_slot(assertions: &mut SmokeAssertions) {
 
     let rejects_deeper_nested = !copy_user_process_for_current_slot(true);
     assertions.assert("deeper nested vfork rejected", rejects_deeper_nested);
+}
+
+fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
+    let (shell_pid, shell_parent_pid, shell_tgid) = {
+        let ctx = context();
+        (
+            ctx.user_child_process.pid(),
+            ctx.user_child_process.parent_pid(),
+            ctx.user_child_process.tgid(),
+        )
+    };
+    if shell_pid == 0 || shell_parent_pid == 0 || shell_tgid == 0 {
+        assertions.assert("observed plain fork starts from shell child", false);
+        return;
+    }
+
+    let child_pid = {
+        let mut clone_frame = TrapFrame::zeroed();
+        clone_frame.sepc = 0x8000;
+        clone_frame.set_reg(2, USER_STACK_TOP - 0x680);
+        clone_frame.set_reg(10, USER_PLAIN_FORK_FLAGS);
+        clone_frame.set_reg(11, 0);
+        clone_frame.set_reg(17, 220);
+
+        let ctx = context();
+        let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &clone_frame,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+        ) else {
+            assertions.assert("copy observed child plain fork", false);
+            return;
+        };
+        child_pid
+    };
+
+    {
+        let ctx = context();
+        assertions.assert(
+            "observed plain fork parent continues",
+            child_pid > shell_pid
+                && ctx.user_child_process.pid() == shell_pid
+                && ctx.user_child_process.parent_pid() == shell_parent_pid
+                && ctx.user_child_process.observed_plain_fork_clone()
+                && ctx.user_child_process.observed_plain_fork_parent_pid() == shell_pid
+                && ctx.user_child_process.observed_plain_fork_child_pid() == child_pid
+                && ctx.user_child_process.observed_plain_fork_child_pending_wait()
+                && ctx.user_child_process.child_trap_frame_reg(10) == Some(0),
+        );
+    }
+
+    let child_frame = {
+        let mut wait_frame = TrapFrame::zeroed();
+        wait_frame.sepc = 0x8100;
+        wait_frame.set_reg(2, USER_STACK_TOP - 0x780);
+        wait_frame.set_reg(10, USER_WAIT4_ALL_CHILDREN);
+        wait_frame.set_reg(11, 0);
+        wait_frame.set_reg(12, USER_TEST_WAIT4_WUNTRACED);
+        wait_frame.set_reg(13, 0);
+        wait_frame.set_reg(17, 260);
+
+        let ctx = context();
+        let Some((child_frame, parent_pid, observed_child_pid)) = ctx
+            .user_child_process
+            .wait4_yield_to_observed_child_continuation(
+                &ctx.user_init_process,
+                &ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &wait_frame,
+                0,
+                USER_WAIT4_ALL_CHILDREN,
+                0,
+            )
+        else {
+            assertions.assert("observed child wait4 handoff", false);
+            return;
+        };
+        if !ctx
+            .user_init_process
+            .switch_observed_child_process_visible(parent_pid, observed_child_pid)
+        {
+            assertions.assert("observed child process visible", false);
+            return;
+        }
+        child_frame
+    };
+
+    {
+        let ctx = context();
+        assertions.assert(
+            "observed child handoff uses grandchild pid",
+            child_frame.reg(10) == 0
+                && ctx.user_child_process.pid() == child_pid
+                && ctx.user_child_process.parent_pid() == shell_pid
+                && ctx.user_child_process.observed_plain_fork_child_active()
+                && ctx.user_init_process.child_process_pid() == child_pid,
+        );
+    }
+
+    let (parent_frame, exit_child_pid, exit_parent_pid) = {
+        let ctx = context();
+        let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
+            ctx.user_child_process.child_exit_to_observed_child_parent_wait(
+                &mut ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                0,
+            )
+        else {
+            assertions.assert("observed child exits to shell wait", false);
+            return;
+        };
+        (parent_frame, exit_child_pid, exit_parent_pid)
+    };
+    if exit_child_pid != child_pid || exit_parent_pid != shell_pid {
+        assertions.assert("observed child exit pids", false);
+        return;
+    }
+
+    {
+        let ctx = context();
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map);
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
+        if !ctx
+            .user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+            || !ctx.user_child_process.restore_parent_wait_writable_page_snapshot(
+                &ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+            || !ctx
+                .user_child_process
+                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            || !ctx
+                .user_init_process
+                .restore_observed_child_parent_process_visible(shell_pid, child_pid)
+            || !ctx
+                .user_child_process
+                .mark_observed_child_parent_wait_resumed(true, 0)
+        {
+            assertions.assert("observed child parent restored", false);
+            return;
+        }
+    }
+
+    let ctx = context();
+    assertions.assert(
+        "observed plain fork restores shell continuation",
+        parent_frame.sepc == 0x8100
+            && ctx.user_child_process.pid() == shell_pid
+            && ctx.user_child_process.parent_pid() == shell_parent_pid
+            && ctx.user_child_process.tgid() == shell_tgid
+            && ctx.user_child_process.current_child_continuation()
+            && ctx.user_child_process.observed_plain_fork_parent_restored()
+            && ctx.user_child_process.last_reaped_child_pid() == child_pid
+            && ctx.user_init_process.child_process_pid() == shell_pid,
+    );
 }
 
 fn start_active_vfork_child(index: usize) -> Option<usize> {

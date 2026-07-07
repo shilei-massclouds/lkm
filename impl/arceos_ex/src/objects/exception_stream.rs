@@ -5478,7 +5478,32 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             .user_child_process
             .current_child_continuation()
         {
-            complete_unsupported_clone_syscall(frame, "child_context_unsupported");
+            let child_pid = {
+                let ctx = crate::context::context();
+                let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
+                    &ctx.user_init_process,
+                    &ctx.user_clone_deferred_boundaries,
+                    &ctx.user_address_space,
+                    &ctx.user_trap_frame,
+                    &ctx.fs_struct,
+                    &ctx.files_struct,
+                    &ctx.page_metadata_map,
+                    frame,
+                    clone_flags,
+                    newsp,
+                ) else {
+                    complete_unsupported_clone_syscall(frame, "child_context_unsupported");
+                    return;
+                };
+                child_pid
+            };
+
+            table.clone_observed.store(1, Ordering::Release);
+            crate::checkpoint::dispatch(
+                Checkpoint::SyscallTableClone,
+                crate::context::context_ref(),
+            );
+            complete_successful_syscall(frame, child_pid);
             return;
         }
 
@@ -6525,10 +6550,75 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
+    if crate::context::context_ref()
+        .user_child_process
+        .observed_plain_fork_child_pending_wait()
+    {
+        if options & WAIT4_WNOHANG != 0 {
+            table.wait4_observed.store(1, Ordering::Release);
+            crate::checkpoint::dispatch(
+                Checkpoint::SyscallTableWait4,
+                crate::context::context_ref(),
+            );
+            complete_successful_syscall(frame, 0);
+            return;
+        }
+
+        let (child_frame, _parent_pid, _child_pid) = {
+            let ctx = crate::context::context();
+            let Some((child_frame, parent_pid, child_pid)) = ctx
+                .user_child_process
+                .wait4_yield_to_observed_child_continuation(
+                    &ctx.user_init_process,
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                    frame,
+                    stat_addr,
+                    upid,
+                    rusage,
+                )
+            else {
+                complete_error_syscall(frame, ECHILD);
+                return;
+            };
+            if !ctx
+                .user_init_process
+                .switch_observed_child_process_visible(parent_pid, child_pid)
+            {
+                complete_error_syscall(frame, ECHILD);
+                return;
+            }
+            (child_frame, parent_pid, child_pid)
+        };
+
+        table.wait4_observed.store(1, Ordering::Release);
+        #[cfg(app_user_boot)]
+        {
+            let child = &crate::context::context_ref().user_child_process;
+            record_wait4_parent_wait_saved(
+                frame,
+                stat_addr,
+                child.pid(),
+                child.parent_wait_stack_window_checkpoint_bound(),
+                child.parent_wait_stack_window_start(),
+                child.parent_wait_stack_window_len(),
+                child.parent_wait_writable_page_snapshot_saved(),
+                child.parent_wait_writable_page_count(),
+                child.parent_wait_writable_page_snapshot_truncated(),
+            );
+        }
+        crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+        print_wait4_child_handoff_trace(&child_frame);
+        *frame = child_frame;
+        return;
+    }
+
     let child_eligible_but_not_waitable = {
         let child = &crate::context::context_ref().user_child_process;
         child.state() == State::Ready
             && child.enqueued()
+            && !child.child_continuation_taken()
             && !child.child_exit_status_observed()
             && !child.parent_wait_resumed()
     };
@@ -6616,6 +6706,9 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
     print_syscall_trace_exit(frame, status);
+    if complete_observed_child_exit_to_parent_wait(frame, status) {
+        return;
+    }
     if complete_child_exit_to_vfork_parent_clone(frame, status) {
         return;
     }
@@ -6626,6 +6719,174 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     print_decimal(status);
     crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+#[cfg(app_user_boot)]
+fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> bool {
+    let wait_status = ((status & 0xff) << 8) as u32;
+    let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
+        let ctx = crate::context::context();
+        let Some((parent_frame, status_ptr, child_pid, parent_pid)) = ctx
+            .user_child_process
+            .child_exit_to_observed_child_parent_wait(
+                &mut ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                status,
+            )
+        else {
+            return false;
+        };
+        (
+            parent_frame,
+            status_ptr,
+            child_pid,
+            parent_pid,
+            ctx.user_address_space.satp_token(),
+        )
+    };
+
+    crate::arch::riscv64::csr::write_satp(parent_satp);
+    crate::arch::riscv64::csr::sfence_vma();
+
+    let stack_window_compared = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+
+    let writable_pages_compared = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+
+    let parent_stack_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+    };
+    if !parent_stack_restored {
+        return false;
+    }
+
+    let writable_pages_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_wait_writable_page_snapshot(
+                &ctx.user_address_space,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+    };
+    if !writable_pages_restored {
+        return false;
+    }
+
+    let fd_snapshot_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_parent_fd_snapshot(&mut ctx.files_struct)
+    };
+    if !fd_snapshot_restored {
+        return false;
+    }
+
+    {
+        let ctx = crate::context::context();
+        if !ctx
+            .user_init_process
+            .restore_observed_child_parent_process_visible(parent_pid, child_pid)
+        {
+            return false;
+        }
+    }
+
+    let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
+    {
+        let ctx = crate::context::context();
+        if !ctx
+            .user_child_process
+            .mark_observed_child_parent_wait_resumed(status_copied, wait_status as usize)
+        {
+            return false;
+        }
+    }
+    let (
+        stack_window_diff_count,
+        stack_window_first_diff_addr,
+        stack_window_before_byte,
+        stack_window_after_byte,
+        writable_pages_dirty_count,
+        writable_pages_stack_dirty_count,
+        writable_pages_non_stack_dirty_count,
+        writable_pages_restored,
+        writable_pages_first_non_stack_kind,
+        writable_pages_first_non_stack_mapping_index,
+        writable_pages_first_non_stack_page_index,
+        writable_pages_first_non_stack_addr,
+        writable_pages_first_non_stack_before_checksum,
+        writable_pages_first_non_stack_after_checksum,
+    ) = {
+        let child = &crate::context::context_ref().user_child_process;
+        (
+            child.parent_wait_stack_window_diff_count(),
+            child.parent_wait_stack_window_first_diff_addr(),
+            child.parent_wait_stack_window_before_byte() as usize,
+            child.parent_wait_stack_window_after_byte() as usize,
+            child.parent_wait_writable_page_dirty_count(),
+            child.parent_wait_writable_page_stack_dirty_count(),
+            child.parent_wait_writable_page_non_stack_dirty_count(),
+            child.parent_wait_writable_page_snapshot_restored(),
+            child.parent_wait_first_non_stack_dirty_kind(),
+            child.parent_wait_first_non_stack_dirty_mapping_index(),
+            child.parent_wait_first_non_stack_dirty_page_index(),
+            child.parent_wait_first_non_stack_dirty_addr(),
+            child.parent_wait_first_non_stack_dirty_before_checksum(),
+            child.parent_wait_first_non_stack_dirty_after_checksum(),
+        )
+    };
+
+    if status_copied {
+        complete_successful_syscall(&mut parent_frame, child_pid);
+    } else {
+        complete_error_syscall(&mut parent_frame, EFAULT);
+    }
+    record_wait4_parent_wait_resumed(
+        &parent_frame,
+        parent_satp,
+        status_ptr,
+        wait_status as usize,
+        status_copied,
+        status,
+        stack_window_compared,
+        stack_window_diff_count,
+        stack_window_first_diff_addr,
+        stack_window_before_byte,
+        stack_window_after_byte,
+        writable_pages_compared,
+        writable_pages_dirty_count,
+        writable_pages_stack_dirty_count,
+        writable_pages_non_stack_dirty_count,
+        writable_pages_restored,
+        writable_pages_first_non_stack_kind,
+        writable_pages_first_non_stack_mapping_index,
+        writable_pages_first_non_stack_page_index,
+        writable_pages_first_non_stack_addr,
+        writable_pages_first_non_stack_before_checksum,
+        writable_pages_first_non_stack_after_checksum,
+    );
+    *frame = parent_frame;
+    crate::checkpoint::dispatch(
+        Checkpoint::UserChildParentWaitResumed,
+        crate::context::context_ref(),
+    );
+    true
+}
+
+#[cfg(not(app_user_boot))]
+fn complete_observed_child_exit_to_parent_wait(_frame: &mut TrapFrame, _status: usize) -> bool {
+    false
 }
 
 #[cfg(app_user_boot)]

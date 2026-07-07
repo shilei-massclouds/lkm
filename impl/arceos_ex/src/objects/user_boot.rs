@@ -3571,6 +3571,13 @@ pub struct UserChildProcess {
     enqueued: bool,
     wait4_parent_wait_observed: bool,
     child_continuation_taken: bool,
+    observed_plain_fork_clone: bool,
+    observed_plain_fork_parent_pid: usize,
+    observed_plain_fork_parent_parent_pid: usize,
+    observed_plain_fork_parent_tgid: usize,
+    observed_plain_fork_child_pid: usize,
+    observed_plain_fork_child_active: bool,
+    observed_plain_fork_parent_restored: bool,
     next_child_pid: usize,
     completed_child_records: [UserCompletedChildRecord; USER_COMPLETED_CHILD_RECORD_CAPACITY],
     completed_child_record_count: usize,
@@ -3678,6 +3685,13 @@ impl UserChildProcess {
             enqueued: false,
             wait4_parent_wait_observed: false,
             child_continuation_taken: false,
+            observed_plain_fork_clone: false,
+            observed_plain_fork_parent_pid: 0,
+            observed_plain_fork_parent_parent_pid: 0,
+            observed_plain_fork_parent_tgid: 0,
+            observed_plain_fork_child_pid: 0,
+            observed_plain_fork_child_active: false,
+            observed_plain_fork_parent_restored: false,
             next_child_pid: USER_CHILD_PID,
             completed_child_records: [UserCompletedChildRecord::empty();
                 USER_COMPLETED_CHILD_RECORD_CAPACITY],
@@ -3807,6 +3821,37 @@ impl UserChildProcess {
 
     pub const fn child_continuation_taken(&self) -> bool {
         self.child_continuation_taken
+    }
+
+    pub const fn observed_plain_fork_clone(&self) -> bool {
+        self.observed_plain_fork_clone
+    }
+
+    pub const fn observed_plain_fork_parent_pid(&self) -> usize {
+        self.observed_plain_fork_parent_pid
+    }
+
+    pub const fn observed_plain_fork_child_pid(&self) -> usize {
+        self.observed_plain_fork_child_pid
+    }
+
+    pub const fn observed_plain_fork_child_active(&self) -> bool {
+        self.observed_plain_fork_child_active
+    }
+
+    pub const fn observed_plain_fork_parent_restored(&self) -> bool {
+        self.observed_plain_fork_parent_restored
+    }
+
+    pub fn observed_plain_fork_child_pending_wait(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.observed_plain_fork_clone
+            && !self.observed_plain_fork_child_active
+            && !self.observed_plain_fork_parent_restored
+            && self.observed_plain_fork_parent_pid != 0
+            && self.observed_plain_fork_child_pid != 0
+            && self.pid == self.observed_plain_fork_parent_pid
+            && self.current_child_continuation()
     }
 
     pub const fn current_child_continuation(&self) -> bool {
@@ -4268,6 +4313,7 @@ impl UserChildProcess {
         self.pidfd_fd = usize::MAX;
         self.pidfd_copyout = false;
         self.parent_clone_return = 0;
+        self.clear_observed_plain_fork_state();
         self.active_slot_reusable = false;
         self.vfork_next_child_accepted = false;
 
@@ -4432,6 +4478,7 @@ impl UserChildProcess {
         self.enqueued = false;
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = true;
+        self.clear_observed_plain_fork_state();
         self.active_slot_reusable = false;
         self.vfork_next_child_accepted = next_child_accepted;
         self.next_child_pid = child_pid.saturating_add(1);
@@ -4507,6 +4554,10 @@ impl UserChildProcess {
                 page_allocator,
                 page_metadata_map,
             );
+            self.parent_wait_writable_page_count = 0;
+            self.parent_wait_writable_page_snapshot_saved = false;
+            self.parent_wait_writable_page_snapshot_truncated = false;
+            self.parent_wait_writable_page_snapshot_restored = false;
         }
 
         unsafe {
@@ -4598,11 +4649,108 @@ impl UserChildProcess {
         self.enqueued = true;
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = true;
+        self.clear_observed_plain_fork_state();
         self.active_slot_reusable = false;
         self.vfork_next_child_accepted = true;
         self.next_child_pid = child_pid.saturating_add(1);
 
         Some((child_frame, parent_pid))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_plain_fork_from_current_child(
+        &mut self,
+        parent: &UserInitProcess,
+        boundaries: &UserCloneDeferredBoundaries,
+        address_space: &UserAddressSpace,
+        trap_frame: &UserTrapFrame,
+        fs_struct: &FsStruct,
+        files_struct: &FilesStruct,
+        page_metadata_map: &PageMetadataMap,
+        current_frame: &TrapFrame,
+        clone_flags: usize,
+        newsp: usize,
+    ) -> Option<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.current_child_continuation()
+            || !self.nested_vfork_clone
+            || self.observed_plain_fork_child_active
+            || (self.observed_plain_fork_clone && !self.observed_plain_fork_parent_restored)
+            || self.pid == 0
+            || parent.state() != State::Online
+            || !parent.pid1_preserved()
+            || boundaries.state() != State::Ready
+            || !boundaries.accepts_plain_fork_first_slice(clone_flags, newsp)
+            || address_space.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
+            || !self.task_struct_allocated
+            || !self.pid_allocated
+            || !self.thread_context_ready
+            || !self.sched_entity_ready
+            || !self.task_state_new
+            || !self.files_struct_copied
+            || !self.fs_struct_copied
+            || !self.credentials_copied
+            || !self.signal_state_copied
+        {
+            return None;
+        }
+
+        let parent_pid = self.pid;
+        let parent_parent_pid = self.parent_pid;
+        let parent_tgid = self.tgid;
+        let child_pid = self.next_child_pid;
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        let stack_snapshot_len = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.user_stack_snapshot,
+        )?;
+        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
+
+        self.exit_signal = boundaries.exit_signal(clone_flags);
+        self.parent_fd_snapshot = parent_fd_snapshot;
+        self.parent_fd_snapshot_saved = true;
+        self.parent_fd_snapshot_restored = false;
+        self.user_address_space_snapshot = true;
+        self.user_stack_snapshot_len = stack_snapshot_len;
+        self.user_stack_snapshot_copied = true;
+        self.user_stack_snapshot_restored = false;
+        self.trap_frame_copied = true;
+        self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
+        self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
+        self.child_trap_frame = Some(child_frame);
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_wait_stack_snapshot_len = 0;
+        self.parent_wait_stack_snapshot_copied = false;
+        self.parent_wait_stack_snapshot_restored = false;
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        self.wait4_parent_wait_observed = false;
+        self.parent_clone_return = child_pid;
+        self.observed_plain_fork_clone = true;
+        self.observed_plain_fork_parent_pid = parent_pid;
+        self.observed_plain_fork_parent_parent_pid = parent_parent_pid;
+        self.observed_plain_fork_parent_tgid = parent_tgid;
+        self.observed_plain_fork_child_pid = child_pid;
+        self.observed_plain_fork_child_active = false;
+        self.observed_plain_fork_parent_restored = false;
+        self.next_child_pid = child_pid.saturating_add(1);
+        Some(child_pid)
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
@@ -4727,6 +4875,118 @@ impl UserChildProcess {
         Some(child_frame)
     }
 
+    pub fn wait4_yield_to_observed_child_continuation(
+        &mut self,
+        parent: &UserInitProcess,
+        address_space: &UserAddressSpace,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        parent_wait_frame: &TrapFrame,
+        stat_addr: usize,
+        upid: usize,
+        rusage: usize,
+    ) -> Option<(TrapFrame, usize, usize)> {
+        if !self.observed_plain_fork_child_pending_wait()
+            || parent.state() != State::Online
+            || address_space.state() != State::Online
+            || !parent.pid1_preserved()
+            || upid != USER_WAIT4_ALL_CHILDREN
+            || rusage != 0
+            || !self.user_stack_snapshot_copied
+            || self.user_stack_snapshot_len == 0
+            || !self.trap_frame_copied
+            || !self.trap_frame_child_return_zero
+            || self.child_trap_frame.is_none()
+        {
+            return None;
+        }
+
+        if self.parent_wait_writable_page_snapshot_saved
+            && !self.parent_wait_writable_page_snapshot_restored
+            && self.parent_wait_writable_page_count != 0
+        {
+            release_writable_page_snapshot_pages(
+                &mut self.parent_wait_writable_page_snapshot_pages,
+                self.parent_wait_writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+        }
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                address_space as *const UserAddressSpace,
+                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
+                1,
+            );
+        }
+        self.parent_wait_frame = Some(*parent_wait_frame);
+        self.parent_wait_status_ptr = stat_addr;
+        self.parent_address_space_snapshot_saved = true;
+
+        if !self.capture_parent_wait_stack_window(
+            address_space,
+            page_metadata_map,
+            parent_wait_frame.reg(2),
+        ) {
+            return None;
+        }
+        let Some(parent_stack_snapshot_len) = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.parent_wait_stack_snapshot,
+        ) else {
+            return None;
+        };
+        self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
+        self.parent_wait_stack_snapshot_copied = true;
+        self.parent_wait_stack_snapshot_restored = false;
+
+        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+            address_space,
+            page_allocator,
+            page_metadata_map,
+            &mut self.parent_wait_writable_page_snapshot_pages,
+            &mut self.parent_wait_writable_page_checksums,
+        ) else {
+            return None;
+        };
+        self.parent_wait_writable_page_count = writable_page_count;
+        self.parent_wait_writable_page_snapshot_saved = true;
+        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+
+        if !restore_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &self.user_stack_snapshot,
+            self.user_stack_snapshot_len,
+        ) {
+            return None;
+        }
+
+        let child_frame = self.child_trap_frame?;
+        let parent_pid = self.observed_plain_fork_parent_pid;
+        let child_pid = self.observed_plain_fork_child_pid;
+        self.wait4_parent_wait_observed = true;
+        self.user_stack_snapshot_restored = true;
+        self.observed_plain_fork_child_active = true;
+        self.pid = child_pid;
+        self.parent_pid = parent_pid;
+        self.tgid = child_pid;
+        Some((child_frame, parent_pid, child_pid))
+    }
+
     pub fn child_exit_to_parent_wait(
         &mut self,
         address_space: &mut UserAddressSpace,
@@ -4761,6 +5021,46 @@ impl UserChildProcess {
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
         Some((parent_frame, self.parent_wait_status_ptr, self.pid))
+    }
+
+    pub fn child_exit_to_observed_child_parent_wait(
+        &mut self,
+        address_space: &mut UserAddressSpace,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        exit_status: usize,
+    ) -> Option<(TrapFrame, usize, usize, usize)> {
+        if self.lifecycle.state() != State::Ready
+            || !self.observed_plain_fork_clone
+            || !self.observed_plain_fork_child_active
+            || self.observed_plain_fork_parent_restored
+            || !self.parent_address_space_snapshot_saved
+            || self.pid == 0
+            || self.pid != self.observed_plain_fork_child_pid
+            || self.parent_pid != self.observed_plain_fork_parent_pid
+        {
+            return None;
+        }
+
+        let parent_frame = self.parent_wait_frame?;
+        let child_pid = self.observed_plain_fork_child_pid;
+        let parent_pid = self.observed_plain_fork_parent_pid;
+        release_replaced_child_address_space_backing(
+            address_space,
+            &self.parent_address_space_snapshot,
+            page_allocator,
+            page_metadata_map,
+        );
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &self.parent_address_space_snapshot as *const UserAddressSpace,
+                address_space as *mut UserAddressSpace,
+                1,
+            );
+        }
+        self.child_exit_status = exit_status;
+        self.child_exit_status_observed = true;
+        Some((parent_frame, self.parent_wait_status_ptr, child_pid, parent_pid))
     }
 
     pub fn child_exit_to_vfork_parent(
@@ -4973,6 +5273,36 @@ impl UserChildProcess {
         true
     }
 
+    pub fn mark_observed_child_parent_wait_resumed(
+        &mut self,
+        status_copied: bool,
+        wait_status: usize,
+    ) -> bool {
+        if !self.observed_plain_fork_clone
+            || !self.observed_plain_fork_child_active
+            || self.observed_plain_fork_parent_restored
+            || !self.child_exit_status_observed
+            || !self.parent_wait_stack_snapshot_restored
+            || !self.parent_wait_writable_page_snapshot_restored
+            || !self.parent_fd_snapshot_restored
+        {
+            return false;
+        }
+
+        let child_pid = self.observed_plain_fork_child_pid;
+        self.wait4_status_copied = status_copied;
+        self.observed_plain_fork_child_active = false;
+        self.observed_plain_fork_parent_restored = true;
+        self.last_reaped_child_pid = child_pid;
+        self.last_reaped_child_wait_status = wait_status;
+        self.last_released_child_pid = child_pid;
+        self.last_released_child_wait_status = wait_status;
+        self.pid = self.observed_plain_fork_parent_pid;
+        self.parent_pid = self.observed_plain_fork_parent_parent_pid;
+        self.tgid = self.observed_plain_fork_parent_tgid;
+        true
+    }
+
     pub fn mark_vfork_parent_resumed(&mut self) -> bool {
         if !self.vfork_clone()
             || !self.child_exit_status_observed
@@ -5135,9 +5465,20 @@ impl UserChildProcess {
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = false;
         self.vfork_next_child_accepted = false;
+        self.clear_observed_plain_fork_state();
         self.active_slot_reusable = true;
         self.active_slot_reuse_count += 1;
         true
+    }
+
+    fn clear_observed_plain_fork_state(&mut self) {
+        self.observed_plain_fork_clone = false;
+        self.observed_plain_fork_parent_pid = 0;
+        self.observed_plain_fork_parent_parent_pid = 0;
+        self.observed_plain_fork_parent_tgid = 0;
+        self.observed_plain_fork_child_pid = 0;
+        self.observed_plain_fork_child_active = false;
+        self.observed_plain_fork_parent_restored = false;
     }
 
     fn capture_parent_wait_stack_window(
@@ -6502,6 +6843,48 @@ impl UserInitProcess {
         self.child_process_pid = child_pid;
         self.child_session_leader_first_slice = false;
         self.child_setsid_success_observed = false;
+        true
+    }
+
+    pub fn switch_observed_child_process_visible(
+        &mut self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || parent_pid == 0
+            || child_pid == 0
+            || self.child_process_pid != parent_pid
+            || !self.child_process_group_visible
+            || self.child_process_group == 0
+            || self.child_process_session_id == 0
+        {
+            return false;
+        }
+
+        self.child_process_pid = child_pid;
+        true
+    }
+
+    pub fn restore_observed_child_parent_process_visible(
+        &mut self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || parent_pid == 0
+            || child_pid == 0
+            || self.child_process_pid != child_pid
+            || !self.child_process_group_visible
+            || self.child_process_group == 0
+            || self.child_process_session_id == 0
+        {
+            return false;
+        }
+
+        self.child_process_pid = parent_pid;
         true
     }
 
