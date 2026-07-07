@@ -2736,7 +2736,12 @@ impl FilesStruct {
     }
 
     fn finish_closed_entry(&mut self, fd: usize, entry: FileDescriptorEntry) {
-        if fd == REGULAR0_FD && entry.ofd == OpenFileDescriptionRef::Regular0 {
+        if entry.ofd == OpenFileDescriptionRef::Regular0
+            && self
+                .fd_table
+                .first_fd_for_ofd(OpenFileDescriptionRef::Regular0)
+                .is_none()
+        {
             self.regular0_offset = 0;
             self.directory0_offset = 0;
             self.directory0_file_ref = None;

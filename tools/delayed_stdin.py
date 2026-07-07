@@ -32,6 +32,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar=("MARKER", "PAYLOAD"),
         help="ordered marker/payload pair; may be repeated",
     )
+    parser.add_argument(
+        "--success-marker",
+        action="append",
+        default=[],
+        help="ordered marker that makes the command successful and terminates it; may be repeated",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command
@@ -39,6 +45,36 @@ def main(argv: list[str] | None = None) -> int:
         command = command[1:]
     if not command:
         parser.error("missing command after --")
+
+    if args.success_marker:
+        if args.ready_marker is not None or args.payload is not None or args.input_step:
+            parser.error("use --success-marker without stdin marker/payload options")
+        stdout, returncode, timed_out, observed_markers, terminated_after_success = (
+            run_until_success_markers(
+                command,
+                timeout_seconds=parse_timeout(args.timeout),
+                success_markers=[marker.encode() for marker in args.success_marker],
+            )
+        )
+        sys.stdout.write(stdout)
+        missing_index = first_missing_step(observed_markers)
+        if terminated_after_success and missing_index is None:
+            return 0
+        if timed_out:
+            sys.stdout.write(f"user-boot marker-only command timed out after {args.timeout}\n")
+            if missing_index is not None:
+                sys.stdout.write(
+                    "user-boot pending success marker: "
+                    f"step={missing_index + 1} marker={args.success_marker[missing_index]}\n"
+                )
+            return 124
+        if missing_index is not None:
+            sys.stdout.write(
+                "user-boot success marker missing: "
+                f"step={missing_index + 1} marker={args.success_marker[missing_index]}\n"
+            )
+            return 1 if returncode == 0 else int(returncode or 1)
+        return int(returncode or 1)
 
     if args.input_step:
         if args.ready_marker is not None or args.payload is not None:
@@ -188,6 +224,80 @@ def run_delayed_steps(
     selector.close()
     stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
     return stdout, process.returncode, timed_out, sent_steps
+
+
+def run_until_success_markers(
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    success_markers: list[bytes],
+) -> tuple[str, int | None, bool, list[bool], bool]:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    stdout_parts: list[bytes] = []
+    scan_buffer = b""
+    observed_markers = [False for _marker in success_markers]
+    next_marker = 0
+    max_scan_buffer = max(4096, max((len(marker) for marker in success_markers), default=0) * 2)
+    stdout_eof = False
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
+    terminated_after_success = False
+
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            timed_out = True
+            kill_process_group(process)
+            break
+        if stdout_eof and process.poll() is not None:
+            break
+
+        wait_time = min(0.25, max(0.0, deadline - now))
+        events = selector.select(wait_time)
+        if not events:
+            continue
+        for key, _ in events:
+            chunk = os.read(key.fd, 4096)
+            if not chunk:
+                stdout_eof = True
+                continue
+            stdout_parts.append(chunk)
+            scan_buffer += chunk
+            while next_marker < len(success_markers):
+                marker = success_markers[next_marker]
+                marker_index = scan_buffer.find(marker)
+                if marker_index < 0:
+                    break
+                observed_markers[next_marker] = True
+                scan_buffer = scan_buffer[marker_index + len(marker) :]
+                next_marker += 1
+            if next_marker == len(success_markers):
+                terminated_after_success = True
+                kill_process_group(process)
+                break
+            if len(scan_buffer) > max_scan_buffer:
+                scan_buffer = scan_buffer[-max_scan_buffer:]
+        if terminated_after_success:
+            break
+
+    try:
+        rest, _ = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        kill_process_group(process)
+        rest, _ = process.communicate()
+    if rest:
+        stdout_parts.append(rest)
+    selector.close()
+    stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
+    return stdout, process.returncode, timed_out, observed_markers, terminated_after_success
 
 
 def write_payload(process: subprocess.Popen[bytes], payload: bytes) -> None:

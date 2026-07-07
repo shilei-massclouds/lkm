@@ -91,6 +91,7 @@ predicate user_boot_payload_user_smoke_stdin_fixture_only<T>(payload: T) -> bool
 predicate user_boot_payload_distro_init_no_stdin_fixture<T>(payload: T) -> bool;
 predicate user_boot_payload_distro_stdin_blocking_wait_enabled<T>(payload: T) -> bool;
 predicate user_boot_payload_user_smoke_stdin_blocking_wait_opt_out<T>(payload: T) -> bool;
+predicate user_boot_payload_rc_local_direct_inittab_diagnostic_first_slice<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_init_attempt_failure_trace_defined<T>(payload: T) -> bool;
@@ -2859,17 +2860,20 @@ object SyscallTable: ResourceObject {
                  * ABI shape, then drives TaskCreationCore.CopyUserProcess;
                  * it must not synthesize a PID return without creating a
                  * child task boundary.
-                 * The later OpenRC login shell /bin/ls focused baseline has
-                 * the same plain-fork flags, but current_child=1 and the
-                 * single active UserChild slot is still the login shell
-                 * continuation.  This slice supports only that observed child
-                 * plain-fork shape: flags must be SIGCHLD only, newsp must be
-                 * zero, the parent must be the current child continuation, and
-                 * the child must not already be inside a deeper observed
-                 * child.  clone records the shell parent pid, allocates the
-                 * next child pid for /bin/ls, copies the fork-time stack/trap
-                 * facts with child a0=0 and inherited TLS, then returns that
-                 * child pid to the shell parent.  It still reuses the single
+                 * The later OpenRC login shell and rc.local direct-inittab
+                 * /bin/ls focused baselines have the same plain-fork flags,
+                 * but current_child=1 and the single active UserChild slot is
+                 * still the shell continuation.  The login shell is a nested
+                 * vfork child, while the direct rc.local sysinit shell is a
+                 * non-nested vfork child.  This slice supports only that
+                 * observed child plain-fork shape: flags must be SIGCHLD
+                 * only, newsp must be zero, the parent must be the current
+                 * vfork child continuation, and the child must not already be
+                 * inside a deeper observed child.  clone records the shell
+                 * parent pid, allocates the next child pid for /bin/ls, copies
+                 * the fork-time stack/trap facts with child a0=0 and inherited
+                 * TLS, then returns that child pid to the shell parent.  It
+                 * still reuses the single
                  * internal UserChild execution slot: no second runnable task
                  * ref is enqueued, and the grandchild continuation runs only
                  * when the shell later reaches wait4(-1, status,
@@ -3296,11 +3300,11 @@ object UserChildProcess: ResourceObject {
 
         on Action::ObservedChildPlainFork {
             /*
-             * Observed OpenRC login shell /bin/ls reaches plain
-             * clone(SIGCHLD) from the already active login-shell child
-             * continuation.  The shell parent stays in the same internal
-             * UserChild slot and clone returns the allocated grandchild pid to
-             * that shell.  The grandchild is only an observed child
+             * Observed OpenRC login shell and rc.local direct-inittab shell
+             * /bin/ls both reach plain clone(SIGCHLD) from an already active
+             * vfork child continuation.  The shell parent stays in the same
+             * internal UserChild slot and clone returns the allocated
+             * grandchild pid to that shell.  The grandchild is only an observed child
              * continuation saved in the slot until the shell reaches wait4;
              * no second UserChildTaskRef is enqueued and no full task graph,
              * COW mm, job-control or generic wait/reap model is introduced.
@@ -3961,6 +3965,7 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_partition_objects_deferred(self);
                     user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
                     user_boot_payload_try_candidate_bound(self);
+                    user_boot_payload_rc_local_direct_inittab_diagnostic_first_slice(self);
                     user_boot_payload_init_attempt_failure_trace_defined(self);
                     payload_image_read_failed_checkpoint_defined(self);
                     payload_image_read_error_classification_contract_ready(self);
@@ -3992,6 +3997,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_partition_objects_deferred(self);
             user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_try_candidate_bound(self);
+            user_boot_payload_rc_local_direct_inittab_diagnostic_first_slice(self);
             user_boot_payload_init_attempt_failure_trace_defined(self);
             payload_image_read_failed_checkpoint_defined(self);
             payload_image_read_error_classification_contract_ready(self);

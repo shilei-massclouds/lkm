@@ -4679,7 +4679,7 @@ impl UserChildProcess {
     ) -> Option<usize> {
         if self.lifecycle.state() != State::Ready
             || !self.current_child_continuation()
-            || !self.nested_vfork_clone
+            || !self.vfork_clone()
             || self.observed_plain_fork_child_active
             || (self.observed_plain_fork_clone && !self.observed_plain_fork_parent_restored)
             || self.pid == 0

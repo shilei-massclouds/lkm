@@ -10,6 +10,7 @@ smoke_app=$6
 test_plic_providers=${7:-}
 default_overlay_map="tests/user/rootfs-overlay.map"
 openrc_login_overlay_dir="tests/rootfs-overlays/openrc-login"
+rc_local_overlay_dir="tests/rootfs-overlays/rc-local"
 input_timeout=${USER_BOOT_INPUT_TIMEOUT:-120s}
 
 tmpdir=$(mktemp -d)
@@ -75,6 +76,32 @@ run_with_delayed_input_steps_log() {
     python3 tools/delayed_stdin.py \
         --timeout "$input_timeout" \
         "$@" > "$log"
+    rc=$?
+    cat "$log"
+    return "$rc"
+}
+
+run_with_success_markers_log() {
+    local log=$1
+    local success_markers=$2
+    shift 2
+    local args=()
+    local marker
+    local rc
+
+    while IFS= read -r marker; do
+        if [ -z "$marker" ]; then
+            continue
+        fi
+        args+=(--success-marker "$marker")
+    done <<< "$success_markers"
+
+    : > "$log"
+    set +e
+    python3 tools/delayed_stdin.py \
+        --timeout "$input_timeout" \
+        "${args[@]}" \
+        -- "$@" > "$log"
     rc=$?
     cat "$log"
     return "$rc"
@@ -213,6 +240,42 @@ run_user_boot_input_steps_case() {
     add_summary "$total" "$pass" "$fail"
 }
 
+run_user_boot_marker_only_case() {
+    local name=$1
+    local log=$2
+    local expected_markers=$3
+    shift 3
+    local marker
+    local markers_ok=1
+
+    run_with_success_markers_log "$log" "$expected_markers" "$@"
+    local rc=$?
+    local total=1
+    local pass=0
+    local fail=1
+    if [ "$rc" -eq 0 ]; then
+        while IFS= read -r marker; do
+            if [ -z "$marker" ]; then
+                continue
+            fi
+            if ! grep -Fq "$marker" "$log"; then
+                markers_ok=0
+                status=1
+                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
+            fi
+        done <<< "$expected_markers"
+        if [ "$markers_ok" -eq 1 ]; then
+            pass=1
+            fail=0
+        fi
+    else
+        status=1
+        printf 'user-boot marker-only command failed for %s\n' "$name"
+    fi
+    record_row "$name" "$total" "$pass" "$fail"
+    add_summary "$total" "$pass" "$fail"
+}
+
 run_user_boot_overlay_case() {
     local name=$1
     local provider=$2
@@ -276,6 +339,19 @@ run_user_boot_openrc_login_case() {
         --input-step '$ ' "$shell_input" \
         -- "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
+}
+
+run_user_boot_rc_local_case() {
+    local name=$1
+    local provider=$2
+    local log=$3
+    local image=$4
+    local expected_markers=$'lkm-rc-local: begin\nlost+found\nlkm-rc-local: end status=0'
+
+    run_user_boot_marker_only_case "$name" "$log" "$expected_markers" \
+        "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$rc_local_overlay_dir" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
@@ -385,6 +461,10 @@ run_user_boot_no_overlay_input_append_case "run distro sh native" native \
 if [ "${TEST_OPENRC_LOGIN:-0}" = "1" ]; then
     run_user_boot_openrc_login_case "run openrc login" native \
         "$tmpdir/run-openrc-login-native.log" "$tmpdir/user-native-openrc-login.raw"
+fi
+if [ "${TEST_RC_LOCAL:-0}" = "1" ]; then
+    run_user_boot_rc_local_case "run rc.local" native \
+        "$tmpdir/run-rc-local-native.log" "$tmpdir/user-native-rc-local.raw"
 fi
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"

@@ -299,6 +299,7 @@ predicate arceos_ex_must_rootfs_overlay_read_default_map_unless_disabled() -> bo
 predicate arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
+predicate arceos_ex_must_rc_local_test_use_inittab_direct_marker_only() -> bool;
 predicate arceos_ex_must_user_probe_print_per_syscall_success_marker() -> bool;
 predicate arceos_ex_must_user_probe_cover_directory_openat_getdents64() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_use_existing_static_tools() -> bool;
@@ -1543,15 +1544,16 @@ type ArceosExStartupPhaseCodingMust {
          * BusyBox /bin/sh "ls" request is a0=0x11, a1=0, a2=0, a3=8,
          * a4=0x20096580, a5=1; implementations must decode this as
          * exit_signal=SIGCHLD with no CLONE_* flags after CSIGNAL removal.
-         * The OpenRC login shell focused baseline later observes the same
-         * plain-fork ABI shape for staged /bin/ls, but from an existing
-         * UserChild continuation: clone_flags=0x11, newsp=0,
-         * current_child=1, active_slot_reusable=0, nested_parent_pid set and
-         * completed records already archived/reaped. This is not the
-         * supported PID1 plain-fork slice and not the supported nested vfork
-         * slice. The supported child-continuation shape is a bounded observed
-         * child plain fork: only SIGCHLD with no other CLONE_* flags, newsp=0,
-         * current child continuation as parent, and no deeper observed child.
+         * The OpenRC login shell focused baseline and the rc.local
+         * direct-inittab shell both observe the same plain-fork ABI shape for
+         * staged /bin/ls from an existing UserChild continuation:
+         * clone_flags=0x11, newsp=0, current_child=1, and active_slot_reusable=0.
+         * The login-shell case is a nested-vfork child; the direct rc.local
+         * sysinit shell is a non-nested vfork child. Neither is the supported
+         * PID1 plain-fork slice or a new vfork clone. The supported
+         * child-continuation shape is a bounded observed child plain fork:
+         * only SIGCHLD with no other CLONE_* flags, newsp=0, current vfork
+         * child continuation as parent, and no deeper observed child.
          * It must save the shell parent pid/frame/stack/fd/address-space facts,
          * allocate next_child_pid for the grandchild, prepare a copied child
          * trap frame with a0=0 and inherited TLS, then return that pid to the
@@ -1754,10 +1756,13 @@ type ArceosExStartupPhaseCodingMust {
          * fcntl(F_DUPFD) and fcntl(F_DUPFD_CLOEXEC) must duplicate the fd
          * entry to the lowest free fixed-capacity slot at or above arg,
          * keeping the same OpenFileDescription and setting the new fd's
-         * close-on-exec bit only for F_DUPFD_CLOEXEC. Invalid source fd
-         * returns EBADF; arg outside the fixed fdtable range returns EINVAL;
-         * no free slot returns EMFILE. Runtime execve success scans the
-         * current fixed fd table and closes entries whose close-on-exec bit
+         * close-on-exec bit only for F_DUPFD_CLOEXEC. If the original fd is
+         * closed while the duplicate still points at that staged OFD, close
+         * must not clear the shared Regular0 metadata; it may be released only
+         * after the last fd-table alias for that OFD is gone. Invalid source
+         * fd returns EBADF; arg outside the fixed fdtable range returns
+         * EINVAL; no free slot returns EMFILE. Runtime execve success scans
+         * the current fixed fd table and closes entries whose close-on-exec bit
          * is set, recording scanned/closed/first-closed/remaining-open
          * diagnostics. dup3(24) supports targeted fd table replacement:
          * flags may be only 0 or O_CLOEXEC, oldfd == newfd returns EINVAL,
@@ -3311,6 +3316,17 @@ type ArceosExBlockIoCodingMust {
          * the stable fixture injection mechanism for user_smoke and staged
          * probes.
          *
+         * rc.local first-stage acceptance is a focused diagnostic, not a
+         * default make test gate. It must use ROOTFS_OVERLAY=none with a
+         * checked-in ROOTFS_FILE_OVERLAY_DIR that replaces /etc/inittab and
+         * /etc/rc.local only. The inittab entry must directly execute
+         * /bin/sh /etc/rc.local as a BusyBox init sysinit action, then the host
+         * harness may terminate QEMU successfully after observing the ordered
+         * script markers, including the rootfs listing marker. This first
+         * slice does not claim OpenRC local.d, /sbin/openrc service graph,
+         * daemon supervision, runlevel completion, script binfmt, or the full
+         * PID1 lifecycle.
+         *
          * OpenRC getty/login shell closure is a distinct acceptance slice from
          * the bare ROOTFS_OVERLAY=none distro image. The test harness may use
          * ROOTFS_OVERLAY=none together with ROOTFS_FILE_OVERLAY_DIR pointing
@@ -3381,6 +3397,7 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_test_harness_pin_user_smoke_qemu_append();
         arceos_ex_must_test_harness_cover_no_overlay_bin_ls();
         arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay();
+        arceos_ex_must_rc_local_test_use_inittab_direct_marker_only();
         arceos_ex_must_openrc_login_test_use_explicit_account_overlay();
         arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input();
         arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified();

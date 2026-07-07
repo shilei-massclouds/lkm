@@ -1,0 +1,1 @@
+::sysinit:/bin/sh /etc/rc.local

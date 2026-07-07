@@ -135,6 +135,34 @@ class DelayedStdinTest(unittest.TestCase):
         self.assertEqual(sent_steps, [True])
         self.assertIn("line=one extra=''", stdout)
 
+    def test_success_marker_cli_terminates_after_ordered_markers(self) -> None:
+        script = (
+            "import time\n"
+            "print('begin', flush=True)\n"
+            "print('done', flush=True)\n"
+            "time.sleep(10)\n"
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = delayed_stdin.main(
+                [
+                    "--timeout",
+                    "5",
+                    "--success-marker",
+                    "begin",
+                    "--success-marker",
+                    "done",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    script,
+                ]
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("begin", stdout.getvalue())
+        self.assertIn("done", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

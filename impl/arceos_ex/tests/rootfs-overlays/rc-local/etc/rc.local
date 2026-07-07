@@ -1,0 +1,7 @@
+#!/bin/sh
+
+echo "lkm-rc-local: begin"
+/bin/ls /
+status=$?
+echo "lkm-rc-local: end status=$status"
+exit "$status"

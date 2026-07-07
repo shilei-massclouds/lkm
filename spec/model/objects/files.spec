@@ -83,6 +83,11 @@
  * oldfd. Replacing an already-open newfd only overwrites the fd table entry;
  * full filp_close/fput/refcount/lock/EBUSY/rlimit/expand_files semantics stay
  * deferred.
+ * F_DUPFD/F_DUPFD_CLOEXEC share that same opened file description in the
+ * fixed fd table. Closing the original fd after a successful dup must not tear
+ * down the staged Regular0 metadata while another fd still points at Regular0;
+ * the metadata may be released only when the last alias for that OFD is
+ * closed.
  *
  * fchown(2) and fchmod(2) first slice is intentionally fd-local. It exists to
  * close the observed BusyBox login post-auth tty/stdin adjustment where local
@@ -194,6 +199,7 @@ predicate fd_table_cloexec_bit_updated_by_fsetfd<T>(table: T, fd: FdRef) -> bool
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_stdio_fd_closed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_duplicated<T>(table: T, oldfd: FdRef, newfd: FdRef) -> bool;
+predicate fd_table_dup_alias_keeps_ofd_live_until_last_close<T>(table: T) -> bool;
 predicate fd_table_dup3_close_on_exec_bound<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_owner_metadata_recorded<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_mode_metadata_recorded<T>(table: T, fd: FdRef) -> bool;
@@ -570,6 +576,7 @@ object FilesStruct: ResourceObject {
                 ensures {
                     files_struct_dup3_routes_to_table(self, FileDescriptorTable);
                     fd_table_fd_duplicated(FileDescriptorTable, oldfd, newfd);
+                    fd_table_dup_alias_keeps_ofd_live_until_last_close(FileDescriptorTable);
                     fd_table_dup3_close_on_exec_bound(FileDescriptorTable, newfd);
                 }
             }
@@ -970,6 +977,7 @@ object FileDescriptorTable: ResourceObject {
                 ensures {
                     fd_table_fd_duplicated(self, oldfd, newfd);
                     fd_table_fd_bound(self, newfd, OpenFileDescription);
+                    fd_table_dup_alias_keeps_ofd_live_until_last_close(self);
                     fd_table_dup3_close_on_exec_bound(self, newfd);
                 }
             }
