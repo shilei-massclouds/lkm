@@ -120,5 +120,24 @@ int smoke_credentials(void)
 		return 51;
 	}
 
+	rc = syscall(SYS_setuid, 1000);
+	if (rc != 0) {
+		return 79;
+	}
+	if (SAY_LITERAL("syscall setuid drop ok\n") < 0) {
+		return 80;
+	}
+
+	ruid = 0;
+	euid = 0;
+	suid = 0;
+	rc = syscall(SYS_getresuid, &ruid, &euid, &suid);
+	if (rc != 0 || ruid != 1000 || euid != 1000 || suid != 1000) {
+		return 81;
+	}
+	if (SAY_LITERAL("syscall getresuid setuid drop ok\n") < 0) {
+		return 82;
+	}
+
 	return 0;
 }

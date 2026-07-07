@@ -100,12 +100,6 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
-	rc = RUN_CASE("credentials", smoke_credentials);
-	if (rc != 0) {
-		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
-		return rc;
-	}
-
 	rc = RUN_CASE("process_identity", smoke_process_identity);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
@@ -125,6 +119,12 @@ int main(int argc, char **argv)
 	}
 
 	rc = RUN_CASE("time_random", smoke_time_random);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
+	rc = RUN_CASE("credentials", smoke_credentials);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
 		return rc;

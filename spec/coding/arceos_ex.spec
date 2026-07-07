@@ -1984,17 +1984,17 @@ type ArceosExStartupPhaseCodingMust {
          * unsupported ENOSYS diagnostic rather than claiming NGROUPS_MAX.
          * The focused OpenRC login rerun after this slice observes
          * /var/run/nscd/socket still returning ENOENT, setgroups(159)
-         * returning 0, and the new direct boundary at setgid(144) with
-         * gid=100. The current setgid slice treats effective uid 0 as the
-         * bounded CAP_SETGID proxy and synchronizes only
-         * UserInitProcess.gid/egid/sgid/fsgid to the target gid; non-root
+         * returning 0, setgid(144) with gid=100 returning 0, and the direct
+         * boundary at setuid(146) with uid=1000 returning EPERM. The current
+         * setgid slice treats effective uid 0 as the bounded CAP_SETGID proxy
+         * and synchronizes only UserInitProcess.gid/egid/sgid/fsgid to the
+         * target gid. The current setuid slice treats effective uid 0 as the
+         * bounded CAP_SETUID proxy and synchronizes only
+         * UserInitProcess.uid/euid/suid/fsuid to a 32-bit target uid; non-root
          * effective uid still returns EPERM. This slice must not broaden
-         * capabilities, user namespace, LSM, credential COW/RCU, setuid,
-         * permission matrix, TTY ownership or inode ownership semantics.
-         * The post-setgid focused rerun records the next boundary at
-         * setuid(146) with uid=1000 returning EPERM and printing
-         * "login: setuid: Operation not permitted"; that evidence belongs to
-         * the next slice.
+         * capabilities, user namespace, LSM, credential COW/RCU, permission
+         * matrix, TTY ownership, inode ownership semantics, or saved-id/root
+         * regain after setuid(1000).
          * getgroups(158), full group_info allocation/sort, capabilities, user
          * namespaces, LSM, task cred COW/RCU, file permission checks, TTY
          * ownership and inode ownership/mode semantics remain trimmed.
@@ -3308,10 +3308,15 @@ type ArceosExBlockIoCodingMust {
          * with no socket/listener model, and keeps all other connect/sendto
          * shapes as ENOSYS diagnostics. That nscd pathname miss now returns
          * ENOENT; setgroups(159) now returns 0 for the observed
-         * gidsetsize=1 shape, and the post-auth direct boundary has moved to
-         * setgid(144) with gid=100. The current bounded setgid slice accepts
-         * that root-euid transition; focused rerun records the later boundary
-         * as setuid(146) with uid=1000 returning EPERM.
+         * gidsetsize=1 shape, setgid(144) with gid=100 returns 0, and the
+         * post-auth direct boundary is setuid(146) with uid=1000 returning
+         * EPERM before this slice. The current bounded setuid slice accepts
+         * that root-euid transition. The focused rerun after this slice
+         * confirms setuid(146, uid=1000) returns 0, login reaches MOTD output,
+         * and the new fatal boundary is login shell execve(221) returning
+         * EFAULT / "login: can't execute '/bin/sh': Bad address"; that execve
+         * boundary is evidence for a later slice, not part of this setuid
+         * change.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

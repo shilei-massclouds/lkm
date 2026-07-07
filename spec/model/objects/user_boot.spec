@@ -2402,12 +2402,17 @@ object SyscallTable: ResourceObject {
                 /*
                  * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
                  * new credentials for current. The current first slice keeps a
-                 * root PID1 credential object on UserInitProcess and accepts
-                 * the no-op/root setuid path required by BusyBox startup;
-                 * namespaces, capability checks, LSM hooks, user accounting and
-                 * credential COW/RCU are explicit deferred facts. The OpenRC
-                 * post-setgid focused rerun reaches setuid(146) uid=1000 and
-                 * still returns EPERM; that next boundary is evidence only.
+                 * bounded PID1 credential view on UserInitProcess. Following
+                 * focused OpenRC evidence, it treats euid==0 as the temporary
+                 * CAP_SETUID proxy and accepts 32-bit uid targets, syncing
+                 * uid/euid/suid/fsuid. Namespaces, full capability checks, LSM
+                 * hooks, user accounting and credential COW/RCU are explicit
+                 * deferred facts; saved-id/capability regain after dropping to
+                 * uid 1000 is not modeled in this slice. The post-slice
+                 * OpenRC focused rerun confirms setuid(146, uid=1000) returns
+                 * 0 and records the next fatal boundary as login shell
+                 * execve(221) returning EFAULT; that execve boundary is
+                 * deferred to a later slice.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2434,8 +2439,8 @@ object SyscallTable: ResourceObject {
                  * the observed gid=100 transition, synchronizing only
                  * UserInitProcess gid/egid/sgid/fsgid. Full capabilities,
                  * user namespaces, LSM hooks and credential COW/RCU remain
-                 * deferred. The post-SetGid focused rerun records the next
-                 * boundary at setuid(146) uid=1000 returning EPERM.
+                 * deferred. The post-SetGid focused rerun records the
+                 * setuid(146) uid=1000 boundary that the SetUid slice closes.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2476,8 +2481,8 @@ object SyscallTable: ResourceObject {
                  * boundary is setgid(144) with gid=100. The following SetGid
                  * slice accepts that observed root-euid transition without
                  * implementing full credential semantics; the post-SetGid
-                 * focused rerun records setuid(146) uid=1000 EPERM as the
-                 * next boundary.
+                 * focused rerun records setuid(146) uid=1000 EPERM, which is
+                 * closed by the bounded SetUid slice.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
