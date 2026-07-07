@@ -535,6 +535,7 @@ predicate user_init_process_tiocsctty_observed<T>(process: T) -> bool;
 predicate user_init_process_child_controlling_tty_bound<T, C>(process: T, child: C) -> bool;
 predicate user_child_process_prepared<T>(process: T) -> bool;
 predicate user_child_process_parent_pid1<T, P>(process: T, parent: P) -> bool;
+predicate user_child_process_parent_pid1_or_current_child<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_pid_allocated<T, N>(process: T, pid_ns: N) -> bool;
 predicate user_child_process_tgid_equals_pid<T>(process: T) -> bool;
 predicate user_child_process_process_group_visible_to_parent<T, P>(process: T, parent: P) -> bool;
@@ -558,6 +559,7 @@ predicate user_child_process_child_continuation_taken<T>(process: T) -> bool;
 predicate user_child_process_vfork_parent_frame_saved<T>(process: T) -> bool;
 predicate user_child_process_vfork_child_handoff<T>(process: T) -> bool;
 predicate user_child_process_vfork_parent_resumed<T>(process: T) -> bool;
+predicate user_child_process_nested_vfork_child_handoff<T>(process: T) -> bool;
 predicate user_child_process_pidfd_copyout_observed<T>(process: T) -> bool;
 predicate user_child_process_single_active_slot<T>(process: T) -> bool;
 predicate user_child_process_completed_records_capacity_bound<T>(process: T) -> bool;
@@ -2939,7 +2941,7 @@ object UserChildProcess: ResourceObject {
 
     state State::Ready {
         invariant {
-            user_child_process_parent_pid1(self, UserInitProcess);
+            user_child_process_parent_pid1_or_current_child(self, UserInitProcess);
             user_child_process_pid_allocated(self, RootPidNamespace);
             user_child_process_tgid_equals_pid(self);
             user_child_process_process_group_visible_to_parent(self, UserInitProcess);
@@ -2989,6 +2991,33 @@ object UserChildProcess: ResourceObject {
                 user_child_process_active_slot_reusable(self);
                 user_init_process_rt_sigtimedwait_woken_by_sigchld(UserInitProcess);
                 user_pidfd_ready(FilesStruct, self);
+            }
+        }
+
+        on Action::NestedVforkChildHandoff {
+            /*
+             * Observed OpenRC login reaches BusyBox login post-auth while the
+             * existing UserChild execution slot is still the getty/login child
+             * continuation.  A single bounded nested CLONE_VM|CLONE_VFORK|
+             * SIGCHLD handoff may reuse the same internal UserChild task ref:
+             * the current child is treated as the vfork parent, the nested
+             * child receives a new user-visible pid and a0=0/newsp, and no
+             * second runnable task graph is created.  This is a first-slice
+             * takeover of the single execution slot, not full parent/child
+             * concurrency or full vfork completion scheduling.
+             */
+            depends_on {
+                UserChildProcess.state == State::Ready;
+                UserInitProcess.state == State::Online;
+                FilesStruct.state == State::Ready;
+            }
+
+            ensures {
+                user_child_process_vfork_child_handoff(self);
+                user_child_process_nested_vfork_child_handoff(self);
+                user_child_process_child_continuation_taken(self);
+                user_child_process_single_active_slot(self);
+                user_child_process_next_child_pid_bound(self);
             }
         }
 

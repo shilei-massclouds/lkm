@@ -7,7 +7,9 @@ use crate::{
     objects::{
         event_stream::TrapFrame,
         files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
+        process_prepare::TaskCopyUserProcessInputs,
         state::State,
+        task::TaskEntry,
         user_boot::{
             ElfObjectRole, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
             UserRtSigtimedwaitResult, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
@@ -1222,6 +1224,7 @@ impl SmokeScenario for UserBootElfScenario {
             resumed_signal == Some(USER_CLONE_SIGCHLD) && resumed_wait_frame.sepc == 0x2000,
         );
         exercise_completed_child_record_reuse(assertions);
+        exercise_nested_vfork_child_slot(assertions);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -1411,6 +1414,155 @@ fn wait4_completed_record(stat_addr: usize, options: usize) -> usize {
     frame.set_reg(17, 260);
     context().syscall_table.wait4(&mut frame);
     frame.reg(10)
+}
+
+fn exercise_nested_vfork_child_slot(assertions: &mut SmokeAssertions) {
+    let Some(parent_pid) = start_active_vfork_child(0x80) else {
+        assertions.assert("start active vfork child for nested clone", false);
+        return;
+    };
+
+    let rejected_without_nested_gate = !copy_user_process_for_current_slot(false);
+    assertions.assert(
+        "active child vfork rejects without nested gate",
+        rejected_without_nested_gate,
+    );
+
+    let accepted_with_nested_gate = copy_user_process_for_current_slot(true);
+    assertions.assert(
+        "nested vfork passes copy_user_process gate",
+        accepted_with_nested_gate,
+    );
+
+    let nested_child_pid = {
+        let mut nested_frame = TrapFrame::zeroed();
+        nested_frame.sepc = 0x6000;
+        nested_frame.set_reg(2, USER_STACK_TOP - 0x480);
+        nested_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+        nested_frame.set_reg(11, USER_STACK_TOP - 0x580);
+        nested_frame.set_reg(17, 220);
+
+        let ctx = context();
+        let Some((_child_frame, nested_parent_pid)) =
+            ctx.user_child_process.copy_nested_vfork_from_current_child(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &nested_frame,
+                USER_OPENRC_VFORK_FLAGS,
+                USER_STACK_TOP - 0x580,
+                true,
+                true,
+                true,
+                true,
+            )
+        else {
+            assertions.assert("copy nested vfork child", false);
+            return;
+        };
+        if nested_parent_pid != parent_pid {
+            assertions.assert("nested vfork parent pid preserved", false);
+            return;
+        }
+        let child_pid = ctx.user_child_process.pid();
+        if !ctx
+            .user_init_process
+            .observe_nested_child_process_group_visible(parent_pid, child_pid)
+        {
+            assertions.assert("nested child process group visible", false);
+            return;
+        }
+        child_pid
+    };
+
+    let ctx = context();
+    assertions.assert(
+        "nested vfork reuses single child slot",
+        ctx.user_child_process.nested_vfork_clone()
+            && ctx.user_child_process.nested_vfork_parent_pid() == parent_pid
+            && nested_child_pid > parent_pid
+            && ctx.user_child_process.current_child_continuation()
+            && ctx.user_child_process.vfork_child_handoff()
+            && !ctx.user_child_process.vfork_parent_resume_on_exit()
+            && ctx.user_child_process.pidfd_fd() == usize::MAX
+            && ctx.user_child_process.next_child_pid() > nested_child_pid,
+    );
+
+    let rejects_deeper_nested = !copy_user_process_for_current_slot(true);
+    assertions.assert("deeper nested vfork rejected", rejects_deeper_nested);
+}
+
+fn start_active_vfork_child(index: usize) -> Option<usize> {
+    let mut parent_frame = TrapFrame::zeroed();
+    parent_frame.sepc = 0x7000 + index * 4;
+    parent_frame.set_reg(2, USER_STACK_TOP - 0x300 - index * 16);
+    parent_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+    parent_frame.set_reg(11, USER_STACK_TOP - 0x400 - index * 16);
+    parent_frame.set_reg(17, 220);
+
+    let child_pid = {
+        let ctx = context();
+        ctx.user_child_process.copy_vfork_from_parent(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            &parent_frame,
+            USER_OPENRC_VFORK_FLAGS,
+            USER_STACK_TOP - 0x400 - index * 16,
+            usize::MAX,
+            false,
+            true,
+            true,
+            true,
+            true,
+        )?;
+        ctx.user_child_process.pid()
+    };
+
+    {
+        let ctx = context();
+        if !ctx
+            .user_init_process
+            .observe_child_process_group_visible(child_pid)
+        {
+            return None;
+        }
+    }
+    Some(child_pid)
+}
+
+fn copy_user_process_for_current_slot(allow_nested_vfork: bool) -> bool {
+    let ctx = context();
+    ctx.task_creation_core
+        .copy_user_process(
+            TaskCopyUserProcessInputs {
+                src_process: &ctx.user_init_process,
+                dst_process: &ctx.user_child_process,
+                root_pid_namespace: &ctx.root_pid_namespace,
+                scheduler: &ctx.scheduler,
+                cpu_group: &ctx.cpu_group,
+                fs_struct: &ctx.fs_struct,
+                files_struct: &ctx.files_struct,
+                address_space: &ctx.user_address_space,
+                trap_frame: &ctx.user_trap_frame,
+                boundaries: &ctx.user_clone_deferred_boundaries,
+                entry: TaskEntry::UserChild,
+                allow_nested_vfork,
+            },
+            ctx.user_child_process.state(),
+            TaskEntry::UserChild,
+        )
+        .is_ok()
 }
 
 fn mapping_contains(

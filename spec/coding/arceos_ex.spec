@@ -1569,7 +1569,19 @@ type ArceosExStartupPhaseCodingMust {
          * SIGCHLD | CLONE_VM | CLONE_VFORK, not CLONE_PIDFD.  The first slice
          * for that shape saves the parent clone frame, hands off directly to
          * the child continuation, and lets bounded child exit resume parent
-         * clone with a real SIGCHLD pending/wake.  The later observed
+         * clone with a real SIGCHLD pending/wake.  The OpenRC login focused
+         * run later observes BusyBox login issuing the same vfork shape while
+         * the getty/login UserChild continuation is still active; this first
+         * slice only permits that single nested takeover by reusing the same
+         * internal UserChild task ref with a new user-visible pid, and still
+         * rejects deeper nesting, pidfd nested vfork, parent/child
+         * concurrency and multiple runnable user task refs.  After that old
+         * copy_user_process boundary is closed, the next focused OpenRC login
+         * boundary is post-auth credential/tty ownership adjustment at
+         * unsupported syscall nr=55 (fchown in local asm-generic headers) with
+         * guest text "login: can't set groups: Function not implemented"; that
+         * fchown/setgroups/credential slice remains out of scope here.  The
+         * later observed
          * boundary is clone_vfork stage=child_records_full with
          * completed_records=8, record_capacity=8, active_slot_reusable=1,
          * next_child_pid=11 and no first_unreaped_pid.  Therefore completed
@@ -3213,15 +3225,18 @@ type ArceosExBlockIoCodingMust {
          * ready-data fixtures.
          *
          * The current focused run has advanced past login/password input and
-         * authentication; its next reproducible boundary is BusyBox login's
+         * authentication. The old reproducible boundary was BusyBox login's
          * post-auth clone(220) vfork while the existing OpenRC/getty child
-         * still occupies the single active child slot, which returns ENOSYS.
-         * Until nested vfork/child-slot semantics are specified and
-         * implemented, the OpenRC login shell case must remain an opt-in
-         * diagnostic entry rather than a default make test hard gate. After
-         * that behavior is closed, the staged-input case should become the
-         * login-shell acceptance gate with /bin/ls, lost+found and user exit
-         * status 0 as pass criteria.
+         * still occupied the single active child slot. The nested
+         * vfork/child-slot slice is now specified here, and the next focused
+         * boundary is post-auth credential/tty ownership adjustment at
+         * unsupported syscall nr=55 (fchown in local asm-generic headers) with
+         * guest text "login: can't set groups: Function not implemented".
+         * The OpenRC login shell case must remain an opt-in diagnostic entry
+         * rather than a default make test hard gate until that new boundary is
+         * specified and closed. After that behavior is closed, the staged-input
+         * case should become the login-shell acceptance gate with /bin/ls,
+         * lost+found and user exit status 0 as pass criteria.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();

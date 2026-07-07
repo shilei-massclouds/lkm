@@ -989,12 +989,15 @@ fn run_syscall_table_clone(
 
     let table = &ctx.syscall_table;
     let child = &ctx.user_child_process;
-    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let parent_pid = crate::objects::rest_init::KERNEL_INIT_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_tp = child.child_trap_frame_reg(4).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+    let runqueue_contains_child = ctx
+        .scheduler
+        .boot_runqueue()
+        .contains_task(internal_child_task);
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1005,9 +1008,9 @@ fn run_syscall_table_clone(
         && ctx.task_creation_core.state() == State::Ready
         && ctx.task_creation_core.user_child_created()
         && child.state() == State::Ready
-        && child.pid() == child_pid
+        && child.pid() >= internal_child_task
         && child.parent_pid() == parent_pid
-        && child.tgid() == child_pid
+        && child.tgid() == child.pid()
         && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
         && child.task_struct_allocated()
         && child.pid_allocated()
@@ -1025,7 +1028,7 @@ fn run_syscall_table_clone(
         && child_a0 == 0
         && child.tls_inherited()
         && child.enqueued()
-        && ctx.scheduler.selected_runqueue_task_id() == child_pid
+        && ctx.scheduler.selected_runqueue_task_id() == internal_child_task
         && runqueue_contains_child
         && ctx.user_init_process.child_process_group_visible();
 
@@ -1066,10 +1069,11 @@ fn run_files_struct_pidfd_install(
     sink.start_case(total, "", name, checkpoint);
 
     let files = &ctx.files_struct;
+    let child = &ctx.user_child_process;
     let valid = files.state() == State::Ready
         && files.pidfd_installed()
         && files.pidfd_fd() != usize::MAX
-        && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+        && files.pidfd_child_pid() == child.pid()
         && !files.pidfd_ready();
 
     sink.diag_usize("pidfd_installed", files.pidfd_installed() as usize);
@@ -1096,11 +1100,14 @@ fn run_syscall_table_clone_vfork_pidfd(
     let table = &ctx.syscall_table;
     let child = &ctx.user_child_process;
     let files = &ctx.files_struct;
-    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+    let runqueue_contains_child = ctx
+        .scheduler
+        .boot_runqueue()
+        .contains_task(internal_child_task);
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1119,7 +1126,7 @@ fn run_syscall_table_clone_vfork_pidfd(
         && child.vfork_parent_frame_saved()
         && child.pidfd_copyout_observed()
         && child.pidfd_fd() == files.pidfd_fd()
-        && child.pid() == child_pid
+        && child.pid() >= internal_child_task
         && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
         && child.current_child_continuation()
         && child.trap_frame_child_return_zero()
@@ -1128,7 +1135,7 @@ fn run_syscall_table_clone_vfork_pidfd(
         && child_sp != 0
         && child.enqueued()
         && files.pidfd_installed()
-        && files.pidfd_child_pid() == child_pid
+        && files.pidfd_child_pid() == child.pid()
         && runqueue_contains_child;
 
     sink.diag_usize(
@@ -1171,11 +1178,14 @@ fn run_syscall_table_clone_vfork_vm(
 
     let table = &ctx.syscall_table;
     let child = &ctx.user_child_process;
-    let child_pid = crate::objects::user_boot::USER_CHILD_PID;
+    let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
     let child_sepc = child.child_trap_frame_sepc().unwrap_or(0);
-    let runqueue_contains_child = ctx.scheduler.boot_runqueue().contains_task(child_pid);
+    let runqueue_contains_child = ctx
+        .scheduler
+        .boot_runqueue()
+        .contains_task(internal_child_task);
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1190,7 +1200,7 @@ fn run_syscall_table_clone_vfork_vm(
         && child.vfork_parent_frame_saved()
         && !child.pidfd_copyout_observed()
         && child.pidfd_fd() == usize::MAX
-        && child.pid() == child_pid
+        && child.pid() >= internal_child_task
         && child.exit_signal() == crate::objects::user_boot::USER_CLONE_SIGCHLD
         && child.current_child_continuation()
         && child.trap_frame_child_return_zero()
@@ -1749,7 +1759,7 @@ fn run_user_pidfd_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Si
     let valid = files.pidfd_installed()
         && files.pidfd_ready()
         && files.pidfd_fd() == child.pidfd_fd()
-        && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+        && files.pidfd_child_pid() == child.pid()
         && files.pidfd_exit_status() == child.child_exit_status()
         && child.child_exit_status_observed()
         && child.vfork_pidfd_clone();
@@ -2028,7 +2038,7 @@ fn run_user_clone_vfork_parent_resumed(
     let child = &ctx.user_child_process;
     let files = &ctx.files_struct;
     let pidfd_ok = if child.vfork_pidfd_clone() {
-        files.pidfd_ready() && files.pidfd_child_pid() == crate::objects::user_boot::USER_CHILD_PID
+        files.pidfd_ready() && files.pidfd_child_pid() == child.pid()
     } else {
         child.vfork_vm_clone() && !files.pidfd_ready()
     };

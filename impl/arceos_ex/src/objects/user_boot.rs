@@ -3558,6 +3558,9 @@ pub struct UserChildProcess {
     vfork_child_handoff: bool,
     vfork_parent_resumed: bool,
     vfork_child_sp: usize,
+    nested_vfork_clone: bool,
+    nested_vfork_parent_pid: usize,
+    vfork_parent_resume_on_exit: bool,
     pidfd_fd: usize,
     pidfd_copyout: bool,
     parent_clone_return: usize,
@@ -3662,6 +3665,9 @@ impl UserChildProcess {
             vfork_child_handoff: false,
             vfork_parent_resumed: false,
             vfork_child_sp: 0,
+            nested_vfork_clone: false,
+            nested_vfork_parent_pid: 0,
+            vfork_parent_resume_on_exit: true,
             pidfd_fd: usize::MAX,
             pidfd_copyout: false,
             parent_clone_return: 0,
@@ -3941,6 +3947,28 @@ impl UserChildProcess {
 
     pub const fn vfork_child_sp(&self) -> usize {
         self.vfork_child_sp
+    }
+
+    pub const fn nested_vfork_clone(&self) -> bool {
+        self.nested_vfork_clone
+    }
+
+    pub const fn nested_vfork_parent_pid(&self) -> usize {
+        self.nested_vfork_parent_pid
+    }
+
+    pub const fn vfork_parent_resume_on_exit(&self) -> bool {
+        self.vfork_parent_resume_on_exit
+    }
+
+    pub fn nested_vfork_copy_ready(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.current_child_continuation()
+            && self.vfork_clone()
+            && !self.nested_vfork_clone
+            && !self.active_slot_reusable
+            && self.pid != 0
+            && self.task_entry == TaskEntry::UserChild
     }
 
     pub const fn pidfd_fd(&self) -> usize {
@@ -4230,6 +4258,9 @@ impl UserChildProcess {
         self.vfork_child_handoff = false;
         self.vfork_parent_resumed = false;
         self.vfork_child_sp = 0;
+        self.nested_vfork_clone = false;
+        self.nested_vfork_parent_pid = 0;
+        self.vfork_parent_resume_on_exit = true;
         self.pidfd_fd = usize::MAX;
         self.pidfd_copyout = false;
         self.parent_clone_return = 0;
@@ -4388,6 +4419,9 @@ impl UserChildProcess {
         self.vfork_child_handoff = true;
         self.vfork_parent_resumed = false;
         self.vfork_child_sp = newsp;
+        self.nested_vfork_clone = false;
+        self.nested_vfork_parent_pid = 0;
+        self.vfork_parent_resume_on_exit = true;
         self.pidfd_fd = pidfd_fd;
         self.pidfd_copyout = pidfd_copyout;
         self.parent_clone_return = 0;
@@ -4406,6 +4440,165 @@ impl UserChildProcess {
             return None;
         }
         Some(child_frame)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_nested_vfork_from_current_child(
+        &mut self,
+        parent: &UserInitProcess,
+        boundaries: &UserCloneDeferredBoundaries,
+        address_space: &UserAddressSpace,
+        trap_frame: &UserTrapFrame,
+        fs_struct: &FsStruct,
+        files_struct: &FilesStruct,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        current_frame: &TrapFrame,
+        clone_flags: usize,
+        newsp: usize,
+        task_struct_allocated: bool,
+        thread_context_ready: bool,
+        sched_entity_ready: bool,
+        task_state_new: bool,
+    ) -> Option<(TrapFrame, usize)> {
+        if !self.nested_vfork_copy_ready()
+            || parent.state() != State::Online
+            || !parent.pid1_preserved()
+            || boundaries.state() != State::Ready
+            || !boundaries.accepts_vfork_vm_first_slice(clone_flags)
+            || boundaries.accepts_vfork_pidfd_first_slice(clone_flags)
+            || newsp == 0
+            || address_space.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
+            || !task_struct_allocated
+            || !thread_context_ready
+            || !sched_entity_ready
+            || !task_state_new
+        {
+            return None;
+        }
+
+        let parent_pid = self.pid;
+        let child_pid = self.next_child_pid;
+        let mut child_frame = *current_frame;
+        child_frame.set_reg(10, 0);
+        child_frame.sepc = child_frame.sepc.wrapping_add(4);
+        child_frame.set_reg(2, newsp);
+        let stack_snapshot_len = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.user_stack_snapshot,
+        )?;
+        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
+
+        if self.parent_wait_writable_page_snapshot_saved
+            && !self.parent_wait_writable_page_snapshot_restored
+            && self.parent_wait_writable_page_count != 0
+        {
+            release_writable_page_snapshot_pages(
+                &mut self.parent_wait_writable_page_snapshot_pages,
+                self.parent_wait_writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+        }
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                address_space as *const UserAddressSpace,
+                &mut self.parent_address_space_snapshot as *mut UserAddressSpace,
+                1,
+            );
+        }
+        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+            address_space,
+            page_allocator,
+            page_metadata_map,
+            &mut self.parent_wait_writable_page_snapshot_pages,
+            &mut self.parent_wait_writable_page_checksums,
+        ) else {
+            return None;
+        };
+
+        self.pid = child_pid;
+        self.parent_pid = parent_pid;
+        self.tgid = child_pid;
+        self.exit_signal = boundaries.exit_signal(clone_flags);
+        self.task_struct_allocated = task_struct_allocated;
+        self.pid_allocated = true;
+        self.thread_context_ready = thread_context_ready;
+        self.sched_entity_ready = sched_entity_ready;
+        self.task_state_new = task_state_new;
+        self.files_struct_copied = true;
+        self.parent_fd_snapshot = parent_fd_snapshot;
+        self.parent_fd_snapshot_saved = true;
+        self.parent_fd_snapshot_restored = false;
+        self.fs_struct_copied = true;
+        self.credentials_copied = parent.credentials_inherited();
+        self.signal_state_copied = parent.signal_state_inherited();
+        self.user_address_space_snapshot = true;
+        self.user_stack_snapshot_len = stack_snapshot_len;
+        self.user_stack_snapshot_copied = true;
+        self.user_stack_snapshot_restored = true;
+        self.trap_frame_copied = true;
+        self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
+        self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
+        self.child_trap_frame = Some(child_frame);
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_address_space_snapshot_saved = true;
+        self.parent_wait_stack_snapshot_len = 0;
+        self.parent_wait_stack_snapshot_copied = false;
+        self.parent_wait_stack_snapshot_restored = false;
+        self.parent_wait_stack_window_start = 0;
+        self.parent_wait_stack_window_len = 0;
+        self.parent_wait_stack_window_saved = false;
+        self.parent_wait_stack_window_compared = false;
+        self.parent_wait_stack_window_diff_count = 0;
+        self.parent_wait_stack_window_first_diff_addr = 0;
+        self.parent_wait_stack_window_before_byte = 0;
+        self.parent_wait_stack_window_after_byte = 0;
+        self.parent_wait_writable_page_count = writable_page_count;
+        self.parent_wait_writable_page_snapshot_saved = true;
+        self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
+        self.parent_wait_writable_page_snapshot_restored = false;
+        self.parent_wait_writable_page_compared = false;
+        self.parent_wait_writable_page_dirty_count = 0;
+        self.parent_wait_writable_page_stack_dirty_count = 0;
+        self.parent_wait_writable_page_non_stack_dirty_count = 0;
+        self.parent_wait_first_non_stack_dirty_kind = 0;
+        self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+        self.parent_wait_first_non_stack_dirty_page_index = 0;
+        self.parent_wait_first_non_stack_dirty_addr = 0;
+        self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+        self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        self.parent_wait_resumed = false;
+        self.vfork_vm_clone = true;
+        self.vfork_pidfd_clone = false;
+        self.vfork_parent_frame = Some(*current_frame);
+        self.vfork_parent_frame_saved = true;
+        self.vfork_child_handoff = true;
+        self.vfork_parent_resumed = false;
+        self.vfork_child_sp = newsp;
+        self.nested_vfork_clone = true;
+        self.nested_vfork_parent_pid = parent_pid;
+        self.vfork_parent_resume_on_exit = false;
+        self.pidfd_fd = usize::MAX;
+        self.pidfd_copyout = false;
+        self.parent_clone_return = 0;
+        self.enqueued = true;
+        self.wait4_parent_wait_observed = false;
+        self.child_continuation_taken = true;
+        self.active_slot_reusable = false;
+        self.vfork_next_child_accepted = true;
+        self.next_child_pid = child_pid.saturating_add(1);
+
+        Some((child_frame, parent_pid))
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
@@ -4575,6 +4768,7 @@ impl UserChildProcess {
     ) -> Option<(TrapFrame, usize)> {
         if self.lifecycle.state() != State::Ready
             || !self.vfork_clone()
+            || !self.vfork_parent_resume_on_exit
             || !self.child_continuation_taken
             || !self.vfork_parent_frame_saved
             || self.vfork_parent_resumed
@@ -4927,6 +5121,9 @@ impl UserChildProcess {
         self.vfork_child_handoff = false;
         self.vfork_parent_resumed = false;
         self.vfork_child_sp = 0;
+        self.nested_vfork_clone = false;
+        self.nested_vfork_parent_pid = 0;
+        self.vfork_parent_resume_on_exit = true;
         self.pidfd_fd = usize::MAX;
         self.pidfd_copyout = false;
         self.parent_clone_return = 0;
@@ -6256,6 +6453,29 @@ impl UserInitProcess {
         self.child_controlling_tty_bound = self.controlling_tty_bound;
         self.child_controlling_tty_cleared_on_setsid = false;
         self.tiocsctty_observed = false;
+        true
+    }
+
+    pub fn observe_nested_child_process_group_visible(
+        &mut self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || parent_pid == 0
+            || child_pid == 0
+            || self.child_process_pid != parent_pid
+            || !self.child_process_group_visible
+            || self.child_process_group == 0
+            || self.child_process_session_id == 0
+        {
+            return false;
+        }
+
+        self.child_process_pid = child_pid;
+        self.child_session_leader_first_slice = false;
+        self.child_setsid_success_observed = false;
         true
     }
 

@@ -8,7 +8,7 @@ use super::{
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
-    state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
     task::TaskEntry,
     user_boot::{
@@ -615,15 +615,19 @@ impl TaskCreationCore {
         dst_state: State,
         dst_entry: TaskEntry,
     ) -> Result<TaskCopyProcessResult, EventError> {
+        let dst_prepared_slot = dst_state == State::Prepared
+            && inputs.dst_process.state() == State::Prepared
+            && inputs.dst_process.prepared();
+        let dst_nested_vfork_slot = inputs.allow_nested_vfork
+            && dst_state == State::Ready
+            && inputs.dst_process.nested_vfork_copy_ready();
         if self.lifecycle.state() != State::Ready
             || !self.entry_contract_ready
             || !self.rest_init_inputs_ready
-            || dst_state != State::Prepared
             || dst_entry != TaskEntry::UserChild
             || inputs.entry != TaskEntry::UserChild
             || inputs.src_process.state() != State::Online
-            || inputs.dst_process.state() != State::Prepared
-            || !inputs.dst_process.prepared()
+            || !(dst_prepared_slot || dst_nested_vfork_slot)
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.scheduler.state() != State::Online
             || inputs.fs_struct.state() != State::Ready
@@ -700,6 +704,7 @@ pub struct TaskCopyUserProcessInputs<'a> {
     pub trap_frame: &'a UserTrapFrame,
     pub boundaries: &'a UserCloneDeferredBoundaries,
     pub entry: TaskEntry,
+    pub allow_nested_vfork: bool,
 }
 
 pub struct TaskCopyProcessResult {

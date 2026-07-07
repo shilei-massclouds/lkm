@@ -5002,6 +5002,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     trap_frame: &ctx.user_trap_frame,
                     boundaries: &ctx.user_clone_deferred_boundaries,
                     entry: TaskEntry::UserChild,
+                    allow_nested_vfork: false,
                 },
                 ctx.user_child_process.state(),
                 TaskEntry::UserChild,
@@ -5089,6 +5090,10 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_unsupported_syscall(frame);
         return;
     }
+    let clone_is_nested_vfork = clone_is_vfork_vm
+        && crate::context::context_ref()
+            .user_child_process
+            .nested_vfork_copy_ready();
 
     let child_frame = {
         let ctx = crate::context::context();
@@ -5106,6 +5111,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 trap_frame: &ctx.user_trap_frame,
                 boundaries: &ctx.user_clone_deferred_boundaries,
                 entry: TaskEntry::UserChild,
+                allow_nested_vfork: clone_is_nested_vfork,
             },
             ctx.user_child_process.state(),
             TaskEntry::UserChild,
@@ -5138,59 +5144,93 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             (usize::MAX, false)
         };
 
-        let Some(child_frame) = ctx.user_child_process.copy_vfork_from_parent(
-            &ctx.user_init_process,
-            &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
-            &ctx.user_trap_frame,
-            &ctx.fs_struct,
-            &ctx.files_struct,
-            &mut ctx.page_allocator,
-            &ctx.page_metadata_map,
-            frame,
-            clone_flags,
-            newsp,
-            pidfd_fd,
-            pidfd_copyout,
-            copy_result.task_struct_allocated(),
-            copy_result.thread_context_ready(),
-            copy_result.sched_entity_ready(),
-            copy_result.task_state_new(),
-        ) else {
-            print_clone_vfork_boundary(frame, "child_copy");
-            complete_unsupported_syscall(frame);
-            return;
+        let (child_frame, nested_parent_pid) = if clone_is_nested_vfork {
+            let Some((child_frame, parent_pid)) =
+                ctx.user_child_process.copy_nested_vfork_from_current_child(
+                    &ctx.user_init_process,
+                    &ctx.user_clone_deferred_boundaries,
+                    &ctx.user_address_space,
+                    &ctx.user_trap_frame,
+                    &ctx.fs_struct,
+                    &ctx.files_struct,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                    frame,
+                    clone_flags,
+                    newsp,
+                    copy_result.task_struct_allocated(),
+                    copy_result.thread_context_ready(),
+                    copy_result.sched_entity_ready(),
+                    copy_result.task_state_new(),
+                )
+            else {
+                print_clone_vfork_boundary(frame, "nested_child_copy");
+                complete_unsupported_syscall(frame);
+                return;
+            };
+            (child_frame, parent_pid)
+        } else {
+            let Some(child_frame) = ctx.user_child_process.copy_vfork_from_parent(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                frame,
+                clone_flags,
+                newsp,
+                pidfd_fd,
+                pidfd_copyout,
+                copy_result.task_struct_allocated(),
+                copy_result.thread_context_ready(),
+                copy_result.sched_entity_ready(),
+                copy_result.task_state_new(),
+            ) else {
+                print_clone_vfork_boundary(frame, "child_copy");
+                complete_unsupported_syscall(frame);
+                return;
+            };
+            (child_frame, 0)
         };
 
-        let runqueue_ref = match ctx
-            .scheduler
-            .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
-        {
-            Ok(runqueue_ref) => runqueue_ref,
-            Err(_) => {
-                print_clone_vfork_boundary(frame, "select_runqueue");
+        if !clone_is_nested_vfork {
+            let runqueue_ref = match ctx
+                .scheduler
+                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
+            {
+                Ok(runqueue_ref) => runqueue_ref,
+                Err(_) => {
+                    print_clone_vfork_boundary(frame, "select_runqueue");
+                    complete_unsupported_syscall(frame);
+                    return;
+                }
+            };
+            if ctx
+                .scheduler
+                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+                .is_err()
+            {
+                print_clone_vfork_boundary(frame, "enqueue");
                 complete_unsupported_syscall(frame);
                 return;
             }
+            if !ctx.user_child_process.mark_enqueued() {
+                print_clone_vfork_boundary(frame, "mark_enqueued");
+                complete_unsupported_syscall(frame);
+                return;
+            }
+        }
+        let child_visible = if clone_is_nested_vfork {
+            ctx.user_init_process
+                .observe_nested_child_process_group_visible(nested_parent_pid, child_pid)
+        } else {
+            ctx.user_init_process
+                .observe_child_process_group_visible(child_pid)
         };
-        if ctx
-            .scheduler
-            .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
-            .is_err()
-        {
-            print_clone_vfork_boundary(frame, "enqueue");
-            complete_unsupported_syscall(frame);
-            return;
-        }
-        if !ctx.user_child_process.mark_enqueued() {
-            print_clone_vfork_boundary(frame, "mark_enqueued");
-            complete_unsupported_syscall(frame);
-            return;
-        }
-        if !ctx
-            .user_init_process
-            .observe_child_process_group_visible(child_pid)
-        {
+        if !child_visible {
             print_clone_vfork_boundary(frame, "process_group_visible");
             complete_unsupported_syscall(frame);
             return;
@@ -6969,6 +7009,12 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
     print_bool_digit(process.pending_sigchld());
     crate::arch::riscv64::sbi::putstr(" parent_clone_return=");
     print_decimal(child.parent_clone_return());
+    crate::arch::riscv64::sbi::putstr(" nested_vfork=");
+    print_bool_digit(child.nested_vfork_clone());
+    crate::arch::riscv64::sbi::putstr(" nested_parent_pid=");
+    print_decimal(child.nested_vfork_parent_pid());
+    crate::arch::riscv64::sbi::putstr(" vfork_resume_on_exit=");
+    print_bool_digit(child.vfork_parent_resume_on_exit());
     crate::arch::riscv64::sbi::putstr(" active_slot_state=");
     print_decimal(child.state() as usize);
     crate::arch::riscv64::sbi::putstr(" active_slot_reusable=");
