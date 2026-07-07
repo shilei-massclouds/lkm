@@ -1902,6 +1902,13 @@ type ArceosExStartupPhaseCodingMust {
          * after the errno decision has been made. That best-effort copy must
          * be guarded by UserAddressSpace mapped-range facts; skipped or
          * failed copies are diagnostic output, not alternate errno behavior.
+         * Supported execve(221) EFAULT diagnostics must print the filename,
+         * argv and envp user pointers, child-continuation fact, stable
+         * failure stage/reason/detail, and best-effort filename/argv/envp
+         * prefix copies. Filename-copy failure is reported as
+         * filename_copy; argv pointer or string-copy failure is reported as
+         * argv_copy. These fields are diagnostic only and must not change the
+         * returned errno, checkpoint sequence, user memory or default output.
          * fcntl and ioctl error diagnostics should decode command names using
          * the local Linux 6.12 UAPI constants, including F_DUPFD,
          * F_DUPFD_CLOEXEC, F_GETFD, F_SETFD, F_GETFL, F_SETFL, TCGETS/TCSETS,

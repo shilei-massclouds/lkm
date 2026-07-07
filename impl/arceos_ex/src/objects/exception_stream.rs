@@ -183,6 +183,8 @@ const EXECVE_FAIL_STAGE_CLOSE_ON_EXEC: usize = 16;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_STAGE_ARGV_COPY: usize = 17;
 #[cfg(app_user_boot)]
+const EXECVE_FAIL_STAGE_FILENAME_COPY: usize = 18;
+#[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NONE: usize = 0;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION: usize = 1;
@@ -208,6 +210,8 @@ const EXECVE_FAIL_REASON_CLOSE_ON_EXEC: usize = 10;
 const EXECVE_FAIL_REASON_ARGV_COPY: usize = 11;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_ARGV_CAPACITY: usize = 12;
+#[cfg(app_user_boot)]
+const EXECVE_FAIL_REASON_FILENAME_COPY: usize = 13;
 const AT_FDCWD: usize = usize::MAX - 99;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
@@ -5765,6 +5769,11 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
 
     let mut filename = [0u8; USER_PATH_MAX];
     let Some(filename_len) = copy_execve_cstr(frame.reg(10), &mut filename) else {
+        reset_execve_checkpoint_observation();
+        record_execve_failure(
+            EXECVE_FAIL_STAGE_FILENAME_COPY,
+            EXECVE_FAIL_REASON_FILENAME_COPY,
+        );
         complete_error_syscall(frame, EFAULT);
         return;
     };
@@ -7909,6 +7918,9 @@ fn print_execve_fail_stage(stage: usize) {
         }
         EXECVE_FAIL_STAGE_CLOSE_ON_EXEC => crate::arch::riscv64::sbi::putstr("close_on_exec"),
         EXECVE_FAIL_STAGE_ARGV_COPY => crate::arch::riscv64::sbi::putstr("argv_copy"),
+        EXECVE_FAIL_STAGE_FILENAME_COPY => {
+            crate::arch::riscv64::sbi::putstr("filename_copy");
+        }
         _ => print_decimal(stage),
     }
 }
@@ -7936,6 +7948,9 @@ fn print_execve_fail_reason(reason: usize) {
         EXECVE_FAIL_REASON_ARGV_COPY => crate::arch::riscv64::sbi::putstr("argv_copy"),
         EXECVE_FAIL_REASON_ARGV_CAPACITY => {
             crate::arch::riscv64::sbi::putstr("argv_capacity");
+        }
+        EXECVE_FAIL_REASON_FILENAME_COPY => {
+            crate::arch::riscv64::sbi::putstr("filename_copy");
         }
         _ => print_decimal(reason),
     }
@@ -8300,11 +8315,19 @@ fn print_syscall_error_diagnostic(frame: &TrapFrame, errno: usize) {
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
     print_hex(frame.stval);
+    print_syscall_error_detail(frame, errno);
     crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_syscall_error_diagnostic(_frame: &TrapFrame, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_syscall_error_detail(frame: &TrapFrame, _errno: usize) {
+    if frame.reg(17) == SYSCALL_EXECVE {
+        print_execve_unsupported_detail(frame);
+    }
+}
 
 #[cfg(any(
     checkpoint_handler_user_syscall_error,

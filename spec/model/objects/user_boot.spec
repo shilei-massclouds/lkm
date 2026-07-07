@@ -2945,9 +2945,11 @@ object SyscallTable: ResourceObject {
                  * intentionally small but covers the observed OpenRC getty
                  * shape argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is
                  * only observed/deferred and is not copied into the new stack
-                 * in this slice.  The implementation returns EFAULT for argv
-                 * pointer/string copy failure and ENOSYS with stable diagnostics
-                 * when the bounded argv capacity is exceeded.  It reuses the
+                 * in this slice.  The implementation records stable
+                 * filename_copy or argv_copy failure stage/reason facts before
+                 * returning EFAULT for filename or argv pointer/string copy
+                 * failure, and returns ENOSYS with stable diagnostics when the
+                 * bounded argv capacity is exceeded.  It reuses the
                  * current UserBootPayload VFS/ELF/interpreter/UserStack/
                  * UserAddressSpace loading shape to build a replacement user
                  * mm.  This follows the
