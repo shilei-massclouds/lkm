@@ -266,6 +266,8 @@ predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
 predicate syscall_table_dup3_supported<T>(table: T) -> bool;
+predicate syscall_table_fchown_supported<T>(table: T) -> bool;
+predicate syscall_table_fchmod_supported<T>(table: T) -> bool;
 predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
 predicate syscall_table_ioctl_supported<T>(table: T) -> bool;
 predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
@@ -333,6 +335,10 @@ predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_dup3_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_fchown_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_fchmod_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
+predicate syscall_fchown_fchmod_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_usercopy_ready<T>(table: T) -> bool;
@@ -466,6 +472,8 @@ predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_dup3_observed<T>(table: T) -> bool;
+predicate syscall_table_fchown_observed<T>(table: T) -> bool;
+predicate syscall_table_fchmod_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
 predicate syscall_table_ioctl_observed<T>(table: T) -> bool;
 predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
@@ -1207,6 +1215,8 @@ object SyscallTable: ResourceObject {
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
                     syscall_table_dup3_supported(self);
+                    syscall_table_fchown_supported(self);
+                    syscall_table_fchmod_supported(self);
                     syscall_table_fcntl_supported(self);
                     syscall_table_ioctl_supported(self);
                     syscall_table_getrandom_supported(self);
@@ -1260,6 +1270,8 @@ object SyscallTable: ResourceObject {
                     syscall_ppoll_poll_freewait_first_slice(self);
                     syscall_ppoll_blocking_wait_deferred(self);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
+                    syscall_fchown_fchmod_fd_local_first_slice(self);
+                    syscall_fchown_fchmod_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);
                     syscall_rt_sigtimedwait_copies_wait_mask(self);
@@ -1303,6 +1315,8 @@ object SyscallTable: ResourceObject {
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
             syscall_table_dup3_supported(self);
+            syscall_table_fchown_supported(self);
+            syscall_table_fchmod_supported(self);
             syscall_table_fcntl_supported(self);
             syscall_table_ioctl_supported(self);
             syscall_table_getrandom_supported(self);
@@ -1751,6 +1765,73 @@ object SyscallTable: ResourceObject {
                     files_struct_dup3_routes_to_table(FilesStruct, FileDescriptorTable);
                     fd_table_fd_duplicated(FileDescriptorTable, FdRef::Stdin, FdRef::Stdout);
                     syscall_table_dup3_observed(self);
+                }
+            }
+
+            on Action::Fchown {
+                /*
+                 * Linux asm-generic/RISC-V exposes fchown as __NR_fchown=55.
+                 * The current OpenRC login focused run observes BusyBox login
+                 * calling fchown(fd=0, uid=1000, gid=100) after password
+                 * authentication. This first slice only validates the fd via
+                 * FilesStruct/FileDescriptorTable, records fd-local owner
+                 * metadata, and returns success. Bad fd returns EBADF through
+                 * the common fd lookup path. Full inode ownership mutation,
+                 * permission/capability checks, TTY ownership, path chown,
+                 * idmapped mounts, namespaces, LSM and setgroups(159) remain
+                 * deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::FchownFd(FdRef::Stdin);
+                    FileDescriptorTable.Action::UpdateFdOwner(FdRef::Stdin);
+                }
+
+                ensures {
+                    syscall_fchown_routes_to_files_struct(self, FilesStruct);
+                    syscall_fchown_fchmod_fd_local_first_slice(self);
+                    syscall_fchown_fchmod_full_linux_model_deferred(self);
+                    files_struct_fchown_fd_routes_to_table(FilesStruct, FileDescriptorTable);
+                    files_struct_fd_owner_recorded(FilesStruct);
+                    syscall_table_fchown_observed(self);
+                }
+            }
+
+            on Action::Fchmod {
+                /*
+                 * Linux asm-generic/RISC-V exposes fchmod as __NR_fchmod=52.
+                 * The current OpenRC login focused run observes BusyBox login
+                 * calling fchmod(fd=0, mode=0600) immediately after fchown.
+                 * This first slice only validates the fd through the fd table,
+                 * records a fd-local mode override, and lets fstat on that fd
+                 * report the overridden permission bits while preserving file
+                 * type bits. It does not persist inode mode or enforce chmod
+                 * authorization.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::FchmodFd(FdRef::Stdin);
+                    FileDescriptorTable.Action::UpdateFdMode(FdRef::Stdin);
+                }
+
+                ensures {
+                    syscall_fchmod_routes_to_files_struct(self, FilesStruct);
+                    syscall_fchown_fchmod_fd_local_first_slice(self);
+                    syscall_fchown_fchmod_full_linux_model_deferred(self);
+                    files_struct_fchmod_fd_routes_to_table(FilesStruct, FileDescriptorTable);
+                    files_struct_fd_mode_override_recorded(FilesStruct);
+                    files_struct_fchmod_mode_visible_to_fstat(FilesStruct);
+                    syscall_table_fchmod_observed(self);
                 }
             }
 

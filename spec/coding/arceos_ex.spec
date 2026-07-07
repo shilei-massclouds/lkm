@@ -1575,13 +1575,14 @@ type ArceosExStartupPhaseCodingMust {
          * slice only permits that single nested takeover by reusing the same
          * internal UserChild task ref with a new user-visible pid, and still
          * rejects deeper nesting, pidfd nested vfork, parent/child
-         * concurrency and multiple runnable user task refs.  After that old
-         * copy_user_process boundary is closed, the next focused OpenRC login
-         * boundary is post-auth credential/tty ownership adjustment at
-         * unsupported syscall nr=55 (fchown in local asm-generic headers) with
-         * guest text "login: can't set groups: Function not implemented"; that
-         * fchown/setgroups/credential slice remains out of scope here.  The
-         * later observed
+         * concurrency and multiple runnable user task refs.  The following
+         * post-auth credential/tty ownership boundary at fchown(55) on fd 0
+         * and fchmod(52) on fd 0 now has a fd-local first slice that records
+         * owner/mode metadata through FilesStruct and the fd table.  Focused
+         * trace after that slice confirms both syscalls return 0, and records
+         * the next post-auth unsupported boundary as socket(198); complete
+         * inode ownership, TTY ownership, credentials, network sockets and
+         * setgroups(159) remain out of scope here.  The later observed
          * boundary is clone_vfork stage=child_records_full with
          * completed_records=8, record_capacity=8, active_slot_reusable=1,
          * next_child_pid=11 and no first_unreaped_pid.  Therefore completed
@@ -3228,10 +3229,13 @@ type ArceosExBlockIoCodingMust {
          * authentication. The old reproducible boundary was BusyBox login's
          * post-auth clone(220) vfork while the existing OpenRC/getty child
          * still occupied the single active child slot. The nested
-         * vfork/child-slot slice is now specified here, and the next focused
-         * boundary is post-auth credential/tty ownership adjustment at
-         * unsupported syscall nr=55 (fchown in local asm-generic headers) with
-         * guest text "login: can't set groups: Function not implemented".
+         * vfork/child-slot slice is now specified here. The following
+         * fd-local fchown(55)/fchmod(52) slice is also specified and focused
+         * trace confirms both syscalls return 0. The new post-auth unsupported
+         * boundary is socket(198); the guest text still says "login: can't set
+         * groups: Function not implemented", but local asm-generic confirms
+         * 198 is socket and 159 is setgroups, so that text is not a reliable
+         * syscall name for the next slice.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

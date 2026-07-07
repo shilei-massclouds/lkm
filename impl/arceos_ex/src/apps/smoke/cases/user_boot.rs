@@ -871,6 +871,71 @@ impl SmokeScenario for UserBootElfScenario {
                     .null_device_write_discards_data()
                 && !ctx.files_struct.null_backend().write_to_console(),
         );
+        let fchmod_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                assertions.assert("fchown fchmod fd snapshot save", false);
+                return;
+            }
+        };
+        let metadata_set = ctx.files_struct.fchown_fd(0, 1000, 100).is_ok()
+            && ctx.files_struct.fchmod_fd(0, 0o600).is_ok();
+        let changed_fd0_diag = ctx.files_struct.fd_table_entry_diagnostic(0);
+        let fchmod_snapshot_restored = ctx
+            .files_struct
+            .restore_parent_fd_snapshot(&fchmod_snapshot)
+            .is_ok();
+        let restored_fd0_diag = ctx.files_struct.fd_table_entry_diagnostic(0);
+        assertions.assert(
+            "fchown fchmod fd snapshot restore",
+            metadata_set
+                && changed_fd0_diag
+                    .map(|entry| {
+                        entry.owner_valid
+                            && entry.owner_uid == 1000
+                            && entry.owner_gid == 100
+                            && entry.mode_override_valid
+                            && entry.mode_override == 0o600
+                    })
+                    .unwrap_or(false)
+                && fchmod_snapshot_restored
+                && restored_fd0_diag
+                    .map(|entry| !entry.owner_valid && !entry.mode_override_valid)
+                    .unwrap_or(false),
+        );
+        assertions.assert(
+            "fchown fchmod bad fd semantics",
+            matches!(
+                ctx.files_struct.fchown_fd(99, 1000, 100),
+                Err(FileError::BadFd)
+            ) && matches!(ctx.files_struct.fchmod_fd(99, 0o600), Err(FileError::BadFd)),
+        );
+        let owner_recorded = ctx.files_struct.fchown_fd(0, 1000, 100).is_ok();
+        let mode_recorded = ctx.files_struct.fchmod_fd(0, 0o600).is_ok();
+        let fd0_metadata = ctx.files_struct.fd_table_entry_diagnostic(0);
+        let fd0_stat = ctx.files_struct.fstat_fd(0, &ctx.vfs_core);
+        assertions.assert(
+            "fchown fchmod fd metadata",
+            owner_recorded
+                && mode_recorded
+                && fd0_metadata
+                    .map(|entry| {
+                        entry.owner_valid
+                            && entry.owner_uid == 1000
+                            && entry.owner_gid == 100
+                            && entry.mode_override_valid
+                            && entry.mode_override == 0o600
+                    })
+                    .unwrap_or(false)
+                && fd0_stat
+                    .map(|stat| stat.mode() & 0o170000 == 0o020000 && stat.mode() & 0o7777 == 0o600)
+                    .unwrap_or(false)
+                && ctx.files_struct.fchown_fd_routes_to_table()
+                && ctx.files_struct.fchmod_fd_routes_to_table()
+                && ctx.files_struct.fd_owner_recorded()
+                && ctx.files_struct.fd_mode_override_recorded()
+                && ctx.files_struct.fchmod_mode_visible_to_fstat(),
+        );
         let dup3_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
             Ok(snapshot) => snapshot,
             Err(_) => {

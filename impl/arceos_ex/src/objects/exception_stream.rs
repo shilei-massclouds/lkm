@@ -73,6 +73,8 @@ const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FACCESSAT: usize = 48;
 const SYSCALL_CHDIR: usize = 49;
+const SYSCALL_FCHMOD: usize = 52;
+const SYSCALL_FCHOWN: usize = 55;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_GETDENTS64: usize = 61;
@@ -726,6 +728,8 @@ pub struct SyscallTable {
     nanosleep_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
+    fchmod_supported: bool,
+    fchown_supported: bool,
     ioctl_supported: bool,
     faccessat_supported: bool,
     lseek_supported: bool,
@@ -828,6 +832,10 @@ pub struct SyscallTable {
     time_full_linux_model_deferred: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
+    fchmod_routes_to_files_struct: bool,
+    fchown_routes_to_files_struct: bool,
+    fchown_fchmod_fd_local_first_slice: bool,
+    fchown_fchmod_full_linux_model_deferred: bool,
     ioctl_routes_to_files_struct: bool,
     faccessat_routes_to_files_struct: bool,
     lseek_routes_to_files_struct: bool,
@@ -895,6 +903,8 @@ pub struct SyscallTable {
     nanosleep_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
+    fchmod_observed: AtomicU8,
+    fchown_observed: AtomicU8,
     ioctl_observed: AtomicU8,
     faccessat_observed: AtomicU8,
     lseek_observed: AtomicU8,
@@ -946,6 +956,8 @@ impl SyscallTable {
             nanosleep_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
+            fchmod_supported: false,
+            fchown_supported: false,
             ioctl_supported: false,
             faccessat_supported: false,
             lseek_supported: false,
@@ -1048,6 +1060,10 @@ impl SyscallTable {
             time_full_linux_model_deferred: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
+            fchmod_routes_to_files_struct: false,
+            fchown_routes_to_files_struct: false,
+            fchown_fchmod_fd_local_first_slice: false,
+            fchown_fchmod_full_linux_model_deferred: false,
             ioctl_routes_to_files_struct: false,
             faccessat_routes_to_files_struct: false,
             lseek_routes_to_files_struct: false,
@@ -1115,6 +1131,8 @@ impl SyscallTable {
             nanosleep_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
+            fchmod_observed: AtomicU8::new(0),
+            fchown_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
             faccessat_observed: AtomicU8::new(0),
             lseek_observed: AtomicU8::new(0),
@@ -1264,6 +1282,16 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn fcntl_supported(&self) -> bool {
         self.fcntl_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchmod_supported(&self) -> bool {
+        self.fchmod_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchown_supported(&self) -> bool {
+        self.fchown_supported
     }
 
     #[allow(dead_code)]
@@ -1687,6 +1715,26 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn fchmod_routes_to_files_struct(&self) -> bool {
+        self.fchmod_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchown_routes_to_files_struct(&self) -> bool {
+        self.fchown_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchown_fchmod_fd_local_first_slice(&self) -> bool {
+        self.fchown_fchmod_fd_local_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn fchown_fchmod_full_linux_model_deferred(&self) -> bool {
+        self.fchown_fchmod_full_linux_model_deferred
+    }
+
+    #[allow(dead_code)]
     pub const fn ioctl_routes_to_files_struct(&self) -> bool {
         self.ioctl_routes_to_files_struct
     }
@@ -1877,6 +1925,16 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn fchmod_observed(&self) -> bool {
+        self.fchmod_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn fchown_observed(&self) -> bool {
+        self.fchown_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn ioctl_observed(&self) -> bool {
         self.ioctl_observed.load(Ordering::Acquire) != 0
     }
@@ -1959,6 +2017,8 @@ impl SyscallTable {
         self.nanosleep_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
+        self.fchmod_supported = true;
+        self.fchown_supported = true;
         self.ioctl_supported = true;
         self.faccessat_supported = true;
         self.lseek_supported = true;
@@ -2061,6 +2121,10 @@ impl SyscallTable {
         self.time_full_linux_model_deferred = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
+        self.fchmod_routes_to_files_struct = true;
+        self.fchown_routes_to_files_struct = true;
+        self.fchown_fchmod_fd_local_first_slice = true;
+        self.fchown_fchmod_full_linux_model_deferred = true;
         self.ioctl_routes_to_files_struct = true;
         self.faccessat_routes_to_files_struct = true;
         self.lseek_routes_to_files_struct = true;
@@ -2250,6 +2314,34 @@ impl SyscallTable {
         }
 
         syscall_table_dup3(self, frame);
+    }
+
+    pub fn fchmod(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.fchmod_supported
+            || !self.fchmod_routes_to_files_struct
+            || !self.fchown_fchmod_fd_local_first_slice
+            || !self.fchown_fchmod_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_fchmod(self, frame);
+    }
+
+    pub fn fchown(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.fchown_supported
+            || !self.fchown_routes_to_files_struct
+            || !self.fchown_fchmod_fd_local_first_slice
+            || !self.fchown_fchmod_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_fchown(self, frame);
     }
 
     pub fn getrandom(&self, frame: &mut TrapFrame) {
@@ -3065,6 +3157,8 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_IOCTL => table.ioctl(frame),
         SYSCALL_FACCESSAT => table.faccessat(frame),
         SYSCALL_CHDIR => table.chdir(frame),
+        SYSCALL_FCHMOD => table.fchmod(frame),
+        SYSCALL_FCHOWN => table.fchown(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
@@ -3770,6 +3864,33 @@ fn syscall_table_dup3(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.dup3_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, fd);
+}
+
+fn syscall_table_fchmod(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let mode = frame.reg(11) as u32;
+    let ctx = crate::context::context();
+    if let Err(error) = ctx.files_struct.fchmod_fd(fd, mode) {
+        complete_error_syscall(frame, file_error_to_errno(error));
+        return;
+    }
+
+    table.fchmod_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_fchown(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let uid = frame.reg(11);
+    let gid = frame.reg(12);
+    let ctx = crate::context::context();
+    if let Err(error) = ctx.files_struct.fchown_fd(fd, uid, gid) {
+        complete_error_syscall(frame, file_error_to_errno(error));
+        return;
+    }
+
+    table.fchown_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
 }
 
 fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -7684,6 +7805,8 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_IOCTL => "ioctl",
         SYSCALL_FACCESSAT => "faccessat",
         SYSCALL_CHDIR => "chdir",
+        SYSCALL_FCHMOD => "fchmod",
+        SYSCALL_FCHOWN => "fchown",
         SYSCALL_OPENAT => "openat",
         SYSCALL_CLOSE => "close",
         SYSCALL_GETDENTS64 => "getdents64",

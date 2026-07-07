@@ -179,6 +179,11 @@ struct FileDescriptorEntry {
     flags: u32,
     close_on_exec: bool,
     pid: usize,
+    owner_valid: bool,
+    owner_uid: usize,
+    owner_gid: usize,
+    mode_override_valid: bool,
+    mode_override: u32,
 }
 
 impl FileDescriptorEntry {
@@ -197,6 +202,11 @@ impl FileDescriptorEntry {
             flags: access_mode,
             close_on_exec: false,
             pid: 0,
+            owner_valid: false,
+            owner_uid: 0,
+            owner_gid: 0,
+            mode_override_valid: false,
+            mode_override: 0,
         }
     }
 
@@ -208,6 +218,11 @@ impl FileDescriptorEntry {
             flags,
             close_on_exec,
             pid: 0,
+            owner_valid: false,
+            owner_uid: 0,
+            owner_gid: 0,
+            mode_override_valid: false,
+            mode_override: 0,
         }
     }
 
@@ -225,6 +240,11 @@ impl FileDescriptorEntry {
             flags,
             close_on_exec,
             pid: 0,
+            owner_valid: false,
+            owner_uid: 0,
+            owner_gid: 0,
+            mode_override_valid: false,
+            mode_override: 0,
         }
     }
 
@@ -236,6 +256,30 @@ impl FileDescriptorEntry {
             flags: FILE_O_RDWR,
             close_on_exec: true,
             pid: child_pid,
+            owner_valid: false,
+            owner_uid: 0,
+            owner_gid: 0,
+            mode_override_valid: false,
+            mode_override: 0,
+        }
+    }
+
+    fn record_owner(&mut self, uid: usize, gid: usize) {
+        self.owner_valid = true;
+        self.owner_uid = uid;
+        self.owner_gid = gid;
+    }
+
+    fn record_mode_override(&mut self, mode: u32) {
+        self.mode_override_valid = true;
+        self.mode_override = mode;
+    }
+
+    fn apply_mode_override(&self, stat: FileStat) -> FileStat {
+        if self.mode_override_valid {
+            stat.with_permission_mode(self.mode_override)
+        } else {
+            stat
         }
     }
 }
@@ -259,6 +303,11 @@ pub struct FdEntryDiagnostic {
     pub flags: u32,
     pub close_on_exec: bool,
     pub pid: usize,
+    pub owner_valid: bool,
+    pub owner_uid: usize,
+    pub owner_gid: usize,
+    pub mode_override_valid: bool,
+    pub mode_override: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -357,6 +406,13 @@ impl FileStat {
 
     pub const fn mode(&self) -> u32 {
         self.mode
+    }
+
+    const fn with_permission_mode(self, mode: u32) -> Self {
+        Self {
+            size: self.size,
+            mode: (self.mode & 0o170000) | (mode & 0o7777),
+        }
     }
 }
 
@@ -1031,6 +1087,11 @@ impl FileDescriptorTable {
             flags: entry.flags,
             close_on_exec: entry.close_on_exec,
             pid: entry.pid,
+            owner_valid: entry.owner_valid,
+            owner_uid: entry.owner_uid,
+            owner_gid: entry.owner_gid,
+            mode_override_valid: entry.mode_override_valid,
+            mode_override: entry.mode_override,
         })
     }
 
@@ -1271,6 +1332,34 @@ impl FileDescriptorTable {
         Ok(())
     }
 
+    fn update_owner(&mut self, fd: usize, uid: usize, gid: usize) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        let entry = self.entries[fd].as_mut().ok_or(FileError::BadFd)?;
+        entry.record_owner(uid, gid);
+        self.lookup_returns.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    fn update_mode(&mut self, fd: usize, mode: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+
+        if fd >= FILE_FD_COUNT {
+            return Err(FileError::BadFd);
+        }
+        let entry = self.entries[fd].as_mut().ok_or(FileError::BadFd)?;
+        entry.record_mode_override(mode & 0o7777);
+        self.lookup_returns.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
     fn close(&mut self, fd: usize) -> FileResult<FileDescriptorEntry> {
         if self.lifecycle.state() != State::Ready {
             return Err(FileError::NotReady);
@@ -1369,10 +1458,15 @@ pub struct FilesStruct {
     read_fd_routes_to_table: AtomicUsize,
     close_fd_routes_to_table: AtomicUsize,
     dup3_routes_to_table: AtomicUsize,
+    fchown_fd_routes_to_table: AtomicUsize,
+    fchmod_fd_routes_to_table: AtomicUsize,
     stat_path_routes_to_vfs: AtomicUsize,
     readlink_path_routes_to_vfs: AtomicUsize,
     regular_fd_installed: AtomicUsize,
     null_fd_installed: AtomicUsize,
+    fd_owner_recorded: AtomicUsize,
+    fd_mode_override_recorded: AtomicUsize,
+    fchmod_mode_visible_to_fstat: AtomicUsize,
     null_device_read_eof_observed: AtomicUsize,
     null_device_write_discard_observed: AtomicUsize,
     null_device_fstat_device_node: AtomicUsize,
@@ -1451,10 +1545,15 @@ impl FilesStruct {
             read_fd_routes_to_table: AtomicUsize::new(0),
             close_fd_routes_to_table: AtomicUsize::new(0),
             dup3_routes_to_table: AtomicUsize::new(0),
+            fchown_fd_routes_to_table: AtomicUsize::new(0),
+            fchmod_fd_routes_to_table: AtomicUsize::new(0),
             stat_path_routes_to_vfs: AtomicUsize::new(0),
             readlink_path_routes_to_vfs: AtomicUsize::new(0),
             regular_fd_installed: AtomicUsize::new(0),
             null_fd_installed: AtomicUsize::new(0),
+            fd_owner_recorded: AtomicUsize::new(0),
+            fd_mode_override_recorded: AtomicUsize::new(0),
+            fchmod_mode_visible_to_fstat: AtomicUsize::new(0),
             null_device_read_eof_observed: AtomicUsize::new(0),
             null_device_write_discard_observed: AtomicUsize::new(0),
             null_device_fstat_device_node: AtomicUsize::new(0),
@@ -1573,6 +1672,14 @@ impl FilesStruct {
         self.dup3_routes_to_table.load(Ordering::Acquire) != 0
     }
 
+    pub fn fchown_fd_routes_to_table(&self) -> bool {
+        self.fchown_fd_routes_to_table.load(Ordering::Acquire) != 0
+    }
+
+    pub fn fchmod_fd_routes_to_table(&self) -> bool {
+        self.fchmod_fd_routes_to_table.load(Ordering::Acquire) != 0
+    }
+
     pub fn stat_path_routes_to_vfs(&self) -> bool {
         self.stat_path_routes_to_vfs.load(Ordering::Acquire) != 0
     }
@@ -1587,6 +1694,18 @@ impl FilesStruct {
 
     pub fn null_fd_installed(&self) -> bool {
         self.null_fd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn fd_owner_recorded(&self) -> bool {
+        self.fd_owner_recorded.load(Ordering::Acquire) != 0
+    }
+
+    pub fn fd_mode_override_recorded(&self) -> bool {
+        self.fd_mode_override_recorded.load(Ordering::Acquire) != 0
+    }
+
+    pub fn fchmod_mode_visible_to_fstat(&self) -> bool {
+        self.fchmod_mode_visible_to_fstat.load(Ordering::Acquire) != 0
     }
 
     pub fn null_device_read_eof_observed(&self) -> bool {
@@ -2611,6 +2730,31 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    pub fn fchown_fd(&mut self, fd: usize, uid: usize, gid: usize) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.update_owner(fd, uid, gid)?;
+        self.fchown_fd_routes_to_table
+            .fetch_add(1, Ordering::AcqRel);
+        self.fd_owner_recorded.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    pub fn fchmod_fd(&mut self, fd: usize, mode: u32) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.update_mode(fd, mode)?;
+        self.fchmod_fd_routes_to_table
+            .fetch_add(1, Ordering::AcqRel);
+        self.fd_mode_override_recorded
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
     pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -2797,7 +2941,7 @@ impl FilesStruct {
 
         let entry = self.fd_table.lookup(fd)?;
         self.stat_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
-        match entry.ofd {
+        let stat = match entry.ofd {
             OpenFileDescriptionRef::Regular0 => {
                 let stat = match self.filesystem0_kind {
                     FilesystemFdKind::RegularFile => FileStat::regular(self.regular0_len),
@@ -2820,19 +2964,25 @@ impl FilesStruct {
                     self.regular_file_stat_observed
                         .fetch_add(1, Ordering::AcqRel);
                 }
-                Ok(stat)
+                stat
             }
-            OpenFileDescriptionRef::Pidfd0 => Ok(FileStat::new(0, VfsInodeKind::DeviceNode)),
+            OpenFileDescriptionRef::Pidfd0 => FileStat::new(0, VfsInodeKind::DeviceNode),
             OpenFileDescriptionRef::Null => {
                 self.null_device_fstat_device_node
                     .fetch_add(1, Ordering::AcqRel);
-                Ok(FileStat::new(0, VfsInodeKind::DeviceNode))
+                FileStat::new(0, VfsInodeKind::DeviceNode)
             }
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
             | OpenFileDescriptionRef::Stderr
-            | OpenFileDescriptionRef::Tty0 => Ok(FileStat::new(0, VfsInodeKind::DeviceNode)),
+            | OpenFileDescriptionRef::Tty0 => FileStat::new(0, VfsInodeKind::DeviceNode),
+        };
+        let stat = entry.apply_mode_override(stat);
+        if entry.mode_override_valid {
+            self.fchmod_mode_visible_to_fstat
+                .fetch_add(1, Ordering::AcqRel);
         }
+        Ok(stat)
     }
 
     pub fn write_fd(&self, fd: usize, bytes: &[u8]) -> FileResult<usize> {

@@ -42,6 +42,10 @@
  *   SyscallTable.Action::ReadlinkAt
  *     -> FilesStruct.Action::ReadlinkPath
  *     -> VfsCore.Action::ReadlinkPath(Path, FsStruct)
+ *   SyscallTable.Action::Fchown / Fchmod
+ *     -> FilesStruct.Action::FchownFd / FchmodFd
+ *     -> FileDescriptorTable.Action::Lookup
+ *     -> FileDescriptorTable.Action::UpdateFdOwner / UpdateFdMode
  *
  * Character-device stdin/readiness path goes:
  *
@@ -79,6 +83,16 @@
  * oldfd. Replacing an already-open newfd only overwrites the fd table entry;
  * full filp_close/fput/refcount/lock/EBUSY/rlimit/expand_files semantics stay
  * deferred.
+ *
+ * fchown(2) and fchmod(2) first slice is intentionally fd-local. It exists to
+ * close the observed BusyBox login post-auth tty/stdin adjustment where local
+ * RISC-V asm-generic numbers are __NR_fchown=55 and __NR_fchmod=52. A valid
+ * open fd records uid/gid and mode override metadata on the fd-table entry and
+ * returns success; invalid fd returns EBADF. The mode override is visible to
+ * fstat on that same fd. This does not persist inode ownership, update ext2,
+ * model TTY device ownership, check capabilities/permissions, handle
+ * fchownat/fchmodat/path chmod/chown, LSM, idmapped mounts, namespaces or
+ * setgroups(159).
  */
 
 enum FileBackendKind {
@@ -118,6 +132,11 @@ predicate files_struct_tty_alias_entries_share_backend<T>(files: T) -> bool;
 predicate files_struct_read_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_close_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
 predicate files_struct_dup3_routes_to_table<T, F>(files: T, table: F) -> bool;
+predicate files_struct_fchown_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
+predicate files_struct_fchmod_fd_routes_to_table<T, F>(files: T, table: F) -> bool;
+predicate files_struct_fd_owner_recorded<T>(files: T) -> bool;
+predicate files_struct_fd_mode_override_recorded<T>(files: T) -> bool;
+predicate files_struct_fchmod_mode_visible_to_fstat<T>(files: T) -> bool;
 predicate files_struct_stdio_fd_close_supported<T>(files: T) -> bool;
 predicate files_struct_close_on_exec_observed<T>(files: T) -> bool;
 predicate files_struct_parent_fd_snapshot_saved<T, C>(files: T, child: C) -> bool;
@@ -152,6 +171,9 @@ predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_stdio_fd_closed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_duplicated<T>(table: T, oldfd: FdRef, newfd: FdRef) -> bool;
 predicate fd_table_dup3_close_on_exec_bound<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_fd_owner_metadata_recorded<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_fd_mode_metadata_recorded<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_parent_snapshot_preserves_fd_metadata<T>(table: T) -> bool;
 predicate fd_table_close_on_exec_scanned<T>(table: T) -> bool;
 predicate fd_table_close_on_exec_closed<T>(table: T) -> bool;
 predicate fd_table_parent_snapshot_saved<T>(table: T) -> bool;
@@ -493,6 +515,60 @@ object FilesStruct: ResourceObject {
                 }
             }
 
+            on Action::FchownFd(fd: FdRef) {
+                /*
+                 * Observed BusyBox login calls fchown(55) on fd 0 after
+                 * authentication. The first slice is fd-table validation plus
+                 * fd-local owner metadata only. It must not bypass the fd
+                 * table by special-casing stdin, and it must not claim inode,
+                 * ext2, TTY ownership, capability, namespace or setgroups
+                 * semantics.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, fd, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(fd);
+                    FileDescriptorTable.Action::UpdateFdOwner(fd);
+                }
+
+                ensures {
+                    files_struct_fchown_fd_routes_to_table(self, FileDescriptorTable);
+                    files_struct_fd_owner_recorded(self);
+                    fd_table_fd_owner_metadata_recorded(FileDescriptorTable, fd);
+                }
+            }
+
+            on Action::FchmodFd(fd: FdRef) {
+                /*
+                 * Observed BusyBox login calls fchmod(52) on fd 0 after
+                 * fchown. The first slice records a fd-local permission mode
+                 * override and lets fstat on that fd report the override while
+                 * leaving file type bits intact. It does not update backing
+                 * inode state or enforce permission/capability checks.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, fd, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(fd);
+                    FileDescriptorTable.Action::UpdateFdMode(fd);
+                }
+
+                ensures {
+                    files_struct_fchmod_fd_routes_to_table(self, FileDescriptorTable);
+                    files_struct_fd_mode_override_recorded(self);
+                    files_struct_fchmod_mode_visible_to_fstat(self);
+                    fd_table_fd_mode_metadata_recorded(FileDescriptorTable, fd);
+                }
+            }
+
             on Action::CloseOnExec {
                 /*
                  * Runtime execve success follows Linux do_close_on_exec() only
@@ -534,6 +610,7 @@ object FilesStruct: ResourceObject {
                 ensures {
                     files_struct_parent_fd_snapshot_saved(self, UserChildProcess);
                     fd_table_parent_snapshot_saved(FileDescriptorTable);
+                    fd_table_parent_snapshot_preserves_fd_metadata(FileDescriptorTable);
                 }
             }
 
@@ -552,6 +629,7 @@ object FilesStruct: ResourceObject {
                 ensures {
                     files_struct_parent_fd_snapshot_restored(self, UserChildProcess);
                     fd_table_parent_snapshot_restored(FileDescriptorTable);
+                    fd_table_parent_snapshot_preserves_fd_metadata(FileDescriptorTable);
                 }
             }
 
@@ -817,6 +895,28 @@ object FileDescriptorTable: ResourceObject {
                     fd_table_fd_duplicated(self, oldfd, newfd);
                     fd_table_fd_bound(self, newfd, OpenFileDescription);
                     fd_table_dup3_close_on_exec_bound(self, newfd);
+                }
+            }
+
+            on Action::UpdateFdOwner(fd: FdRef) {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(self, fd, OpenFileDescription);
+                }
+
+                ensures {
+                    fd_table_fd_owner_metadata_recorded(self, fd);
+                }
+            }
+
+            on Action::UpdateFdMode(fd: FdRef) {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(self, fd, OpenFileDescription);
+                }
+
+                ensures {
+                    fd_table_fd_mode_metadata_recorded(self, fd);
                 }
             }
 
