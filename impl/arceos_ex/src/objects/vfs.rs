@@ -1412,8 +1412,9 @@ impl VfsCore {
         if !absolute && !relative_path_supported(path) {
             return Err(VfsError::UnsupportedPath);
         }
+        let root_dentry = fs_struct.root_dentry().ok_or(VfsError::MountMissing)?;
         let start_dentry = if absolute {
-            fs_struct.root_dentry()
+            Some(root_dentry)
         } else {
             fs_struct.pwd_dentry()
         }
@@ -1445,6 +1446,15 @@ impl VfsCore {
                 current = self.follow_mount(current)?;
                 if current != before_mount {
                     self.path_walk_crossed_mount = true;
+                }
+                let component = &path_buf[component_start..component_end];
+                if component == b"." {
+                    self.ensure_walk_directory(current)?;
+                    continue;
+                }
+                if component == b".." {
+                    current = self.walk_parent_dentry(current, root_dentry)?;
+                    continue;
                 }
                 let parent = current;
                 let next_before_mount = self.lookup_component(
@@ -1611,6 +1621,23 @@ impl VfsCore {
             return Err(VfsError::NotFound);
         }
         Ok(VfsNodeStat::new(inode.size(), inode.kind()))
+    }
+
+    pub fn lookup_path_kind<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<VfsInodeKind, VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        Ok(inode.kind())
     }
 
     fn walk_path_no_follow_final<P: BlockDeviceProvider>(
@@ -2157,6 +2184,28 @@ impl VfsCore {
             }
         }
         Err(VfsError::NotFound)
+    }
+
+    fn ensure_walk_directory(&self, dentry_ref: DentryRef) -> Result<(), VfsError> {
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+        Ok(())
+    }
+
+    fn walk_parent_dentry(
+        &self,
+        dentry_ref: DentryRef,
+        root_dentry: DentryRef,
+    ) -> Result<DentryRef, VfsError> {
+        self.ensure_walk_directory(dentry_ref)?;
+        if dentry_ref == root_dentry {
+            return Ok(dentry_ref);
+        }
+        let dentry = self.positive_dentry(dentry_ref)?;
+        Ok(dentry.parent().unwrap_or(dentry_ref))
     }
 
     fn live_child_count(&self, inode_ref: InodeRef) -> Result<usize, VfsError> {

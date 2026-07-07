@@ -1861,21 +1861,32 @@ type ArceosExStartupPhaseCodingMust {
          * socket slice may therefore install only an unconnected AF_UNIX
          * stream socket fd via FilesStruct. Focused rerun after that slice
          * observes the post-auth stream socket returning fd 3, then the new
-         * first boundary is connect(203) with fd=3 and addrlen=0x18.  DGRAM,
-         * sendto(206), connect(203) successful-path sockaddr handling and the
-         * network/socket operation backend remain unsupported. Unsupported
-         * connect diagnostics may name connect, print fd, sockaddr pointer and
-         * addrlen, best-effort copy at most Linux sockaddr_storage-sized bytes
-         * from user memory, classify AF_UNIX sockaddr_un shape against Linux
-         * 6.12 unix_validate_addr() length/family conditions, print bounded
-         * escaped path or abstract-path prefix, and report whether the fd
-         * currently points at UnixSocket0. It must not change the ENOSYS
-         * return, install fds, mutate fd state, write user memory, create a
-         * Unix socket peer/listener lookup, implement sendto(206), setgroups
-         * (159), network stack or complete credentials. Focused evidence
-         * after this diagnostic classifies the early addrlen=110 connects as
-         * pathname AF_UNIX sockets under /run/utmps, and the post-auth
-         * fchown/fchmod boundary as addrlen=24 path /var/run/nscd/socket.
+         * first boundary is connect(203) with fd=3 and addrlen=0x18. DGRAM,
+         * sendto(206), successful connect and the network/socket operation
+         * backend remain unsupported. The current connect slice accepts only
+         * copied AF_UNIX pathname sockaddr_un values that satisfy Linux 6.12
+         * unix_validate_addr() length/family checks, are not abstract paths,
+         * and whose fd currently points at UnixSocket0. It must route pathname
+         * existence lookup through current FsStruct.root and VFS path walk
+         * without allocating FileRef, opening a file, or mutating the fd table.
+         * The read-only lookup may follow existing fast symlinks and handle
+         * . / .. components needed by Alpine /var/run -> ../run, clamped at the
+         * current FsStruct.root; this still does not create or connect sockets.
+         * Missing pathname returns ENOENT; existing pathname returns
+         * ECONNREFUSED because no Unix socket/listener model is present. User
+         * sockaddr copy fault returns EFAULT. Unsupported connect diagnostics
+         * still name connect, print fd, sockaddr pointer, addrlen,
+         * copy/family/validate/path classification and fd_unix_socket0, then
+         * return ENOSYS for zero/oversized addrlen, invalid family/length,
+         * non-AF_UNIX, abstract path, non-UnixSocket0 fd, non-pathname shape or
+         * unmapped VFS failures. It must not install fds, mutate fd state,
+         * write user memory, create a Unix socket peer/listener lookup,
+         * implement sendto(206), setgroups(159), network stack or complete
+         * credentials. Focused evidence after the diagnostic classifies the
+         * early addrlen=110 connects as pathname AF_UNIX sockets under
+         * /run/utmps, and the post-auth fchown/fchmod boundary as addrlen=24
+         * path /var/run/nscd/socket, expected to return ENOENT when that path
+         * is absent from the current rootfs.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -3259,14 +3270,20 @@ type ArceosExBlockIoCodingMust {
          * implemented", but local asm-generic confirms 198 is socket and 159
          * is setgroups, so that text is not a reliable syscall name for the
          * next slice. The current socket slice is limited to fd creation; the
-         * focused rerun records connect(203) as the new first unsupported
-         * boundary after socket returns fd 3. The current connect slice is
-         * only a sockaddr diagnostic classifier: it copies no more than the
-         * Linux sockaddr_storage boundary, classifies AF_UNIX path versus
-         * abstract path, and still does not implement connect/sendto/
-         * setgroups. The diagnostic classifies the post-auth direct boundary
-         * as libc/NSS nscd pathname connect to /var/run/nscd/socket, not an
-         * abstract syslog socket and not setgroups(159).
+         * focused rerun records connect(203) as the new first boundary after
+         * socket returns fd 3. The current connect slice advances only the
+         * pathname failure errno case: it copies no more than the Linux
+         * sockaddr_storage boundary, accepts only valid AF_UNIX pathname
+         * sockaddr_un values on UnixSocket0, routes existence lookup through
+         * current FsStruct.root without opening or allocating FileRef, follows
+         * existing fast symlinks and . / .. path components only as pathname
+         * lookup semantics for cases such as /var/run -> ../run, returns
+         * ENOENT for missing pathname and ECONNREFUSED for existing pathname
+         * with no socket/listener model, and keeps all other connect/sendto/
+         * setgroups shapes as ENOSYS diagnostics. The diagnostic classifies
+         * the post-auth direct boundary as libc/NSS nscd pathname connect to
+         * /var/run/nscd/socket, not an abstract syslog socket and not
+         * setgroups(159).
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

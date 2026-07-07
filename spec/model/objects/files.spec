@@ -100,13 +100,19 @@
  * socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0). It strips the Linux socket
  * type flags, validates the stream/protocol shape, creates one unconnected
  * UnixSocket0 OFD/backend, and installs it in the first free fd slot with the
- * close-on-exec bit carried by the fd entry. The earlier syslog-like
+ * close-on-exec bit carried by the fd entry. The follow-up connect(203)
+ * failure slice may query whether a supplied fd currently points at
+ * UnixSocket0 and, for a valid AF_UNIX pathname sockaddr, route a read-only
+ * pathname existence/kind lookup through VFS. That lookup must not allocate a
+ * FileRef, open a file, change fd table state, connect a peer or mutate user
+ * memory. It may use VFS fast-symlink following plus . / .. path components
+ * clamped at FsStruct.root so /var/run -> ../run still resolves before the
+ * final missing nscd socket; missing paths map to ENOENT and existing paths map
+ * to ECONNREFUSED until a Unix socket/listener namespace is modeled. The earlier syslog-like
  * SOCK_DGRAM path remains an unsupported diagnostic path for now, so this
- * slice does not claim sendto/connect/socketpair/bind/listen/accept,
- * pathname sockaddr handling, peer lookup, sk_buff queues, net namespaces,
- * LSM or a network stack. Unsupported connect(203) diagnostics may query
- * whether a supplied fd currently points at UnixSocket0, but that query is
- * read-only and must not change fd table, OFD/backend or user memory state.
+ * slice does not claim sendto, successful connect, socketpair/bind/listen/
+ * accept, abstract sockets, peer lookup, sk_buff queues, net namespaces, LSM
+ * or a network stack.
  */
 
 enum FileBackendKind {

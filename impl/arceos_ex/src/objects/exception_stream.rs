@@ -299,6 +299,7 @@ const ELOOP: usize = 40;
 const EMFILE: usize = 24;
 const ENOTDIR: usize = 20;
 const ECHILD: usize = 10;
+const ECONNREFUSED: usize = 111;
 
 #[cfg(app_user_boot)]
 #[derive(Clone, Copy)]
@@ -743,6 +744,7 @@ pub struct SyscallTable {
     fchmod_supported: bool,
     fchown_supported: bool,
     socket_supported: bool,
+    connect_supported: bool,
     ioctl_supported: bool,
     faccessat_supported: bool,
     lseek_supported: bool,
@@ -851,6 +853,8 @@ pub struct SyscallTable {
     fchown_fchmod_full_linux_model_deferred: bool,
     socket_routes_to_files_struct: bool,
     socket_af_unix_stream_first_slice: bool,
+    connect_routes_to_files_struct: bool,
+    connect_af_unix_pathname_failure_first_slice: bool,
     socket_backend_full_linux_model_deferred: bool,
     ioctl_routes_to_files_struct: bool,
     faccessat_routes_to_files_struct: bool,
@@ -976,6 +980,7 @@ impl SyscallTable {
             fchmod_supported: false,
             fchown_supported: false,
             socket_supported: false,
+            connect_supported: false,
             ioctl_supported: false,
             faccessat_supported: false,
             lseek_supported: false,
@@ -1084,6 +1089,8 @@ impl SyscallTable {
             fchown_fchmod_full_linux_model_deferred: false,
             socket_routes_to_files_struct: false,
             socket_af_unix_stream_first_slice: false,
+            connect_routes_to_files_struct: false,
+            connect_af_unix_pathname_failure_first_slice: false,
             socket_backend_full_linux_model_deferred: false,
             ioctl_routes_to_files_struct: false,
             faccessat_routes_to_files_struct: false,
@@ -1319,6 +1326,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn socket_supported(&self) -> bool {
         self.socket_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn connect_supported(&self) -> bool {
+        self.connect_supported
     }
 
     #[allow(dead_code)]
@@ -1772,6 +1784,16 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn connect_routes_to_files_struct(&self) -> bool {
+        self.connect_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn connect_af_unix_pathname_failure_first_slice(&self) -> bool {
+        self.connect_af_unix_pathname_failure_first_slice
+    }
+
+    #[allow(dead_code)]
     pub const fn socket_backend_full_linux_model_deferred(&self) -> bool {
         self.socket_backend_full_linux_model_deferred
     }
@@ -2067,6 +2089,7 @@ impl SyscallTable {
         self.fchmod_supported = true;
         self.fchown_supported = true;
         self.socket_supported = true;
+        self.connect_supported = true;
         self.ioctl_supported = true;
         self.faccessat_supported = true;
         self.lseek_supported = true;
@@ -2175,6 +2198,8 @@ impl SyscallTable {
         self.fchown_fchmod_full_linux_model_deferred = true;
         self.socket_routes_to_files_struct = true;
         self.socket_af_unix_stream_first_slice = true;
+        self.connect_routes_to_files_struct = true;
+        self.connect_af_unix_pathname_failure_first_slice = true;
         self.socket_backend_full_linux_model_deferred = true;
         self.ioctl_routes_to_files_struct = true;
         self.faccessat_routes_to_files_struct = true;
@@ -2407,6 +2432,19 @@ impl SyscallTable {
         }
 
         syscall_table_socket(self, frame);
+    }
+
+    pub fn connect(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.connect_supported
+            || !self.connect_routes_to_files_struct
+            || !self.connect_af_unix_pathname_failure_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_connect(frame);
     }
 
     pub fn getrandom(&self, frame: &mut TrapFrame) {
@@ -3225,6 +3263,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_FCHMOD => table.fchmod(frame),
         SYSCALL_FCHOWN => table.fchown(frame),
         SYSCALL_SOCKET => table.socket(frame),
+        SYSCALL_CONNECT => table.connect(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
@@ -3989,6 +4028,120 @@ fn syscall_table_socket(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.socket_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, fd);
+}
+
+struct ConnectPathname {
+    path: [u8; USER_PATH_MAX],
+    path_len: usize,
+}
+
+enum ConnectSockaddrShape {
+    Pathname(ConnectPathname),
+    CopyFault,
+    Unsupported,
+}
+
+fn syscall_table_connect(frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let addr_ptr = frame.reg(11);
+    let addrlen = frame.reg(12);
+
+    if !crate::context::context_ref()
+        .files_struct
+        .fd_is_unix_socket0(fd)
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let pathname = match classify_connect_sockaddr_pathname(addr_ptr, addrlen) {
+        ConnectSockaddrShape::Pathname(pathname) => pathname,
+        ConnectSockaddrShape::CopyFault => {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        ConnectSockaddrShape::Unsupported => {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    };
+
+    let lookup_result = {
+        let ctx = crate::context::context();
+        ctx.files_struct.lookup_path_kind(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            &pathname.path[..pathname.path_len],
+        )
+    };
+
+    match lookup_result {
+        Ok(_) => {
+            print_connect_path_error_detail(fd, ECONNREFUSED, &pathname.path[..pathname.path_len]);
+            complete_error_syscall(frame, ECONNREFUSED);
+        }
+        Err(FileError::PathUnavailable) => {
+            print_connect_path_error_detail(fd, ENOENT, &pathname.path[..pathname.path_len]);
+            complete_error_syscall(frame, ENOENT);
+        }
+        Err(error) => match connect_path_error_to_errno(error) {
+            Some(errno) => {
+                print_connect_path_error_detail(fd, errno, &pathname.path[..pathname.path_len]);
+                complete_error_syscall(frame, errno);
+            }
+            None => complete_unsupported_syscall(frame),
+        },
+    }
+}
+
+fn classify_connect_sockaddr_pathname(addr_ptr: usize, addrlen: usize) -> ConnectSockaddrShape {
+    if addrlen == 0 || addrlen > SOCKADDR_STORAGE_SIZE || addrlen < SOCKADDR_UN_PATH_OFFSET {
+        return ConnectSockaddrShape::Unsupported;
+    }
+
+    let mut storage = [0u8; SOCKADDR_STORAGE_SIZE];
+    if !copy_from_user(addr_ptr, &mut storage[..addrlen]) {
+        return ConnectSockaddrShape::CopyFault;
+    }
+
+    let family_raw = u16::from_le_bytes([storage[0], storage[1]]) as usize;
+    if family_raw != AF_UNIX || addrlen <= SOCKADDR_UN_PATH_OFFSET || addrlen > SOCKADDR_UN_SIZE {
+        return ConnectSockaddrShape::Unsupported;
+    }
+
+    let path_input_len = addrlen - SOCKADDR_UN_PATH_OFFSET;
+    let raw_path = &storage[SOCKADDR_UN_PATH_OFFSET..SOCKADDR_UN_PATH_OFFSET + path_input_len];
+    if raw_path.first().copied() == Some(0) {
+        return ConnectSockaddrShape::Unsupported;
+    }
+    let path_len = raw_path
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(raw_path.len());
+    if path_len == 0 || path_len > USER_PATH_MAX || raw_path.first().copied() != Some(b'/') {
+        return ConnectSockaddrShape::Unsupported;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    path[..path_len].copy_from_slice(&raw_path[..path_len]);
+    ConnectSockaddrShape::Pathname(ConnectPathname { path, path_len })
+}
+
+fn connect_path_error_to_errno(error: FileError) -> Option<usize> {
+    match error {
+        FileError::PathUnavailable => Some(ENOENT),
+        FileError::NotDirectory => Some(ENOTDIR),
+        FileError::TooManySymlinks => Some(ELOOP),
+        FileError::InvalidArgument => Some(EINVAL),
+        FileError::PermissionDenied => Some(EACCES),
+        FileError::BufferTooSmall => Some(ERANGE),
+        FileError::VfsBackendUnavailable => Some(file_error_to_errno(error)),
+        FileError::NotReady | FileError::BackendUnavailable | FileError::Unsupported => None,
+        _ => Some(file_error_to_errno(error)),
+    }
 }
 
 fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -8211,6 +8364,26 @@ fn print_close_error_detail(fd: usize, error: FileError, errno: usize) {
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_close_error_detail(_fd: usize, _error: FileError, _errno: usize) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_connect_path_error_detail(fd: usize, errno: usize, path: &[u8]) {
+    crate::arch::riscv64::sbi::putstr("syscall connect detail fd=");
+    print_decimal(fd);
+    crate::arch::riscv64::sbi::putstr(" fd_unix_socket0=");
+    print_bool_digit(
+        crate::context::context_ref()
+            .files_struct
+            .fd_is_unix_socket0(fd),
+    );
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    crate::arch::riscv64::sbi::putstr(" path=\"");
+    print_path_bytes(path);
+    crate::arch::riscv64::sbi::putstr("\"\n");
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_connect_path_error_detail(_fd: usize, _errno: usize, _path: &[u8]) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_execve_close_on_exec_report(report: CloseOnExecReport) {

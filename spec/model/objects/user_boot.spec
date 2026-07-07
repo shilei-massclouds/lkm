@@ -341,6 +341,9 @@ predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
 predicate syscall_fchown_fchmod_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_unsupported_socket_diagnostic_first_slice<T>(table: T) -> bool;
 predicate syscall_unsupported_connect_sockaddr_diagnostic_first_slice<T>(table: T) -> bool;
+predicate syscall_connect_supported<T>(table: T) -> bool;
+predicate syscall_connect_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_connect_af_unix_pathname_failure_first_slice<T>(table: T) -> bool;
 predicate syscall_socket_supported<T>(table: T) -> bool;
 predicate syscall_socket_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_socket_af_unix_stream_first_slice<T>(table: T) -> bool;
@@ -1291,23 +1294,30 @@ object SyscallTable: ResourceObject {
                      * creation path and routes it to FilesStruct. Focused
                      * rerun after the slice observes the post-auth socket
                      * returning fd 3, with connect(203) as the next first
-                     * unsupported boundary. The current connect slice is
-                     * diagnostic-only: it follows Linux 6.12
+                     * boundary. The current connect slice follows Linux 6.12
                      * net/socket.c::move_addr_to_kernel() only far enough to
-                     * best-effort copy at most sockaddr_storage-sized user
-                     * bytes, then classifies AF_UNIX sockaddr_un shape against
-                     * net/unix/af_unix.c::unix_validate_addr(). It may print
-                     * copy status, raw family, AF_UNIX flag, path/abstract
-                     * prefix and whether the fd currently names UnixSocket0,
-                     * but it must still return ENOSYS and must not create a
-                     * peer, listener lookup, connection state, sendto path,
-                     * network stack or credential/setgroups behavior. The
-                     * focused diagnostic run classifies the early OpenRC
-                     * 110-byte sockaddr calls as pathname sockets under
-                     * /run/utmps, while the post-auth fchown/fchmod boundary
-                     * is a 24-byte pathname sockaddr for /var/run/nscd/socket;
-                     * both satisfy the AF_UNIX unix_validate_addr()
-                     * length/family gate and still return ENOSYS here. The
+                     * copy at most sockaddr_storage-sized user bytes, then
+                     * accepts only AF_UNIX pathname sockaddr_un values that
+                     * satisfy net/unix/af_unix.c::unix_validate_addr(), are not
+                     * abstract paths, and whose fd currently names
+                     * UnixSocket0. That path routes existence lookup through
+                     * current FsStruct.root and VFS without opening,
+                     * allocating FileRef or mutating fd state. The lookup may
+                     * follow existing fast symlinks and . / .. path components
+                     * clamped at FsStruct.root, covering /var/run -> ../run
+                     * before the final socket pathname miss. Missing
+                     * pathname returns ENOENT; existing pathname returns
+                     * ECONNREFUSED because peer/listener state is still
+                     * unmodeled. Copy fault returns EFAULT. All invalid
+                     * length/family, non-AF_UNIX, abstract, non-UnixSocket0
+                     * and non-pathname shapes still return ENOSYS with the
+                     * stable connect diagnostic. The focused diagnostic run
+                     * classifies the early OpenRC 110-byte sockaddr calls as
+                     * pathname sockets under /run/utmps, while the post-auth
+                     * fchown/fchmod boundary is a 24-byte pathname sockaddr
+                     * for /var/run/nscd/socket; both satisfy the AF_UNIX
+                     * unix_validate_addr() length/family gate, and missing
+                     * paths may now return ENOENT. The
                      * earlier syslog-like AF_UNIX/SOCK_DGRAM path and all
                      * remaining socket operations keep using the unsupported
                      * diagnostic:
@@ -1317,6 +1327,9 @@ object SyscallTable: ResourceObject {
                      */
                     syscall_unsupported_socket_diagnostic_first_slice(self);
                     syscall_unsupported_connect_sockaddr_diagnostic_first_slice(self);
+                    syscall_connect_supported(self);
+                    syscall_connect_routes_to_files_struct(self, FilesStruct);
+                    syscall_connect_af_unix_pathname_failure_first_slice(self);
                     syscall_socket_supported(self);
                     syscall_socket_routes_to_files_struct(self, FilesStruct);
                     syscall_socket_af_unix_stream_first_slice(self);
