@@ -339,6 +339,8 @@ predicate syscall_fchown_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_fchmod_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
 predicate syscall_fchown_fchmod_full_linux_model_deferred<T>(table: T) -> bool;
+predicate syscall_unsupported_socket_diagnostic_first_slice<T>(table: T) -> bool;
+predicate syscall_socket_backend_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_usercopy_ready<T>(table: T) -> bool;
@@ -1272,6 +1274,22 @@ object SyscallTable: ResourceObject {
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_fchown_fchmod_fd_local_first_slice(self);
                     syscall_fchown_fchmod_full_linux_model_deferred(self);
+                    /*
+                     * Current OpenRC login evidence has moved past post-auth
+                     * fchown(55)/fchmod(52) and classifies unsupported
+                     * socket(198) as the direct login failure boundary. The
+                     * diagnostic names socket, decodes domain/type/protocol,
+                     * reports the base type after SOCK_CLOEXEC/SOCK_NONBLOCK
+                     * removal, and flags the AF_UNIX + SOCK_DGRAM syslog-like
+                     * shape. The post-auth blocker is AF_UNIX +
+                     * SOCK_STREAM|SOCK_CLOEXEC, not the earlier tolerated
+                     * syslog-like DGRAM path. This slice still returns ENOSYS,
+                     * installs no fd, does not touch user memory, and does not
+                     * model sendto(206), connect, setgroups(159), credentials
+                     * or a socket backend.
+                     */
+                    syscall_unsupported_socket_diagnostic_first_slice(self);
+                    syscall_socket_backend_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);
                     syscall_rt_sigtimedwait_copies_wait_mask(self);

@@ -110,6 +110,8 @@ const SYSCALL_GETUID: usize = 174;
 const SYSCALL_GETEUID: usize = 175;
 const SYSCALL_GETGID: usize = 176;
 const SYSCALL_GETEGID: usize = 177;
+const SYSCALL_SOCKET: usize = 198;
+const SYSCALL_SENDTO: usize = 206;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_CLONE: usize = 220;
@@ -213,6 +215,9 @@ const O_NONBLOCK: usize = 0o4000;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
+const AF_UNIX: usize = 1;
+const SOCK_DGRAM: usize = 2;
+const SOCK_SUPPORTED_DIAG_FLAGS: usize = O_NONBLOCK | O_CLOEXEC;
 const AT_SYMLINK_NOFOLLOW: usize = 0x100;
 const F_DUPFD: usize = 0;
 const F_GETFD: usize = 1;
@@ -7076,6 +7081,7 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
 
 fn print_unsupported_syscall_detail(frame: &TrapFrame) {
     match frame.reg(17) {
+        SYSCALL_SOCKET => print_socket_unsupported_detail(frame),
         SYSCALL_NANOSLEEP => print_nanosleep_unsupported_detail(frame),
         SYSCALL_RT_SIGTIMEDWAIT => print_rt_sigtimedwait_unsupported_detail(frame),
         SYSCALL_CLONE => print_clone_vfork_boundary(frame, "unsupported_detail"),
@@ -7169,6 +7175,31 @@ fn print_clone_vfork_boundary(frame: &TrapFrame, stage: &str) {
         crate::arch::riscv64::sbi::putstr(" first_unreaped_pid=0 first_unreaped_status=0 first_unreaped_wait_status=0 first_unreaped_pidfd_fd=");
         print_decimal(usize::MAX);
     }
+}
+
+fn print_socket_unsupported_detail(frame: &TrapFrame) {
+    let domain = frame.reg(10);
+    let socket_type = frame.reg(11);
+    let protocol = frame.reg(12);
+    let type_base = socket_type & !SOCK_SUPPORTED_DIAG_FLAGS;
+    let sock_cloexec = socket_type & O_CLOEXEC != 0;
+    let sock_nonblock = socket_type & O_NONBLOCK != 0;
+    let syslog_like = domain == AF_UNIX && type_base == SOCK_DGRAM && protocol == 0;
+
+    crate::arch::riscv64::sbi::putstr(" name=socket domain_raw=");
+    print_decimal(domain);
+    crate::arch::riscv64::sbi::putstr(" type_raw=0x");
+    print_hex(socket_type);
+    crate::arch::riscv64::sbi::putstr(" protocol_raw=");
+    print_decimal(protocol);
+    crate::arch::riscv64::sbi::putstr(" type_base=");
+    print_decimal(type_base);
+    crate::arch::riscv64::sbi::putstr(" sock_cloexec=");
+    print_bool_digit(sock_cloexec);
+    crate::arch::riscv64::sbi::putstr(" sock_nonblock=");
+    print_bool_digit(sock_nonblock);
+    crate::arch::riscv64::sbi::putstr(" af_unix_dgram_syslog_like=");
+    print_bool_digit(syslog_like);
 }
 
 fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {
@@ -7840,6 +7871,8 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_GETEUID => "geteuid",
         SYSCALL_GETGID => "getgid",
         SYSCALL_GETEGID => "getegid",
+        SYSCALL_SOCKET => "socket",
+        SYSCALL_SENDTO => "sendto",
         SYSCALL_BRK => "brk",
         SYSCALL_MUNMAP => "munmap",
         SYSCALL_CLONE => "clone",
