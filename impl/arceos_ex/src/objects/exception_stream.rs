@@ -22,8 +22,8 @@ use super::{
         UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
         UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
         USER_CHILD_PID, USER_SIGNAL_COUNT,
-        USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_WAIT4_ALL_CHILDREN,
-        USER_WAIT4_WUNTRACED,
+        USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_SUPPLEMENTARY_GROUP_MAX,
+        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
     },
 };
 
@@ -102,6 +102,7 @@ const SYSCALL_SETPGID: usize = 154;
 const SYSCALL_GETPGID: usize = 155;
 const SYSCALL_GETSID: usize = 156;
 const SYSCALL_SETSID: usize = 157;
+const SYSCALL_SETGROUPS: usize = 159;
 const SYSCALL_UNAME: usize = 160;
 const SYSCALL_GETTIMEOFDAY: usize = 169;
 const SYSCALL_GETPID: usize = 172;
@@ -733,6 +734,7 @@ pub struct SyscallTable {
     uname_supported: bool,
     setuid_supported: bool,
     setgid_supported: bool,
+    setgroups_supported: bool,
     rt_sigprocmask_supported: bool,
     rt_sigaction_supported: bool,
     rt_sigtimedwait_supported: bool,
@@ -816,6 +818,9 @@ pub struct SyscallTable {
     uname_full_uts_namespace_deferred: bool,
     setuid_routes_to_user_init_process: bool,
     setgid_routes_to_user_init_process: bool,
+    setgroups_routes_to_user_init_process: bool,
+    setgroups_root_first_slice: bool,
+    setgroups_bounded_supplementary_groups_first_slice: bool,
     credentials_full_linux_model_deferred: bool,
     rt_sigprocmask_routes_to_user_init_process: bool,
     rt_sigprocmask_sigsetsize_bound: bool,
@@ -915,6 +920,7 @@ pub struct SyscallTable {
     uname_observed: AtomicU8,
     setuid_observed: AtomicU8,
     setgid_observed: AtomicU8,
+    setgroups_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
     rt_sigaction_observed: AtomicU8,
     rt_sigtimedwait_observed: AtomicU8,
@@ -969,6 +975,7 @@ impl SyscallTable {
             uname_supported: false,
             setuid_supported: false,
             setgid_supported: false,
+            setgroups_supported: false,
             rt_sigprocmask_supported: false,
             rt_sigaction_supported: false,
             rt_sigtimedwait_supported: false,
@@ -1052,6 +1059,9 @@ impl SyscallTable {
             uname_full_uts_namespace_deferred: false,
             setuid_routes_to_user_init_process: false,
             setgid_routes_to_user_init_process: false,
+            setgroups_routes_to_user_init_process: false,
+            setgroups_root_first_slice: false,
+            setgroups_bounded_supplementary_groups_first_slice: false,
             credentials_full_linux_model_deferred: false,
             rt_sigprocmask_routes_to_user_init_process: false,
             rt_sigprocmask_sigsetsize_bound: false,
@@ -1151,6 +1161,7 @@ impl SyscallTable {
             uname_observed: AtomicU8::new(0),
             setuid_observed: AtomicU8::new(0),
             setgid_observed: AtomicU8::new(0),
+            setgroups_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
             rt_sigaction_observed: AtomicU8::new(0),
             rt_sigtimedwait_observed: AtomicU8::new(0),
@@ -1271,6 +1282,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn setgid_supported(&self) -> bool {
         self.setgid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgroups_supported(&self) -> bool {
+        self.setgroups_supported
     }
 
     #[allow(dead_code)]
@@ -1596,6 +1612,21 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn setgid_routes_to_user_init_process(&self) -> bool {
         self.setgid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgroups_routes_to_user_init_process(&self) -> bool {
+        self.setgroups_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgroups_root_first_slice(&self) -> bool {
+        self.setgroups_root_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn setgroups_bounded_supplementary_groups_first_slice(&self) -> bool {
+        self.setgroups_bounded_supplementary_groups_first_slice
     }
 
     #[allow(dead_code)]
@@ -1949,6 +1980,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn setgroups_observed(&self) -> bool {
+        self.setgroups_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn rt_sigprocmask_observed(&self) -> bool {
         self.rt_sigprocmask_observed.load(Ordering::Acquire) != 0
     }
@@ -2078,6 +2114,7 @@ impl SyscallTable {
         self.uname_supported = true;
         self.setuid_supported = true;
         self.setgid_supported = true;
+        self.setgroups_supported = true;
         self.rt_sigprocmask_supported = true;
         self.rt_sigaction_supported = true;
         self.rt_sigtimedwait_supported = true;
@@ -2161,6 +2198,9 @@ impl SyscallTable {
         self.uname_full_uts_namespace_deferred = true;
         self.setuid_routes_to_user_init_process = true;
         self.setgid_routes_to_user_init_process = true;
+        self.setgroups_routes_to_user_init_process = true;
+        self.setgroups_root_first_slice = true;
+        self.setgroups_bounded_supplementary_groups_first_slice = true;
         self.credentials_full_linux_model_deferred = true;
         self.rt_sigprocmask_routes_to_user_init_process = true;
         self.rt_sigprocmask_sigsetsize_bound = true;
@@ -2662,6 +2702,22 @@ impl SyscallTable {
         }
 
         syscall_table_setgid(self, frame);
+    }
+
+    pub fn setgroups(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.setgroups_supported
+            || !self.credentials_usercopy_ready
+            || !self.setgroups_routes_to_user_init_process
+            || !self.setgroups_root_first_slice
+            || !self.setgroups_bounded_supplementary_groups_first_slice
+            || !self.credentials_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_setgroups(self, frame);
     }
 
     pub fn rt_sigprocmask(&self, frame: &mut TrapFrame) {
@@ -3288,6 +3344,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_SETPGID => table.setpgid(frame),
         SYSCALL_GETSID => table.getsid(frame),
         SYSCALL_SETSID => table.setsid(frame),
+        SYSCALL_SETGROUPS => table.setgroups(frame),
         SYSCALL_UNAME => table.uname(frame),
         SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
         SYSCALL_GETPID => table.getpid(frame),
@@ -4453,6 +4510,55 @@ fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     table.setgid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
+    let size = frame.reg(10);
+    let list_ptr = frame.reg(11);
+    let euid = {
+        let process = &crate::context::context_ref().user_init_process;
+        if process.credentials_syscall_ready() {
+            Some(process.euid())
+        } else {
+            None
+        }
+    };
+    let Some(euid) = euid else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    if euid != 0 {
+        print_setgroups_error_detail(size, list_ptr, EPERM, false, 0);
+        complete_error_syscall(frame, EPERM);
+        return;
+    }
+    if size > USER_SUPPLEMENTARY_GROUP_MAX {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let first_gid = if size == 0 {
+        None
+    } else {
+        let Some(gid) = read_user_u32(list_ptr) else {
+            print_setgroups_error_detail(size, list_ptr, EFAULT, false, 0);
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        Some(gid as usize)
+    };
+
+    if !crate::context::context()
+        .user_init_process
+        .set_supplementary_groups_root_slice(size, first_gid)
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.setgroups_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
 }
 
@@ -8238,6 +8344,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_SETPGID => "setpgid",
         SYSCALL_GETSID => "getsid",
         SYSCALL_SETSID => "setsid",
+        SYSCALL_SETGROUPS => "setgroups",
         SYSCALL_UNAME => "uname",
         SYSCALL_GETTIMEOFDAY => "gettimeofday",
         SYSCALL_GETPID => "getpid",
@@ -8384,6 +8491,37 @@ fn print_connect_path_error_detail(fd: usize, errno: usize, path: &[u8]) {
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 fn print_connect_path_error_detail(_fd: usize, _errno: usize, _path: &[u8]) {}
+
+#[cfg(checkpoint_handler_user_syscall_error)]
+fn print_setgroups_error_detail(
+    size: usize,
+    list_ptr: usize,
+    errno: usize,
+    copied: bool,
+    first_gid: usize,
+) {
+    crate::arch::riscv64::sbi::putstr("syscall setgroups detail size=");
+    print_decimal(size);
+    crate::arch::riscv64::sbi::putstr(" list=0x");
+    print_hex(list_ptr);
+    crate::arch::riscv64::sbi::putstr(" errno=");
+    print_decimal(errno);
+    crate::arch::riscv64::sbi::putstr(" copied=");
+    print_bool_digit(copied);
+    crate::arch::riscv64::sbi::putstr(" first_gid=");
+    print_decimal(first_gid);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_error))]
+fn print_setgroups_error_detail(
+    _size: usize,
+    _list_ptr: usize,
+    _errno: usize,
+    _copied: bool,
+    _first_gid: usize,
+) {
+}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_execve_close_on_exec_report(report: CloseOnExecReport) {

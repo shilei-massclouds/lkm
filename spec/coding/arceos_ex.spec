@@ -1583,9 +1583,9 @@ type ArceosExStartupPhaseCodingMust {
          * the next post-auth boundary as socket(198) with
          * AF_UNIX/SOCK_STREAM/SOCK_CLOEXEC/protocol 0.  The current socket
          * first slice only creates an unconnected fd for that stream shape;
-         * complete inode ownership, TTY ownership, credentials, connect,
-         * sendto, network sockets and setgroups(159) remain out of scope
-         * here.  The later observed
+         * complete inode ownership, TTY ownership, complete credentials,
+         * connect, sendto, network sockets and full supplementary group
+         * semantics remain out of scope here.  The later observed
          * boundary is clone_vfork stage=child_records_full with
          * completed_records=8, record_capacity=8, active_slot_reusable=1,
          * next_child_pid=11 and no first_unreaped_pid.  Therefore completed
@@ -1873,20 +1873,22 @@ type ArceosExStartupPhaseCodingMust {
          * . / .. components needed by Alpine /var/run -> ../run, clamped at the
          * current FsStruct.root; this still does not create or connect sockets.
          * Missing pathname returns ENOENT; existing pathname returns
-         * ECONNREFUSED because no Unix socket/listener model is present. User
-         * sockaddr copy fault returns EFAULT. Unsupported connect diagnostics
+         * ECONNREFUSED because no Unix socket/listener model is present. The
+         * missing /var/run/nscd/socket focused rerun now reaches the next
+         * direct boundary: setgroups(159) with gidsetsize=1 and a user gid_t
+         * list pointer. User sockaddr copy fault returns EFAULT. Unsupported connect diagnostics
          * still name connect, print fd, sockaddr pointer, addrlen,
          * copy/family/validate/path classification and fd_unix_socket0, then
          * return ENOSYS for zero/oversized addrlen, invalid family/length,
          * non-AF_UNIX, abstract path, non-UnixSocket0 fd, non-pathname shape or
          * unmapped VFS failures. It must not install fds, mutate fd state,
          * write user memory, create a Unix socket peer/listener lookup,
-         * implement sendto(206), setgroups(159), network stack or complete
+         * implement sendto(206), network stack or complete
          * credentials. Focused evidence after the diagnostic classifies the
          * early addrlen=110 connects as pathname AF_UNIX sockets under
          * /run/utmps, and the post-auth fchown/fchmod boundary as addrlen=24
-         * path /var/run/nscd/socket, expected to return ENOENT when that path
-         * is absent from the current rootfs.
+         * path /var/run/nscd/socket, now returning ENOENT when that path is
+         * absent from the current rootfs and exposing setgroups(159).
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -1972,6 +1974,23 @@ type ArceosExStartupPhaseCodingMust {
          * orphan pgrp and complete job-control semantics remain out of slice.
          * geteuid/getegid/getresuid/getresgid must read the existing root
          * credential substate and write uid_t/gid_t user results for getres*.
+         * setgroups(159) must use local Linux 6.12
+         * include/uapi/asm-generic/unistd.h::__NR_setgroups=159 and
+         * kernel/groups.c::SYSCALL_DEFINE2(setgroups) as the reference. The
+         * current first slice stores only UserInitProcess's bounded
+         * supplementary group view: effective uid 0 may clear it with size 0
+         * or copy one 32-bit gid_t from userspace with size 1; copy fault
+         * returns EFAULT, non-root returns EPERM, and size > 1 remains an
+         * unsupported ENOSYS diagnostic rather than claiming NGROUPS_MAX.
+         * The focused OpenRC login rerun after this slice observes
+         * /var/run/nscd/socket still returning ENOENT, setgroups(159)
+         * returning 0, and the new direct boundary at setgid(144) with
+         * gid=100 returning EPERM and printing "setgid: Operation not
+         * permitted". That evidence is recorded only; this slice must not
+         * broaden setgid, credential or TTY ownership semantics.
+         * getgroups(158), full group_info allocation/sort, capabilities, user
+         * namespaces, LSM, task cred COW/RCU, file permission checks, TTY
+         * ownership and inode ownership/mode semantics remain trimmed.
          * uname must copy the six-field 65-byte new_utsname layout using the
          * static local Linux 6.12 generated UTS values. getcwd must use the
          * inherited FsStruct root/pwd view; the current slice covers only root
@@ -3279,11 +3298,11 @@ type ArceosExBlockIoCodingMust {
          * existing fast symlinks and . / .. path components only as pathname
          * lookup semantics for cases such as /var/run -> ../run, returns
          * ENOENT for missing pathname and ECONNREFUSED for existing pathname
-         * with no socket/listener model, and keeps all other connect/sendto/
-         * setgroups shapes as ENOSYS diagnostics. The diagnostic classifies
-         * the post-auth direct boundary as libc/NSS nscd pathname connect to
-         * /var/run/nscd/socket, not an abstract syslog socket and not
-         * setgroups(159).
+         * with no socket/listener model, and keeps all other connect/sendto
+         * shapes as ENOSYS diagnostics. That nscd pathname miss now returns
+         * ENOENT; setgroups(159) now returns 0 for the observed
+         * gidsetsize=1 shape, and the post-auth direct boundary has moved to
+         * setgid(144) with gid=100 returning EPERM.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

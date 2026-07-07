@@ -57,6 +57,7 @@ pub const USER_PAGE_SIZE: usize = 4096;
 pub const USER_PARENT_WAIT_STACK_PROBE_LEN: usize = 512;
 pub const USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX: usize = 768;
 pub const USER_COMPLETED_CHILD_RECORD_CAPACITY: usize = 8;
+pub const USER_SUPPLEMENTARY_GROUP_MAX: usize = 1;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_ORDER: usize = 2;
 #[cfg(app_user_boot)]
@@ -3415,6 +3416,9 @@ pub struct UserInitProcess {
     sgid: usize,
     fsuid: usize,
     fsgid: usize,
+    supplementary_group_count: usize,
+    supplementary_groups: [usize; USER_SUPPLEMENTARY_GROUP_MAX],
+    setgroups_observed: bool,
     pid_read_observed: bool,
     ppid_zero_first_slice: bool,
     ppid_read_observed: bool,
@@ -5632,6 +5636,9 @@ impl UserInitProcess {
             sgid: 0,
             fsuid: 0,
             fsgid: 0,
+            supplementary_group_count: 0,
+            supplementary_groups: [0; USER_SUPPLEMENTARY_GROUP_MAX],
+            setgroups_observed: false,
             pid_read_observed: false,
             ppid_zero_first_slice: false,
             ppid_read_observed: false,
@@ -5845,6 +5852,18 @@ impl UserInitProcess {
         self.fsgid
     }
 
+    pub const fn supplementary_group_count(&self) -> usize {
+        self.supplementary_group_count
+    }
+
+    pub const fn supplementary_group(&self, index: usize) -> Option<usize> {
+        if index < self.supplementary_group_count && index < USER_SUPPLEMENTARY_GROUP_MAX {
+            Some(self.supplementary_groups[index])
+        } else {
+            None
+        }
+    }
+
     pub const fn pid_read_observed(&self) -> bool {
         self.pid_read_observed
     }
@@ -5983,6 +6002,10 @@ impl UserInitProcess {
 
     pub const fn gid_set_observed(&self) -> bool {
         self.gid_set_observed
+    }
+
+    pub const fn setgroups_observed(&self) -> bool {
+        self.setgroups_observed
     }
 
     pub const fn signal_state_inherited(&self) -> bool {
@@ -6204,6 +6227,9 @@ impl UserInitProcess {
         self.sgid = 0;
         self.fsuid = 0;
         self.fsgid = 0;
+        self.supplementary_group_count = 0;
+        self.supplementary_groups = [0; USER_SUPPLEMENTARY_GROUP_MAX];
+        self.setgroups_observed = false;
         self.session_leader_first_slice = true;
         self.session_id = super::rest_init::KERNEL_INIT_PID;
         self.session_id_read_observed = false;
@@ -6776,6 +6802,36 @@ impl UserInitProcess {
         self.sgid = gid;
         self.fsgid = gid;
         self.gid_set_observed = true;
+        true
+    }
+
+    pub fn set_supplementary_groups_root_slice(
+        &mut self,
+        size: usize,
+        first_gid: Option<usize>,
+    ) -> bool {
+        if !self.credentials_syscall_ready()
+            || self.euid != 0
+            || size > USER_SUPPLEMENTARY_GROUP_MAX
+        {
+            return false;
+        }
+
+        let gid = if size == 1 {
+            let Some(gid) = first_gid else {
+                return false;
+            };
+            gid
+        } else {
+            0
+        };
+
+        self.supplementary_groups = [0; USER_SUPPLEMENTARY_GROUP_MAX];
+        self.supplementary_group_count = size;
+        if size == 1 {
+            self.supplementary_groups[0] = gid;
+        }
+        self.setgroups_observed = true;
         true
     }
 

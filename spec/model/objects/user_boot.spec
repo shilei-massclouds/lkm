@@ -279,6 +279,7 @@ predicate syscall_table_setpgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setsid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
+predicate syscall_table_setgroups_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigtimedwait_supported<T>(table: T) -> bool;
@@ -373,6 +374,9 @@ predicate syscall_setsid_process_group_leader_eperm_first_slice<T>(table: T) -> 
 predicate syscall_setsid_child_success_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setgroups_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setgroups_root_first_slice<T>(table: T) -> bool;
+predicate syscall_setgroups_bounded_supplementary_groups_first_slice<T>(table: T) -> bool;
 predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_rt_sigprocmask_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigprocmask_sigsetsize_bound<T>(table: T) -> bool;
@@ -494,6 +498,7 @@ predicate syscall_table_setpgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setsid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
+predicate syscall_table_setgroups_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigtimedwait_observed<T>(table: T) -> bool;
@@ -521,6 +526,7 @@ predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool
 predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
 predicate user_init_process_credentials_inherited<T, K>(process: T, task: K) -> bool;
 predicate user_init_process_root_credentials_bound<T>(process: T) -> bool;
+predicate user_init_process_supplementary_groups_bound<T>(process: T) -> bool;
 predicate user_init_process_credentials_capability_model_deferred<T>(process: T) -> bool;
 predicate user_init_process_signal_state_inherited<T, K>(process: T, task: K) -> bool;
 predicate user_init_process_signal_runtime_bound<T>(process: T) -> bool;
@@ -607,6 +613,7 @@ predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
 predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
 predicate user_init_process_gid_set_observed<T>(process: T) -> bool;
+predicate user_init_process_setgroups_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigprocmask_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigaction_observed<T>(process: T) -> bool;
 predicate user_init_process_rt_sigtimedwait_observed<T>(process: T) -> bool;
@@ -1237,6 +1244,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_setsid_supported(self);
                     syscall_table_setuid_supported(self);
                     syscall_table_setgid_supported(self);
+                    syscall_table_setgroups_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
                     syscall_table_rt_sigaction_supported(self);
                     syscall_table_rt_sigtimedwait_supported(self);
@@ -1308,16 +1316,23 @@ object SyscallTable: ResourceObject {
                      * before the final socket pathname miss. Missing
                      * pathname returns ENOENT; existing pathname returns
                      * ECONNREFUSED because peer/listener state is still
-                     * unmodeled. Copy fault returns EFAULT. All invalid
+                     * unmodeled. Focused rerun after the missing
+                     * /var/run/nscd/socket case reaches setgroups(159)
+                     * with gidsetsize=1 and a user gid_t list pointer; the
+                     * SetGroups action closes that shape, and the later
+                     * post-SetGroups rerun records setgid(144) gid=100 EPERM.
+                     * Copy fault returns EFAULT. All invalid
                      * length/family, non-AF_UNIX, abstract, non-UnixSocket0
                      * and non-pathname shapes still return ENOSYS with the
                      * stable connect diagnostic. The focused diagnostic run
                      * classifies the early OpenRC 110-byte sockaddr calls as
                      * pathname sockets under /run/utmps, while the post-auth
-                     * fchown/fchmod boundary is a 24-byte pathname sockaddr
+                     * fchown/fchmod boundary was a 24-byte pathname sockaddr
                      * for /var/run/nscd/socket; both satisfy the AF_UNIX
                      * unix_validate_addr() length/family gate, and missing
-                     * paths may now return ENOENT. The
+                     * paths may now return ENOENT, exposing setgroups(159);
+                     * after the SetGroups slice that boundary moves to
+                     * setgid(144) gid=100 EPERM. The
                      * earlier syslog-like AF_UNIX/SOCK_DGRAM path and all
                      * remaining socket operations keep using the unsupported
                      * diagnostic:
@@ -1334,6 +1349,9 @@ object SyscallTable: ResourceObject {
                     syscall_socket_routes_to_files_struct(self, FilesStruct);
                     syscall_socket_af_unix_stream_first_slice(self);
                     syscall_socket_backend_full_linux_model_deferred(self);
+                    syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setgroups_root_first_slice(self);
+                    syscall_setgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);
                     syscall_rt_sigtimedwait_copies_wait_mask(self);
@@ -1390,6 +1408,7 @@ object SyscallTable: ResourceObject {
             syscall_table_setsid_supported(self);
             syscall_table_setuid_supported(self);
             syscall_table_setgid_supported(self);
+            syscall_table_setgroups_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
             syscall_table_rt_sigaction_supported(self);
             syscall_table_rt_sigtimedwait_supported(self);
@@ -1452,6 +1471,9 @@ object SyscallTable: ResourceObject {
             syscall_exit_group_pid1_shutdown_child_wait4_split(self);
             syscall_setsid_process_group_leader_eperm_first_slice(self);
             syscall_setsid_child_success_first_slice(self, UserChildProcess);
+            syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+            syscall_setgroups_root_first_slice(self);
+            syscall_setgroups_bounded_supplementary_groups_first_slice(self);
         }
 
         actions {
@@ -1840,8 +1862,8 @@ object SyscallTable: ResourceObject {
                  * metadata, and returns success. Bad fd returns EBADF through
                  * the common fd lookup path. Full inode ownership mutation,
                  * permission/capability checks, TTY ownership, path chown,
-                 * idmapped mounts, namespaces, LSM and setgroups(159) remain
-                 * deferred.
+                 * idmapped mounts, namespaces, LSM and full supplementary
+                 * group credential semantics remain deferred.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -2421,6 +2443,49 @@ object SyscallTable: ResourceObject {
                     syscall_credentials_full_linux_model_deferred(self);
                     user_init_process_gid_set_observed(UserInitProcess);
                     syscall_table_setgid_observed(self);
+                }
+            }
+
+            on Action::SetGroups {
+                /*
+                 * Linux 6.12 RISC-V exposes setgroups(2) as syscall number
+                 * 159 in include/uapi/asm-generic/unistd.h, implemented by
+                 * kernel/groups.c::SYSCALL_DEFINE2(setgroups). Linux checks
+                 * may_setgroups(), bounds gidsetsize by NGROUPS_MAX, copies a
+                 * gid_t list from userspace, sorts it and commits a new group
+                 * info through current credentials. The current OpenRC login
+                 * evidence reaches setgroups(gidsetsize=1, grouplist=<user
+                 * gid_t *>) immediately after the /var/run/nscd/socket
+                 * connect(203) ENOENT fallback. This first slice keeps only a
+                 * bounded supplementary group view on UserInitProcess: root
+                 * effective uid may clear the list with size 0 or copy one
+                 * 32-bit gid_t from userspace with size 1; copy fault returns
+                 * EFAULT, non-root returns EPERM, and size > 1 remains an
+                 * unsupported diagnostic/ENOSYS boundary rather than claiming
+                 * full NGROUPS_MAX credentials support. The focused rerun
+                 * after this slice confirms /var/run/nscd/socket still
+                 * returns ENOENT and setgroups returns 0; the new direct
+                 * boundary is setgid(144) with gid=100 returning EPERM, which
+                 * is recorded as evidence only for the next slice.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_credentials_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::SetSupplementaryGroups;
+                }
+
+                ensures {
+                    syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setgroups_root_first_slice(self);
+                    syscall_setgroups_bounded_supplementary_groups_first_slice(self);
+                    syscall_credentials_full_linux_model_deferred(self);
+                    user_init_process_supplementary_groups_bound(UserInitProcess);
+                    user_init_process_setgroups_observed(UserInitProcess);
+                    syscall_table_setgroups_observed(self);
                 }
             }
 
@@ -3207,6 +3272,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_trap_frame_bound(self, UserTrapFrame);
                     user_init_process_credentials_inherited(self, KernelInitTask);
                     user_init_process_root_credentials_bound(self);
+                    user_init_process_supplementary_groups_bound(self);
                     user_init_process_credentials_capability_model_deferred(self);
                     user_init_process_signal_state_inherited(self, KernelInitTask);
                     user_init_process_signal_runtime_bound(self);
@@ -3244,6 +3310,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_trap_frame_bound(self, UserTrapFrame);
             user_init_process_credentials_inherited(self, KernelInitTask);
             user_init_process_root_credentials_bound(self);
+            user_init_process_supplementary_groups_bound(self);
             user_init_process_credentials_capability_model_deferred(self);
             user_init_process_signal_state_inherited(self, KernelInitTask);
             user_init_process_signal_runtime_bound(self);
@@ -3281,6 +3348,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_trap_frame_bound(self, UserTrapFrame);
                     user_init_process_credentials_inherited(self, KernelInitTask);
                     user_init_process_root_credentials_bound(self);
+                    user_init_process_supplementary_groups_bound(self);
                     user_init_process_signal_state_inherited(self, KernelInitTask);
                     user_init_process_signal_runtime_bound(self);
                     user_init_process_thread_signal_state_bound(self);
@@ -3321,6 +3389,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
             user_init_process_credentials_inherited(self, KernelInitTask);
             user_init_process_root_credentials_bound(self);
+            user_init_process_supplementary_groups_bound(self);
             user_init_process_credentials_capability_model_deferred(self);
             user_init_process_signal_state_inherited(self, KernelInitTask);
             user_init_process_signal_runtime_bound(self);
@@ -3631,6 +3700,27 @@ object UserInitProcess: ResourceObject {
                     user_init_process_root_credentials_bound(self);
                     user_init_process_credentials_capability_model_deferred(self);
                     user_init_process_gid_set_observed(self);
+                }
+            }
+
+            on Action::SetSupplementaryGroups {
+                /*
+                 * First slice only stores the current bounded supplementary
+                 * group view on UserInitProcess. It does not allocate a Linux
+                 * group_info object, sort arbitrary group arrays, copy task
+                 * credentials, update file permission checks, or attach the
+                 * data to inode/TTY ownership semantics.
+                 */
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_supplementary_groups_bound(self);
+                    user_init_process_credentials_capability_model_deferred(self);
+                    user_init_process_setgroups_observed(self);
                 }
             }
 

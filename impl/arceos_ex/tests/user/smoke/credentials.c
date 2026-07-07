@@ -19,6 +19,7 @@ int smoke_credentials(void)
 	gid_t rgid;
 	gid_t egid;
 	gid_t sgid;
+	gid_t groups[1];
 	long rc;
 
 	rc = syscall(SYS_getuid);
@@ -81,6 +82,15 @@ int smoke_credentials(void)
 	}
 	if (SAY_LITERAL("syscall setgid ok\n") < 0) {
 		return 49;
+	}
+
+	groups[0] = 0;
+	rc = syscall(SYS_setgroups, 1, groups);
+	if (rc != 0) {
+		return 73;
+	}
+	if (SAY_LITERAL("syscall setgroups ok\n") < 0) {
+		return 74;
 	}
 
 	rc = syscall(SYS_setuid, 0);
