@@ -7092,16 +7092,32 @@ fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
     None
 }
 
-#[cfg(app_user_boot)]
 fn copy_execve_cstr(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
-    if user_ptr == 0
-        || !crate::context::context_ref()
-            .user_address_space
-            .user_range_mapped(user_ptr, dst.len())
-    {
+    if dst.is_empty() || user_ptr == 0 {
         return None;
     }
-    copy_cstr_from_user(user_ptr, dst)
+
+    let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
+    let mut index = 0usize;
+    while index < dst.len() {
+        let Some(byte_ptr) = user_ptr.checked_add(index) else {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return None;
+        };
+        if !user_copy_range_accessible(byte_ptr, 1, UserFaultAccess::Load) {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return None;
+        }
+        let byte = unsafe { core::ptr::read_volatile(byte_ptr as *const u8) };
+        if byte == 0 {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return (index != 0).then_some(index);
+        }
+        dst[index] = byte;
+        index += 1;
+    }
+    crate::arch::riscv64::csr::restore_user_memory_access(saved);
+    None
 }
 
 #[cfg(app_user_boot)]
@@ -8035,15 +8051,8 @@ fn print_execve_cstr_copy(label: &str, user_ptr: usize) {
         crate::arch::riscv64::sbi::putstr("NULL");
         return;
     }
-    if !crate::context::context_ref()
-        .user_address_space
-        .user_range_mapped(user_ptr, USER_PATH_MAX)
-    {
-        crate::arch::riscv64::sbi::putstr("skipped");
-        return;
-    }
     let mut bytes = [0u8; USER_PATH_MAX];
-    if let Some(len) = copy_cstr_from_user(user_ptr, &mut bytes) {
+    if let Some(len) = copy_execve_cstr(user_ptr, &mut bytes) {
         crate::arch::riscv64::sbi::putchar(b'"');
         print_path_bytes(&bytes[..len]);
         crate::arch::riscv64::sbi::putchar(b'"');

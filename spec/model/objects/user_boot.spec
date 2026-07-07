@@ -2941,15 +2941,23 @@ object SyscallTable: ResourceObject {
                  * envp={"SHLVL=1", "PWD=/", NULL}) and then tries
                  * "/usr/bin/ls" if the first attempt returns ENOSYS.  This
                  * first slice accepts the child-continuation path, copies the
-                 * filename and a bounded argv vector.  The bounded argv copy is
-                 * intentionally small but covers the observed OpenRC getty
-                 * shape argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is
-                 * only observed/deferred and is not copied into the new stack
-                 * in this slice.  The implementation records stable
-                 * filename_copy or argv_copy failure stage/reason facts before
-                 * returning EFAULT for filename or argv pointer/string copy
-                 * failure, and returns ENOSYS with stable diagnostics when the
-                 * bounded argv capacity is exceeded.  It reuses the
+                 * filename and a bounded argv vector.  Filename and argv
+                 * strings use an execve-only bounded C-string copy: each byte
+                 * up to the first NUL must be individually readable, but the
+                 * entire USER_PATH_MAX range after the user pointer need not
+                 * be mapped.  Empty strings, address overflow, unreadable
+                 * bytes or reaching USER_PATH_MAX without NUL remain copy
+                 * failures.  The bounded argv copy is intentionally small but
+                 * covers the observed OpenRC getty shape
+                 * argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is only
+                 * observed/deferred and is not copied into the new stack in
+                 * this slice.  Non-execve path syscall C-string copies keep
+                 * their existing path-copy semantics.  The implementation
+                 * records stable filename_copy or argv_copy failure
+                 * stage/reason facts before returning EFAULT for filename or
+                 * argv pointer/string copy failure, and returns ENOSYS with
+                 * stable diagnostics when the bounded argv capacity is
+                 * exceeded.  It reuses the
                  * current UserBootPayload VFS/ELF/interpreter/UserStack/
                  * UserAddressSpace loading shape to build a replacement user
                  * mm.  This follows the

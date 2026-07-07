@@ -1905,7 +1905,11 @@ type ArceosExStartupPhaseCodingMust {
          * Supported execve(221) EFAULT diagnostics must print the filename,
          * argv and envp user pointers, child-continuation fact, stable
          * failure stage/reason/detail, and best-effort filename/argv/envp
-         * prefix copies. Filename-copy failure is reported as
+         * prefix copies. Execve filename/argv C-string copies, including
+         * these diagnostic prefix copies, use bounded per-byte readability up
+         * to the first NUL and do not require the whole USER_PATH_MAX range to
+         * be mapped; non-execve path syscall copies keep their existing
+         * mapped-range guard. Filename-copy failure is reported as
          * filename_copy; argv pointer or string-copy failure is reported as
          * argv_copy. These fields are diagnostic only and must not change the
          * returned errno, checkpoint sequence, user memory or default output.
@@ -3320,10 +3324,12 @@ type ArceosExBlockIoCodingMust {
          * EPERM before this slice. The current bounded setuid slice accepts
          * that root-euid transition. The focused rerun after this slice
          * confirms setuid(146, uid=1000) returns 0, login reaches MOTD output,
-         * and the new fatal boundary is login shell execve(221) returning
-         * EFAULT / "login: can't execute '/bin/sh': Bad address"; that execve
-         * boundary is evidence for a later slice, not part of this setuid
-         * change.
+         * and later execve diagnostics identify the login shell EFAULT as
+         * fail_stage=filename_copy / fail_reason=filename_copy. The following
+         * execve C-string copy slice closes that boundary with per-byte
+         * readability; its focused rerun reaches the login shell prompt and
+         * records the next boundary as shell /bin/ls clone(220) unsupported
+         * plus job-control errors, not as part of the setuid change.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input
