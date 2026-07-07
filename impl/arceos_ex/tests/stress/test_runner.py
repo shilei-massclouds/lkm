@@ -370,6 +370,7 @@ class StressRunnerTests(unittest.TestCase):
         case = {
             "paired": {
                 "checkpoint_scope": ["EntryPreludePhase.Started"],
+                "checkpoint_scope_max_counts": {"UserExec.MainElfReady": 2},
                 "arceos_ex": {"command": ["make", "run"]},
                 "linux": {
                     "working_directory": "../linux-6.12",
@@ -387,8 +388,20 @@ class StressRunnerTests(unittest.TestCase):
         }
         config = runner._paired_config(case, Path("case.toml"), Path.cwd(), Path.cwd())
         self.assertEqual(config["checkpoint_scope"], ["EntryPreludePhase.Started"])
+        self.assertEqual(config["checkpoint_scope_max_counts"], {"UserExec.MainElfReady": 2})
         self.assertIn("ARCH=riscv", config["linux"]["build_command"])
         self.assertTrue(config["linux"]["stop_after_stress_mem"])
+
+    def test_rc_local_difftest_config_preserves_dotted_checkpoint_count_keys(self) -> None:
+        arceos_ex_root = Path(__file__).resolve().parents[2]
+        repo_root = arceos_ex_root.parents[1]
+        case_path = arceos_ex_root / "tests/stress/cases/rc-local-difftest.toml"
+        case = runner._load_toml(case_path)
+
+        config = runner._paired_config(case, case_path, repo_root, repo_root)
+
+        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.MainElfReady"], 2)
+        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.TrapFrameReady"], 2)
 
     def test_paired_stress_mem_parses_both_sides(self) -> None:
         arceos_text = "AV9\ncheckpoint: TrampolineVm.Online\n"
@@ -478,6 +491,32 @@ class StressRunnerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(diff["observed_but_not_compared"]["linux"][0]["count"], 1)
+
+    def test_paired_checkpoint_diff_limits_scoped_checkpoint_counts(self) -> None:
+        left = runner._extract_events(
+            "checkpoint: A\n"
+            "checkpoint: UserExec.MainElfReady\n"
+            "checkpoint: UserExec.MainElfReady\n"
+        )
+        right = runner._extract_events(
+            "checkpoint: A\n"
+            "checkpoint: UserExec.MainElfReady\n"
+            "checkpoint: UserExec.MainElfReady\n"
+            "checkpoint: UserExec.MainElfReady\n"
+        )
+        diff = runner._paired_checkpoint_diff(
+            left,
+            right,
+            ["A", "UserExec.MainElfReady", "UserExec.MainElfReady"],
+            checkpoint_scope_max_counts={"UserExec.MainElfReady": 2},
+            left_label="arceos_ex",
+            right_label="linux",
+        )
+
+        self.assertTrue(diff["passed"])
+        observed = diff["observed_but_not_compared"]
+        self.assertEqual(observed["linux"][0]["name"], "UserExec.MainElfReady")
+        self.assertEqual(observed["linux"][0]["excluded_reason"], "scope_count_limit")
 
     def test_report_lists_observed_but_not_compared_checkpoints(self) -> None:
         diff = runner._paired_checkpoint_diff(

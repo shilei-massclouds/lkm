@@ -16,7 +16,7 @@ TEST_PLIC_PROVIDERS ?= $(strip $(foreach provider,$(PROVIDER_NAMES),$(if $(filte
 STRESS_RUNS ?= 10
 STRESS_CASES ?=
 STRESS_TIMEOUT ?=
-DIFFTEST_CASE ?= impl/arceos_ex/tests/stress/cases/linux-exact-baseline-difftest.toml
+DIFFTEST_CASE ?= impl/arceos_ex/tests/stress/cases/rc-local-difftest.toml
 DIFFTEST_RUNS ?= 1
 DIFFTEST_TIMEOUT ?=
 

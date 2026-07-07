@@ -319,6 +319,7 @@ def _run_paired_case(
             arceos["events_data"],
             linux["events_data"],
             paired["checkpoint_scope"],
+            checkpoint_scope_max_counts=paired["checkpoint_scope_max_counts"],
             left_label="arceos_ex",
             right_label="linux",
         )
@@ -1354,32 +1355,63 @@ def _failure_success_comparisons(
 
 
 def _checkpoint_sequence(events: list[dict[str, Any]], scope: list[str]) -> list[str]:
+    return _checkpoint_sequence_limited(events, scope, {})
+
+
+def _checkpoint_sequence_limited(
+    events: list[dict[str, Any]],
+    scope: list[str],
+    max_counts: dict[str, int],
+) -> list[str]:
     scope_set = set(scope)
-    return [
-        str(event["name"])
-        for event in events
-        if event.get("kind") == "checkpoint" and str(event.get("name")) in scope_set
-    ]
+    counts: Counter[str] = Counter()
+    sequence: list[str] = []
+    for event in events:
+        if event.get("kind") != "checkpoint":
+            continue
+        name = str(event.get("name"))
+        if name not in scope_set:
+            continue
+        limit = max_counts.get(name)
+        if limit is not None and counts[name] >= limit:
+            continue
+        counts[name] += 1
+        sequence.append(name)
+    return sequence
 
 
 def _checkpoint_observed_but_not_compared(
     events: list[dict[str, Any]], scope: list[str]
 ) -> list[dict[str, Any]]:
+    return _checkpoint_observed_but_not_compared_limited(events, scope, {})
+
+
+def _checkpoint_observed_but_not_compared_limited(
+    events: list[dict[str, Any]],
+    scope: list[str],
+    max_counts: dict[str, int],
+) -> list[dict[str, Any]]:
     scope_set = set(scope)
+    counts: Counter[str] = Counter()
     observed: dict[str, dict[str, Any]] = {}
     for event in events:
         if event.get("kind") != "checkpoint":
             continue
         name = str(event.get("name"))
+        excluded_reason = "outside_checkpoint_scope"
         if name in scope_set:
-            continue
+            counts[name] += 1
+            limit = max_counts.get(name)
+            if limit is None or counts[name] <= limit:
+                continue
+            excluded_reason = "scope_count_limit"
         entry = observed.setdefault(
             name,
             {
                 "name": name,
                 "count": 0,
                 "first_line": event.get("line", 0),
-                "excluded_reason": "outside_checkpoint_scope",
+                "excluded_reason": excluded_reason,
             },
         )
         entry["count"] += 1
@@ -1416,11 +1448,13 @@ def _paired_checkpoint_diff(
     right_events: list[dict[str, Any]],
     checkpoint_scope: list[str],
     *,
+    checkpoint_scope_max_counts: dict[str, int] | None = None,
     left_label: str = "left",
     right_label: str = "right",
 ) -> dict[str, Any]:
-    left_sequence = _checkpoint_sequence(left_events, checkpoint_scope)
-    right_sequence = _checkpoint_sequence(right_events, checkpoint_scope)
+    max_counts = checkpoint_scope_max_counts or {}
+    left_sequence = _checkpoint_sequence_limited(left_events, checkpoint_scope, max_counts)
+    right_sequence = _checkpoint_sequence_limited(right_events, checkpoint_scope, max_counts)
     missing_from_left = _ordered_missing(checkpoint_scope, left_sequence)
     missing_from_right = _ordered_missing(checkpoint_scope, right_sequence)
     extra_in_left = _ordered_missing(left_sequence, right_sequence)
@@ -1444,6 +1478,7 @@ def _paired_checkpoint_diff(
         "left_label": left_label,
         "right_label": right_label,
         "checkpoint_scope": checkpoint_scope,
+        "checkpoint_scope_max_counts": max_counts,
         "left_sequence": left_sequence,
         "right_sequence": right_sequence,
         f"missing_from_{left_label}": missing_from_left,
@@ -1451,8 +1486,12 @@ def _paired_checkpoint_diff(
         f"extra_in_{left_label}": extra_in_left,
         f"extra_in_{right_label}": extra_in_right,
         "observed_but_not_compared": {
-            left_label: _checkpoint_observed_but_not_compared(left_events, checkpoint_scope),
-            right_label: _checkpoint_observed_but_not_compared(right_events, checkpoint_scope),
+            left_label: _checkpoint_observed_but_not_compared_limited(
+                left_events, checkpoint_scope, max_counts
+            ),
+            right_label: _checkpoint_observed_but_not_compared_limited(
+                right_events, checkpoint_scope, max_counts
+            ),
         },
         "order_mismatch": order_mismatch,
         "first_divergence": first_divergence,
@@ -1605,6 +1644,7 @@ def _paired_manifest(
         "metadata": case.get("metadata", {}),
         "paired": {
             "checkpoint_scope": paired["checkpoint_scope"],
+            "checkpoint_scope_max_counts": paired["checkpoint_scope_max_counts"],
             "arceos_ex": {
                 "command": paired["arceos_ex"]["command"],
                 "working_directory": str(paired["arceos_ex"]["workdir"]),
@@ -1647,10 +1687,15 @@ def _paired_config(
     scope = _as_string_list(raw.get("checkpoint_scope"), "paired.checkpoint_scope")
     if not scope:
         raise SystemExit("paired.checkpoint_scope must not be empty")
+    max_counts = _optional_integer_map(
+        raw.get("checkpoint_scope_max_counts"),
+        "paired.checkpoint_scope_max_counts",
+    )
     arceos = _paired_side_config(raw, "arceos_ex", case_path, repo_root, base_workdir)
     linux = _paired_side_config(raw, "linux", case_path, repo_root, base_workdir)
     return {
         "checkpoint_scope": scope,
+        "checkpoint_scope_max_counts": max_counts,
         "arceos_ex": arceos,
         "linux": linux,
     }
@@ -1864,6 +1909,19 @@ def _string_map(value: object, name: str) -> dict[str, str]:
     for key, item in value.items():
         if not isinstance(key, str) or not isinstance(item, str):
             raise SystemExit(f"expected string map entries in field: {name}")
+        result[key] = item
+    return result
+
+
+def _optional_integer_map(value: object, name: str) -> dict[str, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise SystemExit(f"expected table field: {name}")
+    result: dict[str, int] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, int) or item <= 0:
+            raise SystemExit(f"expected positive integer map entries in field: {name}")
         result[key] = item
     return result
 

@@ -1,0 +1,162 @@
+name = "rc-local-difftest"
+description = "Run the default Linux/arceos_ex paired checkpoint diff for direct BusyBox inittab rc.local, comparing the stable checkpoint prefix through the rc.local shell and /bin/ls execs."
+mode = "paired_checkpoint_diff"
+default_runs = 1
+timeout_seconds = 360
+working_directory = "."
+setup_command = [
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "disk",
+  "FORCE=1",
+  "VIRTIO_BLK_IMAGE=build/stress-rc-local-difftest.raw",
+  "ROOTFS_OVERLAY=none",
+  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/rc-local",
+]
+
+[paired]
+checkpoint_scope = [
+  "EventStream.Prepared",
+  "ExceptionStream.Prepared",
+  "CorePreparePhase.Started",
+  "CorePreparePhase.Ready",
+  "MmCoreInitPhase.Started",
+  "MmCoreInitPhase.Ready",
+  "SchedInitPhase.Started",
+  "SchedInitPhase.Ready",
+  "IrqTimeInitPhase.Started",
+  "LocalIrqEnablePhase.Started",
+  "LocalIrqEnablePhase.Ready",
+  "ProcessPreparePhase.Started",
+  "BootInitRestInitPhase.Ready",
+  "PreSmpInitPhase.Started",
+  "SmpBringupPhase.Started",
+  "SmpBringupPhase.Ready",
+  "RuntimeCorePhase.Started",
+  "Scheduler.SmpReady",
+  "Workqueue.TopologyReady",
+  "AsyncCore.DeferredReady",
+  "PadataCore.DeferredReady",
+  "PageAllocator.LateReady",
+  "RuntimeCoreBoundary.Ready",
+  "InitcallPhase.Started",
+  "CpusetSmp.TrimmedReady",
+  "DriverCore.DeferredReady",
+  "IrqProcView.DeferredReady",
+  "CtorTable.Ready",
+  "InitcallTable.Ready",
+  "InitcallBoundary.Ready",
+  "RootfsPhase.Started",
+  "KUnitRuntime.TrimmedReady",
+  "InitramfsSync.DeferredReady",
+  "RootfsConsole.DeferredReady",
+  "RamdiskExecuteCommand.EaccessCheckpoint",
+  "RootFS.Online",
+  "IntegrityKeys.DeferredReady",
+  "RootfsBoundary.Ready",
+  "FinalizePhase.Started",
+  "AsyncFullSync.DeferredReady",
+  "SystemState.FreeingInitmemCheckpoint",
+  "InitMemoryCleanup.DeferredReady",
+  "KernelMappingProtection.DeferredReady",
+  "PtiFinalize.TrimmedReady",
+  "SystemState.Online",
+  "RcuCore.InkernelBootEnded",
+  "RcuBootEnd.Ready",
+  "SysctlArgs.DeferredReady",
+  "PayloadPhase.Ready",
+  "PayloadPhase.Online",
+  "UserBoot.MainElfReady",
+  "UserBoot.InterpreterReady",
+  "UserBoot.AddressSpaceSetupStart",
+  "UserAddressSpace.Ready",
+  "UserExec.MainElfReady",
+  "UserExec.InterpreterReady",
+  "UserExec.ContextReplaced",
+  "UserExec.SatpReady",
+  "UserExec.TrapFrameReady",
+  "UserExec.MainElfReady",
+  "UserExec.InterpreterReady",
+  "UserExec.ContextReplaced",
+  "UserExec.SatpReady",
+  "UserExec.TrapFrameReady",
+]
+
+[paired.checkpoint_scope_max_counts]
+"UserExec.MainElfReady" = 2
+"UserExec.InterpreterReady" = 2
+"UserExec.ContextReplaced" = 2
+"UserExec.SatpReady" = 2
+"UserExec.TrapFrameReady" = 2
+
+[paired.arceos_ex]
+working_directory = "."
+command = [
+  "python3",
+  "tools/delayed_stdin.py",
+  "--timeout",
+  "180s",
+  "--success-marker",
+  "lkm-rc-local: begin",
+  "--success-marker",
+  "lost+found",
+  "--success-marker",
+  "lkm-rc-local: end status=0",
+  "--",
+  "make",
+  "-C",
+  "impl/arceos_ex",
+  "run",
+  "APP=user-boot",
+  "PROBE=announce,stress-mem",
+  "STRESS_MEM_BYTES=131072",
+  "QEMU_SMP=2",
+  "ROOTFS_OVERLAY=none",
+  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/rc-local",
+  "VIRTIO_BLK_IMAGE=build/stress-rc-local-difftest.raw",
+  "QEMU_APPEND=earlycon=sbi",
+]
+
+[paired.linux]
+working_directory = "../linux-6.12"
+build_command = [
+  "make",
+  "ARCH=riscv",
+  "CROSS_COMPILE=riscv64-linux-gnu-",
+  "KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS",
+  "-j",
+  "$(nproc)",
+]
+command = [
+  "qemu-system-riscv64",
+  "-m",
+  "128M",
+  "-smp",
+  "2",
+  "-machine",
+  "virt",
+  "-bios",
+  "default",
+  "-kernel",
+  "./arch/riscv/boot/Image",
+  "-device",
+  "virtio-blk-device,drive=disk0",
+  "-drive",
+  "id=disk0,if=none,format=raw,file=../lkm/impl/arceos_ex/build/stress-rc-local-difftest.raw",
+  "-device",
+  "virtio-net-device,netdev=net0",
+  "-netdev",
+  "user,id=net0,hostfwd=tcp::5555-:5555",
+  "-nographic",
+  "-append",
+  "earlycon=sbi root=/dev/vda rw console=ttyS0",
+]
+stop_after_stress_mem = true
+
+[metadata]
+observation_mode = "rc-local-paired-checkpoint-diff"
+baseline_role = "default-linux-rc-local-direct-inittab"
+excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
+payload = "BusyBox inittab /bin/sh /etc/rc.local; rc.local runs /bin/ls /"
+scope_note = "Default difftest baseline for rc.local support. Linux poweroff after the success marker exists only to dump checkpoint stress_mem; UserExec checkpoint comparison is limited to the rc.local shell and /bin/ls execs."

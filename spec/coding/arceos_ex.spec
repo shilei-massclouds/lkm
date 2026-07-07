@@ -300,6 +300,7 @@ predicate arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user() -> bo
 predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
 predicate arceos_ex_must_rc_local_test_use_inittab_direct_marker_only() -> bool;
+predicate arceos_ex_must_rc_local_difftest_be_default_case() -> bool;
 predicate arceos_ex_must_user_probe_print_per_syscall_success_marker() -> bool;
 predicate arceos_ex_must_user_probe_cover_directory_openat_getdents64() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_use_existing_static_tools() -> bool;
@@ -3327,6 +3328,16 @@ type ArceosExBlockIoCodingMust {
          * daemon supervision, runlevel completion, script binfmt, or the full
          * PID1 lifecycle.
          *
+         * make difftest's default case must be this rc.local
+         * direct-inittab paired checkpoint baseline. The older distro
+         * init=/bin/sh delayed /bin/ls baseline must remain available by
+         * explicitly setting DIFFTEST_CASE to that TOML path, and the same
+         * Makefile variable may list multiple case paths. If the Linux side
+         * needs a post-marker /sbin/poweroff -f to dump its checkpoint buffer,
+         * that dump-only exec must be excluded from hard checkpoint comparison
+         * by explicit count limits rather than folded into the rc.local
+         * acceptance claim.
+         *
          * OpenRC getty/login shell closure is a distinct acceptance slice from
          * the bare ROOTFS_OVERLAY=none distro image. The test harness may use
          * ROOTFS_OVERLAY=none together with ROOTFS_FILE_OVERLAY_DIR pointing
@@ -3398,6 +3409,7 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_test_harness_cover_no_overlay_bin_ls();
         arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay();
         arceos_ex_must_rc_local_test_use_inittab_direct_marker_only();
+        arceos_ex_must_rc_local_difftest_be_default_case();
         arceos_ex_must_openrc_login_test_use_explicit_account_overlay();
         arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input();
         arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified();
