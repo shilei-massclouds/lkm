@@ -111,6 +111,7 @@ const SYSCALL_GETEUID: usize = 175;
 const SYSCALL_GETGID: usize = 176;
 const SYSCALL_GETEGID: usize = 177;
 const SYSCALL_SOCKET: usize = 198;
+const SYSCALL_CONNECT: usize = 203;
 const SYSCALL_SENDTO: usize = 206;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
@@ -216,7 +217,9 @@ const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
 const O_CLOEXEC: usize = 0o2000000;
 const AF_UNIX: usize = 1;
+const SOCK_STREAM: usize = 1;
 const SOCK_DGRAM: usize = 2;
+const SOCK_TYPE_MASK: usize = 0xf;
 const SOCK_SUPPORTED_DIAG_FLAGS: usize = O_NONBLOCK | O_CLOEXEC;
 const AT_SYMLINK_NOFOLLOW: usize = 0x100;
 const F_DUPFD: usize = 0;
@@ -735,6 +738,7 @@ pub struct SyscallTable {
     fcntl_supported: bool,
     fchmod_supported: bool,
     fchown_supported: bool,
+    socket_supported: bool,
     ioctl_supported: bool,
     faccessat_supported: bool,
     lseek_supported: bool,
@@ -841,6 +845,9 @@ pub struct SyscallTable {
     fchown_routes_to_files_struct: bool,
     fchown_fchmod_fd_local_first_slice: bool,
     fchown_fchmod_full_linux_model_deferred: bool,
+    socket_routes_to_files_struct: bool,
+    socket_af_unix_stream_first_slice: bool,
+    socket_backend_full_linux_model_deferred: bool,
     ioctl_routes_to_files_struct: bool,
     faccessat_routes_to_files_struct: bool,
     lseek_routes_to_files_struct: bool,
@@ -910,6 +917,7 @@ pub struct SyscallTable {
     fcntl_observed: AtomicU8,
     fchmod_observed: AtomicU8,
     fchown_observed: AtomicU8,
+    socket_observed: AtomicU8,
     ioctl_observed: AtomicU8,
     faccessat_observed: AtomicU8,
     lseek_observed: AtomicU8,
@@ -963,6 +971,7 @@ impl SyscallTable {
             fcntl_supported: false,
             fchmod_supported: false,
             fchown_supported: false,
+            socket_supported: false,
             ioctl_supported: false,
             faccessat_supported: false,
             lseek_supported: false,
@@ -1069,6 +1078,9 @@ impl SyscallTable {
             fchown_routes_to_files_struct: false,
             fchown_fchmod_fd_local_first_slice: false,
             fchown_fchmod_full_linux_model_deferred: false,
+            socket_routes_to_files_struct: false,
+            socket_af_unix_stream_first_slice: false,
+            socket_backend_full_linux_model_deferred: false,
             ioctl_routes_to_files_struct: false,
             faccessat_routes_to_files_struct: false,
             lseek_routes_to_files_struct: false,
@@ -1138,6 +1150,7 @@ impl SyscallTable {
             fcntl_observed: AtomicU8::new(0),
             fchmod_observed: AtomicU8::new(0),
             fchown_observed: AtomicU8::new(0),
+            socket_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
             faccessat_observed: AtomicU8::new(0),
             lseek_observed: AtomicU8::new(0),
@@ -1297,6 +1310,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn fchown_supported(&self) -> bool {
         self.fchown_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn socket_supported(&self) -> bool {
+        self.socket_supported
     }
 
     #[allow(dead_code)]
@@ -1740,6 +1758,21 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn socket_routes_to_files_struct(&self) -> bool {
+        self.socket_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn socket_af_unix_stream_first_slice(&self) -> bool {
+        self.socket_af_unix_stream_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn socket_backend_full_linux_model_deferred(&self) -> bool {
+        self.socket_backend_full_linux_model_deferred
+    }
+
+    #[allow(dead_code)]
     pub const fn ioctl_routes_to_files_struct(&self) -> bool {
         self.ioctl_routes_to_files_struct
     }
@@ -1940,6 +1973,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn socket_observed(&self) -> bool {
+        self.socket_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn ioctl_observed(&self) -> bool {
         self.ioctl_observed.load(Ordering::Acquire) != 0
     }
@@ -2024,6 +2062,7 @@ impl SyscallTable {
         self.fcntl_supported = true;
         self.fchmod_supported = true;
         self.fchown_supported = true;
+        self.socket_supported = true;
         self.ioctl_supported = true;
         self.faccessat_supported = true;
         self.lseek_supported = true;
@@ -2130,6 +2169,9 @@ impl SyscallTable {
         self.fchown_routes_to_files_struct = true;
         self.fchown_fchmod_fd_local_first_slice = true;
         self.fchown_fchmod_full_linux_model_deferred = true;
+        self.socket_routes_to_files_struct = true;
+        self.socket_af_unix_stream_first_slice = true;
+        self.socket_backend_full_linux_model_deferred = true;
         self.ioctl_routes_to_files_struct = true;
         self.faccessat_routes_to_files_struct = true;
         self.lseek_routes_to_files_struct = true;
@@ -2347,6 +2389,20 @@ impl SyscallTable {
         }
 
         syscall_table_fchown(self, frame);
+    }
+
+    pub fn socket(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.socket_supported
+            || !self.socket_routes_to_files_struct
+            || !self.socket_af_unix_stream_first_slice
+            || !self.socket_backend_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_socket(self, frame);
     }
 
     pub fn getrandom(&self, frame: &mut TrapFrame) {
@@ -3164,6 +3220,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_CHDIR => table.chdir(frame),
         SYSCALL_FCHMOD => table.fchmod(frame),
         SYSCALL_FCHOWN => table.fchown(frame),
+        SYSCALL_SOCKET => table.socket(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
@@ -3896,6 +3953,38 @@ fn syscall_table_fchown(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.fchown_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_socket(table: &SyscallTable, frame: &mut TrapFrame) {
+    let domain = frame.reg(10);
+    let socket_type = frame.reg(11);
+    let protocol = frame.reg(12);
+    let type_base = socket_type & SOCK_TYPE_MASK;
+    let unsupported_flags = (socket_type & !SOCK_TYPE_MASK) & !SOCK_SUPPORTED_DIAG_FLAGS;
+
+    if unsupported_flags != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if domain != AF_UNIX || type_base != SOCK_STREAM || protocol != 0 {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    let ctx = crate::context::context();
+    let fd = match ctx
+        .files_struct
+        .open_unix_stream_socket(socket_type & O_NONBLOCK != 0, socket_type & O_CLOEXEC != 0)
+    {
+        Ok(fd) => fd,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+
+    table.socket_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, fd);
 }
 
 fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -7082,6 +7171,7 @@ fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
 fn print_unsupported_syscall_detail(frame: &TrapFrame) {
     match frame.reg(17) {
         SYSCALL_SOCKET => print_socket_unsupported_detail(frame),
+        SYSCALL_CONNECT => print_connect_unsupported_detail(frame),
         SYSCALL_NANOSLEEP => print_nanosleep_unsupported_detail(frame),
         SYSCALL_RT_SIGTIMEDWAIT => print_rt_sigtimedwait_unsupported_detail(frame),
         SYSCALL_CLONE => print_clone_vfork_boundary(frame, "unsupported_detail"),
@@ -7181,7 +7271,7 @@ fn print_socket_unsupported_detail(frame: &TrapFrame) {
     let domain = frame.reg(10);
     let socket_type = frame.reg(11);
     let protocol = frame.reg(12);
-    let type_base = socket_type & !SOCK_SUPPORTED_DIAG_FLAGS;
+    let type_base = socket_type & SOCK_TYPE_MASK;
     let sock_cloexec = socket_type & O_CLOEXEC != 0;
     let sock_nonblock = socket_type & O_NONBLOCK != 0;
     let syslog_like = domain == AF_UNIX && type_base == SOCK_DGRAM && protocol == 0;
@@ -7200,6 +7290,15 @@ fn print_socket_unsupported_detail(frame: &TrapFrame) {
     print_bool_digit(sock_nonblock);
     crate::arch::riscv64::sbi::putstr(" af_unix_dgram_syslog_like=");
     print_bool_digit(syslog_like);
+}
+
+fn print_connect_unsupported_detail(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr(" name=connect fd=");
+    print_decimal(frame.reg(10));
+    crate::arch::riscv64::sbi::putstr(" addr_ptr=0x");
+    print_hex(frame.reg(11));
+    crate::arch::riscv64::sbi::putstr(" addrlen=");
+    print_decimal(frame.reg(12));
 }
 
 fn print_nanosleep_unsupported_detail(frame: &TrapFrame) {
@@ -7872,6 +7971,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_GETGID => "getgid",
         SYSCALL_GETEGID => "getegid",
         SYSCALL_SOCKET => "socket",
+        SYSCALL_CONNECT => "connect",
         SYSCALL_SENDTO => "sendto",
         SYSCALL_BRK => "brk",
         SYSCALL_MUNMAP => "munmap",
@@ -8123,6 +8223,7 @@ fn print_ofd_name(ofd: OpenFileDescriptionRef) {
         OpenFileDescriptionRef::Null => "null",
         OpenFileDescriptionRef::Tty0 => "tty0",
         OpenFileDescriptionRef::Pidfd0 => "pidfd0",
+        OpenFileDescriptionRef::UnixSocket0 => "unix_socket0",
     };
     crate::arch::riscv64::sbi::putstr(name);
 }

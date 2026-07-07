@@ -71,6 +71,7 @@ pub enum FileBackendKind {
     CharDevice,
     RegularFile,
     BlockDevice,
+    UnixSocket,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -293,6 +294,7 @@ pub enum OpenFileDescriptionRef {
     Null,
     Tty0,
     Pidfd0,
+    UnixSocket0,
 }
 
 #[derive(Clone, Copy)]
@@ -343,6 +345,7 @@ pub struct FilesStructSnapshot {
     pidfd_fd: usize,
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
+    socket0_fd: usize,
 }
 
 impl FilesStructSnapshot {
@@ -360,6 +363,7 @@ impl FilesStructSnapshot {
             pidfd_fd: usize::MAX,
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
+            socket0_fd: usize::MAX,
         }
     }
 }
@@ -400,6 +404,13 @@ impl FileStat {
         }
     }
 
+    const fn socket(size: usize) -> Self {
+        Self {
+            size,
+            mode: 0o140777,
+        }
+    }
+
     pub const fn size(&self) -> usize {
         self.size
     }
@@ -427,6 +438,8 @@ pub struct FileBackend {
     regular_file_bound: bool,
     regular_file_read_supported: bool,
     regular_file_stat_supported: bool,
+    unix_socket_bound: bool,
+    unix_socket_unconnected: bool,
     regular_file_deferred: bool,
     block_device_deferred: bool,
     write_to_console: AtomicUsize,
@@ -454,6 +467,8 @@ impl FileBackend {
             regular_file_bound: false,
             regular_file_read_supported: false,
             regular_file_stat_supported: false,
+            unix_socket_bound: false,
+            unix_socket_unconnected: false,
             regular_file_deferred: false,
             block_device_deferred: false,
             write_to_console: AtomicUsize::new(0),
@@ -506,6 +521,14 @@ impl FileBackend {
 
     pub const fn regular_file_stat_supported(&self) -> bool {
         self.regular_file_stat_supported
+    }
+
+    pub const fn unix_socket_bound(&self) -> bool {
+        self.unix_socket_bound
+    }
+
+    pub const fn unix_socket_unconnected(&self) -> bool {
+        self.unix_socket_unconnected
     }
 
     pub const fn regular_file_deferred(&self) -> bool {
@@ -607,6 +630,25 @@ impl FileBackend {
         self.char_device_null_bound = true;
         self.char_device_write_supported = true;
         self.char_device_read_supported = true;
+        self.regular_file_deferred = true;
+        self.block_device_deferred = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    fn bind_unix_stream_socket(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base || self.kind != FileBackendKind::UnixSocket {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.allocated = true;
+        self.unix_socket_bound = true;
+        self.unix_socket_unconnected = true;
         self.regular_file_deferred = true;
         self.block_device_deferred = true;
         self.lifecycle
@@ -882,6 +924,31 @@ impl OpenFileDescription {
             || backend.state() != State::Ready
             || backend.kind() != FileBackendKind::CharDevice
             || !backend.char_device_null_bound()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.allocated = true;
+        self.backend_bound = true;
+        self.flags_bound = true;
+        self.readable = true;
+        self.writable = true;
+        self.offset_ready = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    fn setup_unix_socket(&mut self, backend: &FileBackend) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || backend.state() != State::Ready
+            || backend.kind() != FileBackendKind::UnixSocket
+            || !backend.unix_socket_bound()
+            || !backend.unix_socket_unconnected()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1291,6 +1358,19 @@ impl FileDescriptorTable {
         Err(FileError::TooManyOpenFiles)
     }
 
+    fn first_fd_for_ofd(&self, ofd: OpenFileDescriptionRef) -> Option<usize> {
+        let mut fd = 0usize;
+        while fd < FILE_FD_COUNT {
+            if let Some(entry) = self.entries[fd] {
+                if entry.ofd == ofd {
+                    return Some(fd);
+                }
+            }
+            fd += 1;
+        }
+        None
+    }
+
     fn get_fd_flags(&self, fd: usize) -> FileResult<u32> {
         let entry = self.lookup(fd)?;
         Ok(if entry.close_on_exec {
@@ -1417,12 +1497,14 @@ pub struct FilesStruct {
     regular0: OpenFileDescription,
     null: OpenFileDescription,
     tty0: OpenFileDescription,
+    socket0: OpenFileDescription,
     stdin_backend: FileBackend,
     stdout_backend: FileBackend,
     stderr_backend: FileBackend,
     regular0_backend: FileBackend,
     null_backend: FileBackend,
     tty0_backend: FileBackend,
+    socket0_backend: FileBackend,
     regular0_buffer: [u8; REGULAR_FILE_BUFFER_SIZE],
     regular0_len: usize,
     regular0_offset: usize,
@@ -1435,6 +1517,7 @@ pub struct FilesStruct {
     pidfd_fd: usize,
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
+    socket0_fd: usize,
     tty_termios: [u8; TERMIOS_SIZE],
     allocated: bool,
     owned_by_kernel_init_task: bool,
@@ -1481,6 +1564,8 @@ pub struct FilesStruct {
     pidfd_installed: AtomicUsize,
     pidfd_ready: AtomicUsize,
     pidfd_closed: AtomicUsize,
+    unix_stream_socket_fd_installed: AtomicUsize,
+    unix_stream_socket_fd_closed: AtomicUsize,
     stdio_fd_closed: AtomicUsize,
     close_on_exec_observed: AtomicUsize,
     close_on_exec_scanned: AtomicUsize,
@@ -1504,12 +1589,14 @@ impl FilesStruct {
             regular0: OpenFileDescription::new(),
             null: OpenFileDescription::new(),
             tty0: OpenFileDescription::new(),
+            socket0: OpenFileDescription::new(),
             stdin_backend: FileBackend::new(FileBackendKind::CharDevice),
             stdout_backend: FileBackend::new(FileBackendKind::CharDevice),
             stderr_backend: FileBackend::new(FileBackendKind::CharDevice),
             regular0_backend: FileBackend::new(FileBackendKind::RegularFile),
             null_backend: FileBackend::new(FileBackendKind::CharDevice),
             tty0_backend: FileBackend::new(FileBackendKind::CharDevice),
+            socket0_backend: FileBackend::new(FileBackendKind::UnixSocket),
             regular0_buffer: [0; REGULAR_FILE_BUFFER_SIZE],
             regular0_len: 0,
             regular0_offset: 0,
@@ -1522,6 +1609,7 @@ impl FilesStruct {
             pidfd_fd: usize::MAX,
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
+            socket0_fd: usize::MAX,
             tty_termios: [0; TERMIOS_SIZE],
             allocated: false,
             owned_by_kernel_init_task: false,
@@ -1568,6 +1656,8 @@ impl FilesStruct {
             pidfd_installed: AtomicUsize::new(0),
             pidfd_ready: AtomicUsize::new(0),
             pidfd_closed: AtomicUsize::new(0),
+            unix_stream_socket_fd_installed: AtomicUsize::new(0),
+            unix_stream_socket_fd_closed: AtomicUsize::new(0),
             stdio_fd_closed: AtomicUsize::new(0),
             close_on_exec_observed: AtomicUsize::new(0),
             close_on_exec_scanned: AtomicUsize::new(0),
@@ -1766,6 +1856,14 @@ impl FilesStruct {
         self.pidfd_closed.load(Ordering::Acquire) != 0
     }
 
+    pub fn unix_stream_socket_fd_installed(&self) -> bool {
+        self.unix_stream_socket_fd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn unix_stream_socket_fd_closed(&self) -> bool {
+        self.unix_stream_socket_fd_closed.load(Ordering::Acquire) != 0
+    }
+
     pub fn stdio_fd_closed(&self) -> bool {
         self.stdio_fd_closed.load(Ordering::Acquire) != 0
     }
@@ -1803,6 +1901,10 @@ impl FilesStruct {
 
     pub const fn pidfd_exit_status(&self) -> usize {
         self.pidfd_exit_status
+    }
+
+    pub const fn socket0_fd(&self) -> usize {
+        self.socket0_fd
     }
 
     pub fn tty_termios_state_bound(&self) -> bool {
@@ -1873,6 +1975,10 @@ impl FilesStruct {
         &self.tty0
     }
 
+    pub const fn socket0(&self) -> &OpenFileDescription {
+        &self.socket0
+    }
+
     pub const fn stdin_backend(&self) -> &FileBackend {
         &self.stdin_backend
     }
@@ -1895,6 +2001,10 @@ impl FilesStruct {
 
     pub const fn tty0_backend(&self) -> &FileBackend {
         &self.tty0_backend
+    }
+
+    pub const fn socket0_backend(&self) -> &FileBackend {
+        &self.socket0_backend
     }
 
     pub const fn fd_bound(&self, fd: FdRef) -> bool {
@@ -2337,6 +2447,52 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    pub fn open_unix_stream_socket(
+        &mut self,
+        nonblock: bool,
+        close_on_exec: bool,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.socket0_fd = self
+            .fd_table
+            .first_fd_for_ofd(OpenFileDescriptionRef::UnixSocket0)
+            .unwrap_or(usize::MAX);
+        if self.socket0_fd != usize::MAX {
+            return Err(FileError::AlreadyOpen);
+        }
+
+        if self.socket0_backend.state() == State::Base {
+            self.socket0_backend
+                .bind_unix_stream_socket()
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+        if self.socket0.state() == State::Base {
+            self.socket0
+                .setup_unix_socket(&self.socket0_backend)
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+
+        let mut flags = FILE_O_RDWR;
+        if nonblock {
+            flags |= FILE_O_NONBLOCK;
+        }
+        let fd = self.fd_table.install_opened(
+            &self.socket0,
+            OpenFileDescriptionRef::UnixSocket0,
+            true,
+            true,
+            flags,
+            close_on_exec,
+        )?;
+        self.socket0_fd = fd;
+        self.unix_stream_socket_fd_installed
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
     pub fn install_pidfd(&mut self, child_pid: usize) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound || child_pid == 0 {
             return Err(FileError::NotReady);
@@ -2425,8 +2581,11 @@ impl FilesStruct {
                     .fetch_add(1, Ordering::AcqRel);
                 Ok(read)
             }
+            OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::Unsupported),
-            _ => Err(FileError::Unsupported),
+            OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {
+                Err(FileError::NotReadable)
+            }
         }
     }
 
@@ -2463,6 +2622,7 @@ impl FilesStruct {
                 OpenFileDescriptionRef::Null => {
                     ready |= FILE_POLLIN | FILE_POLLRDNORM;
                 }
+                OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::Unsupported),
                 OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {}
             }
         }
@@ -2480,6 +2640,7 @@ impl FilesStruct {
                 | OpenFileDescriptionRef::Regular0
                 | OpenFileDescriptionRef::Null
                 | OpenFileDescriptionRef::Pidfd0 => {}
+                OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::Unsupported),
             }
             if entry.ofd == OpenFileDescriptionRef::Null {
                 ready |= FILE_POLLOUT | FILE_POLLWRNORM;
@@ -2572,6 +2733,16 @@ impl FilesStruct {
             self.pidfd_fd = usize::MAX;
             self.pidfd_closed.fetch_add(1, Ordering::AcqRel);
         }
+        if entry.ofd == OpenFileDescriptionRef::UnixSocket0 {
+            self.socket0_fd = self
+                .fd_table
+                .first_fd_for_ofd(OpenFileDescriptionRef::UnixSocket0)
+                .unwrap_or(usize::MAX);
+            if self.socket0_fd == usize::MAX {
+                self.unix_stream_socket_fd_closed
+                    .fetch_add(1, Ordering::AcqRel);
+            }
+        }
         if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
             self.stdio_fd_closed.fetch_add(1, Ordering::AcqRel);
         }
@@ -2634,6 +2805,7 @@ impl FilesStruct {
             pidfd_fd: self.pidfd_fd,
             pidfd_child_pid: self.pidfd_child_pid,
             pidfd_exit_status: self.pidfd_exit_status,
+            socket0_fd: self.socket0_fd,
         };
         self.parent_fd_snapshot_saved.fetch_add(1, Ordering::AcqRel);
         Ok(snapshot)
@@ -2656,6 +2828,7 @@ impl FilesStruct {
         self.pidfd_fd = snapshot.pidfd_fd;
         self.pidfd_child_pid = snapshot.pidfd_child_pid;
         self.pidfd_exit_status = snapshot.pidfd_exit_status;
+        self.socket0_fd = snapshot.socket0_fd;
         self.parent_fd_snapshot_restored
             .fetch_add(1, Ordering::AcqRel);
         Ok(())
@@ -2786,6 +2959,7 @@ impl FilesStruct {
                 return Err(FileError::NotTty);
             }
             OpenFileDescriptionRef::Pidfd0 => return Err(FileError::NotTty),
+            OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::NotTty),
         };
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
             return Err(FileError::NotTty);
@@ -2972,6 +3146,7 @@ impl FilesStruct {
                     .fetch_add(1, Ordering::AcqRel);
                 FileStat::new(0, VfsInodeKind::DeviceNode)
             }
+            OpenFileDescriptionRef::UnixSocket0 => FileStat::socket(0),
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
             | OpenFileDescriptionRef::Stderr
@@ -3010,6 +3185,7 @@ impl FilesStruct {
             }
             OpenFileDescriptionRef::Tty0 => self.tty0.write(&self.tty0_backend, bytes),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::NotWritable),
+            OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
         }
     }
 

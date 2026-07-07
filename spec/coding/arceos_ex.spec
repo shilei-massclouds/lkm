@@ -1580,9 +1580,12 @@ type ArceosExStartupPhaseCodingMust {
          * and fchmod(52) on fd 0 now has a fd-local first slice that records
          * owner/mode metadata through FilesStruct and the fd table.  Focused
          * trace after that slice confirms both syscalls return 0, and records
-         * the next post-auth unsupported boundary as socket(198); complete
-         * inode ownership, TTY ownership, credentials, network sockets and
-         * setgroups(159) remain out of scope here.  The later observed
+         * the next post-auth boundary as socket(198) with
+         * AF_UNIX/SOCK_STREAM/SOCK_CLOEXEC/protocol 0.  The current socket
+         * first slice only creates an unconnected fd for that stream shape;
+         * complete inode ownership, TTY ownership, credentials, connect,
+         * sendto, network sockets and setgroups(159) remain out of scope
+         * here.  The later observed
          * boundary is clone_vfork stage=child_records_full with
          * completed_records=8, record_capacity=8, active_slot_reusable=1,
          * next_child_pid=11 and no first_unreaped_pid.  Therefore completed
@@ -1848,12 +1851,21 @@ type ArceosExStartupPhaseCodingMust {
          * advance sepc differently, treat the syscall as supported, or guess
          * whether zero-duration, short sleep or full hrtimer/scheduler sleep
          * is required before the observed values are reviewed.
-         * socket(198) and sendto(206), as currently observed in OpenRC/login
-         * logs, are tolerated unsupported noise when returning ENOSYS does not
-         * prevent the guest from reaching getty/login. They must not be used
-         * as justification for introducing a socket fd/backend or network
-         * stack in this slice unless later reproducible evidence shows they
-         * change OpenRC/login reachability.
+         * The early OpenRC/login socket(AF_UNIX,
+         * SOCK_DGRAM|SOCK_CLOEXEC, 0) and sendto(206) path is tolerated
+         * unsupported noise because returning ENOSYS does not prevent the
+         * guest from reaching getty/login. The post-auth
+         * socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0) path is different:
+         * focused evidence shows returning ENOSYS causes immediate login
+         * failure before setgroups(159). The current Linux-differential
+         * socket slice may therefore install only an unconnected AF_UNIX
+         * stream socket fd via FilesStruct. Focused rerun after that slice
+         * observes the post-auth stream socket returning fd 3, then the new
+         * first boundary is connect(203) with fd=3 and addrlen=0x18.  DGRAM,
+         * sendto(206), connect(203) sockaddr handling and the network/socket
+         * operation backend remain unsupported. Unsupported connect
+         * diagnostics may name connect and print fd, sockaddr pointer and
+         * addrlen, but must not copy sockaddr or change the ENOSYS return.
          *
          * The supported-syscall error diagnostic must stay behind the explicit
          * PROBE=user-syscall-error path. It observes supported syscall error
@@ -3231,11 +3243,15 @@ type ArceosExBlockIoCodingMust {
          * still occupied the single active child slot. The nested
          * vfork/child-slot slice is now specified here. The following
          * fd-local fchown(55)/fchmod(52) slice is also specified and focused
-         * trace confirms both syscalls return 0. The new post-auth unsupported
-         * boundary is socket(198); the guest text still says "login: can't set
-         * groups: Function not implemented", but local asm-generic confirms
-         * 198 is socket and 159 is setgroups, so that text is not a reliable
-         * syscall name for the next slice.
+         * trace confirms both syscalls return 0. The new post-auth boundary is
+         * socket(198) with AF_UNIX/SOCK_STREAM/SOCK_CLOEXEC/protocol 0; the
+         * guest text still says "login: can't set groups: Function not
+         * implemented", but local asm-generic confirms 198 is socket and 159
+         * is setgroups, so that text is not a reliable syscall name for the
+         * next slice. The current socket slice is limited to fd creation; the
+         * focused rerun records connect(203) as the new first unsupported
+         * boundary after socket returns fd 3, and still does not implement
+         * connect/sendto/setgroups.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

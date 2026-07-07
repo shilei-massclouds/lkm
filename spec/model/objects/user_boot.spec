@@ -340,6 +340,9 @@ predicate syscall_fchmod_routes_to_files_struct<T, F>(table: T, files: F) -> boo
 predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
 predicate syscall_fchown_fchmod_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_unsupported_socket_diagnostic_first_slice<T>(table: T) -> bool;
+predicate syscall_socket_supported<T>(table: T) -> bool;
+predicate syscall_socket_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_socket_af_unix_stream_first_slice<T>(table: T) -> bool;
 predicate syscall_socket_backend_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_fcntl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_ioctl_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
@@ -1276,19 +1279,28 @@ object SyscallTable: ResourceObject {
                     syscall_fchown_fchmod_full_linux_model_deferred(self);
                     /*
                      * Current OpenRC login evidence has moved past post-auth
-                     * fchown(55)/fchmod(52) and classifies unsupported
-                     * socket(198) as the direct login failure boundary. The
-                     * diagnostic names socket, decodes domain/type/protocol,
-                     * reports the base type after SOCK_CLOEXEC/SOCK_NONBLOCK
-                     * removal, and flags the AF_UNIX + SOCK_DGRAM syslog-like
-                     * shape. The post-auth blocker is AF_UNIX +
-                     * SOCK_STREAM|SOCK_CLOEXEC, not the earlier tolerated
-                     * syslog-like DGRAM path. This slice still returns ENOSYS,
-                     * installs no fd, does not touch user memory, and does not
-                     * model sendto(206), connect, setgroups(159), credentials
-                     * or a socket backend.
+                     * fchown(55)/fchmod(52) and classifies
+                     * socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0) as the
+                     * direct login failure boundary. Linux 6.12 differential
+                     * comparison shows the minimal successful path is
+                     * __sys_socket_create() flag stripping/validation,
+                     * AF_UNIX unix_create(), then sock_map_fd() installing an
+                     * fd carrying close-on-exec. The first implementation
+                     * slice therefore supports only that AF_UNIX stream
+                     * creation path and routes it to FilesStruct. Focused
+                     * rerun after the slice observes the post-auth socket
+                     * returning fd 3, with connect(203) as the next first
+                     * unsupported boundary. The earlier syslog-like
+                     * AF_UNIX/SOCK_DGRAM path and all remaining socket
+                     * operations keep using the unsupported diagnostic:
+                     * name socket, decoded domain/type/protocol, base type
+                     * after SOCK_CLOEXEC/SOCK_NONBLOCK removal, and DGRAM
+                     * syslog-like classification.
                      */
                     syscall_unsupported_socket_diagnostic_first_slice(self);
+                    syscall_socket_supported(self);
+                    syscall_socket_routes_to_files_struct(self, FilesStruct);
+                    syscall_socket_af_unix_stream_first_slice(self);
                     syscall_socket_backend_full_linux_model_deferred(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);

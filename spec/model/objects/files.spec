@@ -93,12 +93,25 @@
  * model TTY device ownership, check capabilities/permissions, handle
  * fchownat/fchmodat/path chmod/chown, LSM, idmapped mounts, namespaces or
  * setgroups(159).
+ *
+ * The first AF_UNIX socket slice follows Linux 6.12 only through
+ * __sys_socket_create()/unix_create()/sock_map_fd() for the observed
+ * post-auth BusyBox login call:
+ * socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0). It strips the Linux socket
+ * type flags, validates the stream/protocol shape, creates one unconnected
+ * UnixSocket0 OFD/backend, and installs it in the first free fd slot with the
+ * close-on-exec bit carried by the fd entry. The earlier syslog-like
+ * SOCK_DGRAM path remains an unsupported diagnostic path for now, so this
+ * slice does not claim sendto/connect/socketpair/bind/listen/accept,
+ * pathname sockaddr handling, sk_buff queues, net namespaces, LSM or a
+ * network stack.
  */
 
 enum FileBackendKind {
     CharDevice,
     RegularFile,
     BlockDevice,
+    UnixSocket,
 }
 
 enum FdRef {
@@ -108,6 +121,7 @@ enum FdRef {
     Regular0,
     Null,
     Pidfd0,
+    UnixSocket0,
 }
 
 predicate files_struct_allocated<T>(files: T) -> bool;
@@ -123,6 +137,8 @@ predicate files_struct_regular_file_slot_ready<T>(files: T) -> bool;
 predicate files_struct_open_path_routes_to_vfs<T, V>(files: T, vfs: V) -> bool;
 predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
 predicate files_struct_null_fd_installed<T>(files: T) -> bool;
+predicate files_struct_unix_stream_socket_fd_installed<T>(files: T) -> bool;
+predicate files_struct_socket_full_linux_model_deferred<T>(files: T) -> bool;
 predicate files_struct_null_device_read_eof_observed<T>(files: T) -> bool;
 predicate files_struct_null_device_write_discard_observed<T>(files: T) -> bool;
 predicate files_struct_null_device_fstat_device_node<T>(files: T) -> bool;
@@ -207,6 +223,8 @@ predicate file_backend_regular_file_read_supported<T>(backend: T) -> bool;
 predicate file_backend_regular_file_stat_supported<T>(backend: T) -> bool;
 predicate file_backend_regular_file_read_returns_data<T>(backend: T) -> bool;
 predicate file_backend_regular_file_stat_returns_metadata<T>(backend: T) -> bool;
+predicate file_backend_unix_socket_bound<T>(backend: T) -> bool;
+predicate file_backend_unix_socket_unconnected<T>(backend: T) -> bool;
 
 object FilesStruct: ResourceObject {
     initial_state: State::Base;
@@ -235,6 +253,7 @@ object FilesStruct: ResourceObject {
                     files_struct_close_on_exec_ready(self);
                     files_struct_shared_deferred(self);
                     files_struct_regular_file_slot_ready(self);
+                    files_struct_socket_full_linux_model_deferred(self);
                     fd_table_stdio_fds_bound(FileDescriptorTable);
                 }
             }
@@ -250,6 +269,7 @@ object FilesStruct: ResourceObject {
             files_struct_next_fd_ready(self);
             files_struct_close_on_exec_ready(self);
             files_struct_regular_file_slot_ready(self);
+            files_struct_socket_full_linux_model_deferred(self);
         }
 
         actions {
@@ -352,6 +372,37 @@ object FilesStruct: ResourceObject {
 
                 ensures {
                     files_struct_null_fd_installed(self);
+                    fd_table_first_free_user_fd_installed(FileDescriptorTable, OpenFileDescription);
+                    fd_table_fd_entries_have_independent_status_flags(FileDescriptorTable);
+                }
+            }
+
+            on Action::OpenUnixStreamSocket {
+                /*
+                 * Linux 6.12 __sys_socket_create() removes SOCK_CLOEXEC and
+                 * SOCK_NONBLOCK from type before AF_UNIX unix_create(), then
+                 * sock_map_fd() installs a file descriptor carrying fd flags.
+                 * The current first slice only accepts the observed
+                 * AF_UNIX/SOCK_STREAM/protocol 0 shape and creates an
+                 * unconnected UnixSocket0 fd entry. It does not create a
+                 * sockaddr namespace, peer state, queues or socket operations
+                 * beyond fd-table lifetime.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(FileBackend, FileBackendKind::UnixSocket);
+                    file_backend_unix_socket_bound(FileBackend);
+                    file_backend_unix_socket_unconnected(FileBackend);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::InstallFirstFreeSocket;
+                }
+
+                ensures {
+                    files_struct_unix_stream_socket_fd_installed(self);
                     fd_table_first_free_user_fd_installed(FileDescriptorTable, OpenFileDescription);
                     fd_table_fd_entries_have_independent_status_flags(FileDescriptorTable);
                 }
@@ -873,6 +924,23 @@ object FileDescriptorTable: ResourceObject {
                 }
             }
 
+            on Action::InstallFirstFreeSocket {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                    OpenFileDescription.state == State::Ready;
+                    FileBackend.state == State::Ready;
+                    file_backend_kind_bound(FileBackend, FileBackendKind::UnixSocket);
+                    file_backend_unix_socket_bound(FileBackend);
+                }
+
+                ensures {
+                    fd_table_first_free_user_fd_installed(self, OpenFileDescription);
+                    fd_table_fd_entries_have_independent_status_flags(self);
+                    fd_table_cloexec_bit_set_on_install(self, FdRef::UnixSocket0);
+                    fd_table_cloexec_not_reported_by_fgetfl(self, FdRef::UnixSocket0);
+                }
+            }
+
             on Action::Close(fd: FdRef) {
                 depends_on {
                     FileDescriptorTable.state == State::Ready;
@@ -1153,6 +1221,19 @@ object FileBackend: ResourceObject {
                     file_backend_regular_file_bound(self);
                     file_backend_regular_file_read_supported(self);
                     file_backend_regular_file_stat_supported(self);
+                }
+            }
+
+            on Action::BindUnixStreamSocket {
+                depends_on {
+                    FileBackend.state == State::Base;
+                }
+
+                ensures {
+                    file_backend_allocated(self);
+                    file_backend_kind_bound(self, FileBackendKind::UnixSocket);
+                    file_backend_unix_socket_bound(self);
+                    file_backend_unix_socket_unconnected(self);
                 }
             }
 
