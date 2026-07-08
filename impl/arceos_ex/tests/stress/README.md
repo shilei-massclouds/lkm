@@ -60,6 +60,17 @@ make test-stress \
   STRESS_RUNS=30
 ```
 
+OpenRC login shell closure is kept as an explicit focused diagnostic case. It
+uses the checked-in account overlay, staged login/password/shell input, and the
+`user-syscall-trace,user-syscall-error` probes. It is not part of the default
+stress suite and must be selected manually:
+
+```sh
+make test-stress \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/openrc-login-focused.toml \
+  STRESS_RUNS=1
+```
+
 Linux/arceos_ex baseline differential testing has a dedicated entry point:
 
 ```sh
@@ -173,6 +184,16 @@ Baseline difftest cases:
   the boot/payload intersection only to the first OpenRC wait boundary currently
   modeled as `SyscallTable.Wait4`; syscall trace/error lines remain diagnostic
   evidence outside the checkpoint comparator.
+
+Focused opt-in stress cases:
+
+- `openrc-login-focused.toml`: opt-in stress/focused diagnostic for the
+  OpenRC getty/login shell path. It uses
+  `tests/rootfs-overlays/openrc-login`, waits for `login:`, `Password:`, and
+  the BusyBox shell prompt before sending `/bin/ls\nexit\n`, and classifies
+  success only when the Alpine greeting, getgroups trace, rootfs listing
+  marker, and `user exit status=0` are all present. This case is not in the
+  default `make test-stress` suite.
 
 Paired diffs only compare the declared `checkpoint_scope` for each case.
 Runtime checkpoints outside that scope are listed as

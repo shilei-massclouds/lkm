@@ -817,9 +817,10 @@ LSM、task graph credential COW/RCU、文件权限判断、TTY ownership 或 ino
 代理：credentials ready 且当前 `euid == 0` 时接受 32-bit `uid_t` 目标，并把当前 `UserInitProcess` 的
 `uid/euid/suid/fsuid` 同步为目标 uid；非 root effective uid、credentials 未 ready 或超出 32-bit uid
 仍返回当前 `EPERM` 路径。该片不得顺手实现完整 capabilities、user namespace、LSM、task graph credential
-COW/RCU、完整 saved-id 权限矩阵、TTY ownership 或 inode ownership/mode 语义。OpenRC login shell case 仍只能作为
-opt-in 诊断入口，不能进入默认 `make test` 硬门禁；越过 `setuid(1000)` 后的新第一边界必须由 focused evidence
-记录后再单独规格化。focused 复跑已确认 `setuid(146, uid=1000)` 返回 0，login 继续经过 `chdir`、
+COW/RCU、完整 saved-id 权限矩阵、TTY ownership 或 inode ownership/mode 语义。OpenRC login shell focused case
+是通过 `STRESS_CASES` 显式选择的 opt-in 诊断资产，不能进入默认 `make test` 硬门禁或默认 `make test-stress`
+suite；越过 `setuid(1000)` 后的新第一边界必须由 focused evidence 记录后再单独规格化。focused 复跑已确认
+`setuid(146, uid=1000)` 返回 0，login 继续经过 `chdir`、
 `.hushlogin` missing-path 和 MOTD 输出；后续证据把登录 shell `execve(221)` 的 `EFAULT` 定位为
 `fail_stage=filename_copy` / `fail_reason=filename_copy`。该 execve filename/argv copy 边界已在后续片
 按逐字节 bounded C-string copy 单独规格化；修后 focused 复跑确认登录 shell 进入 `~ $`。当前 focused baseline

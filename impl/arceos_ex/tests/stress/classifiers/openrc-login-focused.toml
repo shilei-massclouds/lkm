@@ -1,0 +1,46 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["arceos_ex allocation error"]
+description = "Kernel allocation error was printed."
+
+[[rules]]
+id = "unsupported-visible"
+result = "failure"
+contains = ["Function not implemented"]
+description = "A visible unsupported syscall or command path blocked login shell completion."
+
+[[rules]]
+id = "delayed-input-timeout"
+result = "failure"
+contains = ["user-boot delayed input command timed out"]
+description = "Host staged stdin timed out before the login or shell marker sequence completed."
+
+[[rules]]
+id = "delayed-input-missing-marker"
+result = "failure"
+contains = ["user-boot input step marker missing"]
+description = "Host staged stdin could not observe one of the required login or shell markers."
+
+[[rules]]
+id = "user-nonzero-exit"
+result = "failure"
+regex = ["user exit status=(?:-[0-9]+|[1-9][0-9]*)"]
+description = "User-mode payload exited with a nonzero status."
+
+[[rules]]
+id = "openrc-login-focused-success"
+result = "success"
+contains = [
+  "Welcome to Alpine!",
+  "syscall trace nr=158 name=getgroups ret=1",
+  "lost+found",
+  "user exit status=0",
+]
+description = "OpenRC login reached the shell, ran /bin/ls, observed getgroups, and exited cleanly."

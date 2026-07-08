@@ -3421,11 +3421,12 @@ type ArceosExBlockIoCodingMust {
          * focused evidence has since crossed that job-control slice and now
          * identifies login-shell getgroups(158) readback as the next direct
          * boundary before the prompt.
-         * The OpenRC login shell case must remain an opt-in diagnostic entry
-         * rather than a default make test hard gate until that new boundary is
-         * specified and closed. After that behavior is closed, the staged-input
-         * case should become the login-shell acceptance gate with /bin/ls,
-         * lost+found and user exit status 0 as pass criteria.
+         * The OpenRC login shell focused case is an explicit opt-in diagnostic
+         * asset selected through STRESS_CASES; it must not enter the default
+         * make test gate or the default make test-stress suite. After that
+         * behavior is closed, the staged-input case should become the
+         * login-shell acceptance gate with /bin/ls, lost+found and user exit
+         * status 0 as pass criteria.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
