@@ -102,6 +102,7 @@ const SYSCALL_SETPGID: usize = 154;
 const SYSCALL_GETPGID: usize = 155;
 const SYSCALL_GETSID: usize = 156;
 const SYSCALL_SETSID: usize = 157;
+const SYSCALL_GETGROUPS: usize = 158;
 const SYSCALL_SETGROUPS: usize = 159;
 const SYSCALL_UNAME: usize = 160;
 const SYSCALL_GETTIMEOFDAY: usize = 169;
@@ -738,6 +739,7 @@ pub struct SyscallTable {
     uname_supported: bool,
     setuid_supported: bool,
     setgid_supported: bool,
+    getgroups_supported: bool,
     setgroups_supported: bool,
     rt_sigprocmask_supported: bool,
     rt_sigaction_supported: bool,
@@ -822,6 +824,8 @@ pub struct SyscallTable {
     uname_full_uts_namespace_deferred: bool,
     setuid_routes_to_user_init_process: bool,
     setgid_routes_to_user_init_process: bool,
+    getgroups_routes_to_user_init_process: bool,
+    getgroups_bounded_supplementary_groups_first_slice: bool,
     setgroups_routes_to_user_init_process: bool,
     setgroups_root_first_slice: bool,
     setgroups_bounded_supplementary_groups_first_slice: bool,
@@ -924,6 +928,7 @@ pub struct SyscallTable {
     uname_observed: AtomicU8,
     setuid_observed: AtomicU8,
     setgid_observed: AtomicU8,
+    getgroups_observed: AtomicU8,
     setgroups_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
     rt_sigaction_observed: AtomicU8,
@@ -979,6 +984,7 @@ impl SyscallTable {
             uname_supported: false,
             setuid_supported: false,
             setgid_supported: false,
+            getgroups_supported: false,
             setgroups_supported: false,
             rt_sigprocmask_supported: false,
             rt_sigaction_supported: false,
@@ -1063,6 +1069,8 @@ impl SyscallTable {
             uname_full_uts_namespace_deferred: false,
             setuid_routes_to_user_init_process: false,
             setgid_routes_to_user_init_process: false,
+            getgroups_routes_to_user_init_process: false,
+            getgroups_bounded_supplementary_groups_first_slice: false,
             setgroups_routes_to_user_init_process: false,
             setgroups_root_first_slice: false,
             setgroups_bounded_supplementary_groups_first_slice: false,
@@ -1165,6 +1173,7 @@ impl SyscallTable {
             uname_observed: AtomicU8::new(0),
             setuid_observed: AtomicU8::new(0),
             setgid_observed: AtomicU8::new(0),
+            getgroups_observed: AtomicU8::new(0),
             setgroups_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
             rt_sigaction_observed: AtomicU8::new(0),
@@ -1286,6 +1295,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn setgid_supported(&self) -> bool {
         self.setgid_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn getgroups_supported(&self) -> bool {
+        self.getgroups_supported
     }
 
     #[allow(dead_code)]
@@ -1616,6 +1630,16 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn setgid_routes_to_user_init_process(&self) -> bool {
         self.setgid_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn getgroups_routes_to_user_init_process(&self) -> bool {
+        self.getgroups_routes_to_user_init_process
+    }
+
+    #[allow(dead_code)]
+    pub const fn getgroups_bounded_supplementary_groups_first_slice(&self) -> bool {
+        self.getgroups_bounded_supplementary_groups_first_slice
     }
 
     #[allow(dead_code)]
@@ -1984,6 +2008,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn getgroups_observed(&self) -> bool {
+        self.getgroups_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn setgroups_observed(&self) -> bool {
         self.setgroups_observed.load(Ordering::Acquire) != 0
     }
@@ -2118,6 +2147,7 @@ impl SyscallTable {
         self.uname_supported = true;
         self.setuid_supported = true;
         self.setgid_supported = true;
+        self.getgroups_supported = true;
         self.setgroups_supported = true;
         self.rt_sigprocmask_supported = true;
         self.rt_sigaction_supported = true;
@@ -2202,6 +2232,8 @@ impl SyscallTable {
         self.uname_full_uts_namespace_deferred = true;
         self.setuid_routes_to_user_init_process = true;
         self.setgid_routes_to_user_init_process = true;
+        self.getgroups_routes_to_user_init_process = true;
+        self.getgroups_bounded_supplementary_groups_first_slice = true;
         self.setgroups_routes_to_user_init_process = true;
         self.setgroups_root_first_slice = true;
         self.setgroups_bounded_supplementary_groups_first_slice = true;
@@ -2706,6 +2738,21 @@ impl SyscallTable {
         }
 
         syscall_table_setgid(self, frame);
+    }
+
+    pub fn getgroups(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getgroups_supported
+            || !self.credentials_usercopy_ready
+            || !self.getgroups_routes_to_user_init_process
+            || !self.getgroups_bounded_supplementary_groups_first_slice
+            || !self.credentials_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getgroups(self, frame);
     }
 
     pub fn setgroups(&self, frame: &mut TrapFrame) {
@@ -3348,6 +3395,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_SETPGID => table.setpgid(frame),
         SYSCALL_GETSID => table.getsid(frame),
         SYSCALL_SETSID => table.setsid(frame),
+        SYSCALL_GETGROUPS => table.getgroups(frame),
         SYSCALL_SETGROUPS => table.setgroups(frame),
         SYSCALL_UNAME => table.uname(frame),
         SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
@@ -4529,6 +4577,48 @@ fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.setgid_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_getgroups(table: &SyscallTable, frame: &mut TrapFrame) {
+    let size = frame.reg(10);
+    let list_ptr = frame.reg(11);
+    let Some((count, groups)) = crate::context::context()
+        .user_init_process
+        .read_supplementary_groups()
+    else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    if size == 0 {
+        table.getgroups_observed.store(1, Ordering::Release);
+        complete_successful_syscall(frame, count);
+        return;
+    }
+    if size < count {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut index = 0;
+    while index < count {
+        let Some(offset) = index.checked_mul(core::mem::size_of::<u32>()) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        let Some(ptr) = list_ptr.checked_add(offset) else {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        };
+        if !write_user_u32(ptr, groups[index] as u32) {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        index += 1;
+    }
+
+    table.getgroups_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, count);
 }
 
 fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -8678,6 +8768,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_SETPGID => "setpgid",
         SYSCALL_GETSID => "getsid",
         SYSCALL_SETSID => "setsid",
+        SYSCALL_GETGROUPS => "getgroups",
         SYSCALL_SETGROUPS => "setgroups",
         SYSCALL_UNAME => "uname",
         SYSCALL_GETTIMEOFDAY => "gettimeofday",

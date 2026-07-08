@@ -3418,6 +3418,7 @@ pub struct UserInitProcess {
     fsgid: usize,
     supplementary_group_count: usize,
     supplementary_groups: [usize; USER_SUPPLEMENTARY_GROUP_MAX],
+    supplementary_groups_read_observed: bool,
     setgroups_observed: bool,
     pid_read_observed: bool,
     ppid_zero_first_slice: bool,
@@ -5990,6 +5991,7 @@ impl UserInitProcess {
             fsgid: 0,
             supplementary_group_count: 0,
             supplementary_groups: [0; USER_SUPPLEMENTARY_GROUP_MAX],
+            supplementary_groups_read_observed: false,
             setgroups_observed: false,
             pid_read_observed: false,
             ppid_zero_first_slice: false,
@@ -6220,6 +6222,10 @@ impl UserInitProcess {
         } else {
             None
         }
+    }
+
+    pub const fn supplementary_groups_read_observed(&self) -> bool {
+        self.supplementary_groups_read_observed
     }
 
     pub const fn pid_read_observed(&self) -> bool {
@@ -6587,6 +6593,7 @@ impl UserInitProcess {
         self.fsgid = 0;
         self.supplementary_group_count = 0;
         self.supplementary_groups = [0; USER_SUPPLEMENTARY_GROUP_MAX];
+        self.supplementary_groups_read_observed = false;
         self.setgroups_observed = false;
         self.session_leader_first_slice = true;
         self.session_id = super::rest_init::KERNEL_INIT_PID;
@@ -7231,6 +7238,16 @@ impl UserInitProcess {
         }
         self.resgid_read_observed = true;
         Some((self.gid, self.egid, self.sgid))
+    }
+
+    pub fn read_supplementary_groups(
+        &mut self,
+    ) -> Option<(usize, [usize; USER_SUPPLEMENTARY_GROUP_MAX])> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.supplementary_groups_read_observed = true;
+        Some((self.supplementary_group_count, self.supplementary_groups))
     }
 
     pub fn set_uid_root_slice(&mut self, uid: usize) -> bool {

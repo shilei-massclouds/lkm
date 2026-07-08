@@ -2043,9 +2043,16 @@ type ArceosExStartupPhaseCodingMust {
          * capabilities, user namespace, LSM, credential COW/RCU, permission
          * matrix, TTY ownership, inode ownership semantics, or saved-id/root
          * regain after setuid(1000).
-         * getgroups(158), full group_info allocation/sort, capabilities, user
-         * namespaces, LSM, task cred COW/RCU, file permission checks, TTY
-         * ownership and inode ownership/mode semantics remain trimmed.
+         * Focused evidence after setuid(1000), setpgid(0,7) and TIOCSPGRP
+         * succeed reaches getgroups(158) with gidsetsize=32 and a user
+         * gid_t * before the login shell prompt. The current getgroups slice
+         * only reads back the same fixed-capacity supplementary group view:
+         * gidsetsize 0 returns the current count, too-small nonzero buffers
+         * return EINVAL, large-enough buffers copy saved 32-bit gid_t values,
+         * and copyout faults return EFAULT. Full group_info allocation/sort,
+         * capabilities, user namespaces, LSM, task cred COW/RCU, file
+         * permission checks, TTY ownership and inode ownership/mode semantics
+         * remain trimmed.
          * uname must copy the six-field 65-byte new_utsname layout using the
          * static local Linux 6.12 generated UTS values. getcwd must use the
          * inherited FsStruct root/pwd view; the current slice covers only root
@@ -3410,7 +3417,10 @@ type ArceosExBlockIoCodingMust {
          * execve C-string copy slice closes that boundary with per-byte
          * readability; its focused rerun reaches the login shell prompt and
          * records the next boundary as shell /bin/ls clone(220) unsupported
-         * plus job-control errors, not as part of the setuid change.
+         * plus job-control errors, not as part of the setuid change. Current
+         * focused evidence has since crossed that job-control slice and now
+         * identifies login-shell getgroups(158) readback as the next direct
+         * boundary before the prompt.
          * The OpenRC login shell case must remain an opt-in diagnostic entry
          * rather than a default make test hard gate until that new boundary is
          * specified and closed. After that behavior is closed, the staged-input

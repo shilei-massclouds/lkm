@@ -280,6 +280,7 @@ predicate syscall_table_setpgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setsid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
+predicate syscall_table_getgroups_supported<T>(table: T) -> bool;
 predicate syscall_table_setgroups_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_supported<T>(table: T) -> bool;
@@ -375,6 +376,8 @@ predicate syscall_setsid_process_group_leader_eperm_first_slice<T>(table: T) -> 
 predicate syscall_setsid_child_success_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_getgroups_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_getgroups_bounded_supplementary_groups_first_slice<T>(table: T) -> bool;
 predicate syscall_setgroups_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgroups_root_first_slice<T>(table: T) -> bool;
 predicate syscall_setgroups_bounded_supplementary_groups_first_slice<T>(table: T) -> bool;
@@ -499,6 +502,7 @@ predicate syscall_table_setpgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setsid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
+predicate syscall_table_getgroups_observed<T>(table: T) -> bool;
 predicate syscall_table_setgroups_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigaction_observed<T>(table: T) -> bool;
@@ -528,6 +532,7 @@ predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception
 predicate user_init_process_credentials_inherited<T, K>(process: T, task: K) -> bool;
 predicate user_init_process_root_credentials_bound<T>(process: T) -> bool;
 predicate user_init_process_supplementary_groups_bound<T>(process: T) -> bool;
+predicate user_init_process_supplementary_groups_read_observed<T>(process: T) -> bool;
 predicate user_init_process_credentials_capability_model_deferred<T>(process: T) -> bool;
 predicate user_init_process_signal_state_inherited<T, K>(process: T, task: K) -> bool;
 predicate user_init_process_signal_runtime_bound<T>(process: T) -> bool;
@@ -1253,6 +1258,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_setsid_supported(self);
                     syscall_table_setuid_supported(self);
                     syscall_table_setgid_supported(self);
+                    syscall_table_getgroups_supported(self);
                     syscall_table_setgroups_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
                     syscall_table_rt_sigaction_supported(self);
@@ -1361,6 +1367,8 @@ object SyscallTable: ResourceObject {
                     syscall_socket_af_unix_stream_first_slice(self);
                     syscall_socket_backend_full_linux_model_deferred(self);
                     syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_getgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_setgroups_root_first_slice(self);
                     syscall_setgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_nanosleep_full_hrtimer_deferred(self);
@@ -1419,6 +1427,7 @@ object SyscallTable: ResourceObject {
             syscall_table_setsid_supported(self);
             syscall_table_setuid_supported(self);
             syscall_table_setgid_supported(self);
+            syscall_table_getgroups_supported(self);
             syscall_table_setgroups_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
             syscall_table_rt_sigaction_supported(self);
@@ -1483,6 +1492,8 @@ object SyscallTable: ResourceObject {
             syscall_setsid_process_group_leader_eperm_first_slice(self);
             syscall_setsid_child_success_first_slice(self, UserChildProcess);
             syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+            syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+            syscall_getgroups_bounded_supplementary_groups_first_slice(self);
             syscall_setgroups_root_first_slice(self);
             syscall_setgroups_bounded_supplementary_groups_first_slice(self);
         }
@@ -2357,6 +2368,43 @@ object SyscallTable: ResourceObject {
                     syscall_getresgid_routes_to_user_init_process(self, UserInitProcess);
                     user_init_process_resgid_read_observed(UserInitProcess);
                     syscall_table_getresgid_observed(self);
+                }
+            }
+
+            on Action::GetGroups {
+                /*
+                 * Linux 6.12 RISC-V exposes getgroups(2) as syscall number
+                 * 158 in include/uapi/asm-generic/unistd.h; the implementation
+                 * in kernel/groups.c::SYSCALL_DEFINE2(getgroups) returns the
+                 * current supplementary group count when gidsetsize is 0,
+                 * returns EINVAL when the supplied buffer is smaller than the
+                 * current group count, and copies gid_t entries to userspace
+                 * otherwise. The current OpenRC login-shell evidence reaches
+                 * getgroups(32, <user gid_t *>) after login has dropped to
+                 * uid=1000/gid=100 and after setgroups(1, {100}) populated the
+                 * bounded UserInitProcess supplementary group view. This first
+                 * slice only reads back that fixed-capacity view; it does not
+                 * allocate or sort Linux group_info, expand NGROUPS_MAX, or
+                 * connect group membership to permission, inode or TTY
+                 * ownership semantics.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_credentials_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadSupplementaryGroups;
+                }
+
+                ensures {
+                    syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_getgroups_bounded_supplementary_groups_first_slice(self);
+                    syscall_credentials_full_linux_model_deferred(self);
+                    user_init_process_supplementary_groups_bound(UserInitProcess);
+                    user_init_process_supplementary_groups_read_observed(UserInitProcess);
+                    syscall_table_getgroups_observed(self);
                 }
             }
 
@@ -3867,6 +3915,26 @@ object UserInitProcess: ResourceObject {
                     user_init_process_supplementary_groups_bound(self);
                     user_init_process_credentials_capability_model_deferred(self);
                     user_init_process_setgroups_observed(self);
+                }
+            }
+
+            on Action::ReadSupplementaryGroups {
+                /*
+                 * First slice only snapshots the bounded supplementary group
+                 * view previously stored on UserInitProcess. It does not
+                 * expose Linux group_info lifetime, sorting, credentials COW,
+                 * permission checks or ownership semantics.
+                 */
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_supplementary_groups_bound(self);
+                    user_init_process_credentials_capability_model_deferred(self);
+                    user_init_process_supplementary_groups_read_observed(self);
                 }
             }
 
