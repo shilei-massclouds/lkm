@@ -67,11 +67,26 @@ make difftest
 ```
 
 `make difftest` defaults to one real paired run of
-`cases/linux-exact-baseline-difftest.toml`. Use `DIFFTEST_RUNS=0` for a fast
+`cases/rc-local-difftest.toml`, the direct inittab rc.local paired diff. Use
+`DIFFTEST_RUNS=0` for a fast
 configuration check without executing QEMU:
 
 ```sh
 make difftest DIFFTEST_RUNS=0
+```
+
+The default rc.local case carries an exact checkpoint coverage audit. The
+current accounting is `required_total=103`, `in_scope=59`,
+`accounted_outside_scope=44`, and `unaccounted=0`: every exact-mapped
+checkpoint is either in the default rc.local hard scope or explicitly accounted
+outside that scope. This means the default hard scope is fully accounted; it
+does not mean all 103 exact checkpoints are compared by the default case.
+
+The long-term shell baseline remains available explicitly:
+
+```sh
+make difftest \
+  DIFFTEST_CASE=impl/arceos_ex/tests/stress/cases/linux-exact-baseline-difftest.toml
 ```
 
 `DIFFTEST_TIMEOUT` is optional; when it is unset, the case keeps its own
@@ -80,8 +95,8 @@ make difftest DIFFTEST_RUNS=0
 The earlier Linux paired `pd-*` cases were staged by exact-mapped runtime scope
 and served as progression scaffolds. Completed staged cases are deleted after a
 passing paired run. `pd-0005` has now converged into the long-term
-`linux-exact-baseline-difftest.toml` regression asset and is kept through the
-dedicated `make difftest` target.
+`linux-exact-baseline-difftest.toml` regression asset and is kept as an
+explicit `DIFFTEST_CASE` selection.
 
 Completed stages:
 
@@ -122,8 +137,16 @@ Completed stages:
   `observed_but_not_compared` coverage instead of rerunning this completed
   stage.
 
-Long-term baseline difftest:
+Baseline difftest cases:
 
+- `rc-local-difftest.toml`: default `make difftest` paired differential test
+  for direct BusyBox inittab rc.local support. It compares the stable
+  checkpoint prefix through the rc.local shell and `/bin/ls` execs. Its exact
+  checkpoint coverage audit currently reports `required_total=103`,
+  `in_scope=59`, `accounted_outside_scope=44`, and `unaccounted=0`; the 59
+  in-scope checkpoints are the hard comparison set, while the other 44 exact
+  checkpoints are intentionally accounted outside the default rc.local hard
+  scope.
 - `linux-exact-baseline-difftest.toml`: long-term baseline differential test
   for the cumulative stable exact-mapped intersection on the distro `/bin/sh`
   path with delayed `/bin/ls\nexit\n`. It uses the shell rootfs image without
