@@ -87,6 +87,13 @@ class DelayedStdin:
     payload: str
 
 
+class CheckpointCoverageError(Exception):
+    def __init__(self, message: str, audit: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.message = message
+        self.audit = audit
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -251,9 +258,15 @@ def _run_paired_case(
     output_dir = _unique_output_dir(out_root / _run_dir_name(case_name))
     output_dir.mkdir(parents=True, exist_ok=False)
     base_workdir = _resolve_workdir(repo_root, case.get("working_directory", "."))
-    paired = _paired_config(case, case_path, repo_root, base_workdir)
+    try:
+        paired = _paired_config(case, case_path, repo_root, base_workdir)
+    except CheckpointCoverageError as error:
+        _write_json(output_dir / "checkpoint_coverage_error.json", error.audit)
+        print(error.message, file=sys.stderr)
+        raise SystemExit(error.message) from error
     manifest = _paired_manifest(case, case_path, runs, timeout, repo_root, base_workdir, paired)
     _write_json(output_dir / "manifest.json", manifest)
+    checkpoint_coverage = paired.get("checkpoint_coverage")
 
     sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
     run_results: list[dict[str, Any]] = []
@@ -274,6 +287,8 @@ def _run_paired_case(
             duration_seconds=suite_duration,
         )
         summary["paired_checkpoint_diff"] = []
+        if checkpoint_coverage is not None:
+            summary["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
         _write_json(output_dir / "summary.json", summary)
         _write_report(output_dir / "report.md", case_name, summary)
         print(f"stress dry-run wrote {output_dir}")
@@ -323,6 +338,8 @@ def _run_paired_case(
             left_label="arceos_ex",
             right_label="linux",
         )
+        if checkpoint_coverage is not None:
+            diff["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
         side_failed = arceos["timed_out"] or linux["timed_out"] or linux["stress_mem"] is None
         passed = diff["passed"] and not side_failed
         sequence_tokens = [
@@ -372,6 +389,8 @@ def _run_paired_case(
         duration_seconds=suite_duration,
     )
     summary["paired_checkpoint_diff"] = [run["paired_diff"] for run in run_results]
+    if checkpoint_coverage is not None:
+        summary["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
     _write_json(output_dir / "summary.json", summary)
     _write_report(output_dir / "report.md", case_name, summary)
     print(f"stress report: {output_dir / 'report.md'}")
@@ -1574,6 +1593,34 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
                         lines.append(
                             f"  - {side_label} observed_but_not_compared: {rendered}"
                         )
+            coverage = diff.get("checkpoint_coverage")
+            if isinstance(coverage, dict):
+                lines.append(
+                    "  - checkpoint_coverage: "
+                    f"required_total={coverage.get('required_total')} "
+                    f"in_scope={coverage.get('in_scope')} "
+                    f"accounted_outside_scope={coverage.get('accounted_outside_scope')} "
+                    f"unaccounted={coverage.get('unaccounted')}"
+                )
+    coverage = summary.get("checkpoint_coverage")
+    if isinstance(coverage, dict):
+        lines.extend(["", "## Checkpoint Coverage Audit", ""])
+        lines.append(f"- mapping_path: {coverage.get('mapping_path')}")
+        lines.append(
+            f"- required_mapping_kinds: {', '.join(coverage.get('required_mapping_kinds', []))}"
+        )
+        lines.append(f"- mode: {coverage.get('mode')}")
+        lines.append(f"- required_total: {coverage.get('required_total')}")
+        lines.append(f"- in_scope: {coverage.get('in_scope')}")
+        lines.append(
+            f"- accounted_outside_scope: {coverage.get('accounted_outside_scope')}"
+        )
+        lines.append(f"- unaccounted: {coverage.get('unaccounted')}")
+        unaccounted = coverage.get("unaccounted_checkpoints")
+        if isinstance(unaccounted, list) and unaccounted:
+            lines.append(f"- unaccounted_checkpoints: {', '.join(map(str, unaccounted))}")
+        else:
+            lines.append("- unaccounted_checkpoints: none")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1631,7 +1678,7 @@ def _paired_manifest(
     workdir: Path,
     paired: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    paired_entry = {
         "schema_version": SCHEMA_VERSION,
         "case": _string(case, "name"),
         "mode": "paired_checkpoint_diff",
@@ -1662,7 +1709,12 @@ def _paired_manifest(
             "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
             "status_short": _git_output(repo_root, ["status", "--short"]),
         },
-}
+    }
+    if paired.get("checkpoint_coverage") is not None:
+        paired_entry["paired"]["checkpoint_coverage"] = _checkpoint_coverage_report(
+            paired["checkpoint_coverage"]
+        )
+    return paired_entry
 
 
 def _delayed_stdin_summary(delayed_stdin: DelayedStdin | None) -> dict[str, Any] | None:
@@ -1691,13 +1743,179 @@ def _paired_config(
         raw.get("checkpoint_scope_max_counts"),
         "paired.checkpoint_scope_max_counts",
     )
+    checkpoint_coverage = _checkpoint_coverage_config(raw, repo_root, scope)
     arceos = _paired_side_config(raw, "arceos_ex", case_path, repo_root, base_workdir)
     linux = _paired_side_config(raw, "linux", case_path, repo_root, base_workdir)
-    return {
+    config = {
         "checkpoint_scope": scope,
         "checkpoint_scope_max_counts": max_counts,
         "arceos_ex": arceos,
         "linux": linux,
+    }
+    if checkpoint_coverage is not None:
+        config["checkpoint_coverage"] = checkpoint_coverage
+    return config
+
+
+def _checkpoint_coverage_config(
+    paired: dict[str, Any],
+    repo_root: Path,
+    checkpoint_scope: list[str],
+) -> dict[str, Any] | None:
+    raw = paired.get("checkpoint_coverage")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SystemExit("expected table field: paired.checkpoint_coverage")
+    mapping_path = _resolve_repo_path(
+        repo_root,
+        _string(raw, "mapping_path"),
+    )
+    required_mapping_kinds = _as_string_list(
+        raw.get("required_mapping_kinds"),
+        "paired.checkpoint_coverage.required_mapping_kinds",
+    )
+    if not required_mapping_kinds:
+        raise SystemExit("paired.checkpoint_coverage.required_mapping_kinds must not be empty")
+    mode = _string(raw, "mode")
+    if mode != "explicit-accounting":
+        raise SystemExit(f"unsupported paired.checkpoint_coverage.mode: {mode}")
+    accounted_outside_scope = _non_empty_string_map(
+        raw.get("accounted_outside_scope", {}),
+        "paired.checkpoint_coverage.accounted_outside_scope",
+    )
+    audit = _audit_checkpoint_coverage(
+        mapping_path=mapping_path,
+        required_mapping_kinds=required_mapping_kinds,
+        checkpoint_scope=checkpoint_scope,
+        accounted_outside_scope=accounted_outside_scope,
+        mode=mode,
+    )
+    return {
+        "mapping_path": mapping_path,
+        "required_mapping_kinds": required_mapping_kinds,
+        "mode": mode,
+        "accounted_outside_scope": accounted_outside_scope,
+        "audit": audit,
+    }
+
+
+def _audit_checkpoint_coverage(
+    *,
+    mapping_path: Path,
+    required_mapping_kinds: list[str],
+    checkpoint_scope: list[str],
+    accounted_outside_scope: dict[str, str],
+    mode: str,
+) -> dict[str, Any]:
+    required_kind_set = set(required_mapping_kinds)
+    mapping = _load_checkpoint_mapping(mapping_path)
+    required_checkpoints: list[str] = []
+    seen_required: set[str] = set()
+    for row_number, row in enumerate(mapping, 1):
+        kind = _mapping_row_string(row, row_number, "mapping_kind")
+        if kind not in required_kind_set:
+            continue
+        name = _mapping_row_string(row, row_number, "checkpoint_name")
+        if name in seen_required:
+            raise SystemExit(f"duplicate required checkpoint mapping name: {name}")
+        seen_required.add(name)
+        required_checkpoints.append(name)
+
+    scope_set = set(checkpoint_scope)
+    required_set = set(required_checkpoints)
+    outside_scope = [name for name in required_checkpoints if name not in scope_set]
+    accounted_names = [
+        name for name in required_checkpoints if name in accounted_outside_scope and name not in scope_set
+    ]
+    unaccounted = [name for name in outside_scope if name not in accounted_outside_scope]
+    accounting_for_unknown = sorted(
+        name for name in accounted_outside_scope if name not in required_set
+    )
+    accounting_for_in_scope = sorted(
+        name for name in accounted_outside_scope if name in scope_set
+    )
+    audit = {
+        "mapping_path": str(mapping_path),
+        "required_mapping_kinds": list(required_mapping_kinds),
+        "mode": mode,
+        "required_total": len(required_checkpoints),
+        "in_scope": sum(1 for name in required_checkpoints if name in scope_set),
+        "accounted_outside_scope": len(accounted_names),
+        "unaccounted": len(unaccounted),
+        "required_checkpoints": required_checkpoints,
+        "in_scope_checkpoints": [
+            name for name in required_checkpoints if name in scope_set
+        ],
+        "accounted_outside_scope_checkpoints": [
+            {"name": name, "reason": accounted_outside_scope[name]}
+            for name in accounted_names
+        ],
+        "unaccounted_checkpoints": unaccounted,
+        "invalid_accounting": {
+            "unknown_or_not_required": accounting_for_unknown,
+            "already_in_scope": accounting_for_in_scope,
+        },
+    }
+    if unaccounted or accounting_for_unknown or accounting_for_in_scope:
+        problems: list[str] = []
+        if unaccounted:
+            problems.append(
+                "unaccounted required checkpoints: " + ", ".join(unaccounted)
+            )
+        if accounting_for_unknown:
+            problems.append(
+                "accounted checkpoints are not required mappings: "
+                + ", ".join(accounting_for_unknown)
+            )
+        if accounting_for_in_scope:
+            problems.append(
+                "accounted checkpoints are already in checkpoint_scope: "
+                + ", ".join(accounting_for_in_scope)
+            )
+        raise CheckpointCoverageError(
+            "checkpoint coverage audit failed; " + "; ".join(problems),
+            audit,
+        )
+    return audit
+
+
+def _load_checkpoint_mapping(path: Path) -> list[dict[str, Any]]:
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError as error:
+        raise SystemExit(f"checkpoint coverage mapping not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"checkpoint coverage mapping is not valid JSON: {path}") from error
+    if not isinstance(data, list):
+        raise SystemExit(f"checkpoint coverage mapping must be a JSON array: {path}")
+    rows: list[dict[str, Any]] = []
+    for row_number, row in enumerate(data, 1):
+        if not isinstance(row, dict):
+            raise SystemExit(f"checkpoint coverage mapping row {row_number} must be an object")
+        rows.append(row)
+    return rows
+
+
+def _mapping_row_string(row: dict[str, Any], row_number: int, key: str) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value:
+        raise SystemExit(f"checkpoint coverage mapping row {row_number} missing string {key}")
+    return value
+
+
+def _checkpoint_coverage_report(config: dict[str, Any]) -> dict[str, Any]:
+    audit = config["audit"]
+    return {
+        "mapping_path": audit["mapping_path"],
+        "required_mapping_kinds": list(audit["required_mapping_kinds"]),
+        "mode": audit["mode"],
+        "required_total": audit["required_total"],
+        "in_scope": audit["in_scope"],
+        "accounted_outside_scope": audit["accounted_outside_scope"],
+        "unaccounted": audit["unaccounted"],
+        "unaccounted_checkpoints": list(audit["unaccounted_checkpoints"]),
     }
 
 
@@ -1777,6 +1995,13 @@ def _resolve_case_path(case_path: Path, value: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
         path = case_path.parent / path
+    return path.resolve()
+
+
+def _resolve_repo_path(repo_root: Path, value: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = repo_root / path
     return path.resolve()
 
 
@@ -1910,6 +2135,14 @@ def _string_map(value: object, name: str) -> dict[str, str]:
         if not isinstance(key, str) or not isinstance(item, str):
             raise SystemExit(f"expected string map entries in field: {name}")
         result[key] = item
+    return result
+
+
+def _non_empty_string_map(value: object, name: str) -> dict[str, str]:
+    result = _string_map(value, name)
+    for key, item in result.items():
+        if not key or not item:
+            raise SystemExit(f"expected non-empty string map entries in field: {name}")
     return result
 
 

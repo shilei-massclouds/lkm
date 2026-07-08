@@ -4,12 +4,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import sys
 import tempfile
 from pathlib import Path
 import unittest
 
 import runner
+
+
+def _mapping_row(name: str, kind: str) -> dict[str, str]:
+    return {
+        "checkpoint_name": name,
+        "mapping_kind": kind,
+    }
 
 
 class StressRunnerTests(unittest.TestCase):
@@ -402,6 +410,117 @@ class StressRunnerTests(unittest.TestCase):
 
         self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.MainElfReady"], 2)
         self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.TrapFrameReady"], 2)
+        coverage = config["checkpoint_coverage"]["audit"]
+        self.assertEqual(coverage["required_total"], 103)
+        self.assertEqual(coverage["in_scope"], 59)
+        self.assertEqual(coverage["accounted_outside_scope"], 44)
+        self.assertEqual(coverage["unaccounted"], 0)
+
+    def test_paired_config_parses_checkpoint_coverage_with_dotted_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mapping_path = root / "mapping.json"
+            mapping_path.write_text(
+                json.dumps(
+                    [
+                        _mapping_row("A", "exact"),
+                        _mapping_row("B.Outside", "exact"),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            case_path = root / "case.toml"
+            case_path.write_text(
+                """
+[paired]
+checkpoint_scope = ["A"]
+
+[paired.checkpoint_coverage]
+mapping_path = "mapping.json"
+required_mapping_kinds = ["exact"]
+mode = "explicit-accounting"
+
+[paired.checkpoint_coverage.accounted_outside_scope]
+"B.Outside" = "pending"
+
+[paired.arceos_ex]
+command = ["make", "run"]
+
+[paired.linux]
+command = ["qemu-system-riscv64"]
+""",
+                encoding="utf-8",
+            )
+
+            config = runner._paired_config(
+                runner._load_toml(case_path),
+                case_path,
+                root,
+                root,
+            )
+
+        coverage = config["checkpoint_coverage"]["audit"]
+        self.assertEqual(coverage["required_total"], 2)
+        self.assertEqual(coverage["in_scope"], 1)
+        self.assertEqual(coverage["accounted_outside_scope"], 1)
+        self.assertEqual(coverage["unaccounted"], 0)
+        self.assertEqual(
+            coverage["accounted_outside_scope_checkpoints"],
+            [{"name": "B.Outside", "reason": "pending"}],
+        )
+
+    def test_checkpoint_coverage_audit_fails_with_unaccounted_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mapping_path = Path(tmp) / "mapping.json"
+            mapping_path.write_text(
+                json.dumps(
+                    [
+                        _mapping_row("A", "exact"),
+                        _mapping_row("B", "exact"),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(runner.CheckpointCoverageError) as caught:
+                runner._audit_checkpoint_coverage(
+                    mapping_path=mapping_path,
+                    required_mapping_kinds=["exact"],
+                    checkpoint_scope=["A"],
+                    accounted_outside_scope={},
+                    mode="explicit-accounting",
+                )
+
+        self.assertIn("B", caught.exception.message)
+        self.assertEqual(caught.exception.audit["unaccounted"], 1)
+        self.assertEqual(caught.exception.audit["unaccounted_checkpoints"], ["B"])
+
+    def test_checkpoint_coverage_audit_ignores_range_and_unmapped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mapping_path = Path(tmp) / "mapping.json"
+            mapping_path.write_text(
+                json.dumps(
+                    [
+                        _mapping_row("A", "exact"),
+                        _mapping_row("B", "range"),
+                        _mapping_row("C", "unmapped"),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            coverage = runner._audit_checkpoint_coverage(
+                mapping_path=mapping_path,
+                required_mapping_kinds=["exact"],
+                checkpoint_scope=["A"],
+                accounted_outside_scope={},
+                mode="explicit-accounting",
+            )
+
+        self.assertEqual(coverage["required_total"], 1)
+        self.assertEqual(coverage["in_scope"], 1)
+        self.assertEqual(coverage["accounted_outside_scope"], 0)
+        self.assertEqual(coverage["unaccounted"], 0)
 
     def test_paired_stress_mem_parses_both_sides(self) -> None:
         arceos_text = "AV9\ncheckpoint: TrampolineVm.Online\n"

@@ -249,6 +249,8 @@ predicate arceos_ex_must_linux_checkpoint_mapping_support_regeneration_check() -
 predicate arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact() -> bool;
 predicate arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only() -> bool;
 predicate arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check() -> bool;
+predicate arceos_ex_must_paired_checkpoint_scope_be_hard_comparison_scope_only() -> bool;
+predicate arceos_ex_must_paired_checkpoint_coverage_account_all_required_mappings() -> bool;
 predicate arceos_ex_must_linux_checkpoint_marker_patch_derive_from_plan() -> bool;
 predicate arceos_ex_must_linux_checkpoint_marker_patch_not_mutate_linux_tree() -> bool;
 predicate arceos_ex_must_linux_checkpoint_marker_patch_insert_before_anchor() -> bool;
@@ -301,6 +303,7 @@ predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile(
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
 predicate arceos_ex_must_rc_local_test_use_inittab_direct_marker_only() -> bool;
 predicate arceos_ex_must_rc_local_difftest_be_default_case() -> bool;
+predicate arceos_ex_must_rc_local_difftest_report_hard_scope_coverage_counts() -> bool;
 predicate arceos_ex_must_user_probe_print_per_syscall_success_marker() -> bool;
 predicate arceos_ex_must_user_probe_cover_directory_openat_getdents64() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_use_existing_static_tools() -> bool;
@@ -2707,10 +2710,28 @@ type ArceosExIrqTimeInitCodingMust {
          * it regenerates JSON and Markdown in memory from the tracked mapping
          * artifact, compares them with the tracked coverage artifacts, and
          * reports drift as failure without rewriting repository outputs.
+         *
+         * Paired checkpoint difftest coverage:
+         *
+         * paired_checkpoint_diff checkpoint_scope is a case-local hard
+         * comparison scope. It is not a declaration that every latest exact
+         * Linux mapping is actively compared by that case. A case that enables
+         * [paired.checkpoint_coverage] must consume the tracked
+         * tools/out/checkpoints/linux_checkpoint_mapping.json, filter to
+         * required_mapping_kinds, and require every required checkpoint to be
+         * either present in checkpoint_scope or explicitly listed in
+         * accounted_outside_scope with a stable reason string. Missing
+         * accounting is a configuration failure before dry-run or real QEMU
+         * execution. Manifest, summary and paired diff/report outputs must
+         * carry required_total, in_scope, accounted_outside_scope and
+         * unaccounted counts so the default rc.local difftest cannot be
+         * misreported as full exact-mapping agreement.
          */
         arceos_ex_must_linux_checkpoint_coverage_be_mapping_only_review_artifact();
         arceos_ex_must_linux_checkpoint_coverage_export_aggregate_fields_only();
         arceos_ex_must_linux_checkpoint_coverage_support_regeneration_check();
+        arceos_ex_must_paired_checkpoint_scope_be_hard_comparison_scope_only();
+        arceos_ex_must_paired_checkpoint_coverage_account_all_required_mappings();
 
         /*
          * Linux checkpoint marker patch generation:
@@ -3336,7 +3357,12 @@ type ArceosExBlockIoCodingMust {
          * needs a post-marker /sbin/poweroff -f to dump its checkpoint buffer,
          * that dump-only exec must be excluded from hard checkpoint comparison
          * by explicit count limits rather than folded into the rc.local
-         * acceptance claim.
+         * acceptance claim. This default case must also enable exact
+         * checkpoint coverage audit: checkpoint_scope remains the hard
+         * comparison scope, not the full latest exact mapping set, and every
+         * exact checkpoint must either be in scope or registered in explicit
+         * outside-scope accounting. Reports must state the hard-scope result
+         * separately from coverage counts.
          *
          * OpenRC getty/login shell closure is a distinct acceptance slice from
          * the bare ROOTFS_OVERLAY=none distro image. The test harness may use
@@ -3410,6 +3436,7 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay();
         arceos_ex_must_rc_local_test_use_inittab_direct_marker_only();
         arceos_ex_must_rc_local_difftest_be_default_case();
+        arceos_ex_must_rc_local_difftest_report_hard_scope_coverage_counts();
         arceos_ex_must_openrc_login_test_use_explicit_account_overlay();
         arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input();
         arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified();

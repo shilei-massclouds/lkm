@@ -90,6 +90,57 @@ checkpoint_scope = [
 "UserExec.SatpReady" = 2
 "UserExec.TrapFrameReady" = 2
 
+[paired.checkpoint_coverage]
+mapping_path = "tools/out/checkpoints/linux_checkpoint_mapping.json"
+required_mapping_kinds = ["exact"]
+mode = "explicit-accounting"
+
+[paired.checkpoint_coverage.accounted_outside_scope]
+"StartupTimeline.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"EntryPreludePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"EntryPreludePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"TrampolineVm.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"RawDtb.Prepared" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"RawDtb.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"EarlyVm.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"EarlyVm.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"KernelImage.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"EventStream.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ExceptionStream.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"CpuStartProvider.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"CpuStartProvider.BootDataSelected" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"CpuStartProvider.BootDataPublished" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"CpuStartProvider.HsmStartIssued" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApEntryPreludePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApEntryPreludePhase.CurrentStackEstablished" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApEntryPreludePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApSmpCallinPhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApSmpCallinPhase.CpuRunningProduced" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApSmpCallinPhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApOnlineIdlePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApOnlineIdlePhase.DoneUpProduced" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ApOnlineIdlePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SecondaryCpuStartupAck.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SecondaryCpuOnlineAck.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"InitcallPhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"RootfsPhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"FinalizePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"UserInitProcess.EnterUserMode" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.ExecveArgsReady" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"UserExec.SatpSwitched" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"UserExec.ReturnFrameReady" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.OpenAt" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Read" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Write" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Writev" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Close" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.NewFstatAt" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.SetTidAddress" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Clone" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Wait4" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"UserChild.ParentWaitResumed" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"SyscallTable.Exit" = "outside_stable_rc_local_hard_scope_pending_expansion"
+
 [paired.arceos_ex]
 working_directory = "."
 command = [
