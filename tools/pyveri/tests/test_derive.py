@@ -556,6 +556,8 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
         self.assertEqual(derivation.states["ComputerProject"], "Online")
         self.assertEqual(derivation.states["KernelProject"], "Online")
+        self.assertEqual(derivation.states["OpenSBI"], "Online")
+        self.assertNotIn("OpenSbi" + "Firmware", derivation.states)
         self.assertEqual(derivation.states["Kernel"], "Online")
         self.assertEqual(derivation.states["EntrySuccessorPhase"], "Ready")
         self.assertEqual(derivation.states["CorePreparePhase"], "Ready")

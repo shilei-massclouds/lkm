@@ -25,7 +25,8 @@ object Kernel: KernelObject {
     parent: KernelProject;
 
     /*
-     * Base 表示内核系统规格对象已经进入模型空间，但尚未推进到 Boot ready 边界。
+     * Base 表示内核映像已经驻留在内存中，但是 Kernel 尚未收到启动事件、
+     * 尚未开始执行内核生命周期。
      */
     state State::Base {
         transitions {
@@ -37,7 +38,7 @@ object Kernel: KernelObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                 }
@@ -60,7 +61,7 @@ object Kernel: KernelObject {
         invariant {
             Riscv64.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
             BootPhase.state == State::Ready;
@@ -90,7 +91,7 @@ object Kernel: KernelObject {
         invariant {
             Riscv64.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
             BootPhase.state == State::Ready;
@@ -120,7 +121,7 @@ object Kernel: KernelObject {
         invariant {
             Riscv64.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
             BootPhase.state == State::Ready;

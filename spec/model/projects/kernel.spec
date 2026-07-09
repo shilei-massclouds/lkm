@@ -156,9 +156,9 @@ object Config: PrepareObject {
 include "../systems/kernel.spec";
 
 /*
- * OpenSBI 表示本次启动中已经处于可交接状态的 OpenSBI 固件实例。它消费
- * KernelProject 已构造好的 kernel image，并在 Enable 完成后发出进入 Kernel
- * 生命周期的启动事件。
+ * OpenSBI 表示本次启动中的单一 OpenSBI 固件/交接对象。Ready 表示固件
+ * 和启动 ABI 已经具备内核入口交接事实；Enable 消费 KernelProject 构造好的
+ * kernel image，完成控制权交接并发出进入 Kernel 生命周期的启动事件。
  */
 object OpenSBI: PrepareObject {
     initial_state: State::Ready;
@@ -167,13 +167,21 @@ object OpenSBI: PrepareObject {
 
     state State::Ready {
         invariant {
-            OpenSbiFirmware.state == State::Online;
+            SbiSpec.state == State::Online;
+            BootArgs.state == State::Online;
+            ordered_booting_enabled();
+            primary_hart_only_at_kernel_entry();
+            primary_hart_sie_clear_at_kernel_entry();
+            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
         }
 
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    OpenSbiFirmware.state == State::Online;
+                    SbiSpec.state == State::Online;
+                    BootArgs.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     kernel_image_constructed();
@@ -188,7 +196,17 @@ object OpenSBI: PrepareObject {
 
     state State::Online {
         invariant {
-            OpenSbiFirmware.state == State::Online;
+            SbiSpec.state == State::Online;
+            BootArgs.state == State::Online;
+            Lds.state == State::Online;
+            Config.state == State::Online;
+            kernel_image_constructed();
+            ordered_booting_enabled();
+            primary_hart_only_at_kernel_entry();
+            primary_hart_sie_clear_at_kernel_entry();
+            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
         }
     }
 }

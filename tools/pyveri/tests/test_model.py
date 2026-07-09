@@ -25,6 +25,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertTrue(result.ok, [diag.format() for diag in result.errors])
         self.assertEqual(len(result.errors), 0)
         self.assertIn("ComputerProject", result.model.objects)
+        self.assertNotIn("OpenSbi" + "Firmware", result.model.objects)
+        self.assertEqual(result.model.objects["OpenSBI"].initial_state, "Ready")
         self.assertEqual(
             result.model.children["ComputerProject"],
             [
@@ -37,6 +39,10 @@ class ModelBuilderTests(unittest.TestCase):
                 "Kernel",
                 "OpenSBI",
             ],
+        )
+        self.assertEqual(
+            result.model.objects["OpenSBI"].states["Ready"].transitions["Enable"].target_state,
+            "Online",
         )
         self.assertEqual(
             result.model.children["Kernel"],

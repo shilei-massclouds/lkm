@@ -1002,11 +1002,11 @@ object SBI: PlatformServiceObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     SbiSpec.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                 }
 
                 ensures {
-                    sbi_capability_view_ready(SBI, SbiSpec, OpenSbiFirmware);
+                    sbi_capability_view_ready(SBI, SbiSpec, OpenSBI);
                     sbi_hsm_extension_available(SBI);
                 }
             }
@@ -1018,7 +1018,7 @@ object SBI: PlatformServiceObject {
      */
     state State::Ready {
         invariant {
-            sbi_capability_view_ready(SBI, SbiSpec, OpenSbiFirmware);
+            sbi_capability_view_ready(SBI, SbiSpec, OpenSBI);
             sbi_hsm_extension_available(SBI);
         }
     }

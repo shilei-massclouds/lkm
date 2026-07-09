@@ -3700,7 +3700,7 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 `ComputerProject` 是当前模型的顶层工程对象，按计算机前置、硬件/固件前置和内核工程启动三段迁移组织：
 
 - `Preset -> Prepared`：确认 `Riscv64` 已在线，建立当前项目采用的 RISC-V64 ISA 前置；`emits ComputerProject.Setup`；无 `drives`。
-- `Setup -> Ready`：确认 `BootArgs`、`SbiSpec`、`OpenSbiFirmware` 已在线，建立启动 ABI 与固件交接前置；`emits ComputerProject.Enable`；无 `drives`。
+- `Setup -> Ready`：确认 `BootArgs`、`SbiSpec`、`OpenSBI` 已处于可交接状态，建立启动 ABI 与固件交接前置；`emits ComputerProject.Enable`；无 `drives`。
 - `Enable -> Online`：启动内核工程编排；`drives KernelProject.Preset`。
 
 ## 内核工程规格

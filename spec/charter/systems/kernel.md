@@ -6,7 +6,7 @@
 
 内核是被动模式，本身不主动改变自身状态，不主动对外发送信息，只有受到外部事件触发时，才会产生反应，处理完毕后重回静默状态。当然，由于外部事件可能并发到来，内核对不同事件的响应过程可能重叠，所以内核需要建立同步/互斥机制进行必要的内部协调与状态保护。
 
-`KernelProject.Enable` 驱动 `OpenSBI.Enable`。OpenSBI在引导结束时发出启动事件，触发内核持续推动生命周期直至运行状态。
+`KernelProject.Enable` 驱动 `OpenSBI.Enable`。OpenSBI 是由内核工程启动链驱动的单一固件/交接对象；它完成控制权交接后发出启动事件，触发内核持续推动生命周期直至运行状态。
 
 > [model] NOTE：`KernelProject.Enable` drives `OpenSBI.Transition::Enable`；`OpenSBI.Enable` emits `Kernel.Transition::Preset` 向内核发出启动事件。
 
@@ -48,7 +48,7 @@
 
 外部事件是触发内核产生反应的根源。
 
-1. 启动触发：`KernelProject.Enable` 驱动 `OpenSBI.Transition::Enable`；`OpenSBI.Enable` 完成后通过 `emits` 触发 `Kernel.Transition::Preset`。
+1. 启动触发：`KernelProject.Enable` 驱动 `OpenSBI.Transition::Enable`；`OpenSBI.Enable` 完成 OpenSBI 到内核的控制权交接后通过 `emits` 触发 `Kernel.Transition::Preset`。
 2. 中断事件：中断控制器代表其它硬件设备向内核发出的中断事件，触发内核通过服务例程进行响应。中断事件包括时钟中断、外设中断和 IPI 中断；后续不引入 `Event::XXX`，而应落到对应的 action 或迁移名称。
 
 ### 内部触发

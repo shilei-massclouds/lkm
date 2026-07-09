@@ -40,6 +40,8 @@ class ModelToolTests(unittest.TestCase):
             self.assertGreaterEqual(data["summary"]["objects"], 25)
             self.assertEqual(data["summary"]["errors"], 0)
             self.assertIn("ComputerProject", data["model"]["objects"])
+            self.assertIn("OpenSBI", data["model"]["objects"])
+            self.assertNotIn("OpenSbi" + "Firmware", data["model"]["objects"])
 
     def test_model_json_contains_indexed_children_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -52,6 +54,7 @@ class ModelToolTests(unittest.TestCase):
             objects = data["model"]["objects"]
             computer = objects["ComputerProject"]
             kernel = objects["Kernel"]
+            opensbi = objects["OpenSBI"]
             preset = computer["states"]["Base"]["transitions"]["Preset"]
             enable = computer["states"]["Ready"]["transitions"]["Enable"]
             event_stream = objects["EventStream"]
@@ -70,6 +73,11 @@ class ModelToolTests(unittest.TestCase):
                     "Kernel",
                     "OpenSBI",
                 ],
+            )
+            self.assertEqual(opensbi["initial_state"], "Ready")
+            self.assertEqual(
+                opensbi["states"]["Ready"]["transitions"]["Enable"]["target_state"],
+                "Online",
             )
             self.assertEqual(
                 kernel["children"],

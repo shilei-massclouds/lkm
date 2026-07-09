@@ -290,7 +290,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "riscv_sbi_spec",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "ordered_booting_enabled()",
     ): (
@@ -298,7 +298,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "primary_hart_only_at_kernel_entry()",
     ): (
@@ -306,7 +306,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "primary_hart_sie_clear_at_kernel_entry()",
     ): (
@@ -314,7 +314,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)",
     ): (
@@ -322,7 +322,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)",
     ): (
@@ -330,7 +330,7 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
-        "OpenSbiFirmware",
+        "OpenSBI",
         "firmware::opensbi",
         "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)",
     ): (
@@ -2828,7 +2828,7 @@ class _Deriver:
             return False
 
         if not (
-            self._validate_state("OpenSbiFirmware", "Online")
+            self._validate_state("OpenSBI", "Online")
             and self._validate_state("BootArgs", "Online")
             and self._validate_state("PhysicalMemory", "Online")
         ):
@@ -2918,14 +2918,14 @@ class _Deriver:
             return False
 
         if expression == "interrupt_concurrency_closed()":
-            self._validate_state("OpenSbiFirmware", "Online")
+            self._validate_state("OpenSBI", "Ready")
             if "primary_hart_sie_clear_at_kernel_entry()" not in self.proved_expressions:
                 return False
             proof_class = "system_exclusive_context"
             proof_provider = "prior_derivation_facts"
         elif expression == "task_concurrency_closed()":
             self._validate_state("SbiSpec", "Online")
-            self._validate_state("OpenSbiFirmware", "Online")
+            self._validate_state("OpenSBI", "Ready")
             if not {
                 "sbi_hsm_available()",
                 "ordered_booting_enabled()",

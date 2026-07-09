@@ -82,28 +82,6 @@ object SbiSpec: PrepareObject {
     }
 }
 
-/*
- * OpenSbiFirmware 表示当前启动路径中由 OpenSBI 固件提供的 SBI 交接语义。
- * 它把 SBI 规范能力落实到本次内核入口的固件状态。
- */
-object OpenSbiFirmware: PrepareObject {
-    initial_state: State::Online;
-    source: firmware::opensbi;
-
-    state State::Online {
-        invariant {
-            SbiSpec.state == State::Online;
-            BootArgs.state == State::Online;
-            ordered_booting_enabled();
-            primary_hart_only_at_kernel_entry();
-            primary_hart_sie_clear_at_kernel_entry();
-            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
-        }
-    }
-}
-
 include "kernel.spec";
 
 object ComputerProject: ProjectObject {
@@ -148,14 +126,14 @@ object ComputerProject: ProjectObject {
         transitions {
             /*
              * Setup 建立当前项目所需的硬件/固件前置：BootArgs 描述入口
-             * ABI 交接，SbiSpec/OpenSbiFirmware 描述固件能力与本次入口状态。
+             * ABI 交接，SbiSpec/OpenSBI 描述固件能力与本次可交接状态。
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     BootArgs.state == State::Online;
                     SbiSpec.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Ready;
                 }
 
                 emits {
@@ -165,7 +143,7 @@ object ComputerProject: ProjectObject {
                 deferred {
                     /* 对应 BootArgs 所承载的启动硬件/ABI 交接事实。 */
                     computer_hardware_constructed();
-                    /* 对应 SbiSpec 与 OpenSbiFirmware 所承载的固件事实。 */
+                    /* 对应 SbiSpec 与 OpenSBI 所承载的固件事实。 */
                     computer_firmware_constructed();
                 }
             }
@@ -180,7 +158,7 @@ object ComputerProject: ProjectObject {
             Riscv64.state == State::Online;
             BootArgs.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Ready;
         }
 
         transitions {

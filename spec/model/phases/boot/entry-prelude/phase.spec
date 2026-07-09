@@ -1058,7 +1058,7 @@ object RawDtb: ResourceObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                     firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
                 }
 
@@ -1095,7 +1095,7 @@ object RawDtb: ResourceObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                     firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
                 }
 
@@ -2193,7 +2193,7 @@ object EntryPreludePhase: PhaseObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                 }

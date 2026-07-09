@@ -138,7 +138,7 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 >
 > Preset：建立Riscv64 ISA规范
 >
-> Setup：建立硬件平台，定义BootArgs标准，建立SbiSpec规范，实现OpenSbiFirmware
+> Setup：建立硬件平台，定义BootArgs标准，建立SbiSpec规范，实现OpenSBI
 >
 > Enable：驱动内核工程
 

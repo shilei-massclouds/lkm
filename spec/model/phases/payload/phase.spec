@@ -35,7 +35,7 @@ object PayloadPhase: PhaseObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
-                    OpenSbiFirmware.state == State::Online;
+                    OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     BootPhase.state == State::Ready;
@@ -74,7 +74,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             Riscv64.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
             BootPhase.state == State::Ready;
@@ -122,7 +122,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             Riscv64.state == State::Online;
             SbiSpec.state == State::Online;
-            OpenSbiFirmware.state == State::Online;
+            OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
             BootPhase.state == State::Ready;

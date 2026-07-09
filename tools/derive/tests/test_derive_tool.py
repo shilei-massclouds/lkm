@@ -48,6 +48,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["summary"]["contradiction"], 0)
             self.assertEqual(data["states"]["ComputerProject"], "Online")
             self.assertEqual(data["states"]["KernelProject"], "Online")
+            self.assertEqual(data["states"]["OpenSBI"], "Online")
+            self.assertNotIn("OpenSbi" + "Firmware", data["states"])
             self.assertEqual(data["states"]["Kernel"], "Online")
             self.assertIn("locks", data["model"])
             self.assertIn("exclusive_contexts", data["model"])
