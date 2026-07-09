@@ -35,12 +35,12 @@ class ModelBuilderTests(unittest.TestCase):
             result.model.children["KernelProject"],
             [
                 "Kernel",
+                "OpenSBI",
             ],
         )
         self.assertEqual(
             result.model.children["Kernel"],
             [
-                "PreparePhase",
                 "BootPhase",
                 "InterruptPhase",
                 "UpMultitaskPhase",
@@ -69,10 +69,12 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertIn("ComputerProject: ProjectObject", text)
         self.assertIn("ComputerProject -> KernelProject [parent]", text)
-        self.assertIn("Kernel -> PreparePhase [parent]", text)
+        self.assertIn("KernelProject -> OpenSBI [parent]", text)
+        self.assertIn("Kernel -> BootPhase [parent]", text)
         self.assertNotIn("drives", text)
         self.assertIn('"ComputerProject" -> "KernelProject"', dot)
-        self.assertIn('"Kernel" -> "PreparePhase"', dot)
+        self.assertIn('"KernelProject" -> "OpenSBI"', dot)
+        self.assertIn('"Kernel" -> "BootPhase"', dot)
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
@@ -87,8 +89,12 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  -> ComputerProject.Setup [emits]", text)
         self.assertIn("ComputerProject.Enable", text)
         self.assertIn("  -> KernelProject.Preset", text)
+        self.assertIn("KernelProject.Enable", text)
+        self.assertIn("  -> OpenSBI.Enable", text)
+        self.assertIn("OpenSBI.Enable", text)
+        self.assertIn("  -> Kernel.Preset [emits]", text)
         self.assertIn("Kernel.Preset", text)
-        self.assertIn("  -> PreparePhase.Setup", text)
+        self.assertIn("  -> BootPhase.Setup", text)
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
@@ -98,7 +104,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("rankdir=LR", dot)
         self.assertIn('"ComputerProject.Preset" -> "ComputerProject.Setup"', dot)
         self.assertIn('"ComputerProject.Enable" -> "KernelProject.Preset"', dot)
-        self.assertIn('"Kernel.Preset" -> "PreparePhase.Setup"', dot)
+        self.assertIn('"KernelProject.Enable" -> "OpenSBI.Enable"', dot)
+        self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
+        self.assertIn('"Kernel.Preset" -> "BootPhase.Setup"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -109,8 +117,6 @@ class ModelBuilderTests(unittest.TestCase):
         svg = render_svg(view)
 
         self.assertIn("timeline view:", text)
-        self.assertIn("PreparePhase: ready (State::Ready)", text)
-        self.assertIn("PreparePhase: online (State::Online)", text)
         self.assertIn("  - Riscv64.State::Online", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
@@ -125,17 +131,19 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
         self.assertIn("  - MemBlock.State::Offline", text)
+        self.assertIn("KernelProject: online (State::Online)", text)
+        self.assertIn("  - OpenSBI.State::Online", text)
         self.assertNotIn("ComputerProject", text)
-        self.assertNotIn("KernelProject", text)
         self.assertNotIn("Kernel: ready", text)
         self.assertIn("<svg", svg)
-        self.assertIn("PreparePhase", svg)
         self.assertIn("BootPhase", svg)
         self.assertIn("EntryPreludePhase", svg)
         self.assertIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPhase", svg)
+        self.assertIn("KernelProject", svg)
+        self.assertIn("OpenSBI", svg)
         self.assertNotIn("ComputerProject", svg)
 
 

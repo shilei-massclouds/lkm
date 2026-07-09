@@ -991,10 +991,28 @@ class _Deriver:
         for block in transition.decl.emits:
             for entry, entry_span in block.entry_spans:
                 match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
-                if match is None:
+                if match is not None:
+                    emitted_object = transition.object_name
+                    emitted_transition = match.group(1)
+                else:
+                    match = _TARGET_RE.match(entry)
+                    if match is None:
+                        self._record(
+                            DerivationStatus.CONTRADICTION,
+                            f"cannot parse emits entry: {entry}",
+                            entry_span,
+                            object_name=transition.object_name,
+                            transition_name=transition.name,
+                            expression=entry,
+                            source_kind="emits",
+                        )
+                        return False
+                    emitted_object = match.group(1)
+                    emitted_transition = match.group(2)
+                if emitted_object not in self.model.objects:
                     self._record(
                         DerivationStatus.CONTRADICTION,
-                        f"cannot parse emits entry: {entry}",
+                        f"unknown emitted object: {emitted_object}",
                         entry_span,
                         object_name=transition.object_name,
                         transition_name=transition.name,
@@ -1002,11 +1020,10 @@ class _Deriver:
                         source_kind="emits",
                     )
                     return False
-                emitted_transition = match.group(1)
                 self._record(
                     DerivationStatus.PROVED,
                     "completion event emitted: "
-                    f"{transition.object_name}.Transition::{emitted_transition}",
+                    f"{emitted_object}.Transition::{emitted_transition}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,
@@ -1016,7 +1033,7 @@ class _Deriver:
                     proof_provider="transition_completion",
                 )
                 if self._derive_transition(
-                    transition.object_name,
+                    emitted_object,
                     emitted_transition,
                     edge_kind="emits",
                 ):
@@ -1024,7 +1041,7 @@ class _Deriver:
                 self._record(
                     DerivationStatus.BLOCKED,
                     "emitted transition blocked: "
-                    f"{_transition_label(transition.object_name, emitted_transition)}",
+                    f"{_transition_label(emitted_object, emitted_transition)}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,

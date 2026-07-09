@@ -82,6 +82,56 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
+    def test_derives_cross_object_emits_in_same_chain(self) -> None:
+        result = build_model(
+            parse_text(
+                """
+                object A: ProjectObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                        transitions {
+                            on Transition::Preset -> State::Prepared {
+                                emits {
+                                    B.Transition::Setup;
+                                }
+                            }
+                        }
+                    }
+
+                    state State::Prepared {
+                    }
+                }
+
+                object B: PhaseObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
+                            }
+                        }
+                    }
+
+                    state State::Ready {
+                    }
+                }
+                """
+            )
+        )
+
+        derivation = derive(result.model, "A.Transition::Preset")
+
+        self.assertTrue(derivation.ok)
+        self.assertEqual(derivation.states["A"], "Prepared")
+        self.assertEqual(derivation.states["B"], "Ready")
+        self.assertEqual(
+            [transition.object_name for transition in derivation.transitions],
+            ["A", "B"],
+        )
+        self.assertEqual(derivation.trace[0].children[0].edge_kind, "emits")
+        self.assertEqual(derivation.trace[0].children[0].object_name, "B")
+
     def test_blocks_when_dependency_state_is_missing(self) -> None:
         result = build_model(
             parse_text(
@@ -500,7 +550,9 @@ class DerivationTests(unittest.TestCase):
         )
         self.assertIn("> ComputerProject.Transition::Preset State::Base", text)
         self.assertIn("  > ComputerProject.Transition::Setup State::Prepared", text)
-        self.assertIn("  > PreparePhase.Transition::Setup State::Base", text)
+        self.assertIn("> OpenSBI.Transition::Enable State::Ready", text)
+        self.assertIn("> Kernel.Transition::Preset State::Base", text)
+        self.assertIn("> BootPhase.Transition::Setup State::Base", text)
         self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
         self.assertEqual(derivation.states["ComputerProject"], "Online")
         self.assertEqual(derivation.states["KernelProject"], "Online")

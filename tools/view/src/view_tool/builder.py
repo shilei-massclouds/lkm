@@ -22,6 +22,10 @@ from common.view_types import (
 
 _OBJECT_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
 _TARGET_RE = re.compile(r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\Z")
+_OBJECT_TRANSITION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
 _LOCAL_TRANSITION_EXPR_RE = re.compile(r"\ATransition::([A-Za-z_][A-Za-z0-9_]*)\Z")
 _OBJECT_STATE_RE = re.compile(
@@ -1142,6 +1146,10 @@ def _emitted_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
             match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
             if match is not None:
                 emitted.append((transition.object_name, match.group(1)))
+                continue
+            match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
+            if match is not None:
+                emitted.append((match.group(1), match.group(2)))
     return emitted
 
 

@@ -1,5 +1,11 @@
 # Project Charter
 
+## 入口索引
+
+`spec/charter/main.md` 将逐步收缩为总览入口。当前入口项：
+
+1. [内核系统](systems/kernel.md)：对应 `spec/charter/systems/kernel.md`，描述 `Kernel` 系统实例的含义、生命周期、阶段编排和 payload 交接边界。
+
 ## 文档状态
 
 - 状态：草稿
@@ -742,16 +748,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 这些对象的详细状态、来源和边界检查后续补充。当前先保留该阶段，以便后续说明入口前导期对象建立时依赖哪些更早已经存在的前置条件。
 
-当前先将内核启动到常规运行划分为以下四个运行阶段：
+内核系统级生命周期、`Kernel` 对顶层阶段树的串接关系，以及引导期、中断期、单核多任务期、多核运行期和 payload 交接的入口摘要，已拆分到 [内核系统](systems/kernel.md)。本节后续保留各阶段上下文与对象建立细节，作为后续继续拆分到 phase charter 的来源。
 
-1. 从引导入口到调度准备完成、IRQ/time 设施开始建立之前，称为 `引导期`，英文名 `Boot Phase`。
-2. 从 IRQ/time 设施准备开始，到多任务启动之前，称为 `中断期`，英文名 `Interrupt Phase`。其中首个子阶段开始时中断总开关仍关闭，只建立 IRQ/time 控制设施；随后由独立的 `LocalIrqEnablePhase` 执行 `local_irq_enable()`，打开 boot CPU 本地中断总入口。
-3. 从多任务启动到多核即 `SMP` 启动之前，称为 `单核多任务期`，英文名 `UP Multitask Phase`。
-4. 多核即 `SMP` 启动之后的常规运行状态，称为 `多核运行期`，英文名 `SMP Runtime Phase`。
-
-这四个阶段之所以重要，不仅因为它们描述了内核的启动推进顺序，更因为它们直接决定了 `Flow` 所处的 `Context` 以及资源访问所受的环境约束。
-
-从执行语义看，内核启动由概念上的 `根流` 推进。该根流在形式化模型中表现为对 `Kernel` 系统对象的推进；`Kernel` 串接准备期、引导期以及后续启动阶段。
+从执行语义看，内核启动仍由概念上的 `根流` 推进；形式化模型中该推进落在 `Kernel` 系统对象及其阶段树上。
 
 入口前导期中建立的 `根流` 对象，是这个概念根流在内核对象体系中的一个具体承载，只表达当前阶段需要落地的执行语义。因此，形式化模型中的阶段对象不必以 `根流` 对象为父对象；阶段对象可以挂在启动时间轴或上级阶段对象下，并在阶段完成后退出。
 
@@ -3711,39 +3710,3 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 - `Preset -> Prepared`：建立 kernel system spec 和工程模型前置；`emits KernelProject.Setup`；无 `drives`。
 - `Setup -> Ready`：依赖 `Lds` 与 `Config`，生成代码并构造 kernel image；`emits KernelProject.Enable`；无 `drives`。
 - `Enable -> Online`：启动内核系统实例；`drives Kernel.Preset`。
-
-## 内核系统规格
-
-`Kernel` 是 `KernelProject.Enable` 后启动出来的内核系统实例，按系统生命周期驱动阶段树：
-
-- `Kernel.Preset -> Prepared`：验证 project-level 启动输入并推进引导期；`drives BootPhase.Setup`；`emits Kernel.Setup`。
-  - `BootPhase.Setup` 顺序推进：
-    - `EntryPreludePhase.Setup`
-    - `EntrySuccessorPhase.Setup`
-    - `CorePreparePhase.Setup`
-    - `MmCoreInitPhase.Setup`
-    - `SchedInitPhase.Setup`
-- `Kernel.Setup -> Ready`：接续引导期并推进中断期；`drives InterruptPhase.Setup`；`emits Kernel.Enable`。
-  - `InterruptPhase.Setup` 推进：
-    - `IrqTimeInitPhase.Setup`
-    - `LocalIrqEnablePhase.Setup`
-    - `IrqOpenPreparePhase.Setup`
-    - `ProcessPreparePhase.Setup`
-- `Kernel.Enable -> Online`：推进单核多任务期、多核运行期和 selected payload 交接。
-  - `drives UpMultitaskPhase.Setup`
-    - `BootInitRestInitPhase.Setup`
-    - `BootInitScheduleHandoffPhase.Setup`
-    - `BootIdleEntryPhase.Setup`
-  - `drives SmpRuntimePhase.Setup`
-    - `PreSmpInitPhase.Setup`
-    - `SmpBringupPhase.Setup`
-    - `RuntimeCorePhase.Setup`
-    - `InitcallPhase.Setup`
-    - `RootfsPhase.Setup`
-    - `FinalizePhase.Setup`
-  - `drives PayloadPhase.Setup`
-    - `PayloadExecSyncBoundaries.Setup`
-    - `UserCloneDeferredBoundaries.Setup`
-    - `UserBootPayload.Setup`
-  - `drives PayloadPhase.Enable`
-    - `UserBootPayload.Enable`

@@ -68,12 +68,12 @@ class ModelToolTests(unittest.TestCase):
                 objects["KernelProject"]["children"],
                 [
                     "Kernel",
+                    "OpenSBI",
                 ],
             )
             self.assertEqual(
                 kernel["children"],
                 [
-                    "PreparePhase",
                     "BootPhase",
                     "InterruptPhase",
                     "UpMultitaskPhase",
@@ -189,7 +189,7 @@ class ModelToolTests(unittest.TestCase):
                 stderr.getvalue(),
             )
 
-    def test_emits_must_be_same_object_transition(self) -> None:
+    def test_emits_allows_cross_object_transition(self) -> None:
         source = """
             object A: T {
                 initial_state: State::Base;
@@ -216,21 +216,16 @@ class ModelToolTests(unittest.TestCase):
         """
 
         with tempfile.TemporaryDirectory() as tmp:
-            spec = Path(tmp) / "bad-emits-cross-object.spec"
-            ast = Path(tmp) / "bad-emits-cross-object.ast.json"
-            model = Path(tmp) / "bad-emits-cross-object.model.json"
+            spec = Path(tmp) / "emits-cross-object.spec"
+            ast = Path(tmp) / "emits-cross-object.ast.json"
+            model = Path(tmp) / "emits-cross-object.model.json"
             spec.write_text(source, encoding="utf-8")
 
             self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                exit_code = model_main([str(ast), "-o", str(model)])
-
-            self.assertEqual(exit_code, 1)
-            self.assertIn(
-                "emits must reference a same-object transition as Transition::Name",
-                stderr.getvalue(),
-            )
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            data = read_json(model)
+            emits = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Preset"]["emits"]
+            self.assertEqual(emits[0]["entries"][0]["text"], "B.Transition::Setup")
 
     def test_emits_must_target_transition_enabled_from_target_state(self) -> None:
         source = """

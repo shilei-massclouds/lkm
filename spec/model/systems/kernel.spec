@@ -16,7 +16,7 @@ include "../phases/smp-runtime/main.spec";
 include "../phases/payload/main.spec";
 
 /*
- * Kernel 表示 KernelProject.Enable 后启动出来的内核系统实例。
+ * Kernel 表示 OpenSBI.Enable 完成控制权交接后触发出的内核系统实例。
  * 它替代旧的临时启动时间轴对象，按内核系统生命周期编排准备期、引导期、
  * 中断期、单核多任务期、多核运行期以及 payload 交接阶段。
  */

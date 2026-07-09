@@ -226,11 +226,12 @@ drives {
 `ProtectedCommit` 在 `SomeContext` 之内。代码生成或 lowering 不得把这三个动作
 重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 transition body。
 
-## SEM-TRANSITION-EMITS-001: Completion Events Are Local Post-Commit Events
+## SEM-TRANSITION-EMITS-001: Completion Events Are Post-Commit Events
 
 状态机是惰性的；外部事件或迁移完成事件触发 transition，transition 自身不得在未被
 事件触发时主动推进。`emits` 是 transition 的一等子块，用于声明“当前 transition
-完成后向本对象目标状态发出的迁移完成事件”：
+完成后发出的迁移完成事件”。它可以触发本对象的后续 transition，也可以触发其它对象
+的 transition，用于表达状态提交后的跨对象事件交接：
 
 ```text
 on Transition::Preset -> State::Prepared {
@@ -240,6 +241,7 @@ on Transition::Preset -> State::Prepared {
 
     emits {
         Transition::Setup;
+        OtherObject.Transition::Preset;
     }
 }
 ```
@@ -250,18 +252,24 @@ on Transition::Preset -> State::Prepared {
 - 确认 owner 对象仍在当前 transition 的 source state。
 - 提交 owner 对象状态到 target state。
 - 验证 target state invariant。
-- 按 `emits` 中的 source order，在同一个 owner 对象的 target state 上触发对应
-  transition。
+- 按 `emits` 中的 source order 触发对应 transition。本对象的 `Transition::Name`
+  必须从当前 target state 出发；跨对象的 `OtherObject.Transition::Name` 从目标对象
+  当前状态出发，由目标 transition 自身的 source state 和 `depends_on` 约束判定是否
+  可执行。
 
 `emits` 的约束：
 
-- `emits` 条目只能写成 `Transition::Name`，不得写成
-  `OtherObject.Transition::Name`。跨对象推进继续使用 `drives`。
-- 被发出的 transition 必须在同一个对象内存在，并且 source state 必须等于当前
-  transition 的 target state。
+- `emits` 条目可以写成 `Transition::Name` 或 `OtherObject.Transition::Name`。
+- 被发出的 transition 必须存在。
+- 当 `emits` 使用本对象 transition 时，被发出的 transition source state 必须等于
+  当前 transition 的 target state。
+- 当 `emits` 使用跨对象 transition 时，不要求目标 transition 的 source state 等于
+  当前 transition 的 target state；目标对象状态由事件链执行时判定。
+- `emits` 本身不跨推导链。跨对象 `emits` 仍属于当前推导链内的完成事件交接；未来
+  只有任务创建、中断流建立等会产生新推导链的 action/migration 结果，才能触发链的
+  创建语义。
 - `emits` 不是 `drives` 的别名；`drives` 表达当前迁移过程中的外部驱动，
-  `emits` 表达当前迁移已经提交并通过目标状态 invariant 后的本地 completion
-  event。
+  `emits` 表达当前迁移已经提交并通过目标状态 invariant 后的 completion event。
 - `emits` 目前只覆盖 lifecycle transition completion event。state-local
   `actions { ... }` 的正式 action event 语法落地后，可以在本规则基础上扩展
   action event，但本轮不展开。

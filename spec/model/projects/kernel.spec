@@ -155,6 +155,44 @@ object Config: PrepareObject {
 
 include "../systems/kernel.spec";
 
+/*
+ * OpenSBI 表示本次启动中已经处于可交接状态的 OpenSBI 固件实例。它消费
+ * KernelProject 已构造好的 kernel image，并在 Enable 完成后发出进入 Kernel
+ * 生命周期的启动事件。
+ */
+object OpenSBI: PrepareObject {
+    initial_state: State::Ready;
+    parent: KernelProject;
+    source: firmware::opensbi;
+
+    state State::Ready {
+        invariant {
+            OpenSbiFirmware.state == State::Online;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    OpenSbiFirmware.state == State::Online;
+                    Lds.state == State::Online;
+                    Config.state == State::Online;
+                    kernel_image_constructed();
+                }
+
+                emits {
+                    Kernel.Transition::Preset;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            OpenSbiFirmware.state == State::Online;
+        }
+    }
+}
+
 object KernelProject: ProjectObject {
     initial_state: State::Base;
     parent: ComputerProject;
@@ -220,12 +258,12 @@ object KernelProject: ProjectObject {
 
         transitions {
             /*
-             * Enable 启动内核实例并执行测试/评估；Kernel 自身的完成事件链
-             * 负责从 Preset 自动推进到 Online。
+             * Enable 启动 OpenSBI 交接过程；OpenSBI 完成控制权交接后通过 emits
+             * 触发 Kernel.Preset，Kernel 自身的完成事件链负责自动推进到 Online。
              */
             on Transition::Enable -> State::Online {
                 drives {
-                    Kernel.Transition::Preset;
+                    OpenSBI.Transition::Enable;
                 }
             }
         }
@@ -236,6 +274,7 @@ object KernelProject: ProjectObject {
      */
     state State::Online {
         invariant {
+            OpenSBI.state == State::Online;
             Kernel.state == State::Online;
         }
     }

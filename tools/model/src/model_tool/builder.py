@@ -1115,6 +1115,10 @@ def _emitted_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
             match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
             if match is not None:
                 transitions.append((transition.object_name, match.group(1)))
+                continue
+            match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
+            if match is not None:
+                transitions.append((match.group(1), match.group(2)))
     return transitions
 
 
@@ -1278,37 +1282,46 @@ def _check_emit_references(
 ) -> None:
     for block in transition.decl.emits:
         for entry, entry_span in block.entry_spans:
-            match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
-            if match is None:
+            local_match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+            object_match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
+            if local_match is not None:
+                emitted_object = transition.object_name
+                emitted_name = local_match.group(1)
+            elif object_match is not None:
+                emitted_object = object_match.group(1)
+                emitted_name = object_match.group(2)
+            else:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        "emits must reference a same-object transition as "
-                        f"Transition::Name: {entry}",
+                        "emits must reference a transition as Transition::Name "
+                        f"or Object.Transition::Name: {entry}",
                         entry_span,
                     )
                 )
                 continue
 
-            emitted_name = match.group(1)
-            emitted = _transition_def(model, transition.object_name, emitted_name)
+            emitted = _transition_def(model, emitted_object, emitted_name)
             if emitted is None:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "unknown emitted transition: "
-                        f"{transition.object_name}.Transition::{emitted_name}",
+                        f"{emitted_object}.Transition::{emitted_name}",
                         entry_span,
                     )
                 )
                 continue
 
-            if emitted.source_state != transition.target_state:
+            if (
+                emitted_object == transition.object_name
+                and emitted.source_state != transition.target_state
+            ):
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "emitted transition is not enabled from target state: "
-                        f"{transition.object_name}.Transition::{emitted_name} "
+                        f"{emitted_object}.Transition::{emitted_name} "
                         f"requires State::{emitted.source_state}, "
                         f"but {transition.object_name}.Transition::{transition.name} "
                         f"targets State::{transition.target_state}",
