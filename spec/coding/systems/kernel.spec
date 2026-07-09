@@ -8,6 +8,7 @@
 
 predicate kernel_system_coding_maps_to_arceos_ex_system_module() -> bool;
 predicate kernel_system_coding_implements_kernel_lifecycle_boundary() -> bool;
+predicate kernel_system_coding_preserves_model_lifecycle_states() -> bool;
 predicate kernel_system_coding_owns_runtime_phase_order() -> bool;
 predicate kernel_system_coding_uses_kernel_system_state() -> bool;
 predicate kernel_system_coding_does_not_reorder_phase_calls() -> bool;
@@ -28,10 +29,15 @@ type KernelSystemCoding {
          * Kernel lifecycle boundary:
          *
          * systems/kernel.rs must provide the system lifecycle entry points that
-         * bridge SMP/runtime readiness into PayloadPhase setup/enable and mark
-         * Kernel online after PayloadPhase.Online.
+         * preserve the model Kernel lifecycle states. Kernel.Preset completes
+         * only after BootPhase.Ready and moves Kernel from Base to Prepared;
+         * Kernel.Setup completes only after InterruptPhase.Ready and moves
+         * Kernel from Prepared to Ready; Kernel.Enable drives
+         * UpMultitaskPhase, SmpRuntimePhase and PayloadPhase, and marks Kernel
+         * Online only after PayloadPhase.Online.
          */
         kernel_system_coding_implements_kernel_lifecycle_boundary();
+        kernel_system_coding_preserves_model_lifecycle_states();
 
         /*
          * Runtime choreography:

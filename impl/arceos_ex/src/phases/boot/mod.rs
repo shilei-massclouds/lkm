@@ -19,7 +19,7 @@ pub fn setup_after_children() -> ! {
 }
 
 fn handoff() -> ! {
-    crate::phases::interrupt::setup()
+    crate::systems::kernel::preset_after_boot()
 }
 
 fn boot_phase_ready() -> EventResult {

@@ -28,7 +28,7 @@ pub fn setup_after_children() -> ! {
 }
 
 fn handoff() -> ! {
-    crate::systems::kernel::ready()
+    crate::systems::kernel::enable_after_smp_runtime()
 }
 
 fn smp_runtime_phase_ready() -> EventResult {

@@ -69,3 +69,7 @@ fn payload_phase_dependencies_ready() -> bool {
         && printk::is_ready()
         && (printk::boot_console_online() || printk::console_handoff_complete())
 }
+
+pub fn is_online() -> bool {
+    crate::phases::state::load(&PAYLOAD_PHASE_STATE) == State::Online
+}
