@@ -25,7 +25,7 @@ use super::{
     static_branch::StaticBranch,
     workqueue::Workqueue,
 };
-use crate::{arch::riscv64, trace::Checkpoint};
+use crate::{arch::riscv64, checkpoint::Checkpoint};
 
 const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
@@ -1595,7 +1595,7 @@ impl IrqTimeTrimmedPaths {
         self.rcu_init_nohz_trimmed_noop = true;
         self.rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled = true;
         self.rcu_nohz_position_preserved = true;
-        crate::trace::checkpoint(Checkpoint::RcuInitNohzTrimmedNoop);
+        crate::checkpoint::checkpoint(Checkpoint::RcuInitNohzTrimmedNoop);
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -1621,7 +1621,7 @@ impl IrqTimeTrimmedPaths {
         self.kfence_init_trimmed_noop = true;
         self.kfence_trimmed_because_config_kfence_disabled = true;
         self.kfence_position_preserved = true;
-        crate::trace::checkpoint(Checkpoint::KfenceInitTrimmedNoop);
+        crate::checkpoint::checkpoint(Checkpoint::KfenceInitTrimmedNoop);
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -4592,7 +4592,7 @@ impl Serial8250ConsoleBurstIrqTxProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250ConsoleBurstIrqTxReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250ConsoleBurstIrqTxReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -4861,7 +4861,7 @@ impl Serial8250ConsoleLongIrqTxProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250ConsoleLongIrqTxReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250ConsoleLongIrqTxReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -5150,7 +5150,7 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250ConsoleLongBurstIrqTxReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250ConsoleLongBurstIrqTxReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -5302,7 +5302,7 @@ impl Serial8250ConsoleTxQuiesceProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250ConsoleTxQuiesceReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250ConsoleTxQuiesceReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -5489,7 +5489,7 @@ impl Serial8250RxLoopbackProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250RxLoopbackReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250RxLoopbackReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -5775,7 +5775,7 @@ impl Serial8250RxBatchLoopbackProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::Serial8250RxBatchLoopbackReady);
+        crate::checkpoint::checkpoint(Checkpoint::Serial8250RxBatchLoopbackReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -6184,7 +6184,7 @@ impl TtyXmitFifoProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::TtyXmitFifoProbeReady);
+        crate::checkpoint::checkpoint(Checkpoint::TtyXmitFifoProbeReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -6387,7 +6387,7 @@ impl TtyWriteRuntimeTxProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::TtyWriteRuntimeTxReady);
+        crate::checkpoint::checkpoint(Checkpoint::TtyWriteRuntimeTxReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -6640,7 +6640,7 @@ impl TtyWriteBatchRuntimeTxProbe {
             );
         }
 
-        crate::trace::checkpoint(Checkpoint::TtyWriteBatchRuntimeTxReady);
+        crate::checkpoint::checkpoint(Checkpoint::TtyWriteBatchRuntimeTxReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }

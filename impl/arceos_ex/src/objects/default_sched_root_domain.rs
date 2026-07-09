@@ -3,7 +3,7 @@ use super::{
     cpu_group::CpuGroup,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct DefaultSchedRootDomain {
     lifecycle: Lifecycle,

@@ -2,7 +2,7 @@
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::trace::{self, Checkpoint};
+use crate::checkpoint::{self, Checkpoint};
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 use super::files::OpenFileDescriptionRef;
@@ -7643,7 +7643,7 @@ fn run_breakpoint_hooks(frame: &mut TrapFrame) -> BreakpointHookResult {
 }
 
 pub fn resume_after_breakpoint(frame: &mut TrapFrame) {
-    trace::checkpoint(Checkpoint::BreakpointExceptionHandled);
+    checkpoint::checkpoint(Checkpoint::BreakpointExceptionHandled);
     frame.sepc = frame
         .sepc
         .wrapping_add(breakpoint_instruction_length(frame.sepc));

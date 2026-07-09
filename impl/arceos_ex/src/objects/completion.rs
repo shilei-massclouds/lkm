@@ -1,7 +1,7 @@
 use super::state::{
     failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const COMPLETION_DONE_ALL: usize = usize::MAX;
 

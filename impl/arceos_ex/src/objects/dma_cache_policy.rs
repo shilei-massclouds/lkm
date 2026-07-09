@@ -3,7 +3,7 @@ use super::{
     cpu_capabilities::CpuCapabilities,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct DmaCachePolicy {
     lifecycle: Lifecycle,

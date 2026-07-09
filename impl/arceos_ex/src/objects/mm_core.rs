@@ -21,7 +21,7 @@ use super::{
     workqueue::Workqueue,
     zones::{ZoneKind, Zones},
 };
-use crate::{arch::riscv64::csr, trace::Checkpoint};
+use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use alloc::{boxed::Box, vec::Vec};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
@@ -1954,7 +1954,7 @@ impl PageAllocator {
         }
 
         self.full_gfp_mask_open = true;
-        crate::trace::checkpoint(Checkpoint::PageAllocatorFullGfpMaskOpen);
+        crate::checkpoint::checkpoint(Checkpoint::PageAllocatorFullGfpMaskOpen);
         Ok(())
     }
 
@@ -1989,7 +1989,7 @@ impl PageAllocator {
         self.page_extension_late_config_disabled = true;
         self.shuffle_late_trimmed = true;
         self.shuffle_late_config_disabled = true;
-        crate::trace::checkpoint(Checkpoint::PageAllocatorLateReady);
+        crate::checkpoint::checkpoint(Checkpoint::PageAllocatorLateReady);
         Ok(())
     }
 
@@ -2665,7 +2665,7 @@ impl SlubSubsystem {
         }
 
         self.flush_workqueue_ready = true;
-        crate::trace::checkpoint(Checkpoint::SlubFlushWorkqueueReady);
+        crate::checkpoint::checkpoint(Checkpoint::SlubFlushWorkqueueReady);
         Ok(())
     }
 }

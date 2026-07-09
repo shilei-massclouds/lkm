@@ -72,7 +72,7 @@ MUST：当前 checkpoint 机制按“观察点 + consumer”理解。默认构�
 `PROBE=announce`，长期应清理；`trace` 名称留给后续 Linux-like trace 机制。
 
 MUST：Linux differential checkpoint 工作的第一个子阶段只导出本项目 checkpoint inventory。唯一事实源是
-`impl/arceos_ex/src/trace/mod.rs`：`Checkpoint` enum 顺序定义稳定序号和启动观测顺序基线，
+`impl/arceos_ex/src/checkpoint/mod.rs`：`Checkpoint` enum 顺序定义稳定序号和启动观测顺序基线，
 `Checkpoint::name()` 定义稳定对外名称，`early_byte()` 的显式 match arm 定义可选早期单字符 announce 元数据。
 导出工具只能写入 `tools/out/checkpoints/` 下的机器可读 JSON 和人工可读 Markdown；JSON 行字段固定为
 `index`、`variant`、`name`、`early_byte` 和 `source_file`。本阶段不得改变 checkpoint 行为、handler、KUnit 输出、
@@ -130,7 +130,7 @@ required checkpoint 必须让 difftest 配置校验失败；已登记的缺口�
 的 coverage counts。默认 rc.local difftest 结论只能表述为声明的 hard scope 内一致；exact checkpoint 覆盖率由
 coverage audit 单独报告，不得把部分 hard scope 误表述为全部 exact mapping 一致。
 
-MUST：后续 Linux checkpoint 插桩同步阶段必须把 `impl/arceos_ex/src/trace/mod.rs` 导出的 checkpoint inventory 作为唯一
+MUST：后续 Linux checkpoint 插桩同步阶段必须把 `impl/arceos_ex/src/checkpoint/mod.rs` 导出的 checkpoint inventory 作为唯一
 checkpoint 源头，把 `tools/out/checkpoints/linux_checkpoint_mapping.json` 作为唯一 Linux anchor 源头。Linux 侧
 instrumentation plan 和 marker 只能从这两者派生，不得手写独立 checkpoint list。插桩同步主键必须使用
 `checkpoint_name` 和/或 `checkpoint_variant`；`checkpoint_index` 只能用于启动顺序审阅和输出排序，不得作为 Linux marker
@@ -1438,9 +1438,11 @@ impl/arceos_ex/
   linker/riscv64.lds
   src/
     arch/riscv64/
+    projects/
+    systems/
     objects/
     phases/
-    trace/
+    checkpoint/
 ```
 
 目录结构服务于对象级实现清晰性，不承担最终组件边界。

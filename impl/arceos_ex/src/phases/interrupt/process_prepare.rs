@@ -1,12 +1,12 @@
 use crate::{
     arch::riscv64::csr,
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         process_prepare::TaskCreationSetup,
         state::{failed_condition, EventError, EventErrorCode, EventResult, LifecycleEvent, State},
         vfs::{FileSystemKind, VfsInodeKind},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -15,7 +15,7 @@ static PROCESS_PREPARE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::ProcessPreparePhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::ProcessPreparePhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex process prepare event failed\n",

@@ -19,8 +19,8 @@ use super::{
     workqueue::Workqueue,
 };
 use crate::{
+    checkpoint::{self, Checkpoint},
     context::Context,
-    trace::{self, Checkpoint},
 };
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -1053,7 +1053,7 @@ impl PlatformBus {
         }
         self.of_platform_devices_created = self.platform_device_count() == candidates.count();
         self.of_platform_devices_added = self.klist_device_count() == candidates.count();
-        trace::checkpoint(Checkpoint::OfPlatformDefaultPopulateScanComplete);
+        checkpoint::checkpoint(Checkpoint::OfPlatformDefaultPopulateScanComplete);
         InitcallReturn::Ok
     }
 

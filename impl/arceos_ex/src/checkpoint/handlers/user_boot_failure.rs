@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
@@ -8,7 +9,6 @@ use crate::{
         state::State,
         user_boot::{ElfError, UserInitAttemptReason, UserInitAttemptStage, UserInitPathRef},
     },
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::UserBootInitAttemptFailed];

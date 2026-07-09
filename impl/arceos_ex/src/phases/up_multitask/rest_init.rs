@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         rest_init::{
@@ -6,7 +7,6 @@ use crate::{
         },
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 

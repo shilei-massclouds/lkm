@@ -909,7 +909,7 @@ pub fn handle_irq_completion() {
     runtime.real_completion_len = len;
     VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::VirtioRngEntropyReady,
+        crate::checkpoint::Checkpoint::VirtioRngEntropyReady,
         crate::context::context_ref(),
     );
 }

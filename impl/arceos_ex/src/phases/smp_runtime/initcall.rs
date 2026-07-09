@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         initcall::initcall_phase_ready_diagnostic,
@@ -7,7 +8,6 @@ use crate::{
             LifecycleEvent, State,
         },
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -15,7 +15,7 @@ use core::sync::atomic::AtomicU8;
 static INITCALL_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::InitcallPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::InitcallPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex initcall event failed\n",

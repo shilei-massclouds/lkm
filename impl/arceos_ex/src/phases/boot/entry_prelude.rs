@@ -2,13 +2,13 @@ use core::arch::global_asm;
 use core::sync::atomic::AtomicU8;
 
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         boot_args::BootArgs,
         soc::Soc,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 
 #[unsafe(link_section = ".data.phase")]
@@ -270,7 +270,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.boot_cpu_current_task.setup()?;
     ctx.boot_current_cpu.setup()?;
     ctx.cpu_group.preset(&ctx.boot_current_cpu)?;
-    crate::trace::checkpoint(Checkpoint::CpuGroupPrepared);
+    crate::checkpoint::checkpoint(Checkpoint::CpuGroupPrepared);
     ctx.boot_current_cpu.enable(&ctx.cpu_group)?;
     ctx.init_task.adopt_head_preset(&ctx.kernel_image)?;
     ctx.init_stack

@@ -8,7 +8,7 @@ use super::{
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const EARLY_SYSTEM_WORKQUEUE_COUNT: usize = 9;
 const POOL_WORKQUEUE_CACHE_OBJECT_SIZE: usize = core::mem::size_of::<usize>() * 12;
@@ -410,7 +410,7 @@ impl Workqueue {
         self.pool_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
         self.topology_pool_mutex_guard_used = true;
         self.topology_struct_mutex_guard_used = true;
-        crate::trace::checkpoint(Checkpoint::WorkqueueTopologyReady);
+        crate::checkpoint::checkpoint(Checkpoint::WorkqueueTopologyReady);
         Ok(())
     }
 }

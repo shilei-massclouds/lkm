@@ -1,10 +1,10 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         rootfs::rootfs_phase_ready,
         state::{failed_condition, EventError, EventErrorCode, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -34,8 +34,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.kunit_runtime_trimmed, &ctx.workqueue)?;
     ctx.rootfs_console_deferred
         .setup(&ctx.initramfs_sync_deferred, &ctx.kernel_init_task)?;
-    crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
-    crate::trace::checkpoint(Checkpoint::RootfsPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
+    crate::checkpoint::checkpoint(Checkpoint::RootfsPhaseStarted);
     ctx.rootfs_prepare_namespace_paths.setup(
         &ctx.rootfs_console_deferred,
         &ctx.saved_command_line,

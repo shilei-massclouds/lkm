@@ -6,7 +6,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const MAX_STATIC_KEYS: usize = 8;
 

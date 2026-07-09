@@ -1,7 +1,7 @@
 use crate::{arch::riscv64::sbi, objects::printk};
 
 use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 #[allow(dead_code)]
 static mut EARLY_CON: EarlyCon = EarlyCon::new();

@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
@@ -8,7 +9,6 @@ use crate::{
         rest_init::{TaskEntry, TaskKind, KERNEL_INIT_PID},
         state::State,
     },
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[

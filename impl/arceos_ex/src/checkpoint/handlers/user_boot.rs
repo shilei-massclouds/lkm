@@ -1,11 +1,11 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
     },
     context::Context,
     objects::user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
-    trace::Checkpoint,
 };
 
 #[cfg(app_user_boot)]

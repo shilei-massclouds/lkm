@@ -3,7 +3,7 @@ use super::{
     early_param::EarlyParam,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 #[derive(Clone, Copy)]
 pub struct BootParamSummary {

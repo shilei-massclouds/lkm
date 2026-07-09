@@ -37,6 +37,13 @@
 
 组件、module、crate、公开接口、adapter、构建接入以及与 ArceOS 组件体系兼容相关的规则，记录在 `spec/compose/`。`Composition Phase` 不应改变对象状态、transition 迁移和依赖语义，只决定这些对象级实现如何组合和发布。
 
+## 目录层次
+
+`spec/coding/` 保留 `projects/`、`systems/`、`phases/`、`objects/` 四类子目录，
+与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
+`rust/`、`arceos_ex` 等通用编码规格继续由本目录根入口承载；后续新增或拆分的专题约束，
+若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
+
 ## 当前实践目标
 
 当前目标是实践主规格文档的第二点用途：基于规格指挥 AI 生成内核代码。

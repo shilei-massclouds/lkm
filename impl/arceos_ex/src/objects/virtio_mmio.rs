@@ -10,7 +10,7 @@ use super::{
     ioremap::IoMemoryMapping,
     irq_time::{IrqHandlerKind, LogicalIrq},
 };
-use crate::{checkpoint, trace::Checkpoint};
+use crate::checkpoint::{self, Checkpoint};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 const VIRTIO_MMIO_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"virtio,mmio")];

@@ -3,10 +3,10 @@ use super::{
     cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
     init_task::InitTask,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::arch::riscv64::csr;
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 
@@ -125,7 +125,7 @@ impl BootCurrentCpu {
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
-            crate::trace::Checkpoint::BootCurrentCpuReady,
+            crate::checkpoint::Checkpoint::BootCurrentCpuReady,
         )
     }
 
@@ -156,7 +156,7 @@ impl BootCurrentCpu {
             LifecycleEvent::Enable,
             State::Ready,
             State::Online,
-            crate::trace::Checkpoint::BootCurrentCpuOnline,
+            crate::checkpoint::Checkpoint::BootCurrentCpuOnline,
         )
     }
 }
@@ -218,7 +218,7 @@ impl LocalInterruptControl {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            crate::trace::Checkpoint::BootCpuLocalInterruptReady,
+            crate::checkpoint::Checkpoint::BootCpuLocalInterruptReady,
         )
     }
 
@@ -350,7 +350,7 @@ impl CurrentTaskSlot {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            crate::trace::Checkpoint::BootCpuCurrentTaskReady,
+            crate::checkpoint::Checkpoint::BootCpuCurrentTaskReady,
         )
     }
 
@@ -434,7 +434,7 @@ impl PreemptionControl {
         self.setup_with_depth(
             init_task,
             0,
-            crate::trace::Checkpoint::BootIdlePreemptionReady,
+            crate::checkpoint::Checkpoint::BootIdlePreemptionReady,
         )
     }
 
@@ -442,7 +442,7 @@ impl PreemptionControl {
         self.setup_with_depth(
             init_task,
             1,
-            crate::trace::Checkpoint::BootIdlePreemptionReady,
+            crate::checkpoint::Checkpoint::BootIdlePreemptionReady,
         )
     }
 

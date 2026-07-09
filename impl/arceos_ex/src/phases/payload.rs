@@ -1,11 +1,11 @@
 use core::sync::atomic::AtomicU8;
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::{
         printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 
 #[unsafe(link_section = ".data.phase")]

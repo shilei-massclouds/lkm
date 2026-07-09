@@ -1,11 +1,11 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
     },
     context::Context,
     objects::{cpu_control::CurrentTaskRef, state::State},
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[

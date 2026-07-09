@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
@@ -8,7 +9,6 @@ use crate::{
         linux_plic_shim::{self, LinuxPlicBoundaryFacts},
         ns16550a,
     },
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::InitcallBoundaryReady];

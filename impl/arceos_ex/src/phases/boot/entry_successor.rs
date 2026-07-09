@@ -1,10 +1,10 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         earlycon, printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -19,7 +19,7 @@ const DEFERRED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
 const DEFERRED_START_KERNEL_POSITION: u8 = 1 << 2;
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex entry successor event failed\n",

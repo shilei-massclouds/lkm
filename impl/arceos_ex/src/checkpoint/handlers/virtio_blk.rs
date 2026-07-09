@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
@@ -12,7 +13,6 @@ use crate::{
         virtio_blk,
         virtio_mmio::{self, VIRTIO_ID_BLOCK, VIRTIO_MMIO_PLATFORM_DRIVER_REF},
     },
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[

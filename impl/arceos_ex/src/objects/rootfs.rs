@@ -10,7 +10,7 @@ use super::{
     vfs::{DentryRef, FileSystemKind, FsStruct, MountRef, VfsCore},
     workqueue::Workqueue,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub const ROOTFS_REAL_MOUNT_POINT_NAME: &[u8] = b"root";
 

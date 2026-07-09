@@ -744,7 +744,7 @@ pub fn setup_live_driver(
         .map_err(|_| live_setup_error())?;
     runtime.real_probe_succeeded = true;
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::VirtioBlkReady,
+        crate::checkpoint::Checkpoint::VirtioBlkReady,
         crate::context::context_ref(),
     );
     dispatch_first_read_ready();
@@ -932,7 +932,7 @@ fn read_live_block(
     };
     VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::VirtioBlkLiveReadSubmitted,
+        crate::checkpoint::Checkpoint::VirtioBlkLiveReadSubmitted,
         crate::context::context_ref(),
     );
     {
@@ -947,7 +947,7 @@ fn read_live_block(
     }
     VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::VirtioBlkLiveReadCompleted,
+        crate::checkpoint::Checkpoint::VirtioBlkLiveReadCompleted,
         crate::context::context_ref(),
     );
 
@@ -1110,7 +1110,7 @@ fn dispatch_first_read_ready() {
         .is_ok()
     {
         crate::checkpoint::dispatch(
-            crate::trace::Checkpoint::VirtioBlkReadReady,
+            crate::checkpoint::Checkpoint::VirtioBlkReadReady,
             crate::context::context_ref(),
         );
     }

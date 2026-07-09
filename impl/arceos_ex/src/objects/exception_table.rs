@@ -3,7 +3,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 unsafe extern "C" {
     fn __start___ex_table();

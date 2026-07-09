@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         earlycon,
@@ -7,7 +8,6 @@ use crate::{
         state::{failed_condition, EventResult, LifecycleEvent, State},
         static_branch::StaticKey,
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -16,7 +16,7 @@ static MM_CORE_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::MmCoreInitPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::MmCoreInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex mm core init event failed\n",

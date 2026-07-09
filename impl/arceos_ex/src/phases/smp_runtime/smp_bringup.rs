@@ -1,10 +1,10 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         smp_bringup::smp_bringup_runtime_ready,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -12,7 +12,7 @@ use core::sync::atomic::AtomicU8;
 static SMP_BRINGUP_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::SmpBringupPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::SmpBringupPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex smp bringup event failed\n",

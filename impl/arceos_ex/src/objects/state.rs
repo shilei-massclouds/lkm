@@ -1,7 +1,7 @@
 #[cfg(target_arch = "riscv64")]
 use core::arch::global_asm;
 
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 #[allow(dead_code)]
 #[repr(u8)]
@@ -309,7 +309,7 @@ impl Lifecycle {
 
         self.state = target;
         self.seen_events |= event.bit();
-        crate::trace::checkpoint(checkpoint);
+        crate::checkpoint::checkpoint(checkpoint);
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     workqueue::Workqueue,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct RcuCore {
     lifecycle: Lifecycle,
@@ -290,7 +290,7 @@ impl RcuCore {
             self.gp_seq_baseline_synced = true;
             self.scheduler_start_local_irq_guarded = local_interrupt.disabled();
             self.scheduler_start_local_irq_save_count = local_interrupt.saved_and_disabled_count();
-            crate::trace::checkpoint(Checkpoint::RcuSchedulerStartingReady);
+            crate::checkpoint::checkpoint(Checkpoint::RcuSchedulerStartingReady);
             Ok(())
         })();
         let restore_result = local_interrupt.restore();
@@ -313,7 +313,7 @@ impl RcuCore {
         self.normal_after_boot_write_once_trimmed_or_recorded = true;
         self.boot_ended_publish_recorded = true;
         self.inkernel_boot_ended = true;
-        crate::trace::checkpoint(Checkpoint::RcuInkernelBootEnded);
+        crate::checkpoint::checkpoint(Checkpoint::RcuInkernelBootEnded);
         true
     }
 

@@ -6,8 +6,8 @@ pub mod runtime_core;
 pub mod smp_bringup;
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::state::{EventResult, LifecycleEvent, State},
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -15,7 +15,7 @@ use core::sync::atomic::AtomicU8;
 static SMP_RUNTIME_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup() -> ! {
-    crate::trace::checkpoint(Checkpoint::SmpRuntimePhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::SmpRuntimePhaseStarted);
     pre_smp_init::setup(crate::context::context())
 }
 

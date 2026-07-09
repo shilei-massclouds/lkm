@@ -1,11 +1,11 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
     },
     context::Context,
     objects::{earlycon, printk},
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PrintkBufferReady];

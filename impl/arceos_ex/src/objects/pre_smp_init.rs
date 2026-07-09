@@ -8,7 +8,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     workqueue::Workqueue,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct VmstatCore {
     lifecycle: Lifecycle,

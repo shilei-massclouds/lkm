@@ -1,13 +1,13 @@
 use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit::Sink,
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         irq_time::{IrqHandlerKind, LogicalIrq},
         ns16550a,
         state::State,
     },
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];

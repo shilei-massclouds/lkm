@@ -3,7 +3,7 @@ use super::{
     mm_core::{NamedSlubCacheKind, SlubSubsystem},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const RADIX_TREE_CPUHP_STEP: usize = 0x300;
 const RADIX_TREE_NODE_CACHE_OBJECT_SIZE: usize = core::mem::size_of::<usize>() * 8;

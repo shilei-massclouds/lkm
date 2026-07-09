@@ -6,7 +6,7 @@ use super::{
     rwlock::{RwLock, RwLockWriteOutcome},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const MAX_RESOURCES: usize = 64;
 const NO_RESOURCE: usize = usize::MAX;

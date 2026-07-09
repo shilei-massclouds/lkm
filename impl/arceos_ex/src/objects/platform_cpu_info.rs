@@ -3,7 +3,7 @@ use super::{
     raw_dtb::RawDtb,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct PlatformCpuInfo {
     lifecycle: Lifecycle,

@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use crate::{objects::printk, trace::Checkpoint};
+use crate::{checkpoint::Checkpoint, objects::printk};
 
 const SUITE_NAME: &str = "arceos_ex";
 

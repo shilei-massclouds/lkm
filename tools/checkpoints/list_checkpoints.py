@@ -12,7 +12,7 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE = REPO_ROOT / "impl" / "arceos_ex" / "src" / "trace" / "mod.rs"
+DEFAULT_SOURCE = REPO_ROOT / "impl" / "arceos_ex" / "src" / "checkpoint" / "mod.rs"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "out" / "checkpoints"
 JSON_NAME = "arceos_ex_checkpoints.json"
 MARKDOWN_NAME = "arceos_ex_checkpoints.md"
@@ -328,7 +328,7 @@ def check_outputs(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Export arceos_ex Checkpoint inventory from trace/mod.rs.",
+        description="Export arceos_ex Checkpoint inventory from checkpoint/mod.rs.",
     )
     parser.add_argument(
         "--source",

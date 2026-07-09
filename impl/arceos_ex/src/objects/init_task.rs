@@ -1,4 +1,4 @@
-use crate::{arch::riscv64::csr, trace::Checkpoint};
+use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     kernel_image::KernelImage,

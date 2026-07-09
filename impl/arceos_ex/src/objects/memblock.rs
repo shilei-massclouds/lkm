@@ -8,7 +8,7 @@ use super::{
     raw_dtb::{PhysRange, RawDtb},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct MemBlock {
     lifecycle: Lifecycle,

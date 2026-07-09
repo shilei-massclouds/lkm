@@ -1,11 +1,11 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
     },
     context::Context,
     objects::{mm_core::PageAllocator, raw_dtb::PhysRange, state::State},
-    trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PageAllocatorMemBlockHandoffReady];

@@ -7784,7 +7784,7 @@ pub fn run_first_user_init(
         user_boot_panic("user init ELF setup failed\n");
     }
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::UserBootMainElfReady,
+        crate::checkpoint::Checkpoint::UserBootMainElfReady,
         crate::context::context_ref(),
     );
     let interpreter_image = if let Some(path) = elf.interpreter_path() {
@@ -7804,7 +7804,7 @@ pub fn run_first_user_init(
             user_boot_panic("user interp ELF setup failed\n");
         }
         crate::checkpoint::dispatch(
-            crate::trace::Checkpoint::UserBootInterpreterReady,
+            crate::checkpoint::Checkpoint::UserBootInterpreterReady,
             crate::context::context_ref(),
         );
         Some(image)
@@ -7844,7 +7844,7 @@ pub fn run_first_user_init(
         user_boot_panic("user stack setup failed\n");
     }
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::UserBootAddressSpaceSetupStart,
+        crate::checkpoint::Checkpoint::UserBootAddressSpaceSetupStart,
         crate::context::context_ref(),
     );
     if address_space
@@ -7862,7 +7862,7 @@ pub fn run_first_user_init(
         user_boot_panic("user address space setup failed\n");
     }
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::UserAddressSpaceReady,
+        crate::checkpoint::Checkpoint::UserAddressSpaceReady,
         crate::context::context_ref(),
     );
     if trap_frame.setup(address_space, elf, stack).is_err() {
@@ -7951,7 +7951,7 @@ pub fn run_first_user_init(
     }
 
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::UserModeEntry,
+        crate::checkpoint::Checkpoint::UserModeEntry,
         crate::context::context_ref(),
     );
     unsafe {
@@ -8271,7 +8271,7 @@ fn emit_init_attempt_failure(payload: &mut UserBootPayload, failure: UserInitAtt
     }
     print_init_attempt_failure(failure);
     crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::UserBootInitAttemptFailed,
+        crate::checkpoint::Checkpoint::UserBootInitAttemptFailed,
         crate::context::context_ref(),
     );
 }

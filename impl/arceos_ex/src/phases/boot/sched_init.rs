@@ -1,4 +1,5 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         earlycon,
@@ -6,7 +7,6 @@ use crate::{
         printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -14,7 +14,7 @@ use core::sync::atomic::AtomicU8;
 static SCHED_INIT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::SchedInitPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::SchedInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex sched init event failed\n",
@@ -294,6 +294,6 @@ fn checkpoint_irqs_disabled() -> EventResult {
         );
     }
 
-    crate::trace::checkpoint(Checkpoint::SchedInitIrqsDisabledCheckpoint);
+    crate::checkpoint::checkpoint(Checkpoint::SchedInitIrqsDisabledCheckpoint);
     Ok(())
 }

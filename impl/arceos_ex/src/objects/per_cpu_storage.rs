@@ -8,7 +8,7 @@ use super::{
     static_objects::StaticObjects,
     vm::Vm,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const MAX_PER_CPU_UNITS: usize = 16;
 const DYNAMIC_RESERVE_SIZE: usize = 4096;

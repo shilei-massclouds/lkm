@@ -2,7 +2,7 @@ use super::{
     boot_args::BootArgs,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub(crate) const MAX_CPUS: usize = 16;
 pub(crate) const BOOT_CPU_LOGICAL_ID: usize = 0;

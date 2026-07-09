@@ -6,7 +6,7 @@ use super::{
     sbi::Sbi,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct CpuGroup {
     lifecycle: Lifecycle,
@@ -264,7 +264,7 @@ impl CpuGroup {
 
         self.pre_smp_topology_ready = true;
         self.boot_cpu_topology_recorded = true;
-        crate::trace::checkpoint(Checkpoint::CpuGroupPreSmpReady);
+        crate::checkpoint::checkpoint(Checkpoint::CpuGroupPreSmpReady);
         Ok(())
     }
 
@@ -289,7 +289,7 @@ impl CpuGroup {
         self.register_secondary_cpu_views(secondary_cpus)?;
         self.refresh_cpu_set_views();
         self.smp_concurrency_open = true;
-        crate::trace::checkpoint(Checkpoint::SecondaryCpusOnline);
+        crate::checkpoint::checkpoint(Checkpoint::SecondaryCpusOnline);
         Ok(())
     }
 

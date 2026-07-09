@@ -1,4 +1,4 @@
-use crate::{arch::riscv64::csr, trace::Checkpoint};
+use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     boot_args::BootArgs,
@@ -146,7 +146,7 @@ impl Vm {
     }
 
     pub(super) fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
-        crate::trace::enable_post_vm_checkpoints();
+        crate::checkpoint::enable_post_vm_checkpoints();
 
         let result = self.trampoline_vm.enable(kernel_image);
         if result.is_err() {

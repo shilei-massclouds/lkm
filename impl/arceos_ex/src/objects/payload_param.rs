@@ -3,7 +3,7 @@ use super::{
     command_line::StaticCommandLine,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct PayloadParam {
     lifecycle: Lifecycle,

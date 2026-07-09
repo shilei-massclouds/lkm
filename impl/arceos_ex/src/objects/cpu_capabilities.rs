@@ -5,7 +5,7 @@ use super::{
     fdt_reader::read_cells,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 #[derive(Clone, Copy)]
 pub struct IsaFacts {

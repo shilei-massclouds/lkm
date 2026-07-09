@@ -1,4 +1,4 @@
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 use super::{
     config::Config,

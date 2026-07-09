@@ -4,7 +4,7 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct CacheBlockInfo {
     lifecycle: Lifecycle,

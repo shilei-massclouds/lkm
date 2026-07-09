@@ -1,10 +1,10 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         pre_smp_init::pre_smp_runtime_ready,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -13,7 +13,7 @@ static PRE_SMP_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::PreSmpInitPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::PreSmpInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex pre-smp init event failed\n",

@@ -19,7 +19,7 @@ use super::{
     task::TaskCpuState,
     workqueue::Workqueue,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub use super::task::TaskEntry;
 
@@ -705,7 +705,7 @@ impl KthreaddTask {
                 boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
             self.global_ref_bound = true;
             self.provider_ready = true;
-            crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
+            crate::checkpoint::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
             Ok(())
         })();
         let unlock_result = boot_idle_rcu_read_side.read_unlock();
@@ -828,7 +828,7 @@ impl SystemState {
 
         self.value = SystemStateValue::FreeingInitmem;
         self.freeing_initmem_window_entered = true;
-        crate::trace::checkpoint(Checkpoint::SystemStateFreeingInitmemCheckpoint);
+        crate::checkpoint::checkpoint(Checkpoint::SystemStateFreeingInitmemCheckpoint);
         Ok(())
     }
 

@@ -1,12 +1,12 @@
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::{
         handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
         kunit::Sink,
     },
     context::Context,
-    trace::Checkpoint,
 };
 
 const ANNOUNCE_MODE_EARLY_BYTE: u8 = 0;

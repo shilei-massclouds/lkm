@@ -1,8 +1,8 @@
 pub mod rest_init;
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::state::{EventResult, LifecycleEvent, State},
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -11,7 +11,7 @@ static UP_MULTITASK_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup() -> ! {
-    crate::trace::checkpoint(Checkpoint::UpMultitaskPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::UpMultitaskPhaseStarted);
     rest_init::preset(crate::context::context())
 }
 

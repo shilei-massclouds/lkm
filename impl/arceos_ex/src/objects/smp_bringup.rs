@@ -25,7 +25,7 @@ use super::{
     static_objects::StaticObjects,
     vm::Vm,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const AP_STACK_SIZE: usize = 16 * 1024;
 const AP_WAIT_SPINS: usize = 50_000_000;
@@ -169,22 +169,22 @@ extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) 
     let logical_id = data.logical_id;
     if logical_id < MAX_CPUS {
         AP_ENTRY_REACHED[logical_id].store(1, Ordering::Release);
-        crate::trace::ap_checkpoint(Checkpoint::ApEntryPreludePhaseStarted, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApEntryPreludePhaseStarted, logical_id);
         AP_BOOT_DATA_CONSUMED[logical_id].store(1, Ordering::Release);
-        crate::trace::ap_checkpoint(Checkpoint::ApEntryPreludeBootDataConsumed, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApEntryPreludeBootDataConsumed, logical_id);
         AP_CURRENT_STACK_ESTABLISHED[logical_id].store(1, Ordering::Release);
-        crate::trace::ap_checkpoint(
+        crate::checkpoint::ap_checkpoint(
             Checkpoint::ApEntryPreludeCurrentStackEstablished,
             logical_id,
         );
 
-        crate::trace::ap_checkpoint(Checkpoint::ApSmpCallinPhaseStarted, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApSmpCallinPhaseStarted, logical_id);
         AP_CPU_RUNNING_PRODUCED[logical_id].store(1, Ordering::Release);
-        crate::trace::ap_checkpoint(Checkpoint::ApSmpCallinCpuRunningProduced, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApSmpCallinCpuRunningProduced, logical_id);
 
-        crate::trace::ap_checkpoint(Checkpoint::ApOnlineIdlePhaseStarted, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApOnlineIdlePhaseStarted, logical_id);
         AP_DONE_UP_PRODUCED[logical_id].store(1, Ordering::Release);
-        crate::trace::ap_checkpoint(Checkpoint::ApOnlineIdleDoneUpProduced, logical_id);
+        crate::checkpoint::ap_checkpoint(Checkpoint::ApOnlineIdleDoneUpProduced, logical_id);
     }
 
     loop {
@@ -445,14 +445,14 @@ impl CpuHotplugSyncSet {
         {
             return self.failed_preset();
         }
-        crate::trace::checkpoint(Checkpoint::CpuHotplugReadGuardUsed);
+        crate::checkpoint::checkpoint(Checkpoint::CpuHotplugReadGuardUsed);
 
         if smpboot_threads_lock.lock_owner(MutexOwner::KernelInitTask)?
             != MutexLockOutcome::Acquired
         {
             return self.failed_preset();
         }
-        crate::trace::checkpoint(Checkpoint::SmpbootThreadsMutexGuardUsed);
+        crate::checkpoint::checkpoint(Checkpoint::SmpbootThreadsMutexGuardUsed);
 
         self.cpu_running_ready = true;
         self.cpu_running_observed = false;
@@ -494,8 +494,8 @@ impl CpuHotplugSyncSet {
         self.cpu_running_observed = true;
         wait_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         self.cpu_running_wait_lock_guard_used = true;
-        crate::trace::checkpoint(Checkpoint::CpuRunningObserved);
-        crate::trace::checkpoint(Checkpoint::CpuRunningWaitLockGuardUsed);
+        crate::checkpoint::checkpoint(Checkpoint::CpuRunningObserved);
+        crate::checkpoint::checkpoint(Checkpoint::CpuRunningWaitLockGuardUsed);
         Ok(())
     }
 
@@ -521,8 +521,8 @@ impl CpuHotplugSyncSet {
         self.done_up_observed = true;
         wait_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         self.done_up_wait_lock_guard_used = true;
-        crate::trace::checkpoint(Checkpoint::CpuDoneUpObserved);
-        crate::trace::checkpoint(Checkpoint::CpuDoneUpWaitLockGuardUsed);
+        crate::checkpoint::checkpoint(Checkpoint::CpuDoneUpObserved);
+        crate::checkpoint::checkpoint(Checkpoint::CpuDoneUpWaitLockGuardUsed);
         Ok(())
     }
 
@@ -674,7 +674,7 @@ impl CpuStartProvider {
 
         self.cpu_add_remove_mutex_guard_used = true;
         self.cpu_hotplug_write_guard_used = true;
-        crate::trace::checkpoint(Checkpoint::CpuHotplugWriteGuardUsed);
+        crate::checkpoint::checkpoint(Checkpoint::CpuHotplugWriteGuardUsed);
 
         cpu_hotplug_lock.write_unlock_owner(PerCpuRwSemaphoreOwner::KernelInitTask)?;
         cpu_add_remove_lock.unlock_owner(MutexOwner::KernelInitTask)?;
@@ -745,20 +745,20 @@ impl CpuStartProvider {
             self.boot_data_per_secondary_cpu = true;
             self.boot_data_task_ptr_is_idle_task = true;
             self.boot_data_stack_ptr_is_pt_regs_stack = true;
-            crate::trace::checkpoint(Checkpoint::CpuStartProviderBootDataSelected);
+            crate::checkpoint::checkpoint(Checkpoint::CpuStartProviderBootDataSelected);
             core::sync::atomic::fence(Ordering::SeqCst);
             self.sbi_boot_data_publish_barriers_observed = true;
-            crate::trace::checkpoint(Checkpoint::CpuStartProviderBootDataPublished);
+            crate::checkpoint::checkpoint(Checkpoint::CpuStartProviderBootDataPublished);
 
             self.start_requests_issued = true;
             self.hsm_start_requests_issued = true;
-            crate::trace::checkpoint(Checkpoint::CpuStartProviderHsmStartIssued);
+            crate::checkpoint::checkpoint(Checkpoint::CpuStartProviderHsmStartIssued);
             if crate::arch::riscv64::sbi::hart_start(cpu.hartid(), entry_pa, boot_data_pa).is_err()
             {
                 return false;
             }
             self.hsm_start_return_observed = true;
-            crate::trace::checkpoint(Checkpoint::CpuStartProviderHsmStartReturned);
+            crate::checkpoint::checkpoint(Checkpoint::CpuStartProviderHsmStartReturned);
 
             logical_id += 1;
         }
@@ -1218,7 +1218,7 @@ impl SecondaryCpuOnlineAck {
         self.ap_cache_tlb_flush_summary_observed = callin.cache_tlb_flush_observed();
         self.ap_ipi_enable_observed = callin.ipi_enable_observed();
         self.ap_hotplug_thread_mb_pair_deferred = true;
-        crate::trace::checkpoint(Checkpoint::SecondaryCpuApLocalSyncSummary);
+        crate::checkpoint::checkpoint(Checkpoint::SecondaryCpuApLocalSyncSummary);
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

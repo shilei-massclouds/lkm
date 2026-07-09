@@ -5,7 +5,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_BLOCK, VIRTIO_ID_RNG},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 use alloc::vec::Vec;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -445,7 +445,7 @@ impl VirtioBus {
         if device.is_block() {
             self.block_device_count = self.block_device_count.saturating_add(1);
         }
-        crate::trace::checkpoint(Checkpoint::VirtioBusDeviceAdded);
+        crate::checkpoint::checkpoint(Checkpoint::VirtioBusDeviceAdded);
         Some(device_ref)
     }
 }

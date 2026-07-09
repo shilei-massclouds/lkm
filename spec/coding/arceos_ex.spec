@@ -232,7 +232,7 @@ predicate arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant() -> b
 predicate arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers() -> bool;
 predicate arceos_ex_must_checkpoint_consumers_be_cfg_selected() -> bool;
 predicate arceos_ex_must_log_trace_and_probe_remain_distinct_consumers() -> bool;
-predicate arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source() -> bool;
+predicate arceos_ex_must_checkpoint_inventory_use_checkpoint_mod_as_source() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_export_stable_fields() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux() -> bool;
 predicate arceos_ex_must_checkpoint_inventory_support_regeneration_check() -> bool;
@@ -2565,7 +2565,7 @@ type ArceosExIrqTimeInitCodingMust {
          * Checkpoint inventory export:
          *
          * The first Linux-differential checkpoint stage is inventory only.
-         * Its sole source of truth is impl/arceos_ex/src/trace/mod.rs:
+         * Its sole source of truth is impl/arceos_ex/src/checkpoint/mod.rs:
          * Checkpoint enum order defines the stable index/order baseline,
          * Checkpoint::name() defines the public stable name, and explicit
          * early_byte() match arms define optional early announce metadata.
@@ -2583,7 +2583,7 @@ type ArceosExIrqTimeInitCodingMust {
          * tracked tools/out/checkpoints/ artifacts, and reports file drift as
          * failure without rewriting repository outputs.
          */
-        arceos_ex_must_checkpoint_inventory_use_trace_mod_as_source();
+        arceos_ex_must_checkpoint_inventory_use_checkpoint_mod_as_source();
         arceos_ex_must_checkpoint_inventory_export_stable_fields();
         arceos_ex_must_checkpoint_inventory_not_modify_runtime_or_linux();
         arceos_ex_must_checkpoint_inventory_support_regeneration_check();

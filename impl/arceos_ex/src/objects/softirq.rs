@@ -2,7 +2,7 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const SOFTIRQ_SLOT_COUNT: usize = 10;
 

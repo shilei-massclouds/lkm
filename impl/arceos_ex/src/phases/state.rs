@@ -1,8 +1,8 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::state::{failed_condition, EventResult, LifecycleEvent, State},
-    trace::Checkpoint,
 };
 
 const BASE: u8 = 0;
@@ -48,7 +48,7 @@ pub fn mark(
     }
 
     state.store(encode(target), Ordering::Relaxed);
-    crate::trace::checkpoint(checkpoint);
+    crate::checkpoint::checkpoint(checkpoint);
     Ok(())
 }
 

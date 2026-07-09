@@ -1,11 +1,11 @@
 use crate::{
     arch::riscv64::csr,
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         earlycon, printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -14,7 +14,7 @@ static LOCAL_IRQ_ENABLE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup(ctx: &mut Context) -> ! {
-    crate::trace::checkpoint(Checkpoint::LocalIrqEnablePhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::LocalIrqEnablePhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex local irq enable event failed\n",

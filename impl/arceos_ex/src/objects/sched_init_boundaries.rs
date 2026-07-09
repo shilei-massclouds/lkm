@@ -2,7 +2,7 @@ use super::{
     rcu::RcuCore,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct SchedInitPreludeTrimmedPaths {
     lifecycle: Lifecycle,
@@ -60,12 +60,12 @@ impl SchedInitPreludeTrimmedPaths {
         }
 
         self.poking_init_trimmed_noop = true;
-        crate::trace::checkpoint(Checkpoint::PokingInitNoop);
+        crate::checkpoint::checkpoint(Checkpoint::PokingInitNoop);
         self.ftrace_init_trimmed_noop = true;
         self.ftrace_trimmed_because_mcount_record_disabled = true;
-        crate::trace::checkpoint(Checkpoint::FtraceInitTrimmedNoop);
+        crate::checkpoint::checkpoint(Checkpoint::FtraceInitTrimmedNoop);
         self.early_trace_init_deferred = true;
-        crate::trace::checkpoint(Checkpoint::EarlyTraceInitDeferred);
+        crate::checkpoint::checkpoint(Checkpoint::EarlyTraceInitDeferred);
         self.position_preserved = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -133,10 +133,10 @@ impl SchedInitTraceContextBoundaries {
         }
 
         self.trace_init_deferred = true;
-        crate::trace::checkpoint(Checkpoint::TraceInitDeferred);
+        crate::checkpoint::checkpoint(Checkpoint::TraceInitDeferred);
         self.context_tracking_init_trimmed_noop = true;
         self.context_tracking_trimmed_because_user_force_disabled = true;
-        crate::trace::checkpoint(Checkpoint::ContextTrackingInitTrimmedNoop);
+        crate::checkpoint::checkpoint(Checkpoint::ContextTrackingInitTrimmedNoop);
         self.position_preserved = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,

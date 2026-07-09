@@ -10,7 +10,7 @@ use super::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const SCHED_CLOCK_TIMER_PERIOD: u64 = 1_000_000;
 const N_TTY_LINE_DISCIPLINE: usize = 0;
@@ -606,28 +606,28 @@ impl IrqOpenPrepareTrimmedPaths {
         }
 
         self.panic_later_clear = true;
-        crate::trace::checkpoint(Checkpoint::PanicLaterClearCheckpoint);
+        crate::checkpoint::checkpoint(Checkpoint::PanicLaterClearCheckpoint);
         self.lockdep_init_trimmed_noop = true;
         self.lockdep_trimmed_because_config_debug_lock_alloc_disabled = true;
-        crate::trace::checkpoint(Checkpoint::LockdepInitNoop);
+        crate::checkpoint::checkpoint(Checkpoint::LockdepInitNoop);
         self.locking_selftest_trimmed_noop = true;
         self.locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled = true;
-        crate::trace::checkpoint(Checkpoint::LockingSelftestNoop);
+        crate::checkpoint::checkpoint(Checkpoint::LockingSelftestNoop);
         self.initrd_bounds_trimmed = true;
         self.initrd_trimmed_because_config_blk_dev_initrd_disabled = true;
-        crate::trace::checkpoint(Checkpoint::InitrdBoundsTrimmed);
+        crate::checkpoint::checkpoint(Checkpoint::InitrdBoundsTrimmed);
         self.page_allocator_per_cpu_pagesets_deferred = true;
         self.page_allocator_deferred_bound = true;
-        crate::trace::checkpoint(Checkpoint::PageAllocatorPerCpuPagesetsDeferred);
+        crate::checkpoint::checkpoint(Checkpoint::PageAllocatorPerCpuPagesetsDeferred);
         self.numa_policy_trimmed_noop = true;
         self.numa_policy_trimmed_because_config_numa_disabled = true;
-        crate::trace::checkpoint(Checkpoint::NumaPolicyNoop);
+        crate::checkpoint::checkpoint(Checkpoint::NumaPolicyNoop);
         self.acpi_early_trimmed_noop = true;
         self.acpi_early_trimmed_because_config_acpi_disabled = true;
-        crate::trace::checkpoint(Checkpoint::AcpiEarlyNoop);
+        crate::checkpoint::checkpoint(Checkpoint::AcpiEarlyNoop);
         self.late_time_init_hook_trimmed_noop = true;
         self.late_time_init_hook_unset_on_riscv = true;
-        crate::trace::checkpoint(Checkpoint::LateTimeInitNoop);
+        crate::checkpoint::checkpoint(Checkpoint::LateTimeInitNoop);
         self.position_preserved = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -659,7 +659,7 @@ impl IrqOpenPrepareTrimmedPaths {
 
         self.arch_cpu_finalize_init_trimmed_noop = true;
         self.arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled = true;
-        crate::trace::checkpoint(Checkpoint::ArchCpuFinalizeNoop);
+        crate::checkpoint::checkpoint(Checkpoint::ArchCpuFinalizeNoop);
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,

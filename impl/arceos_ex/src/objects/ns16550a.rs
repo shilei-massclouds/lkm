@@ -11,7 +11,10 @@ use super::{
     irq_time::{IrqHandlerKind, LogicalIrq},
     printk,
 };
-use crate::{arch::riscv64::csr, trace, trace::Checkpoint};
+use crate::{
+    arch::riscv64::csr,
+    checkpoint::{self, Checkpoint},
+};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 const NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
@@ -1018,7 +1021,7 @@ impl Serial8250WriteBackend {
         self.tx_irq_budget_hits = 0;
         self.tx_irq_empty_stop = 0;
         self.tx_irq_guarded_by_local_irq_save = false;
-        trace::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
+        checkpoint::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
         true
     }
 

@@ -19,7 +19,7 @@ use super::{
     user_boot::USER_CHILD_PID,
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 const SMOKE_SCHEDULER_TASK_ID: usize = 1001;
 const SMOKE_MUTEX_TASK_ID: usize = 1002;
@@ -759,7 +759,7 @@ impl Scheduler {
                     self.scheduler_trace_sched_switch_count.wrapping_add(1);
                 self.switch_to(prev_ref, next_ref, current_task_slot)?;
                 self.schedule_passes = self.schedule_passes.wrapping_add(1);
-                crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
+                crate::checkpoint::checkpoint(Checkpoint::SchedulerSchedule);
                 Ok(())
             })();
             let unlock_result = self
@@ -789,7 +789,7 @@ impl Scheduler {
         self.schedule_exit_saved_interrupt_count = local_interrupt.saved_and_disabled_count();
         self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
         self.schedule_exit_count = self.schedule_exit_count.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerScheduleExit);
+        crate::checkpoint::checkpoint(Checkpoint::SchedulerScheduleExit);
         self.cooperative_context_switch(prev_ref, next_ref)?;
         Ok(())
     }
@@ -898,7 +898,7 @@ impl Scheduler {
         self.pick_next_task_exit_prev_ref = prev_ref;
         self.pick_next_task_exit_next_ref = next_ref;
         self.pick_next_task_exit_count = self.pick_next_task_exit_count.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerPickNextTaskExit);
+        crate::checkpoint::checkpoint(Checkpoint::SchedulerPickNextTaskExit);
         Ok(next_ref)
     }
 
@@ -950,7 +950,7 @@ impl Scheduler {
         self.switch_to_entry_count = self.switch_to_entry_count.wrapping_add(1);
         self.scheduler_prepare_task_switch_count =
             self.scheduler_prepare_task_switch_count.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerSwitchToEntry);
+        crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToEntry);
         self.record_core_context_switch(prev_ref, next_ref)?;
         current_task_slot.commit_switch_to(next_ref)?;
         trace_switch_to(prev_ref, next_ref, current_task_slot.current());
@@ -965,7 +965,7 @@ impl Scheduler {
         self.switch_to_exit_count = self.switch_to_exit_count.wrapping_add(1);
         self.scheduler_finish_task_switch_count =
             self.scheduler_finish_task_switch_count.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerSwitchToExit);
+        crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToExit);
         Ok(())
     }
 
@@ -1456,7 +1456,7 @@ impl Scheduler {
         self.kernel_init_affinity_released = true;
         self.rt_dl_smp_ready = true;
         self.granularity_refreshed = true;
-        crate::trace::checkpoint(Checkpoint::SchedulerSmpReady);
+        crate::checkpoint::checkpoint(Checkpoint::SchedulerSmpReady);
         Ok(())
     }
 

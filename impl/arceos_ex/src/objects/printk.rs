@@ -7,7 +7,10 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::{arch::riscv64::sbi, trace, trace::Checkpoint};
+use crate::{
+    arch::riscv64::sbi,
+    checkpoint::{self, Checkpoint},
+};
 use core::fmt::{self, Write};
 
 #[allow(dead_code)]
@@ -92,13 +95,13 @@ impl ConsoleRegistry {
         self.route = PrintkRoute::Serial8250;
         self.handoff_complete = true;
         self.legacy_earlycon_drain_blocked_after_handoff = true;
-        trace::checkpoint(Checkpoint::Serial8250ConsoleOnline);
+        checkpoint::checkpoint(Checkpoint::Serial8250ConsoleOnline);
         self.serial8250_online_trace_emitted = true;
         if !self.keep_bootcon {
             self.boot_console_online = false;
             self.boot_console_unregistered = true;
             self.boot_console_removed_from_registry = true;
-            trace::checkpoint(Checkpoint::BootConsoleOffline);
+            checkpoint::checkpoint(Checkpoint::BootConsoleOffline);
             self.boot_console_offline_trace_emitted = true;
         }
         true

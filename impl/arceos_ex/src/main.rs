@@ -12,14 +12,13 @@ mod objects;
 mod phases;
 #[cfg(checkpoint_handler_stress_mem)]
 mod stress_mem;
-mod trace;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;
 
+use checkpoint::Checkpoint;
 use objects::mm_core::KernelGlobalAllocAdapter;
 use objects::state::{EventResult, LifecycleEvent, State};
-use trace::Checkpoint;
 
 #[global_allocator]
 static KERNEL_GLOBAL_ALLOCATOR: KernelGlobalAllocAdapter = KernelGlobalAllocAdapter;

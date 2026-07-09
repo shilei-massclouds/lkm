@@ -1,10 +1,10 @@
 use crate::{
+    checkpoint::Checkpoint,
     context::Context,
     objects::{
         runtime_core::runtime_core_ready,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -32,7 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 
     ctx.scheduler
         .enable_smp(&mut ctx.kernel_init_task, &ctx.cpu_group)?;
-    crate::trace::checkpoint(Checkpoint::RuntimeCorePhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::RuntimeCorePhaseStarted);
     ctx.workqueue
         .setup_topology(&ctx.scheduler, &ctx.cpu_group)?;
     ctx.async_core_deferred.setup(&ctx.workqueue)?;

@@ -3,7 +3,7 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CpuHotplugLifecycleState {

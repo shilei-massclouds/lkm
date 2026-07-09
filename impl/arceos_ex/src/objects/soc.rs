@@ -1,11 +1,11 @@
 use super::state::EventResult;
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct Soc;
 
 impl Soc {
     pub fn preset() -> EventResult {
-        crate::trace::checkpoint(Checkpoint::SocPrepared);
+        crate::checkpoint::checkpoint(Checkpoint::SocPrepared);
         Ok(())
     }
 }

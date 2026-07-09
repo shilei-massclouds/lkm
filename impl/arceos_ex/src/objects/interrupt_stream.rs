@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
     arch::riscv64::{csr, SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ},
-    trace::Checkpoint,
+    checkpoint::Checkpoint,
 };
 
 use super::{

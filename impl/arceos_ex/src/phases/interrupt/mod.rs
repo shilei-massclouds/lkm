@@ -4,8 +4,8 @@ pub mod local_irq_enable;
 pub mod process_prepare;
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::state::{EventResult, LifecycleEvent, State},
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 
@@ -13,7 +13,7 @@ use core::sync::atomic::AtomicU8;
 static INTERRUPT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup() -> ! {
-    crate::trace::checkpoint(Checkpoint::InterruptPhaseStarted);
+    crate::checkpoint::checkpoint(Checkpoint::InterruptPhaseStarted);
     irq_time_init::setup(crate::context::context())
 }
 

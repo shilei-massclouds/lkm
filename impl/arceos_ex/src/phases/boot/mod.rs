@@ -5,8 +5,8 @@ pub mod mm_core_init;
 pub mod sched_init;
 
 use crate::{
+    checkpoint::Checkpoint,
     objects::state::{EventResult, LifecycleEvent, State},
-    trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
 

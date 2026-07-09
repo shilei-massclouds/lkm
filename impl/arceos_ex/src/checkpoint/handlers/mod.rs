@@ -57,7 +57,7 @@ mod virtio_rng;
     checkpoint_handler_user_boot_failure
 ))]
 use crate::checkpoint::kunit::{KtapSink, Sink};
-use crate::{context::Context, trace::Checkpoint};
+use crate::{checkpoint::Checkpoint, context::Context};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[allow(dead_code)]

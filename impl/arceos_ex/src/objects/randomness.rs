@@ -4,7 +4,7 @@ use super::{
     irq_time::Timekeeper,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::checkpoint::Checkpoint;
 
 pub struct Randomness {
     lifecycle: Lifecycle,
