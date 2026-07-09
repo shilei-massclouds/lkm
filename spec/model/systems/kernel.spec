@@ -3,6 +3,10 @@
  *
  * This file defines the formal kernel system object and composes the sibling
  * model object and phase trees. The formal directory entry is spec/model/main.spec.
+ *
+ * Four-level chain:
+ * spec/charter/systems/kernel.md -> this model -> spec/coding/systems/kernel.spec
+ * -> impl/arceos_ex/src/systems/kernel.rs.
  */
 
 include "../phases/boot/main.spec";

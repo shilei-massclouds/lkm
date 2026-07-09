@@ -10,8 +10,10 @@ mod checkpoint;
 mod context;
 mod objects;
 mod phases;
+mod projects;
 #[cfg(checkpoint_handler_stress_mem)]
 mod stress_mem;
+mod systems;
 
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;

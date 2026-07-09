@@ -4,6 +4,10 @@
  * KernelProject models the lifecycle of the kernel engineering work product:
  * establish the kernel system specification, build the image, then boot and
  * evaluate the resulting kernel instance.
+ *
+ * Four-level chain:
+ * spec/charter/projects/kernel.md -> this model -> spec/coding/projects/kernel.spec
+ * -> impl/arceos_ex/src/projects/kernel.rs.
  */
 
 /*

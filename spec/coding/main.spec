@@ -10,3 +10,5 @@ include "build.spec";
 include "riscv64.spec";
 include "rust.spec";
 include "arceos_ex.spec";
+include "projects/kernel.spec";
+include "systems/kernel.spec";
