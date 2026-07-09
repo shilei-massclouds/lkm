@@ -1,46 +1,45 @@
-#![allow(dead_code)]
+//! Runtime lifecycle boundary for the running `Kernel` system instance.
 
-//! Mapping entry for the running `Kernel` system instance.
-//!
-//! This module intentionally carries metadata only. The current
-//! `startup_timeline_ready` and `startup_timeline_event` functions remain in
-//! the crate root as the compatibility boundary for existing startup behavior.
+use core::sync::atomic::AtomicU8;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SpecPath {
-    pub layer: &'static str,
-    pub path: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MappingStatus {
-    SkeletonOnly,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct KernelSystemMapping {
-    pub object_name: &'static str,
-    pub charter: SpecPath,
-    pub model: SpecPath,
-    pub coding: SpecPath,
-    pub implementation: &'static str,
-    pub status: MappingStatus,
-}
-
-pub const KERNEL_SYSTEM_MAPPING: KernelSystemMapping = KernelSystemMapping {
-    object_name: "Kernel",
-    charter: SpecPath {
-        layer: "charter",
-        path: "spec/charter/systems/kernel.md",
-    },
-    model: SpecPath {
-        layer: "model",
-        path: "spec/model/systems/kernel.spec",
-    },
-    coding: SpecPath {
-        layer: "coding",
-        path: "spec/coding/systems/kernel.spec",
-    },
-    implementation: "impl/arceos_ex/src/systems/kernel.rs",
-    status: MappingStatus::SkeletonOnly,
+use crate::{
+    checkpoint::Checkpoint,
+    objects::state::{EventResult, LifecycleEvent, State},
 };
+
+#[unsafe(link_section = ".data.phase")]
+static KERNEL_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
+
+pub fn ready() -> ! {
+    if !crate::phases::prepare::is_online()
+        || !crate::phases::boot::is_ready()
+        || !crate::phases::interrupt::is_ready()
+        || !crate::phases::up_multitask::is_ready()
+        || !crate::phases::smp_runtime::is_ready()
+    {
+        crate::arch::riscv64::sbi::putstr("arceos_ex kernel invariant failed\n");
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
+
+    crate::phases::shutdown_on_error(mark_ready(), "arceos_ex kernel ready event failed\n");
+    crate::phases::payload::setup_then_enable()
+}
+
+fn mark_ready() -> EventResult {
+    crate::phases::state::adopt(
+        &KERNEL_STATE,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Ready,
+    )
+}
+
+pub fn mark_online() -> EventResult {
+    crate::phases::state::mark(
+        &KERNEL_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::KernelOnline,
+    )
+}

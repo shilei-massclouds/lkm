@@ -25,8 +25,8 @@ def _mapping_rows() -> list[dict[str, object]]:
     return [
         {
             "checkpoint_index": 0,
-            "checkpoint_name": "StartupTimeline.Started",
-            "checkpoint_variant": "StartupTimelineStarted",
+            "checkpoint_name": "Kernel.Started",
+            "checkpoint_variant": "KernelStarted",
             "linux_file": "init/main.c",
             "linux_symbol": "start_kernel",
             "linux_anchor": "start_kernel() definition line 1",

@@ -560,6 +560,10 @@
       "count": 1
     },
     {
+      "family": "Kernel",
+      "count": 1
+    },
+    {
       "family": "KernelCmdline",
       "count": 1
     },
@@ -881,10 +885,6 @@
     },
     {
       "family": "StackDepot",
-      "count": 1
-    },
-    {
-      "family": "StartupTimeline",
       "count": 1
     },
     {

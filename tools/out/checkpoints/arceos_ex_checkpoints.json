@@ -1,15 +1,15 @@
 [
   {
     "index": 0,
-    "variant": "StartupTimelineStarted",
-    "name": "StartupTimeline.Started",
+    "variant": "KernelStarted",
+    "name": "Kernel.Started",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 1,
-    "variant": "StartupTimelineReady",
-    "name": "StartupTimeline.Ready",
+    "variant": "KernelOnline",
+    "name": "Kernel.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },

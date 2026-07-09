@@ -6,8 +6,8 @@
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | StartupTimeline.Started | StartupTimelineStarted | exact | high | init/main.c | start_kernel | start_kernel() definition line 903 | Linux C boot timeline entry anchor. |
-| 1 | StartupTimeline.Ready | StartupTimelineReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 0 | Kernel.Started | KernelStarted | exact | high | init/main.c | start_kernel | start_kernel() definition line 903 | Linux C kernel entry anchor. |
+| 1 | Kernel.Online | KernelOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 2 | PreparePhase.Ready | PreparePhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 3 | PreparePhase.Online | PreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 4 | BootPhase.Started | BootPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

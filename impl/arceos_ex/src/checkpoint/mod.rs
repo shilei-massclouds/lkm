@@ -111,9 +111,9 @@ fn checkpoint_reentry_shutdown() -> ! {
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Checkpoint {
-    StartupTimelineStarted,
+    KernelStarted,
     #[allow(dead_code)]
-    StartupTimelineReady,
+    KernelOnline,
     PreparePhaseReady,
     PreparePhaseOnline,
     BootPhaseStarted,
@@ -580,8 +580,8 @@ impl Checkpoint {
     #[allow(dead_code)]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::StartupTimelineStarted => "StartupTimeline.Started",
-            Self::StartupTimelineReady => "StartupTimeline.Ready",
+            Self::KernelStarted => "Kernel.Started",
+            Self::KernelOnline => "Kernel.Online",
             Self::PreparePhaseReady => "PreparePhase.Ready",
             Self::PreparePhaseOnline => "PreparePhase.Online",
             Self::BootPhaseStarted => "BootPhase.Started",

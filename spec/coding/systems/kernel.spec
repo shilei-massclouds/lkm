@@ -2,14 +2,14 @@
  * Kernel System Coding Specification
  *
  * This file constrains the implementation mapping for the running Kernel
- * system instance. It preserves the current startup timeline as a compatibility
- * boundary while naming the system-level mapping target.
+ * system instance. The Kernel system module owns the system-level startup
+ * lifecycle boundary while phase-local setup remains in the mapped phase files.
  */
 
 predicate kernel_system_coding_maps_to_arceos_ex_system_module() -> bool;
-predicate kernel_system_coding_records_spec_chain() -> bool;
+predicate kernel_system_coding_implements_kernel_lifecycle_boundary() -> bool;
 predicate kernel_system_coding_owns_runtime_phase_order() -> bool;
-predicate kernel_system_coding_preserves_startup_timeline_boundary() -> bool;
+predicate kernel_system_coding_uses_kernel_system_state() -> bool;
 predicate kernel_system_coding_does_not_reorder_phase_calls() -> bool;
 predicate kernel_system_coding_does_not_reassign_phase_ownership() -> bool;
 predicate kernel_system_coding_preserves_payload_handoff_boundary() -> bool;
@@ -19,20 +19,19 @@ type KernelSystemCoding {
         /*
          * Mapping path:
          *
-         * Kernel system implementation metadata belongs under
-         * impl/arceos_ex/src/systems/. The current skeleton maps the system
-         * object to impl/arceos_ex/src/systems/kernel.rs.
+         * Kernel system implementation belongs under impl/arceos_ex/src/systems/.
+         * The Kernel object maps to impl/arceos_ex/src/systems/kernel.rs.
          */
         kernel_system_coding_maps_to_arceos_ex_system_module();
 
         /*
-         * Spec chain:
+         * Kernel lifecycle boundary:
          *
-         * The implementation entry must record the charter, model and coding
-         * paths that define the running system object before later behavior is
-         * added.
+         * systems/kernel.rs must provide the system lifecycle entry points that
+         * bridge SMP/runtime readiness into PayloadPhase setup/enable and mark
+         * Kernel online after PayloadPhase.Online.
          */
-        kernel_system_coding_records_spec_chain();
+        kernel_system_coding_implements_kernel_lifecycle_boundary();
 
         /*
          * Runtime choreography:
@@ -45,18 +44,18 @@ type KernelSystemCoding {
         kernel_system_coding_owns_runtime_phase_order();
 
         /*
-         * Compatibility boundary:
+         * Kernel state:
          *
-         * startup_timeline_ready and startup_timeline_event are the current
-         * implementation boundary for system-level startup compatibility.
-         * Skeleton mapping work must not move them.
+         * The system module owns the Kernel lifecycle state and emits Kernel
+         * system checkpoints. Crate-root entry code must not retain separate
+         * startup timeline state.
          */
-        kernel_system_coding_preserves_startup_timeline_boundary();
+        kernel_system_coding_uses_kernel_system_state();
 
         /*
          * Behavior preservation:
          *
-         * Skeleton mapping work must not reorder existing phase calls or
+         * Kernel system migration must not reorder existing phase calls or
          * checkpoint emission order.
          */
         kernel_system_coding_does_not_reorder_phase_calls();

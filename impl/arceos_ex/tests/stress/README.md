@@ -116,7 +116,7 @@ Completed stages:
   partially overlapping checkpoints.
 - `pd-0002-linux-boot-c-paired.toml`: boot C phase landmarks from
   `CorePreparePhase.Started` through `ProcessPreparePhase.Started`. Its stage
-  is complete; `StartupTimeline.Started` remains a Linux-side runtime marker
+  is complete; `Kernel.Started` remains a Linux-side runtime marker
   outside the current hard diff intersection.
 - `pd-0003-linux-runtime-rootfs-paired.toml`: SMP, runtime core, initcall,
   rootfs, finalize, and `PayloadPhase.Ready` landmarks. Its stage is complete;
@@ -174,7 +174,7 @@ Baseline difftest cases:
   `EventStream.Ready`, and `ExceptionStream.Ready` stay outside this hard scope
   because Linux 2-vCPU runs can report the same head.S markers again on the AP
   path or in a different entry-vs-C ordering. The Linux-only
-  `StartupTimeline.Started` C-entry marker is likewise observed coverage, not a
+  `Kernel.Started` C-entry marker is likewise observed coverage, not a
   baseline hard gate.
 - `openrc-native-init-difftest.toml`: focused manual paired differential test
   for native Alpine `/sbin/init` / OpenRC with no `init=/bin/sh` override. It

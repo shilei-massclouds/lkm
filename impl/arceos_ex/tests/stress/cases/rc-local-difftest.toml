@@ -96,7 +96,7 @@ required_mapping_kinds = ["exact"]
 mode = "explicit-accounting"
 
 [paired.checkpoint_coverage.accounted_outside_scope]
-"StartupTimeline.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"Kernel.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EntryPreludePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EntryPreludePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "TrampolineVm.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"

@@ -1,13 +1,13 @@
 [
   {
     "checkpoint_index": 0,
-    "checkpoint_name": "StartupTimeline.Started",
-    "checkpoint_variant": "StartupTimelineStarted",
+    "checkpoint_name": "Kernel.Started",
+    "checkpoint_variant": "KernelStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "start_kernel",
     "linux_anchor": "start_kernel() definition line 903",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=StartupTimeline.Started variant=StartupTimelineStarted fingerprint=sha256:157e6bf6ecd4ba00cd50b5e0ca62ec6a68da217256432e23ceb379c27df14abc */",
+    "marker": "/* LKM_CHECKPOINT name=Kernel.Started variant=KernelStarted fingerprint=sha256:157e6bf6ecd4ba00cd50b5e0ca62ec6a68da217256432e23ceb379c27df14abc */",
     "anchor_fingerprint": "sha256:157e6bf6ecd4ba00cd50b5e0ca62ec6a68da217256432e23ceb379c27df14abc"
   },
   {

@@ -575,8 +575,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=0,
-                variant="StartupTimelineStarted",
-                name="StartupTimeline.Started",
+                variant="KernelStarted",
+                name="Kernel.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=108,
@@ -615,8 +615,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=0,
-                variant="StartupTimelineStarted",
-                name="StartupTimeline.Started",
+                variant="KernelStarted",
+                name="Kernel.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
@@ -643,7 +643,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             main_text = main_path.read_text(encoding="utf-8")
             main_text = main_text.replace(
                 "void start_kernel(void)\n",
-                "/* LKM_CHECKPOINT name=StartupTimeline.Started variant=StartupTimelineStarted fingerprint=sha256:demo */\n"
+                "/* LKM_CHECKPOINT name=Kernel.Started variant=KernelStarted fingerprint=sha256:demo */\n"
                 "void start_kernel(void)\n",
             )
             main_text = main_text.replace(
@@ -674,8 +674,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=0,
-                variant="StartupTimelineStarted",
-                name="StartupTimeline.Started",
+                variant="KernelStarted",
+                name="Kernel.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
@@ -743,7 +743,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             main_text = main_text.replace(
                 "void start_kernel(void)\n{\n",
                 "void start_kernel(void)\n{\n"
-                "    lkm_checkpoint_record(LKM_CHECKPOINT_STARTUP_TIMELINE_STARTED);\n",
+                "    lkm_checkpoint_record(LKM_CHECKPOINT_KERNEL_STARTED);\n",
             )
             main_text = main_text.replace(
                 "    setup_arch(&command_line);\n",
@@ -1632,8 +1632,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         inventory = [
             {
                 "index": 0,
-                "variant": "StartupTimelineStarted",
-                "name": "StartupTimeline.Started",
+                "variant": "KernelStarted",
+                "name": "Kernel.Started",
             },
             {
                 "index": 401,
@@ -1673,8 +1673,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         inventory = [
             {
                 "index": 0,
-                "variant": "StartupTimelineStarted",
-                "name": "StartupTimeline.Started",
+                "variant": "KernelStarted",
+                "name": "Kernel.Started",
             }
         ]
 
@@ -1750,7 +1750,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertNotEqual(by_name["TrampolineVm.Ready"].mapping_kind, "unmapped")
         self.assertNotEqual(by_name["RawDtb.Ready"].mapping_kind, "unmapped")
         self.assertNotEqual(by_name["FixMap.Ready"].mapping_kind, "unmapped")
-        self.assertEqual(by_name["StartupTimeline.Started"].linux_symbol, "start_kernel")
+        self.assertEqual(by_name["Kernel.Started"].linux_symbol, "start_kernel")
         self.assertEqual(by_name["MmCoreInitPhase.Ready"].linux_file, "mm/mm_init.c")
         self.assertEqual(by_name["SchedInitPhase.Ready"].linux_file, "kernel/sched/core.c")
         self.assertEqual(by_name["BootInitRestInitPhase.Ready"].linux_symbol, "rest_init")

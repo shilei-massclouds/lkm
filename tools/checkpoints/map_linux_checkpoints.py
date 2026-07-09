@@ -700,12 +700,12 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="high",
             notes="RISC-V64 relocate_enable_mmu switches from trampoline mappings to the early kernel page table.",
         ),
-        "StartupTimeline.Started": MappingRule(
+        "Kernel.Started": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
             linux_symbol="start_kernel",
             confidence="high",
-            notes="Linux C boot timeline entry anchor.",
+            notes="Linux C kernel entry anchor.",
         ),
         "MmCoreInitPhase.Started": MappingRule(
             mapping_kind="exact",

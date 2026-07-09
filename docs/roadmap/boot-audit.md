@@ -4,7 +4,7 @@
 
 ## 当前审计计划：impl 与 Linux 6.12 对照
 
-后续回顾检查以当前项目 `impl/` 下由规格驱动生成的代码为对象，以 `../linux-6.12/` 为 Linux 参考源码。审计顺序按 formal model 的阶段树推进，先从 `StartupTimeline` 下的 `BootPhase` 开始，再进入后续阶段。
+后续回顾检查以当前项目 `impl/` 下由规格驱动生成的代码为对象，以 `../linux-6.12/` 为 Linux 参考源码。审计顺序按 formal model 的阶段树推进，先从 `Kernel` 生命周期下的 `BootPhase` 开始，再进入后续阶段。
 
 审计发现问题时，默认先归类并修订规格，而不是直接修改 `impl/` 代码：
 
@@ -131,7 +131,7 @@
 
 1. **P0 已完成首轮：补齐 `PrintkBuffer.setup()` 的 `LocalInterruptControl` wiring**。对照 Linux `setup_log_buf(0)` 的 `local_irq_save(flags)` / `local_irq_restore(flags)`，已修订 model/coding，使 `PrintkBuffer.Transition::Setup` 中切换 active printk buffer 和复制既有 records 的局部临界区在正式 local-interrupt context 内执行，并依赖已有 `BootCpuLocalInterrupt: LocalInterruptControl` 的 ready/disabled 状态。实现侧按保守策略执行 `SaveAndDisable` / `Restore`，保留 source context、绑定 `BootCpuLocalInterrupt` 的可观测事实和 ready-check 约束，不再只观察 `PrintkBuffer` 内部 summary bool。
 2. **P0 已完成首轮：补齐 transition/action body 有序语义工具计划**。正式规格允许 `within Context { ... }` 只包住需要保护的局部操作，前后可以有 `drives { ... }` 或其它块；parser/AST/JSON/model 现在保留 source-ordered body member 序列，derive/check 按该序列处理 `drives` 与嵌套 `within`，并保持旧的分类字段兼容。`PrintkBuffer.Transition::Setup` 已用正式有序 body 表达 `setup_log_buf()` 的“前置动态缓冲准备 -> guarded active-buffer switch/copy -> 后续 remaining-record copy”路径，不再依赖注释说明局部保护范围。
-3. **P0 已完成工具能力，后续按新策略暂缓使用：`only-once` 单次调用证明**。DSL 和 model 工具已支持 `within ContextName only-once { ... }`，并能从 `StartupTimeline.Transition::Setup` 的 `drives` 图出发计数验证，证明失败即报错。由于基于 Effective Context 的 guard 省略会增加当前启动阶段审计难度，新的 P0 策略会先从正式规格使用点移除 `only-once` 标记，保留工具能力和测试，不再把它作为近期 guard lowering 前置。当前需要记录以备未来恢复的四个使用点是：`spec/model/boot/core-prepare/phase.spec` 中的 `ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext`，以及 `spec/model/boot/entry-successor/phase.spec` 中的 `PrintkBufferSetupLocalInterruptContext`。
+3. **P0 已完成工具能力，后续按新策略暂缓使用：`only-once` 单次调用证明**。DSL 和 model 工具已支持 `within ContextName only-once { ... }`，并能从 `Kernel` 生命周期迁移的 `drives` 图出发计数验证，证明失败即报错。由于基于 Effective Context 的 guard 省略会增加当前启动阶段审计难度，新的 P0 策略会先从正式规格使用点移除 `only-once` 标记，保留工具能力和测试，不再把它作为近期 guard lowering 前置。当前需要记录以备未来恢复的四个使用点是：`spec/model/boot/core-prepare/phase.spec` 中的 `ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext`，以及 `spec/model/boot/entry-successor/phase.spec` 中的 `PrintkBufferSetupLocalInterruptContext`。
 4. **P0 已完成首轮：复核 CorePrepare 剩余同步/并发面是否收口**。已完成 CorePrepare 已审计对象中的本地中断、抢占、自旋锁、Mutex、读写锁、RCU、per-cpu 同步、TLB/cache flush、CPU bring-up 同步量首轮复核；当前未保留未分类 P0 缺口。
 5. **P0 后续：进入下一个启动子阶段**。CorePrepare 收口后切换到下一个 boot 子阶段，继续按“先 Linux 边界、再 model/coding、最后 impl 验证”的顺序审计。
 

@@ -6,7 +6,8 @@
  *
  * Four-level chain:
  * spec/charter/systems/kernel.md -> this model -> spec/coding/systems/kernel.spec
- * -> impl/arceos_ex/src/systems/kernel.rs.
+ * -> impl/arceos_ex/src/systems/kernel.rs. The implementation endpoint carries
+ * the Kernel runtime lifecycle boundary.
  */
 
 include "../phases/boot/main.spec";

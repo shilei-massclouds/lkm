@@ -1,19 +1,19 @@
 [
   {
     "checkpoint_index": 0,
-    "checkpoint_name": "StartupTimeline.Started",
-    "checkpoint_variant": "StartupTimelineStarted",
+    "checkpoint_name": "Kernel.Started",
+    "checkpoint_variant": "KernelStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "start_kernel",
     "linux_anchor": "start_kernel() definition line 903",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Linux C boot timeline entry anchor."
+    "notes": "Linux C kernel entry anchor."
   },
   {
     "checkpoint_index": 1,
-    "checkpoint_name": "StartupTimeline.Ready",
-    "checkpoint_variant": "StartupTimelineReady",
+    "checkpoint_name": "Kernel.Online",
+    "checkpoint_variant": "KernelOnline",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

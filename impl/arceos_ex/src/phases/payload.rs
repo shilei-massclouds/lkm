@@ -55,7 +55,7 @@ fn enable() -> EventResult {
         State::Online,
         Checkpoint::PayloadPhaseOnline,
     )
-    .and_then(|()| crate::startup_timeline_event())
+    .and_then(|()| crate::systems::kernel::mark_online())
 }
 
 fn payload_phase_dependencies_ready() -> bool {

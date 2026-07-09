@@ -128,10 +128,10 @@ class ListCheckpointsTests(unittest.TestCase):
         records = list_checkpoints.parse_checkpoints()
         by_name = {record.name: record for record in records}
 
-        self.assertIn("StartupTimeline.Started", by_name)
+        self.assertIn("Kernel.Started", by_name)
         self.assertIn("EntryPreludePhase.Started", by_name)
         self.assertIn("PayloadPhase.Online", by_name)
-        self.assertEqual(by_name["StartupTimeline.Started"].variant, "StartupTimelineStarted")
+        self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
         self.assertEqual(
             by_name["EntryPreludePhase.Started"].early_byte,
             "A",
