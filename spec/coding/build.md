@@ -110,3 +110,145 @@ Unknown configuration must fail fast. Examples:
 - missing required external tool
 
 Silent fallback to a nearby default is not acceptable when it changes the object path, payload, disk contents, provider or validation scope.
+
+<!-- formal-predicate-notes:spec/coding/build.spec START -->
+
+## Formal predicate notes
+
+以下说明从 `spec/coding/build.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+
+### BuildAndScriptCodingMust
+
+#### Stable entry
+
+The repository top-level Makefile is the stable developer and CI
+entry for object-level implementation. New routine commands should
+be reachable from it or intentionally documented as lower-level
+implementation details.
+
+#### Delegation
+
+Kernel-specific build, image, disk and QEMU rules belong to the
+selected kernel implementation directory, for example
+impl/arceos_ex/Makefile. The top-level Makefile should delegate with
+explicit parameters instead of duplicating kernel-specific command
+bodies.
+
+#### Composable targets
+
+Targets such as build, generate, disk, run, verify, test-verify,
+test-kunit, test-smoke and test must remain separately callable.
+An aggregate target may sequence them, but it must not hide a step
+so that developers cannot rerun or diagnose it independently.
+
+#### Disk image input
+
+make disk is the canonical builder for runtime block-device images
+used by QEMU. It must be reproducible from explicit Make variables
+such as image path, size, file-system type, file-system block size
+and the rootfs source URL/cache path. Kernel runtime code must not
+depend on manually prepared local disk state.
+
+#### Idempotent disk creation
+
+The default make disk behavior must create the configured disk image
+only when the image path is missing. Existing runtime disk images
+are local runtime state and must not be reformatted by default; an
+explicit clean/delete/rebuild step is required to regenerate them.
+
+#### Downloaded rootfs cache
+
+Downloaded rootfs inputs such as Alpine minirootfs tarballs must be
+cached under a build artifact directory controlled by Make
+variables. If the cached tarball exists, routine disk creation must
+not download it again.
+
+#### Runtime dependencies
+
+make run must depend on runtime inputs it needs, including the disk
+image when QEMU devices include virtio-blk. make build must not
+create or mutate runtime disk images unless the target explicitly
+requires it.
+
+#### Visible model/codegen boundary
+
+Makefiles and helper scripts must keep model derivation, generated
+artifact creation and kernel compilation as visible target edges.
+They must not silently bypass pyveri/codegen outputs, substitute
+stale generated files, or turn verification failures into warnings.
+
+#### Payload selection
+
+Selected payload or test app must remain an explicit build parameter
+such as APP. Scripts must not infer a different payload from local
+files, previous runs or environment side effects.
+
+#### External tool commands
+
+External tools such as rustc, rust-objcopy, QEMU, wget, tar, mkfs
+and pyveri must be configurable through Make variables or
+documented script parameters. Hard-coded host-local absolute paths
+are not allowed in ordinary build targets.
+
+#### Decomposable tests
+
+The aggregate make test target must preserve independently runnable
+verify, KUnit/checkpoint and smoke stages. Adding a new validation
+stage requires documenting its ordering, inputs and whether it is
+part of the default acceptance gate.
+
+#### Checkpoint artifact drift gate
+
+The aggregate make test target must run checkpoint inventory,
+Linux mapping, Linux mapping coverage and Linux instrumentation
+plan artifact checks before QEMU/runtime stages. The gate must be
+independently callable, must report drift as a test failure with
+retained logs, and must not rewrite tracked checkpoint output files
+while running in test mode. Linux marker scans are useful for trees
+that already carry marker comments, but they must remain an explicit
+opt-in check until the referenced Linux tree is instrumented.
+
+#### Generated output hygiene
+
+Generated files, runtime disk images, QEMU logs, temporary debugfs
+scripts and trace reports must stay in build/tools/out/tmp-style
+locations or documented artifact directories. They must not be
+committed unless a specification explicitly classifies them as
+stable source inputs.
+
+#### Clean scope
+
+The repository top-level make clean target must remove routine
+build, code-generation and test-cache artifacts created under the
+repository, while preserving tracked checkpoint review artifacts
+under tools/out/checkpoints/, user-local environments, diagnostic
+logs, editor state and other unlisted local files. It must keep
+the selected kernel implementation clean as the owner of
+kernel-specific build artifacts.
+
+### BuildAndScriptCodingShould
+
+#### Explicit image and file-system knobs
+
+Disk-image paths, sizes, FS_TYPE, ext2 block size and deterministic
+fixture file knobs should have explicit variable names. Avoid
+embedding these decisions in opaque shell fragments.
+
+#### Data-driven QEMU devices
+
+QEMU devices should be composed from variables such as QEMU_DEVICES
+and disk-image paths. The default may target QEMU virt, but the rule
+should allow tests to remove or replace devices explicitly.
+
+#### Unknown configuration
+
+Unknown provider names, file-system types, payload names or feature
+values should fail fast at build time rather than falling back to a
+nearby default.
+
+#### Target documentation
+
+New Makefile targets or helper scripts should be documented in this
+coding directory before they become part of the normal workflow.
+
+<!-- formal-predicate-notes:spec/coding/build.spec END -->

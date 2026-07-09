@@ -6,6 +6,8 @@
 
 本文件补充 Rust 语言层面的模块组织、安全边界、状态表示、错误处理和裸机约束。它不改变 `spec/model` 中的对象生命周期语义。
 
+正式硬约束位于 [`rust.spec`](rust.spec)，并由 [`main.spec`](main.spec) 统一 include。本文只提供说明、背景和参考建议。
+
 ## 基础约束
 
 - 内核主体默认使用 `#![no_std]`。
@@ -89,3 +91,62 @@
 - 是否引入统一 lifecycle trait。
 - panic、early halt 和 trace 输出的具体格式。
 - Rust `no_std` 系统 crates 的信任论证。
+
+<!-- formal-predicate-notes:spec/coding/rust.spec START -->
+
+## Formal predicate notes
+
+以下说明从 `spec/coding/rust.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+
+### RustCodingShould
+
+#### Transition-chain error propagation
+
+Rust code that drives a sequence of model transitions should convert
+TransitionResult-like values into Result-like outcomes and use the `?`
+operator inside ordinary functions. The non-returning phase boundary
+should handle the final error report and shutdown.
+
+#### Boundary error handling
+
+Transition-chain error reporting should be centralized at explicit phase
+or startup boundaries. Interior transition-driving functions should
+propagate errors instead of open-coding repeated require-style
+checks after each transition.
+
+#### Parameterized global assembly
+
+global_asm! blocks should use named const/sym operands for Rust-side
+constants, Rust-defined statics and Rust-defined function symbols
+when supported by the compiler and linker. This keeps assembly
+dependencies visible to Rust and reduces string-only coupling.
+
+Linker-script provided symbols may remain as direct assembly symbol
+references when sym operands would produce toolchain-renamed
+undefined symbols.
+
+#### Explicit ABI at low-level boundaries
+
+Functions that cross an assembly boundary, firmware ABI boundary,
+naked-function boundary, manually stored function-pointer boundary,
+function-pointer-to-integer round trip, or address-space switching
+continuation should use an explicit stable ABI such as extern "C".
+This includes functions reached indirectly after their address has
+been converted, relocated, stored and transmuted back.
+
+#### Avoid unnecessary extern "C"
+
+Pure Rust internal functions should not use extern "C" only for
+stylistic uniformity. The explicit ABI marker should signal a real
+low-level boundary or recorded exception.
+
+### RustCodingMay
+
+#### Tiny assembly boundaries
+
+Rust naked functions may be used for small, isolated assembly
+boundaries such as a one-instruction trace hook or ABI trampoline
+when the current toolchain supports them and the function body has
+no Rust prologue/epilogue requirements.
+
+<!-- formal-predicate-notes:spec/coding/rust.spec END -->

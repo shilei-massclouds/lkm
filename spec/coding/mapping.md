@@ -240,3 +240,211 @@ object fact 还是 deferred boundary。Runtime Core 窗口中的 `sched_init_smp
 - checkpoint 输出格式。
 - 与 Linux 状态差分的采集接口。
 - typestate 与运行期状态字段的选择规则。
+
+<!-- formal-predicate-notes:spec/coding/mapping.spec START -->
+
+## Formal predicate notes
+
+以下说明从 `spec/coding/mapping.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+
+### CodingRuleLevels
+
+#### MUST
+
+A mandatory rule. Violating a MUST rule blocks implementation until
+the model, coding spec, tool or implementation is corrected.
+
+#### SHOULD
+
+A strong recommendation. Generated or handwritten code is expected to
+follow it by default. A deviation is allowed only with an explicit
+recorded reason, scope and future convergence path.
+
+#### MAY
+
+An optional technique. It is permitted when useful but must not be
+required by later code unless promoted to SHOULD or MUST.
+
+#### NOTE
+
+Explanatory guidance. It carries no direct implementation obligation
+and cannot override MUST or SHOULD rules.
+
+### CodingMappingMust
+
+#### Model priority
+
+Implementation must strictly follow objects, states, transitions,
+dependencies, drive order, phase boundaries and proof obligations
+derived from spec/model. Implementation convenience, directory habit,
+reused code, early Rust entry, reduced assembly or build-tool limits
+are not valid reasons to diverge from model semantics.
+
+#### Map before coding
+
+Code generation or modification must first identify the model object
+to source-file mapping. Code may only be written to the mapped file or
+its explicit submodules unless a recorded exception exists.
+
+#### Object ownership
+
+The main implementation of a model object must live in that object's
+mapped file. Phase setup/handoff/checkpoint code belongs to the Phase
+file; resource-object state and event methods belong to the resource
+object file.
+
+#### Phase tree path
+
+Phase file paths must reflect the model parent/child phase tree.
+
+#### DFS generation
+
+Phase code must be generated from the phase tree using depth-first
+traversal. Runtime control between sibling phases is connected by
+handoff() -> next.setup(), not by flattening all child phase bodies
+into the parent phase.
+
+#### Phase shape
+
+Phase objects must not be implemented as resource-object style
+struct + impl lifecycle state machines. They are process modules with
+setup(), handoff(), boundary checks and checkpoints.
+
+#### Transition boundaries
+
+Each model transition must keep a locatable code boundary. If low-level
+code must complete adjacent transitions without a hardware-visible gap, the
+mapped source must still preserve transition functions, state adoption,
+checks and checkpoint boundaries.
+
+#### Checks before checkpoints
+
+depends_on, ensures and invariant facts must be checked before the
+target state is committed, a checkpoint is emitted or later code uses
+the fact as an established dependency.
+
+#### Checkpoint ownership
+
+A checkpoint may only be emitted by the mapped implementation of the
+object event or phase boundary whose fact it reports. A lower-level
+phase, resource object, assembly entry point or continuation must not
+emit synthetic checkpoints for parent phases, sibling phases,
+preparation phases or other objects merely to make the runtime trace
+visually match the derived trace.
+
+#### Checkpoint as observation timing
+
+A checkpoint is a stable observation timing boundary. It may trigger
+trace backends or observer handlers, but it is not ordinary logging,
+does not advance object state by itself, and must not become a
+dependency of the transition whose boundary it observes.
+
+#### Observation facts
+
+Structured observation content must live on the owning object,
+provider or explicit context object as long-term facts. Handlers may
+read, classify or emit those facts; they must not manufacture model
+facts through handler-local debug state.
+
+#### Failure diagnostic separation
+
+Failure diagnostics are structured error payloads collected on a
+failing predicate/check path and emitted when the error is reported.
+They are not additional checkpoints and are not checkpoint handlers
+registered on a failure point. Supporting them must not change the
+successful checkpoint sequence.
+
+#### Linker script mapping
+
+A generated or maintained linker script is the coding artifact that
+realizes the model Lds object. It must be driven by the PreparePhase
+Lds attributes and by the Config attributes that Lds depends on, such
+as kernel addresses, page size, section alignment, head-text layout
+and boot-stack size. Hard-coded linker constants are only permitted
+as recorded transitional exceptions with the corresponding model
+Lds/Config source named.
+
+#### Explicit exceptions
+
+Architecture, linker, Rust-language or boot-ABI constraints that force
+code outside the default mapped file must be recorded with reason,
+scope and the preserved model boundary.
+
+#### Verification gates
+
+Changes touching model semantics, phase call chains, object states or
+entry paths must pass the configured build/verify/run gates before
+they are treated as complete.
+
+### CodingMappingShould
+
+#### Global context
+
+Object Coding Phase should maintain long-lived resource objects in a
+single implementation Context rather than in phase-local object
+carriers. Phase modules should borrow this Context and use it to
+drive resource-object transitions.
+
+#### Context parameter names
+
+Function parameters and local variables that carry the implementation
+Context should be named ctx or context. They should not be named
+objects, because objects has a formal model meaning.
+
+#### Context resource layout
+
+Context fields should be grouped by resource-object category, matching
+the source directory hierarchy as it evolves. They should not be
+grouped by Phase except as an explicitly recorded transitional step.
+
+#### Context accessor placement
+
+Context accessors should be centralized, for example as
+crate::context::context() and crate::context::context_ref(). Phase
+files should not define their own local objects()/context() accessors.
+
+### LinuxCheckpointMappingRules
+
+#### Static source only
+
+Linux checkpoint mapping artifacts record reviewable anchors in the
+read-only Linux reference tree. The mapping pass must not modify
+Linux source, add probes, or depend on runtime collection to justify
+a mapping.
+
+#### Unproven stays unmapped
+
+If a checkpoint cannot be tied to a stable Linux source boundary from
+the reference tree, it must remain unmapped and the notes must record
+why no reliable boundary was claimed.
+
+#### Partial boundaries
+
+When Linux lacks a local object boundary matching the arceos_ex
+checkpoint, the mapping should use a range or medium confidence to
+make the partial alignment explicit.
+
+#### UserBoot versus UserExec
+
+Boot-time init exec checkpoints may reuse Linux exec/binfmt/return
+anchors that also describe runtime exec syscall checkpoints, but the
+notes must distinguish the boot-time init exec view from the runtime
+exec syscall view.
+
+#### Shared call-site semantics
+
+Multiple arceos_ex checkpoints may reuse the same Linux call site
+when a single Linux boundary is the reviewable anchor for a phase
+boundary and one or more object facts. Each mapping note must name
+the semantic view being claimed, such as phase boundary, object fact
+or deferred boundary, so the artifact does not imply distinct Linux
+objects where Linux exposes only one local call-site boundary.
+
+do_basic_setup() object-level checkpoint mappings may reuse direct
+call sites from the same Linux function, including do_initcalls().
+Their notes must distinguish cpuset/cgroup trimmed no-op position
+reservation, driver core deferred boundary, procfs IRQ view deferred
+boundary, constructor table dispatch, initcall table dispatcher, and
+the do_basic_setup() end boundary before the KUnit handoff.
+
+<!-- formal-predicate-notes:spec/coding/mapping.spec END -->

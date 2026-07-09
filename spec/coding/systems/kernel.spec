@@ -1,9 +1,8 @@
 /*
- * Kernel System Coding Specification
+ * Kernel system coding formal rule index
  *
- * This file constrains the implementation mapping for the running Kernel
- * system instance. The Kernel system module owns the system-level startup
- * lifecycle boundary while phase-local setup remains in the mapped phase files.
+ * Formal entry: keep predicate/type names, rule grouping, and compact labels here.
+ * Explanatory rationale, examples, and implementation notes live in kernel.md.
  */
 
 predicate kernel_system_coding_maps_to_arceos_ex_system_module() -> bool;
@@ -17,71 +16,26 @@ predicate kernel_system_coding_preserves_payload_handoff_boundary() -> bool;
 
 type KernelSystemCoding {
     invariant {
-        /*
-         * Mapping path:
-         *
-         * Kernel system implementation belongs under impl/arceos_ex/src/systems/.
-         * The Kernel object maps to impl/arceos_ex/src/systems/kernel.rs.
-         */
+        /* Mapping path. */
         kernel_system_coding_maps_to_arceos_ex_system_module();
 
-        /*
-         * Kernel lifecycle boundary:
-         *
-         * systems/kernel.rs must provide the system lifecycle entry points that
-         * preserve the model Kernel lifecycle states. Kernel.Preset completes
-         * only after BootPhase.Ready and moves Kernel from Base to Prepared;
-         * Kernel.Setup completes only after InterruptPhase.Ready and moves
-         * Kernel from Prepared to Ready; Kernel.Enable drives
-         * UpMultitaskPhase, SmpRuntimePhase and PayloadPhase, and marks Kernel
-         * Online only after PayloadPhase.Online.
-         */
+        /* Kernel lifecycle boundary. */
         kernel_system_coding_implements_kernel_lifecycle_boundary();
         kernel_system_coding_preserves_model_lifecycle_states();
 
-        /*
-         * Runtime choreography:
-         *
-         * Kernel owns the ordering relationship among BootPhase,
-         * InterruptPhase, UpMultitaskPhase, SmpRuntimePhase and PayloadPhase.
-         * Individual phase setup/handoff code remains in the mapped phase
-         * files.
-         */
+        /* Runtime choreography. */
         kernel_system_coding_owns_runtime_phase_order();
 
-        /*
-         * Kernel state:
-         *
-         * The system module owns the Kernel lifecycle state and emits Kernel
-         * system checkpoints. Crate-root entry code must not retain separate
-         * startup timeline state.
-         */
+        /* Kernel state. */
         kernel_system_coding_uses_kernel_system_state();
 
-        /*
-         * Behavior preservation:
-         *
-         * Kernel system migration must not reorder existing phase calls or
-         * checkpoint emission order.
-         */
+        /* Behavior preservation. */
         kernel_system_coding_does_not_reorder_phase_calls();
 
-        /*
-         * Phase ownership:
-         *
-         * System-level mapping records the lifecycle owner but must not absorb
-         * phase-local checks, diagnostics or checkpoints out of their phase
-         * modules.
-         */
+        /* Phase ownership. */
         kernel_system_coding_does_not_reassign_phase_ownership();
 
-        /*
-         * Payload handoff:
-         *
-         * The selected payload remains a sibling phase handoff after
-         * SMP/runtime readiness, not a project-level build action and not a
-         * nested runtime-core side effect.
-         */
+        /* Payload handoff. */
         kernel_system_coding_preserves_payload_handoff_boundary();
     }
 }

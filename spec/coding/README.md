@@ -8,6 +8,12 @@
 
 `spec/coding/README.md` 是 coding 规格目录的说明入口，只负责说明范围、文档优先级和阅读顺序。正式规格入口是 [`main.spec`](main.spec)；对象级代码生成的硬性约束从 `main.spec` include 的 [`mapping.spec`](mapping.spec) 进入。实现代码前必须先阅读正式 `.spec` 入口，再阅读对应 `.md` 说明。
 
+## `.spec` 与 `.md` 分工
+
+`.spec` 文件只作为 formal 硬约束索引：保留 predicate/type 名称、规则强度分层、type 分组、最短规则标签，以及被实现 metadata、model 注释或工具引用的稳定路径。长背景、Linux/ArceOS 参考路径解释、实现例子、阶段性取舍、deferred 细节和重复说明必须维护在对应 `.md` 中。
+
+新增 coding 约束时默认先写 `.md`。只有当该约束需要成为 formal 硬约束、需要被工具/模型引用，或需要稳定 rule ID 承载实现门禁时，才在 `.spec` 中新增 predicate，并用 1 行短标签指向 `.md` 正文。不得在 `.spec` 中重新复制 `.md` 的解释性正文。
+
 当前阅读顺序为：
 
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
@@ -17,12 +23,14 @@
 5. `riscv64.spec`：RISC-V64 架构、链接脚本和入口地址语义相关的正式规格。
 6. `rust.spec`：Rust 语言、安全边界和 ABI 相关的正式规格。
 7. `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
-8. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
-9. `build.md`：对 `build.spec` 的说明、当前 Makefile 入口和脚本约束。
-10. `riscv64.md`：RISC-V64 架构相关补充说明。
-11. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
-12. `arceos.md`：参考 ArceOS 时的取舍原则。
-13. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+8. `projects/kernel.spec`、`systems/kernel.spec`：project/system 层级的 formal 编码约束。
+9. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
+10. `build.md`：对 `build.spec` 的说明、当前 Makefile 入口和脚本约束。
+11. `riscv64.md`：RISC-V64 架构相关补充说明。
+12. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
+13. `arceos.md`：参考 ArceOS 时的取舍原则。
+14. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+15. `projects/kernel.md`、`systems/kernel.md`：project/system 层级 formal predicate 的解释性正文。
 
 若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
 
@@ -43,6 +51,21 @@
 与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
 `rust/`、`arceos_ex` 等通用编码规格继续由本目录根入口承载；后续新增或拆分的专题约束，
 若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
+
+## Formal 入口清单
+
+本清单记录 2026-07-09 `spec/coding` 瘦身后的 formal 入口状态；predicate/type 名称在瘦身中保持不变。
+
+| Formal 文件 | Predicates | Types | 瘦身前行数 | 当前行数 | 说明正文 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `main.spec` | 0 | 0 | 14 | 14 | `README.md` |
+| `mapping.spec` | 28 | 4 | 331 | 137 | `mapping.md` |
+| `build.spec` | 18 | 2 | 219 | 88 | `build.md` |
+| `riscv64.spec` | 11 | 3 | 140 | 57 | `riscv64.md` |
+| `rust.spec` | 6 | 2 | 87 | 39 | `rust.md` |
+| `arceos_ex.spec` | 452 | 22 | 5200 | 1653 | `arceos_ex.md` |
+| `projects/kernel.spec` | 6 | 1 | 68 | 35 | `projects/kernel.md` |
+| `systems/kernel.spec` | 8 | 1 | 87 | 41 | `systems/kernel.md` |
 
 ## 当前实践目标
 
@@ -122,6 +145,10 @@
 - `riscv64.spec`：RISC-V64 链接脚本、入口地址事实和地址转换来源的正式规则。
 - `rust.spec`：Rust 语言、安全边界和 ABI 使用的正式规则。
 - `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
+- `projects/kernel.spec`：KernelProject 层级的 formal 编码约束。
+- `systems/kernel.spec`：Kernel system 层级的 formal 编码约束。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
 - `arceos_ex.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+- `projects/kernel.md`：KernelProject formal predicate 的说明性正文。
+- `systems/kernel.md`：Kernel system formal predicate 的说明性正文。
