@@ -4,7 +4,7 @@
 
 ## 下一阶段计划：virtio-rng 与 virtio 基础对象
 
-本节是当前 P0 的执行清单。目标不是完整 virtio 子系统，而是用最简单的真实 virtio 设备 `virtio-rng` 推动可复用的 `virtio-mmio`、virtio core 和 split virtqueue 对象建模与实现。每完成一步必须先检查并确认执行结果，再进入下一步；检查结果应同步到本节状态，必要时同步 `spec/charter/main.md`、`spec/model` 和 `spec/coding/arceos_ex.md`。
+本节是当前 P0 的执行清单。目标不是完整 virtio 子系统，而是用最简单的真实 virtio 设备 `virtio-rng` 推动可复用的 `virtio-mmio`、virtio core 和 split virtqueue 对象建模与实现。每完成一步必须先检查并确认执行结果，再进入下一步；检查结果应同步到本节状态，必要时同步 `spec/charter/main.md`、`spec/model` 和 `spec/coding/arceos_ex-implementation.md`。
 
 ### 已确认原则
 

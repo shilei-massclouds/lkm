@@ -22,15 +22,16 @@
 4. `build.spec`：Makefile、helper scripts、生成产物、磁盘镜像、QEMU 和测试命令链相关的正式规格。
 5. `riscv64.spec`：RISC-V64 架构、链接脚本和入口地址语义相关的正式规格。
 6. `rust.spec`：Rust 语言、安全边界和 ABI 相关的正式规格。
-7. `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
-8. `projects/kernel.spec`、`systems/kernel.spec`：project/system 层级的 formal 编码约束。
+7. `arceos_ex.spec`：当前 `arceos_ex` 目标内核的兼容 formal 入口；该文件只 include 拆分后的 system、phase 和 object topic。
+8. `projects/kernel.spec`、`systems/kernel.spec`：project/system 层级的 formal 编码约束，其中 `systems/kernel.spec` 也承载 `arceos_ex` startup/payload handoff 系统约束。
 9. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
 10. `build.md`：对 `build.spec` 的说明、当前 Makefile 入口和脚本约束。
 11. `riscv64.md`：RISC-V64 架构相关补充说明。
 12. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
 13. `arceos.md`：参考 ArceOS 时的取舍原则。
-14. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
-15. `projects/kernel.md`、`systems/kernel.md`：project/system 层级 formal predicate 的解释性正文。
+14. `arceos_ex.md`：当前实验内核的 coding 索引入口，链接拆分后的 formal topic 和实现说明。
+15. `arceos_ex-implementation.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+16. `projects/kernel.md`、`systems/kernel.md`：project/system 层级 formal predicate 的解释性正文。
 
 若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
 
@@ -49,12 +50,13 @@
 
 `spec/coding/` 保留 `projects/`、`systems/`、`phases/`、`objects/` 四类子目录，
 与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
-`rust/`、`arceos_ex` 等通用编码规格继续由本目录根入口承载；后续新增或拆分的专题约束，
+`rust/` 等通用编码规格继续由本目录根入口承载；`arceos_ex.spec` 保留为稳定兼容入口，但
+其目标内核专题规则已经按系统、阶段和对象拆入上述子目录。后续新增或拆分的专题约束，
 若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
 
 ## Formal 入口清单
 
-本清单记录 2026-07-09 `spec/coding` 瘦身后的 formal 入口状态；predicate/type 名称在瘦身中保持不变。
+本清单记录 2026-07-09 `spec/coding` 拆分后的 formal 入口状态；predicate/type 名称在拆分中保持不变。
 
 | Formal 文件 | Predicates | Types | 瘦身前行数 | 当前行数 | 说明正文 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -63,9 +65,18 @@
 | `build.spec` | 18 | 2 | 219 | 88 | `build.md` |
 | `riscv64.spec` | 11 | 3 | 140 | 57 | `riscv64.md` |
 | `rust.spec` | 6 | 2 | 87 | 39 | `rust.md` |
-| `arceos_ex.spec` | 452 | 22 | 5200 | 1653 | `arceos_ex.md` |
+| `arceos_ex.spec` | 0 | 0 | 1653 | 28 | `arceos_ex.md` |
 | `projects/kernel.spec` | 6 | 1 | 68 | 35 | `projects/kernel.md` |
-| `systems/kernel.spec` | 8 | 1 | 87 | 41 | `systems/kernel.md` |
+| `systems/kernel.spec` | 80 | 2 | 41 | 209 | `systems/kernel.md` |
+
+`arceos_ex.spec` 是稳定兼容入口，不直接声明 predicate/type。其 include 顺序保留原 `arceos_ex` type 的迁移顺序，具体 formal 文件按以下 topic 阅读：
+
+- System：[`systems/kernel.spec`](systems/kernel.spec) / [`systems/kernel.md`](systems/kernel.md)，包括 `KernelSystemCoding` 和 `ArceosExStartupPhaseCodingMust`。
+- Boot phases：`phases/boot/entry-prelude.*`、`entry-successor.*`、`core-prepare.*`、`mm-core-init.*`。
+- Interrupt phases：`phases/interrupt/irq-time-init.*`、`local-irq-enable.*`、`irq-open-prepare.*`、`process-prepare.*`。
+- Up-multitask phase：`phases/up-multitask/rest-init.*`。
+- SMP runtime phases：`phases/smp-runtime/pre-smp-init.*`、`smp-bringup.*`、`runtime-core.*`、`initcall.*`、`rootfs.*`、`finalize.*`。
+- Objects/subsystems：`objects/device-tree-must.*`、`device-tree-should.*`、`effective-context.*`、`completion.*`、`block-io.*`。
 
 ## 当前实践目标
 
@@ -144,11 +155,12 @@
 - `build.spec`：Makefile、helper scripts、生成产物、磁盘镜像、QEMU 和测试命令链的正式规则。
 - `riscv64.spec`：RISC-V64 链接脚本、入口地址事实和地址转换来源的正式规则。
 - `rust.spec`：Rust 语言、安全边界和 ABI 使用的正式规则。
-- `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
+- `arceos_ex.spec`：当前 `arceos_ex` 目标内核的兼容 formal 入口，include 拆分后的 system、phase 和 object topic。
 - `projects/kernel.spec`：KernelProject 层级的 formal 编码约束。
-- `systems/kernel.spec`：Kernel system 层级的 formal 编码约束。
+- `systems/kernel.spec`：Kernel system 层级和 `arceos_ex` startup/payload handoff 的 formal 编码约束。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
-- `arceos_ex.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+- `arceos_ex.md`：`arceos_ex` coding 兼容索引入口，链接拆分后的 formal topic 和实现说明。
+- `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 - `projects/kernel.md`：KernelProject formal predicate 的说明性正文。
 - `systems/kernel.md`：Kernel system formal predicate 的说明性正文。
