@@ -7,27 +7,35 @@ formal files. Read phase topics in model phase-tree order:
 
 ## Boot
 
-- `boot/entry-prelude.spec` / `boot/entry-prelude.md`
-- `boot/entry-successor.spec` / `boot/entry-successor.md`
-- `boot/core-prepare.spec` / `boot/core-prepare.md`
-- `boot/mm-core-init.spec` / `boot/mm-core-init.md`
+- [`boot.md`](boot.md) — BootPhase 编排链串接顺序
+- `boot/entry-prelude.md` / `boot/entry-prelude.spec`
+- `boot/entry-successor.md` / `boot/entry-successor.spec`
+- `boot/core-prepare.md` / `boot/core-prepare.spec`
+- `boot/mm-core-init.md` / `boot/mm-core-init.spec`
 
 ## Interrupt
 
-- `interrupt/irq-time-init.spec` / `interrupt/irq-time-init.md`
-- `interrupt/local-irq-enable.spec` / `interrupt/local-irq-enable.md`
-- `interrupt/irq-open-prepare.spec` / `interrupt/irq-open-prepare.md`
-- `interrupt/process-prepare.spec` / `interrupt/process-prepare.md`
+- [`interrupt.md`](interrupt.md) — InterruptPhase 编排链串接顺序
+- `interrupt/irq-time-init.md` / `interrupt/irq-time-init.spec`
+- `interrupt/local-irq-enable.md` / `interrupt/local-irq-enable.spec`
+- `interrupt/irq-open-prepare.md` / `interrupt/irq-open-prepare.spec`
+- `interrupt/process-prepare.md` / `interrupt/process-prepare.spec`
 
 ## UpMultitask
 
-- `up-multitask/rest-init.spec` / `up-multitask/rest-init.md`
+- [`up-multitask.md`](up-multitask.md) — UpMultitaskPhase 编排链串接顺序
+- `up-multitask/rest-init.md` / `up-multitask/rest-init.spec`
 
 ## SmpRuntime
 
-- `smp-runtime/pre-smp-init.spec` / `smp-runtime/pre-smp-init.md`
-- `smp-runtime/smp-bringup.spec` / `smp-runtime/smp-bringup.md`
-- `smp-runtime/runtime-core.spec` / `smp-runtime/runtime-core.md`
-- `smp-runtime/initcall.spec` / `smp-runtime/initcall.md`
-- `smp-runtime/rootfs.spec` / `smp-runtime/rootfs.md`
-- `smp-runtime/finalize.spec` / `smp-runtime/finalize.md`
+- [`smp-runtime.md`](smp-runtime.md) — SmpRuntimePhase 编排链串接顺序
+- `smp-runtime/pre-smp-init.md` / `smp-runtime/pre-smp-init.spec`
+- `smp-runtime/smp-bringup.md` / `smp-runtime/smp-bringup.spec`
+- `smp-runtime/runtime-core.md` / `smp-runtime/runtime-core.spec`
+- `smp-runtime/initcall.md` / `smp-runtime/initcall.spec`
+- `smp-runtime/rootfs.md` / `smp-runtime/rootfs.spec`
+- `smp-runtime/finalize.md` / `smp-runtime/finalize.spec`
+
+## Payload
+
+- [`payload.md`](payload.md) — PayloadPhase 编排链串接顺序

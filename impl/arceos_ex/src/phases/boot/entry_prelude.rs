@@ -209,7 +209,7 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
         crate::phases::prepare::adopt_head_prefix(&boot_args),
         "arceos_ex prepare event failed\n",
     );
-    setup(&boot_args)
+    preset_flow(&boot_args)
 }
 
 /// Continues `EntryPreludePhase.setup()` after the `_start` head segment.
@@ -229,11 +229,11 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
 /// then continues the remaining `EntryPreludePhase.setup()` drives in model
 /// order. It also supplies the phase-owned continuation that resumes this same
 /// setup() after `Vm.Setup` switches to the early virtual address space.
-fn setup(boot_args: &BootArgs) -> ! {
+fn preset_flow(boot_args: &BootArgs) -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
-        setup_until_vm_switch(ctx, boot_args),
-        "arceos_ex entry prelude event failed\n",
+        preset_until_vm_switch(ctx, boot_args),
+        "arceos_ex entry prelude preset failed\n",
     );
     ctx.vm.setup(
         &ctx.config,
@@ -244,7 +244,7 @@ fn setup(boot_args: &BootArgs) -> ! {
     )
 }
 
-fn setup_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
+fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
     ctx.event_stream.preset(&ctx.kernel_image)?;
     ctx.exception_stream
@@ -277,19 +277,23 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
 }
 
-/// Continues the same `EntryPreludePhase.setup()` after `Vm.Setup` has switched
+/// Continues the same `EntryPreludePhase.preset()` after `Vm.Setup` has switched
 /// to the early virtual address space.  Control returns here directly from the
 /// continuation selected by this phase; it does not pass through `BootPhase`.
 extern "C" fn after_vm_setup_continuation() -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
         after_vm_setup(ctx),
-        "arceos_ex entry prelude event failed\n",
+        "arceos_ex entry prelude preset tail failed\n",
     );
-    handoff(ctx)
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex entry prelude setup failed\n",
+    );
+    enable(ctx)
 }
 
-/// Finishes `EntryPreludePhase.setup()` after `Vm.Setup` has switched address
+/// Finishes `EntryPreludePhase.preset()` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
 fn after_vm_setup(ctx: &mut Context) -> EventResult {
     ctx.event_stream.setup(
@@ -301,20 +305,19 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
     ctx.init_task.enable(&ctx.kernel_image, &ctx.vm)?;
     ctx.init_stack.setup(&ctx.vm)?;
     Soc::preset()?;
-    checkpoint_ready(ctx)
+    adopt_prepared_with_check(ctx)
 }
 
-/// Implements the Phase handoff edge from `EntryPreludePhase` to the next
-/// BootPhase child, `EntrySuccessorPhase`.
-fn handoff(ctx: &mut Context) -> ! {
+/// Implements the Enable migration from `EntryPreludePhase` to `EntrySuccessorPhase`.
+fn enable(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(
-        handoff_event(ctx),
-        "arceos_ex entry prelude handoff failed\n",
+        enable_event(ctx),
+        "arceos_ex entry prelude enable failed\n",
     );
     crate::phases::boot::entry_successor::setup(ctx)
 }
 
-fn handoff_event(ctx: &mut Context) -> EventResult {
+fn enable_event(ctx: &mut Context) -> EventResult {
     crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
         LifecycleEvent::Enable,
@@ -324,24 +327,34 @@ fn handoff_event(ctx: &mut Context) -> EventResult {
     )
 }
 
-/// Checks the `EntryPreludePhase.Ready` model boundary before emitting its
-/// checkpoint.  This is the coding counterpart of the phase invariant.
-fn checkpoint_ready(ctx: &Context) -> EventResult {
+/// Adopts Prepared state after Preset drives complete.
+/// Checks the model Online invariant as the ensures condition.
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
     if !entry_prelude_phase_ready(ctx) {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE),
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     }
 
     crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
+        State::Prepared,
         Checkpoint::EntryPreludePhaseReady,
+    )
+}
+
+/// Setup migration: empty drives, just adopts Prepared → Ready.
+fn adopt_ready(ctx: &mut Context) -> EventResult {
+    crate::phases::state::adopt(
+        &ENTRY_PRELUDE_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
     )
 }
 

@@ -54,13 +54,54 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 `SHOULD`：承载 `Context` 的函数参数和局部变量应命名为 `ctx` 或 `context`，不应命名为 `objects`，以免与模型中的 `object` 概念混淆。
 
-## Phase 对象
+## 阶段链式映射规则
+
+基于[阶段范式](../charter/phase-paradigm.md)，模型中的阶段树在 impl 中映射为平坦的函数调用链。本条规则取代下文"Phase 对象"节中的旧生成规则。
+
+### 基本映射
+
+1. **叶子子阶段是 impl 中唯一出现实体的层**。编排层（Kernel、BootPhase、InterruptPhase、UpMultitaskPhase、SmpRuntimePhase、PayloadPhase）不生成独立函数或模块；其 `drives` 语义坍缩为子阶段间的调用顺序。
+
+2. **每个子阶段的每个迁移对应一个函数**：`preset()`、`setup()`、`enable()`。函数体遵循统一结构：
+
+   ```
+   fn xxx_preset/setup/enable() {
+       // 1. depends_on → 断言检查
+       // 2. drives → 调用被驱动对象的迁移函数
+       // 3. ensures → 断言 + 推进自身状态
+       // 4. emits → 调用本子阶段下一迁移函数
+   }
+   ```
+
+3. **子阶段间串接**：前一个子阶段的 `enable()` 末尾（emits 位置）调用后一个子阶段的 `preset()`。若本子阶段是本层最后一个，则 `enable()` 末尾调用下一编排层首个子阶段的 `preset()`。
+
+4. **编排层 coding 文件**只记录子阶段的串接顺序，不生成函数。例如 `coding/phases/boot.md` 描述 `EntryPreludePhase → EntrySuccessorPhase → CorePreparePhase → MmCoreInitPhase → SchedInitPhase` 的串接关系。
+
+5. **叶子子阶段 coding 文件**详细描述每个迁移的 `depends_on`/`drives`/`ensures`/`emits` 到 impl 的具体映射。
+
+### 整体调用形状
+
+```
+EntryPreludePhase.preset()   ← 由启动入口调用
+  → .setup()
+    → .enable()
+      → EntrySuccessorPhase.preset()
+        → .setup()
+          → .enable()
+            → CorePreparePhase.preset()
+              → ...
+                → PayloadPhase.preset()
+                  → .setup()
+                    → .enable()    → 不返回
+```
+
+## Phase 对象（旧规则，已被阶段链式映射规则替代）
 
 Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`PayloadPhase`。
 
 Phase 代码生成以模型中的阶段树为输入，默认采用深度优先遍历。生成器从顶层启动对象进入第一个阶段；若该阶段不属于当前内核代码生成范围，则只生成必要的事实采纳、检查或发布边界，然后回到父层级继续处理下一个阶段。若该阶段属于当前内核代码生成范围且包含子 Phase，则递归处理其子 Phase；若该阶段没有子 Phase，则生成该叶子 Phase 的主体 `setup()` 过程。
 
-父 Phase 在模型中声明和组织直接子 Phase 的顺序，这一顺序是 coding 生成 `handoff()` 链的依据。父 Phase 本身不应被机械生成成“直接逐个调用子 Phase `setup()`”的串行过程；运行时控制流应由当前 Phase 的 `handoff()` 显式连接到同层下一个 Phase 的 `setup()`。当某个 Phase 是本层级最后一个子 Phase 时，它的 `handoff()` 回到父 Phase 的完成确认过程。
+父 Phase 在模型中声明和组织直接子 Phase 的顺序，这一顺序是 coding 生成 `handoff()` 链的依据。父 Phase 本身不应被机械生成成"直接逐个调用子 Phase `setup()`"的串行过程；运行时控制流应由当前 Phase 的 `handoff()` 显式连接到同层下一个 Phase 的 `setup()`。当某个 Phase 是本层级最后一个子 Phase 时，它的 `handoff()` 回到父 Phase 的完成确认过程。
 
 非叶子 Phase 的代码职责主要是边界确认：在所有子 Phase 通过 `handoff()` 链完成后，执行自身 `depends_on`、`ensures`、`invariant` 对应的检查和 checkpoint，并将父 Phase 推进到对应完成边界。叶子 Phase 的代码职责主要是按本 Phase 规格中的 `drives` 顺序推进普通对象 transition，并在完成后调用自身 `handoff()`。
 
@@ -74,9 +115,9 @@ Phase 对象在源码中不得对应资源对象式 Rust `struct`。默认实现
 - `entry_successor_phase_handoff(...)`
 - `boot_phase_setup(...)`
 
-每个 Phase 对象在 coding 阶段默认生成 `setup()` 和 `handoff()` 两个过程函数。`handoff()` 是 Phase coding 中对模型 `cleanup` 的本地别名，表达“本阶段退出服务并移交控制权”。若模型中显式定义了该 Phase 的 `cleanup`，则 `handoff()` 的前半段必须实现对应动作、检查和 checkpoint；若模型没有显式 `cleanup`，则 `handoff()` 只负责移交执行权。
+每个 Phase 对象在 coding 阶段默认生成 `setup()` 和 `handoff()` 两个过程函数。`handoff()` 是 Phase coding 中对模型 `cleanup` 的本地别名，表达"本阶段退出服务并移交控制权"。若模型中显式定义了该 Phase 的 `cleanup`，则 `handoff()` 的前半段必须实现对应动作、检查和 checkpoint；若模型没有显式 `cleanup`，则 `handoff()` 只负责移交执行权。
 
-Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外，`setup()` 成功完成本阶段目标后，最后一步必须调用本 Phase 的 `handoff()`。同一层级内，前一个 Phase 的 `handoff()` 调用下一个兄弟 Phase 的 `setup()`；若当前 Phase 是本层级最后一个阶段，则调用父 Phase 的 `setup()` 或父 Phase 的完成确认过程。父 Phase 是子 Phase 顺序的组织者和规格来源，但 coding 中不应简单生成“父 Phase 直接逐个调用子 Phase”的控制流。
+Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外，`setup()` 成功完成本阶段目标后，最后一步必须调用本 Phase 的 `handoff()`。同一层级内，前一个 Phase 的 `handoff()` 调用下一个兄弟 Phase 的 `setup()`；若当前 Phase 是本层级最后一个阶段，则调用父 Phase 的 `setup()` 或父 Phase 的完成确认过程。父 Phase 是子 Phase 顺序的组织者和规格来源，但 coding 中不应简单生成"父 Phase 直接逐个调用子 Phase"的控制流。
 
 Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期 transition，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
 

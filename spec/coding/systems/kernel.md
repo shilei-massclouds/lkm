@@ -1,20 +1,29 @@
 # Kernel 系统编码指引
 
-`systems/kernel` 是 Kernel 生命周期的编排层。它协调各子阶段的有序 Preset/Setup/Enable，但不直接实现子阶段内部逻辑。
+`systems/kernel` 是 Kernel 生命周期的编排层。按[阶段链式映射规则](../mapping.md#阶段链式映射规则)，编排层在 impl 中不出现独立函数，其 `drives` 语义坍缩为子阶段间的调用顺序。
 
-## 生命周期边界
+## 串接顺序
 
-Kernel 状态机：`Base --[Preset]--> Prepared --[Setup]--> Ready --[Enable]--> Online`。
+Kernel 在模型中编排以下阶段树顶层子阶段。impl 中的串接链为：
 
-`impl/arceos_ex/src/systems/kernel.rs` 中的三个公开入口点：
+```
+BootPhase 叶子链完成
+  → prepare: EntryPreludePhase.preset()  ← 启动入口
+  → EntryPreludePhase → EntrySuccessorPhase → CorePreparePhase → MmCoreInitPhase → SchedInitPhase
+  → InterruptPhase 叶子链:
+    → IrqTimeInitPhase → LocalIrqEnablePhase → IrqOpenPreparePhase → ProcessPreparePhase
+  → UpMultitaskPhase 叶子链:
+    → BootInitRestInitPhase → BootInitScheduleHandoffPhase → BootIdleEntryPhase
+  → SmpRuntimePhase 叶子链:
+    → PreSmpInitPhase → SmpBringupPhase → RuntimeCorePhase → InitcallPhase → RootfsPhase → FinalizePhase
+  → PayloadPhase.preset() → .setup() → .enable()  → 不返回
+```
 
-| 入口 | 不变量检查 | 下一动作 | 状态迁移 |
-|---|---|---|---|
-| `preset_after_boot()` | Prepare.Online, Boot.Ready | 驱动 InterruptPhase | Base → Prepared |
-| `setup_after_interrupt()` | Prepare.Online, Boot.Ready, Interrupt.Ready | 驱动 UpMultitaskPhase | Prepared → Ready |
-| `enable_after_smp_runtime()` | Prepare.Online, Boot.Ready, Interrupt.Ready, UpMultitask.Ready, SmpRuntime.Ready | 驱动 PayloadPhase | Ready → Online |
+各段串接分别在对应编排层 coding 文件中详述。
 
-`enable_after_smp_runtime()` 启动 PayloadPhase 后，`mark_online()` 额外要求 PayloadPhase.Online。
+## 状态记录
+
+Kernel 在 impl 中需要一个轻量状态变量用于记录和检查生命周期边界。但该变量不驱动任何阶段，仅用于 invariant 检查和 checkpoint。
 
 ## 范围边界
 
