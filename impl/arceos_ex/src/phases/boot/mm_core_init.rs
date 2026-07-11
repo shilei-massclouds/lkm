@@ -15,7 +15,7 @@ use core::sync::atomic::AtomicU8;
 static MM_CORE_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::MmCoreInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
@@ -94,7 +94,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn handoff() -> ! {
-    crate::phases::boot::sched_init::setup(crate::context::context())
+    crate::phases::boot::sched_init::preset(crate::context::context())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {

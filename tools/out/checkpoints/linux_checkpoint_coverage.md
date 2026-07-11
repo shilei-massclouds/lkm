@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 429
+- total checkpoints: 431
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 312 |
+| unmapped | 314 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 312 |
+| none | 314 |
 | medium | 62 |
 | high | 55 |
 
@@ -58,6 +58,7 @@
 | BootCPU | 3 |
 | Completion | 3 |
 | EarlyDtb | 3 |
+| EntrySuccessorPhase | 3 |
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
@@ -67,7 +68,6 @@
 | BootCurrentCPU | 2 |
 | BootPhase | 2 |
 | CommandLine | 2 |
-| EntrySuccessorPhase | 2 |
 | InitTask | 2 |
 | InterruptPhase | 2 |
 | IrqChipInitTable | 2 |
@@ -98,4 +98,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 175
+- singleton unmapped families: 176

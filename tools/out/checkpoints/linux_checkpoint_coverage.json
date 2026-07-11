@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 429,
+  "total_checkpoints": 431,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 312
+      "count": 314
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 312
+      "count": 314
     },
     {
       "confidence": "medium",
@@ -156,6 +156,10 @@
       "count": 3
     },
     {
+      "family": "EntrySuccessorPhase",
+      "count": 3
+    },
+    {
       "family": "InitStack",
       "count": 3
     },
@@ -189,10 +193,6 @@
     },
     {
       "family": "CommandLine",
-      "count": 2
-    },
-    {
-      "family": "EntrySuccessorPhase",
       "count": 2
     },
     {
@@ -421,6 +421,10 @@
     },
     {
       "family": "ContextTrackingInit",
+      "count": 1
+    },
+    {
+      "family": "CorePreparePhase",
       "count": 1
     },
     {
@@ -1012,5 +1016,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 175
+  "unmapped_singleton_family_count": 176
 }

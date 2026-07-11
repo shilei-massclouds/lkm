@@ -314,7 +314,7 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex entry prelude enable failed\n",
     );
-    crate::phases::boot::entry_successor::setup(ctx)
+    crate::phases::boot::entry_successor::preset(ctx)
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {

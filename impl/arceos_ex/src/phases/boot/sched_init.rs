@@ -13,7 +13,7 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static SCHED_INIT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::SchedInitPhaseStarted);
     crate::phases::shutdown_on_error(
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),

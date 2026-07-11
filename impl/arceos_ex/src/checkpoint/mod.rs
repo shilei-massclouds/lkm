@@ -128,6 +128,8 @@ pub enum Checkpoint {
     EntrySuccessorPhaseStarted,
     #[allow(dead_code)]
     EntrySuccessorPhaseReady,
+    #[allow(dead_code)]
+    EntrySuccessorPhaseOnline,
     EntryPreludePhaseOnline,
     InterruptStreamPrepared,
     InterruptStreamReady,
@@ -202,6 +204,8 @@ pub enum Checkpoint {
     BootConsoleOffline,
     CorePreparePhaseStarted,
     CorePreparePhaseReady,
+    #[allow(dead_code)]
+    CorePreparePhaseOnline,
     DeviceTreeReady,
     ZonesReady,
     ResourceTreeReady,
@@ -592,6 +596,7 @@ impl Checkpoint {
             Self::EntryPreludePhaseReady => "EntryPreludePhase.Ready",
             Self::EntrySuccessorPhaseStarted => "EntrySuccessorPhase.Started",
             Self::EntrySuccessorPhaseReady => "EntrySuccessorPhase.Ready",
+            Self::EntrySuccessorPhaseOnline => "EntrySuccessorPhase.Online",
             Self::EntryPreludePhaseOnline => "EntryPreludePhase.Online",
             Self::InterruptStreamPrepared => "InterruptStream.Prepared",
             Self::InterruptStreamReady => "InterruptStream.Ready",
@@ -660,6 +665,7 @@ impl Checkpoint {
             Self::BootConsoleOffline => "BootConsole.Offline",
             Self::CorePreparePhaseStarted => "CorePreparePhase.Started",
             Self::CorePreparePhaseReady => "CorePreparePhase.Ready",
+            Self::CorePreparePhaseOnline => "CorePreparePhase.Online",
             Self::DeviceTreeReady => "DeviceTree.Ready",
             Self::ZonesReady => "Zones.Ready",
             Self::ResourceTreeReady => "ResourceTree.Ready",

@@ -12,16 +12,16 @@ use core::sync::atomic::AtomicU8;
 static CORE_PREPARE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::CorePreparePhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex core prepare event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        "arceos_ex core prepare preset failed\n",
     );
-    handoff(ctx)
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.device_tree
         .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
     ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
@@ -87,82 +87,72 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.exception_stream.setup(&ctx.event_stream)
 }
 
-fn checkpoint_setup_nr_cpu_ids(cpu_group: &crate::objects::cpu_group::CpuGroup) -> EventResult {
-    let boot_cpu = cpu_group.boot_cpu();
-    if cpu_group.state() != State::Ready
-        || cpu_group.boot_cpu_state() != State::Online
-        || !cpu_group.possible_cpu_boundary_ready()
-        || boot_cpu.map(|cpu| cpu.cpu_ref()) != cpu_group.boot_cpu_ref()
-        || !boot_cpu
-            .map(|cpu| cpu.cpu_ref().is_boot_cpu() && cpu.logical_id() == 0)
-            .unwrap_or(false)
-    {
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
+    if !ctx.interrupt_stream.early_boot_irqs_disabled() {
         return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Base,
-            State::Ready,
-        );
-    }
-    crate::checkpoint::checkpoint(Checkpoint::SetupNrCpuIdsCheckpoint);
-    Ok(())
-}
-
-fn checkpoint_second_parse_early_param(
-    early_param: &crate::objects::early_param::EarlyParam,
-) -> EventResult {
-    if early_param.state() != State::Ready {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Base,
-            State::Ready,
-        );
-    }
-    crate::checkpoint::checkpoint(Checkpoint::SecondParseEarlyParamCheckpoint);
-    Ok(())
-}
-
-fn checkpoint_print_unknown_bootoptions(
-    boot_param: &crate::objects::boot_param::BootParam,
-) -> EventResult {
-    if boot_param.state() != State::Ready {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Base,
-            State::Ready,
-        );
-    }
-    crate::checkpoint::checkpoint(Checkpoint::PrintUnknownBootoptionsCheckpoint);
-    Ok(())
-}
-
-fn handoff(ctx: &mut Context) -> ! {
-    crate::phases::boot::mm_core_init::setup(ctx)
-}
-
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !core_prepare_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&CORE_PREPARE_PHASE_STATE),
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     }
 
     crate::phases::state::mark(
         &CORE_PREPARE_PHASE_STATE,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
+        State::Prepared,
         Checkpoint::CorePreparePhaseReady,
     )
 }
 
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex core prepare setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn adopt_ready(ctx: &Context) -> EventResult {
+    if !core_prepare_phase_ready(ctx) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            crate::phases::state::load(&CORE_PREPARE_PHASE_STATE),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::adopt(
+        &CORE_PREPARE_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+    )
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        enable_event(ctx),
+        "arceos_ex core prepare enable failed\n",
+    );
+    crate::phases::boot::mm_core_init::preset(ctx)
+}
+
+fn enable_event(ctx: &mut Context) -> EventResult {
+    crate::phases::state::mark(
+        &CORE_PREPARE_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::CorePreparePhaseOnline,
+    )
+}
+
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&CORE_PREPARE_PHASE_STATE) == State::Ready
+    let s = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
+    s == State::Ready || s == State::Online
 }
 
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
@@ -227,4 +217,55 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.exception_stream.unexpected_state() == State::Ready
         && ctx.interrupt_stream.early_boot_irqs_disabled()
         && (earlycon::is_online() || printk::console_handoff_complete())
+}
+
+fn checkpoint_setup_nr_cpu_ids(cpu_group: &crate::objects::cpu_group::CpuGroup) -> EventResult {
+    let boot_cpu = cpu_group.boot_cpu();
+    if cpu_group.state() != State::Ready
+        || cpu_group.boot_cpu_state() != State::Online
+        || !cpu_group.possible_cpu_boundary_ready()
+        || boot_cpu.map(|cpu| cpu.cpu_ref()) != cpu_group.boot_cpu_ref()
+        || !boot_cpu
+            .map(|cpu| cpu.cpu_ref().is_boot_cpu() && cpu.logical_id() == 0)
+            .unwrap_or(false)
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
+    }
+    crate::checkpoint::checkpoint(Checkpoint::SetupNrCpuIdsCheckpoint);
+    Ok(())
+}
+
+fn checkpoint_second_parse_early_param(
+    early_param: &crate::objects::early_param::EarlyParam,
+) -> EventResult {
+    if early_param.state() != State::Ready {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
+    }
+    crate::checkpoint::checkpoint(Checkpoint::SecondParseEarlyParamCheckpoint);
+    Ok(())
+}
+
+fn checkpoint_print_unknown_bootoptions(
+    boot_param: &crate::objects::boot_param::BootParam,
+) -> EventResult {
+    if boot_param.state() != State::Ready {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
+    }
+    crate::checkpoint::checkpoint(Checkpoint::PrintUnknownBootoptionsCheckpoint);
+    Ok(())
 }

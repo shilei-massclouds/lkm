@@ -1,150 +1,177 @@
-# CorePreparePhase coding
+# CorePreparePhase Coding
 
-本文件承载 `spec/coding/phases/boot/core-prepare.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+## Overview
 
-<!-- formal-predicate-notes:spec/coding/phases/boot/core-prepare.spec START -->
+核心准备子阶段，对应 model `spec/model/phases/boot/core-prepare/phase.spec` 中 `CorePreparePhase` 对象的 Preset → Online 生命周期。
 
-## Formal predicate notes
+本阶段从 `EntrySuccessorPhase.Online` 开始，驱动 DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup、PerCpuStorage、StaticBranch、CommandLine、Params、PrintkBuffer、ExceptionStream 等对象的建立，对应 Linux `paging_init()` 之后到 `trap_init()` 之间的核心准备路径。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`core-prepare.spec`](core-prepare.spec)。
+按[阶段链式映射规则](../../mapping.md#阶段链式映射规则)，每个迁移对应一个概念函数。
 
-### ArceosExCorePrepareCodingMust
+## preset()
 
-#### CorePrepare concurrency boundary
+### 1. depends_on
 
-CorePreparePhase runs after paging_init() and before trap_init() /
-mm_core_init() while Linux still has early_boot_irqs_disabled == true
-and secondary CPUs have not been brought online. The implementation
-must not open local IRQs, task concurrency, or SMP concurrency in
-this phase; its ready check must still observe the model facts
-early_boot_irqs_disabled_true(), interrupt_concurrency_closed(),
-task_concurrency_closed(), and smp_concurrency_closed().
+由 `EntrySuccessorPhase.enable()` 保证：
+- `EntrySuccessorPhase.state == Online`
+- `Vm.state == Online`、`SwapperVm.state == Online`
+- `MemBlock.state == Online`
+- `Params.state == Prepared`、`EarlyParam.state == Ready`
+- `CommandLine.state == Prepared`
+- `BootCPU.state == Online`、`BootCpuLocalInterrupt.state == Ready`
+- `PrintkBuffer.state == Prepared`
+- `ExceptionStream.state == Prepared`
 
-#### StaticBranch.setup guard facts
+### 2. drives
 
-StaticBranch.setup() models Linux jump_label_init(). Even though the
-current prototype runs before SMP/task concurrency opens, generated
-code must make the Linux guard semantics visible as facts: the CPU
-hotplug read guard corresponding to cpus_read_lock() and the
-jump_label_mutex guard corresponding to jump_label_lock().
+模型 `CorePreparePhase.Preset` 按以下顺序驱动：
 
-#### JumpLabelMutex object mapping
+| # | Model drives | Impl |
+|---|---|---|
+| 1 | `DeviceTree.Transition::Setup` | `ctx.device_tree.setup()` |
+| 2 | `Zones.Transition::Setup` | `ctx.zones.setup()` |
+| 3 | `PageMetadataMap.Transition::Setup` | `ctx.page_metadata_map.setup()` |
+| 4 | `ResourceLock.Transition::Preset` | `ctx.resource_lock.preset_static()` |
+| 5 | `ResourceLock.Transition::Setup` | `ctx.resource_lock.setup()` |
+| 6 | `ResourceTree.Transition::Setup` | `ctx.resource_tree.setup()` |
+| 7 | `CpuGroup.Transition::Setup` | `ctx.cpu_group.setup_smp()` |
+| 8 | `CacheBlockInfo.Transition::Setup` | `ctx.cache_block_info.setup()` |
+| 9 | `CpuCapabilities.Transition::Setup` | `ctx.cpu_capabilities.setup()` |
+| 10 | `DmaCachePolicy.Transition::Setup` | `ctx.dma_cache_policy.setup()` |
+| 11 | `PerCpuStorage.Transition::Preset` | `ctx.per_cpu_storage.preset()` |
+| 12 | `CpuHotplugLock.Transition::Preset` | `ctx.cpu_hotplug_lock.preset_static_with_per_cpu_storage()` |
+| 13 | `CpuHotplugLock.Transition::Setup` | `ctx.cpu_hotplug_lock.setup()` |
+| 14 | `JumpLabelMutex.Transition::Preset` | `ctx.jump_label_mutex.preset_static()` |
+| 15 | `JumpLabelMutex.Transition::Setup` | `ctx.jump_label_mutex.setup()` |
+| 16 | `StaticBranch.Transition::Setup` | `ctx.static_branch.setup()` |
+| 17 | `CommandLine.Transition::Setup` | `ctx.command_line.setup()` |
+| 18 | `PerCpuStorage.Transition::Setup` | `ctx.per_cpu_storage.setup()` |
+| 19 | `CpuHotplugState.Transition::Setup` | `ctx.cpu_hotplug_state.setup()` |
+| 20 | `Params.Transition::Setup` | `ctx.params.setup()` |
+| 21 | `Randomness.Transition::Preset` | `ctx.randomness.preset()` |
+| 22 | `PrintkBuffer.Transition::Setup` | `printk::setup()` |
+| 23 | `ExceptionTable.Transition::Setup` | `ctx.exception_table.setup()` |
+| 24 | `ExceptionStream.Transition::Setup` | `ctx.exception_stream.setup()` |
 
-The Linux jump_label_mutex used by jump_label_lock() must be
-represented as an independent Context object, not as a private bool
-hidden inside StaticBranch. CorePrepare setup must drive its static
-initializer/Preset and Ready setup before StaticBranch.setup()
-consumes it.
+### 3. ensures
 
-#### CpuHotplugLock object mapping
+驱动完成后检查：
+- `interrupt_concurrency_closed()`
+- `task_concurrency_closed()`
+- `smp_concurrency_closed()`
+- `context_is(SystemExclusive)`
+- `early_boot_irqs_disabled_true()`
 
-The Linux cpu_hotplug_lock used by cpus_read_lock() must be
-represented as an independent Context object of type
-PerCpuRwSemaphore. The object may depend on PerCpuStorage.Prepared
-for early boot-CPU static per-cpu storage, but PerCpuRwSemaphore as a
-generic type must not be globally tied to PerCpuStorage. CorePrepare
-setup must drive PerCpuStorage.Preset, CpuHotplugLock.Preset and
-CpuHotplugLock.Setup before StaticBranch.setup() consumes it.
+### 4. emits
 
-#### StaticBranch jump-label mutex guard lowering
+推进 Base → Prepared，调用 `setup()`。
 
-StaticBranch.setup() must preserve the StaticBranchJumpLabelContext
-source boundary and execute the modeled JumpLabelMutex.Lock/Unlock
-protocol, or an equivalent implementation that preserves owner,
-nesting/debug and wakeup-observable effects. SingleTaskContext facts
-are not enough to erase the mutex protocol in the current lowering
-strategy. The CorePrepare ready check must observe the independent
-JumpLabelMutex ready object and a completed lock/unlock guard fact.
+## setup()
 
-#### StaticBranch CPU hotplug read guard lowering
+### 1. depends_on
 
-StaticBranch.setup() must preserve the CpuHotplugReadContext source
-boundary for cpus_read_lock()/cpus_read_unlock() and execute the
-modeled CpuHotplugLock.ReadLock/ReadUnlock pair. SingleTaskContext
-facts are not enough to erase this read-side protocol in the current
-lowering strategy. The generic PerCpuRwSemaphore implementation must
-still provide real read/write behavior for later call sites and
-smoke tests.
+由 `preset()` 保证。
 
-#### PerCpuRwSemaphore observable behavior
+### 2. drives
 
-PerCpuRwSemaphore must model static/runtime initialization, ready
-setup, read-side fast path, writer block flag, reader drain, reader
-slow-path/blocked observations, write unlock wakeup, and the local
-RcuSync child object. Lockdep, tracing, exact scheduler waitqueue
-mechanics and a true asynchronous RCU grace-period service may be
-internal or deferred, but the visible counters and outcomes must be
-testable from the implementation.
+无。
 
-#### Text patch synchronization boundary
+### 3. ensures
 
-Runtime static-key code patching uses separate text patch guards and
-instruction-cache synchronization on RISC-V. CorePrepare
-StaticBranch.setup() must not silently claim those runtime sync
-effects; they remain deferred to later StaticBranch action modeling.
+检查所有被驱动对象已到达模型约定的状态（参见下文 Invariant 表）。
 
-#### ResourceTree setup guard
+### 4. emits
 
-Linux init_resources() inserts resources through insert_resource(),
-whose kernel/resource.c path takes resource_lock with write_lock().
-ResourceLock must be represented as an independent Context object of
-type RwLock, not as a bool hidden inside ResourceTree. CorePrepare
-setup must drive ResourceLock.Preset and ResourceLock.Setup before
-ResourceTree.setup() consumes it.
+推进 Prepared → Ready，调用 `enable()`。
 
-#### ResourceTree resource_lock guard lowering
+## enable()
 
-ResourceTree.setup() must preserve the ResourceTreeWriteContext
-source boundary and execute the modeled
-ResourceLock.WriteLock/WriteUnlock pair. SingleTaskContext facts are
-not enough to erase this write-side protocol in the current lowering
-strategy. The generic RwLock implementation must still provide real
-read/write behavior for later call sites and smoke tests.
+### 1. depends_on
 
-#### RwLock observable behavior
+由 `setup()` 保证。
 
-RwLock must model static/runtime initialization, Ready/unlocked
-setup, read-side sharing, write-side exclusion, trylock outcomes,
-read/write unlock conditions and the ordinary read_lock()/write_lock()
-boundary that does not save IRQ flags. Lockdep/debug owner,
-PREEMPT_RT rwbase_rt, exact architecture raw lock details, exact
-reader count internals and irqsave/bh/nested API variants may remain
-internal or deferred until a concrete object needs them.
+### 2. drives
 
-#### PrintkBuffer setup IRQ guard
+无。
 
-Linux setup_log_buf() switches the active printk ring buffer under
-local_irq_save()/local_irq_restore(). PrintkBuffer.setup() must
-record the local IRQ save/restore guard before reporting Ready, and
-must bind that guard to the existing BootCpuLocalInterrupt
-LocalInterruptControl object rather than hiding it as a PrintkBuffer
-internal bool.
+### 3. ensures
 
-In the current lowering strategy arceos_ex must execute or preserve
-the save/restore protocol instead of relying on SingleTaskContext to
-erase it. A future proof-only optimization may be reintroduced only
-after the model marks the lexical guarded block with a verified
-single-entry proof and confirms that no saved-flags/debug side
-effects are consumed.
+推进 Ready → Online，发出 `CorePreparePhaseOnline` checkpoint。
 
-#### Randomness preset conditional lock boundary
+### 4. emits
 
-Randomness.preset() maps to Linux random_init_early(command_line).
-The main early-mix path calls the internal _mix_pool_bytes() helper
-directly, not mix_pool_bytes(), so it does not take input_pool.lock
-and generated code must not add an unconditional input-pool spinlock
-guard merely because later random paths use that lock.
+→ `MmCoreInitPhase.preset()`
 
-#### Randomness conditional reseed/credit lock boundary
+## 迁移间调用关系
 
-Linux random_init_early() may enter crng_reseed() when crng_ready()
-is already true, or _credit_init_bits() when trust_cpu is enabled.
-Those conditional paths may update base_crng under
-spin_lock_irqsave(&base_crng.lock, flags) /
-spin_unlock_irqrestore(&base_crng.lock, flags). The current
-arceos_ex minimal path may keep this condition deferred, but if the
-path is implemented it must lower through the RawSpinLock irqsave
-guard protocol, not through an unguarded update or unconditional
-early-mix lock.
+```
+preset()  ← 由 EntrySuccessorPhase.enable() 调用
+  │
+  ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
+  │
+  ├─ adopt_prepared_with_check()  ← 检查并发的关闭事实，标记 Prepared
+  │
+  setup()  ← emits
+  │
+  ├─ adopt_ready()  ← 检查 Online invariant，标记 Ready
+  │
+  enable()  ← emits
+  │
+  ├─ enable_event()  ← 标记 Online
+  │
+  └─ MmCoreInitPhase.preset()
+```
 
-<!-- formal-predicate-notes:spec/coding/phases/boot/core-prepare.spec END -->
+## Invariant（模型 CorePreparePhase.Ready / Online）
+
+| Object | Required State |
+|---|---|
+| EntrySuccessorPhase | Online |
+| DeviceTree | Ready |
+| Zones | Ready |
+| PageMetadataMap | Ready |
+| ResourceLock | Ready |
+| ResourceTree | Ready |
+| CpuGroup | Ready |
+| CacheBlockInfo | Ready |
+| CpuCapabilities | Ready |
+| DmaCachePolicy | Ready |
+| CpuHotplugLock | Ready |
+| JumpLabelMutex | Ready |
+| StaticBranch | Ready |
+| CommandLine | Ready |
+| SavedCommandLine | Ready |
+| StaticCommandLine | Ready |
+| PerCpuStorage | Ready |
+| CpuHotplugState | Ready |
+| Params | Ready |
+| BootParam | Ready |
+| PayloadParam | Ready |
+| Randomness | Prepared |
+| PrintkBuffer | Ready |
+| ExceptionTable | Ready |
+| ExceptionStream | Ready |
+| PageFaultException | Ready |
+| SyscallException | Prepared |
+| BreakpointException | Ready |
+| UnexpectedException | Ready |
+
+## Checkpoints
+
+| Checkpoint | Phase State | Position |
+|---|---|---|
+| `CorePreparePhaseStarted` | Base | `preset()` 入口 |
+| `CorePreparePhaseReady` | Prepared | `adopt_prepared_with_check()` |
+| `CorePreparePhaseOnline` | Online | `enable_event()` |
+
+## Coding Constraints
+
+- CorePreparePhase 运行在 `paging_init()` 完成后、`trap_init()`/`mm_core_init()` 之前的系统独占上下文中：中断、任务并发、SMP 并发均未打开。
+- `StaticBranch.setup()` 必须保持 `CpuHotplugLock.ReadLock/ReadUnlock` 和 `JumpLabelMutex.Lock/Unlock` 的 guard 协议可见，不得因 SingleTaskContext 事实而隐藏或擦除。
+- `PrintkBuffer.setup()` 中的 `local_irq_save/restore` 临界区必须绑定到 `BootCpuLocalInterrupt` 对象，如 `PrintkBufferSetupLocalInterruptContext` 模型上下文所示。
+- `Randomness.preset()` 对应的 `random_init_early()` 中的 `_mix_pool_bytes()` 不持有 `input_pool.lock`，实现不得添加该锁。
+- 所有 deferred 路径（如 `acpi_boot_table_init()`、`early_memtest()`、`sparse_init()`、`kasan_init()`、`bootconfig`、`VFS caches` 等）保留调用位置标记，不得在当前实现中提前推进或隐含状态。
+- `checkpoint_setup_nr_cpu_ids` 仅验证 `CpuGroup` 的 `possible_cpu_boundary_ready` 和 `BootCPU == CpuGroup[0]`，不推进额外对象状态。
+- `checkpoint_second_parse_early_param` 仅检查 `EarlyParam.state == Ready`（标志第二次 `parse_early_param()` 调用位置），不重新推进 `EarlyParam` 或 `EarlyCon`。
+- `checkpoint_print_unknown_bootoptions` 仅输出 `BootParam` 收集到的未知选项，不改变 `BootParam` 状态。
+- 所有对象推进必须严格按模型 drives 顺序执行，不得因实现方便提前打开中断或 SMP 并发。
