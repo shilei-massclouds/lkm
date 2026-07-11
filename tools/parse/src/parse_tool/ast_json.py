@@ -206,8 +206,12 @@ def _block_to_json(item: Block) -> dict[str, Any]:
     }
 
 
-def _span_to_json(span: SourceSpan) -> dict[str, int]:
-    return {
+def _span_to_json(span: SourceSpan) -> dict[str, int | str | None]:
+    result: dict[str, int | str | None] = {
         "start_line": span.start_line,
         "end_line": span.end_line,
     }
+    if span.source_file is not None:
+        result["source_file"] = span.source_file
+        result["source_line"] = span.source_line
+    return result

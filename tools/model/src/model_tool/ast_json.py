@@ -310,9 +310,17 @@ def _block_from_json(item: Any) -> Block:
 
 def _span_from_json(item: Any) -> SourceSpan:
     data = _as_object(item, "span")
+    source_file = data.get("source_file")
+    if source_file is not None and not isinstance(source_file, str):
+        raise ValueError("span.source_file must be a string or null")
+    source_line = data.get("source_line")
+    if source_line is not None and not isinstance(source_line, int):
+        raise ValueError("span.source_line must be an integer or null")
     return SourceSpan(
         start_line=_integer(data, "start_line"),
         end_line=_integer(data, "end_line"),
+        source_file=source_file,
+        source_line=source_line,
     )
 
 

@@ -11,6 +11,8 @@ class SourceSpan:
 
     start_line: int
     end_line: int
+    source_file: str | None = None
+    source_line: int | None = None
 
 
 @dataclass(frozen=True)
@@ -30,7 +32,7 @@ class Block:
     @property
     def entry_spans(self) -> list[tuple[str, SourceSpan]]:
         start_line = self.body_start_line or self.span.start_line
-        return statement_entry_spans(self.body, start_line)
+        return statement_entry_spans(self.body, start_line, source_file=self.span.source_file, source_line=self.span.source_line)
 
 
 @dataclass(frozen=True)
@@ -198,13 +200,13 @@ class SpecDocument:
     objects: list[ObjectDecl] = field(default_factory=list)
 
 
-def statement_entries(body: str) -> list[str]:
+def statement_entries(body: str, *, source_file: str | None = None, source_line: int | None = None) -> list[str]:
     """Split a raw block body into top-level semicolon-terminated entries."""
 
-    return [entry for entry, _span in statement_entry_spans(body, 1)]
+    return [entry for entry, _span in statement_entry_spans(body, 1, source_file=source_file, source_line=source_line)]
 
 
-def statement_entry_spans(body: str, start_line: int) -> list[tuple[str, SourceSpan]]:
+def statement_entry_spans(body: str, start_line: int, *, source_file: str | None = None, source_line: int | None = None) -> list[tuple[str, SourceSpan]]:
     """Split a raw block body into entries with line spans."""
 
     entries: list[tuple[str, SourceSpan]] = []
@@ -219,20 +221,26 @@ def statement_entry_spans(body: str, start_line: int) -> list[tuple[str, SourceS
         elif char == ";" and depth == 0:
             entry = body[start:index].strip()
             if entry:
-                entries.append((entry, _entry_span(body, start, index, start_line)))
+                entries.append((entry, _entry_span(body, start, index, start_line, source_file=source_file, source_line=source_line)))
             start = index + 1
 
     tail = body[start:].strip()
     if tail:
-        entries.append((tail, _entry_span(body, start, len(body), start_line)))
+        entries.append((tail, _entry_span(body, start, len(body), start_line, source_file=source_file, source_line=source_line)))
     return entries
 
 
-def _entry_span(body: str, start: int, end: int, start_line: int) -> SourceSpan:
+def _entry_span(
+    body: str, start: int, end: int, start_line: int, *, source_file: str | None = None, source_line: int | None = None
+) -> SourceSpan:
     while start < end and body[start].isspace():
         start += 1
     while end > start and body[end - 1].isspace():
         end -= 1
     entry_start_line = start_line + body.count("\n", 0, start)
     entry_end_line = start_line + body.count("\n", 0, end)
-    return SourceSpan(entry_start_line, entry_end_line)
+    if source_line is not None:
+        entry_source_line = source_line + (entry_start_line - start_line)
+    else:
+        entry_source_line = None
+    return SourceSpan(entry_start_line, entry_end_line, source_file=source_file, source_line=entry_source_line)

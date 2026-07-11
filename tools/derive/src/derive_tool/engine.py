@@ -4376,7 +4376,11 @@ def _append_trace_node(
 def _format_record(record: DerivationRecord) -> str:
     location = ""
     if record.span is not None:
-        location = f"line {record.span.start_line}: "
+        if record.span.source_file is not None:
+            loc = record.span.source_line or record.span.start_line
+            location = f"{record.span.source_file}:{loc}: "
+        else:
+            location = f"line {record.span.start_line}: "
     proof = ""
     if record.proof_provider or record.proof_class:
         proof_provider = record.proof_provider or "unknown"

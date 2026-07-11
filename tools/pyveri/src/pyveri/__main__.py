@@ -778,7 +778,15 @@ def _derive_ok_summary(summary: dict[str, Any]) -> bool:
 
 def _format_record(record: dict[str, Any]) -> str:
     span = record.get("span")
-    location = f"line {span['start_line']}: " if span is not None else ""
+    if span is not None:
+        source_file = span.get("source_file")
+        if source_file is not None:
+            loc = span.get("source_line") or span["start_line"]
+            location = f"{source_file}:{loc}: "
+        else:
+            location = f"line {span['start_line']}: "
+    else:
+        location = ""
     proof = ""
     if record.get("proof_provider") or record.get("proof_class"):
         proof_provider = record.get("proof_provider") or "unknown"
@@ -847,7 +855,7 @@ def _parse_trace_annotation_categories(
 def _spec_trace_annotations(
     ast_data: dict[str, Any], spec: Path, categories: set[str]
 ) -> dict[str, dict[str, str]]:
-    lines = _read_source_with_includes(spec, seen=set(), stack=[]).splitlines()
+    lines = _read_source_with_includes(spec, seen=set(), stack=[])[0].splitlines()
     annotations: dict[str, dict[str, str]] = {}
     if "state" in categories:
         annotations["states"] = {}

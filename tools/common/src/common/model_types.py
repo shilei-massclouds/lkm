@@ -38,7 +38,11 @@ class Diagnostic:
     def format(self) -> str:
         location = ""
         if self.span is not None:
-            location = f"line {self.span.start_line}: "
+            if self.span.source_file is not None:
+                loc = self.span.source_line or self.span.start_line
+                location = f"{self.span.source_file}:{loc}: "
+            else:
+                location = f"line {self.span.start_line}: "
         return f"{self.severity.value}: {location}{self.message}"
 
 

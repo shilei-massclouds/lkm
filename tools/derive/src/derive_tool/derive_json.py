@@ -127,10 +127,14 @@ def _trace_to_json(node: DerivationTraceNode) -> dict[str, Any]:
     }
 
 
-def _optional_span_to_json(span: SourceSpan | None) -> dict[str, int] | None:
+def _optional_span_to_json(span: SourceSpan | None) -> dict[str, int | str | None] | None:
     if span is None:
         return None
-    return {
+    result: dict[str, int | str | None] = {
         "start_line": span.start_line,
         "end_line": span.end_line,
     }
+    if span.source_file is not None:
+        result["source_file"] = span.source_file
+        result["source_line"] = span.source_line
+    return result

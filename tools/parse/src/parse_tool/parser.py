@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
 
 from common.spec_ast import (
@@ -60,8 +61,37 @@ _INCLUDE_LINE_RE = re.compile(r'\A\s*include\s+"([^"]+)"\s*;\s*\Z')
 def parse_file(path: str | Path) -> SpecDocument:
     """Parse a spec file."""
 
-    text = _read_with_includes(Path(path), seen=set(), stack=[])
-    return parse_text(text)
+    resolved = Path(path).resolve()
+    text, line_to_file, line_to_local = _read_with_includes(resolved, seen=set(), stack=[])
+    line_to_file, line_to_local = _to_relative_paths(line_to_file, line_to_local)
+    try:
+        document = parse_text(text)
+    except ParseError as exc:
+        raise _enrich_parse_error(exc, line_to_file) from None
+    return _enrich_document(document, line_to_file, line_to_local)
+
+
+def _to_relative_paths(
+    line_to_file: list[str], line_to_local: list[int]
+) -> tuple[list[str], list[int]]:
+    """Convert absolute paths in line_to_file to paths relative to the project root."""
+    project_root = _find_project_root()
+    if project_root is None:
+        return [os.path.relpath(f) for f in line_to_file], line_to_local
+    return [os.path.relpath(f, project_root) for f in line_to_file], line_to_local
+
+
+def _find_project_root() -> str | None:
+    """Find the project root by walking up to a directory containing .git."""
+    d = Path.cwd()
+    for _ in range(10):
+        if (d / ".git").exists():
+            return str(d)
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return None
 
 
 def parse_text(text: str) -> SpecDocument:
@@ -113,23 +143,186 @@ def parse_text(text: str) -> SpecDocument:
     )
 
 
-def _read_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
+def _enrich_parse_error(exc: ParseError, line_to_file: list[str]) -> ParseError:
+    """Add source file information to a ParseError message when available."""
+    msg = str(exc)
+    if not msg.startswith("line ") or not line_to_file:
+        return exc
+    try:
+        rest = msg[len("line "):]
+        line_str, _, detail = rest.partition(":")
+        merged_line = int(line_str.strip())
+        if 1 <= merged_line <= len(line_to_file):
+            source_file = line_to_file[merged_line - 1]
+            return ParseError(f"{source_file}:{merged_line}:{detail}")
+    except (ValueError, IndexError):
+        pass
+    return exc
+
+
+def _enrich_document(
+    document: SpecDocument, line_to_file: list[str], line_to_local: list[int]
+) -> SpecDocument:
+    """Reconstruct a SpecDocument with source_file filled in on all spans."""
+    return dc_replace(
+        document,
+        enums=[_with_file_node(e, line_to_file, line_to_local) for e in document.enums],
+        functions=[_with_file_node(f, line_to_file, line_to_local) for f in document.functions],
+        predicates=[_with_file_node(p, line_to_file, line_to_local) for p in document.predicates],
+        types=[_enrich_type(t, line_to_file, line_to_local) for t in document.types],
+        locks=[_with_file_node(lk, line_to_file, line_to_local) for lk in document.locks],
+        exclusive_contexts=[_enrich_ctx(c, line_to_file, line_to_local) for c in document.exclusive_contexts],
+        objects=[_enrich_obj(o, line_to_file, line_to_local) for o in document.objects],
+    )
+
+
+def _enrich_ctx(
+    ctx: "ExclusiveContextDecl", lf: list[str], ll: list[int]
+) -> "ExclusiveContextDecl":
+    guard = None
+    if ctx.guard is not None:
+        guard = dc_replace(
+            ctx.guard,
+            span=_with_file(ctx.guard.span, lf, ll),
+            entered_by=[_with_file_block(b, lf, ll) for b in ctx.guard.entered_by],
+            exited_by=[_with_file_block(b, lf, ll) for b in ctx.guard.exited_by],
+            holds=[_with_file_block(b, lf, ll) for b in ctx.guard.holds],
+            other_blocks=[_with_file_block(b, lf, ll) for b in ctx.guard.other_blocks],
+        )
+    return dc_replace(
+        ctx,
+        span=_with_file(ctx.span, lf, ll),
+        guard=guard,
+        effects=[_with_file_block(b, lf, ll) for b in ctx.effects],
+        other_blocks=[_with_file_block(b, lf, ll) for b in ctx.other_blocks],
+    )
+
+
+def _enrich_obj(
+    obj: "ObjectDecl", lf: list[str], ll: list[int]
+) -> "ObjectDecl":
+    return dc_replace(
+        obj,
+        span=_with_file(obj.span, lf, ll),
+        attrs=[_with_file_block(b, lf, ll) for b in obj.attrs],
+        references=[_with_file_block(b, lf, ll) for b in obj.references],
+        states=[_enrich_state(s, lf, ll) for s in obj.states],
+        other_blocks=[_with_file_block(b, lf, ll) for b in obj.other_blocks],
+    )
+
+
+def _enrich_state(
+    state: "StateDecl", lf: list[str], ll: list[int]
+) -> "StateDecl":
+    return dc_replace(
+        state,
+        span=_with_file(state.span, lf, ll),
+        invariants=[_with_file_block(b, lf, ll) for b in state.invariants],
+        deferred=[_with_file_block(b, lf, ll) for b in state.deferred],
+        transitions=[_enrich_tr(t, lf, ll) for t in state.transitions],
+        other_blocks=[_with_file_block(b, lf, ll) for b in state.other_blocks],
+    )
+
+
+def _enrich_tr(
+    tr: "TransitionDecl", lf: list[str], ll: list[int]
+) -> "TransitionDecl":
+    return dc_replace(
+        tr,
+        span=_with_file(tr.span, lf, ll),
+        depends_on=[_with_file_block(b, lf, ll) for b in tr.depends_on],
+        drives=[_with_file_block(b, lf, ll) for b in tr.drives],
+        emits=[_with_file_block(b, lf, ll) for b in tr.emits],
+        within=[_enrich_within(w, lf, ll) for w in tr.within],
+        may_change=[_with_file_block(b, lf, ll) for b in tr.may_change],
+        ensures=[_with_file_block(b, lf, ll) for b in tr.ensures],
+        deferred=[_with_file_block(b, lf, ll) for b in tr.deferred],
+        other_blocks=[_with_file_block(b, lf, ll) for b in tr.other_blocks],
+        body_members=[_enrich_bm(bm, lf, ll) for bm in tr.body_members],
+    )
+
+
+def _enrich_within(
+    w: "WithinDecl", lf: list[str], ll: list[int]
+) -> "WithinDecl":
+    return dc_replace(
+        w,
+        span=_with_file(w.span, lf, ll),
+        entered_by=[_with_file_block(b, lf, ll) for b in w.entered_by],
+        depends_on=[_with_file_block(b, lf, ll) for b in w.depends_on],
+        drives=[_with_file_block(b, lf, ll) for b in w.drives],
+        within=[_enrich_within(n, lf, ll) for n in w.within],
+        exited_by=[_with_file_block(b, lf, ll) for b in w.exited_by],
+        may_change=[_with_file_block(b, lf, ll) for b in w.may_change],
+        ensures=[_with_file_block(b, lf, ll) for b in w.ensures],
+        deferred=[_with_file_block(b, lf, ll) for b in w.deferred],
+        other_blocks=[_with_file_block(b, lf, ll) for b in w.other_blocks],
+        body_members=[_enrich_bm(bm, lf, ll) for bm in w.body_members],
+    )
+
+
+def _enrich_bm(bm: "BodyMember", lf: list[str], ll: list[int]) -> "BodyMember":
+    block = None
+    if bm.block is not None:
+        block = _with_file_block(bm.block, lf, ll)
+    within = None
+    if bm.within is not None:
+        within = _enrich_within(bm.within, lf, ll)
+    return dc_replace(bm, span=_with_file(bm.span, lf, ll), block=block, within=within)
+
+
+def _enrich_type(t: "TypeDecl", lf: list[str], ll: list[int]) -> "TypeDecl":
+    return dc_replace(
+        t,
+        span=_with_file(t.span, lf, ll),
+        blocks=[_with_file_block(b, lf, ll) for b in t.blocks],
+    )
+
+
+def _with_file_node(node, lf: list[str], ll: list[int]):
+    return dc_replace(node, span=_with_file(node.span, lf, ll))
+
+
+def _with_file_block(block: "Block", lf: list[str], ll: list[int]) -> "Block":
+    return dc_replace(block, span=_with_file(block.span, lf, ll))
+
+
+def _with_file(
+    span: SourceSpan, line_to_file: list[str], line_to_local: list[int]
+) -> SourceSpan:
+    if span.source_file is not None:
+        return span
+    line = span.start_line
+    if 1 <= line <= len(line_to_file):
+        return SourceSpan(
+            span.start_line, span.end_line,
+            source_file=line_to_file[line - 1],
+            source_line=line_to_local[line - 1],
+        )
+    return span
+
+
+def _read_with_includes(
+    path: Path, seen: set[Path], stack: list[Path]
+) -> tuple[str, list[str], list[int]]:
     return _read_with_include_mode(path, seen, stack, strip=True)
 
 
-def _read_source_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
+def _read_source_with_includes(
+    path: Path, seen: set[Path], stack: list[Path]
+) -> tuple[str, list[str], list[int]]:
     return _read_with_include_mode(path, seen, stack, strip=False)
 
 
 def _read_with_include_mode(
     path: Path, seen: set[Path], stack: list[Path], *, strip: bool
-) -> str:
+) -> tuple[str, list[str], list[int]]:
     resolved = path.resolve()
     if resolved in stack:
         cycle = " -> ".join(str(item) for item in [*stack, resolved])
         raise ParseError(f"include cycle: {cycle}")
     if resolved in seen:
-        return "\n"
+        return "\n", [], []
 
     seen.add(resolved)
     raw = resolved.read_text(encoding="utf-8")
@@ -139,18 +332,34 @@ def _read_with_include_mode(
 
 def _expand_includes(
     text: str, base_dir: Path, seen: set[Path], stack: list[Path], *, strip: bool
-) -> str:
+) -> tuple[str, list[str], list[int]]:
     lines: list[str] = []
-    for line in text.splitlines(keepends=True):
-        match = _INCLUDE_LINE_RE.match(line.rstrip("\n"))
+    line_to_file: list[str] = []
+    line_to_local: list[int] = []
+    current_file = str(stack[-1])
+    current_local = 1
+    for raw_line in text.splitlines(keepends=True):
+        match = _INCLUDE_LINE_RE.match(raw_line.rstrip("\n"))
         if not match:
-            lines.append(line)
+            lines.append(raw_line)
+            line_to_file.append(current_file)
+            line_to_local.append(current_local)
+            current_local += 1
             continue
         include_path = (base_dir / match.group(1)).resolve()
-        lines.append(_read_with_include_mode(include_path, seen, stack, strip=strip))
-        if lines[-1] and not lines[-1].endswith("\n"):
+        inc_text, inc_lf, inc_ll = _read_with_include_mode(
+            include_path, seen, stack, strip=strip
+        )
+        inc_line_count = inc_text.count("\n") + (1 if inc_text and not inc_text.endswith("\n") else 0)
+        lines.append(inc_text)
+        line_to_file.extend(inc_lf)
+        line_to_local.extend(inc_ll)
+        if inc_text and not inc_text.endswith("\n"):
             lines.append("\n")
-    return "".join(lines)
+            line_to_file.append(current_file)
+            line_to_local.append(current_local)
+        current_local += 1
+    return "".join(lines), line_to_file, line_to_local
 
 
 def strip_comments(text: str) -> str:
