@@ -90,10 +90,6 @@ object Kernel: KernelObject {
                     SmpRuntimePhase.Transition::Preset;
                     PayloadPhase.Transition::Preset;
                 }
-
-                ensures {
-                    PayloadPhase.state == State::Online;
-                }
             }
         }
     }

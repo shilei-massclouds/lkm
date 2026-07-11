@@ -23,9 +23,9 @@
 
 ### 范式
 
-符合阶段范式，初始状态Base，触发事件Preset，自动推进状态迁移。
+符合[阶段范式](../phase-paradigm.md)。内核启动事件对应Preset迁移事件。
 
-> [model] MUST：内核启动事件对应Preset
+> [model] MUST：内核启动事件对应Preset迁移事件。
 
 ### 状态与迁移
 
@@ -33,22 +33,30 @@
 
   > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
 
-* Preset：驱动引导期阶段。
+* Preset：内核通过引导期过程。
+
+  > [model] MUST：驱动BootPhase.Preset，等待BootPhase到达Online状态。
 
 * Prepared：内核完成早期引导；中断尚未开启。
 
-* Setup：驱动中断期阶段。
+* Setup：内核通过中断期引导过程。
+
+  > [model] MUST: 驱动InterruptPhase.Preset，等待InterruptPhase到达Online状态。
 
 * Ready：中断已经开启，内核具备了支持多任务的能力，但是还没有真正启动多任务。
 
-* Enable：驱动单核多任务期、多核运行期和应用交接期阶段。
+* Enable：内核通过单核多任务期、多核运行期和应用交接期阶段。
+
+  > [model] MUST: 依次驱动并等待UpMultitaskPhase、SmpRuntimePhase和PayloadPhase阶段完成。
 
 * Online：内核处于正常服务状态，支持应用运行。
 
 ## 引用
 
-* 阶段 charter 后续拆分到 `spec/charter/phases/`。
+* [阶段范式](../phase-paradigm.md)
+* [charter/phases](../phases)
 
 ## 映射目标
 
-- Model：`spec/model/systems/kernel.spec`
+* [model/kernel](spec/model/systems/kernel.spec)
+

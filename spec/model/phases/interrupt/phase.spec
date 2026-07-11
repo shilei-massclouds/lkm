@@ -47,13 +47,12 @@ object InterruptPhase: PhaseObject {
     state State::Base {
         transitions {
             /*
-             * Setup 顺序推进当前已经正式规格化的中断期子阶段。
-             * InterruptPhase 从 BootPhase.Ready 接续，project-level 启动输入由 Kernel 边界验证。
+             * Preset 顺序推进当前已经正式规格化的中断期子阶段。
+             * InterruptPhase 从 BootPhase.Online 接续。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    BootPhase.state == State::Ready;
-                    SchedInitPhase.state == State::Ready;
+                    SchedInitPhase.state == State::Online;
                 }
 
                 within SingleTaskContext {
@@ -72,21 +71,47 @@ object InterruptPhase: PhaseObject {
                         ProcessPreparePhase.Transition::Setup;
                     }
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    /*
-     * Ready 表示当前模型已经展开的中断期子阶段均已完成。
-     */
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    IrqTimeInitPhase.state == State::Ready;
+                    LocalIrqEnablePhase.state == State::Ready;
+                    IrqOpenPreparePhase.state == State::Ready;
+                    ProcessPreparePhase.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
     state State::Ready {
         invariant {
-            BootPhase.state == State::Ready;
-            SchedInitPhase.state == State::Ready;
+            BootPhase.state == State::Online;
+            SchedInitPhase.state == State::Online;
             IrqTimeInitPhase.state == State::Ready;
             LocalIrqEnablePhase.state == State::Ready;
             IrqOpenPreparePhase.state == State::Ready;
             ProcessPreparePhase.state == State::Ready;
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

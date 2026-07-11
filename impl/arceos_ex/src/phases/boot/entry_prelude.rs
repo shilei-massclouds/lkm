@@ -315,18 +315,13 @@ fn handoff(ctx: &mut Context) -> ! {
 }
 
 fn handoff_event(ctx: &mut Context) -> EventResult {
-    cleanup_entry_prelude_phase(ctx)?;
     crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
-        LifecycleEvent::Cleanup,
+        LifecycleEvent::Enable,
         State::Ready,
-        State::Destroyed,
-        Checkpoint::EntryPreludePhaseDestroyed,
+        State::Online,
+        Checkpoint::EntryPreludePhaseOnline,
     )
-}
-
-fn cleanup_entry_prelude_phase(_ctx: &mut Context) -> EventResult {
-    Ok(())
 }
 
 /// Checks the `EntryPreludePhase.Ready` model boundary before emitting its

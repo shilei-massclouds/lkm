@@ -1359,11 +1359,11 @@ object CorePreparePhase: PhaseObject {
     state State::Base {
         transitions {
             /*
-             * Setup 按 paging_init() 后到 trap_init() 的核心路径编排对象推进。
+             * Preset 按 paging_init() 后到 trap_init() 的核心路径编排对象推进。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    EntrySuccessorPhase.state == State::Ready;
+                    EntrySuccessorPhase.state == State::Online;
                     Vm.state == State::Online;
                     SwapperVm.state == State::Online;
                     MemBlock.state == State::Online;
@@ -1433,6 +1433,61 @@ object CorePreparePhase: PhaseObject {
                     "parse_args(\"Setting extra init args\", ...) 暂缓：bootconfig init.* 路径随 BootConfig 展开。"
                     "vfs_caches_init_early() 暂缓：VFS/inode/dentry 缓存不属于当前核心启动模型。"
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    context_is(SystemExclusive);
+                    early_boot_irqs_disabled_true();
+                    EntrySuccessorPhase.state == State::Online;
+                    DeviceTree.state == State::Ready;
+                    Zones.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    ResourceLock.state == State::Ready;
+                    ResourceTree.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    CacheBlockInfo.state == State::Ready;
+                    CpuCapabilities.state == State::Ready;
+                    DmaCachePolicy.state == State::Ready;
+                    CpuHotplugLock.state == State::Ready;
+                    JumpLabelMutex.state == State::Ready;
+                    StaticBranch.state == State::Ready;
+                    CommandLine.state == State::Ready;
+                    SavedCommandLine.state == State::Ready;
+                    StaticCommandLine.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                    PerCpuStaticImage.state == State::Ready;
+                    PerCpuFirstChunk.state == State::Ready;
+                    PerCpuOffsetTable.state == State::Ready;
+                    CpuHotplugState.state == State::Ready;
+                    Params.state == State::Ready;
+                    BootParam.state == State::Ready;
+                    PayloadParam.state == State::Ready;
+                    Randomness.state == State::Prepared;
+                    PrintkBuffer.state == State::Ready;
+                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                    ExceptionTable.state == State::Ready;
+                    ExceptionStream.state == State::Ready;
+                    PageFaultException.state == State::Ready;
+                    SyscallException.state == State::Prepared;
+                    BreakpointException.state == State::Ready;
+                    UnexpectedException.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -1447,7 +1502,7 @@ object CorePreparePhase: PhaseObject {
             smp_concurrency_closed();
             context_is(SystemExclusive);
             early_boot_irqs_disabled_true();
-            EntrySuccessorPhase.state == State::Ready;
+            EntrySuccessorPhase.state == State::Online;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;
             PageMetadataMap.state == State::Ready;
@@ -1481,5 +1536,53 @@ object CorePreparePhase: PhaseObject {
             BreakpointException.state == State::Ready;
             UnexpectedException.state == State::Ready;
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    context_is(SystemExclusive);
+                    early_boot_irqs_disabled_true();
+                    EntrySuccessorPhase.state == State::Online;
+                    DeviceTree.state == State::Ready;
+                    Zones.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    ResourceLock.state == State::Ready;
+                    ResourceTree.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    CacheBlockInfo.state == State::Ready;
+                    CpuCapabilities.state == State::Ready;
+                    DmaCachePolicy.state == State::Ready;
+                    CpuHotplugLock.state == State::Ready;
+                    JumpLabelMutex.state == State::Ready;
+                    StaticBranch.state == State::Ready;
+                    CommandLine.state == State::Ready;
+                    SavedCommandLine.state == State::Ready;
+                    StaticCommandLine.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                    PerCpuStaticImage.state == State::Ready;
+                    PerCpuFirstChunk.state == State::Ready;
+                    PerCpuOffsetTable.state == State::Ready;
+                    CpuHotplugState.state == State::Ready;
+                    Params.state == State::Ready;
+                    BootParam.state == State::Ready;
+                    PayloadParam.state == State::Ready;
+                    Randomness.state == State::Prepared;
+                    PrintkBuffer.state == State::Ready;
+                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                    ExceptionTable.state == State::Ready;
+                    ExceptionStream.state == State::Ready;
+                    PageFaultException.state == State::Ready;
+                    SyscallException.state == State::Prepared;
+                    BreakpointException.state == State::Ready;
+                    UnexpectedException.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

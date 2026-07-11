@@ -316,7 +316,7 @@ object Scheduler: SchedulerObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    MmCoreInitPhase.state == State::Ready;
+                    MmCoreInitPhase.state == State::Online;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     StaticBranch.state == State::Ready;
@@ -1466,7 +1466,7 @@ object SchedInitPreludeTrimmedPaths: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    MmCoreInitPhase.state == State::Ready;
+                    MmCoreInitPhase.state == State::Online;
                 }
 
                 ensures {
@@ -1634,9 +1634,9 @@ object SchedInitPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    MmCoreInitPhase.state == State::Ready;
+                    MmCoreInitPhase.state == State::Online;
                     PageAllocator.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -1680,6 +1680,40 @@ object SchedInitPhase: PhaseObject {
                     "TasksRcu.setup() 暂缓：GP kthread 创建留给后续 rcu_init_tasks_generic()。";
                     "context tracking idle/user/EQS 运行期细节后续随 RCU/context tracking 展开；本调用点的 context_tracking_init() 当前因 CONFIG_CONTEXT_TRACKING_USER_FORCE=n 已由 SchedInitTraceContextBoundaries 记录为 trimmed/no-op。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    sched_init_ready(SchedInitPhase);
+                    Scheduler.state == State::Online;
+                    BootRunQueue.state == State::Ready;
+                    BootIdleTask.state == State::Ready;
+                    RadixTree.state == State::Ready;
+                    MapleTree.state == State::Ready;
+                    Workqueue.state == State::Prepared;
+                    Softirq.state == State::Prepared;
+                    RcuCore.state == State::Ready;
+                    TasksRcu.state == State::Prepared;
+                    SchedInitPreludeTrimmedPaths.state == State::Ready;
+                    sched_init_prelude_trimmed_paths_ready(SchedInitPreludeTrimmedPaths);
+                    SchedInitTraceContextBoundaries.state == State::Ready;
+                    sched_init_trace_context_boundaries_ready(SchedInitTraceContextBoundaries);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -1704,5 +1738,32 @@ object SchedInitPhase: PhaseObject {
             task_concurrency_closed();
             context_is(SystemExclusive);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    sched_init_ready(SchedInitPhase);
+                    Scheduler.state == State::Online;
+                    BootRunQueue.state == State::Ready;
+                    BootIdleTask.state == State::Ready;
+                    RadixTree.state == State::Ready;
+                    MapleTree.state == State::Ready;
+                    Workqueue.state == State::Prepared;
+                    Softirq.state == State::Prepared;
+                    RcuCore.state == State::Ready;
+                    TasksRcu.state == State::Prepared;
+                    SchedInitPreludeTrimmedPaths.state == State::Ready;
+                    sched_init_prelude_trimmed_paths_ready(SchedInitPreludeTrimmedPaths);
+                    SchedInitTraceContextBoundaries.state == State::Ready;
+                    sched_init_trace_context_boundaries_ready(SchedInitTraceContextBoundaries);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

@@ -1573,9 +1573,9 @@ object MmCoreInitPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    CorePreparePhase.state == State::Ready;
+                    CorePreparePhase.state == State::Online;
                     ExceptionStream.state == State::Ready;
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
@@ -1624,6 +1624,56 @@ object MmCoreInitPhase: PhaseObject {
                     "init_espfix_bsp() 不纳入 RISC-V64 当前路径：x86 特定路径。";
                     "pti_init() 不纳入 RISC-V64 当前路径：x86 PTI 路径。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    mm_core_init_ready(MmCoreInitPhase);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                    CorePreparePhase.state == State::Online;
+                    ExceptionStream.state == State::Ready;
+                    MemoryTopology.state == State::Ready;
+                    MemoryNode.state == State::Ready;
+                    ZoneSet.state == State::Ready;
+                    ZonelistSet.state == State::Ready;
+                    ZonelistUpdateSeq.state == State::Ready;
+                    ZonelistPrintkDeferredSection.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    PageAllocatorBuddyFreePageSets.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    MemBlock.state == State::Offline;
+                    MemoryDebugHardening.state == State::Ready;
+                    Swiotlb.state == State::Ready;
+                    StackDepot.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    PageTableLockCache.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    VmapAreaCache.state == State::Ready;
+                    VmapAddressSpace.state == State::Ready;
+                    VmapNodeSet.state == State::Ready;
+                    VmapBlockQueues.state == State::Ready;
+                    VfreeDeferredSet.state == State::Ready;
+                    Ioremap.state == State::Ready;
+                    MmStructCache.state == State::Ready;
+                    MmCoreTrimmedPaths.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -1634,7 +1684,7 @@ object MmCoreInitPhase: PhaseObject {
             interrupt_concurrency_closed();
             task_concurrency_closed();
             context_is(SystemExclusive);
-            CorePreparePhase.state == State::Ready;
+            CorePreparePhase.state == State::Online;
             ExceptionStream.state == State::Ready;
             MemoryTopology.state == State::Ready;
             MemoryNode.state == State::Ready;
@@ -1664,5 +1714,48 @@ object MmCoreInitPhase: PhaseObject {
             MmStructCache.state == State::Ready;
             MmCoreTrimmedPaths.state == State::Ready;
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    mm_core_init_ready(MmCoreInitPhase);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                    CorePreparePhase.state == State::Online;
+                    ExceptionStream.state == State::Ready;
+                    MemoryTopology.state == State::Ready;
+                    MemoryNode.state == State::Ready;
+                    ZoneSet.state == State::Ready;
+                    ZonelistSet.state == State::Ready;
+                    ZonelistUpdateSeq.state == State::Ready;
+                    ZonelistPrintkDeferredSection.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    PageAllocatorBuddyFreePageSets.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    MemBlock.state == State::Offline;
+                    MemoryDebugHardening.state == State::Ready;
+                    Swiotlb.state == State::Ready;
+                    StackDepot.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    PageTableLockCache.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    VmapAreaCache.state == State::Ready;
+                    VmapAddressSpace.state == State::Ready;
+                    VmapNodeSet.state == State::Ready;
+                    VmapBlockQueues.state == State::Ready;
+                    VfreeDeferredSet.state == State::Ready;
+                    Ioremap.state == State::Ready;
+                    MmStructCache.state == State::Ready;
+                    MmCoreTrimmedPaths.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

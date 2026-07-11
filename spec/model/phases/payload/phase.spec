@@ -28,20 +28,17 @@ object PayloadPhase: PhaseObject {
     state State::Base {
         transitions {
             /*
-             * Setup 确认 selected payload 可进入。当前规格只抽象 payload 选择和
+             * Preset 确认 selected payload 可进入。当前规格只抽象 payload 选择和
              * 前置条件；Linux-like 用户态首进程路径由 UserBootPayload 承载。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
+                    SmpRuntimePhase.state == State::Online;
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
                     OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
-                    BootPhase.state == State::Ready;
-                    InterruptPhase.state == State::Ready;
-                    UpMultitaskPhase.state == State::Ready;
-                    SmpRuntimePhase.state == State::Ready;
                     FinalizePhase.state == State::Ready;
                     FinalizeBoundary.state == State::Ready;
                     SystemState.state == State::Online;
@@ -67,6 +64,9 @@ object PayloadPhase: PhaseObject {
         }
     }
 
+    state State::Prepared {
+    }
+
     /*
      * Ready 表示 selected payload 已经确定，且启动链可以执行最终交接。
      */
@@ -77,10 +77,10 @@ object PayloadPhase: PhaseObject {
             OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
-            BootPhase.state == State::Ready;
-            InterruptPhase.state == State::Ready;
-            UpMultitaskPhase.state == State::Ready;
-            SmpRuntimePhase.state == State::Ready;
+            BootPhase.state == State::Online;
+            InterruptPhase.state == State::Online;
+            UpMultitaskPhase.state == State::Online;
+            SmpRuntimePhase.state == State::Online;
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
             SystemState.state == State::Online;
@@ -125,10 +125,10 @@ object PayloadPhase: PhaseObject {
             OpenSBI.state == State::Online;
             Lds.state == State::Online;
             Config.state == State::Online;
-            BootPhase.state == State::Ready;
-            InterruptPhase.state == State::Ready;
-            UpMultitaskPhase.state == State::Ready;
-            SmpRuntimePhase.state == State::Ready;
+            BootPhase.state == State::Online;
+            InterruptPhase.state == State::Online;
+            UpMultitaskPhase.state == State::Online;
+            SmpRuntimePhase.state == State::Online;
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
             SystemState.state == State::Online;

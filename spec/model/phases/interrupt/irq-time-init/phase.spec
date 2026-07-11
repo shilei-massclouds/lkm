@@ -2223,7 +2223,7 @@ object IrqTimeInitPhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    SchedInitPhase.state == State::Ready;
+                    SchedInitPhase.state == State::Online;
                     Scheduler.state == State::Online;
                     RcuCore.state == State::Ready;
                     Workqueue.state == State::Prepared;

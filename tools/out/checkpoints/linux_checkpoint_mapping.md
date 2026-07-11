@@ -18,7 +18,7 @@
 | 9 | EntryPreludePhase.Ready | EntryPreludePhaseReady | exact | high | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 330: tail start_kernel | RISC-V64 head.S handoff from _start_kernel to Linux start_kernel(). |
 | 10 | EntrySuccessorPhase.Started | EntrySuccessorPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 11 | EntrySuccessorPhase.Ready | EntrySuccessorPhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 12 | EntryPreludePhase.Destroyed | EntryPreludePhaseDestroyed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 12 | EntryPreludePhase.Online | EntryPreludePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 13 | InterruptStream.Prepared | InterruptStreamPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 14 | InterruptStream.Ready | InterruptStreamReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 15 | KernelImage.Prepared | KernelImagePrepared | range | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel lines 286-290: .Lclear_bss: .. .Lclear_bss_done: | RISC-V64 head.S BSS clear interval; not a portable Linux kernel-image object boundary. |

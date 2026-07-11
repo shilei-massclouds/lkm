@@ -2189,7 +2189,7 @@ object EntryPreludePhase: PhaseObject {
             /*
              * Setup 按入口前导期构建时序驱动各对象状态迁移。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
@@ -2218,14 +2218,32 @@ object EntryPreludePhase: PhaseObject {
                     BootInitStack.Transition::Setup;
                     Soc.Transition::Preset;
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    /*
-     * Ready 表示入口前导期编排的对象状态均已到达本阶段目标。
-     */
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
     state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
+    state State::Online {
         invariant {
             interrupt_concurrency_closed();
             task_concurrency_closed();
@@ -2249,26 +2267,6 @@ object EntryPreludePhase: PhaseObject {
             BootCPU.state == State::Prepared;
             CpuGroup.state == State::Prepared;
             Soc.state == State::Prepared;
-        }
-
-        transitions {
-            /*
-             * Cleanup 在后继阶段开始后退出入口前导期对象。
-             */
-            on Transition::Cleanup -> State::Destroyed {
-                depends_on {
-                    EntrySuccessorPhase.state == State::Base;
-                }
-            }
-        }
-    }
-
-    /*
-     * Destroyed 表示入口前导期对象已经退出服务，并由后继阶段接续。
-     */
-    state State::Destroyed {
-        invariant {
-            no_service(EntryPreludePhase);
         }
     }
 }

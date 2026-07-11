@@ -14,7 +14,7 @@
 | 9 | EntryPreludePhaseReady | EntryPreludePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 10 | EntrySuccessorPhaseStarted | EntrySuccessorPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 11 | EntrySuccessorPhaseReady | EntrySuccessorPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 12 | EntryPreludePhaseDestroyed | EntryPreludePhase.Destroyed | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 12 | EntryPreludePhaseOnline | EntryPreludePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 13 | InterruptStreamPrepared | InterruptStream.Prepared | I | impl/arceos_ex/src/checkpoint/mod.rs |
 | 14 | InterruptStreamReady | InterruptStream.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 15 | KernelImagePrepared | KernelImage.Prepared | K | impl/arceos_ex/src/checkpoint/mod.rs |

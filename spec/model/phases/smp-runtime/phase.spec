@@ -26,9 +26,9 @@ object SmpRuntimePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    UpMultitaskPhase.state == State::Ready;
+                    UpMultitaskPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -55,13 +55,48 @@ object SmpRuntimePhase: PhaseObject {
                     rootfs_phase_ready(RootfsPhase);
                     finalize_phase_ready(FinalizePhase);
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    PreSmpInitPhase.state == State::Ready;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
+                    SmpBringupPhase.state == State::Ready;
+                    RuntimeCorePhase.state == State::Ready;
+                    InitcallPhase.state == State::Ready;
+                    RootfsPhase.state == State::Ready;
+                    FinalizePhase.state == State::Ready;
+                    smp_runtime_phase_ready(SmpRuntimePhase);
+                    pre_smp_init_ready(PreSmpInitPhase);
+                    runtime_core_phase_ready(RuntimeCorePhase);
+                    initcall_phase_ready(InitcallPhase);
+                    rootfs_phase_ready(RootfsPhase);
+                    finalize_phase_ready(FinalizePhase);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
 
     state State::Ready {
         invariant {
-            UpMultitaskPhase.state == State::Ready;
+            UpMultitaskPhase.state == State::Online;
             PreSmpInitPhase.state == State::Ready;
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -81,5 +116,13 @@ object SmpRuntimePhase: PhaseObject {
             rootfs_phase_ready(RootfsPhase);
             finalize_phase_ready(FinalizePhase);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

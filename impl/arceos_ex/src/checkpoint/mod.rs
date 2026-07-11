@@ -128,7 +128,7 @@ pub enum Checkpoint {
     EntrySuccessorPhaseStarted,
     #[allow(dead_code)]
     EntrySuccessorPhaseReady,
-    EntryPreludePhaseDestroyed,
+    EntryPreludePhaseOnline,
     InterruptStreamPrepared,
     InterruptStreamReady,
     KernelImagePrepared,
@@ -592,7 +592,7 @@ impl Checkpoint {
             Self::EntryPreludePhaseReady => "EntryPreludePhase.Ready",
             Self::EntrySuccessorPhaseStarted => "EntrySuccessorPhase.Started",
             Self::EntrySuccessorPhaseReady => "EntrySuccessorPhase.Ready",
-            Self::EntryPreludePhaseDestroyed => "EntryPreludePhase.Destroyed",
+            Self::EntryPreludePhaseOnline => "EntryPreludePhase.Online",
             Self::InterruptStreamPrepared => "InterruptStream.Prepared",
             Self::InterruptStreamReady => "InterruptStream.Ready",
             Self::KernelImagePrepared => "KernelImage.Prepared",

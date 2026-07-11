@@ -29,46 +29,86 @@ context SingleTaskContext: Context {
 }
 
 /*
- * BootPhase 表示引导期阶段对象。它负责推进当前模型已经展开的引导期子阶段。
+ * BootPhase 引导期阶段
+ * 顺序推进入口前导期、入口后继期、核心准备期、内存核心初始化期和调度准备期五个子阶段。
  */
 object BootPhase: PhaseObject {
     initial_state: State::Base;
     parent: Kernel;
 
-    /*
-     * Base 表示引导期阶段对象已经进入模型空间，但尚未推进其子阶段。
-     */
     state State::Base {
         transitions {
-            /*
-             * Setup 顺序推进入口前导期、入口后继期、核心准备期、内存核心初始化期
-             * 和调度准备期五个子阶段。
-             * BootPhase 直接依赖 project-level 启动输入，不再通过单独准备阶段衔接。
-             */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 within SingleTaskContext {
                     drives {
-                        EntryPreludePhase.Transition::Setup;
-                        EntrySuccessorPhase.Transition::Setup;
-                        CorePreparePhase.Transition::Setup;
-                        MmCoreInitPhase.Transition::Setup;
-                        SchedInitPhase.Transition::Setup;
+                        EntryPreludePhase.Transition::Preset;
                     }
+                }
+
+                ensures {
+                    EntryPreludePhase.state == State::Online;
+                }
+
+                emits {
+                    Transition::Setup;
                 }
             }
         }
     }
 
-    /*
-     * Ready 表示当前模型已经展开的引导期子阶段均已完成。
-     */
-    state State::Ready {
-        invariant {
-            EntryPreludePhase.state == State::Destroyed;
-            EntrySuccessorPhase.state == State::Ready;
-            CorePreparePhase.state == State::Ready;
-            MmCoreInitPhase.state == State::Ready;
-            SchedInitPhase.state == State::Ready;
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                within SingleTaskContext {
+                    drives {
+                        EntrySuccessorPhase.Transition::Preset;
+                    }
+                }
+
+                ensures {
+                    EntrySuccessorPhase.state == State::Online;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
         }
+    }
+
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+                within SingleTaskContext {
+                    drives {
+                        CorePreparePhase.Transition::Preset;
+                    }
+                }
+                ensures {
+                    CorePreparePhase.state == State::Online;
+                }
+
+                within SingleTaskContext {
+                    drives {
+                        MmCoreInitPhase.Transition::Preset;
+                    }
+                }
+                ensures {
+                    MmCoreInitPhase.state == State::Online;
+                }
+                
+                within SingleTaskContext {
+                    drives {
+                        SchedInitPhase.Transition::Preset;
+                    }
+                }
+                ensures {
+                    SchedInitPhase.state == State::Online;
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

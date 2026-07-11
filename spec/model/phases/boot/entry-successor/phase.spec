@@ -1046,9 +1046,9 @@ object EntrySuccessorPhase: PhaseObject {
             /*
              * Setup 按 start_kernel/setup_arch 到 paging_init() 的最小核心路径编排对象推进。
              */
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    EntryPreludePhase.state == State::Ready;
+                    EntryPreludePhase.state == State::Online;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Online;
                     BootInitTask.state == State::Online;
@@ -1060,7 +1060,6 @@ object EntrySuccessorPhase: PhaseObject {
                 }
 
                 drives {
-                    EntryPreludePhase.Transition::Cleanup;
                     BootInitStack.Transition::Enable;
                     EarlyDtb.Transition::Preset;
                     InterruptStream.Transition::Setup;
@@ -1088,6 +1087,47 @@ object EntrySuccessorPhase: PhaseObject {
                 deferred {
                     "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象；init_vmlinux_build_id() 暂缓：Linux start_kernel() early generic path 在 debug_objects_early_init() 后调用，当前不展开 build-id 元数据对象，但保留调用位置；page_address_init() 暂缓：Linux 在 boot_cpu_init() 后、setup_arch() 前调用，当前没有 page_address freelist/hash 元数据对象，但保留调用位置。"
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                    early_boot_irqs_disabled_true();
+                    EntryPreludePhase.state == State::Online;
+                    BootInitStack.state == State::Online;
+                    BootCPU.state == State::Online;
+                    InterruptStream.state == State::Ready;
+                    PrintkBuffer.state == State::Prepared;
+                    EarlyDtb.state == State::Destroyed;
+                    KernelCmdline.state == State::Ready;
+                    InitMM.state == State::Ready;
+                    EarlyIoremap.state == State::Ready;
+                    SBI.state == State::Ready;
+                    Params.state == State::Prepared;
+                    EarlyParam.state == State::Ready;
+                    EarlyCon.state == State::Online;
+                    MemBlock.state == State::Online;
+                    Vm.state == State::Online;
+                    SwapperVm.state == State::Online;
+                    EarlyVm.state == State::Destroyed;
+                    vmlinux_build_id_deferred(EntrySuccessorPhase);
+                    page_address_init_deferred(EntrySuccessorPhase);
+                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -1096,31 +1136,38 @@ object EntrySuccessorPhase: PhaseObject {
      * Ready 表示入口后继期核心路径完成，完整内核虚拟内存空间已经启用。
      */
     state State::Ready {
-        invariant {
-            interrupt_concurrency_closed();
-            task_concurrency_closed();
-            context_is(SystemExclusive);
-            early_boot_irqs_disabled_true();
-            EntryPreludePhase.state == State::Destroyed;
-            BootInitStack.state == State::Online;
-            BootCPU.state == State::Online;
-            InterruptStream.state == State::Ready;
-            PrintkBuffer.state == State::Prepared;
-            EarlyDtb.state == State::Destroyed;
-            KernelCmdline.state == State::Ready;
-            InitMM.state == State::Ready;
-            EarlyIoremap.state == State::Ready;
-            SBI.state == State::Ready;
-            Params.state == State::Prepared;
-            EarlyParam.state == State::Ready;
-            EarlyCon.state == State::Online;
-            MemBlock.state == State::Online;
-            Vm.state == State::Online;
-            SwapperVm.state == State::Online;
-            EarlyVm.state == State::Destroyed;
-            vmlinux_build_id_deferred(EntrySuccessorPhase);
-            page_address_init_deferred(EntrySuccessorPhase);
-            entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                    early_boot_irqs_disabled_true();
+                    EntryPreludePhase.state == State::Online;
+                    BootInitStack.state == State::Online;
+                    BootCPU.state == State::Online;
+                    InterruptStream.state == State::Ready;
+                    PrintkBuffer.state == State::Prepared;
+                    EarlyDtb.state == State::Destroyed;
+                    KernelCmdline.state == State::Ready;
+                    InitMM.state == State::Ready;
+                    EarlyIoremap.state == State::Ready;
+                    SBI.state == State::Ready;
+                    Params.state == State::Prepared;
+                    EarlyParam.state == State::Ready;
+                    EarlyCon.state == State::Online;
+                    MemBlock.state == State::Online;
+                    Vm.state == State::Online;
+                    SwapperVm.state == State::Online;
+                    EarlyVm.state == State::Destroyed;
+                    vmlinux_build_id_deferred(EntrySuccessorPhase);
+                    page_address_init_deferred(EntrySuccessorPhase);
+                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
+                }
+            }
         }
+    }
+
+    state State::Online {
     }
 }

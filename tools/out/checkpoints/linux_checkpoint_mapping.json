@@ -133,8 +133,8 @@
   },
   {
     "checkpoint_index": 12,
-    "checkpoint_name": "EntryPreludePhase.Destroyed",
-    "checkpoint_variant": "EntryPreludePhaseDestroyed",
+    "checkpoint_name": "EntryPreludePhase.Online",
+    "checkpoint_variant": "EntryPreludePhaseOnline",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

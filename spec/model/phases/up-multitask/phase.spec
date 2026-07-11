@@ -26,9 +26,9 @@ object UpMultitaskPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    InterruptPhase.state == State::Ready;
+                    InterruptPhase.state == State::Online;
                     ProcessPreparePhase.state == State::Ready;
                 }
 
@@ -37,17 +37,45 @@ object UpMultitaskPhase: PhaseObject {
                     BootInitScheduleHandoffPhase.Transition::Setup;
                     BootIdleEntryPhase.Transition::Setup;
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    BootInitRestInitPhase.state == State::Ready;
+                    BootInitScheduleHandoffPhase.state == State::Ready;
+                    BootIdleEntryPhase.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
 
     state State::Ready {
         invariant {
-            InterruptPhase.state == State::Ready;
+            InterruptPhase.state == State::Online;
             ProcessPreparePhase.state == State::Ready;
             BootInitRestInitPhase.state == State::Ready;
             BootInitScheduleHandoffPhase.state == State::Ready;
             BootIdleEntryPhase.state == State::Ready;
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
+    state State::Online {
     }
 }
