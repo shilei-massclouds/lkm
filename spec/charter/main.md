@@ -1,17 +1,17 @@
 # Project Charter
 
-## 入口索引
-
-`spec/charter/main.md` 将逐步收缩为总览入口。当前入口项：
-
-1. [内核系统](systems/kernel.md)：对应 `spec/charter/systems/kernel.md`，描述 `Kernel` 系统实例的含义、生命周期、阶段编排和 payload 交接边界。
-
 ## 文档状态
 
 - 状态：草稿
 - 维护方式：共同迭代
 - 当前体系结构约束：`riscv64`
 - 参考内核：`../linux-6.12`
+
+## 索引
+
+> `spec/charter/main.md` 将逐步收缩为总览。
+
+1. [内核系统](systems/kernel.md)：内核的一次运行实例，基于内存已经加载的内核映像，获得上级BootLoader移交的控制权后开始启动，为应用提供运行环境。
 
 ## 定位
 
