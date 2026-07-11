@@ -1,13 +1,8 @@
 /*
  * Kernel System Specification
  *
- * This file defines the formal kernel system object and composes the sibling
- * model object and phase trees. The formal directory entry is spec/model/main.spec.
+ * This file defines the formal kernel system object and composes phase trees.
  *
- * Four-level chain:
- * spec/charter/systems/kernel.md -> this model -> spec/coding/systems/kernel.spec
- * -> impl/arceos_ex/src/systems/kernel.rs. The implementation endpoint carries
- * the Kernel runtime lifecycle boundary.
  */
 
 include "../phases/boot/main.spec";
@@ -17,9 +12,9 @@ include "../phases/smp-runtime/main.spec";
 include "../phases/payload/main.spec";
 
 /*
- * Kernel 表示 OpenSBI.Enable 完成控制权交接后触发出的内核系统实例。
- * 它替代旧的临时启动时间轴对象，按内核系统生命周期编排准备期、引导期、
- * 中断期、单核多任务期、多核运行期以及 payload 交接阶段。
+ * Kernel 代表内核运行实例, 由 OpenSBI 交接控制权后启动。
+ * 按照内核生命周期编排准备期、引导期、中断期、单核多任务期、
+ * 多核运行期以及应用交接期。
  */
 object Kernel: KernelObject {
     initial_state: State::Base;
@@ -27,15 +22,14 @@ object Kernel: KernelObject {
 
     /*
      * Base 表示内核映像已经驻留在内存中，但是 Kernel 尚未收到启动事件、
-     * 尚未开始执行内核生命周期。
+     * 尚未开始内核生命周期。
      */
     state State::Base {
         transitions {
-            /*
-             * Preset 建立内核系统规格前置，验证 project-level 启动输入，
-             * 推进当前已经展开的引导期阶段，使目标 Prepared 表示 Boot ready。
-             */
             on Transition::Preset -> State::Prepared {
+                /*
+                * 检查硬件/固件规范，确保固件服务可用，确认内核Lds和Config存在。
+                */
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
@@ -45,7 +39,11 @@ object Kernel: KernelObject {
                 }
 
                 drives {
-                    BootPhase.Transition::Setup;
+                    BootPhase.Transition::Preset;
+                }
+
+                ensures {
+                    BootPhase.state == State::Online;
                 }
 
                 emits {
@@ -56,25 +54,17 @@ object Kernel: KernelObject {
     }
 
     /*
-     * Prepared 表示 project-level 启动输入和引导期边界已经生效。
+     * Prepared 状态：引导期完成，具备开启中断的条件。
      */
     state State::Prepared {
-        invariant {
-            Riscv64.state == State::Online;
-            SbiSpec.state == State::Online;
-            OpenSBI.state == State::Online;
-            Lds.state == State::Online;
-            Config.state == State::Online;
-            BootPhase.state == State::Ready;
-        }
-
         transitions {
-            /*
-             * Setup 推进中断期阶段，使目标 Ready 表示中断期已完成。
-             */
             on Transition::Setup -> State::Ready {
                 drives {
-                    InterruptPhase.Transition::Setup;
+                    InterruptPhase.Transition::Preset;
+                }
+
+                ensures {
+                    InterruptPhase.state == State::Online;
                 }
 
                 emits {
@@ -89,16 +79,6 @@ object Kernel: KernelObject {
      * SMP/runtime 与 payload 交接。
      */
     state State::Ready {
-        invariant {
-            Riscv64.state == State::Online;
-            SbiSpec.state == State::Online;
-            OpenSBI.state == State::Online;
-            Lds.state == State::Online;
-            Config.state == State::Online;
-            BootPhase.state == State::Ready;
-            InterruptPhase.state == State::Ready;
-        }
-
         transitions {
             /*
              * Enable 启动完整内核系统实例，进入多任务、推进 SMP/runtime 和
@@ -106,30 +86,21 @@ object Kernel: KernelObject {
              */
             on Transition::Enable -> State::Online {
                 drives {
-                    UpMultitaskPhase.Transition::Setup;
-                    SmpRuntimePhase.Transition::Setup;
-                    PayloadPhase.Transition::Setup;
-                    PayloadPhase.Transition::Enable;
+                    UpMultitaskPhase.Transition::Preset;
+                    SmpRuntimePhase.Transition::Preset;
+                    PayloadPhase.Transition::Preset;
+                }
+
+                ensures {
+                    PayloadPhase.state == State::Online;
                 }
             }
         }
     }
 
     /*
-     * Online 表示内核启动编排链已经移交给 selected payload，内核系统实例在线。
+     * Online 表示内核启动编排链已经移交给 selected payload，内核进入正式服务状态。
      */
     state State::Online {
-        invariant {
-            Riscv64.state == State::Online;
-            SbiSpec.state == State::Online;
-            OpenSBI.state == State::Online;
-            Lds.state == State::Online;
-            Config.state == State::Online;
-            BootPhase.state == State::Ready;
-            InterruptPhase.state == State::Ready;
-            UpMultitaskPhase.state == State::Ready;
-            SmpRuntimePhase.state == State::Ready;
-            PayloadPhase.state == State::Online;
-        }
     }
 }
