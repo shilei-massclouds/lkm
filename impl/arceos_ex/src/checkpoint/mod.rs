@@ -233,6 +233,8 @@ pub enum Checkpoint {
     ExceptionStreamReady,
     MmCoreInitPhaseStarted,
     MmCoreInitPhaseReady,
+    #[allow(dead_code)]
+    MmCoreInitPhaseOnline,
     MemoryTopologyReady,
     MemoryNodeReady,
     ZoneSetReady,
@@ -263,6 +265,8 @@ pub enum Checkpoint {
     MmCoreTrimmedPathsReady,
     SchedInitPhaseStarted,
     SchedInitPhaseReady,
+    #[allow(dead_code)]
+    SchedInitPhaseOnline,
     PokingInitNoop,
     FtraceInitTrimmedNoop,
     EarlyTraceInitDeferred,
@@ -693,6 +697,7 @@ impl Checkpoint {
             Self::ExceptionStreamReady => "ExceptionStream.Ready",
             Self::MmCoreInitPhaseStarted => "MmCoreInitPhase.Started",
             Self::MmCoreInitPhaseReady => "MmCoreInitPhase.Ready",
+            Self::MmCoreInitPhaseOnline => "MmCoreInitPhase.Online",
             Self::MemoryTopologyReady => "MemoryTopology.Ready",
             Self::MemoryNodeReady => "MemoryNode.Ready",
             Self::ZoneSetReady => "ZoneSet.Ready",
@@ -723,6 +728,7 @@ impl Checkpoint {
             Self::MmCoreTrimmedPathsReady => "MmCoreTrimmedPaths.Ready",
             Self::SchedInitPhaseStarted => "SchedInitPhase.Started",
             Self::SchedInitPhaseReady => "SchedInitPhase.Ready",
+            Self::SchedInitPhaseOnline => "SchedInitPhase.Online",
             Self::PokingInitNoop => "PokingInit.Noop",
             Self::FtraceInitTrimmedNoop => "FtraceInit.TrimmedNoop",
             Self::EarlyTraceInitDeferred => "EarlyTraceInit.Deferred",

@@ -187,7 +187,7 @@
     "anchor_fingerprint": "sha256:775a8457864c3f955739c84f2b54ce1085e272a13f34e2ed270b86d8e7ee9623"
   },
   {
-    "checkpoint_index": 139,
+    "checkpoint_index": 140,
     "checkpoint_name": "SchedInitPhase.Started",
     "checkpoint_variant": "SchedInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -198,7 +198,7 @@
     "anchor_fingerprint": "sha256:e2baa98bf9e8dedd58b918e496d1515fed8c15341e6f89b3f7602545b153c05e"
   },
   {
-    "checkpoint_index": 140,
+    "checkpoint_index": 141,
     "checkpoint_name": "SchedInitPhase.Ready",
     "checkpoint_variant": "SchedInitPhaseReady",
     "linux_file": "kernel/sched/core.c",
@@ -209,7 +209,7 @@
     "anchor_fingerprint": "sha256:578645dbec38a8bb135a0e2a8decf9917cf18b07a549c8c38f6000378f68cbc6"
   },
   {
-    "checkpoint_index": 172,
+    "checkpoint_index": 174,
     "checkpoint_name": "IrqTimeInitPhase.Started",
     "checkpoint_variant": "IrqTimeInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -220,7 +220,7 @@
     "anchor_fingerprint": "sha256:c73bd68617c1a8d6e37cadeaa506209b7eb6ef39b0973f7e3ab9dd4f14fdab14"
   },
   {
-    "checkpoint_index": 208,
+    "checkpoint_index": 210,
     "checkpoint_name": "LocalIrqEnablePhase.Started",
     "checkpoint_variant": "LocalIrqEnablePhaseStarted",
     "linux_file": "init/main.c",
@@ -231,7 +231,7 @@
     "anchor_fingerprint": "sha256:8604f32a56db71fe0f325700c72a3236c018918236bdc56b603c9d01b6594b90"
   },
   {
-    "checkpoint_index": 209,
+    "checkpoint_index": 211,
     "checkpoint_name": "LocalIrqEnablePhase.Ready",
     "checkpoint_variant": "LocalIrqEnablePhaseReady",
     "linux_file": "init/main.c",
@@ -242,7 +242,7 @@
     "anchor_fingerprint": "sha256:f6fde6368f55a1fe8dde26f41c73aebaa3210e1e08ecf602f5a69acdab9642b6"
   },
   {
-    "checkpoint_index": 230,
+    "checkpoint_index": 232,
     "checkpoint_name": "ProcessPreparePhase.Started",
     "checkpoint_variant": "ProcessPreparePhaseStarted",
     "linux_file": "init/main.c",
@@ -253,7 +253,7 @@
     "anchor_fingerprint": "sha256:040c8fb7842c4e5d9d99ace72823a83ca9ffd03a4a32763b885d182232e8b6d0"
   },
   {
-    "checkpoint_index": 267,
+    "checkpoint_index": 269,
     "checkpoint_name": "BootInitRestInitPhase.Ready",
     "checkpoint_variant": "BootInitRestInitPhaseReady",
     "linux_file": "init/main.c",
@@ -264,7 +264,7 @@
     "anchor_fingerprint": "sha256:1273e1d2c8aa4180861ca736f457914606e649c85f98bbb107ff883c0ba5ed30"
   },
   {
-    "checkpoint_index": 291,
+    "checkpoint_index": 293,
     "checkpoint_name": "PreSmpInitPhase.Started",
     "checkpoint_variant": "PreSmpInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -275,7 +275,7 @@
     "anchor_fingerprint": "sha256:2c2663d6dd4c6839112ac9e6043da2515d9ae9e4862acabd29fb5952d55a8325"
   },
   {
-    "checkpoint_index": 302,
+    "checkpoint_index": 304,
     "checkpoint_name": "SmpBringupPhase.Started",
     "checkpoint_variant": "SmpBringupPhaseStarted",
     "linux_file": "init/main.c",
@@ -286,7 +286,7 @@
     "anchor_fingerprint": "sha256:08d3be20bc3bd9f5c9141b5d44ade504b81e0f024e35ce7b4b8f10380445abfc"
   },
   {
-    "checkpoint_index": 303,
+    "checkpoint_index": 305,
     "checkpoint_name": "SmpBringupPhase.Ready",
     "checkpoint_variant": "SmpBringupPhaseReady",
     "linux_file": "init/main.c",
@@ -297,7 +297,7 @@
     "anchor_fingerprint": "sha256:675d01169b756a814d0e8fe57b9ad1c49594664305e8521af77e097e9f33c3bf"
   },
   {
-    "checkpoint_index": 313,
+    "checkpoint_index": 315,
     "checkpoint_name": "CpuStartProvider.Ready",
     "checkpoint_variant": "CpuStartProviderReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -308,7 +308,7 @@
     "anchor_fingerprint": "sha256:8529db6ec0d62d253c3a3cb1938062e69c8f8bddc0d1c902132b088bfbed14db"
   },
   {
-    "checkpoint_index": 314,
+    "checkpoint_index": 316,
     "checkpoint_name": "CpuStartProvider.BootDataSelected",
     "checkpoint_variant": "CpuStartProviderBootDataSelected",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -319,7 +319,7 @@
     "anchor_fingerprint": "sha256:c2da1fa224bcf8ba6d1fda664aff77b385a9f97333689412987a981dc90e9d7c"
   },
   {
-    "checkpoint_index": 315,
+    "checkpoint_index": 317,
     "checkpoint_name": "CpuStartProvider.BootDataPublished",
     "checkpoint_variant": "CpuStartProviderBootDataPublished",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -330,7 +330,7 @@
     "anchor_fingerprint": "sha256:d3e9814e84ae0d1f7ada1fc682164207d0c4aed2d912ea546882ac3bf3de017b"
   },
   {
-    "checkpoint_index": 316,
+    "checkpoint_index": 318,
     "checkpoint_name": "CpuStartProvider.HsmStartIssued",
     "checkpoint_variant": "CpuStartProviderHsmStartIssued",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -341,7 +341,7 @@
     "anchor_fingerprint": "sha256:e108b6ecc8da2b28ee6b153cabcf19cafae4b083c6ca92cdf3dd75dfa97d11af"
   },
   {
-    "checkpoint_index": 318,
+    "checkpoint_index": 320,
     "checkpoint_name": "ApEntryPreludePhase.Started",
     "checkpoint_variant": "ApEntryPreludePhaseStarted",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -352,7 +352,7 @@
     "anchor_fingerprint": "sha256:5f815205add548595954767b8ec2ae0cb16a980971dc8dbb34c90d1044d5954b"
   },
   {
-    "checkpoint_index": 320,
+    "checkpoint_index": 322,
     "checkpoint_name": "ApEntryPreludePhase.CurrentStackEstablished",
     "checkpoint_variant": "ApEntryPreludeCurrentStackEstablished",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -363,7 +363,7 @@
     "anchor_fingerprint": "sha256:2c173a00a78e2fa399e2de3aabf1767dd15e63b8fd3a6af16fa7ea2326ad2a94"
   },
   {
-    "checkpoint_index": 321,
+    "checkpoint_index": 323,
     "checkpoint_name": "ApEntryPreludePhase.Ready",
     "checkpoint_variant": "ApEntryPreludePhaseReady",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -374,7 +374,7 @@
     "anchor_fingerprint": "sha256:d496514d4a2aa57dda69422840759ef0415663e8fb24f44cccf47dcdba632e68"
   },
   {
-    "checkpoint_index": 322,
+    "checkpoint_index": 324,
     "checkpoint_name": "ApSmpCallinPhase.Started",
     "checkpoint_variant": "ApSmpCallinPhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -385,7 +385,7 @@
     "anchor_fingerprint": "sha256:f4bf2211aef4b017758b962e54d4af03ab7a672269c53ad5e14f58e0cd965555"
   },
   {
-    "checkpoint_index": 323,
+    "checkpoint_index": 325,
     "checkpoint_name": "ApSmpCallinPhase.CpuRunningProduced",
     "checkpoint_variant": "ApSmpCallinCpuRunningProduced",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -396,7 +396,7 @@
     "anchor_fingerprint": "sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66"
   },
   {
-    "checkpoint_index": 324,
+    "checkpoint_index": 326,
     "checkpoint_name": "ApSmpCallinPhase.Ready",
     "checkpoint_variant": "ApSmpCallinPhaseReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -407,7 +407,7 @@
     "anchor_fingerprint": "sha256:21582b6d1714784e322da76181705a0a0852d4e932a7643031dae8d546ccfd66"
   },
   {
-    "checkpoint_index": 325,
+    "checkpoint_index": 327,
     "checkpoint_name": "ApOnlineIdlePhase.Started",
     "checkpoint_variant": "ApOnlineIdlePhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -418,7 +418,7 @@
     "anchor_fingerprint": "sha256:986de6743ce3873bbe3119396afa419f702147c83cda21b8c340a4cabc85b0a5"
   },
   {
-    "checkpoint_index": 326,
+    "checkpoint_index": 328,
     "checkpoint_name": "ApOnlineIdlePhase.DoneUpProduced",
     "checkpoint_variant": "ApOnlineIdleDoneUpProduced",
     "linux_file": "kernel/cpu.c",
@@ -429,7 +429,7 @@
     "anchor_fingerprint": "sha256:ea16eeb18091544560e4d7ab4aea1c676873f87148b780bf3124f661f392ce46"
   },
   {
-    "checkpoint_index": 327,
+    "checkpoint_index": 329,
     "checkpoint_name": "ApOnlineIdlePhase.Ready",
     "checkpoint_variant": "ApOnlineIdlePhaseReady",
     "linux_file": "kernel/sched/idle.c",
@@ -440,7 +440,7 @@
     "anchor_fingerprint": "sha256:967122ada57d057e4f24f256894e82a4bb987bd550080037488f61935acd0a4c"
   },
   {
-    "checkpoint_index": 330,
+    "checkpoint_index": 332,
     "checkpoint_name": "SecondaryCpuStartupAck.Ready",
     "checkpoint_variant": "SecondaryCpuStartupAckReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -451,7 +451,7 @@
     "anchor_fingerprint": "sha256:7a8abb5e3cd4ddd182a1a1479f40e4a9de925349905b0aa307ae1d0bea39fcca"
   },
   {
-    "checkpoint_index": 335,
+    "checkpoint_index": 337,
     "checkpoint_name": "SecondaryCpuOnlineAck.Ready",
     "checkpoint_variant": "SecondaryCpuOnlineAckReady",
     "linux_file": "kernel/cpu.c",
@@ -462,7 +462,7 @@
     "anchor_fingerprint": "sha256:e34112086cb069028cdb712d5c1bb09a8fe097f69119bdfe9c90a3263eeecf34"
   },
   {
-    "checkpoint_index": 337,
+    "checkpoint_index": 339,
     "checkpoint_name": "RuntimeCorePhase.Started",
     "checkpoint_variant": "RuntimeCorePhaseStarted",
     "linux_file": "init/main.c",
@@ -473,7 +473,7 @@
     "anchor_fingerprint": "sha256:03dfeb8f64384687156aeddedf07992345fb047ee1f56b3abb305105a96fbd1d"
   },
   {
-    "checkpoint_index": 339,
+    "checkpoint_index": 341,
     "checkpoint_name": "Scheduler.SmpReady",
     "checkpoint_variant": "SchedulerSmpReady",
     "linux_file": "init/main.c",
@@ -484,7 +484,7 @@
     "anchor_fingerprint": "sha256:675d01169b756a814d0e8fe57b9ad1c49594664305e8521af77e097e9f33c3bf"
   },
   {
-    "checkpoint_index": 340,
+    "checkpoint_index": 342,
     "checkpoint_name": "Workqueue.TopologyReady",
     "checkpoint_variant": "WorkqueueTopologyReady",
     "linux_file": "init/main.c",
@@ -495,7 +495,7 @@
     "anchor_fingerprint": "sha256:03dfeb8f64384687156aeddedf07992345fb047ee1f56b3abb305105a96fbd1d"
   },
   {
-    "checkpoint_index": 341,
+    "checkpoint_index": 343,
     "checkpoint_name": "AsyncCore.DeferredReady",
     "checkpoint_variant": "AsyncCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -506,7 +506,7 @@
     "anchor_fingerprint": "sha256:61c13f44ed28517448e066192dd123eafb7c4e3c03735c68ab598e615b38ecda"
   },
   {
-    "checkpoint_index": 342,
+    "checkpoint_index": 344,
     "checkpoint_name": "PadataCore.DeferredReady",
     "checkpoint_variant": "PadataCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -517,7 +517,7 @@
     "anchor_fingerprint": "sha256:cd092461aec09389276bca53585579667144153842c7a6a7be6e94657ee9fec1"
   },
   {
-    "checkpoint_index": 343,
+    "checkpoint_index": 345,
     "checkpoint_name": "PageAllocator.LateReady",
     "checkpoint_variant": "PageAllocatorLateReady",
     "linux_file": "init/main.c",
@@ -528,7 +528,7 @@
     "anchor_fingerprint": "sha256:b6e27c8b0efab2478a69dd1a1f756e259436731660b78074706e53d142afdd7e"
   },
   {
-    "checkpoint_index": 344,
+    "checkpoint_index": 346,
     "checkpoint_name": "RuntimeCoreBoundary.Ready",
     "checkpoint_variant": "RuntimeCoreBoundaryReady",
     "linux_file": "init/main.c",
@@ -539,7 +539,7 @@
     "anchor_fingerprint": "sha256:b6e27c8b0efab2478a69dd1a1f756e259436731660b78074706e53d142afdd7e"
   },
   {
-    "checkpoint_index": 345,
+    "checkpoint_index": 347,
     "checkpoint_name": "InitcallPhase.Started",
     "checkpoint_variant": "InitcallPhaseStarted",
     "linux_file": "init/main.c",
@@ -550,7 +550,7 @@
     "anchor_fingerprint": "sha256:4d94f0c1455072ddf644def011d739e0e5475ccfae9693589ec0dbcfd018a61e"
   },
   {
-    "checkpoint_index": 346,
+    "checkpoint_index": 348,
     "checkpoint_name": "InitcallPhase.Ready",
     "checkpoint_variant": "InitcallPhaseReady",
     "linux_file": "init/main.c",
@@ -561,7 +561,7 @@
     "anchor_fingerprint": "sha256:1f620492b8c34214aec73a0840bf92bd8c15ee94293f6710d094cc427330bf3c"
   },
   {
-    "checkpoint_index": 347,
+    "checkpoint_index": 349,
     "checkpoint_name": "CpusetSmp.TrimmedReady",
     "checkpoint_variant": "CpusetSmpTrimmedReady",
     "linux_file": "init/main.c",
@@ -572,7 +572,7 @@
     "anchor_fingerprint": "sha256:88e8287947ca8e2620b48e3a79ac1ae12371120f602b72da3ed2a4d2b6e39dd6"
   },
   {
-    "checkpoint_index": 348,
+    "checkpoint_index": 350,
     "checkpoint_name": "DriverCore.DeferredReady",
     "checkpoint_variant": "DriverCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -583,7 +583,7 @@
     "anchor_fingerprint": "sha256:0e34c050b69a9ebc028c4395576a76b82b082f2f820fbad2b026c29478f656b4"
   },
   {
-    "checkpoint_index": 349,
+    "checkpoint_index": 351,
     "checkpoint_name": "IrqProcView.DeferredReady",
     "checkpoint_variant": "IrqProcViewDeferredReady",
     "linux_file": "init/main.c",
@@ -594,7 +594,7 @@
     "anchor_fingerprint": "sha256:92e6a1b81dd05d0e2715ef0e2985625b6b09475dc5e2a34d832aaba70b315fd7"
   },
   {
-    "checkpoint_index": 350,
+    "checkpoint_index": 352,
     "checkpoint_name": "CtorTable.Ready",
     "checkpoint_variant": "CtorTableReady",
     "linux_file": "init/main.c",
@@ -605,7 +605,7 @@
     "anchor_fingerprint": "sha256:1839c71bfc9e4eea5b66a9a7fb77a6d5563846fa596a35673c1d10a4f36577ef"
   },
   {
-    "checkpoint_index": 359,
+    "checkpoint_index": 361,
     "checkpoint_name": "InitcallTable.Ready",
     "checkpoint_variant": "InitcallTableReady",
     "linux_file": "init/main.c",
@@ -616,7 +616,7 @@
     "anchor_fingerprint": "sha256:1f620492b8c34214aec73a0840bf92bd8c15ee94293f6710d094cc427330bf3c"
   },
   {
-    "checkpoint_index": 365,
+    "checkpoint_index": 367,
     "checkpoint_name": "InitcallBoundary.Ready",
     "checkpoint_variant": "InitcallBoundaryReady",
     "linux_file": "init/main.c",
@@ -627,7 +627,7 @@
     "anchor_fingerprint": "sha256:1f620492b8c34214aec73a0840bf92bd8c15ee94293f6710d094cc427330bf3c"
   },
   {
-    "checkpoint_index": 366,
+    "checkpoint_index": 368,
     "checkpoint_name": "RootfsPhase.Started",
     "checkpoint_variant": "RootfsPhaseStarted",
     "linux_file": "init/main.c",
@@ -638,7 +638,7 @@
     "anchor_fingerprint": "sha256:40771e6159d99116aed1044932e4ac26854ff6484cd995c1380162fee3db40a4"
   },
   {
-    "checkpoint_index": 367,
+    "checkpoint_index": 369,
     "checkpoint_name": "RootfsPhase.Ready",
     "checkpoint_variant": "RootfsPhaseReady",
     "linux_file": "init/do_mounts.c",
@@ -649,7 +649,7 @@
     "anchor_fingerprint": "sha256:98be793b382949218fe97ea7d3d5df8680708b264112f80d9bdf8ead3436cae1"
   },
   {
-    "checkpoint_index": 368,
+    "checkpoint_index": 370,
     "checkpoint_name": "KUnitRuntime.TrimmedReady",
     "checkpoint_variant": "KUnitRuntimeTrimmedReady",
     "linux_file": "init/main.c",
@@ -660,7 +660,7 @@
     "anchor_fingerprint": "sha256:3d33db533450fcce68e9b91ec9cdfbe64176119c483e3fa123bb8da7273f09d0"
   },
   {
-    "checkpoint_index": 369,
+    "checkpoint_index": 371,
     "checkpoint_name": "InitramfsSync.DeferredReady",
     "checkpoint_variant": "InitramfsSyncDeferredReady",
     "linux_file": "init/main.c",
@@ -671,7 +671,7 @@
     "anchor_fingerprint": "sha256:0d95b2b8587641ec6a20555dfbc4898ff733a15ca6723f14dd15c47f5fdb68cf"
   },
   {
-    "checkpoint_index": 370,
+    "checkpoint_index": 372,
     "checkpoint_name": "RootfsConsole.DeferredReady",
     "checkpoint_variant": "RootfsConsoleDeferredReady",
     "linux_file": "init/main.c",
@@ -682,7 +682,7 @@
     "anchor_fingerprint": "sha256:7317bda8223c00594a3b8f144274efcf7a2a226246ac3a37752b654cc9e5a77b"
   },
   {
-    "checkpoint_index": 372,
+    "checkpoint_index": 374,
     "checkpoint_name": "RamdiskExecuteCommand.EaccessCheckpoint",
     "checkpoint_variant": "RamdiskExecuteCommandEaccessCheckpoint",
     "linux_file": "init/main.c",
@@ -693,7 +693,7 @@
     "anchor_fingerprint": "sha256:53b87d9662a9719bf150645a0f7444016bc3614e63f3a5a55c3e850b9d9040bb"
   },
   {
-    "checkpoint_index": 373,
+    "checkpoint_index": 375,
     "checkpoint_name": "RootFS.Online",
     "checkpoint_variant": "RootFSOnline",
     "linux_file": "init/do_mounts.c",
@@ -704,7 +704,7 @@
     "anchor_fingerprint": "sha256:c39f9cc12ad3fe2ac53973278e05fca78b2dcccebaf0e9d3935ea4d1ecd32243"
   },
   {
-    "checkpoint_index": 374,
+    "checkpoint_index": 376,
     "checkpoint_name": "IntegrityKeys.DeferredReady",
     "checkpoint_variant": "IntegrityKeysDeferredReady",
     "linux_file": "init/main.c",
@@ -715,7 +715,7 @@
     "anchor_fingerprint": "sha256:b4e4014e299a65d526136c65a06616f6271e3d5cdbab5103212e4f0a0daafd27"
   },
   {
-    "checkpoint_index": 375,
+    "checkpoint_index": 377,
     "checkpoint_name": "RootfsBoundary.Ready",
     "checkpoint_variant": "RootfsBoundaryReady",
     "linux_file": "init/main.c",
@@ -726,7 +726,7 @@
     "anchor_fingerprint": "sha256:b4e4014e299a65d526136c65a06616f6271e3d5cdbab5103212e4f0a0daafd27"
   },
   {
-    "checkpoint_index": 376,
+    "checkpoint_index": 378,
     "checkpoint_name": "FinalizePhase.Started",
     "checkpoint_variant": "FinalizePhaseStarted",
     "linux_file": "init/main.c",
@@ -737,7 +737,7 @@
     "anchor_fingerprint": "sha256:0085888a907a865e672fe2004f31a3f24eab4eec946f4d7330f652fae11e9767"
   },
   {
-    "checkpoint_index": 377,
+    "checkpoint_index": 379,
     "checkpoint_name": "FinalizePhase.Ready",
     "checkpoint_variant": "FinalizePhaseReady",
     "linux_file": "init/main.c",
@@ -748,7 +748,7 @@
     "anchor_fingerprint": "sha256:61c2d0e700b81ddd6c819ec7fea9c0451b466d991533791158dd7ccc28af6416"
   },
   {
-    "checkpoint_index": 378,
+    "checkpoint_index": 380,
     "checkpoint_name": "AsyncFullSync.DeferredReady",
     "checkpoint_variant": "AsyncFullSyncDeferredReady",
     "linux_file": "init/main.c",
@@ -759,7 +759,7 @@
     "anchor_fingerprint": "sha256:0085888a907a865e672fe2004f31a3f24eab4eec946f4d7330f652fae11e9767"
   },
   {
-    "checkpoint_index": 379,
+    "checkpoint_index": 381,
     "checkpoint_name": "SystemState.FreeingInitmemCheckpoint",
     "checkpoint_variant": "SystemStateFreeingInitmemCheckpoint",
     "linux_file": "init/main.c",
@@ -770,7 +770,7 @@
     "anchor_fingerprint": "sha256:c6210996c4f1110405f43f1e2a19e791a0148b4a83b66dd8e583ccf7659538d5"
   },
   {
-    "checkpoint_index": 380,
+    "checkpoint_index": 382,
     "checkpoint_name": "InitMemoryCleanup.DeferredReady",
     "checkpoint_variant": "InitMemoryCleanupDeferredReady",
     "linux_file": "init/main.c",
@@ -781,7 +781,7 @@
     "anchor_fingerprint": "sha256:257f6af300289f4a9c2e70caac4917c22ea8487078db1d72a7318600fb3bf086"
   },
   {
-    "checkpoint_index": 381,
+    "checkpoint_index": 383,
     "checkpoint_name": "KernelMappingProtection.DeferredReady",
     "checkpoint_variant": "KernelMappingProtectionDeferredReady",
     "linux_file": "init/main.c",
@@ -792,7 +792,7 @@
     "anchor_fingerprint": "sha256:8e7e12d860f2644378518dee62c577088f0c88a21841aaea8294de37052fa726"
   },
   {
-    "checkpoint_index": 382,
+    "checkpoint_index": 384,
     "checkpoint_name": "PtiFinalize.TrimmedReady",
     "checkpoint_variant": "PtiFinalizeTrimmedReady",
     "linux_file": "init/main.c",
@@ -803,7 +803,7 @@
     "anchor_fingerprint": "sha256:d17b9c8edf829b56a26101c1762e0a99ccc355baf94b3668efed96c8816da034"
   },
   {
-    "checkpoint_index": 383,
+    "checkpoint_index": 385,
     "checkpoint_name": "SystemState.Online",
     "checkpoint_variant": "SystemStateOnline",
     "linux_file": "init/main.c",
@@ -814,7 +814,7 @@
     "anchor_fingerprint": "sha256:61c2d0e700b81ddd6c819ec7fea9c0451b466d991533791158dd7ccc28af6416"
   },
   {
-    "checkpoint_index": 384,
+    "checkpoint_index": 386,
     "checkpoint_name": "RcuCore.InkernelBootEnded",
     "checkpoint_variant": "RcuInkernelBootEnded",
     "linux_file": "init/main.c",
@@ -825,7 +825,7 @@
     "anchor_fingerprint": "sha256:22a835032ccf00c19aeedfd3b5b930a5c44eb03b8692aa11b64e7f8eb5f38558"
   },
   {
-    "checkpoint_index": 385,
+    "checkpoint_index": 387,
     "checkpoint_name": "RcuBootEnd.Ready",
     "checkpoint_variant": "RcuBootEndReady",
     "linux_file": "init/main.c",
@@ -836,7 +836,7 @@
     "anchor_fingerprint": "sha256:22a835032ccf00c19aeedfd3b5b930a5c44eb03b8692aa11b64e7f8eb5f38558"
   },
   {
-    "checkpoint_index": 386,
+    "checkpoint_index": 388,
     "checkpoint_name": "SysctlArgs.DeferredReady",
     "checkpoint_variant": "SysctlArgsDeferredReady",
     "linux_file": "init/main.c",
@@ -847,7 +847,7 @@
     "anchor_fingerprint": "sha256:f5f2e1079a8d270dad77c902a0fb62d625de4803905da5c7c92e34c0fa2a64fa"
   },
   {
-    "checkpoint_index": 389,
+    "checkpoint_index": 391,
     "checkpoint_name": "UserBoot.MainElfReady",
     "checkpoint_variant": "UserBootMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -858,7 +858,7 @@
     "anchor_fingerprint": "sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554"
   },
   {
-    "checkpoint_index": 390,
+    "checkpoint_index": 392,
     "checkpoint_name": "UserBoot.InterpreterReady",
     "checkpoint_variant": "UserBootInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -869,7 +869,7 @@
     "anchor_fingerprint": "sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62"
   },
   {
-    "checkpoint_index": 392,
+    "checkpoint_index": 394,
     "checkpoint_name": "UserBoot.AddressSpaceSetupStart",
     "checkpoint_variant": "UserBootAddressSpaceSetupStart",
     "linux_file": "fs/binfmt_elf.c",
@@ -880,7 +880,7 @@
     "anchor_fingerprint": "sha256:dd94ba13a9d9a3e9a1328f6ff0c4746447dc6e1fbd0b8028cfa6e223bb7e7685"
   },
   {
-    "checkpoint_index": 393,
+    "checkpoint_index": 395,
     "checkpoint_name": "UserInitProcess.EnterUserMode",
     "checkpoint_variant": "UserModeEntry",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -891,7 +891,7 @@
     "anchor_fingerprint": "sha256:4e123c759fc00f1992c0cd1da108bbd5e1bf5e43e54bd87da816ea2f0d44593b"
   },
   {
-    "checkpoint_index": 394,
+    "checkpoint_index": 396,
     "checkpoint_name": "UserAddressSpace.Ready",
     "checkpoint_variant": "UserAddressSpaceReady",
     "linux_file": "fs/exec.c",
@@ -902,7 +902,7 @@
     "anchor_fingerprint": "sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0"
   },
   {
-    "checkpoint_index": 395,
+    "checkpoint_index": 397,
     "checkpoint_name": "SyscallTable.ExecveArgsReady",
     "checkpoint_variant": "SyscallTableExecveArgsReady",
     "linux_file": "fs/exec.c",
@@ -913,7 +913,7 @@
     "anchor_fingerprint": "sha256:2d2c94cdb267cdef959204ef3e71fa55fd3651475e0483a4c02ae522e8760c1f"
   },
   {
-    "checkpoint_index": 396,
+    "checkpoint_index": 398,
     "checkpoint_name": "UserExec.MainElfReady",
     "checkpoint_variant": "UserExecMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -924,7 +924,7 @@
     "anchor_fingerprint": "sha256:44b0e14f6cbdd13bb767580b66282fe843c1496b0ec1941738ea004d85ecc554"
   },
   {
-    "checkpoint_index": 397,
+    "checkpoint_index": 399,
     "checkpoint_name": "UserExec.InterpreterReady",
     "checkpoint_variant": "UserExecInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -935,7 +935,7 @@
     "anchor_fingerprint": "sha256:0b92a2beb44ecc12213e7a0d0f2c3b54fa694d87ab4adf40f2442967ef731a62"
   },
   {
-    "checkpoint_index": 399,
+    "checkpoint_index": 401,
     "checkpoint_name": "UserExec.TrapFrameReady",
     "checkpoint_variant": "UserExecTrapFrameReady",
     "linux_file": "arch/riscv/kernel/process.c",
@@ -946,7 +946,7 @@
     "anchor_fingerprint": "sha256:bae39591e723d1fadcc0d5140a4ba2900f1b3da392f6d64909e702058ea114ec"
   },
   {
-    "checkpoint_index": 400,
+    "checkpoint_index": 402,
     "checkpoint_name": "UserExec.SatpReady",
     "checkpoint_variant": "UserExecSatpReady",
     "linux_file": "fs/exec.c",
@@ -957,7 +957,7 @@
     "anchor_fingerprint": "sha256:284874d727bc6d6244f03f9b814b58336a0a51b50dc94df28bd5ba23e00aead0"
   },
   {
-    "checkpoint_index": 401,
+    "checkpoint_index": 403,
     "checkpoint_name": "UserExec.ContextReplaced",
     "checkpoint_variant": "UserExecContextReplaced",
     "linux_file": "fs/exec.c",
@@ -968,7 +968,7 @@
     "anchor_fingerprint": "sha256:77d4a9a31a51d96fe31d7555248b5983de5f3dcb999ef88de32be4f5abf58d26"
   },
   {
-    "checkpoint_index": 402,
+    "checkpoint_index": 404,
     "checkpoint_name": "UserExec.SatpSwitched",
     "checkpoint_variant": "UserExecSatpSwitched",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -979,7 +979,7 @@
     "anchor_fingerprint": "sha256:c86192c80eef5c3dd657d0f3e3e42ef03ca1b38f251709dae1bc3b23f4d8398e"
   },
   {
-    "checkpoint_index": 403,
+    "checkpoint_index": 405,
     "checkpoint_name": "UserExec.ReturnFrameReady",
     "checkpoint_variant": "UserExecReturnFrameReady",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -990,7 +990,7 @@
     "anchor_fingerprint": "sha256:4e123c759fc00f1992c0cd1da108bbd5e1bf5e43e54bd87da816ea2f0d44593b"
   },
   {
-    "checkpoint_index": 404,
+    "checkpoint_index": 406,
     "checkpoint_name": "SyscallTable.OpenAt",
     "checkpoint_variant": "SyscallTableOpenAt",
     "linux_file": "fs/open.c",
@@ -1001,7 +1001,7 @@
     "anchor_fingerprint": "sha256:45c1d50b119fc8cd6e1bfe0700bd871344a128edd42b46fbddf569be25ff832e"
   },
   {
-    "checkpoint_index": 405,
+    "checkpoint_index": 407,
     "checkpoint_name": "SyscallTable.Read",
     "checkpoint_variant": "SyscallTableRead",
     "linux_file": "fs/read_write.c",
@@ -1012,7 +1012,7 @@
     "anchor_fingerprint": "sha256:9b89d40103c018476fdc5ed63447c311ebeaf9e78905b64bdacafe82e25c72a4"
   },
   {
-    "checkpoint_index": 406,
+    "checkpoint_index": 408,
     "checkpoint_name": "SyscallTable.Write",
     "checkpoint_variant": "SyscallTableWrite",
     "linux_file": "fs/read_write.c",
@@ -1023,7 +1023,7 @@
     "anchor_fingerprint": "sha256:6dd6150566c4a1cdd4f919a8fb6c1ccab4f82c38b923a1c48fa0f3e2969e2e07"
   },
   {
-    "checkpoint_index": 407,
+    "checkpoint_index": 409,
     "checkpoint_name": "SyscallTable.Writev",
     "checkpoint_variant": "SyscallTableWritev",
     "linux_file": "fs/read_write.c",
@@ -1034,7 +1034,7 @@
     "anchor_fingerprint": "sha256:0284519ade08dbce46873d93989013114df0b03ccd47e56e4e02d6a9205e192b"
   },
   {
-    "checkpoint_index": 408,
+    "checkpoint_index": 410,
     "checkpoint_name": "SyscallTable.Close",
     "checkpoint_variant": "SyscallTableClose",
     "linux_file": "fs/open.c",
@@ -1045,7 +1045,7 @@
     "anchor_fingerprint": "sha256:119433103f6272bcb24489f95afbaf8a8ef9a4c2f03205c3498167a09e89259f"
   },
   {
-    "checkpoint_index": 409,
+    "checkpoint_index": 411,
     "checkpoint_name": "SyscallTable.NewFstatAt",
     "checkpoint_variant": "SyscallTableNewFstatAt",
     "linux_file": "fs/stat.c",
@@ -1056,7 +1056,7 @@
     "anchor_fingerprint": "sha256:92fad3c308a8b4e87fba011bd2c3f0e883bc482e58d4e853fdf12ccf8985e861"
   },
   {
-    "checkpoint_index": 410,
+    "checkpoint_index": 412,
     "checkpoint_name": "SyscallTable.SetTidAddress",
     "checkpoint_variant": "SyscallTableSetTidAddress",
     "linux_file": "kernel/fork.c",
@@ -1067,7 +1067,7 @@
     "anchor_fingerprint": "sha256:7d7706e14dcb544d203c69537d2902e8282a18905a33a02b20b5ac612724408e"
   },
   {
-    "checkpoint_index": 411,
+    "checkpoint_index": 413,
     "checkpoint_name": "SyscallTable.Clone",
     "checkpoint_variant": "SyscallTableClone",
     "linux_file": "kernel/fork.c",
@@ -1078,7 +1078,7 @@
     "anchor_fingerprint": "sha256:c4bdc67063c7c38c2a9ff89eabef84cc7ca8286d110d0dc681e56a063e398bff"
   },
   {
-    "checkpoint_index": 422,
+    "checkpoint_index": 424,
     "checkpoint_name": "SyscallTable.Wait4",
     "checkpoint_variant": "SyscallTableWait4",
     "linux_file": "kernel/exit.c",
@@ -1089,7 +1089,7 @@
     "anchor_fingerprint": "sha256:92549b5d721968fa29152fb2746347e9f8866c16a82bf68bcc565087909aba19"
   },
   {
-    "checkpoint_index": 423,
+    "checkpoint_index": 425,
     "checkpoint_name": "UserChild.ParentWaitResumed",
     "checkpoint_variant": "UserChildParentWaitResumed",
     "linux_file": "kernel/exit.c",
@@ -1100,7 +1100,7 @@
     "anchor_fingerprint": "sha256:f59455758ea844d2ff8d6d95109a70ee4de1f4e90d1d7959792b73943146d908"
   },
   {
-    "checkpoint_index": 428,
+    "checkpoint_index": 430,
     "checkpoint_name": "SyscallTable.Exit",
     "checkpoint_variant": "SyscallTableExit",
     "linux_file": "kernel/exit.c",
@@ -1111,7 +1111,7 @@
     "anchor_fingerprint": "sha256:71e7f8adff875cc351cc7490c5b46ebe6a5f84fbe8bc61a6834ab11dac40f705"
   },
   {
-    "checkpoint_index": 429,
+    "checkpoint_index": 431,
     "checkpoint_name": "PayloadPhase.Ready",
     "checkpoint_variant": "PayloadPhaseReady",
     "linux_file": "init/main.c",
@@ -1122,7 +1122,7 @@
     "anchor_fingerprint": "sha256:f5f2e1079a8d270dad77c902a0fb62d625de4803905da5c7c92e34c0fa2a64fa"
   },
   {
-    "checkpoint_index": 430,
+    "checkpoint_index": 432,
     "checkpoint_name": "PayloadPhase.Online",
     "checkpoint_variant": "PayloadPhaseOnline",
     "linux_file": "init/main.c",

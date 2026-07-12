@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 431
+- total checkpoints: 433
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 314 |
+| unmapped | 316 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 314 |
+| none | 316 |
 | medium | 62 |
 | high | 55 |
 
@@ -98,4 +98,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 176
+- singleton unmapped families: 178

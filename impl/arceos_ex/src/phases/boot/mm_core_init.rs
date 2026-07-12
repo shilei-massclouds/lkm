@@ -18,13 +18,13 @@ static MM_CORE_INIT_PHASE_STATE: AtomicU8 =
 pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::MmCoreInitPhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex mm core init event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        "arceos_ex mm core init preset failed\n",
     );
-    handoff()
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.memory_topology
         .setup(&ctx.zones, &ctx.cpu_group, &ctx.config)?;
     ctx.page_allocator.preset(
@@ -93,31 +93,63 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )
 }
 
-fn handoff() -> ! {
-    crate::phases::boot::sched_init::preset(crate::context::context())
-}
-
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !mm_core_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE),
-            State::Base,
-            State::Ready,
-        );
-    }
-
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
     crate::phases::state::mark(
         &MM_CORE_INIT_PHASE_STATE,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
+        State::Prepared,
         Checkpoint::MmCoreInitPhaseReady,
     )
 }
 
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex mm core init setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn adopt_ready(ctx: &Context) -> EventResult {
+    if !mm_core_init_phase_ready(ctx) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::adopt(
+        &MM_CORE_INIT_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+    )
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        enable_event(ctx),
+        "arceos_ex mm core init enable failed\n",
+    );
+    crate::phases::boot::sched_init::preset(crate::context::context())
+}
+
+fn enable_event(ctx: &mut Context) -> EventResult {
+    crate::phases::state::mark(
+        &MM_CORE_INIT_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::MmCoreInitPhaseOnline,
+    )
+}
+
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE) == State::Ready
+    let s = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
+    s == State::Ready || s == State::Online
 }
 
 fn mm_core_init_phase_ready(ctx: &Context) -> bool {

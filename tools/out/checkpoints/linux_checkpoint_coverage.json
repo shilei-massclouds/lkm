@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 431,
+  "total_checkpoints": 433,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 314
+      "count": 316
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 314
+      "count": 316
     },
     {
       "confidence": "medium",
@@ -632,6 +632,10 @@
       "count": 1
     },
     {
+      "family": "MmCoreInitPhase",
+      "count": 1
+    },
+    {
       "family": "MmCoreTrimmedPaths",
       "count": 1
     },
@@ -797,6 +801,10 @@
     },
     {
       "family": "SchedInitIrqsDisabled",
+      "count": 1
+    },
+    {
+      "family": "SchedInitPhase",
       "count": 1
     },
     {
@@ -1016,5 +1024,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 176
+  "unmapped_singleton_family_count": 178
 }

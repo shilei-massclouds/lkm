@@ -16,13 +16,13 @@ static SCHED_INIT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::en
 pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::SchedInitPhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex sched init event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        "arceos_ex sched init preset failed\n",
     );
-    handoff()
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.sched_init_prelude_trimmed_paths.setup()?;
     ctx.scheduler
         .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
@@ -58,31 +58,72 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.sched_init_prelude_trimmed_paths, &ctx.rcu_core)
 }
 
-fn handoff() -> ! {
-    crate::phases::boot::setup_after_children()
-}
-
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !sched_init_phase_ready(ctx) {
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
+    if crate::arch::riscv64::csr::supervisor_interrupts_enabled() {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&SCHED_INIT_PHASE_STATE),
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     }
 
     crate::phases::state::mark(
         &SCHED_INIT_PHASE_STATE,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
+        State::Prepared,
         Checkpoint::SchedInitPhaseReady,
     )
 }
 
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex sched init setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn adopt_ready(ctx: &Context) -> EventResult {
+    if !sched_init_phase_ready(ctx) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            crate::phases::state::load(&SCHED_INIT_PHASE_STATE),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::adopt(
+        &SCHED_INIT_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+    )
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        enable_event(ctx),
+        "arceos_ex sched init enable failed\n",
+    );
+    crate::phases::boot::setup_after_children()
+}
+
+fn enable_event(ctx: &mut Context) -> EventResult {
+    crate::phases::state::mark(
+        &SCHED_INIT_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::SchedInitPhaseOnline,
+    )
+}
+
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&SCHED_INIT_PHASE_STATE) == State::Ready
+    let s = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
+    s == State::Ready || s == State::Online
 }
 
 fn sched_init_phase_ready(ctx: &Context) -> bool {
@@ -287,10 +328,10 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
 fn checkpoint_irqs_disabled() -> EventResult {
     if crate::arch::riscv64::csr::supervisor_interrupts_enabled() {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             State::Base,
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     }
 
