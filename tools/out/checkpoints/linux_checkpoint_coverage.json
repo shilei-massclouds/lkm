@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 433,
+  "total_checkpoints": 434,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 316
+      "count": 317
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 316
+      "count": 317
     },
     {
       "confidence": "medium",
@@ -556,6 +556,10 @@
       "count": 1
     },
     {
+      "family": "IrqTimeInitPhase",
+      "count": 1
+    },
+    {
       "family": "JiffiesClocksource",
       "count": 1
     },
@@ -1024,5 +1028,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 178
+  "unmapped_singleton_family_count": 179
 }
