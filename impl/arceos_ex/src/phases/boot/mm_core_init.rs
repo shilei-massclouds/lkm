@@ -16,12 +16,39 @@ static MM_CORE_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex mm core init preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::MmCoreInitPhaseStarted);
     crate::phases::shutdown_on_error(
         preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
         "arceos_ex mm core init preset failed\n",
     );
     setup(ctx)
+}
+
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::boot::core_prepare::is_online()
+        && ctx.exception_stream.state() == State::Ready
+        && ctx.memblock.state() == State::Online
+        && ctx.zones.state() == State::Ready
+        && ctx.page_metadata_map.state() == State::Ready
+        && ctx.cpu_group.state() == State::Ready
+        && ctx.dma_cache_policy.state() == State::Ready
+        && ctx.per_cpu_storage.state() == State::Ready
+        && printk::is_ready()
+        && ctx.static_branch.state() == State::Ready
+        && ctx.vm.state() == State::Online
+        && ctx.vm.swapper_vm().state() == State::Online
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -94,51 +121,52 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    crate::phases::state::mark(
+    let state = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
+    if state != State::Base || !mm_core_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+
+    crate::phases::state::mark_checked(
         &MM_CORE_INIT_PHASE_STATE,
         LifecycleEvent::Preset,
         State::Base,
         State::Prepared,
-        Checkpoint::MmCoreInitPhaseReady,
+        Checkpoint::MmCoreInitPhasePrepared,
     )
 }
 
 fn setup(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex mm core init setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex mm core init setup failed\n");
     enable(ctx)
 }
 
 fn adopt_ready(ctx: &Context) -> EventResult {
-    if !mm_core_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE),
-            State::Prepared,
-            State::Ready,
-        );
+    let state = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
+    if state != State::Prepared || !mm_core_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
     }
 
-    crate::phases::state::adopt(
+    crate::phases::state::mark_checked(
         &MM_CORE_INIT_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Prepared,
         State::Ready,
+        Checkpoint::MmCoreInitPhaseReady,
     )
 }
 
 fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        enable_event(ctx),
-        "arceos_ex mm core init enable failed\n",
-    );
-    crate::phases::boot::sched_init::preset(crate::context::context())
+    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex mm core init enable failed\n");
+    crate::phases::boot::enable_after_mm_core_init()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
-    crate::phases::state::mark(
+    let state = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
+    if state != State::Ready || !mm_core_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
         &MM_CORE_INIT_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
@@ -147,13 +175,12 @@ fn enable_event(ctx: &mut Context) -> EventResult {
     )
 }
 
-pub fn is_ready() -> bool {
-    let s = crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE);
-    s == State::Ready || s == State::Online
+pub fn is_online() -> bool {
+    crate::phases::state::load(&MM_CORE_INIT_PHASE_STATE) == State::Online
 }
 
 fn mm_core_init_phase_ready(ctx: &Context) -> bool {
-    crate::phases::boot::core_prepare::is_ready()
+    crate::phases::boot::core_prepare::is_online()
         && ctx.exception_stream.state() == State::Ready
         && ctx.memblock.state() == State::Offline
         && ctx.memory_topology.state() == State::Ready

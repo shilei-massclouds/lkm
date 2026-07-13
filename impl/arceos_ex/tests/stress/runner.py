@@ -61,6 +61,7 @@ STRESS_MEM_HEADER_RE = re.compile(
 STRESS_MEM_PROMPT_ECHO_RE = re.compile(r"(?:~|/) # [^\r\n]*(?:\r?\n)?")
 EARLY_CHECKPOINT_BYTES = {
     "R": "Kernel.Started",
+    "B": "BootPhase.Started",
     "A": "EntryPreludePhase.Started",
     "I": "InterruptStream.Prepared",
     "K": "KernelImage.Prepared",

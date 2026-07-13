@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 434
+- total checkpoints: 441
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 317 |
+| unmapped | 324 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 317 |
+| none | 324 |
 | medium | 62 |
 | high | 55 |
 
@@ -49,8 +49,10 @@
 | Scheduler | 8 |
 | CpuHotplugSync | 7 |
 | PageAllocator | 5 |
+| BootPhase | 4 |
 | CpuGroup | 4 |
 | EarlyCon | 4 |
+| EntrySuccessorPhase | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
 | SyscallTable | 4 |
@@ -58,7 +60,6 @@
 | BootCPU | 3 |
 | Completion | 3 |
 | EarlyDtb | 3 |
-| EntrySuccessorPhase | 3 |
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
@@ -66,8 +67,9 @@
 | UserClone | 3 |
 | Vm | 3 |
 | BootCurrentCPU | 2 |
-| BootPhase | 2 |
 | CommandLine | 2 |
+| CorePreparePhase | 2 |
+| EntryPreludePhase | 2 |
 | InitTask | 2 |
 | InterruptPhase | 2 |
 | IrqChipInitTable | 2 |
@@ -75,6 +77,7 @@
 | IrqOpenPrepareTrimmedPaths | 2 |
 | IrqTimeTrimmedPaths | 2 |
 | KthreaddReadyGate | 2 |
+| MmCoreInitPhase | 2 |
 | PhysicalMemory | 2 |
 | PlatformCpuInfo | 2 |
 | PlicIrqDomain | 2 |
@@ -82,6 +85,7 @@
 | PrintkBuffer | 2 |
 | Randomness | 2 |
 | RcuCore | 2 |
+| SchedInitPhase | 2 |
 | Serial8250Console | 2 |
 | SignalCore | 2 |
 | SmpRuntimePhase | 2 |
@@ -98,4 +102,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 179
+- singleton unmapped families: 175

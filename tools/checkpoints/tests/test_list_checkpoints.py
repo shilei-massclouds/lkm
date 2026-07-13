@@ -129,13 +129,26 @@ class ListCheckpointsTests(unittest.TestCase):
         by_name = {record.name: record for record in records}
 
         self.assertIn("Kernel.Started", by_name)
+        self.assertIn("BootPhase.Started", by_name)
         self.assertIn("EntryPreludePhase.Started", by_name)
         self.assertIn("PayloadPhase.Online", by_name)
         self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
+        self.assertEqual(by_name["BootPhase.Started"].early_byte, "B")
         self.assertEqual(
             by_name["EntryPreludePhase.Started"].early_byte,
             "A",
         )
+
+        for phase in (
+            "BootPhase",
+            "EntryPreludePhase",
+            "EntrySuccessorPhase",
+            "CorePreparePhase",
+            "MmCoreInitPhase",
+            "SchedInitPhase",
+        ):
+            for boundary in ("Started", "Prepared", "Ready", "Online"):
+                self.assertIn(f"{phase}.{boundary}", by_name)
 
 
 if __name__ == "__main__":

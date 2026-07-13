@@ -52,6 +52,24 @@ pub fn mark(
     Ok(())
 }
 
+pub fn mark_checked(
+    state: &AtomicU8,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+    checkpoint: Checkpoint,
+) -> EventResult {
+    adopt(state, event, expected, target)?;
+
+    let actual = load(state);
+    if actual != target {
+        return failed_condition(event, actual, target, target);
+    }
+
+    crate::checkpoint::checkpoint(checkpoint);
+    Ok(())
+}
+
 pub fn adopt(
     state: &AtomicU8,
     event: LifecycleEvent,

@@ -1,167 +1,65 @@
 # EntryPreludePhase Coding
 
-## Overview
+入口前导子阶段对应 model `EntryPreludePhase` 的完整 `Preset -> Setup -> Enable` 生命周期，实现
+落点为 `impl/arceos_ex/src/phases/boot/entry_prelude.rs`。它是 BootPhase.Preset 的直接 child；
+`_start` 虽由 OpenSBI 跳入，阶段所有权仍是 `Kernel.Preset drives Boot.Preset drives
+EntryPrelude.Preset`。
 
-入口前导子阶段，对应 model `spec/model/phases/boot/entry-prelude/phase.spec` 中 `EntryPreludePhase` 对象的 Preset → Online 生命周期。
+## 入口例外与 adoption
 
-本阶段从内核入口 `_start` 到 EarlyVm.Online（早期虚拟地址空间可访问），职责：
+`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R`、`BootPhase.Started` 的 `B` 和
+`EntryPreludePhase.Started` 的 `A`。三个 checkpoint 都是 Preset 接受事件，输出时对应状态仍为
+Base。汇编随后完成必须发生在 Rust 前的 CSR/GPR/BSS 操作。
 
-- 关闭 S 模式中断总开关（sie/sip）
-- 建立 gp-relative 寻址
-- 禁用内核 FPU/Vector
-- 清零 BSS
-- 记录 boot hartid，建立 BootCPU 对象
-- 安装 init_task/pt_regs/trap 入口
-- 建立跳板页表 → 早期页表，完成物理→虚拟地址切换
+进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel、Boot 和 EntryPrelude 的入口
+边界。EntryPrelude adoption 必须检查自身精确 Base 以及 model 的 Riscv64、SbiSpec、OpenSBI、
+Lds、Config 依赖；不得再次输出 Started。Boot adoption 同时在这个最早 Rust 边界确认
+`sstatus.SIE == 0`。
 
-本阶段是首个子阶段，没有前驱阶段。`_start` 是启动入口，不由上级函数调用。
+## Preset: Base -> Prepared
 
-按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。preset 因汇编 → 地址空间切换的技术约束，跨多段实现；setup 和 enable 为空，仅做 emits 推进。
+Preset 横跨三个物理实现段，但仍是一个 model transition：
 
-## preset()
+| 段 | model drives 与实现 |
+| --- | --- |
+| `_start` head | `InterruptStream.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；`RootStream.Preset` 禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart、`init_task` 和 init stack |
+| `preset_until_vm_switch()` | adoption head 对象事实；驱动 `BootCurrentCPU.Setup -> CpuGroup.Preset -> BootCurrentCPU.Enable`、`EventStream.Preset`、`ExceptionStream.Preset` 和 `Vm.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootInitTask.Enable`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
-入口符号：`_start`（不是 Rust fn，由 OpenSBI 跳转至此）
+`Vm.Setup` 必须在同一个 Preset 内完成 TrampolineVm 到 EarlyVm 的切换，并通过
+`after_vm_setup_continuation()` 回到 EntryPrelude owner。所有 drives 成功后检查 Preset 后置对象
+事实，提交 Prepared，读回并发出 `EntryPreludePhase.Prepared`，随后按 emits 调用 Setup。
 
-### 1. depends_on
+## Setup: Prepared -> Ready
 
-首个子阶段，无运行时检查。前置条件由 Prepare 层保证（硬件规格、OpenSBI、Lds、Config 均 Online）。
+Setup start 检查精确 Prepared。该 transition 没有 drives；确认 Prepared 后置事实仍成立后提交
+Ready，读回并发出 `EntryPreludePhase.Ready`，随后按 emits 调用 Enable。
 
-### 2. drives
+## Enable: Ready -> Online
 
-模型 EntryPreludePhase.Preset 驱动全部子对象迁移。impl 分为三段：
+Enable start 检查精确 Ready，并验证 model Online invariant：Root/Interrupt/Exception/Event streams、
+KernelImage、RawDtb、BootInitTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
+CpuGroup 和 Soc 必须处于 model 规定状态。成功后提交 Online，发出
+`EntryPreludePhase.Online`，再返回 `boot::preset_after_entry_prelude()`。本阶段不得直接启动
+EntrySuccessorPhase。
 
-**段 1 — 汇编 head（`_start` 到 `entry_prelude_rust_entry`）**
+## 状态与 checkpoint
 
-| Model drives | Impl |
-|---|---|
-| `InterruptStream.Transition::Preset` | `csrw sie, zero; csrw sip, zero` |
-| `KernelImage.Transition::Preset` | `la gp, __global_pointer$` |
-| `RootStream.Transition::Preset` | `csrrc zero, sstatus, #FPU_VECTOR_MASK` |
-| `KernelImage.Transition::Setup` | BSS zero loop |
-| `BootCurrentCPU.Transition::Preset` | 保存 `a0`(hartid) 到 `head_boot_hartid` |
-| `BootInitTask.Transition::Preset` | `la tp, init_task` |
-| `BootInitStack.Transition::Preset` | `la sp, init_stack_end`; 预留 `pt_size_on_stack`; `csrw stvec, head_trap_entry` |
+`ENTRY_PRELUDE_PHASE_STATE` 持久记录四状态；`is_online()` 只匹配 Online。
 
-**段 2 — Rust `setup_until_vm_switch`（`entry_prelude_rust_entry` → `Vm.Setup`）**
-
-| Model drives | Impl |
-|---|---|
-| `BootCurrentCPU.Transition::Setup` → `CpuGroup.Transition::Preset` → `BootCurrentCPU.Transition::Enable` | `cpu_group.preset()`, `boot_current_cpu.enable()` |
-| `EventStream.Transition::Preset` | `event_stream.preset()` |
-| `ExceptionStream.Transition::Preset` | `exception_stream.preset()` |
-| `Vm.Transition::Preset`（含 `TrampolineVm.Setup` → `EarlyVm.Preset` → `EarlyVm.Setup`） | `vm.preset()` |
-
-**段 3 — Rust 续接 `after_vm_setup`（地址空间切换后）**
-
-| Model drives | Impl |
-|---|---|
-| `Vm.Transition::Setup`（含 `TrampolineVm.Enable` → `EarlyVm.Enable` → `TrampolineVm.Cleanup` → `KernelImage.Enable`） | 在 `vm.setup()` 内完成，回调 `after_vm_setup_continuation` |
-| `EventStream.Transition::Setup` | `event_stream.setup()` |
-| `BootInitTask.Transition::Enable` | `init_task.enable()` |
-| `BootInitStack.Transition::Setup` | `init_stack.setup()` |
-| `Soc.Transition::Preset` | `Soc::preset()` |
-
-### 3. ensures
-
-调用 `checkpoint_ready()`，检查模型 Online invariant（见下文 invariant 表）。成功后推进自身状态。
-
-### 4. emits
-
-推进 Base → Prepared（概念上；impl 中 Prepared 隐式到达，`checkpoint_ready` 标记 Ready 作为下一个可见状态点）。调用 `setup()`。
-
-## setup()
-
-### 1. depends_on
-
-由 preset 保证。
-
-### 2. drives
-
-无。
-
-### 3. ensures
-
-Ready 状态（`checkpoint_ready` 已确认对象状态满足 Online invariant）。
-
-### 4. emits
-
-调用 `enable()`。
-
-## enable()
-
-### 1. depends_on
-
-由 setup 保证。
-
-### 2. drives
-
-无。
-
-### 3. ensures
-
-调用 `handoff_event()`，标记 Ready → Online，发出 `EntryPreludePhaseOnline`  checkpoint。
-
-### 4. emits
-
-→ `EntrySuccessorPhase.preset()`
-
-## 迁移间调用关系
-
-```
-_start (preset 入口)
-  │
-  ├─ [汇编 head] → drives(InterruptStream.Preset, KernelImage.Preset, ...)
-  │
-  ├─ [Rust setup_until_vm_switch] → drives(EventStream.Preset, Vm.Preset, ...)
-  │
-  ├─ [Rust after_vm_setup] → drives(EventStream.Setup, InitTask.Enable, ...)
-  │
-  └─ checkpoint_ready()  ← ensures + emits
-       │
-       setup() ← emits（空壳）
-       │
-       enable() ← emits
-       │
-       handoff_event() → EntrySuccessorPhase.preset()
-```
-
-## Invariant（模型 EntryPreludePhase.Online）
-
-EntryPreludePhase 的 ensures 检查以下对象状态：
-
-| Object | Required State |
-|---|---|
-| RootStream | Prepared |
-| InterruptStream | Prepared |
-| EventStream | Ready |
-| ExceptionStream | Prepared |
-| PageFaultException | Prepared |
-| SyscallException | Prepared |
-| BreakpointException | Prepared |
-| UnexpectedException | Prepared |
-| KernelImage | Online |
-| RawDtb | Ready |
-| BootInitTask | Online |
-| BootInitStack | Ready |
-| Vm | Ready |
-| TrampolineVm | Destroyed |
-| EarlyVm | Online |
-| BootCurrentCPU | Online |
-| BootCPU | Prepared |
-| CpuGroup | Prepared |
-| Soc | Prepared |
-
-## Checkpoints
-
-| Checkpoint | Phase State | Position |
-|---|---|---|
-| `EntryPreludePhaseStarted` | Base | head 段 `trace_adopt_begin` |
-| `EntryPreludePhaseReady` | Ready | `checkpoint_ready()` |
-| `EntryPreludePhaseOnline` | Online | `handoff_event()` |
+| Checkpoint | owner state | Position |
+| --- | --- | --- |
+| `EntryPreludePhase.Started` | Base | `_start` 的 `A`，Rust 不重复 |
+| `EntryPreludePhase.Prepared` | Prepared | `after_vm_setup()` drives 完成并检查后 |
+| `EntryPreludePhase.Ready` | Ready | Setup 提交后 |
+| `EntryPreludePhase.Online` | Online | Enable 提交后、返回父 continuation 前 |
 
 ## Coding Constraints
 
-- RISC-V early alternatives (`apply_early_boot_alternatives`) 在本阶段 Vm.Preset 中 deferred，不得假装已实现，必须保持 observable deferral。
-- head 段汇编必须在 Rust 运行前完成所有物理地址阶段的 CSR/GPR 操作。
-- TrampolineVm 到 EarlyVm 切换必须在同一个 Vm.Setup event 内完成，不跨阶段边界。
-- preset 跨汇编/Rust 多段是因地址空间切换的技术约束，不是模型层面有多个 Preset。
+- RISC-V early alternatives (`apply_early_boot_alternatives`) 在 `Vm.Preset` 中保持显式 deferred；
+  不得假装 absent 或 implemented。
+- head 汇编只执行 Rust 前不可延迟的架构动作；每个已完成动作由 Rust adoption 进入对象状态，
+  不重复对应 checkpoint。
+- TrampolineVm 到 EarlyVm 的 translation synchronization 和 continuation identity 必须保持；地址
+  空间切换不能制造第二个 Preset 或绕过中间阶段状态。
+- `Started` 不是第五种状态，不新增 `Phase.Base` checkpoint。

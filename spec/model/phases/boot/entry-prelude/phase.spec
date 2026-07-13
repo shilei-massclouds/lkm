@@ -21,6 +21,11 @@ object RootStream: FlowObject {
              * Preset 禁止内核态使用 FPU 和 VECTOR，建立根流的早期安全执行条件。
              */
             on Transition::Preset -> State::Prepared {
+                /*
+                 * Started is emitted in `_start`; source/dependency adoption occurs at the
+                 * earliest Rust boundary without re-emitting it. Online returns to the
+                 * BootPhase.Preset continuation rather than starting a sibling phase.
+                 */
                 depends_on {
                     Riscv64.state == State::Online;
                 }

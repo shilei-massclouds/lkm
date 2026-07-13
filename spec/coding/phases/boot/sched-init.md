@@ -12,7 +12,7 @@
 
 ### 1. depends_on
 
-由 `MmCoreInitPhase.enable()` 保证：
+由 `BootPhase.enable_after_mm_core_init()` 启动，并在 `preset()` 中逐项检查：
 - `MmCoreInitPhase.state == Online`
 - `PageAllocator.state == Ready`
 - `SlubSubsystem.state == Ready`、`KmallocCaches.state == Ready`
@@ -20,6 +20,9 @@
 - `PerCpuStorage.state == Ready`、`CpuHotplugState.state == Ready`
 - `StaticBranch.state == Ready`
 - `PrintkBuffer.state == Ready`
+
+`preset()` 必须先检查 `SCHED_INIT_PHASE_STATE == Base`；全部依赖通过后才发出
+`SchedInitPhase.Started`。
 
 ### 2. drives
 
@@ -48,7 +51,7 @@
 
 ### 4. emits
 
-推进 Base → Prepared，调用 `setup()`。
+提交 Base → Prepared，读回并发出 `SchedInitPhase.Prepared`，再调用 `setup()`。
 
 ## setup()
 
@@ -66,7 +69,8 @@
 
 ### 4. emits
 
-推进 Prepared → Ready，调用 `enable()`。
+检查精确 Prepared，提交 Prepared → Ready，读回并发出 `SchedInitPhase.Ready`，再调用
+`enable()`。
 
 ## enable()
 
@@ -80,30 +84,31 @@
 
 ### 3. ensures
 
-推进 Ready → Online，发出 `SchedInitPhaseOnline` checkpoint。
+检查精确 Ready并重新确认 Online invariant，提交 Ready → Online，发出
+`SchedInitPhase.Online` checkpoint。
 
 ### 4. emits
 
-→ `BootPhase.setup_after_children()`
+→ `BootPhase.enable_after_sched_init()` 父 continuation
 
 ## 迁移间调用关系
 
 ```
-preset()  ← 由 MmCoreInitPhase.enable() 调用
+preset()  ← 由 BootPhase.enable_after_mm_core_init() 调用
   │
   ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
   │
-  ├─ adopt_prepared_with_check()  ← 检查 IRQs disabled，标记 Prepared
+  ├─ adopt_prepared_with_check()  ← 检查 IRQs disabled，标记 Prepared + checkpoint
   │
   setup()  ← emits
   │
-  ├─ adopt_ready()  ← 检查 Online invariant，标记 Ready
+  ├─ adopt_ready()  ← 检查 Ready invariant，标记 Ready + checkpoint
   │
   enable()  ← emits
   │
-  ├─ enable_event()  ← 标记 Online
+  ├─ enable_event()  ← 检查 invariant，标记 Online + checkpoint
   │
-  └─ BootPhase.setup_after_children()
+  └─ BootPhase.enable_after_sched_init()
 ```
 
 ## Invariant（模型 SchedInitPhase.Ready / Online）
@@ -127,9 +132,10 @@ preset()  ← 由 MmCoreInitPhase.enable() 调用
 
 | Checkpoint | Phase State | Position |
 |---|---|---|
-| `SchedInitPhaseStarted` | Base | `preset()` 入口 |
-| `SchedInitPhaseReady` | Prepared | `adopt_prepared_with_check()` |
-| `SchedInitPhaseOnline` | Online | `enable_event()` |
+| `SchedInitPhase.Started` | Base | `preset()` source/dependency 检查后 |
+| `SchedInitPhase.Prepared` | Prepared | `adopt_prepared_with_check()` |
+| `SchedInitPhase.Ready` | Ready | `adopt_ready()` |
+| `SchedInitPhase.Online` | Online | `enable_event()`、父 continuation 前 |
 
 ## Coding Constraints
 
@@ -139,3 +145,6 @@ preset()  ← 由 MmCoreInitPhase.enable() 调用
 - 所有 `sched_init()` 中的 trimmed 路径（poking_init/ftrace_init/early_trace_init/trace_init/context_tracking_init）必须保持 observable deferred/trimmed 标记。
 - `SchedInitPreludeTrimmedPaths` 必须记录 `poking_init`/`ftrace_init` 的 trimmed 状态及其原因（如 `CONFIG_FTRACE_MCOUNT_RECORD=n`）。
 - `SchedInitTraceContextBoundaries` 必须记录 `trace_init` 的 deferred 状态及 `context_tracking_init` 的 trimmed 状态。
+
+`SCHED_INIT_PHASE_STATE` 必须持久记录四状态；公开查询为 `is_online()`，且只在精确 Online 时
+返回 true。

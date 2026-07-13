@@ -23,13 +23,13 @@ start/completion continuation：
 
 ### Preset
 
-OpenSBI 进入 `_start` 后，架构入口先保存固件参数，并在任何子阶段 checkpoint 之前输出
-`Kernel.Started` 的稳定早期编码。该几条入口指令是 Kernel.Preset start 的架构 lowering，
-物理上与 EntryPrelude 汇编同段，但不得排在 `EntryPreludePhase.Started` 之后。进入 Rust、完成
-`PreparePhase` adoption 后，`systems::kernel::adopt_head_preset_start()` 校验 Kernel 仍为
-`Base` 和准备条件，不重复输出 checkpoint。由于首个 `drives` 是
-`BootPhase.Preset -> EntryPreludePhase.Preset`，入口 ABI 随后直接继续 EntryPrelude，不额外
-绕过一个 Rust wrapper。
+OpenSBI 进入 `_start` 后，架构入口先保存固件参数，并按 `R -> B -> A` 输出
+`Kernel.Started`、`BootPhase.Started` 和 `EntryPreludePhase.Started` 的稳定早期编码。这几条入口
+指令分别属于三层 Preset start 的架构 lowering，物理上位于同一汇编段但不折叠 owner。进入
+Rust 后依次 adoption Prepare、Kernel、Boot 和 EntryPrelude；
+`systems::kernel::adopt_head_preset_start()` 校验 Kernel 仍为 Base 和准备条件，不重复输出
+checkpoint。首个 `drives` 仍是 `BootPhase.Preset -> EntryPreludePhase.Preset`，入口 ABI 不额外
+绕过 Rust wrapper。
 
 BootPhase 达到 model `Online` 后进入 `systems::kernel::preset_after_boot()`。该 continuation
 检查 Prepare 和 Boot 完成条件，提交 Kernel `Base -> Prepared`，随后按 `emits Setup` 启动
@@ -65,9 +65,9 @@ SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，
 - `Kernel.Online` 属于 Kernel.Enable 完成边界，只能在 PayloadPhase.Online 已提交后发出。
 - 子阶段 checkpoint 保留在对应 phase module，不得由 `systems/kernel.rs` 代发。
 
-当前部分编排 phase 的实现查询仍命名为 `is_ready()`，但它们代表 model `Online` 完成边界；
-该命名和四状态记录必须在对应 Boot、Interrupt、UpMultitask、SmpRuntime 子树审计中收敛，
-不能据此降低 Kernel model 的 `Online` 要求。
+Boot 子树已经使用精确 `is_online()` 查询和完整四状态 checkpoint。Interrupt、UpMultitask、
+SmpRuntime 等尚未审计子树中仍代表 model Online 的旧 `is_ready()`，必须在各自批次收敛；不能
+据此降低 Kernel model 的 Online 要求。
 
 ## 所有权与范围
 

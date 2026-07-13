@@ -14,12 +14,36 @@ use core::sync::atomic::AtomicU8;
 static SCHED_INIT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex sched init preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::SchedInitPhaseStarted);
     crate::phases::shutdown_on_error(
         preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
         "arceos_ex sched init preset failed\n",
     );
     setup(ctx)
+}
+
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::boot::mm_core_init::is_online()
+        && ctx.page_allocator.state() == State::Ready
+        && ctx.slub_subsystem.state() == State::Ready
+        && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
+        && ctx.cpu_group.state() == State::Ready
+        && ctx.per_cpu_storage.state() == State::Ready
+        && ctx.cpu_hotplug_state.state() == State::Ready
+        && ctx.static_branch.state() == State::Ready
+        && printk::is_ready()
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -59,60 +83,55 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    if crate::arch::riscv64::csr::supervisor_interrupts_enabled() {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            crate::phases::state::load(&SCHED_INIT_PHASE_STATE),
-            State::Base,
-            State::Prepared,
-        );
+    let state = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
+    if state != State::Base
+        || !sched_init_phase_ready(ctx)
+        || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
+    {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
         &SCHED_INIT_PHASE_STATE,
         LifecycleEvent::Preset,
         State::Base,
         State::Prepared,
-        Checkpoint::SchedInitPhaseReady,
+        Checkpoint::SchedInitPhasePrepared,
     )
 }
 
 fn setup(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex sched init setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex sched init setup failed\n");
     enable(ctx)
 }
 
 fn adopt_ready(ctx: &Context) -> EventResult {
-    if !sched_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&SCHED_INIT_PHASE_STATE),
-            State::Prepared,
-            State::Ready,
-        );
+    let state = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
+    if state != State::Prepared || !sched_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
     }
 
-    crate::phases::state::adopt(
+    crate::phases::state::mark_checked(
         &SCHED_INIT_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Prepared,
         State::Ready,
+        Checkpoint::SchedInitPhaseReady,
     )
 }
 
 fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        enable_event(ctx),
-        "arceos_ex sched init enable failed\n",
-    );
-    crate::phases::boot::setup_after_children()
+    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex sched init enable failed\n");
+    crate::phases::boot::enable_after_sched_init()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
-    crate::phases::state::mark(
+    let state = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
+    if state != State::Ready || !sched_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
         &SCHED_INIT_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
@@ -121,9 +140,8 @@ fn enable_event(ctx: &mut Context) -> EventResult {
     )
 }
 
-pub fn is_ready() -> bool {
-    let s = crate::phases::state::load(&SCHED_INIT_PHASE_STATE);
-    s == State::Ready || s == State::Online
+pub fn is_online() -> bool {
+    crate::phases::state::load(&SCHED_INIT_PHASE_STATE) == State::Online
 }
 
 fn sched_init_phase_ready(ctx: &Context) -> bool {
@@ -135,7 +153,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
     let boot_runqueue = ctx.scheduler.boot_runqueue();
     let boot_idle_task = boot_scheduler_view.idle_task();
 
-    crate::phases::boot::mm_core_init::is_ready()
+    crate::phases::boot::mm_core_init::is_online()
         && ctx.scheduler.state() == State::Online
         && ctx.scheduler.scheduler_running()
         && ctx.scheduler.default_root_domain().state() == State::Ready

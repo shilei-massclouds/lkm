@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 434,
+  "total_checkpoints": 441,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 317
+      "count": 324
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 317
+      "count": 324
     },
     {
       "confidence": "medium",
@@ -120,11 +120,19 @@
       "count": 5
     },
     {
+      "family": "BootPhase",
+      "count": 4
+    },
+    {
       "family": "CpuGroup",
       "count": 4
     },
     {
       "family": "EarlyCon",
+      "count": 4
+    },
+    {
+      "family": "EntrySuccessorPhase",
       "count": 4
     },
     {
@@ -156,10 +164,6 @@
       "count": 3
     },
     {
-      "family": "EntrySuccessorPhase",
-      "count": 3
-    },
-    {
       "family": "InitStack",
       "count": 3
     },
@@ -188,11 +192,15 @@
       "count": 2
     },
     {
-      "family": "BootPhase",
+      "family": "CommandLine",
       "count": 2
     },
     {
-      "family": "CommandLine",
+      "family": "CorePreparePhase",
+      "count": 2
+    },
+    {
+      "family": "EntryPreludePhase",
       "count": 2
     },
     {
@@ -224,6 +232,10 @@
       "count": 2
     },
     {
+      "family": "MmCoreInitPhase",
+      "count": 2
+    },
+    {
       "family": "PhysicalMemory",
       "count": 2
     },
@@ -249,6 +261,10 @@
     },
     {
       "family": "RcuCore",
+      "count": 2
+    },
+    {
+      "family": "SchedInitPhase",
       "count": 2
     },
     {
@@ -424,10 +440,6 @@
       "count": 1
     },
     {
-      "family": "CorePreparePhase",
-      "count": 1
-    },
-    {
       "family": "CpuAddRemoveLock",
       "count": 1
     },
@@ -501,10 +513,6 @@
     },
     {
       "family": "EarlyVm",
-      "count": 1
-    },
-    {
-      "family": "EntryPreludePhase",
       "count": 1
     },
     {
@@ -633,10 +641,6 @@
     },
     {
       "family": "MemoryTopology",
-      "count": 1
-    },
-    {
-      "family": "MmCoreInitPhase",
       "count": 1
     },
     {
@@ -805,10 +809,6 @@
     },
     {
       "family": "SchedInitIrqsDisabled",
-      "count": 1
-    },
-    {
-      "family": "SchedInitPhase",
       "count": 1
     },
     {
@@ -1028,5 +1028,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 179
+  "unmapped_singleton_family_count": 175
 }

@@ -558,6 +558,13 @@ pub enum Checkpoint {
     SyscallTableExit,
     PayloadPhaseReady,
     PayloadPhaseOnline,
+    BootPhasePrepared,
+    BootPhaseOnline,
+    EntryPreludePhasePrepared,
+    EntrySuccessorPhasePrepared,
+    CorePreparePhasePrepared,
+    MmCoreInitPhasePrepared,
+    SchedInitPhasePrepared,
 }
 
 impl Checkpoint {
@@ -565,6 +572,7 @@ impl Checkpoint {
     pub(crate) const fn early_byte(self) -> u8 {
         match self {
             Self::KernelStarted => b'R',
+            Self::BootPhaseStarted => b'B',
             Self::EntryPreludePhaseStarted => b'A',
             Self::InterruptStreamPrepared => b'I',
             Self::KernelImagePrepared => b'K',
@@ -1030,6 +1038,13 @@ impl Checkpoint {
             Self::SyscallTableExit => "SyscallTable.Exit",
             Self::PayloadPhaseReady => "PayloadPhase.Ready",
             Self::PayloadPhaseOnline => "PayloadPhase.Online",
+            Self::BootPhasePrepared => "BootPhase.Prepared",
+            Self::BootPhaseOnline => "BootPhase.Online",
+            Self::EntryPreludePhasePrepared => "EntryPreludePhase.Prepared",
+            Self::EntrySuccessorPhasePrepared => "EntrySuccessorPhase.Prepared",
+            Self::CorePreparePhasePrepared => "CorePreparePhase.Prepared",
+            Self::MmCoreInitPhasePrepared => "MmCoreInitPhase.Prepared",
+            Self::SchedInitPhasePrepared => "SchedInitPhase.Prepared",
         }
     }
 }

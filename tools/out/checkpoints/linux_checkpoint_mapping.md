@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 317
+- unmapped: 324
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -440,3 +440,10 @@
 | 431 | SyscallTable.Exit | SyscallTableExit | exact | medium | kernel/exit.c | do_group_exit | do_group_exit() line 1088: do_exit(exit_code); | Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit(). |
 | 432 | PayloadPhase.Ready | PayloadPhaseReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1492: do_sysctl_args(); | Linux kernel_init() reaches the post-finalize payload-selection boundary. |
 | 433 | PayloadPhase.Online | PayloadPhaseOnline | exact | medium | init/main.c | kernel_init | kernel_init() line 1525: if (!try_to_run_init_process("/sbin/init") \|\| | Linux kernel_init() default init candidate handoff anchor. Requested-init paths record the same runtime checkpoint before run_init_process(execute_command), but the single-fingerprint LKM_CHECKPOINT marker remains on this canonical fallback anchor. |
+| 434 | BootPhase.Prepared | BootPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 435 | BootPhase.Online | BootPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 436 | EntryPreludePhase.Prepared | EntryPreludePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 437 | EntrySuccessorPhase.Prepared | EntrySuccessorPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 438 | CorePreparePhase.Prepared | CorePreparePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 439 | MmCoreInitPhase.Prepared | MmCoreInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 440 | SchedInitPhase.Prepared | SchedInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

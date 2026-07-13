@@ -12,7 +12,7 @@
 
 ### 1. depends_on
 
-由 `CorePreparePhase.enable()` 保证：
+由 `BootPhase.enable_after_core_prepare()` 启动，并在 `preset()` 中逐项检查：
 - `CorePreparePhase.state == Online`
 - `ExceptionStream.state == Ready`
 - `MemBlock.state == Online`、`Zones.state == Ready`
@@ -21,6 +21,9 @@
 - `PerCpuStorage.state == Ready`、`PrintkBuffer.state == Ready`
 - `StaticBranch.state == Ready`
 - `Vm.state == Online`、`SwapperVm.state == Online`
+
+`preset()` 必须先检查 `MM_CORE_INIT_PHASE_STATE == Base`；全部依赖通过后才发出
+`MmCoreInitPhase.Started`。
 
 ### 2. drives
 
@@ -54,7 +57,7 @@
 
 ### 4. emits
 
-推进 Base → Prepared，调用 `setup()`。
+提交 Base → Prepared，读回并发出 `MmCoreInitPhase.Prepared`，再调用 `setup()`。
 
 ## setup()
 
@@ -72,7 +75,8 @@
 
 ### 4. emits
 
-推进 Prepared → Ready，调用 `enable()`。
+检查精确 Prepared，提交 Prepared → Ready，读回并发出 `MmCoreInitPhase.Ready`，再调用
+`enable()`。
 
 ## enable()
 
@@ -86,30 +90,31 @@
 
 ### 3. ensures
 
-推进 Ready → Online，发出 `MmCoreInitPhaseOnline` checkpoint。
+检查精确 Ready并重新确认 Online invariant，提交 Ready → Online，发出
+`MmCoreInitPhase.Online` checkpoint。
 
 ### 4. emits
 
-→ `SchedInitPhase.preset()`
+→ `BootPhase.enable_after_mm_core_init()` 父 continuation
 
 ## 迁移间调用关系
 
 ```
-preset()  ← 由 CorePreparePhase.enable() 调用
+preset()  ← 由 BootPhase.enable_after_core_prepare() 调用
   │
   ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
   │
-  ├─ adopt_prepared_with_check()  ← 检查并发关闭事实，标记 Prepared
+  ├─ adopt_prepared_with_check()  ← 检查 Preset ensures，标记 Prepared + checkpoint
   │
   setup()  ← emits
   │
-  ├─ adopt_ready()  ← 检查 Online invariant，标记 Ready
+  ├─ adopt_ready()  ← 检查 Ready invariant，标记 Ready + checkpoint
   │
   enable()  ← emits
   │
-  ├─ enable_event()  ← 标记 Online
+  ├─ enable_event()  ← 检查 invariant，标记 Online + checkpoint
   │
-  └─ SchedInitPhase.preset()
+  └─ BootPhase.enable_after_mm_core_init()
 ```
 
 ## Invariant（模型 MmCoreInitPhase.Ready / Online）
@@ -152,9 +157,10 @@ preset()  ← 由 CorePreparePhase.enable() 调用
 
 | Checkpoint | Phase State | Position |
 |---|---|---|
-| `MmCoreInitPhaseStarted` | Base | `preset()` 入口 |
-| `MmCoreInitPhaseReady` | Prepared | `adopt_prepared_with_check()` |
-| `MmCoreInitPhaseOnline` | Online | `enable_event()` |
+| `MmCoreInitPhase.Started` | Base | `preset()` source/dependency 检查后 |
+| `MmCoreInitPhase.Prepared` | Prepared | `adopt_prepared_with_check()` |
+| `MmCoreInitPhase.Ready` | Ready | `adopt_ready()` |
+| `MmCoreInitPhase.Online` | Online | `enable_event()`、父 continuation 前 |
 
 ## Coding Constraints
 
@@ -165,3 +171,37 @@ preset()  ← 由 CorePreparePhase.enable() 调用
 - 所有 mm_core_init 裁剪路径（PageExt/KFENCE/KMSAN/Kmemleak/DebugObjects/ExecMemory）必须在 `MmCoreTrimmedPaths` 中保留 observable 位置标记，不得假定为不存在。
 - `PageAllocator.setup()` 中的 `zonelist_update_seq` 写侧 seqlock + `printk_deferred` 的协议必须保持 observable。
 - `KernelGlobalAllocator.setup()` 必须在 `SlubSubsystem.Ready` 之后运行，暴露通过 SLUB/kmalloc 的 Rust `GlobalAlloc` 边界。
+
+`MM_CORE_INIT_PHASE_STATE` 必须持久记录四状态；公开查询为 `is_online()`，且只在精确 Online 时
+返回 true。
+
+## 迁移自 legacy formal index 的 MUST/SHOULD
+
+原 `mm-core-init.spec` 的规则按下列主题全部由本文件承接：
+
+- MemoryTopology 只投影既有 zones；PageAllocator.Preset 只建立 topology/hooks，Setup 完成
+  MemBlock 到 buddy 的 page handoff，MemBlock 最终为 Offline 而不是 Destroyed，且 SWIOTLB 必须
+  在 handoff 前建立。
+- buddy free lists 归 PageAllocator 所有，使用 zone/order free-area、首轮单 migratetype、拆分
+  MemBlock free ranges、PageMetadata nodes 和 intrusive list；free area 只保存 head/count，node 是
+  block-head metadata，不得依赖 heap storage。
+- 暴露 Linux-like alloc/free pages API；分配返回 owned linear-mapped PageRef，free order 必须匹配
+  alloc order；smoke 覆盖 alloc/free/read/write。
+- 即使 boot lowering 可省略机器指令，model synchronization 仍保留；zonelist irqsave seqlock 与
+  printk-deferred 协议必须可观察，PageAllocator 运行期 locking 必须显式 deferred。
+- MemoryDebugHardening 使用 StaticBranch registry。SlubSubsystem 是唯一 facade 而不是 cache
+  instance；类型名为 SlubCache，registry 拥有所有实例，KmallocCaches 引用已注册 cache，所有
+  `kmem_cache` 创建点必须注册 named cache 或显式 deferred。
+- SLUB bootstrap 必须早于 KmallocCaches.Ready；kmalloc/kzalloc/kfree 使用 PageAllocator backing
+  pages、固定 size classes 和 slab-slot freelist，kzalloc 清零，kfree 回收；复杂 Linux 路径、
+  runtime locking 和 slab-mutex/FULL 边界保持显式，smoke 覆盖三类 API。
+- GlobalAlloc 只能在 SLUB Ready 后建立，并实现 `core::alloc::GlobalAlloc`；alloc 走 kmalloc，
+  alloc_zeroed 走 kzalloc 或等价清零，dealloc 从 pointer 恢复 kmalloc object，只支持文档化 layout
+  子集。动态容器依赖 GlobalAlloc Ready，smoke 覆盖 Vec growth/drop 和 layout pressure boundary。
+- PageTableLockCache 的 Linux 名必须是 `page->ptl`。Vmalloc 同时管理 vmap addresses 和执行映射，
+  Setup 建立所有 vmap subobjects，每次 map page range 记录动作，支持预分配窗口、拒绝重复映射并
+  可按需分配 L0 window；unmap 必须早于 free vmap area，锁、RCU、TLB/cache synchronization
+  contract 不能被隐藏。
+- Ioremap 把 physical resource 与 MMIO policy 保持在 Vmalloc 之外；iounmap 只请求 Vmalloc
+  teardown，并显式记录 MMIO attribute policy。MmStructCache 只创建 `mm_struct` cache。
+- `MmCoreInitPhase` 的 Started、Prepared、Ready、Online checkpoint 均应保持可观察。

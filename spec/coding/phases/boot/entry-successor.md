@@ -1,151 +1,55 @@
 # EntrySuccessorPhase Coding
 
-## Overview
+入口后继子阶段对应 model `EntrySuccessorPhase`，实现落点为
+`impl/arceos_ex/src/phases/boot/entry_successor.rs`。它只由 BootPhase.Setup 驱动；完成后返回父
+continuation，不拥有 CorePrepare sibling 的启动权。
 
-入口后继子阶段，对应 model `spec/model/phases/boot/entry-successor/phase.spec` 中 `EntrySuccessorPhase` 对象的 Preset → Online 生命周期。
+## Transition 映射
 
-本阶段从 `EntryPreludePhase.Online` 开始，推进到 `SwapperVm.Online`、`MemBlock.Online`、`EarlyDtb.Destroyed`，对应 Linux `start_kernel()` 中从 `setup_arch()`/`paging_init()` 完成后到 `mm_core_init()` 之前的核心路径。
+### Preset: Base -> Prepared
 
-按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。
+`preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootInitTask/
+KernelImage 状态，EarlyVm、BootInitStack、InterruptStream、RawDtb 和 FixMap 状态。检查通过后才
+发出 `EntrySuccessorPhase.Started`。
 
-## preset()
+随后严格按 model 顺序驱动 BootInitStack.Enable、EarlyDtb.Preset、InterruptStream.Setup、
+BootCPU.Setup/Enable、PrintkBuffer.Preset、EarlyDtb.Setup、InitMM.Setup、EarlyIoremap.Setup、
+SBI.Setup、Params.Preset、MemBlock.Setup、Vm.Enable、MemBlock.Enable 和 EarlyDtb.Cleanup。
+驱动完成后检查 start_kernel deferred facts，提交 Prepared，读回并发出
+`EntrySuccessorPhase.Prepared`，再按 emits 调用 Setup。
 
-### 1. depends_on
+### Setup: Prepared -> Ready
 
-由 `EntryPreludePhase.enable()` 保证：
-- `EntryPreludePhase.state == Online`
-- `Vm.state == Ready`
-- `EarlyVm.state == Online`
-- `BootInitTask.state == Online`
-- `BootInitStack.state == Ready`
-- `InterruptStream.state == Prepared`
-- `RawDtb.state == Ready`
-- `FixMap.state == Ready`
-- `KernelImage.state == Online`
+Setup 检查精确 Prepared，并验证 EntrySuccessor Ready invariant：入口先导 Online、完整内核虚拟
+地址空间与 boot CPU 状态、early IRQ 关闭、EarlyDtb 销毁、MemBlock/参数/console 等对象状态
+以及 deferred facts。成功后提交 Ready，发出 `EntrySuccessorPhase.Ready`，再调用 Enable。
 
-### 2. drives
+### Enable: Ready -> Online
 
-模型 `EntrySuccessorPhase.Preset` 按以下顺序驱动：
+Enable 检查精确 Ready并重新确认 invariant，提交 Online 并发出
+`EntrySuccessorPhase.Online`。随后返回 `boot::setup_after_entry_successor()`；不得直接调用
+CorePreparePhase。
 
-| # | Model drives | Impl |
-|---|---|---|
-| 1 | `BootInitStack.Transition::Enable` | `ctx.init_stack.enable()` |
-| 2 | `EarlyDtb.Transition::Preset` | `ctx.early_dtb.preset()`，内部驱动 `PlatformCpuInfo.Preset→Enable`、`PhysicalMemory.Preset→Enable` |
-| 3 | `InterruptStream.Transition::Setup` | `ctx.interrupt_stream.setup()` |
-| 4 | `BootCPU.Transition::Setup` | `ctx.boot_current_cpu.setup_boot_cpu()` |
-| 5 | `BootCPU.Transition::Enable` | `ctx.boot_current_cpu.enable_boot_cpu()` + `ctx.cpu_group.register_boot_cpu()` |
-| 6 | `PrintkBuffer.Transition::Preset` | `printk::preset()`、`printk::write_str()` |
-| 7 | `EarlyDtb.Transition::Setup` | `ctx.early_dtb.setup()`，内部驱动 `MemBlock.Preset`、`CommandLine.Preset` |
-| 8 | `InitMM.Transition::Setup` | `ctx.init_mm.setup()` |
-| 9 | `EarlyIoremap.Transition::Setup` | `ctx.early_ioremap.setup()` |
-| 10 | `SBI.Transition::Setup` | `ctx.sbi.setup()` |
-| 11 | `Params.Transition::Preset` | `ctx.params.preset()`，内部驱动 `EarlyParam.Setup` → `EarlyCon.Preset→Setup→Enable` |
-| 12 | `MemBlock.Transition::Setup` | `ctx.memblock.setup()` |
-| 13 | `Vm.Transition::Enable` | `ctx.vm.enable()` |
-| 14 | `MemBlock.Transition::Enable` | `ctx.memblock.enable()` |
-| 15 | `EarlyDtb.Transition::Cleanup` | `ctx.early_dtb.cleanup()` |
+## 状态与 checkpoint
 
-### 3. ensures
+`ENTRY_SUCCESSOR_PHASE_STATE` 持久记录四状态；`is_online()` 只匹配 Online。
 
-驱动完成后检查 deferred facts：
-- `vmlinux_build_id_deferred`
-- `page_address_init_deferred`
-- `entry_successor_start_kernel_position_preserved`
+| Checkpoint | owner state | Position |
+| --- | --- | --- |
+| `EntrySuccessorPhase.Started` | Base | Preset source/dependency 检查后 |
+| `EntrySuccessorPhase.Prepared` | Prepared | Preset drives/ensures 完成后 |
+| `EntrySuccessorPhase.Ready` | Ready | Setup invariant 检查和提交后 |
+| `EntrySuccessorPhase.Online` | Online | Enable 提交后、父 continuation 前 |
 
-### 4. emits
+## 保留的实现规则
 
-推进 Base → Prepared，调用 `setup()`。
+原 `entry-successor.spec` 的有效规则在此继续作为 MUST：
 
-## setup()
-
-### 1. depends_on
-
-由 `preset()` 保证。
-
-### 2. drives
-
-无。
-
-### 3. ensures
-
-检查所有被驱动对象已到达模型约定的状态（参见下文 Invariant 表）。
-
-### 4. emits
-
-推进 Prepared → Ready，调用 `enable()`。
-
-## enable()
-
-### 1. depends_on
-
-由 `setup()` 保证。
-
-### 2. drives
-
-无。
-
-### 3. ensures
-
-推进 Ready → Online，发出 `EntrySuccessorPhaseOnline` checkpoint。
-
-### 4. emits
-
-→ `CorePreparePhase.preset()`
-
-## 迁移间调用关系
-
-```
-preset()  ← 由 EntryPreludePhase.enable() 调用
-  │
-  ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
-  │
-  ├─ adopt_prepared_with_check()  ← 检查 deferred facts，标记 Prepared
-  │
-  setup()  ← emits
-  │
-  ├─ adopt_ready()  ← 检查 Online invariant，标记 Ready
-  │
-  enable()  ← emits
-  │
-  ├─ enable_event()  ← 标记 Online
-  │
-  └─ CorePreparePhase.preset()
-```
-
-## Invariant（模型 EntrySuccessorPhase.Ready / Online）
-
-| Object | Required State |
-|---|---|
-| EntryPreludePhase | Online |
-| BootInitStack | Online |
-| BootCPU | Online |
-| InterruptStream | Ready |
-| PrintkBuffer | Prepared |
-| EarlyDtb | Destroyed |
-| KernelCmdline | Ready |
-| InitMM | Ready |
-| EarlyIoremap | Ready |
-| SBI | Ready |
-| Params | Prepared |
-| EarlyParam | Ready |
-| EarlyCon | Online |
-| MemBlock | Online |
-| Vm | Online |
-| SwapperVm | Online |
-| EarlyVm | Destroyed |
-
-## Checkpoints
-
-| Checkpoint | Phase State | Position |
-|---|---|---|
-| `EntrySuccessorPhaseStarted` | Base | `preset()` 入口 |
-| `EntrySuccessorPhaseReady` | Prepared | `adopt_prepared_with_check()` |
-| `EntrySuccessorPhaseOnline` | Online | `enable_event()` |
-
-## Coding Constraints
-
-- `init_vmlinux_build_id()` 暂缓，保留调用位置作为 deferred fact。
-- `page_address_init()` 暂缓，保留调用位置作为 deferred fact。
-- `setup_bootmem()` 中 `hugetlb_cma_reserve()` 暂缓，保留调用位置作为 deferred fact。
-- 所有 elf 映射、页表切换、物理内存采集和 SBI/console 能力探测必须按模型 drives 顺序推进，不得提前打开中断或任务并发。
-- `printk::write_str("arceos_ex object kernel\n")` 是启动 banner 输出，不是生命周期 transition，属于 `PrintkBuffer.Preset` 之后的 `PrintkBuffer.Write` action。
+- `init_vmlinux_build_id()`、`page_address_init()` 和 start_kernel 位置必须保留为结构化 deferred
+  facts，不能因未实现对应对象而消失。
+- MemBlock 必须记录 RISC-V `setup_bootmem()` 的 `phys_ram_base`、kernel-map offset、DMA32 zone
+  input 和 hugetlb CMA deferred 边界。
+- SwapperVm 必须保留 `CONFIG_STRICT_KERNEL_RWX` 最终权限拆分 deferred 边界。
+- `printk::write_str("arceos_ex object kernel\n")` 是 PrintkBuffer.Preset 后的 Write action，不是
+  phase transition。
+- 所有 drives 保持 model 源顺序，阶段内不得提前打开中断、任务并发或 SMP 并发。

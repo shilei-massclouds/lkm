@@ -176,7 +176,7 @@ pub fn is_ready() -> bool {
 }
 
 fn irq_time_init_phase_ready(ctx: &Context) -> bool {
-    crate::phases::boot::sched_init::is_ready()
+    crate::phases::boot::sched_init::is_online()
         && ctx.irq_controller.state() == State::Ready
         && ctx.irq_controller.descriptors_ready()
         && ctx.irq_controller.domain_ready()

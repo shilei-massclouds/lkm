@@ -19,12 +19,36 @@ const DEFERRED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
 const DEFERRED_START_KERNEL_POSITION: u8 = 1 << 2;
 
 pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex entry successor preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
     crate::phases::shutdown_on_error(
-        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check()),
         "arceos_ex entry successor preset failed\n",
     );
     setup(ctx)
+}
+
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::boot::entry_prelude::is_online()
+        && ctx.vm.state() == State::Ready
+        && ctx.vm.entry_prelude_ready()
+        && ctx.init_task.state() == State::Online
+        && ctx.init_stack.state() == State::Ready
+        && ctx.interrupt_stream.state() == State::Prepared
+        && ctx.raw_dtb.state() == State::Ready
+        && ctx.fix_map.state() == State::Ready
+        && ctx.kernel_image.state() == State::Online
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -85,48 +109,38 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.early_dtb.cleanup(&ctx.memblock, &ctx.early_param)
 }
 
-fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    if !start_kernel_deferred_facts_ready() {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE),
-            State::Base,
-            State::Prepared,
-        );
+fn adopt_prepared_with_check() -> EventResult {
+    let state = crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE);
+    if state != State::Base || !start_kernel_deferred_facts_ready() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
         &ENTRY_SUCCESSOR_PHASE_STATE,
         LifecycleEvent::Preset,
         State::Base,
         State::Prepared,
-        Checkpoint::EntrySuccessorPhaseReady,
+        Checkpoint::EntrySuccessorPhasePrepared,
     )
 }
 
 fn setup(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex entry successor setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex entry successor setup failed\n");
     enable(ctx)
 }
 
 fn adopt_ready(ctx: &Context) -> EventResult {
-    if !entry_successor_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE),
-            State::Prepared,
-            State::Ready,
-        );
+    let state = crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE);
+    if state != State::Prepared || !entry_successor_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
     }
 
-    crate::phases::state::adopt(
+    crate::phases::state::mark_checked(
         &ENTRY_SUCCESSOR_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Prepared,
         State::Ready,
+        Checkpoint::EntrySuccessorPhaseReady,
     )
 }
 
@@ -135,11 +149,16 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex entry successor enable failed\n",
     );
-    crate::phases::boot::core_prepare::preset(ctx)
+    crate::phases::boot::setup_after_entry_successor()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
-    crate::phases::state::mark(
+    let state = crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE);
+    if state != State::Ready || !entry_successor_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
         &ENTRY_SUCCESSOR_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
@@ -148,8 +167,13 @@ fn enable_event(ctx: &mut Context) -> EventResult {
     )
 }
 
+pub fn is_online() -> bool {
+    crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE) == State::Online
+}
+
 fn entry_successor_phase_ready(ctx: &Context) -> bool {
-    ctx.init_stack.state() == State::Online
+    crate::phases::boot::entry_prelude::is_online()
+        && ctx.init_stack.state() == State::Online
         && ctx.cpu_group.boot_cpu_state() == State::Online
         && ctx.boot_current_cpu.state() == State::Online
         && ctx.boot_cpu_local_interrupt.state() == State::Ready

@@ -75,14 +75,20 @@ Kernel
 2. **Kernel 根与 coding 权威来源（完成）**：Kernel charter/model/coding/impl 的状态与
    continuation 已完成首轮对齐；coding README/mapping 已改为 `.md` 权威；删除不可解析的
    `coding/main.spec` 和 `coding/arceos_ex.spec`，顶层
-   `spec/main.spec` 恢复可解析；剩余 24 个 coding `.spec` 已分类。announce 运行以
+   `spec/main.spec` 恢复可解析；当时剩余 24 个 coding `.spec` 已分类。announce 运行以
    `RAI...` 证明 `Kernel.Started` 先于 `EntryPreludePhase.Started`，并最终到达
    `Kernel.Online -> Hello, world!`。
 3. **两层阶段范式（完成）**：charter 范式只负责生成 model 的标准生命周期、父 `drives` 和
    同对象 `emits`；coding 范式独立负责四状态设置/检查、父 continuation、执行主体交接和
    checkpoint lowering。旧的 sibling emits、平坦 DFS 和 `handoff() -> next.setup()` 规则已删除。
-4. **BootPhase（待办）**：先审计编排层，再按五个叶子阶段顺序执行；EntryPrelude 作为已实现
-   样板重新复核，入口汇编例外必须有四层对应说明。
+4. **BootPhase（完成）**：Boot charter 固定五个直接子阶段；model 保持 Kernel -> Boot ->
+   EntryPrelude 的父 `drives` 和同对象 `emits`，只补入口 lowering/continuation 注释；coding
+   逐项映射父/叶 source、target、depends、drives、ensures、state、checkpoint 和 continuation，
+   并删除三个已迁移的 Boot coding `.spec`。实现入口采用 `R -> B -> A` 与四层 Rust adoption，
+   Boot 和五个叶子均可观察 Started/Prepared/Ready/Online；所有 sibling 直调已改为 Boot 父
+   continuation，查询收敛为精确 Online。announce 实测 `RBAIKOZHTS`，并观察
+   EntryPrelude.Online < Boot.Prepared < EntrySuccessor.Started、EntrySuccessor.Online <
+   Boot.Ready < CorePrepare.Started、SchedInit.Online < Boot.Online < InterruptPhase.Started。
 5. **InterruptPhase（待办）**：审计四个叶子阶段，重点核对中断开关、effective context、
    非标准 transition 入口、父 continuation 和 checkpoint owner。
 6. **UpMultitaskPhase（待办）**：审计 rest-init 子阶段链，重点核对 BootIdle、KernelInit、
@@ -112,13 +118,13 @@ Kernel
 | 节点 | Charter | Model | Coding `.md` | Impl | 结论 |
 | --- | --- | --- | --- | --- | --- |
 | 两层阶段范式 | `drives` 父子关系、同对象 `emits` | model 作为唯一执行语义 | 独立状态/continuation/checkpoint lowering | 各子树逐项应用 | complete |
-| Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RAI...`、Kernel.Online 已验证 | complete |
-| BootPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| EntryPreludePhase | 已有首轮 | 已有首轮 | 已有首轮 | 已有首轮 | recheck |
-| EntrySuccessorPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| CorePreparePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| MmCoreInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| SchedInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RBA...`、Kernel.Online 已验证 | complete |
+| BootPhase | 五子阶段、入口/出口已固定 | 既有 drives/emits 保持 | 父 continuation/四状态/checkpoint 已完整映射 | Online 状态和五个父 continuation 已验证 | complete |
+| EntryPreludePhase | 入口例外已明确 | 入口 adoption/父返回注释已补 | 汇编、VM continuation、四状态已映射 | `RBA...` 且四 checkpoint 已验证 | complete |
+| EntrySuccessorPhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
+| CorePreparePhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
+| MmCoreInitPhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
+| SchedInitPhase | 边界一致 | 既有 transition 保持 | 四状态/父返回已映射 | depends/四状态/Boot.Online 已验证 | complete |
 | InterruptPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | IrqTimeInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | LocalIrqEnablePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
@@ -140,13 +146,15 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录已从 26 个 `.spec` 降到 24 个；剩余分类为通用映射/构建/架构/语言 4 个、
-  project 1 个、phase 14 个、object 5 个。
+- coding 目录已从 26 个 `.spec` 降到 21 个；剩余分类为通用映射/构建/架构/语言 4 个、
+  project 1 个、phase 11 个、object 5 个。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Kernel 根审计发现各 composite phase 当前 impl 仍把 model Online 完成边界命名/记录为
-  `Ready`；该问题按 Boot、Interrupt、UpMultitask、SmpRuntime 子树批次逐项修正。
-- 更新本计划前，根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次，
+- Boot 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；剩余问题继续按 Interrupt、
+  UpMultitask、SmpRuntime 子树批次逐项修正。
+- Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+  `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
+- 本批开始前根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次，
   总计 90/90，通过且每个 case 只有一个成功事件序列。

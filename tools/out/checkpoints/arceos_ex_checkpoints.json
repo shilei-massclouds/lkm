@@ -31,7 +31,7 @@
     "index": 4,
     "variant": "BootPhaseStarted",
     "name": "BootPhase.Started",
-    "early_byte": null,
+    "early_byte": "B",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
@@ -3034,6 +3034,55 @@
     "index": 433,
     "variant": "PayloadPhaseOnline",
     "name": "PayloadPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 434,
+    "variant": "BootPhasePrepared",
+    "name": "BootPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 435,
+    "variant": "BootPhaseOnline",
+    "name": "BootPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 436,
+    "variant": "EntryPreludePhasePrepared",
+    "name": "EntryPreludePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 437,
+    "variant": "EntrySuccessorPhasePrepared",
+    "name": "EntrySuccessorPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 438,
+    "variant": "CorePreparePhasePrepared",
+    "name": "CorePreparePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 439,
+    "variant": "MmCoreInitPhasePrepared",
+    "name": "MmCoreInitPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 440,
+    "variant": "SchedInitPhasePrepared",
+    "name": "SchedInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }

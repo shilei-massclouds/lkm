@@ -60,12 +60,12 @@ fn enable() -> EventResult {
 
 fn payload_phase_dependencies_ready() -> bool {
     crate::phases::prepare::is_online()
-        && crate::phases::boot::is_ready()
+        && crate::phases::boot::is_online()
         && crate::phases::interrupt::is_ready()
         && crate::phases::up_multitask::is_ready()
         && crate::phases::smp_runtime::is_ready()
-        && crate::phases::boot::core_prepare::is_ready()
-        && crate::phases::boot::mm_core_init::is_ready()
+        && crate::phases::boot::core_prepare::is_online()
+        && crate::phases::boot::mm_core_init::is_online()
         && printk::is_ready()
         && (printk::boot_console_online() || printk::console_handoff_complete())
 }

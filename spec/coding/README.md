@@ -54,9 +54,11 @@ coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 
 
 ## `.spec` 迁移基线
 
-Kernel 根审计开始时 coding 目录有 26 个 `.spec`。本批删除已经不可解析的 `main.spec` 和
-`arceos_ex.spec` 后剩余 24 个：通用映射/构建/架构/语言 4 个、project 1 个、phase 14 个、
-object 5 个。后续按阶段树审计批次迁移 phase 文件，最后处理其它类别。
+Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删除不可解析的 `main.spec`
+和 `arceos_ex.spec` 后剩余 24 个；Boot 子树批次又把 `entry-successor.spec`、
+`core-prepare.spec` 和 `mm-core-init.spec` 的有效实现规则迁入对应 `.md` 并删除，当前剩余 21 个：
+通用映射/构建/架构/语言 4 个、project 1 个、phase 11 个、object 5 个。后续继续按阶段树审计
+批次迁移 phase 文件，最后处理其它类别。
 
 ## 当前实践目标
 

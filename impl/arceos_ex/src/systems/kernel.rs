@@ -20,7 +20,7 @@ pub fn adopt_head_preset_start() -> EventResult {
 }
 
 pub fn preset_after_boot() -> ! {
-    if !crate::phases::prepare::is_online() || !crate::phases::boot::is_ready() {
+    if !crate::phases::prepare::is_online() || !crate::phases::boot::is_online() {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel preset invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
@@ -31,7 +31,7 @@ pub fn preset_after_boot() -> ! {
 
 pub fn setup_after_interrupt() -> ! {
     if !crate::phases::prepare::is_online()
-        || !crate::phases::boot::is_ready()
+        || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_ready()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel setup invariant failed\n");
@@ -44,7 +44,7 @@ pub fn setup_after_interrupt() -> ! {
 
 pub fn enable_after_smp_runtime() -> ! {
     if !crate::phases::prepare::is_online()
-        || !crate::phases::boot::is_ready()
+        || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_ready()
         || !crate::phases::up_multitask::is_ready()
         || !crate::phases::smp_runtime::is_ready()
@@ -76,7 +76,7 @@ fn mark_ready() -> EventResult {
 
 pub fn mark_online() -> EventResult {
     if !crate::phases::prepare::is_online()
-        || !crate::phases::boot::is_ready()
+        || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_ready()
         || !crate::phases::up_multitask::is_ready()
         || !crate::phases::smp_runtime::is_ready()

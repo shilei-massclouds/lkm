@@ -38,6 +38,12 @@ object BootPhase: PhaseObject {
 
     state State::Base {
         transitions {
+            /*
+             * `_start` 是 Kernel.Preset -> BootPhase.Preset ->
+             * EntryPreludePhase.Preset 的特殊架构 lowering。实现可以在 head 中先记录三个
+             * Started 观察点，再在最早 Rust 边界 adoption source state、depends_on 和
+             * SingleTaskContext；这不折叠三个 owner transition，也不改变 drives 边。
+             */
             on Transition::Preset -> State::Prepared {
                 within SingleTaskContext {
                     drives {
@@ -48,6 +54,8 @@ object BootPhase: PhaseObject {
                 ensures {
                     EntryPreludePhase.state == State::Online;
                 }
+
+                /* EntryPrelude Online returns to the Boot.Preset continuation. */
 
                 emits {
                     Transition::Setup;
@@ -69,6 +77,8 @@ object BootPhase: PhaseObject {
                     EntrySuccessorPhase.state == State::Online;
                 }
 
+                /* EntrySuccessor Online returns to the Boot.Setup continuation. */
+
                 emits {
                     Transition::Enable;
                 }
@@ -87,6 +97,8 @@ object BootPhase: PhaseObject {
                 ensures {
                     CorePreparePhase.state == State::Online;
                 }
+
+                /* Each child returns to the next Boot.Enable continuation. */
 
                 within SingleTaskContext {
                     drives {

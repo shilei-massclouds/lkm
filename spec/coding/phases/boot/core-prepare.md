@@ -12,7 +12,7 @@
 
 ### 1. depends_on
 
-由 `EntrySuccessorPhase.enable()` 保证：
+由 `BootPhase.enable()` 启动，并在 `preset()` 中逐项检查：
 - `EntrySuccessorPhase.state == Online`
 - `Vm.state == Online`、`SwapperVm.state == Online`
 - `MemBlock.state == Online`
@@ -21,6 +21,9 @@
 - `BootCPU.state == Online`、`BootCpuLocalInterrupt.state == Ready`
 - `PrintkBuffer.state == Prepared`
 - `ExceptionStream.state == Prepared`
+
+`preset()` 还必须先检查 `CORE_PREPARE_PHASE_STATE == Base`；全部检查通过后才发出
+`CorePreparePhase.Started`。
 
 ### 2. drives
 
@@ -64,7 +67,7 @@
 
 ### 4. emits
 
-推进 Base → Prepared，调用 `setup()`。
+提交 Base → Prepared，读回后发出 `CorePreparePhase.Prepared`，再调用 `setup()`。
 
 ## setup()
 
@@ -82,7 +85,8 @@
 
 ### 4. emits
 
-推进 Prepared → Ready，调用 `enable()`。
+检查精确 Prepared，提交 Prepared → Ready，读回后发出 `CorePreparePhase.Ready`，再调用
+`enable()`。
 
 ## enable()
 
@@ -96,30 +100,31 @@
 
 ### 3. ensures
 
-推进 Ready → Online，发出 `CorePreparePhaseOnline` checkpoint。
+检查精确 Ready并重新确认 Online invariant，提交 Ready → Online，发出
+`CorePreparePhase.Online` checkpoint。
 
 ### 4. emits
 
-→ `MmCoreInitPhase.preset()`
+→ `BootPhase.enable_after_core_prepare()` 父 continuation
 
 ## 迁移间调用关系
 
 ```
-preset()  ← 由 EntrySuccessorPhase.enable() 调用
+preset()  ← 由 BootPhase.enable() 调用
   │
   ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
   │
-  ├─ adopt_prepared_with_check()  ← 检查并发的关闭事实，标记 Prepared
+  ├─ adopt_prepared_with_check()  ← 检查并发关闭事实，标记 Prepared + checkpoint
   │
   setup()  ← emits
   │
-  ├─ adopt_ready()  ← 检查 Online invariant，标记 Ready
+  ├─ adopt_ready()  ← 检查 Ready invariant，标记 Ready + checkpoint
   │
   enable()  ← emits
   │
-  ├─ enable_event()  ← 标记 Online
+  ├─ enable_event()  ← 检查 invariant，标记 Online + checkpoint
   │
-  └─ MmCoreInitPhase.preset()
+  └─ BootPhase.enable_after_core_prepare()
 ```
 
 ## Invariant（模型 CorePreparePhase.Ready / Online）
@@ -160,9 +165,10 @@ preset()  ← 由 EntrySuccessorPhase.enable() 调用
 
 | Checkpoint | Phase State | Position |
 |---|---|---|
-| `CorePreparePhaseStarted` | Base | `preset()` 入口 |
-| `CorePreparePhaseReady` | Prepared | `adopt_prepared_with_check()` |
-| `CorePreparePhaseOnline` | Online | `enable_event()` |
+| `CorePreparePhase.Started` | Base | `preset()` source/dependency 检查后 |
+| `CorePreparePhase.Prepared` | Prepared | `adopt_prepared_with_check()` |
+| `CorePreparePhase.Ready` | Ready | `adopt_ready()` |
+| `CorePreparePhase.Online` | Online | `enable_event()`、父 continuation 前 |
 
 ## Coding Constraints
 
@@ -175,3 +181,15 @@ preset()  ← 由 EntrySuccessorPhase.enable() 调用
 - `checkpoint_second_parse_early_param` 仅检查 `EarlyParam.state == Ready`（标志第二次 `parse_early_param()` 调用位置），不重新推进 `EarlyParam` 或 `EarlyCon`。
 - `checkpoint_print_unknown_bootoptions` 仅输出 `BootParam` 收集到的未知选项，不改变 `BootParam` 状态。
 - 所有对象推进必须严格按模型 drives 顺序执行，不得因实现方便提前打开中断或 SMP 并发。
+
+`CORE_PREPARE_PHASE_STATE` 必须持久记录四状态；公开查询为 `is_online()`，且只在精确 Online
+时返回 true。
+
+## 迁移自 legacy formal index 的 MUST
+
+原 `core-prepare.spec` 的有效规则全部由本文件承接：必须保持 early IRQ、task 和 SMP 并发关闭
+事实；StaticBranch 必须记录并实际驱动独立 `CpuHotplugLock`/`JumpLabelMutex` guard，运行期 text
+patch synchronization 继续显式 deferred；ResourceTree 必须记录并实际驱动独立 ResourceLock
+write guard，通用 RwLock 暴露 reader/writer 协议；PrintkBuffer.Setup 必须记录 local irq
+save/restore 并绑定 BootCpuLocalInterrupt；Randomness.Preset 不得无条件获取 input-pool lock，未来
+展开条件 reseed/credit 路径时必须使用 base-crng irqsave lock。

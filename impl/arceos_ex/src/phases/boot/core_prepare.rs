@@ -13,12 +13,39 @@ static CORE_PREPARE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex core prepare preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::CorePreparePhaseStarted);
     crate::phases::shutdown_on_error(
         preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
         "arceos_ex core prepare preset failed\n",
     );
     setup(ctx)
+}
+
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::boot::entry_successor::is_online()
+        && ctx.vm.state() == State::Online
+        && ctx.vm.swapper_vm().state() == State::Online
+        && ctx.memblock.state() == State::Online
+        && ctx.params.state() == State::Prepared
+        && ctx.early_param.state() == State::Ready
+        && ctx.command_line.state() == State::Prepared
+        && ctx.cpu_group.boot_cpu_state() == State::Online
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.disabled()
+        && printk::is_prepared()
+        && ctx.exception_stream.state() == State::Prepared
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -88,60 +115,56 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    if !ctx.interrupt_stream.early_boot_irqs_disabled() {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            crate::phases::state::load(&CORE_PREPARE_PHASE_STATE),
-            State::Base,
-            State::Prepared,
-        );
+    let state = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
+    if state != State::Base
+        || !ctx.interrupt_stream.early_boot_irqs_disabled()
+        || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
+        || ctx.cpu_group.smp_concurrency_open()
+    {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
         &CORE_PREPARE_PHASE_STATE,
         LifecycleEvent::Preset,
         State::Base,
         State::Prepared,
-        Checkpoint::CorePreparePhaseReady,
+        Checkpoint::CorePreparePhasePrepared,
     )
 }
 
 fn setup(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex core prepare setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex core prepare setup failed\n");
     enable(ctx)
 }
 
 fn adopt_ready(ctx: &Context) -> EventResult {
-    if !core_prepare_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&CORE_PREPARE_PHASE_STATE),
-            State::Prepared,
-            State::Ready,
-        );
+    let state = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
+    if state != State::Prepared || !core_prepare_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
     }
 
-    crate::phases::state::adopt(
+    crate::phases::state::mark_checked(
         &CORE_PREPARE_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Prepared,
         State::Ready,
+        Checkpoint::CorePreparePhaseReady,
     )
 }
 
 fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        enable_event(ctx),
-        "arceos_ex core prepare enable failed\n",
-    );
-    crate::phases::boot::mm_core_init::preset(ctx)
+    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex core prepare enable failed\n");
+    crate::phases::boot::enable_after_core_prepare()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
-    crate::phases::state::mark(
+    let state = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
+    if state != State::Ready || !core_prepare_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
         &CORE_PREPARE_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
@@ -150,13 +173,13 @@ fn enable_event(ctx: &mut Context) -> EventResult {
     )
 }
 
-pub fn is_ready() -> bool {
-    let s = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
-    s == State::Ready || s == State::Online
+pub fn is_online() -> bool {
+    crate::phases::state::load(&CORE_PREPARE_PHASE_STATE) == State::Online
 }
 
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
-    ctx.device_tree.state() == State::Ready
+    crate::phases::boot::entry_successor::is_online()
+        && ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
         && ctx.page_metadata_map.state() == State::Ready
         && ctx.page_metadata_map.metadata_count() != 0

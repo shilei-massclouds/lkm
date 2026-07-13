@@ -6,7 +6,7 @@
 | 1 | KernelOnline | Kernel.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 2 | PreparePhaseReady | PreparePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 3 | PreparePhaseOnline | PreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 4 | BootPhaseStarted | BootPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 4 | BootPhaseStarted | BootPhase.Started | B | impl/arceos_ex/src/checkpoint/mod.rs |
 | 5 | BootPhaseReady | BootPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 6 | InterruptPhaseStarted | InterruptPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 7 | InterruptPhaseReady | InterruptPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -436,3 +436,10 @@
 | 431 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 432 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 433 | PayloadPhaseOnline | PayloadPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 434 | BootPhasePrepared | BootPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 435 | BootPhaseOnline | BootPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 436 | EntryPreludePhasePrepared | EntryPreludePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 437 | EntrySuccessorPhasePrepared | EntrySuccessorPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 438 | CorePreparePhasePrepared | CorePreparePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 439 | MmCoreInitPhasePrepared | MmCoreInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 440 | SchedInitPhasePrepared | SchedInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
