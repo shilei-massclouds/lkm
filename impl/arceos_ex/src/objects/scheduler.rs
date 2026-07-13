@@ -15,7 +15,7 @@ use super::{
         failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
     },
     static_branch::StaticBranch,
-    task::TaskCpuState,
+    task::{Task, TaskCpuState, TaskEntry, TaskKind},
     user_boot::USER_CHILD_PID,
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
@@ -90,7 +90,6 @@ pub struct Scheduler {
     schedule_exit_saved_interrupt_count: usize,
     schedule_exit_restored_interrupt_count: usize,
     schedule_exit_count: usize,
-    kernel_init_switch_context: TaskSwitchContext,
     smoke_scheduler_task: SmokeSchedulerTask,
     smoke_mutex_task: SmokeSchedulerTask,
     smoke_rwsem_task: SmokeSchedulerTask,
@@ -161,7 +160,6 @@ impl Scheduler {
             schedule_exit_saved_interrupt_count: 0,
             schedule_exit_restored_interrupt_count: 0,
             schedule_exit_count: 0,
-            kernel_init_switch_context: TaskSwitchContext::new(),
             smoke_scheduler_task: SmokeSchedulerTask::new(SMOKE_SCHEDULER_TASK_ID),
             smoke_mutex_task: SmokeSchedulerTask::new(SMOKE_MUTEX_TASK_ID),
             smoke_rwsem_task: SmokeSchedulerTask::new(SMOKE_RWSEM_TASK_ID),
@@ -696,7 +694,7 @@ impl Scheduler {
     pub fn schedule(
         &mut self,
         cpu_group: &CpuGroup,
-        kernel_init_task: &KernelInitTask,
+        kernel_init_task: &mut KernelInitTask,
         kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
@@ -790,14 +788,14 @@ impl Scheduler {
         self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
         self.schedule_exit_count = self.schedule_exit_count.wrapping_add(1);
         crate::checkpoint::checkpoint(Checkpoint::SchedulerScheduleExit);
-        self.cooperative_context_switch(prev_ref, next_ref)?;
+        self.cooperative_context_switch(prev_ref, next_ref, kernel_init_task, kthreadd_task)?;
         Ok(())
     }
 
     pub fn schedule_idle(
         &mut self,
         cpu_group: &CpuGroup,
-        kernel_init_task: &KernelInitTask,
+        kernel_init_task: &mut KernelInitTask,
         kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
@@ -922,6 +920,7 @@ impl Scheduler {
             prev_ref,
             CurrentTaskRef::BootIdle
                 | CurrentTaskRef::KernelInit
+                | CurrentTaskRef::Kthreadd
                 | CurrentTaskRef::SmokeScheduler
                 | CurrentTaskRef::SmokeMutex
                 | CurrentTaskRef::SmokeRwsem
@@ -1009,77 +1008,44 @@ impl Scheduler {
         &mut self,
         prev_ref: CurrentTaskRef,
         next_ref: CurrentTaskRef,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
     ) -> EventResult {
-        match (prev_ref, next_ref) {
-            (CurrentTaskRef::KernelInit, CurrentTaskRef::SmokeScheduler) => {
-                if !self.smoke_scheduler_task.switch_context().initialized() {
-                    return self.failed_switch_to();
-                }
-                unsafe {
-                    task_switch::switch(
-                        &mut self.kernel_init_switch_context,
-                        self.smoke_scheduler_task.switch_context(),
-                    );
-                }
+        // Resolve the prev (mutable) and next (immutable) switch contexts for
+        // the given ref pair.
+        // The kernel_init_task and kthreadd_task are passed from the outside so
+        // their switch_ctx is accessible here even though they are not owned by
+        // Scheduler.  When a kernel task is the *prev* party we need mutable
+        // access; we obtain it through a raw-pointer cast because the callers
+        // guarantee exclusive ownership at the point of the switch.
+        //
+        // NOTE: BootIdle and Kthreadd kernel-task pairs are NOT wired for the
+        // real assembly switch yet — the kernel entry stubs do not call
+        // schedule() to return.  Once the entry functions implement real
+        // kernel-init / kthreadd work, add the corresponding arms below.
+        let prev: *mut TaskSwitchContext = match prev_ref {
+            CurrentTaskRef::KernelInit => {
+                kernel_init_task.switch_context() as *const TaskSwitchContext as *mut _
             }
-            (CurrentTaskRef::SmokeScheduler, CurrentTaskRef::KernelInit) => unsafe {
-                task_switch::switch(
-                    self.smoke_scheduler_task.switch_context_mut(),
-                    &self.kernel_init_switch_context,
-                );
-            },
-            (CurrentTaskRef::KernelInit, CurrentTaskRef::SmokeMutex) => {
-                if !self.smoke_mutex_task.switch_context().initialized() {
-                    return self.failed_switch_to();
-                }
-                unsafe {
-                    task_switch::switch(
-                        &mut self.kernel_init_switch_context,
-                        self.smoke_mutex_task.switch_context(),
-                    );
-                }
-            }
-            (CurrentTaskRef::SmokeMutex, CurrentTaskRef::KernelInit) => unsafe {
-                task_switch::switch(
-                    self.smoke_mutex_task.switch_context_mut(),
-                    &self.kernel_init_switch_context,
-                );
-            },
-            (CurrentTaskRef::KernelInit, CurrentTaskRef::SmokeRwsem) => {
-                if !self.smoke_rwsem_task.switch_context().initialized() {
-                    return self.failed_switch_to();
-                }
-                unsafe {
-                    task_switch::switch(
-                        &mut self.kernel_init_switch_context,
-                        self.smoke_rwsem_task.switch_context(),
-                    );
-                }
-            }
-            (CurrentTaskRef::SmokeRwsem, CurrentTaskRef::KernelInit) => unsafe {
-                task_switch::switch(
-                    self.smoke_rwsem_task.switch_context_mut(),
-                    &self.kernel_init_switch_context,
-                );
-            },
-            (CurrentTaskRef::KernelInit, CurrentTaskRef::SmokeRwLock) => {
-                if !self.smoke_rwlock_task.switch_context().initialized() {
-                    return self.failed_switch_to();
-                }
-                unsafe {
-                    task_switch::switch(
-                        &mut self.kernel_init_switch_context,
-                        self.smoke_rwlock_task.switch_context(),
-                    );
-                }
-            }
-            (CurrentTaskRef::SmokeRwLock, CurrentTaskRef::KernelInit) => unsafe {
-                task_switch::switch(
-                    self.smoke_rwlock_task.switch_context_mut(),
-                    &self.kernel_init_switch_context,
-                );
-            },
-            _ => {}
+            CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context_mut(),
+            CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context_mut(),
+            CurrentTaskRef::SmokeRwsem => self.smoke_rwsem_task.switch_context_mut(),
+            CurrentTaskRef::SmokeRwLock => self.smoke_rwlock_task.switch_context_mut(),
+            _ => return Ok(()),
+        };
+        let next: &TaskSwitchContext = match next_ref {
+            CurrentTaskRef::KernelInit => kernel_init_task.switch_context(),
+            CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context(),
+            CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context(),
+            CurrentTaskRef::SmokeRwsem => self.smoke_rwsem_task.switch_context(),
+            CurrentTaskRef::SmokeRwLock => self.smoke_rwlock_task.switch_context(),
+            _ => return Ok(()),
+        };
+        if !next.initialized() {
+            return self.failed_switch_to();
+        }
+        unsafe {
+            task_switch::switch(&mut *prev, next);
         }
         Ok(())
     }
@@ -1809,9 +1775,10 @@ pub struct CpuIdleTaskView {
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
     no_set_affinity: bool,
-    thread_context_core_register_set: bool,
-    thread_context_core_saved_count: usize,
-    thread_context_core_restored_count: usize,
+    switch_ctx_ra: usize,
+    switch_ctx_initialized: bool,
+    core_saved_count: usize,
+    core_restored_count: usize,
 }
 
 impl CpuIdleTaskView {
@@ -1843,16 +1810,20 @@ impl CpuIdleTaskView {
         self.no_set_affinity
     }
 
-    pub const fn thread_context_core_register_set(self) -> bool {
-        self.thread_context_core_register_set
+    pub const fn switch_ctx_ra(self) -> usize {
+        self.switch_ctx_ra
     }
 
-    pub const fn thread_context_core_saved_count(self) -> usize {
-        self.thread_context_core_saved_count
+    pub const fn switch_ctx_initialized(self) -> bool {
+        self.switch_ctx_initialized
     }
 
-    pub const fn thread_context_core_restored_count(self) -> usize {
-        self.thread_context_core_restored_count
+    pub const fn core_saved_count(self) -> usize {
+        self.core_saved_count
+    }
+
+    pub const fn core_restored_count(self) -> usize {
+        self.core_restored_count
     }
 }
 
@@ -1930,7 +1901,7 @@ impl SmokeSchedulerTask {
         }
 
         let stack_top = self.stack.as_ptr() as usize + core::mem::size_of_val(&self.stack);
-        self.switch_context.init(entry, stack_top);
+        self.switch_context.init(entry, stack_top, 0);
         self.thread_context.setup_smoke_scheduler(stack_top);
         if !self.cpu.set_task_cpu(cpu_id) {
             return false;
@@ -2509,12 +2480,10 @@ impl BootRunQueue {
 }
 
 pub struct BootIdleTask {
+    pub task: Task,
     lifecycle: Lifecycle,
     pi_lock: RawSpinLock,
-    task_id: usize,
-    cpu: TaskCpuState,
     cpu_ref: CpuRef,
-    thread_context: TaskThreadContext,
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
     no_set_affinity: bool,
@@ -2522,17 +2491,17 @@ pub struct BootIdleTask {
     init_held_runqueue_lock: bool,
     cpu_set_under_rcu_read: bool,
     runqueue_current_published_with_rcu: bool,
+    core_saved_count: usize,
+    core_restored_count: usize,
 }
 
 impl BootIdleTask {
     const fn new() -> Self {
         Self {
+            task: Task::new(),
             lifecycle: Lifecycle::new(State::Base),
             pi_lock: RawSpinLock::new(),
-            task_id: usize::MAX,
-            cpu: TaskCpuState::new(),
             cpu_ref: CpuRef::invalid(),
-            thread_context: TaskThreadContext::new(),
             uses_current_init_task: false,
             lazy_tlb_mm_ready: false,
             no_set_affinity: false,
@@ -2540,6 +2509,8 @@ impl BootIdleTask {
             init_held_runqueue_lock: false,
             cpu_set_under_rcu_read: false,
             runqueue_current_published_with_rcu: false,
+            core_saved_count: 0,
+            core_restored_count: 0,
         }
     }
 
@@ -2552,11 +2523,11 @@ impl BootIdleTask {
     }
 
     pub const fn task_id(&self) -> usize {
-        self.task_id
+        self.task.pid
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.cpu.cpu_id()
+        self.task.cpu.cpu_id()
     }
 
     pub const fn init_held_pi_lock(&self) -> bool {
@@ -2575,26 +2546,34 @@ impl BootIdleTask {
         self.runqueue_current_published_with_rcu
     }
 
+    pub fn switch_context(&self) -> &TaskSwitchContext {
+        &self.task.switch_ctx
+    }
+
+    pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
+        &mut self.task.switch_ctx
+    }
+
     pub fn view(&self) -> Option<CpuIdleTaskView> {
         if self.lifecycle.state() != State::Ready
-            || self.task_id == usize::MAX
             || self.cpu_ref == CpuRef::invalid()
-            || self.cpu.cpu_id() == usize::MAX
+            || self.task.cpu.cpu_id() == usize::MAX
         {
             return None;
         }
 
         Some(CpuIdleTaskView {
             state: self.lifecycle.state(),
-            task_id: self.task_id,
+            task_id: self.task.pid,
             cpu_ref: self.cpu_ref,
-            cpu_id: self.cpu.cpu_id(),
+            cpu_id: self.task.cpu.cpu_id(),
             uses_current_init_task: self.uses_current_init_task,
             lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
             no_set_affinity: self.no_set_affinity,
-            thread_context_core_register_set: self.thread_context.core_register_set(),
-            thread_context_core_saved_count: self.thread_context.core_saved_count(),
-            thread_context_core_restored_count: self.thread_context.core_restored_count(),
+            switch_ctx_ra: self.task.switch_ctx.ra(),
+            switch_ctx_initialized: self.task.switch_ctx.initialized(),
+            core_saved_count: self.core_saved_count,
+            core_restored_count: self.core_restored_count,
         })
     }
 
@@ -2611,8 +2590,8 @@ impl BootIdleTask {
             && self.cpu_ref == boot_cpu.cpu_ref()
             && self.cpu_ref == boot_runqueue.cpu_ref()
             && self.cpu_id() == boot_runqueue.cpu_id()
-            && self.task_id == boot_runqueue.idle_task_id()
-            && boot_runqueue.curr_task_id() == self.task_id
+            && self.task_id() == boot_runqueue.idle_task_id()
+            && boot_runqueue.curr_task_id() == self.task_id()
     }
 
     fn setup(
@@ -2661,9 +2640,9 @@ impl BootIdleTask {
             boot_runqueue.lock.acquire()?;
             let runqueue_guarded_result = (|| {
                 self.init_held_runqueue_lock = true;
-                self.task_id = boot_runqueue.idle_task_id();
+                self.task.pid = boot_runqueue.idle_task_id();
                 boot_idle_rcu_read_side.read_lock()?;
-                if !self.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
+                if !self.task.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
                     let _ = boot_idle_rcu_read_side.read_unlock();
                     return failed_condition(
                         LifecycleEvent::Setup,
@@ -2675,7 +2654,8 @@ impl BootIdleTask {
                 boot_idle_rcu_read_side.read_unlock()?;
                 self.cpu_set_under_rcu_read = true;
                 self.cpu_ref = boot_runqueue.cpu_ref();
-                self.thread_context.setup_boot_idle();
+                self.task.kind = TaskKind::KernelThread;
+                self.task.switch_ctx.init_with_dummy();
                 self.uses_current_init_task = true;
                 self.lazy_tlb_mm_ready = true;
                 self.no_set_affinity = true;
@@ -2698,7 +2678,7 @@ impl BootIdleTask {
     }
 
     fn save_core_context(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.lifecycle.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -2707,12 +2687,12 @@ impl BootIdleTask {
             );
         }
 
-        self.thread_context.save_core();
+        self.core_saved_count = self.core_saved_count.wrapping_add(1);
         Ok(())
     }
 
     fn restore_core_context(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.lifecycle.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -2721,7 +2701,7 @@ impl BootIdleTask {
             );
         }
 
-        self.thread_context.restore_core();
+        self.core_restored_count = self.core_restored_count.wrapping_add(1);
         Ok(())
     }
 }

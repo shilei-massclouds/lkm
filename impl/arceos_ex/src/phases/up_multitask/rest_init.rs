@@ -3,9 +3,10 @@ use crate::{
     context::Context,
     objects::{
         rest_init::{
-            runtime_services_still_deferred, SystemStateValue, TaskEntry, TaskKind, TaskSpawnInputs,
+            runtime_services_still_deferred, SystemStateValue, TaskSpawnInputs,
         },
         state::{failed_condition, EventResult, LifecycleEvent, State},
+        task::{TaskEntry, TaskKind},
     },
 };
 use core::sync::atomic::AtomicU8;
@@ -67,6 +68,11 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.init_task,
         &ctx.scheduler,
         &ctx.cpu_group,
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &mut ctx.page_table_caches,
+        &ctx.config,
     )?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_task_pi_lock.setup()?;
@@ -111,6 +117,11 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.init_task,
         &ctx.scheduler,
         &ctx.cpu_group,
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &mut ctx.page_table_caches,
+        &ctx.config,
     )?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
@@ -169,7 +180,7 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     let result = ctx.boot_idle_runtime.run_idle_loop(
         &mut ctx.scheduler,
         &ctx.cpu_group,
-        &ctx.kernel_init_task,
+        &mut ctx.kernel_init_task,
         &ctx.kthreadd_task,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
@@ -202,7 +213,7 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
 
     let schedule_result = ctx.scheduler.schedule(
         &ctx.cpu_group,
-        &ctx.kernel_init_task,
+        &mut ctx.kernel_init_task,
         &ctx.kthreadd_task,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,

@@ -581,7 +581,7 @@ impl Context {
     pub fn schedule_current(&mut self) -> EventResult {
         self.scheduler.schedule(
             &self.cpu_group,
-            &self.kernel_init_task,
+            &mut self.kernel_init_task,
             &self.kthreadd_task,
             &mut self.boot_cpu_local_interrupt,
             &mut self.boot_cpu_current_task,

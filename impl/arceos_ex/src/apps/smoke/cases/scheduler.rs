@@ -126,9 +126,9 @@ pub fn run() -> SmokeResult {
             .scheduler
             .default_root_domain()
             .covers_cpu_ref(boot_scheduler_view.runqueue().cpu_ref())
-        || !boot_idle_task.thread_context_core_register_set()
-        || boot_idle_task.thread_context_core_saved_count() == 0
-        || boot_idle_task.thread_context_core_restored_count() == 0
+        || !boot_idle_task.switch_ctx_initialized()
+        || boot_idle_task.core_saved_count() == 0
+        || boot_idle_task.core_restored_count() == 0
         || ctx.scheduler.idle_schedule_passes() == 0
         || ctx.scheduler.idle_schedule_returned_passes() != ctx.scheduler.idle_schedule_passes()
         || ctx.scheduler.idle_schedule_identity_passes() != 0

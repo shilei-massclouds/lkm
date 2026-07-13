@@ -3,8 +3,9 @@ use crate::{
     context::context,
     objects::{
         printk,
-        rest_init::{SystemStateValue, TaskEntry, TaskKind},
+        rest_init::SystemStateValue,
         state::State,
+        task::{TaskEntry, TaskKind},
     },
     phases,
 };
@@ -181,9 +182,9 @@ pub fn run() -> SmokeResult {
         || !ctx.scheduler.boot_idle_preemption().disabled()
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
-        || !boot_idle_task.thread_context_core_register_set()
-        || boot_idle_task.thread_context_core_saved_count() == 0
-        || boot_idle_task.thread_context_core_restored_count() == 0
+        || !boot_idle_task.switch_ctx_initialized()
+        || boot_idle_task.core_saved_count() == 0
+        || boot_idle_task.core_restored_count() == 0
         || !ctx.kernel_init_task.released_for_pre_smp_init()
     {
         printk::write_str("scheduler dispatch facts invalid\n");

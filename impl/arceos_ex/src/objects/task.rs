@@ -1,3 +1,5 @@
+use crate::arch::riscv64::task_switch::TaskSwitchContext;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum TaskEntry {
     None,
@@ -5,6 +7,13 @@ pub enum TaskEntry {
     Kthreadd,
     UserChild,
     SmokeScheduler,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum TaskKind {
+    None,
+    UserModeThread,
+    KernelThread,
 }
 
 pub struct TaskCpuState {
@@ -27,5 +36,32 @@ impl TaskCpuState {
 
         self.cpu_id = cpu_id;
         true
+    }
+}
+
+pub struct Task {
+    pub entry: TaskEntry,
+    pub pid: usize,
+    pub kind: TaskKind,
+    pub cpu: TaskCpuState,
+    pub running: bool,
+    pub switch_ctx: TaskSwitchContext,
+}
+
+impl Task {
+    pub const fn new() -> Self {
+        Self {
+            entry: TaskEntry::None,
+            pid: 0,
+            kind: TaskKind::None,
+            cpu: TaskCpuState::new(),
+            running: false,
+            switch_ctx: TaskSwitchContext::new(),
+        }
+    }
+
+    pub fn init_switch_context(&mut self, entry: extern "C" fn() -> !, stack_top: usize) {
+        let tp = self as *const Task as usize;
+        self.switch_ctx.init(entry, stack_top, tp);
     }
 }

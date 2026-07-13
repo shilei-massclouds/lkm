@@ -6,8 +6,9 @@ use crate::{
     },
     context::Context,
     objects::{
-        rest_init::{TaskEntry, TaskKind, KERNEL_INIT_PID},
+        rest_init::KERNEL_INIT_PID,
         state::State,
+        task::{TaskEntry, TaskKind},
     },
 };
 
