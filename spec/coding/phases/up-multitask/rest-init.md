@@ -50,8 +50,11 @@ enters the kthreadd service loop boundary.
 #### Kthreadd entry loop
 
 BootInitRestInitPhase must publish KthreaddTask entry/provider facts
-but must not drive the kthreadd service-loop subphase. The current
-BP records kthreadd schedule-loop execution as deferred until a
+but must not execute the kthreadd loop on the BootIdle owner line. When
+KthreaddTask is selected, its temporary entry loop repeatedly calls the
+ordinary scheduler boundary to yield the CPU. The number of completed loop
+iterations is not a boot acceptance condition. Consuming kthread creation
+requests and the full wait/park/stop protocol remain deferred until a
 KthreaddTask-owned runtime phase exists.
 
 #### System state
@@ -102,10 +105,9 @@ PrepareIdleEntry, RunIdleLoop and DoIdleCycle into one setup-time
 fact update. The phase code must explicitly drive
 BootIdleRuntime.prepare_idle_entry(), then
 BootIdleRuntime.run_idle_loop(), with run_idle_loop() committing one
-representative do_idle_cycle() boundary. This step still keeps the
-real idle loop and need_resched loop deferred; it only aligns the
-code shape with the model action boundary so later AI-generated code
-has named hooks to extend.
+representative do_idle_cycle() boundary for finite model observation. The
+runtime continuation itself must remain an unbounded loop that can repeatedly
+enter schedule_idle(); no exact loop or switch count is part of boot acceptance.
 
 #### Representative need_resched idle cycle
 
@@ -117,8 +119,9 @@ no-need-resched wait state with polling/nohz details deferred; the
 second records that the CPU-visible environment sets need_resched and
 the idle task leaves the wait state; the third records a
 schedule_idle request/return and drains the need_resched fact. This
-remains an object-level representative cycle: it must not add a true
-infinite loop, real timer/IRQ wakeup source, or cpuidle/WFI path.
+remains an object-level representative cycle. The implementation repeats this
+scheduler boundary, while real timer/IRQ wakeup sources and the cpuidle/WFI
+path remain deferred.
 
 #### schedule_idle wrapper
 
@@ -130,10 +133,11 @@ BootIdleRuntime. It must reuse the existing Scheduler.schedule()
 pick-next/switch-to skeleton and must not hand-commit a
 BootIdleTask -> BootIdleTask identity switch when runnable tasks are
 present. It must publish idle-specific counters/facts separately
-from ordinary schedule() calls so smoke/KUnit coverage can
-distinguish the idle path. It must not model the full Linux do {
-__schedule(SM_IDLE); } while (need_resched()) loop,
-sched_submit_work() skip details, or the long-running idle loop yet.
+from ordinary schedule() calls so smoke/KUnit coverage can distinguish the
+idle path. The finite object trace need not expand the full Linux do {
+__schedule(SM_IDLE); } while (need_resched()) loop, tick/nohz detail, or
+sched_submit_work() skip details; the Rust continuation must nevertheless
+remain schedulable for an unbounded number of iterations.
 
 #### Action lowering ABI
 
@@ -179,14 +183,11 @@ helper or collapse the model action order into one opaque phase call.
 
 #### Smoke/KUnit coverage
 
-The rest_init smoke case and the checkpoint KUnit smoke reuse must
-validate the boot idle schedule relation, not only non-zero facts:
-the representative idle cycle records exactly one
-Scheduler.schedule_idle() pass in the current BP implementation;
-idle schedule request/return counters match each other; ordinary
-schedule/switch/current-task switch counters include that idle pass;
-and idle identity counters remain zero while runnable boot tasks are
-present.
+The rest_init smoke case and the checkpoint KUnit smoke reuse must validate
+the boot idle schedule relation and the KernelInit payload owner, but must not
+require an exact number of BootIdle, Kthreadd or context-switch iterations.
+Counter observations may prove that a boundary was reached; they are not
+default `make run` acceptance criteria.
 
 #### CPU instance model
 
@@ -482,11 +483,26 @@ PreSmpInitPhase must depend on the KernelInitTask release/dispatch
 facts and Scheduler first-schedule fact, not on BootIdleEntryPhase.Ready
 or any UP multitask aggregate wrapper.
 
-#### No real task switch
+#### Real BootIdle to KernelInit stack handoff
 
-The current object-level implementation must not pretend to perform
-a real task-stack switch, preemptive scheduler context switch or
-idle loop. It may only publish the rest_init boundary facts.
+The implementation may linearize the owner-split rest_init object and
+checkpoint facts, but leaving UpMultitaskPhase must perform one real
+cooperative context transfer from BootIdleTask to KernelInitTask. The
+handoff saves BootIdleTask's `ra/sp/tp/s0..s11`, restores the initialized
+KernelInitTask context on its vmalloc stack, and enters `kernel_init_entry()`.
+SmpRuntimePhase and PayloadPhase must be driven from that entry. If a later
+schedule restores the BootIdle continuation, it remains in its active idle
+schedule loop. If KthreaddTask is selected, it remains in its temporary active
+schedule loop. Neither continuation may execute the selected payload.
+
+#### Boot stack size after handoff
+
+Once the real BootIdleTask to KernelInitTask handoff is enabled and the
+KernelInit entry verifies that it is running on its own 16 KiB vmalloc stack,
+the generated boot stack must use the codegen profile's 16 KiB size. This
+reduction is valid only while SmpRuntimePhase and PayloadPhase remain owned by
+KernelInitTask; moving either path back to the boot stack requires re-auditing
+the boot stack bound before changing the linker profile.
 
 #### Deferred runtime
 

@@ -1870,9 +1870,20 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 `CurrentTaskRef` 目标的事实，不能只依赖 `Scheduler` 计数或 `BootRunQueue.curr` 间接表示。当前 `rest_init`
 首次调度从 `BootIdleTask` 选择已入队的 `KernelInitTask` 或 `KthreaddTask`，实现暂时固定优先
 `KernelInitTask`，以支撑后续 `PreSmpInitPhase -> ... -> PayloadPhase` 的 KernelInit 执行线。当前
-`switch_to` 仍只实现 RISC-V 核心保存/恢复边界和 `CurrentTaskRef` commit；真实 task stack switch、next task
-上下文恢复、`finish_task_switch()` 等细节后续展开。若调用路径来自 `schedule_preempt_disabled()`，
+`switch_to` 的通用 action 仍负责 RISC-V 核心保存/恢复边界和 `CurrentTaskRef` commit；在 owner-split 对象事实
+线性提交完成、`UpMultitaskPhase` 离开前，impl MUST 通过每个 `Task` 拥有的 `TaskSwitchContext` 保存
+`BootIdleTask` 的真实 `ra/sp/tp/s0..s11` 并恢复 `KernelInitTask` 的 vmalloc stack context，再由
+`kernel_init_entry()` 驱动 `PreSmpInitPhase -> ... -> PayloadPhase`。不得从 BootIdle 的调用栈直接调用
+`smp_runtime::setup()` 或 selected payload。若 KernelInitTask 后续切回使 BootIdle continuation 恢复，
+该 continuation 必须停留在无限 `schedule_idle()` 循环，不得继续执行 payload。KthreaddTask 当前入口可在
+请求消费语义尚未展开时使用无限 `schedule()` 循环主动让出 CPU；循环次数和任务切换次数不得成为默认
+hello 验收条件。MM/FPU/vector 切换、通用 `finish_task_switch()` 和完整 kthreadd 请求处理仍 deferred。
+若调用路径来自 `schedule_preempt_disabled()`，
 调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
+真实 owner handoff 和 KernelInit entry 栈范围检查闭合后，生成的 `.boot.stack` 使用 codegen profile 的
+16KiB 配置；该缩减必须由完整 `make test` 同时覆盖 native/linux-object 与 hello/user/smoke 矩阵。
+默认 `make run` 的功能验收只要求 KernelInitTask 最终输出 `Hello, world!` 并关机，不绑定 BootIdle/Kthreadd
+是否完成过一轮、具体切换次数或 switch 诊断输出顺序。
 
 在 coding/codegen 层，模型中带显式参数和返回值的 action 可以 lowering 为统一入口形态：`Action(ContextRef, MutPacketRef)`。`ContextRef`
 提供生产对象图入口，`MutPacketRef` 是该 action chain 的强类型、局部、schema 明确的临时 packet，用于承载同级 actions 之间传递的临时值，例如

@@ -59,6 +59,10 @@ object PayloadPhase: PhaseObject {
 
                 ensures {
                     selected_payload_ready();
+                    payload_execution_owned_by_kernel_init_task(
+                        PayloadPhase,
+                        KernelInitTask
+                    );
                 }
             }
         }
@@ -89,9 +93,15 @@ object PayloadPhase: PhaseObject {
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_task_stack_switch_committed(
+                Scheduler,
+                BootIdleTask,
+                KernelInitTask
+            );
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();
+            payload_execution_owned_by_kernel_init_task(PayloadPhase, KernelInitTask);
             PayloadExecSyncBoundaries.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
         }
@@ -137,9 +147,15 @@ object PayloadPhase: PhaseObject {
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_task_stack_switch_committed(
+                Scheduler,
+                BootIdleTask,
+                KernelInitTask
+            );
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();
+            payload_execution_owned_by_kernel_init_task(PayloadPhase, KernelInitTask);
             PayloadExecSyncBoundaries.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
             selected_payload_no_return_handoff();

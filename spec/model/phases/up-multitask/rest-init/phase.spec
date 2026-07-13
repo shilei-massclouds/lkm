@@ -991,10 +991,9 @@ object KthreaddTask: Task {
         }
 
         /*
-         * RunScheduleLoop 对应 kthreadd() 的最小入口循环边界。当前规格只
-         * 提交“入口循环已建立且会在无工作时寻求 schedule”的事实；真实
-         * kthread_create_list 消费、wait/park/stop 语义，以及 Scheduler
-         * 支持非 idle current 后的实际 schedule() 展开留给后续模型。
+         * RunScheduleLoop 对应 kthreadd() 的当前最小入口循环。实现可以在
+         * 尚未消费 kthread_create_list 时重复主动调用 schedule() 让出 CPU；
+         * finite derivation 只提交循环已激活，不约束一次运行中完成了多少轮。
          */
         Action::RunScheduleLoop {
             state_effect: StateEffect::None;
@@ -1007,10 +1006,10 @@ object KthreaddTask: Task {
             ensures {
                 kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
                 kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
-                kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
+                kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
             }
             deferred {
-                "KthreaddTask 的真实 kthreadd() 循环、kthread_create_list 消费和非 idle current 下的 Scheduler.schedule() 展开后续建模；当前只保留入口循环与 schedule 请求边界。";
+                "kthread_create_list 消费、请求完成、wait/park/stop 和长期服务语义后续建模；当前最小循环只主动 schedule() 让出 CPU。";
             }
         }
     }
@@ -1219,8 +1218,10 @@ object KthreaddReadyGate: Completion {
  * cpu_startup_entry() -> do_idle() -> schedule_idle() 的循环主线：boot CPU
  * 先执行 current->flags |= PF_IDLE、arch_cpu_idle_prepare() 和
  * cpuhp_online_idle(CPUHP_ONLINE)，然后进入 while (1) do_idle()；当本 CPU
- * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度；真实系统
- * 未来再次回到 idle loop continuation 的控制流后续展开。
+ * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度。当前实现可先
+ * 线性提交 owner-split 的对象事实，但离开 UpMultitaskPhase 时必须把真实
+ * BootIdleTask switch context 保存，并恢复 KernelInitTask switch context；
+ * 若 KernelInitTask 后续切回，BootIdleTask 才从该 continuation 继续。
  */
 object BootIdleRuntime: BootIdleRuntimeObject {
     initial_state: State::Base;
@@ -1364,7 +1365,7 @@ object BootInitRestInitPhase: PhaseObject {
                     task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
                     kthreadd_task_created(KthreaddTask);
                     task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
-                    kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
+                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
@@ -1406,7 +1407,7 @@ object BootInitRestInitPhase: PhaseObject {
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
             task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
-            kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
+            kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
             kthreadd_global_ref_bound(KthreaddTask);
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
@@ -1486,12 +1487,16 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                     task_concurrency_open();
                     smp_concurrency_closed();
-                    real_task_switch_deferred();
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
                     secondary_cpus_not_started(CpuGroup);
                 }
 
                 deferred {
-                    "真实任务栈切换和完整 scheduler class 策略后续展开；本阶段只提交首次 handoff 可观察事实。";
+                    "完整 scheduler class 策略、MM/FPU/vector 切换和通用任务返回策略后续展开。";
                 }
             }
         }
@@ -1520,6 +1525,11 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
             scheduler_membarrier_switch_barrier_deferred(Scheduler);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            kernel_init_task_stack_switch_committed(
+                Scheduler,
+                BootIdleTask,
+                KernelInitTask
+            );
             task_concurrency_open();
             smp_concurrency_closed();
         }
@@ -1608,11 +1618,15 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_init_task_runtime_handoff_complete(BootInitTask, BootIdleTask);
                     boot_cpu_idle_runtime_entered(BootIdleRuntime);
                     secondary_cpus_not_started(CpuGroup);
-                    real_task_switch_deferred();
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
                 }
 
                 deferred {
-                    "当前只建模 boot idle loop 的抽象主线和一轮代表性 no-need-resched -> need-resched -> schedule_idle；真实系统未来再次回到 idle loop continuation 的控制流，以及完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
+                    "finite derivation 只展开 boot idle loop 的一轮代表性 no-need-resched -> need-resched -> schedule_idle；实现 continuation 必须允许无限重复，完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
                     "secondary CPU 启动仍保持 deferred，后续 SMP Runtime Phase 再推进。";
                 }
             }
@@ -1634,6 +1648,11 @@ object BootIdleEntryPhase: PhaseObject {
             boot_idle_preempt_need_resched_set(BootIdleTask);
             boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
             boot_idle_loop_continues(BootIdleRuntime);
+            kernel_init_task_stack_switch_committed(
+                Scheduler,
+                BootIdleTask,
+                KernelInitTask
+            );
             task_concurrency_open();
             smp_concurrency_closed();
         }

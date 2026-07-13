@@ -11,8 +11,8 @@ use super::{
     },
     init_task::InitTask,
     mm_core::{
-        GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches, VmallocAllocator,
-        VmapArea, VmapAreaFlags, VmapMapping,
+        GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches,
+        VmallocAllocator, VmapArea, VmapAreaFlags, VmapMapping,
     },
     process_prepare::{
         CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCopyProcessInputs,
@@ -20,7 +20,9 @@ use super::{
     },
     rcu::RcuCore,
     scheduler::Scheduler,
-    state::{failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{
+        failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
+    },
     task::{Task, TaskCpuState, TaskEntry, TaskKind},
     workqueue::Workqueue,
 };
@@ -59,6 +61,9 @@ pub struct KernelInitTask {
     pid_lookup_under_rcu_read: bool,
     pid_lookup_rcu_guard_balanced: bool,
     kernel_stack_top: usize,
+    entry_started_count: usize,
+    entry_stack_pointer: usize,
+    entry_stack_verified: bool,
 }
 
 impl KernelInitTask {
@@ -79,6 +84,9 @@ impl KernelInitTask {
             pid_lookup_under_rcu_read: false,
             pid_lookup_rcu_guard_balanced: false,
             kernel_stack_top: 0,
+            entry_started_count: 0,
+            entry_stack_pointer: 0,
+            entry_stack_verified: false,
         }
     }
 
@@ -158,12 +166,45 @@ impl KernelInitTask {
         self.kernel_stack_top
     }
 
+    pub const fn entry_started_count(&self) -> usize {
+        self.entry_started_count
+    }
+
+    pub const fn entry_stack_pointer(&self) -> usize {
+        self.entry_stack_pointer
+    }
+
+    pub const fn entry_stack_verified(&self) -> bool {
+        self.entry_stack_verified
+    }
+
     pub fn switch_context(&self) -> &TaskSwitchContext {
         &self.task.switch_ctx
     }
 
     pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
         &mut self.task.switch_ctx
+    }
+
+    pub fn mark_entry_started(&mut self, stack_pointer: usize) -> EventResult {
+        let stack_base = self.kernel_stack_top.saturating_sub(KERNEL_TASK_STACK_SIZE);
+        if self.lifecycle.state() != State::Online
+            || self.entry_started_count != 0
+            || stack_pointer < stack_base
+            || stack_pointer > self.kernel_stack_top
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.entry_started_count = self.entry_started_count.wrapping_add(1);
+        self.entry_stack_pointer = stack_pointer;
+        self.entry_stack_verified = true;
+        Ok(())
     }
 
     pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
@@ -442,7 +483,7 @@ pub struct KthreaddTask {
     provider_ready: bool,
     pid_lookup_under_rcu_read: bool,
     pid_lookup_rcu_guard_balanced: bool,
-    schedule_loop_deferred: bool,
+    schedule_loop_active: bool,
     enqueued: bool,
     kernel_stack_top: usize,
 }
@@ -463,7 +504,7 @@ impl KthreaddTask {
             provider_ready: false,
             pid_lookup_under_rcu_read: false,
             pid_lookup_rcu_guard_balanced: false,
-            schedule_loop_deferred: true,
+            schedule_loop_active: false,
             enqueued: false,
             kernel_stack_top: 0,
         }
@@ -529,8 +570,8 @@ impl KthreaddTask {
         self.pid_lookup_rcu_guard_balanced
     }
 
-    pub const fn schedule_loop_deferred(&self) -> bool {
-        self.schedule_loop_deferred
+    pub const fn schedule_loop_active(&self) -> bool {
+        self.schedule_loop_active
     }
 
     pub const fn enqueued(&self) -> bool {
@@ -641,6 +682,7 @@ impl KthreaddTask {
         )?;
         self.kernel_stack_top = stack_top;
         self.task.init_switch_context(kthreadd_entry, stack_top);
+        self.schedule_loop_active = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -1227,7 +1269,7 @@ pub struct BootIdleRuntime {
     boot_init_handoff_complete: bool,
     boot_cpu_hotplug_online: bool,
     secondary_cpus_not_started: bool,
-    real_task_switch_deferred: bool,
+    kernel_init_task_switch_handoff_ready: bool,
 }
 
 impl BootIdleRuntime {
@@ -1271,7 +1313,7 @@ impl BootIdleRuntime {
             boot_init_handoff_complete: false,
             boot_cpu_hotplug_online: false,
             secondary_cpus_not_started: true,
-            real_task_switch_deferred: true,
+            kernel_init_task_switch_handoff_ready: false,
         }
     }
 
@@ -1459,8 +1501,8 @@ impl BootIdleRuntime {
         self.secondary_cpus_not_started
     }
 
-    pub const fn real_task_switch_deferred(&self) -> bool {
-        self.real_task_switch_deferred
+    pub const fn kernel_init_task_switch_handoff_ready(&self) -> bool {
+        self.kernel_init_task_switch_handoff_ready
     }
 
     pub fn setup(
@@ -1522,7 +1564,7 @@ impl BootIdleRuntime {
         self.boot_init_handoff_complete = false;
         self.boot_cpu_hotplug_online = false;
         self.secondary_cpus_not_started = true;
-        self.real_task_switch_deferred = true;
+        self.kernel_init_task_switch_handoff_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -1612,7 +1654,7 @@ impl BootIdleRuntime {
         )?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
-        self.real_task_switch_deferred = true;
+        self.kernel_init_task_switch_handoff_ready = true;
         Ok(())
     }
 
@@ -1772,16 +1814,28 @@ pub fn runtime_services_still_deferred(
 
 // ── Task entry functions ──────────────────────────────────────────────────────
 // Called by task_switch assembly on first schedule of each kernel task.
-// These are stubs for now; real implementations are wired up by the scheduler.
+// KernelInit owns the remaining startup phases and selected payload. Kthreadd
+// keeps its minimal deferred loop until its scheduler/runtime slice is added.
 
 extern "C" fn kernel_init_entry() -> ! {
-    loop {
-        core::hint::spin_loop();
+    let stack_pointer: usize;
+    unsafe {
+        core::arch::asm!("mv {}, sp", out(reg) stack_pointer);
     }
+    crate::phases::shutdown_on_error(
+        crate::context::context()
+            .kernel_init_task
+            .mark_entry_started(stack_pointer),
+        "kernel_init entry stack invariant failed\n",
+    );
+    crate::arch::riscv64::sbi::putstr("kernel_init (pid=1) started\n");
+    crate::phases::smp_runtime::setup()
 }
 
 extern "C" fn kthreadd_entry() -> ! {
+    crate::arch::riscv64::sbi::putstr("kthreadd (pid=2) started\n");
     loop {
-        core::hint::spin_loop();
+        let result = crate::context::context().schedule_current();
+        crate::phases::shutdown_on_error(result, "kthreadd schedule loop failed\n");
     }
 }

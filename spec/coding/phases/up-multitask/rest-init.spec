@@ -47,7 +47,8 @@ predicate arceos_ex_must_scheduler_schedule_smoke_use_payload_cooperative_switch
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_up_multitask_wrapper() -> bool;
-predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
+predicate arceos_ex_must_rest_init_handoff_real_boot_idle_to_kernel_init_stack() -> bool;
+predicate arceos_ex_must_boot_stack_use_16k_after_kernel_init_handoff() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
 
 type ArceosExRestInitCodingMust {
@@ -186,8 +187,11 @@ type ArceosExRestInitCodingMust {
         /* Fork dependency. */
         arceos_ex_must_rest_init_not_make_pre_smp_depend_on_up_multitask_wrapper();
 
-        /* No real task switch. */
-        arceos_ex_must_rest_init_keep_true_task_switching_deferred();
+        /* Real BootIdle -> KernelInit stack handoff. */
+        arceos_ex_must_rest_init_handoff_real_boot_idle_to_kernel_init_stack();
+
+        /* Boot stack size after the owner handoff. */
+        arceos_ex_must_boot_stack_use_16k_after_kernel_init_handoff();
 
         /* Deferred runtime. */
         arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred();

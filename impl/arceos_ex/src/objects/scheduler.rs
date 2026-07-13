@@ -41,6 +41,7 @@ pub struct Scheduler {
     cpu_runqueues: [CpuRunQueueMetadata; MAX_CPUS],
     cpu_runqueue_count: usize,
     scheduler_running: bool,
+    task_stack_switching_online: bool,
     selected_runqueue_task_id: usize,
     schedule_passes: usize,
     current_runqueue_resolve_passes: usize,
@@ -90,6 +91,8 @@ pub struct Scheduler {
     schedule_exit_saved_interrupt_count: usize,
     schedule_exit_restored_interrupt_count: usize,
     schedule_exit_count: usize,
+    kernel_init_stack_switch_started_count: usize,
+    kernel_init_stack_switch_returned_count: usize,
     smoke_scheduler_task: SmokeSchedulerTask,
     smoke_mutex_task: SmokeSchedulerTask,
     smoke_rwsem_task: SmokeSchedulerTask,
@@ -111,6 +114,7 @@ impl Scheduler {
             cpu_runqueues: [const { CpuRunQueueMetadata::invalid() }; MAX_CPUS],
             cpu_runqueue_count: 0,
             scheduler_running: false,
+            task_stack_switching_online: false,
             selected_runqueue_task_id: usize::MAX,
             schedule_passes: 0,
             current_runqueue_resolve_passes: 0,
@@ -160,6 +164,8 @@ impl Scheduler {
             schedule_exit_saved_interrupt_count: 0,
             schedule_exit_restored_interrupt_count: 0,
             schedule_exit_count: 0,
+            kernel_init_stack_switch_started_count: 0,
+            kernel_init_stack_switch_returned_count: 0,
             smoke_scheduler_task: SmokeSchedulerTask::new(SMOKE_SCHEDULER_TASK_ID),
             smoke_mutex_task: SmokeSchedulerTask::new(SMOKE_MUTEX_TASK_ID),
             smoke_rwsem_task: SmokeSchedulerTask::new(SMOKE_RWSEM_TASK_ID),
@@ -169,6 +175,14 @@ impl Scheduler {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn kernel_init_stack_switch_started_count(&self) -> usize {
+        self.kernel_init_stack_switch_started_count
+    }
+
+    pub const fn kernel_init_stack_switch_returned_count(&self) -> usize {
+        self.kernel_init_stack_switch_returned_count
     }
 
     pub const fn sched_domains_mutex(&self) -> &Mutex {
@@ -823,6 +837,38 @@ impl Scheduler {
         Ok(())
     }
 
+    pub fn handoff_boot_idle_to_kernel_init(
+        &mut self,
+        kernel_init_task: &KernelInitTask,
+        current_task_slot: &CurrentTaskSlot,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || kernel_init_task.state() != State::Online
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_kernel_init()
+            || !self.boot_idle_task.switch_context().initialized()
+            || !kernel_init_task.switch_context().initialized()
+            || self.kernel_init_stack_switch_started_count != 0
+        {
+            return Err(self.failed_schedule_condition());
+        }
+
+        let prev = self.boot_idle_task.switch_context_mut() as *mut TaskSwitchContext;
+        let next = kernel_init_task.switch_context() as *const TaskSwitchContext;
+        self.task_stack_switching_online = true;
+        self.kernel_init_stack_switch_started_count =
+            self.kernel_init_stack_switch_started_count.wrapping_add(1);
+        crate::arch::riscv64::sbi::putstr("-> switch BootIdleTask -> KernelInitTask\n");
+        unsafe {
+            task_switch::switch(&mut *prev, &*next);
+        }
+        self.kernel_init_stack_switch_returned_count =
+            self.kernel_init_stack_switch_returned_count.wrapping_add(1);
+        crate::arch::riscv64::sbi::putstr("<- switch BootIdleTask restored\n");
+        Ok(())
+    }
+
     fn resolve_current_runqueue_ref(
         &mut self,
         cpu_group: &CpuGroup,
@@ -875,6 +921,7 @@ impl Scheduler {
                 prev_ref,
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
+                    | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::UserChild
                     | CurrentTaskRef::SmokeScheduler
                     | CurrentTaskRef::SmokeMutex
@@ -1011,21 +1058,17 @@ impl Scheduler {
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
     ) -> EventResult {
-        // Resolve the prev (mutable) and next (immutable) switch contexts for
-        // the given ref pair.
-        // The kernel_init_task and kthreadd_task are passed from the outside so
-        // their switch_ctx is accessible here even though they are not owned by
-        // Scheduler.  When a kernel task is the *prev* party we need mutable
-        // access; we obtain it through a raw-pointer cast because the callers
-        // guarantee exclusive ownership at the point of the switch.
-        //
-        // NOTE: BootIdle and Kthreadd kernel-task pairs are NOT wired for the
-        // real assembly switch yet — the kernel entry stubs do not call
-        // schedule() to return.  Once the entry functions implement real
-        // kernel-init / kthreadd work, add the corresponding arms below.
+        if !self.task_stack_switching_online || prev_ref == next_ref {
+            return Ok(());
+        }
+
         let prev: *mut TaskSwitchContext = match prev_ref {
+            CurrentTaskRef::BootIdle => self.boot_idle_task.switch_context_mut(),
             CurrentTaskRef::KernelInit => {
                 kernel_init_task.switch_context() as *const TaskSwitchContext as *mut _
+            }
+            CurrentTaskRef::Kthreadd => {
+                kthreadd_task.switch_context() as *const TaskSwitchContext as *mut _
             }
             CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context_mut(),
             CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context_mut(),
@@ -1034,7 +1077,9 @@ impl Scheduler {
             _ => return Ok(()),
         };
         let next: &TaskSwitchContext = match next_ref {
+            CurrentTaskRef::BootIdle => self.boot_idle_task.switch_context(),
             CurrentTaskRef::KernelInit => kernel_init_task.switch_context(),
+            CurrentTaskRef::Kthreadd => kthreadd_task.switch_context(),
             CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context(),
             CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context(),
             CurrentTaskRef::SmokeRwsem => self.smoke_rwsem_task.switch_context(),
@@ -2329,6 +2374,7 @@ impl BootRunQueue {
                 prev_ref,
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
+                    | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::UserChild
                     | CurrentTaskRef::SmokeScheduler
                     | CurrentTaskRef::SmokeMutex
@@ -2361,12 +2407,21 @@ impl BootRunQueue {
                     CurrentTaskRef::SmokeMutex
                 } else if self.smoke_scheduler_task_enqueued {
                     CurrentTaskRef::SmokeScheduler
+                } else if self.kthreadd_task_enqueued {
+                    CurrentTaskRef::Kthreadd
                 } else {
-                    self.first_runnable_task_ref()
+                    CurrentTaskRef::BootIdle
+                }
+            }
+            CurrentTaskRef::Kthreadd => {
+                if self.kernel_init_task_enqueued {
+                    CurrentTaskRef::KernelInit
+                } else {
+                    CurrentTaskRef::BootIdle
                 }
             }
             CurrentTaskRef::BootIdle => self.first_runnable_task_ref(),
-            CurrentTaskRef::None | CurrentTaskRef::Kthreadd => CurrentTaskRef::None,
+            CurrentTaskRef::None => CurrentTaskRef::None,
         };
         if matches!(next_ref, CurrentTaskRef::None) {
             return Err(self.failed_setup_error());

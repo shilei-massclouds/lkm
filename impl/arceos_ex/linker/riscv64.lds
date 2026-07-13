@@ -143,7 +143,7 @@ SECTIONS
     .boot.stack (NOLOAD) : AT(ADDR(.boot.stack) - LOAD_OFFSET) ALIGN(4K) {
         init_stack_start = .;
         KEEP(*(.boot.stack))
-        . += 32K;
+        . += 16K;
         . = ALIGN(4K);
         init_stack_end = .;
     }

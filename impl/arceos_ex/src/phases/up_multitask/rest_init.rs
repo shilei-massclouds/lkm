@@ -2,9 +2,7 @@ use crate::{
     checkpoint::Checkpoint,
     context::Context,
     objects::{
-        rest_init::{
-            runtime_services_still_deferred, SystemStateValue, TaskSpawnInputs,
-        },
+        rest_init::{runtime_services_still_deferred, SystemStateValue, TaskSpawnInputs},
         state::{failed_condition, EventResult, LifecycleEvent, State},
         task::{TaskEntry, TaskKind},
     },
@@ -395,7 +393,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
             .irqrestore_restored_before_preemption_enabled()
         && ctx.kthreadd_task.global_ref_bound()
         && ctx.kthreadd_task.provider_ready()
-        && ctx.kthreadd_task.schedule_loop_deferred()
+        && ctx.kthreadd_task.schedule_loop_active()
         && ctx.kthreadd_task.enqueued()
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling
@@ -442,7 +440,9 @@ fn boot_idle_entry_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_idle_runtime.boot_init_handoff_complete()
         && ctx.boot_idle_runtime.boot_cpu_hotplug_online()
         && ctx.boot_idle_runtime.secondary_cpus_not_started()
-        && ctx.boot_idle_runtime.real_task_switch_deferred()
+        && ctx
+            .boot_idle_runtime
+            .kernel_init_task_switch_handoff_ready()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
@@ -506,7 +506,7 @@ fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
             .irqrestore_restored_before_preemption_enabled()
         && ctx.kthreadd_task.global_ref_bound()
         && ctx.kthreadd_task.provider_ready()
-        && ctx.kthreadd_task.schedule_loop_deferred()
+        && ctx.kthreadd_task.schedule_loop_active()
         && ctx.kthreadd_task.enqueued()
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling

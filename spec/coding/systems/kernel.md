@@ -21,6 +21,13 @@ BootPhase 叶子链完成
 
 各段串接分别在对应编排层 coding 文件中详述。
 
+`UpMultitaskPhase` 之后的串接必须服从任务所有权：实现可以先线性提交
+BootIdle owner-split 的对象/checkpoint 事实，但离开该阶段时必须真实切换到
+`KernelInitTask` 的 task stack；`SmpRuntimePhase` 和 `PayloadPhase` 只能由
+`kernel_init_entry()` 执行。BootIdle continuation 若恢复，必须留在无限 idle
+调度循环；KthreaddTask 当前可使用临时的无限主动 schedule 循环。二者均不得
+沿原启动调用栈直接执行 selected payload。
+
 ## 状态记录
 
 Kernel 在 impl 中需要一个轻量状态变量用于记录和检查生命周期边界。但该变量不驱动任何阶段，仅用于 invariant 检查和 checkpoint。

@@ -99,7 +99,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.provider_ready()
         || !ctx.kthreadd_task.pid_lookup_under_rcu_read()
         || !ctx.kthreadd_task.pid_lookup_rcu_guard_balanced()
-        || !ctx.kthreadd_task.schedule_loop_deferred()
+        || !ctx.kthreadd_task.schedule_loop_active()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
         || ctx.kthreadd_task_pi_lock.irqsave_entered_count() == 0
@@ -192,8 +192,8 @@ pub fn run() -> SmokeResult {
     }
 
     let idle_schedule_passes = ctx.scheduler.idle_schedule_passes();
-    if idle_schedule_passes != 1
-        || ctx.scheduler.idle_schedule_returned_passes() != idle_schedule_passes
+    if idle_schedule_passes == 0
+        || ctx.scheduler.idle_schedule_returned_passes() > idle_schedule_passes
         || ctx.scheduler.idle_schedule_identity_passes() != 0
         || ctx.scheduler.schedule_passes() < idle_schedule_passes
         || ctx.scheduler.switch_to_passes() < idle_schedule_passes
@@ -244,7 +244,12 @@ pub fn run() -> SmokeResult {
             .representative_need_resched_cycle_committed()
         || !ctx.boot_idle_runtime.boot_init_handoff_complete()
         || !ctx.boot_idle_runtime.secondary_cpus_not_started()
-        || !ctx.boot_idle_runtime.real_task_switch_deferred()
+        || !ctx
+            .boot_idle_runtime
+            .kernel_init_task_switch_handoff_ready()
+        || ctx.scheduler.kernel_init_stack_switch_started_count() == 0
+        || ctx.kernel_init_task.entry_started_count() == 0
+        || !ctx.kernel_init_task.entry_stack_verified()
         || ctx.workqueue.workers_running()
     {
         printk::write_str("boot idle runtime facts invalid\n");
@@ -252,9 +257,10 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "rest_init init_pid={} kthreadd_pid={} schedule_passes={} switch_to_passes={} idle_schedule_passes={}\n",
+        "rest_init init_pid={} kthreadd_pid={} kernel_init_sp={:#x} schedule_passes={} switch_to_passes={} idle_schedule_passes={}\n",
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
+        ctx.kernel_init_task.entry_stack_pointer(),
         ctx.scheduler.schedule_passes(),
         ctx.scheduler.switch_to_passes(),
         idle_schedule_passes
