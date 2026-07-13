@@ -1,3 +1,6 @@
+pub mod ap_entry_prelude;
+pub mod ap_online_idle;
+pub mod ap_smp_callin;
 pub mod finalize;
 pub mod initcall;
 pub mod pre_smp_init;

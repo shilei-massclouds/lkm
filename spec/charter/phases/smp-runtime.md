@@ -19,6 +19,11 @@ SmpBringupPhase 的父级驱动属于 KernelInitTask 的 BP 执行线。该阶�
 ApEntryPreludePhase、ApSmpCallinPhase 和 ApOnlineIdlePhase 仍由各 AP 执行；BP 只负责
 准备、发起 HSM 启动和等待 completion，不获得 AP 子阶段的执行所有权。
 
+三个 AP phase 组成以 secondary CPU `logical_id` 为 target key 的 replicated phase family。
+每个 AP 分别持有三个 phase 的独立四态；同一个 AP 必须依次完成 EntryPrelude.Online、
+SmpCallin.Online、OnlineIdle.Online，不同 AP 之间允许交错。family Online 表示所有目标 AP
+实例均已 Online，只作为 BP completion/all-online barrier 的聚合观察，不构成 AP 间全局阶段屏障。
+
 ## 生命周期
 
 SmpRuntimePhase 和六个直接子阶段均遵循标准
@@ -57,6 +62,10 @@ KernelInitTask 的 task stack，KernelInitTask entry count 和真实 stack-switc
 每个标准阶段保留 Started、Prepared、Ready、Online 四个 checkpoint。既有 Started/Ready
 checkpoint 的标识和 Linux 映射保持稳定；新增 Prepared/Online 默认不建立 Linux paired hard
 scope 映射。
+
+AP family 的四个 checkpoint 由每个 `ApIdleTask[logical_id]` 重复发出。BP 上的 HSM request、
+Acquire wait、completion ack、CpuGroup online publish 和 SmpBringup 状态 checkpoint 继续由
+KernelInitTask 发出，不能替代任何 AP phase state/checkpoint。
 
 ## 引用
 

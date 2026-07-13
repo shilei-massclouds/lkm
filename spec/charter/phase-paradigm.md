@@ -61,6 +61,23 @@ transition 中有多个 `drives` 条目或多个 `drives` 块时，严格按照 
 同一父阶段下的多个子阶段只是结构上的 siblings，不存在子阶段之间的隐式执行边。它们的
 可观察顺序完全来自共同父 transition 的 source-ordered `drives`，以及父阶段自身的迁移链。
 
+## Replicated phase family
+
+当同一个 PhaseObject 对一组目标实例重复执行时，charter/model 中的单个 PhaseObject 表示
+replicated phase family，而不是由协调者拥有的聚合生命周期。每个目标 key（例如 secondary
+CPU 的 `logical_id`）都有独立的 `Base -> Prepared -> Ready -> Online` 四态和唯一执行 owner。
+
+replicated family 的父 `drives` 和 sibling 顺序按相同 target key pointwise 解释：对同一个
+`logical_id`，前一 sibling 必须到达 `Online` 后才能触发后一 sibling 的 `Preset`；不同
+`logical_id` 的执行可以交错，不能从 model 的 source order 推导出跨目标的全局阶段屏障。
+family 的 `Online` 查询表示所有目标实例都已到达 `Online`，只用于协调者完成 wait/barrier 和
+后续父级提交，不改变各实例先前独立提交 Online 的时点或 owner。
+
+协调者可以准备目标、发布启动数据、发起硬件启动并以 acquire 语义观察 family 状态，但不得
+替目标实例提交 phase state 或发出 phase checkpoint。若某个目标入口只能 adoption 已由架构
+建立的事实，adoption 仍属于该目标实例的 Preset，并必须在后续状态 checkpoint 前验证目标
+identity、栈/任务指针等长期边界。
+
 ## 递归推进
 
 父子驱动和同对象迁移链在每一级递归应用，形成嵌套的阶段推进：
@@ -121,6 +138,8 @@ Cleanup: allowed source state -> Destroyed
 4. 上下级关系由父 transition 的 source-ordered `drives` 明确表达。
 5. 每个被驱动阶段的完成状态和父层所需事实由 `ensures`/invariant 明确确认。
 6. context、执行主体交接和 deferred 边界没有被阶段树的视觉顺序掩盖。
+7. replicated family 明确 target key、per-target owner、pointwise sibling 顺序和 family Online
+   聚合查询，且没有引入隐式跨目标屏障。
 
 本范式适用于 `Kernel` 驱动的各级标准阶段对象。普通资源对象仍遵循通用对象生命周期语义，
 不因为被 Phase 驱动而自动成为阶段。

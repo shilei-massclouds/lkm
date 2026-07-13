@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 475
+- total checkpoints: 481
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 358 |
+| unmapped | 364 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 358 |
+| none | 364 |
 | medium | 62 |
 | high | 55 |
 
@@ -73,6 +73,9 @@
 | SlubSubsystem | 3 |
 | UserClone | 3 |
 | Vm | 3 |
+| ApEntryPreludePhase | 2 |
+| ApOnlineIdlePhase | 2 |
+| ApSmpCallinPhase | 2 |
 | BootCurrentCPU | 2 |
 | CommandLine | 2 |
 | CorePreparePhase | 2 |

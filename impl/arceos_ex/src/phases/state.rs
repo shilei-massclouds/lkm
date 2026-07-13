@@ -23,8 +23,8 @@ pub const fn encode(state: State) -> u8 {
     }
 }
 
-pub fn load(state: &AtomicU8) -> State {
-    match state.load(Ordering::Relaxed) {
+pub const fn decode(value: u8) -> State {
+    match value {
         BASE => State::Base,
         PREPARED => State::Prepared,
         READY => State::Ready,
@@ -33,6 +33,10 @@ pub fn load(state: &AtomicU8) -> State {
         DESTROYED => State::Destroyed,
         _ => State::Destroyed,
     }
+}
+
+pub fn load(state: &AtomicU8) -> State {
+    decode(state.load(Ordering::Relaxed))
 }
 
 pub fn mark(

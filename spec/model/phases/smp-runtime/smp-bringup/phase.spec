@@ -444,7 +444,8 @@ object CpuStartProvider: HardwareObject {
  * 执行的 AP 专属入口先导期。它不同于 BP EntryPreludePhase：不建立
  * BootCurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
  * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
- * SwapperVm，并安装正式 trap vector。
+ * SwapperVm，并安装正式 trap vector。该对象是以 secondary logical_id
+ * 为 target key 的 replicated phase family；每个 AP 有独立四态。
  */
 object ApEntryPreludePhase: PhaseObject {
     initial_state: State::Base;
@@ -452,7 +453,7 @@ object ApEntryPreludePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CpuStartProvider.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -477,12 +478,26 @@ object ApEntryPreludePhase: PhaseObject {
                     ap_interrupts_masked_on_entry(CpuGroup);
                     ap_switches_to_swapper_vm(SwapperVm);
                     ap_formal_event_entry_installed(EventStream, ExceptionStream);
+                    ap_entry_boot_data_logical_id_matches_target(CpuGroup);
+                    ap_entry_boot_data_stack_pointer_matches_target(
+                        CpuGroup,
+                        SecondaryIdleTaskSet
+                    );
+                    ap_entry_real_sp_in_secondary_idle_task_stack(
+                        CpuGroup,
+                        SecondaryIdleTaskSet
+                    );
+                    ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+                }
+
+                emits {
+                    Transition::Setup;
                 }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
             ap_secondary_start_sbi_entry_reached(CpuGroup);
             ap_entry_uses_logical_secondary_cpu(CpuGroup);
@@ -493,6 +508,61 @@ object ApEntryPreludePhase: PhaseObject {
             ap_pt_regs_pointer_established(CpuGroup, SecondaryIdleTaskSet);
             ap_switches_to_swapper_vm(SwapperVm);
             ap_formal_event_entry_installed(EventStream, ExceptionStream);
+            ap_entry_boot_data_logical_id_matches_target(CpuGroup);
+            ap_entry_boot_data_stack_pointer_matches_target(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_real_sp_in_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    ap_entry_boot_data_logical_id_matches_target(CpuGroup);
+                    ap_entry_boot_data_stack_pointer_matches_target(CpuGroup, SecondaryIdleTaskSet);
+                    ap_entry_real_sp_in_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+                    ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ap_secondary_start_sbi_entry_reached(CpuGroup);
+            ap_entry_consumes_sbi_hart_boot_data(CpuStartProvider, CpuGroup);
+            ap_current_task_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+            ap_stack_is_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_real_sp_in_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    ap_secondary_start_sbi_entry_reached(CpuGroup);
+                    ap_entry_consumes_sbi_hart_boot_data(CpuStartProvider, CpuGroup);
+                    ap_entry_real_sp_in_secondary_idle_task_stack(
+                        CpuGroup,
+                        SecondaryIdleTaskSet
+                    );
+                    ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            ap_secondary_start_sbi_entry_reached(CpuGroup);
+            ap_entry_consumes_sbi_hart_boot_data(CpuStartProvider, CpuGroup);
+            ap_current_task_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
+            ap_stack_is_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_real_sp_in_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
+            ap_entry_tp_is_secondary_idle_task(CpuGroup, SecondaryIdleTaskSet);
         }
     }
 }
@@ -500,7 +570,8 @@ object ApEntryPreludePhase: PhaseObject {
 /*
  * ApSmpCallinPhase 是 AP 的 C/Rust bringup 主体，对齐 Linux smp_callin()。
  * 它在 AP 已经具备 current idle task 和正式 trap vector 后运行，发布
- * set_cpu_online() 与 complete(cpu_running) 事实。
+ * set_cpu_online() 与 complete(cpu_running) 事实。该对象按同一个
+ * secondary logical_id replicate，并 pointwise 依赖前一 family Online。
  */
 object ApSmpCallinPhase: PhaseObject {
     initial_state: State::Base;
@@ -508,9 +579,9 @@ object ApSmpCallinPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    ApEntryPreludePhase.state == State::Ready;
+                    ApEntryPreludePhase.state == State::Online;
                     CpuHotplugSyncSet.state == State::Prepared;
                     SbiIpi.state == State::Ready;
                     InitMM.state == State::Ready;
@@ -527,11 +598,15 @@ object ApSmpCallinPhase: PhaseObject {
                     ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
                     ap_cpu_running_completion_produced(CpuHotplugSyncSet);
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
             ap_smp_callin_reached(CpuGroup);
             ap_current_active_mm_is_init_mm(CpuGroup, InitMM);
@@ -541,6 +616,46 @@ object ApSmpCallinPhase: PhaseObject {
             ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
             ap_cpu_running_completion_produced(CpuHotplugSyncSet);
         }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    ApEntryPreludePhase.state == State::Online;
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ApEntryPreludePhase.state == State::Online;
+            ap_smp_callin_reached(CpuGroup);
+            ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    ApEntryPreludePhase.state == State::Online;
+                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            ApEntryPreludePhase.state == State::Online;
+            ap_smp_callin_reached(CpuGroup);
+            ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+            ap_ipi_enable_observed(ApSmpCallinPhase);
+            ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+        }
     }
 }
 
@@ -548,7 +663,8 @@ object ApSmpCallinPhase: PhaseObject {
  * ApOnlineIdlePhase 表示 AP 在 complete(cpu_running) 之后打开本地中断，
  * 进入 cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)，并由 CPUHP AP online
  * idle 边界产生 done_up completion。当前不展开完整 idle loop、AP 调度
- * 或 hotplug callback，只要求 AP 已进入独立 idle/park 运行线。
+ * 或 hotplug callback，只要求 AP 已进入独立 idle/park 运行线。该对象按
+ * secondary logical_id replicate，并 pointwise 依赖 callin family Online。
  */
 object ApOnlineIdlePhase: PhaseObject {
     initial_state: State::Base;
@@ -556,9 +672,9 @@ object ApOnlineIdlePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    ApSmpCallinPhase.state == State::Ready;
+                    ApSmpCallinPhase.state == State::Online;
                     CpuHotplugSyncSet.state == State::Prepared;
                     cpu_hotplug_done_up_completion_ready(CpuGroup);
                     ap_cpu_running_completion_produced(CpuHotplugSyncSet);
@@ -569,8 +685,36 @@ object ApOnlineIdlePhase: PhaseObject {
                     ap_cpu_startup_entry_reached(ApOnlineIdlePhase);
                     ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
                     ap_done_up_completion_produced(CpuHotplugSyncSet);
-                    ap_idle_or_park_loop_entered(CpuGroup);
+                    ap_idle_or_park_loop_selected(CpuGroup);
                     ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
+                }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            ap_local_irq_enable_observed(ApOnlineIdlePhase);
+            ap_cpu_startup_entry_reached(ApOnlineIdlePhase);
+            ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
+            ap_done_up_completion_produced(CpuHotplugSyncSet);
+            ap_idle_or_park_loop_selected(CpuGroup);
+            ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    ApSmpCallinPhase.state == State::Online;
+                    ap_done_up_completion_produced(CpuHotplugSyncSet);
+                }
+
+                emits {
+                    Transition::Enable;
                 }
             }
         }
@@ -578,10 +722,28 @@ object ApOnlineIdlePhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            ap_local_irq_enable_observed(ApOnlineIdlePhase);
-            ap_cpu_startup_entry_reached(ApOnlineIdlePhase);
-            ap_cpuhp_online_idle_reached(ApOnlineIdlePhase);
+            ApSmpCallinPhase.state == State::Online;
             ap_done_up_completion_produced(CpuHotplugSyncSet);
+            ap_idle_or_park_loop_selected(CpuGroup);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    ApSmpCallinPhase.state == State::Online;
+                    ap_done_up_completion_produced(CpuHotplugSyncSet);
+                    ap_idle_or_park_loop_selected(CpuGroup);
+                    ap_idle_or_park_loop_entered(CpuGroup);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            ApSmpCallinPhase.state == State::Online;
+            ap_done_up_completion_produced(CpuHotplugSyncSet);
+            ap_idle_or_park_loop_selected(CpuGroup);
             ap_idle_or_park_loop_entered(CpuGroup);
             ap_does_not_run_bp_payload_or_syscalls(CpuGroup);
         }
@@ -602,7 +764,7 @@ object SecondaryCpuStartupAck: HardwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuStartProvider.state == State::Ready;
-                    ApSmpCallinPhase.state == State::Ready;
+                    ApSmpCallinPhase.state == State::Online;
                     CpuHotplugSyncSet.state == State::Prepared;
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
@@ -661,11 +823,12 @@ object SecondaryCpuOnlineAck: HardwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     SecondaryCpuStartupAck.state == State::Ready;
-                    ApOnlineIdlePhase.state == State::Ready;
+                    ApOnlineIdlePhase.state == State::Online;
                     CpuHotplugSyncSet.state == State::Prepared;
                     SbiIpi.state == State::Ready;
                     cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
                     ap_done_up_completion_produced(CpuHotplugSyncSet);
+                    ap_idle_or_park_loop_entered(CpuGroup);
                 }
 
                 within DoneUpCompletionWaitLockContext {
@@ -752,9 +915,10 @@ object SmpBringupBoundary: KernelObject {
 /*
  * SmpBringupPhase 表示 smp_init() 的 BP/AP 组合边界。BP side 由
  * KernelInitTask 驱动 idle_threads_init()/bringup_nonboot_cpus() 并等待
- * completions；AP side 由 HSM 启动后的 ApEntryPreludePhase、
- * ApSmpCallinPhase 和 ApOnlineIdlePhase 驱动。二者通过 cpu_running
- * 和 done_up completion 连接。
+ * completions；AP side 由 HSM 启动后的 replicated ApEntryPreludePhase、
+ * ApSmpCallinPhase 和 ApOnlineIdlePhase 驱动。三个 family 的 sibling
+ * drives 按 logical_id pointwise 解释：同一 AP 严格顺序，不同 AP 允许
+ * 交错。二者通过 cpu_running 和 done_up completion 连接。
  */
 object SmpBringupPhase: PhaseObject {
     initial_state: State::Base;
@@ -785,9 +949,9 @@ object SmpBringupPhase: PhaseObject {
                     CpuAddRemoveLock.Transition::Preset;
                     CpuAddRemoveLock.Transition::Setup;
                     CpuStartProvider.Transition::Setup;
-                    ApEntryPreludePhase.Transition::Setup;
-                    ApSmpCallinPhase.Transition::Setup;
-                    ApOnlineIdlePhase.Transition::Setup;
+                    ApEntryPreludePhase.Transition::Preset;
+                    ApSmpCallinPhase.Transition::Preset;
+                    ApOnlineIdlePhase.Transition::Preset;
                     SecondaryCpuStartupAck.Transition::Setup;
                     SecondaryCpuOnlineAck.Transition::Setup;
                     SmpBringupBoundary.Transition::Setup;
@@ -804,6 +968,9 @@ object SmpBringupPhase: PhaseObject {
                     ap_smp_callin_reached(CpuGroup);
                     ap_cpu_running_completion_produced(CpuHotplugSyncSet);
                     ap_done_up_completion_produced(CpuHotplugSyncSet);
+                    ApEntryPreludePhase.state == State::Online;
+                    ApSmpCallinPhase.state == State::Online;
+                    ApOnlineIdlePhase.state == State::Online;
                     cpu_hotplug_sync_gates_prepared(CpuGroup);
                     cpu_running_completion_observed(CpuGroup);
                     done_up_completion_observed(CpuGroup);
@@ -843,9 +1010,9 @@ object SmpBringupPhase: PhaseObject {
             CpuHotplugSyncSet.state == State::Prepared;
             CpuAddRemoveLock.state == State::Ready;
             CpuStartProvider.state == State::Ready;
-            ApEntryPreludePhase.state == State::Ready;
-            ApSmpCallinPhase.state == State::Ready;
-            ApOnlineIdlePhase.state == State::Ready;
+            ApEntryPreludePhase.state == State::Online;
+            ApSmpCallinPhase.state == State::Online;
+            ApOnlineIdlePhase.state == State::Online;
             SecondaryCpuStartupAck.state == State::Ready;
             SecondaryCpuOnlineAck.state == State::Ready;
             SmpBringupBoundary.state == State::Ready;

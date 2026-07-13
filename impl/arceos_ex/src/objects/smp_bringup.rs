@@ -1,13 +1,10 @@
 use core::arch::global_asm;
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::Ordering;
 
 use super::{
     cpu::{SecondaryCpuStore, MAX_CPUS},
     cpu_control::{LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
-    event_stream::EventStream,
-    exception_stream::ExceptionStream,
-    init_mm::InitMm,
     irq_time::SbiIpi,
     kernel_image::KernelImage,
     lds::Lds,
@@ -23,12 +20,10 @@ use super::{
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
-    vm::Vm,
 };
 use crate::checkpoint::Checkpoint;
 
 const AP_STACK_SIZE: usize = 16 * 1024;
-const AP_WAIT_SPINS: usize = 50_000_000;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 16;
 const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 24;
@@ -106,12 +101,6 @@ static mut AP_IDLE_TASKS: [ApIdleTaskRecord; MAX_CPUS] =
 #[unsafe(link_section = ".bss.ap_stack")]
 static mut AP_STACKS: [ApStack; MAX_CPUS] = [const { ApStack::new() }; MAX_CPUS];
 
-static AP_ENTRY_REACHED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
-static AP_BOOT_DATA_CONSUMED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
-static AP_CURRENT_STACK_ESTABLISHED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
-static AP_CPU_RUNNING_PRODUCED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
-static AP_DONE_UP_PRODUCED: [AtomicU8; MAX_CPUS] = [const { AtomicU8::new(0) }; MAX_CPUS];
-
 global_asm!(
     r#"
     .section .head.text.ap, "ax"
@@ -165,33 +154,90 @@ unsafe extern "C" {
 
 #[unsafe(no_mangle)]
 extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) -> ! {
-    let data = unsafe { &*boot_data };
-    let logical_id = data.logical_id;
-    if logical_id < MAX_CPUS {
-        AP_ENTRY_REACHED[logical_id].store(1, Ordering::Release);
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApEntryPreludePhaseStarted, logical_id);
-        AP_BOOT_DATA_CONSUMED[logical_id].store(1, Ordering::Release);
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApEntryPreludeBootDataConsumed, logical_id);
-        AP_CURRENT_STACK_ESTABLISHED[logical_id].store(1, Ordering::Release);
-        crate::checkpoint::ap_checkpoint(
-            Checkpoint::ApEntryPreludeCurrentStackEstablished,
-            logical_id,
+    if boot_data.is_null() {
+        crate::phases::smp_runtime::smp_bringup::ap_phase_fail_stop(
+            "ApEntryPreludePhase",
+            usize::MAX,
+            State::Base,
+            "boot-data-null",
         );
-
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApSmpCallinPhaseStarted, logical_id);
-        AP_CPU_RUNNING_PRODUCED[logical_id].store(1, Ordering::Release);
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApSmpCallinCpuRunningProduced, logical_id);
-
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApOnlineIdlePhaseStarted, logical_id);
-        AP_DONE_UP_PRODUCED[logical_id].store(1, Ordering::Release);
-        crate::checkpoint::ap_checkpoint(Checkpoint::ApOnlineIdleDoneUpProduced, logical_id);
     }
 
-    loop {
-        unsafe {
-            core::arch::asm!("wfi", options(nomem, nostack));
-        }
-        core::hint::spin_loop();
+    let observed_sp: usize;
+    let observed_tp: usize;
+    unsafe {
+        core::arch::asm!(
+            "mv {observed_sp}, sp",
+            "mv {observed_tp}, tp",
+            observed_sp = out(reg) observed_sp,
+            observed_tp = out(reg) observed_tp,
+            options(nomem, nostack),
+        );
+    }
+    let Some(target_logical_id) = ap_boot_data_target_logical_id(boot_data as usize) else {
+        crate::phases::smp_runtime::smp_bringup::ap_phase_fail_stop(
+            "ApEntryPreludePhase",
+            usize::MAX,
+            State::Base,
+            "boot-data-slot",
+        );
+    };
+    let data = unsafe { &*boot_data };
+    let adoption = ApEntryAdoption {
+        target_logical_id,
+        boot_data_logical_id: data.logical_id,
+        boot_data_pointer: boot_data as usize,
+        boot_data_self_pointer: data.boot_data_virt,
+        boot_data_stack_pointer: data.stack_ptr,
+        expected_stack_top: ap_stack_top_virt(target_logical_id).unwrap_or(0),
+        observed_sp,
+        boot_data_task_pointer: data.task_ptr,
+        expected_task_pointer: ap_idle_task_virt(target_logical_id).unwrap_or(0),
+        observed_tp,
+    };
+    crate::phases::smp_runtime::ap_entry_prelude::preset(adoption)
+}
+
+pub(crate) struct ApEntryAdoption {
+    target_logical_id: usize,
+    boot_data_logical_id: usize,
+    boot_data_pointer: usize,
+    boot_data_self_pointer: usize,
+    boot_data_stack_pointer: usize,
+    expected_stack_top: usize,
+    observed_sp: usize,
+    boot_data_task_pointer: usize,
+    expected_task_pointer: usize,
+    observed_tp: usize,
+}
+
+impl ApEntryAdoption {
+    pub(crate) const fn logical_id(&self) -> usize {
+        self.target_logical_id
+    }
+
+    pub(crate) fn boot_data_matches_target(&self) -> bool {
+        self.target_logical_id != 0
+            && self.target_logical_id < MAX_CPUS
+            && self.boot_data_logical_id == self.target_logical_id
+            && self.boot_data_pointer == self.boot_data_self_pointer
+            && ap_boot_data_virt(self.target_logical_id) == Some(self.boot_data_pointer)
+    }
+
+    pub(crate) fn stack_matches_target(&self) -> bool {
+        let Some(stack_base) = self.expected_stack_top.checked_sub(AP_STACK_SIZE) else {
+            return false;
+        };
+        self.expected_stack_top != 0
+            && self.boot_data_stack_pointer == self.expected_stack_top
+            && self.observed_sp >= stack_base
+            && self.observed_sp <= self.expected_stack_top
+    }
+
+    pub(crate) fn task_pointer_matches_target(&self) -> bool {
+        self.expected_task_pointer != 0
+            && self.boot_data_task_pointer == self.expected_task_pointer
+            && self.observed_tp == self.expected_task_pointer
     }
 }
 
@@ -200,6 +246,17 @@ fn ap_boot_data_virt(logical_id: usize) -> Option<usize> {
         return None;
     }
     Some(unsafe { core::ptr::addr_of!(AP_BOOT_DATA[logical_id]) as usize })
+}
+
+fn ap_boot_data_target_logical_id(pointer: usize) -> Option<usize> {
+    let mut logical_id = 1usize;
+    while logical_id < MAX_CPUS {
+        if ap_boot_data_virt(logical_id) == Some(pointer) {
+            return Some(logical_id);
+        }
+        logical_id += 1;
+    }
+    None
 }
 
 fn ap_idle_task_virt(logical_id: usize) -> Option<usize> {
@@ -215,41 +272,6 @@ fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {
     }
     let stack = unsafe { core::ptr::addr_of!(AP_STACKS[logical_id]) as usize };
     stack.checked_add(AP_STACK_SIZE)
-}
-
-fn reset_ap_observations(cpu_group: &CpuGroup) {
-    let mut logical_id = 1usize;
-    while logical_id <= cpu_group.secondary_count() && logical_id < MAX_CPUS {
-        AP_ENTRY_REACHED[logical_id].store(0, Ordering::Release);
-        AP_BOOT_DATA_CONSUMED[logical_id].store(0, Ordering::Release);
-        AP_CURRENT_STACK_ESTABLISHED[logical_id].store(0, Ordering::Release);
-        AP_CPU_RUNNING_PRODUCED[logical_id].store(0, Ordering::Release);
-        AP_DONE_UP_PRODUCED[logical_id].store(0, Ordering::Release);
-        logical_id += 1;
-    }
-}
-
-fn wait_for_ap_fact(cpu_group: &CpuGroup, facts: &[AtomicU8; MAX_CPUS]) -> bool {
-    let mut spin = 0usize;
-    while spin < AP_WAIT_SPINS {
-        if all_secondary_facts(cpu_group, facts) {
-            return true;
-        }
-        core::hint::spin_loop();
-        spin += 1;
-    }
-    false
-}
-
-fn all_secondary_facts(cpu_group: &CpuGroup, facts: &[AtomicU8; MAX_CPUS]) -> bool {
-    let mut logical_id = 1usize;
-    while logical_id <= cpu_group.secondary_count() && logical_id < MAX_CPUS {
-        if facts[logical_id].load(Ordering::Acquire) == 0 {
-            return false;
-        }
-        logical_id += 1;
-    }
-    cpu_group.secondary_count() != 0
 }
 
 pub struct SecondaryIdleTaskSet {
@@ -703,7 +725,6 @@ impl CpuStartProvider {
         };
         let gp = lds.global_pointer();
         let rust_entry = arceos_ex_secondary_entry_rust as usize;
-        reset_ap_observations(cpu_group);
 
         let mut logical_id = 1usize;
         while logical_id <= cpu_group.secondary_count() && logical_id < MAX_CPUS {
@@ -781,282 +802,6 @@ impl CpuStartProvider {
     }
 }
 
-pub struct ApEntryPreludePhase {
-    lifecycle: Lifecycle,
-    entry_reached: bool,
-    boot_data_consumed: bool,
-    current_stack_established: bool,
-    swapper_vm_selected: bool,
-    formal_event_entry_installed: bool,
-}
-
-impl ApEntryPreludePhase {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            entry_reached: false,
-            boot_data_consumed: false,
-            current_stack_established: false,
-            swapper_vm_selected: false,
-            formal_event_entry_installed: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn entry_reached(&self) -> bool {
-        self.entry_reached
-    }
-
-    pub const fn boot_data_consumed(&self) -> bool {
-        self.boot_data_consumed
-    }
-
-    pub const fn current_stack_established(&self) -> bool {
-        self.current_stack_established
-    }
-
-    pub const fn swapper_vm_selected(&self) -> bool {
-        self.swapper_vm_selected
-    }
-
-    pub const fn formal_event_entry_installed(&self) -> bool {
-        self.formal_event_entry_installed
-    }
-
-    pub fn setup(
-        &mut self,
-        start_provider: &CpuStartProvider,
-        cpu_group: &CpuGroup,
-        idle_tasks: &SecondaryIdleTaskSet,
-        vm: &Vm,
-        event_stream: &EventStream,
-        exception_stream: &ExceptionStream,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || start_provider.state() != State::Ready
-            || !start_provider.hsm_start_requests_issued()
-            || !start_provider.boot_data_per_secondary_cpu()
-            || cpu_group.state() != State::Ready
-            || !cpu_group.secondary_cpus_present_not_online()
-            || idle_tasks.state() != State::Prepared
-            || !idle_tasks.per_secondary_idle_task()
-            || vm.state() != State::Online
-            || vm.swapper_vm().state() != State::Online
-            || event_stream.state() != State::Ready
-            || exception_stream.state() != State::Ready
-        {
-            return self.failed_setup();
-        }
-
-        if !wait_for_ap_fact(cpu_group, &AP_ENTRY_REACHED)
-            || !wait_for_ap_fact(cpu_group, &AP_BOOT_DATA_CONSUMED)
-            || !wait_for_ap_fact(cpu_group, &AP_CURRENT_STACK_ESTABLISHED)
-        {
-            return self.failed_setup();
-        }
-
-        self.entry_reached = true;
-        self.boot_data_consumed = true;
-        self.current_stack_established = true;
-        self.swapper_vm_selected = true;
-        self.formal_event_entry_installed = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::ApEntryPreludePhaseReady,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.lifecycle.state(),
-            State::Base,
-            State::Ready,
-        )
-    }
-}
-
-pub struct ApSmpCallinPhase {
-    lifecycle: Lifecycle,
-    callin_reached: bool,
-    active_mm_init_mm: bool,
-    topology_recorded: bool,
-    notify_cpu_starting_observed: bool,
-    ipi_enable_observed: bool,
-    cpu_online_fact_published: bool,
-    cache_tlb_flush_observed: bool,
-    cpu_running_completion_produced: bool,
-}
-
-impl ApSmpCallinPhase {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            callin_reached: false,
-            active_mm_init_mm: false,
-            topology_recorded: false,
-            notify_cpu_starting_observed: false,
-            ipi_enable_observed: false,
-            cpu_online_fact_published: false,
-            cache_tlb_flush_observed: false,
-            cpu_running_completion_produced: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn cpu_running_completion_produced(&self) -> bool {
-        self.cpu_running_completion_produced
-    }
-
-    pub const fn ipi_enable_observed(&self) -> bool {
-        self.ipi_enable_observed
-    }
-
-    pub const fn cache_tlb_flush_observed(&self) -> bool {
-        self.cache_tlb_flush_observed
-    }
-
-    pub fn setup(
-        &mut self,
-        entry: &ApEntryPreludePhase,
-        cpu_group: &CpuGroup,
-        sync: &CpuHotplugSyncSet,
-        sbi_ipi: &SbiIpi,
-        init_mm: &InitMm,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || entry.state() != State::Ready
-            || !entry.current_stack_established()
-            || cpu_group.state() != State::Ready
-            || sync.state() != State::Prepared
-            || !sync.cpu_running_ready()
-            || sbi_ipi.state() != State::Ready
-            || init_mm.state() != State::Ready
-        {
-            return self.failed_setup();
-        }
-
-        if !wait_for_ap_fact(cpu_group, &AP_CPU_RUNNING_PRODUCED) {
-            return self.failed_setup();
-        }
-
-        self.callin_reached = true;
-        self.active_mm_init_mm = true;
-        self.topology_recorded = true;
-        self.notify_cpu_starting_observed = true;
-        self.ipi_enable_observed = true;
-        self.cpu_online_fact_published = true;
-        self.cache_tlb_flush_observed = true;
-        self.cpu_running_completion_produced = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::ApSmpCallinPhaseReady,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.lifecycle.state(),
-            State::Base,
-            State::Ready,
-        )
-    }
-}
-
-pub struct ApOnlineIdlePhase {
-    lifecycle: Lifecycle,
-    local_irq_enable_observed: bool,
-    cpu_startup_entry_reached: bool,
-    cpuhp_online_idle_reached: bool,
-    done_up_completion_produced: bool,
-    idle_or_park_loop_entered: bool,
-    no_bp_payload_or_syscalls: bool,
-}
-
-impl ApOnlineIdlePhase {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            local_irq_enable_observed: false,
-            cpu_startup_entry_reached: false,
-            cpuhp_online_idle_reached: false,
-            done_up_completion_produced: false,
-            idle_or_park_loop_entered: false,
-            no_bp_payload_or_syscalls: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn local_irq_enable_observed(&self) -> bool {
-        self.local_irq_enable_observed
-    }
-
-    pub const fn done_up_completion_produced(&self) -> bool {
-        self.done_up_completion_produced
-    }
-
-    pub const fn idle_or_park_loop_entered(&self) -> bool {
-        self.idle_or_park_loop_entered
-    }
-
-    pub fn setup(
-        &mut self,
-        callin: &ApSmpCallinPhase,
-        cpu_group: &CpuGroup,
-        sync: &CpuHotplugSyncSet,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || callin.state() != State::Ready
-            || !callin.cpu_running_completion_produced()
-            || cpu_group.state() != State::Ready
-            || sync.state() != State::Prepared
-            || !sync.done_up_ready()
-        {
-            return self.failed_setup();
-        }
-
-        if !wait_for_ap_fact(cpu_group, &AP_DONE_UP_PRODUCED) {
-            return self.failed_setup();
-        }
-
-        self.local_irq_enable_observed = true;
-        self.cpu_startup_entry_reached = true;
-        self.cpuhp_online_idle_reached = true;
-        self.done_up_completion_produced = true;
-        self.idle_or_park_loop_entered = true;
-        self.no_bp_payload_or_syscalls = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::ApOnlineIdlePhaseReady,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.lifecycle.state(),
-            State::Base,
-            State::Ready,
-        )
-    }
-}
-
 pub struct SecondaryCpuStartupAck {
     lifecycle: Lifecycle,
     acknowledged: bool,
@@ -1087,7 +832,7 @@ impl SecondaryCpuStartupAck {
     pub fn setup(
         &mut self,
         start_provider: &CpuStartProvider,
-        callin: &ApSmpCallinPhase,
+        cpu_group: &CpuGroup,
         sync: &mut CpuHotplugSyncSet,
         cpu_running_wait_lock: &mut RawSpinLock,
         local_interrupt: &mut LocalInterruptControl,
@@ -1096,8 +841,8 @@ impl SecondaryCpuStartupAck {
         if self.lifecycle.state() != State::Base
             || start_provider.state() != State::Ready
             || !start_provider.start_requests_issued()
-            || callin.state() != State::Ready
-            || !callin.cpu_running_completion_produced()
+            || !crate::phases::smp_runtime::ap_smp_callin::all_online(cpu_group)
+            || !crate::phases::smp_runtime::ap_smp_callin::all_callin_facts(cpu_group)
             || !start_provider.cpu_add_remove_mutex_guard_used()
             || !start_provider.cpu_hotplug_write_guard_used()
             || !start_provider.sbi_boot_data_publish_barriers_observed()
@@ -1187,8 +932,6 @@ impl SecondaryCpuOnlineAck {
     pub fn setup(
         &mut self,
         startup_ack: &SecondaryCpuStartupAck,
-        online_idle: &ApOnlineIdlePhase,
-        callin: &ApSmpCallinPhase,
         sync: &mut CpuHotplugSyncSet,
         cpu_group: &mut CpuGroup,
         secondary_cpus: &mut SecondaryCpuStore,
@@ -1200,9 +943,10 @@ impl SecondaryCpuOnlineAck {
         if self.lifecycle.state() != State::Base
             || startup_ack.state() != State::Ready
             || !startup_ack.acknowledged()
-            || online_idle.state() != State::Ready
-            || !online_idle.done_up_completion_produced()
-            || callin.state() != State::Ready
+            || !crate::phases::smp_runtime::ap_online_idle::all_online(cpu_group)
+            || !crate::phases::smp_runtime::ap_online_idle::all_online_idle_facts(cpu_group)
+            || !crate::phases::smp_runtime::ap_online_idle::all_park_loops_entered(cpu_group)
+            || !crate::phases::smp_runtime::ap_smp_callin::all_online(cpu_group)
             || sync.state() != State::Prepared
             || sbi_ipi.state() != State::Ready
         {
@@ -1213,10 +957,10 @@ impl SecondaryCpuOnlineAck {
         cpu_group.mark_secondary_cpus_online_after_ap_ack(secondary_cpus)?;
         self.acknowledged = true;
         self.online_after_ap_ack = true;
-        self.ap_idle_or_park_loop_entered = online_idle.idle_or_park_loop_entered();
-        self.ap_local_irq_enable_observed = online_idle.local_irq_enable_observed();
-        self.ap_cache_tlb_flush_summary_observed = callin.cache_tlb_flush_observed();
-        self.ap_ipi_enable_observed = callin.ipi_enable_observed();
+        self.ap_idle_or_park_loop_entered = true;
+        self.ap_local_irq_enable_observed = true;
+        self.ap_cache_tlb_flush_summary_observed = true;
+        self.ap_ipi_enable_observed = true;
         self.ap_hotplug_thread_mb_pair_deferred = true;
         crate::checkpoint::checkpoint(Checkpoint::SecondaryCpuApLocalSyncSummary);
         self.lifecycle.transition(
@@ -1309,9 +1053,6 @@ pub fn smp_bringup_runtime_ready(
     cpu_running_wait_lock: &RawSpinLock,
     done_up_wait_lock: &RawSpinLock,
     start_provider: &CpuStartProvider,
-    ap_entry: &ApEntryPreludePhase,
-    ap_callin: &ApSmpCallinPhase,
-    ap_online_idle: &ApOnlineIdlePhase,
     startup_ack: &SecondaryCpuStartupAck,
     online_ack: &SecondaryCpuOnlineAck,
     boundary: &SmpBringupBoundary,
@@ -1365,19 +1106,13 @@ pub fn smp_bringup_runtime_ready(
         && start_provider.cpu_add_remove_mutex_guard_used()
         && start_provider.cpu_hotplug_write_guard_used()
         && start_provider.sbi_boot_data_publish_barriers_observed()
-        && ap_entry.state() == State::Ready
-        && ap_entry.entry_reached()
-        && ap_entry.boot_data_consumed()
-        && ap_entry.current_stack_established()
-        && ap_entry.swapper_vm_selected()
-        && ap_entry.formal_event_entry_installed()
-        && ap_callin.state() == State::Ready
-        && ap_callin.cpu_running_completion_produced()
-        && ap_callin.ipi_enable_observed()
-        && ap_callin.cache_tlb_flush_observed()
-        && ap_online_idle.state() == State::Ready
-        && ap_online_idle.done_up_completion_produced()
-        && ap_online_idle.idle_or_park_loop_entered()
+        && crate::phases::smp_runtime::ap_entry_prelude::all_online(cpu_group)
+        && crate::phases::smp_runtime::ap_entry_prelude::all_adoption_facts(cpu_group)
+        && crate::phases::smp_runtime::ap_smp_callin::all_online(cpu_group)
+        && crate::phases::smp_runtime::ap_smp_callin::all_callin_facts(cpu_group)
+        && crate::phases::smp_runtime::ap_online_idle::all_online(cpu_group)
+        && crate::phases::smp_runtime::ap_online_idle::all_online_idle_facts(cpu_group)
+        && crate::phases::smp_runtime::ap_online_idle::all_park_loops_entered(cpu_group)
         && startup_ack.state() == State::Ready
         && startup_ack.ap_smp_callin_ack_matches_secondary_cpu()
         && online_ack.state() == State::Ready

@@ -5223,5 +5223,71 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 475,
+    "checkpoint_name": "ApEntryPreludePhase.Prepared",
+    "checkpoint_variant": "ApEntryPreludePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 476,
+    "checkpoint_name": "ApEntryPreludePhase.Online",
+    "checkpoint_variant": "ApEntryPreludePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 477,
+    "checkpoint_name": "ApSmpCallinPhase.Prepared",
+    "checkpoint_variant": "ApSmpCallinPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 478,
+    "checkpoint_name": "ApSmpCallinPhase.Online",
+    "checkpoint_variant": "ApSmpCallinPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 479,
+    "checkpoint_name": "ApOnlineIdlePhase.Prepared",
+    "checkpoint_variant": "ApOnlineIdlePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 480,
+    "checkpoint_name": "ApOnlineIdlePhase.Online",
+    "checkpoint_variant": "ApOnlineIdlePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 475,
+  "total_checkpoints": 481,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 358
+      "count": 364
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 358
+      "count": 364
     },
     {
       "confidence": "medium",
@@ -214,6 +214,18 @@
     {
       "family": "Vm",
       "count": 3
+    },
+    {
+      "family": "ApEntryPreludePhase",
+      "count": 2
+    },
+    {
+      "family": "ApOnlineIdlePhase",
+      "count": 2
+    },
+    {
+      "family": "ApSmpCallinPhase",
+      "count": 2
     },
     {
       "family": "BootCurrentCPU",

@@ -3323,5 +3323,47 @@
     "name": "FinalizePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 475,
+    "variant": "ApEntryPreludePhasePrepared",
+    "name": "ApEntryPreludePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 476,
+    "variant": "ApEntryPreludePhaseOnline",
+    "name": "ApEntryPreludePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 477,
+    "variant": "ApSmpCallinPhasePrepared",
+    "name": "ApSmpCallinPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 478,
+    "variant": "ApSmpCallinPhaseOnline",
+    "name": "ApSmpCallinPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 479,
+    "variant": "ApOnlineIdlePhasePrepared",
+    "name": "ApOnlineIdlePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 480,
+    "variant": "ApOnlineIdlePhaseOnline",
+    "name": "ApOnlineIdlePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

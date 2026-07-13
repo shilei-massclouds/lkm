@@ -333,6 +333,18 @@ Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值�
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，不提交 runqueue 成员关系，也不直接更新 task 记录的 CPU id。参照 Linux，`select_task_rq()` 只返回目标 CPU，后续由 `set_task_cpu()` / `__set_task_cpu()` 更新 `task_struct.thread_info.cpu`，再进入 task rq lock 和 enqueue/activate。规格中该更新表达为 `task.Action::SetTaskCpu(cpu_ref)`，并位于 `SelectRunQueue` 和 `EnqueueTask` 之间。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue，并通过 `runqueue_ref_cpu_is(selected_rq, BootCPURef)` 证明调用方写入 `Task.SetTaskCpu(BootCPURef)`；后续 SMP 选择策略应继续由 selected `RunQueueRef` 的 CPU 事实驱动 `Task.SetTaskCpu`，而不是由调用方硬编码 boot CPU。`RunQueueRef` 与 `CurrentRunQueueRef` 必须保持类型语义分离：`CurrentRunQueueRef` 只表示当前 CPU 视角的 current runqueue，不能作为 `SelectRunQueue` 返回值、普通入队目标或 smoke task 入队目标复用。完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
 `SchedulerObject.Action::Schedule` 是 `Scheduler.Online` 后的调度分界 action。
+
+### Replicated PhaseObject family
+
+当 phase 规格明确声明对象按 target key（例如 secondary CPU `logical_id`）replicate 时，model
+中的单个 `PhaseObject` 表示该 key 集合上的实例族。每个 key 独立拥有对象状态；对象的
+`depends_on`、`ensures`、invariant 和同对象 `emits` 都按该 key 解释。
+
+父 transition 中针对 replicated siblings 的 source-ordered `drives` 是 pointwise order：同一
+key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间允许交错。family 级
+`state == State::Online` 表示目标集合中所有实例 Online，只提供聚合完成事实，不隐含跨 key 的
+阶段屏障，也不把实例 transition 的 owner 转移给聚合读取者。当前语法不增加 indexed-object
+表达式；具体 family key 和聚合解释必须由对应 charter/model 注释与 coding 映射共同固定。
 它不推进 `Scheduler` lifecycle state，但会提交一次调度边界的运行期事实。
 `schedule_preempt_disabled()` 仍由调用方展开为三段式：
 先退出调用方继承的 preempt-disabled guard，再调用

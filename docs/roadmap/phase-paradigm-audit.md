@@ -120,9 +120,14 @@ Kernel
    KernelInitTask 栈。六个 legacy coding `.spec` 已迁移删除；14 个新 checkpoint 只追加为
    461–474 且默认 unmapped。announce 验证完整父子顺序及所有 BP 主线 checkpoint owner，
    smoke 54/54、stress 一轮 3/3、根目录 `make test` 167/167 通过。
-8. **SmpBringup AP 子树（待办）**：独立审计 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和
-   `ApOnlineIdlePhase` 的 AP owner、HSM/completion/hotplug guard 与阶段四层映射；不把 BP 上的
-   SmpBringup 聚合 checkpoint 误归为 AP task checkpoint。
+8. **SmpBringup AP 子树（完成）**：三个 AP phase 已固定为以 secondary `logical_id` 为 key 的
+   replicated family；每个 AP 独立四态，同一 AP 严格 Entry -> Callin -> OnlineIdle，不同 AP
+   允许交错。实现使用三组 `[AtomicU8; MAX_CPUS]`，AP AcqRel 单写、BP Acquire 聚合观察；旧
+   Context 聚合 Lifecycle 已删除。AP 入口 adoption 验证 boot-data slot/logical-id/stack pointer、
+   真实 SP 位于 16 KiB 目标栈、TP 等于目标 idle-task pointer，三阶段 Online 只返回具名 AP
+   continuation，最后进入 WFI park loop。BP 只负责 HSM、all-online/completion wait、ack 和 online
+   publish。旧 checkpoint 321–330 不变且均由 `ApIdleTask[n]` 发出；新增 475–480 默认 unmapped。
+   SMP2/SMP8 announce 已验证 per-AP owner/pointwise 顺序、跨 AP 交错和全部 Online 后的 BP ack。
 9. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
    selected payload、KernelInitTask owner、不返回语义和关机边界。
 10. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
@@ -145,7 +150,7 @@ Kernel
 
 | 节点 | Charter | Model | Coding `.md` | Impl | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| 两层阶段范式 | `drives` 父子关系、同对象 `emits` | model 作为唯一执行语义 | 独立状态/continuation/checkpoint lowering | 各子树逐项应用 | complete |
+| 两层阶段范式 | `drives` 父子关系、同对象 `emits`、replicated family | model 作为唯一执行语义 | 独立状态/continuation/checkpoint lowering | 普通与 per-target 阶段逐项应用 | complete |
 | Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RBA...`、Kernel.Online 已验证 | complete |
 | BootPhase | 五子阶段、入口/出口已固定 | 既有 drives/emits 保持 | 父 continuation/四状态/checkpoint 已完整映射 | Online 状态和五个父 continuation 已验证 | complete |
 | EntryPreludePhase | 入口例外已明确 | 入口 adoption/父返回注释已补 | 汇编、VM continuation、四状态已映射 | `RBA...` 且四 checkpoint 已验证 | complete |
@@ -164,10 +169,10 @@ Kernel
 | BootIdleEntryPhase | BootIdleTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
 | SmpRuntimePhase | 六个直接子阶段、Up.Online 入口和 Payload 出口固定 | 1/1/4 drives、四态和精确 Online 完整 | KernelInitTask owner、栈检查与六个 continuation 已映射 | 四 checkpoint、实际 SP 和父 continuation 已验证 | complete |
 | PreSmpInitPhase | BP 预备边界一致 | 标准四态、下游依赖 Online | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
-| SmpBringupPhase | BP 协调 AP 启动边界一致 | 标准四态、AP 模型保持 | completion/HSM/hotplug guard 与父返回已映射 | 四个 BP checkpoint、精确 Online 已验证 | complete |
-| ApEntryPreludePhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
-| ApSmpCallinPhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
-| ApOnlineIdlePhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
+| SmpBringupPhase | BP 协调 replicated AP family | pointwise AP drives、all-online 后 ack | HSM/Acquire wait/completion/hotplug guard 已映射 | BP 不代写 AP 状态，全部 Online 后才 ack | complete |
+| ApEntryPreludePhase | per-logical-id AP entry family | 标准四态、真实 entry adoption facts | AcqRel 状态、SP/TP/boot-data 检查、父返回已映射 | SMP2/8 四 checkpoint 与 AP owner 已验证 | complete |
+| ApSmpCallinPhase | per-logical-id callin family | 标准四态、依赖 Entry Online | cpu_running summary、pointwise continuation 已映射 | SMP2/8 四 checkpoint 与 AP owner 已验证 | complete |
+| ApOnlineIdlePhase | per-logical-id online-idle family | 标准四态、依赖 Callin Online | done_up/park continuation 与 Acquire 查询已映射 | SMP2/8 四 checkpoint、park/all-online 已验证 | complete |
 | RuntimeCorePhase | runtime core 边界一致 | 标准四态、下游依赖 Online | Started 位于 sched_init_smp 动作前 | 四 checkpoint、精确 Online 已验证 | complete |
 | InitcallPhase | initcall 边界一致 | 标准四态、下游依赖 Online | 首失败诊断与父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
 | RootfsPhase | rootfs 边界一致 | 标准四态、下游依赖 Online | Started 位于 Preset/KUnit 入口 | 四 checkpoint、namespace 前边界保持独立 | complete |
@@ -185,8 +190,8 @@ Kernel
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Boot、Interrupt、UpMultitask 与 SmpRuntime BP 主线已消除 model Online 被实现命名/记录为
-  Ready 的漂移；剩余问题继续按 SmpBringup AP 子树、Payload 批次逐项修正。
+- Boot、Interrupt、UpMultitask、SmpRuntime BP 主线与 SmpBringup AP 子树已消除 model Online
+  被实现命名/记录为 Ready 的漂移；下一批继续 PayloadPhase。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
@@ -203,5 +208,10 @@ Kernel
   六个直接子阶段完整 Online -> parent continuation 顺序，全部 BP 主线 checkpoint 位于
   KernelInitTask 执行线，实际 SP 栈范围检查与唯一切栈/入口计数均成立；AP checkpoint 保持 AP
   task owner，不套用 BP 断言。
+- SmpBringup AP 子树已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+  `QEMU_SMP=2/8` hello announce；checkpoint inventory 为 481，Linux mapping 为 exact 103 /
+  range 14 / unmapped 364，instrumentation plan 仍为 103。SMP8 实测不同 AP 交错，且每个
+  logical ID 内四态和三个 sibling 严格有序；全部 AP Online 后 BP 才发布 completion ack、
+  SmpBringup Prepared/Ready/Online。
 - 本批根目录直接 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
   基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。

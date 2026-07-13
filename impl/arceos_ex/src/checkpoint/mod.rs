@@ -599,6 +599,12 @@ pub enum Checkpoint {
     RootfsPhaseOnline,
     FinalizePhasePrepared,
     FinalizePhaseOnline,
+    ApEntryPreludePhasePrepared,
+    ApEntryPreludePhaseOnline,
+    ApSmpCallinPhasePrepared,
+    ApSmpCallinPhaseOnline,
+    ApOnlineIdlePhasePrepared,
+    ApOnlineIdlePhaseOnline,
 }
 
 impl Checkpoint {
@@ -1113,6 +1119,12 @@ impl Checkpoint {
             Self::RootfsPhaseOnline => "RootfsPhase.Online",
             Self::FinalizePhasePrepared => "FinalizePhase.Prepared",
             Self::FinalizePhaseOnline => "FinalizePhase.Online",
+            Self::ApEntryPreludePhasePrepared => "ApEntryPreludePhase.Prepared",
+            Self::ApEntryPreludePhaseOnline => "ApEntryPreludePhase.Online",
+            Self::ApSmpCallinPhasePrepared => "ApSmpCallinPhase.Prepared",
+            Self::ApSmpCallinPhaseOnline => "ApSmpCallinPhase.Online",
+            Self::ApOnlineIdlePhasePrepared => "ApOnlineIdlePhase.Prepared",
+            Self::ApOnlineIdlePhaseOnline => "ApOnlineIdlePhase.Online",
         }
     }
 }

@@ -646,6 +646,33 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(rules["LocalIrqEnablePhase.Ready"].mapping_kind, "exact")
         self.assertEqual(rules["ProcessPreparePhase.Ready"].mapping_kind, "range")
 
+    def test_ap_phase_lifecycle_additions_default_to_unmapped(self) -> None:
+        names = [
+            "ApEntryPreludePhase.Prepared",
+            "ApEntryPreludePhase.Online",
+            "ApSmpCallinPhase.Prepared",
+            "ApSmpCallinPhase.Online",
+            "ApOnlineIdlePhase.Prepared",
+            "ApOnlineIdlePhase.Online",
+        ]
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=475 + index,
+                variant=name.replace(".", ""),
+                name=name,
+            )
+            for index, name in enumerate(names)
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        self.assertEqual([record.checkpoint_name for record in mapped], names)
+        self.assertTrue(all(record.mapping_kind == "unmapped" for record in mapped))
+
     def test_mapping_ignores_generated_marker_comment_lines(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(

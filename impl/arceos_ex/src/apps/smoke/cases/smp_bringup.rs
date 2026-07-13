@@ -78,19 +78,16 @@ pub fn run() -> SmokeResult {
         || !ctx
             .cpu_start_provider
             .sbi_boot_data_publish_barriers_observed()
-        || ctx.ap_entry_prelude_phase.state() != State::Ready
-        || !ctx.ap_entry_prelude_phase.entry_reached()
-        || !ctx.ap_entry_prelude_phase.boot_data_consumed()
-        || !ctx.ap_entry_prelude_phase.current_stack_established()
-        || !ctx.ap_entry_prelude_phase.swapper_vm_selected()
-        || !ctx.ap_entry_prelude_phase.formal_event_entry_installed()
-        || ctx.ap_smp_callin_phase.state() != State::Ready
-        || !ctx.ap_smp_callin_phase.cpu_running_completion_produced()
-        || !ctx.ap_smp_callin_phase.ipi_enable_observed()
-        || !ctx.ap_smp_callin_phase.cache_tlb_flush_observed()
-        || ctx.ap_online_idle_phase.state() != State::Ready
-        || !ctx.ap_online_idle_phase.done_up_completion_produced()
-        || !ctx.ap_online_idle_phase.idle_or_park_loop_entered()
+        || !phases::smp_runtime::ap_entry_prelude::all_online(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_entry_prelude::all_adoption_facts(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_entry_prelude::all_boot_data_verified(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_entry_prelude::all_stacks_verified(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_entry_prelude::all_task_pointers_verified(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_smp_callin::all_online(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_smp_callin::all_callin_facts(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_online_idle::all_online(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_online_idle::all_online_idle_facts(&ctx.cpu_group)
+        || !phases::smp_runtime::ap_online_idle::all_park_loops_entered(&ctx.cpu_group)
         || ctx.secondary_cpu_startup_ack.state() != State::Ready
         || !ctx.secondary_cpu_startup_ack.acknowledged()
         || !ctx
@@ -111,6 +108,18 @@ pub fn run() -> SmokeResult {
     {
         printk::write_str("secondary cpu ack facts invalid\n");
         return SmokeResult::Failed;
+    }
+
+    let mut logical_id = 1usize;
+    while logical_id <= ctx.cpu_group.secondary_count() {
+        if phases::smp_runtime::ap_entry_prelude::state_for(logical_id) != State::Online
+            || phases::smp_runtime::ap_smp_callin::state_for(logical_id) != State::Online
+            || phases::smp_runtime::ap_online_idle::state_for(logical_id) != State::Online
+        {
+            printk::write_str("per-AP phase state invalid\n");
+            return SmokeResult::Failed;
+        }
+        logical_id += 1;
     }
 
     if ctx.cpu_group.state() != State::Ready

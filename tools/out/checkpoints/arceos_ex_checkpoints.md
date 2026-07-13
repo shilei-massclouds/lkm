@@ -477,3 +477,9 @@
 | 472 | RootfsPhaseOnline | RootfsPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 473 | FinalizePhasePrepared | FinalizePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 474 | FinalizePhaseOnline | FinalizePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 475 | ApEntryPreludePhasePrepared | ApEntryPreludePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 476 | ApEntryPreludePhaseOnline | ApEntryPreludePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 477 | ApSmpCallinPhasePrepared | ApSmpCallinPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 478 | ApSmpCallinPhaseOnline | ApSmpCallinPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 479 | ApOnlineIdlePhasePrepared | ApOnlineIdlePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 480 | ApOnlineIdlePhaseOnline | ApOnlineIdlePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

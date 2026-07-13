@@ -33,6 +33,11 @@ composite phase 可以使用轻量状态和 continuation 函数，不要求一�
 但它不能只靠子阶段的视觉调用顺序代表自己的 transition。叶子 phase 同样保留三个 transition
 和四状态，只是其 `drives` 通常落到普通对象 transition/action。
 
+replicated phase family 必须把 target key 映射为独立状态槽，例如由 AP 单写、协调 CPU 只读的
+`[AtomicU8; MAX_CPUS]`。每个实例仍由过程 module 的 `preset`/`setup`/`enable` 推进，不得退化为
+协调者持有的单个 `Lifecycle` 聚合对象。family 查询可以提供 `state_for(key)` 和
+`all_online(target_set)`，但 `all_online` 只能聚合读取已提交状态，不能代写状态或补发 checkpoint。
+
 ## Transition lowering
 
 每个阶段 transition 按以下顺序映射：
@@ -100,6 +105,11 @@ parent_transition_start
 新执行主体上的恢复点继续执行父 `drives` 的下一项，而不是创建第二条未建模阶段链。无限 idle
 或服务循环只执行自己所属任务的运行期职责，不能因为物理上仍持有旧栈帧而继续父阶段。
 
+replicated siblings 的 continuation 按 target key 绑定：`ChildA[key].Online` 只能恢复同一个
+`key` 的父 continuation 并触发 `ChildB[key].Preset`。不同 key 可以并发或交错；协调者只有在
+model 要求 family completion 时才用 acquire load 等待所有目标 Online。AP/设备等远端 owner
+提交状态时使用 release 或 AcqRel，协调者不得用普通非同步字段推断 completion。
+
 ## `emits` lowering
 
 标准阶段的 `emits` 只连接本阶段迁移：
@@ -132,6 +142,9 @@ continuation、任务调度移交和资源销毁必须分别命名和映射。
   对应 owner 发出，且不能使用尚未提交的阶段状态名称。
 - checkpoint handler 不改变状态、不触发 `emits`、不成为依赖。失败诊断也不能伪装成成功
   checkpoint。
+- replicated family 的 Started 和三个 target-state checkpoint 由每个 target owner 分别发出，
+  因此同名 checkpoint 可以重复；owner 标签必须包含稳定 target identity。协调者的 all-online
+  barrier 和 ack 使用自己的 checkpoint，不能复用 family state checkpoint。
 
 ## 失败与不返回路径
 

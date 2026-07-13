@@ -158,6 +158,9 @@ class ListCheckpointsTests(unittest.TestCase):
             "SmpRuntimePhase",
             "PreSmpInitPhase",
             "SmpBringupPhase",
+            "ApEntryPreludePhase",
+            "ApSmpCallinPhase",
+            "ApOnlineIdlePhase",
             "RuntimeCorePhase",
             "InitcallPhase",
             "RootfsPhase",
@@ -202,6 +205,18 @@ class ListCheckpointsTests(unittest.TestCase):
             "FinalizePhaseStarted": 379,
             "FinalizePhaseReady": 380,
         }
+        stable_ap_phase_ids = {
+            "ApEntryPreludePhaseStarted": 321,
+            "ApEntryPreludeBootDataConsumed": 322,
+            "ApEntryPreludeCurrentStackEstablished": 323,
+            "ApEntryPreludePhaseReady": 324,
+            "ApSmpCallinPhaseStarted": 325,
+            "ApSmpCallinCpuRunningProduced": 326,
+            "ApSmpCallinPhaseReady": 327,
+            "ApOnlineIdlePhaseStarted": 328,
+            "ApOnlineIdleDoneUpProduced": 329,
+            "ApOnlineIdlePhaseReady": 330,
+        }
         appended_smp_runtime_ids = {
             "SmpRuntimePhasePrepared": 461,
             "SmpRuntimePhaseOnline": 462,
@@ -217,6 +232,14 @@ class ListCheckpointsTests(unittest.TestCase):
             "RootfsPhaseOnline": 472,
             "FinalizePhasePrepared": 473,
             "FinalizePhaseOnline": 474,
+        }
+        appended_ap_phase_ids = {
+            "ApEntryPreludePhasePrepared": 475,
+            "ApEntryPreludePhaseOnline": 476,
+            "ApSmpCallinPhasePrepared": 477,
+            "ApSmpCallinPhaseOnline": 478,
+            "ApOnlineIdlePhasePrepared": 479,
+            "ApOnlineIdlePhaseOnline": 480,
         }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
@@ -243,11 +266,25 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertEqual(
             {
                 variant: by_variant[variant].index
+                for variant in stable_ap_phase_ids
+            },
+            stable_ap_phase_ids,
+        )
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
                 for variant in appended_smp_runtime_ids
             },
             appended_smp_runtime_ids,
         )
-        self.assertEqual(len(records), 475)
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
+                for variant in appended_ap_phase_ids
+            },
+            appended_ap_phase_ids,
+        )
+        self.assertEqual(len(records), 481)
 
 
 if __name__ == "__main__":
