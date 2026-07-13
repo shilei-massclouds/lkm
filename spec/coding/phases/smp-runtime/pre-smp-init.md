@@ -21,9 +21,11 @@ Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
 
 #### Entry facts
 
-This phase must run from the KernelInitTask release/dispatch facts
-and Scheduler first-schedule fact, not from BootIdleEntryPhase.Ready
-or any UP multitask aggregate wrapper.
+This phase must run after UpMultitaskPhase.Online from the
+KernelInitTask entry on its verified task stack. It must additionally
+consume the KernelInitTask release/dispatch facts and Scheduler
+first-schedule fact, not infer readiness from BootIdleEntryPhase.Ready
+or a RestInitPhase wrapper.
 
 #### kthreadd_done wait side
 

@@ -1,8 +1,8 @@
 /*
  * UP Multitask Phase Specification
  *
- * This top-level phase starts after InterruptPhase has completed the
- * ProcessPreparePhase boundary and ends in the rest_init() boot idle branch.
+ * This top-level phase starts after InterruptPhase is Online and ends after
+ * the rest_init() boot idle branch is Online.
  * The expanded path is split by execution owner:
  * BootInitRestInitPhase creates PID 1/kthreadd and completes kthreadd_done,
  * BootInitScheduleHandoffPhase commits the first scheduler handoff from the
@@ -29,13 +29,17 @@ object UpMultitaskPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     InterruptPhase.state == State::Online;
-                    ProcessPreparePhase.state == State::Online;
                 }
 
                 drives {
-                    BootInitRestInitPhase.Transition::Setup;
-                    BootInitScheduleHandoffPhase.Transition::Setup;
-                    BootIdleEntryPhase.Transition::Setup;
+                    BootInitRestInitPhase.Transition::Preset;
+                }
+
+                ensures {
+                    BootInitRestInitPhase.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                 }
 
                 emits {
@@ -48,10 +52,21 @@ object UpMultitaskPhase: PhaseObject {
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
+                depends_on {
+                    BootInitRestInitPhase.state == State::Online;
+                }
+
+                drives {
+                    BootInitScheduleHandoffPhase.Transition::Preset;
+                }
+
                 ensures {
-                    BootInitRestInitPhase.state == State::Ready;
-                    BootInitScheduleHandoffPhase.state == State::Ready;
-                    BootIdleEntryPhase.state == State::Ready;
+                    BootInitScheduleHandoffPhase.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                 }
 
                 emits {
@@ -64,18 +79,54 @@ object UpMultitaskPhase: PhaseObject {
     state State::Ready {
         invariant {
             InterruptPhase.state == State::Online;
-            ProcessPreparePhase.state == State::Online;
-            BootInitRestInitPhase.state == State::Ready;
-            BootInitScheduleHandoffPhase.state == State::Ready;
-            BootIdleEntryPhase.state == State::Ready;
+            BootInitRestInitPhase.state == State::Online;
+            BootInitScheduleHandoffPhase.state == State::Online;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            scheduler_first_schedule_committed(Scheduler);
         }
 
         transitions {
             on Transition::Enable -> State::Online {
+                drives {
+                    BootIdleEntryPhase.Transition::Preset;
+                }
+
+                ensures {
+                    BootIdleEntryPhase.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
+                }
             }
         }
     }
 
     state State::Online {
+        invariant {
+            InterruptPhase.state == State::Online;
+            BootInitRestInitPhase.state == State::Online;
+            BootInitScheduleHandoffPhase.state == State::Online;
+            BootIdleEntryPhase.state == State::Online;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            scheduler_first_schedule_committed(Scheduler);
+            kernel_init_task_stack_switch_committed(
+                Scheduler,
+                BootIdleTask,
+                KernelInitTask
+            );
+        }
     }
 }

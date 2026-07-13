@@ -48,11 +48,15 @@ Kernel.Enable 的三个 `drives` 必须保持连续 owner 和顺序：
 ```text
 UpMultitaskPhase
   -> real BootIdleTask-to-KernelInitTask stack handoff
+  -> enable_after_up_multitask() on KernelInitTask
   -> SmpRuntimePhase on KernelInitTask
   -> PayloadPhase on KernelInitTask
 ```
 
-SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，检查前两棵子树已
+`kernel_init_entry()` 验证实际 SP 位于 KernelInitTask 的 vmalloc stack 后调用
+`systems::kernel::enable_after_up_multitask()`。该具名 Kernel.Enable continuation 精确检查 Kernel
+仍为 Ready、UpMultitask Online、KernelInitTask Online、entry count 为 1 且 SP 验证成功，然后启动
+SmpRuntimePhase。SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，检查前两棵子树已
 完成并启动 PayloadPhase。PayloadPhase 提交 `Online` 后调用 `systems::kernel::mark_online()`；
 该函数检查三个 `drives` 阶段均已达到 model `Online`，提交 Kernel `Ready -> Online` 并记录
 `Kernel.Online`，然后 selected payload 继续执行且不返回。
@@ -65,7 +69,7 @@ SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，
 - `Kernel.Online` 属于 Kernel.Enable 完成边界，只能在 PayloadPhase.Online 已提交后发出。
 - 子阶段 checkpoint 保留在对应 phase module，不得由 `systems/kernel.rs` 代发。
 
-Boot 子树已经使用精确 `is_online()` 查询和完整四状态 checkpoint。Interrupt、UpMultitask、
+Boot、Interrupt 和 UpMultitask 子树已经使用精确 `is_online()` 查询和完整四状态 checkpoint。
 SmpRuntime 等尚未审计子树中仍代表 model Online 的旧 `is_ready()`，必须在各自批次收敛；不能
 据此降低 Kernel model 的 Online 要求。
 
@@ -76,5 +80,5 @@ Kernel 只拥有顶层生命周期和阶段顺序。ELF、地址空间、syscall
 RuntimeCore 的隐式副作用；`UserBootPayload` 是 selected payload variant，不是第二条启动链。
 
 BootIdle continuation 若恢复，只能进入无限 idle 调度循环。SmpRuntime 和 Payload 必须由
-`kernel_init_entry()` 在 KernelInitTask task stack 上执行；KThreaddTask 不得沿启动栈执行
-payload。
+`kernel_init_entry()` 在 KernelInitTask task stack 上执行并经具名 Kernel continuation 进入后续
+drive；KThreaddTask 不得沿启动栈执行 payload。

@@ -1,67 +1,53 @@
-# 单核多任务阶段
+# UpMultitaskPhase 单核多任务阶段
 
-引导任务身份转化为空闲任务，同时启动两个新任务：内核初始化任务和内核线程守护任务。
+UpMultitaskPhase 是 Kernel 的第三个直接子阶段。它从 `rest_init()` 入口开始，在 boot CPU
+上建立 PID 1、kthreadd 和首次调度事实，让原 BootInitTask 进入 BootIdleTask 运行期，最后
+通过一次真实 task stack 切换把 Kernel.Enable 的后续执行权交给 KernelInitTask。
 
-内核初始化任务继续承担内核初始化工作，启动多核之前是本阶段的出口边界。
+## 边界与职责
 
-> [model] MUST：单核多任务阶段正式命名是UpMultitaskPhase。
+- 入口：`Kernel.Enable` 在 `InterruptPhase.Online` 后驱动 `UpMultitaskPhase.Preset`。
+- 直接子阶段固定为 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
+  `BootIdleEntryPhase`；不建立 `RestInitPhase` wrapper。
+- 出口：`UpMultitaskPhase.Online` 已发布后，BootIdleTask 保存自己的 switch context，恢复
+  KernelInitTask 的 vmalloc stack，并进入具名 `kernel::enable_after_up_multitask()`
+  continuation。该 continuation 才能启动现有 SmpRuntime 入口。
+- secondary CPU、workqueue worker 和后续 runtime 不属于本阶段。
 
-引导任务在本阶段中完成 调度交接、转换空闲任务2个子阶段。
+三个子阶段按执行主体划分：
 
-> [model] MUST：引导任务命名BootInitTask，转换身份为空闲任务后，命名为BootIdleTask。
+1. `BootInitRestInitPhase` 由 BootInitTask 执行 `rcu_scheduler_starting()`，创建并唤醒
+   KernelInitTask/KthreaddTask，发布 `SYSTEM_SCHEDULING` 并完成 `kthreadd_done`。
+2. `BootInitScheduleHandoffPhase` 仍由 BootInitTask 执行
+   `BootIdlePreemption.EnableNoResched` 和首次 `Scheduler.Schedule`，只提交调度/dispatch 事实。
+3. `BootIdleEntryPhase` 由 BootIdleTask continuation 在 `BootIdleStartupContext` 中进入
+   `cpu_startup_entry()` 与一轮代表性 idle loop，然后返回父 Enable continuation。
 
-内核初始化任务在本阶段中为多核运行做准备。
-
-> [model] MUST：内核初始化任务命名KernelInitTask。
-
-内核线程守护任务 *暂缺*。
-
-> [model] MUST：内核线程守护任务命名KThreaddTask。
-
-> 待补充。 待补充。 
-
-## 边界与交互
-
-1. 入口边界：中断期阶段把执行权移交当前阶段。
-2. 出口边界：把执行权移交给多核运行期阶段，由多核运行期负责启动多核。
+叶子阶段 Online 后只返回 UpMultitask 持有的 continuation，不直接启动 sibling。
 
 ## 生命周期
 
-### 范式
+UpMultitaskPhase 与三个直接子阶段均遵循标准阶段生命周期：
 
-符合阶段范式，初始状态Base，启动事件Preset，自动推进状态迁移，直到Online。
+```text
+Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
+```
 
-> [model] MUST：阶段启动事件对应Preset迁移事件。
+`Started` 是 Preset 被接受时的事件 checkpoint，不是额外状态。每个叶子的 Linux 对象动作
+归入自身 Preset；Setup 和 Enable 只检查 Preset 已建立的事实并逐层发布状态。
 
-### 状态与迁移
+父阶段用三次迁移分别拥有三个子阶段：
 
-#### 引导任务
+- UpMultitask.Preset 驱动 BootInitRestInit.Preset；其 Online 后发布 UpMultitask.Prepared。
+- UpMultitask.Setup 驱动 BootInitScheduleHandoff.Preset；其 Online 后发布 UpMultitask.Ready。
+- UpMultitask.Enable 驱动 BootIdleEntry.Preset；其 Online 后发布 UpMultitask.Online。
 
-* Preset：空。
-
-* Setup：内核引导任务进行一次调度，给其它任务让出运行机会。
-
-  > [model] MUST: 驱动SchedHandoffPhase.Preset并等待其到达Online状态。
-
-* Enable：内核引导任务转换身份成为空闲任务。
-
-  > [model] MUST: 驱动BootIdleEntryPhase.Preset并等待其到达Online状态。
-
-#### 内核初始化任务
-
-* Preset：空。
-
-  > [model] MUST：驱动PreSmpInitPhase等待其到达Online状态。
-
-#### 内核线程守护任务
-
-* 暂缺。
+`KernelInitTask` 的 `CurrentTaskRef` 标签只是线性调度事实；只有上述真实 task stack handoff 和
+KernelInit 入口的实际 SP 验证构成物理跨栈边界。
 
 ## 引用
 
-* [charter/phases](../phases)
-
-## 映射目标
-
-* [phases/boot](spec/model/phases/boot.spec)
-
+- [阶段范式](../phase-paradigm.md)
+- [UpMultitask model](../../model/phases/up-multitask/phase.spec)
+- [UpMultitask coding](../../coding/phases/up-multitask.md)
+- [Kernel 系统](../systems/kernel.md)

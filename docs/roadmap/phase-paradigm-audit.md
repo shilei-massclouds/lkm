@@ -57,7 +57,9 @@ Kernel
 │   ├── IrqOpenPreparePhase
 │   └── ProcessPreparePhase
 ├── UpMultitaskPhase
-│   └── RestInit 子阶段链
+│   ├── BootInitRestInitPhase
+│   ├── BootInitScheduleHandoffPhase
+│   └── BootIdleEntryPhase
 ├── SmpRuntimePhase
 │   ├── PreSmpInitPhase
 │   ├── SmpBringupPhase
@@ -97,8 +99,17 @@ Kernel
    观察 Started/Prepared/Ready/Online，旧 ID 保持，新 Prepared/Online 默认 unmapped。announce
    实测四条 Online -> sibling Started 顺序、ProcessPrepare.Online -> Interrupt.Prepared/Ready/Online
    -> UpMultitask.Started，并最终到达 Kernel.Online 与 Hello；默认 stress 一轮 3/3 通过。
-6. **UpMultitaskPhase（待办）**：审计 rest-init 子阶段链，重点核对 BootIdle、KernelInit、
-   KThreadd 的任务所有权、真实栈切换和无限调度循环。
+6. **UpMultitaskPhase（完成）**：charter 固定三个直接子阶段、Interrupt.Online 入口和
+   Kernel.Enable 跨栈出口；父 Preset/Setup/Enable 分别驱动 RestInit/ScheduleHandoff/BootIdleEntry。
+   父与三个叶子统一四态，叶子对象动作归 Preset，Setup/Enable 只检查和发布；Online 只返回
+   三个具名父 continuation。离开 UpMultitask.Online 后执行真实 BootIdle -> KernelInit stack
+   handoff，KernelInit entry 验证实际 SP、唯一 switch/entry count 后经
+   `kernel::enable_after_up_multitask()` 启动 SmpRuntime。legacy `rest-init.spec` 已迁移删除，
+   查询收敛为精确 Online；dispatch 历史事实在 ScheduleHandoff.Online invariant 成立时锁存，
+   不受后续 scheduler smoke 改写 current-task 瞬时值影响。11 个新增 checkpoint 追加为
+   450–460，旧 268–272 不变且 Linux exact mapping 仍只保留 RestInit.Ready。announce 实测
+   三组 child Online -> parent state -> next child Started、UpMultitask.Online -> real switch ->
+   KernelInit entry -> SmpRuntime.Started，并最终到达 Kernel.Online 与 Hello；stress 一轮 3/3 通过。
 7. **SmpRuntimePhase（待办）**：审计六个叶子阶段，确认整棵运行期初始化链由
    KernelInitTask 驱动。
 8. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
@@ -136,8 +147,10 @@ Kernel
 | LocalIrqEnablePhase | 只开放 boot CPU 总入口 | 标准四态、无外层 context | early flag/SIE 顺序与负向 gates 已映射 | 四 checkpoint、父返回已验证 | complete |
 | IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptStream context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
 | ProcessPreparePhase | rest_init 前准备边界一致 | 标准四态、下游依赖 Online | 对象覆盖/deferred/父返回已映射 | 四 checkpoint、Interrupt.Prepared 已验证 | complete |
-| UpMultitaskPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| RestInit 子阶段链 | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| UpMultitaskPhase | 三子阶段、Interrupt/Kernel 边界固定 | 三迁移分担 drives、四态完整 | continuation/checkpoint/跨栈完整映射 | 精确 Online、三个父 continuation、Kernel continuation 已验证 | complete |
+| BootInitRestInitPhase | BootInitTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |
+| BootInitScheduleHandoffPhase | BootInitTask 首次调度边界 | 标准四态、Scheduler action context 保持 | dispatch 锁存与父返回已映射 | 四 checkpoint、长期 dispatch query 已验证 | complete |
+| BootIdleEntryPhase | BootIdleTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
 | SmpRuntimePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | PreSmpInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | SmpBringupPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
@@ -152,18 +165,22 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录已从 26 个 `.spec` 降到 17 个；剩余分类为通用映射/构建/架构/语言 4 个、
-  project 1 个、phase 7 个、object 5 个。
+- coding 目录已从 26 个 `.spec` 降到 16 个；剩余分类为通用映射/构建/架构/语言 4 个、
+  project 1 个、phase 6 个、object 5 个。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Boot 与 Interrupt 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；剩余问题继续按
-  UpMultitask、SmpRuntime、Payload 子树批次逐项修正。
+- Boot、Interrupt 与 UpMultitask 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；
+  剩余问题继续按 SmpRuntime、Payload 子树批次逐项修正。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为
   450，Linux mapping 为 exact 103 / range 14 / unmapped 333，instrumentation plan 仍为 103。
+- UpMultitask 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+  `make build APP=hello PROBE=announce`、`make run APP=hello PROBE=announce`、
+  `make run APP=smoke` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为 461，Linux
+  mapping 为 exact 103 / range 14 / unmapped 344，instrumentation plan 仍为 103，stress 为 3/3。
 - 本批开始前根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
   基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。

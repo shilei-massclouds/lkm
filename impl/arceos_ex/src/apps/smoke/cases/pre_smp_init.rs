@@ -7,12 +7,15 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
+    let pre_smp_ready = phases::smp_runtime::pre_smp_init::is_ready();
+    let dispatch_ready = phases::up_multitask::rest_init::dispatch_ready();
+    let up_multitask_online = phases::up_multitask::is_online();
 
-    if !phases::smp_runtime::pre_smp_init::is_ready()
-        || !phases::up_multitask::rest_init::dispatch_ready()
-        || !phases::up_multitask::is_ready()
-    {
-        printk::write_str("pre-smp init phase is not ready\n");
+    if !pre_smp_ready || !dispatch_ready || !up_multitask_online {
+        printk::write_fmt(format_args!(
+            "pre-smp init readiness pre_smp={} dispatch={} up_multitask={}\n",
+            pre_smp_ready, dispatch_ready, up_multitask_online
+        ));
         return SmokeResult::Failed;
     }
 

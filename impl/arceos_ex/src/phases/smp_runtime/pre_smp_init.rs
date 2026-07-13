@@ -22,7 +22,9 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
-    if !crate::phases::up_multitask::rest_init::dispatch_ready() {
+    if !crate::phases::up_multitask::is_online()
+        || !crate::phases::up_multitask::rest_init::dispatch_ready()
+    {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,

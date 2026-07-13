@@ -21,7 +21,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
-    if !crate::phases::up_multitask::is_ready()
+    if !crate::phases::up_multitask::is_online()
         || !crate::phases::smp_runtime::pre_smp_init::is_ready()
     {
         return failed_condition(

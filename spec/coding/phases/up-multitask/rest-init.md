@@ -1,14 +1,32 @@
-# BootInitRestInitPhase coding
+# UpMultitask rest_init 子阶段编码
 
-本文件承载 `spec/coding/phases/up-multitask/rest-init.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+本文件是 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase` 的
+coding 权威来源。原 `rest-init.spec` 的有效实现规则已全部归并到本文，不再维护平行 predicate
+索引。
 
-<!-- formal-predicate-notes:spec/coding/phases/up-multitask/rest-init.spec START -->
+## 生命周期与 continuation
 
-## Formal predicate notes
+三个子阶段都使用 `Base -> Prepared -> Ready -> Online`。对象动作只在 Preset 执行；Setup 和
+Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset start，不是状态。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`rest-init.spec`](rest-init.spec)。
+| 子阶段 | Preset 对象动作与 context | checkpoints | Online continuation |
+| --- | --- | --- | --- |
+| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::preset_after_boot_init_rest_init()` |
+| BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched` 与 Scheduler 既有 action context 中的首次 `Schedule` | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::setup_after_boot_init_schedule_handoff()` |
+| BootIdleEntry | `BootIdleStartupContext` 中进入 runtime、prepare entry 与代表性 idle loop | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::enable_after_boot_idle_entry()` |
 
-### ArceosExRestInitCodingMust
+每个 Online continuation 只返回父 transition，不启动 sibling。`dispatch_ready()` 保留为调度事实
+查询：BootInitScheduleHandoffPhase 提交 Online 时必须仍满足既有 first-schedule、
+pick/switch/current-task 与 completion dispatch invariant，并在同一边界锁存长期 dispatch fact；
+后续查询同时要求该阶段精确 Online 和锁存事实，不用已经发生后续调度的 current-task 瞬时值重算历史。
+
+BootIdleEntry Online 返回父 Enable continuation；父提交 UpMultitask Online 后才调用
+`handoff_boot_idle_to_kernel_init()`。`kernel_init_entry()` 验证真实 `sp` 后调用具名
+`kernel::enable_after_up_multitask()`，该 continuation 检查 Kernel Ready、UpMultitask Online、
+KernelInitTask Online、唯一 entry count 与 SP verification，再启动 SmpRuntime。线性模型中的
+`CurrentTaskRef` 标签不构成物理 Rust stack 归属证据。
+
+## 已迁移实现规则
 
 #### Model path
 
@@ -29,9 +47,9 @@ subtree, for example impl/arceos_ex/src/phases/up_multitask/rest_init.rs.
 BootInitRestInitPhase must run after ProcessPreparePhase.Online;
 BootInitScheduleHandoffPhase then opens task-concurrency through the
 first scheduler handoff; BootIdleEntryPhase records the boot idle
-continuation. UpMultitaskPhase.Ready is the direct aggregate over
-those concrete subphases; no extra RestInitPhase wrapper reports
-their readiness.
+continuation. UpMultitaskPhase.Online is reached only after those
+three concrete subphases each reach Online; no extra RestInitPhase
+wrapper reports their readiness.
 
 #### Task creation facts
 
@@ -176,8 +194,8 @@ save/restore counts must be balanced for this invocation.
 The phase implementation must present the boot-idle tail chain
 directly in phase order: enter BootIdleStartupContext, then
 BootIdleRuntime.setup(), BootIdleRuntime.prepare_idle_entry(),
-BootIdleRuntime.run_idle_loop(), and the BootIdleEntryPhase.Ready
-checkpoint. It may use one small helper for each named action, but
+BootIdleRuntime.run_idle_loop(), then the BootIdleEntryPhase Prepared,
+Ready and Online checkpoints. It may use one small helper for each named action, but
 it must not hide the whole chain behind a single setup_boot_idle_tail()
 helper or collapse the model action order into one opaque phase call.
 
@@ -479,9 +497,10 @@ question, not a completed resource-exclusive context.
 
 #### Fork dependency
 
-PreSmpInitPhase must depend on the KernelInitTask release/dispatch
-facts and Scheduler first-schedule fact, not on BootIdleEntryPhase.Ready
-or any UP multitask aggregate wrapper.
+PreSmpInitPhase must depend on UpMultitaskPhase.Online in addition to
+the KernelInitTask release/dispatch facts and Scheduler first-schedule
+fact. It must not infer readiness from BootIdleEntryPhase.Ready or a
+nonexistent RestInitPhase wrapper.
 
 #### Real BootIdle to KernelInit stack handoff
 
@@ -490,7 +509,8 @@ checkpoint facts, but leaving UpMultitaskPhase must perform one real
 cooperative context transfer from BootIdleTask to KernelInitTask. The
 handoff saves BootIdleTask's `ra/sp/tp/s0..s11`, restores the initialized
 KernelInitTask context on its vmalloc stack, and enters `kernel_init_entry()`.
-SmpRuntimePhase and PayloadPhase must be driven from that entry. If a later
+That entry must call the named Kernel.Enable continuation, which validates
+the owner and stack facts before driving SmpRuntimePhase and PayloadPhase. If a later
 schedule restores the BootIdle continuation, it remains in its active idle
 schedule loop. If KthreaddTask is selected, it remains in its temporary active
 schedule loop. Neither continuation may execute the selected payload.
@@ -509,5 +529,3 @@ the boot stack bound before changing the linker profile.
 Secondary CPU bringup, workqueue workers, Tasks RCU GP kthreads,
 KernelInitTask.kernel_init_freeable() and kthreadd request
 consumption remain later-phase work.
-
-<!-- formal-predicate-notes:spec/coding/phases/up-multitask/rest-init.spec END -->

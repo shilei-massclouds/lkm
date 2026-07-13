@@ -151,6 +151,10 @@ class ListCheckpointsTests(unittest.TestCase):
             "LocalIrqEnablePhase",
             "IrqOpenPreparePhase",
             "ProcessPreparePhase",
+            "UpMultitaskPhase",
+            "BootInitRestInitPhase",
+            "BootInitScheduleHandoffPhase",
+            "BootIdleEntryPhase",
         ):
             for boundary in ("Started", "Prepared", "Ready", "Online"):
                 self.assertIn(f"{phase}.{boundary}", by_name)
@@ -168,6 +172,13 @@ class ListCheckpointsTests(unittest.TestCase):
             "ProcessPreparePhaseStarted": 233,
             "ProcessPreparePhaseReady": 234,
         }
+        stable_up_multitask_ids = {
+            "UpMultitaskPhaseStarted": 268,
+            "UpMultitaskPhaseReady": 269,
+            "BootInitRestInitPhaseReady": 270,
+            "BootInitScheduleHandoffPhaseReady": 271,
+            "BootIdleEntryPhaseReady": 272,
+        }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
             {
@@ -175,6 +186,13 @@ class ListCheckpointsTests(unittest.TestCase):
                 for variant in stable_interrupt_ids
             },
             stable_interrupt_ids,
+        )
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
+                for variant in stable_up_multitask_ids
+            },
+            stable_up_multitask_ids,
         )
 
 

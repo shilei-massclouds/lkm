@@ -46,7 +46,7 @@ pub fn enable_after_smp_runtime() -> ! {
     if !crate::phases::prepare::is_online()
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
-        || !crate::phases::up_multitask::is_ready()
+        || !crate::phases::up_multitask::is_online()
         || !crate::phases::smp_runtime::is_ready()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel enable invariant failed\n");
@@ -54,6 +54,24 @@ pub fn enable_after_smp_runtime() -> ! {
     }
 
     crate::phases::payload::setup_then_enable()
+}
+
+pub fn enable_after_up_multitask() -> ! {
+    let ctx = crate::context::context_ref();
+    if crate::phases::state::load(&KERNEL_STATE) != State::Ready
+        || !crate::phases::up_multitask::is_online()
+        || ctx.kernel_init_task.state() != State::Online
+        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
+        || ctx.kernel_init_task.entry_started_count() != 1
+        || !ctx.kernel_init_task.entry_stack_verified()
+    {
+        crate::arch::riscv64::sbi::putstr(
+            "arceos_ex kernel enable after up multitask invariant failed\n",
+        );
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
+
+    crate::phases::smp_runtime::setup()
 }
 
 fn mark_prepared() -> EventResult {
@@ -78,7 +96,7 @@ pub fn mark_online() -> EventResult {
     if !crate::phases::prepare::is_online()
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
-        || !crate::phases::up_multitask::is_ready()
+        || !crate::phases::up_multitask::is_online()
         || !crate::phases::smp_runtime::is_ready()
         || !crate::phases::payload::is_online()
     {

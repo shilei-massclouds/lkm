@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 450,
+  "total_checkpoints": 461,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 333
+      "count": 344
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 333
+      "count": 344
     },
     {
       "confidence": "medium",
@@ -120,6 +120,14 @@
       "count": 5
     },
     {
+      "family": "BootIdleEntryPhase",
+      "count": 4
+    },
+    {
+      "family": "BootInitScheduleHandoffPhase",
+      "count": 4
+    },
+    {
       "family": "BootPhase",
       "count": 4
     },
@@ -156,11 +164,19 @@
       "count": 4
     },
     {
+      "family": "UpMultitaskPhase",
+      "count": 4
+    },
+    {
       "family": "VirtioBlk",
       "count": 4
     },
     {
       "family": "BootCPU",
+      "count": 3
+    },
+    {
+      "family": "BootInitRestInitPhase",
       "count": 3
     },
     {
@@ -320,10 +336,6 @@
       "count": 2
     },
     {
-      "family": "UpMultitaskPhase",
-      "count": 2
-    },
-    {
       "family": "UserChildRecord",
       "count": 2
     },
@@ -376,10 +388,6 @@
       "count": 1
     },
     {
-      "family": "BootIdleEntryPhase",
-      "count": 1
-    },
-    {
       "family": "BootIdlePiLock",
       "count": 1
     },
@@ -401,10 +409,6 @@
     },
     {
       "family": "BootInitPreemption",
-      "count": 1
-    },
-    {
-      "family": "BootInitScheduleHandoffPhase",
       "count": 1
     },
     {
@@ -1036,5 +1040,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 174
+  "unmapped_singleton_family_count": 172
 }

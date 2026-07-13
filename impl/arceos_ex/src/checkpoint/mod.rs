@@ -574,6 +574,17 @@ pub enum Checkpoint {
     IrqOpenPreparePhaseOnline,
     ProcessPreparePhasePrepared,
     ProcessPreparePhaseOnline,
+    UpMultitaskPhasePrepared,
+    UpMultitaskPhaseOnline,
+    BootInitRestInitPhaseStarted,
+    BootInitRestInitPhasePrepared,
+    BootInitRestInitPhaseOnline,
+    BootInitScheduleHandoffPhaseStarted,
+    BootInitScheduleHandoffPhasePrepared,
+    BootInitScheduleHandoffPhaseOnline,
+    BootIdleEntryPhaseStarted,
+    BootIdleEntryPhasePrepared,
+    BootIdleEntryPhaseOnline,
 }
 
 impl Checkpoint {
@@ -1063,6 +1074,17 @@ impl Checkpoint {
             Self::IrqOpenPreparePhaseOnline => "IrqOpenPreparePhase.Online",
             Self::ProcessPreparePhasePrepared => "ProcessPreparePhase.Prepared",
             Self::ProcessPreparePhaseOnline => "ProcessPreparePhase.Online",
+            Self::UpMultitaskPhasePrepared => "UpMultitaskPhase.Prepared",
+            Self::UpMultitaskPhaseOnline => "UpMultitaskPhase.Online",
+            Self::BootInitRestInitPhaseStarted => "BootInitRestInitPhase.Started",
+            Self::BootInitRestInitPhasePrepared => "BootInitRestInitPhase.Prepared",
+            Self::BootInitRestInitPhaseOnline => "BootInitRestInitPhase.Online",
+            Self::BootInitScheduleHandoffPhaseStarted => "BootInitScheduleHandoffPhase.Started",
+            Self::BootInitScheduleHandoffPhasePrepared => "BootInitScheduleHandoffPhase.Prepared",
+            Self::BootInitScheduleHandoffPhaseOnline => "BootInitScheduleHandoffPhase.Online",
+            Self::BootIdleEntryPhaseStarted => "BootIdleEntryPhase.Started",
+            Self::BootIdleEntryPhasePrepared => "BootIdleEntryPhase.Prepared",
+            Self::BootIdleEntryPhaseOnline => "BootIdleEntryPhase.Online",
         }
     }
 }

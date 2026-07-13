@@ -3148,5 +3148,82 @@
     "name": "ProcessPreparePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 450,
+    "variant": "UpMultitaskPhasePrepared",
+    "name": "UpMultitaskPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 451,
+    "variant": "UpMultitaskPhaseOnline",
+    "name": "UpMultitaskPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 452,
+    "variant": "BootInitRestInitPhaseStarted",
+    "name": "BootInitRestInitPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 453,
+    "variant": "BootInitRestInitPhasePrepared",
+    "name": "BootInitRestInitPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 454,
+    "variant": "BootInitRestInitPhaseOnline",
+    "name": "BootInitRestInitPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 455,
+    "variant": "BootInitScheduleHandoffPhaseStarted",
+    "name": "BootInitScheduleHandoffPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 456,
+    "variant": "BootInitScheduleHandoffPhasePrepared",
+    "name": "BootInitScheduleHandoffPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 457,
+    "variant": "BootInitScheduleHandoffPhaseOnline",
+    "name": "BootInitScheduleHandoffPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 458,
+    "variant": "BootIdleEntryPhaseStarted",
+    "name": "BootIdleEntryPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 459,
+    "variant": "BootIdleEntryPhasePrepared",
+    "name": "BootIdleEntryPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 460,
+    "variant": "BootIdleEntryPhaseOnline",
+    "name": "BootIdleEntryPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

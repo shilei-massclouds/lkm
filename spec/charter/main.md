@@ -2282,8 +2282,8 @@ flowchart LR
 
 当前 `UP Multitask Phase` 正式展开三个按执行主体划分的子阶段：
 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
-`BootIdleEntryPhase`。不再建立 `RestInitPhase` 兼容 wrapper；`UpMultitaskPhase.Ready`
-直接由这三个具体子阶段 Ready 构成。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
+`BootIdleEntryPhase`。不再建立 `RestInitPhase` 兼容 wrapper；`UpMultitaskPhase.Online`
+只在这三个具体子阶段分别到达 Online 后发布。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
 `KernelInitTask` 驱动的执行线：
 
 - `BootInitTask` 继续执行 `rest_init()`，在调度交接后完成
@@ -2291,11 +2291,10 @@ flowchart LR
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
   然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
   `PreSmpInitPhase`。
-- 因此 `PreSmpInitPhase.Started` 不是 `BootIdleEntryPhase.Ready` 或任何
-  UP multitask 聚合 wrapper 后的普通 sibling；它依赖 PID 1 release/dispatch 和
-  scheduler first handoff facts。
-- `SmpRuntimePhase` 由 `TaskEntry::KernelInit` 启动，而不是由
-  `UpMultitaskPhase` 的最后子阶段顺序衔接启动。
+- 因此 `PreSmpInitPhase.Started` 不能由 `BootIdleEntryPhase.Ready` 单独推出；它依赖
+  `UpMultitaskPhase.Online`、PID 1 release/dispatch 和 scheduler first handoff facts。
+- `SmpRuntimePhase` 由真实 `TaskEntry::KernelInit` 入口在校验实际栈指针后，通过
+  Kernel.Enable continuation 启动；BootIdleEntry Online 只返回 UpMultitask 父 continuation。
 
 按“子阶段不跨执行主体边界”的原则，`BootInitRestInitPhase` 只能表示
 `BootInitTask` 视角下执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
@@ -2318,10 +2317,9 @@ Scheduler action。该分界提交 `Scheduler.first_schedule_committed` 等调�
 没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是由
 preemption guard 边界和调度分界组成的通用 helper。
 
-`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `KernelInitTask`
-release/dispatch facts 和 Scheduler first-schedule fact，不作为
-`UpMultitaskPhase` 的普通 sibling，也不直接依赖 `BootIdleEntryPhase.Ready` 或任何
-UP multitask 聚合 wrapper。
+`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `UpMultitaskPhase.Online`、
+`KernelInitTask` release/dispatch facts 和 Scheduler first-schedule fact。它不由
+BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推断父阶段完成。
 
 实现层应拆分 `rest_init`：`BootInitRestInitPhase` 创建 PID 1/kthreadd 并完成
 `kthreadd_done`；`BootInitScheduleHandoffPhase` 退出 boot 初始 preempt-disabled 上下文并调用
@@ -2398,9 +2396,10 @@ UP multitask 聚合 wrapper。
 
 本子阶段的结束状态暂定至少包含：
 
-- `BootInitRestInitPhase.state == Ready`
-- `BootInitScheduleHandoffPhase.state == Ready`
-- `BootIdleEntryPhase.state == Ready`
+- `BootInitRestInitPhase.state == Online`
+- `BootInitScheduleHandoffPhase.state == Online`
+- `BootIdleEntryPhase.state == Online`
+- `UpMultitaskPhase.state == Online`
 - `RcuCore.state == Ready`，且 `RcuCore.scheduler_active == RCU_SCHEDULER_INIT`
 - `KernelInitTask.state == Online`，且 `KernelInitTask.pid == 1`
 - `KernelInitTask.cpu_affinity == BootCPU`，并记录 `PF_NO_SETAFFINITY`
@@ -2539,8 +2538,9 @@ UP multitask 聚合 wrapper。
 
 本阶段的结束状态暂定至少包含：
 
-- `BootInitRestInitPhase.state == Ready`
-- `BootInitScheduleHandoffPhase.state == Ready`
+- `BootInitRestInitPhase.state == Online`
+- `BootInitScheduleHandoffPhase.state == Online`
+- `UpMultitaskPhase.state == Online`
 - `BootIdleTask.state == Online`，表示 boot CPU idle/scheduler 路径已经接管原 `BootInitTask`
 - `KernelInitTask.state == Online`，且 PID 1 已解除 `kthreadd_done` 等待
 - `KthreaddTask.state == Online`，表示 `kthreadd` 任务已建立并可由调度器运行

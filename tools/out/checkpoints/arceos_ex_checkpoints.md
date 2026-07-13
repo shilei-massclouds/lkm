@@ -452,3 +452,14 @@
 | 447 | IrqOpenPreparePhaseOnline | IrqOpenPreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 448 | ProcessPreparePhasePrepared | ProcessPreparePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 449 | ProcessPreparePhaseOnline | ProcessPreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 450 | UpMultitaskPhasePrepared | UpMultitaskPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 451 | UpMultitaskPhaseOnline | UpMultitaskPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 452 | BootInitRestInitPhaseStarted | BootInitRestInitPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 453 | BootInitRestInitPhasePrepared | BootInitRestInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 454 | BootInitRestInitPhaseOnline | BootInitRestInitPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 455 | BootInitScheduleHandoffPhaseStarted | BootInitScheduleHandoffPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 456 | BootInitScheduleHandoffPhasePrepared | BootInitScheduleHandoffPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 457 | BootInitScheduleHandoffPhaseOnline | BootInitScheduleHandoffPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 458 | BootIdleEntryPhaseStarted | BootIdleEntryPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 459 | BootIdleEntryPhasePrepared | BootIdleEntryPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 460 | BootIdleEntryPhaseOnline | BootIdleEntryPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

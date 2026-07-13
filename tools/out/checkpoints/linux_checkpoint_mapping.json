@@ -4948,5 +4948,126 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 450,
+    "checkpoint_name": "UpMultitaskPhase.Prepared",
+    "checkpoint_variant": "UpMultitaskPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 451,
+    "checkpoint_name": "UpMultitaskPhase.Online",
+    "checkpoint_variant": "UpMultitaskPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 452,
+    "checkpoint_name": "BootInitRestInitPhase.Started",
+    "checkpoint_variant": "BootInitRestInitPhaseStarted",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 453,
+    "checkpoint_name": "BootInitRestInitPhase.Prepared",
+    "checkpoint_variant": "BootInitRestInitPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 454,
+    "checkpoint_name": "BootInitRestInitPhase.Online",
+    "checkpoint_variant": "BootInitRestInitPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 455,
+    "checkpoint_name": "BootInitScheduleHandoffPhase.Started",
+    "checkpoint_variant": "BootInitScheduleHandoffPhaseStarted",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 456,
+    "checkpoint_name": "BootInitScheduleHandoffPhase.Prepared",
+    "checkpoint_variant": "BootInitScheduleHandoffPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 457,
+    "checkpoint_name": "BootInitScheduleHandoffPhase.Online",
+    "checkpoint_variant": "BootInitScheduleHandoffPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 458,
+    "checkpoint_name": "BootIdleEntryPhase.Started",
+    "checkpoint_variant": "BootIdleEntryPhaseStarted",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 459,
+    "checkpoint_name": "BootIdleEntryPhase.Prepared",
+    "checkpoint_variant": "BootIdleEntryPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 460,
+    "checkpoint_name": "BootIdleEntryPhase.Online",
+    "checkpoint_variant": "BootIdleEntryPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   }
 ]

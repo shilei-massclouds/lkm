@@ -23,13 +23,13 @@ pub fn run() -> SmokeResult {
     };
     let boot_idle_task = boot_scheduler_view.idle_task();
 
-    if !phases::up_multitask::rest_init::is_ready()
-        || !phases::up_multitask::rest_init::boot_init_rest_init_ready()
-        || !phases::up_multitask::rest_init::boot_init_schedule_handoff_ready()
-        || !phases::up_multitask::rest_init::boot_idle_entry_ready()
-        || !phases::up_multitask::is_ready()
+    if !phases::up_multitask::rest_init::is_online()
+        || !phases::up_multitask::rest_init::boot_init_rest_init_is_online()
+        || !phases::up_multitask::rest_init::boot_init_schedule_handoff_is_online()
+        || !phases::up_multitask::rest_init::boot_idle_entry_is_online()
+        || !phases::up_multitask::is_online()
     {
-        printk::write_str("rest init phase is not ready\n");
+        printk::write_str("rest init phase is not online\n");
         return SmokeResult::Failed;
     }
 
@@ -247,8 +247,8 @@ pub fn run() -> SmokeResult {
         || !ctx
             .boot_idle_runtime
             .kernel_init_task_switch_handoff_ready()
-        || ctx.scheduler.kernel_init_stack_switch_started_count() == 0
-        || ctx.kernel_init_task.entry_started_count() == 0
+        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
+        || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
         || ctx.workqueue.workers_running()
     {

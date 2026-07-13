@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 333
+- unmapped: 344
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -456,3 +456,14 @@
 | 447 | IrqOpenPreparePhase.Online | IrqOpenPreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 448 | ProcessPreparePhase.Prepared | ProcessPreparePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 449 | ProcessPreparePhase.Online | ProcessPreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 450 | UpMultitaskPhase.Prepared | UpMultitaskPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 451 | UpMultitaskPhase.Online | UpMultitaskPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 452 | BootInitRestInitPhase.Started | BootInitRestInitPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 453 | BootInitRestInitPhase.Prepared | BootInitRestInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 454 | BootInitRestInitPhase.Online | BootInitRestInitPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 455 | BootInitScheduleHandoffPhase.Started | BootInitScheduleHandoffPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 456 | BootInitScheduleHandoffPhase.Prepared | BootInitScheduleHandoffPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 457 | BootInitScheduleHandoffPhase.Online | BootInitScheduleHandoffPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 458 | BootIdleEntryPhase.Started | BootIdleEntryPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 459 | BootIdleEntryPhase.Prepared | BootIdleEntryPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 460 | BootIdleEntryPhase.Online | BootIdleEntryPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

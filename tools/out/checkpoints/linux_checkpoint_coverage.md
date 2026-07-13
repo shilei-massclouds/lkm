@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 450
+- total checkpoints: 461
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 333 |
+| unmapped | 344 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 333 |
+| none | 344 |
 | medium | 62 |
 | high | 55 |
 
@@ -49,6 +49,8 @@
 | Scheduler | 8 |
 | CpuHotplugSync | 7 |
 | PageAllocator | 5 |
+| BootIdleEntryPhase | 4 |
+| BootInitScheduleHandoffPhase | 4 |
 | BootPhase | 4 |
 | CpuGroup | 4 |
 | EarlyCon | 4 |
@@ -58,8 +60,10 @@
 | KthreaddTask | 4 |
 | MemBlock | 4 |
 | SyscallTable | 4 |
+| UpMultitaskPhase | 4 |
 | VirtioBlk | 4 |
 | BootCPU | 3 |
+| BootInitRestInitPhase | 3 |
 | Completion | 3 |
 | EarlyDtb | 3 |
 | InitStack | 3 |
@@ -99,10 +103,9 @@
 | TasksRcu | 2 |
 | Tick | 2 |
 | TickBroadcast | 2 |
-| UpMultitaskPhase | 2 |
 | UserChildRecord | 2 |
 | UserSignalWait | 2 |
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 174
+- singleton unmapped families: 172

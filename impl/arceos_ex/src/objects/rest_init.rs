@@ -1829,7 +1829,7 @@ extern "C" fn kernel_init_entry() -> ! {
         "kernel_init entry stack invariant failed\n",
     );
     crate::arch::riscv64::sbi::putstr("kernel_init (pid=1) started\n");
-    crate::phases::smp_runtime::setup()
+    crate::systems::kernel::enable_after_up_multitask()
 }
 
 extern "C" fn kthreadd_entry() -> ! {

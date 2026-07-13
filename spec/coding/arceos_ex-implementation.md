@@ -28,10 +28,10 @@
 - `LocalIrqEnablePhase.Online`
 - `IrqOpenPreparePhase.Online`
 - `ProcessPreparePhase.Online`
-- `UpMultitaskPhase.Ready`
-- `BootInitRestInitPhase.Ready`
-- `BootInitScheduleHandoffPhase.Ready`
-- `BootIdleEntryPhase.Ready`
+- `UpMultitaskPhase.Online`
+- `BootInitRestInitPhase.Online`
+- `BootInitScheduleHandoffPhase.Online`
+- `BootIdleEntryPhase.Online`
 - `PreSmpInitPhase.Ready`
 - `SmpRuntimePhase.Ready`
 - `SmpBringupPhase.Ready`
@@ -204,8 +204,8 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run PROBE=announce` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Online`（其当前展开子阶段包括 `IrqTimeInitPhase.Online`、`LocalIrqEnablePhase.Online`、
-`IrqOpenPreparePhase.Online` 和 `ProcessPreparePhase.Online`），再完成 `UpMultitaskPhase.Ready`（当前展开
-`BootInitRestInitPhase.Ready`、`BootInitScheduleHandoffPhase.Ready` 和 `BootIdleEntryPhase.Ready`），
+`IrqOpenPreparePhase.Online` 和 `ProcessPreparePhase.Online`），再完成 `UpMultitaskPhase.Online`（当前展开
+`BootInitRestInitPhase.Online`、`BootInitScheduleHandoffPhase.Online` 和 `BootIdleEntryPhase.Online`），
 随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
 `RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
 后续的 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`PayloadPhase` 是
@@ -282,7 +282,8 @@ smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup
 provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、
 `schedule_preempt_disabled()` 已按 `BootInitTask` 视角拆为首次 scheduler handoff，
 以及 post-schedule `BootIdleTask` 视角的 boot idle runtime 入口等事实。
-这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
+对象事实允许线性提交，但离开 UpMultitaskPhase 必须执行一次真实 BootIdleTask 到
+KernelInitTask 的 task stack 切换，并在 KernelInit 入口验证实际 SP。
 
 PID 1 和 kthreadd 的创建必须通过 `TaskCreationCore` 的 entry contract 表达：`KernelInitTask` 使用
 `TaskEntry::KernelInit`，其第一执行线指向 `SmpRuntimePhase`；`KthreaddTask` 使用
@@ -308,8 +309,8 @@ boot CPU。
 `BootIdlePreemption.enable_no_resched()` 和 `Scheduler.schedule()`，再由
 `BootIdleEntryPhase` 进入 post-schedule boot idle context。不得引入
 `KernelInitDispatchGate` 生命周期对象。`SmpRuntimePhase` 首个子阶段 `PreSmpInitPhase` 依赖
-`KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact，不能硬依赖任何
-UP multitask 聚合 wrapper。
+`UpMultitaskPhase.Online`、`KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact；
+不能只依赖 BootIdleEntry 的局部状态。
 
 `Scheduler` 的生命周期不属于 rest_init 三子阶段。实现必须复用
 `SchedInitPhase` 已建立的 `Scheduler.Online` 对象；`BootInitScheduleHandoffPhase`
@@ -334,7 +335,7 @@ phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()
 `run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。
 `BootIdleEntryPhase` 主线必须直接呈现进入 `BootIdleStartupContext` ->
 `BootIdleRuntime.setup()` -> `BootIdleRuntime.prepare_idle_entry()` -> `BootIdleRuntime.run_idle_loop()` ->
-`BootIdleEntryPhase.Ready` checkpoint 的顺序。代码可以为每个 named action 保留小 helper，但不得再用单个
+`BootIdleEntryPhase.Prepared/Ready/Online` checkpoint 的顺序。代码可以为每个 named action 保留小 helper，但不得再用单个
 `setup_boot_idle_tail()` 把整条链隐藏起来。
 
 `do_idle_cycle()` 必须进一步暴露 `wait_while_no_need_resched()`、`observe_need_resched()` 和
@@ -383,8 +384,8 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
 仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
-`PreSmpInitPhase` 的入口来自 `KernelInitTask` entry/release/dispatch 和 Scheduler 首次调度 facts，而非
-`BootIdleEntryPhase.Ready` 或其它 UP multitask 聚合 wrapper。
+`PreSmpInitPhase` 的入口来自 `UpMultitaskPhase.Online`、`KernelInitTask` entry/release/dispatch、
+Scheduler 首次调度 facts 和真实栈入口，而非 `BootIdleEntryPhase.Ready`。
 
 ## SmpBringupPhase 编码约束
 
@@ -1873,7 +1874,8 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 `switch_to` 的通用 action 仍负责 RISC-V 核心保存/恢复边界和 `CurrentTaskRef` commit；在 owner-split 对象事实
 线性提交完成、`UpMultitaskPhase` 离开前，impl MUST 通过每个 `Task` 拥有的 `TaskSwitchContext` 保存
 `BootIdleTask` 的真实 `ra/sp/tp/s0..s11` 并恢复 `KernelInitTask` 的 vmalloc stack context，再由
-`kernel_init_entry()` 驱动 `PreSmpInitPhase -> ... -> PayloadPhase`。不得从 BootIdle 的调用栈直接调用
+`kernel_init_entry()` 验证实际 SP 后调用 `kernel::enable_after_up_multitask()`，再驱动
+`PreSmpInitPhase -> ... -> PayloadPhase`。不得从 BootIdle 的调用栈直接调用
 `smp_runtime::setup()` 或 selected payload。若 KernelInitTask 后续切回使 BootIdle continuation 恢复，
 该 continuation 必须停留在无限 `schedule_idle()` 循环，不得继续执行 payload。KthreaddTask 当前入口可在
 请求消费语义尚未展开时使用无限 `schedule()` 循环主动让出 CPU；循环次数和任务切换次数不得成为默认

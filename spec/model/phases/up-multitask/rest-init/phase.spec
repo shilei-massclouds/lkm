@@ -1286,7 +1286,7 @@ object BootInitRestInitPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ProcessPreparePhase.state == State::Online;
                     InterruptStream.state == State::Online;
@@ -1387,6 +1387,59 @@ object BootInitRestInitPhase: PhaseObject {
                 deferred {
                     "KthreaddTask 入口循环属于 KthreaddTask 自己的执行线；本阶段只发布 entry/provider facts，不驱动 kthreadd 服务循环子阶段。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    ProcessPreparePhase.state == State::Online;
+                    rcu_scheduler_starting_ready(RcuCore);
+                    rcu_scheduler_active_level_init(RcuCore);
+                    rcu_gp_seq_baseline_synced(RcuCore);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
+                    boot_init_rest_init_ready(BootInitRestInitPhase);
+                    rest_init_dispatch_ready(BootInitRestInitPhase);
+                    KernelInitTask.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_pf_no_setaffinity(KernelInitTask);
+                    kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+                    KthreaddTask.state == State::Online;
+                    task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
+                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                    kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ready(KthreaddTask);
+                    SystemState.state == State::Ready;
+                    KthreaddReadyGate.state == State::Online;
+                    KernelInitKthreaddDoneWait.state == State::Ready;
+                    kernel_init_kthreadd_done_wait_ready(
+                        KernelInitKthreaddDoneWait,
+                        KernelInitTask,
+                        KthreaddReadyGate
+                    );
+                    kthreadd_ready_gate_completed(KthreaddReadyGate);
+                    completion_complete_committed(KthreaddReadyGate);
+                    completion_wait_lock_guard_used(
+                        KthreaddReadyGate,
+                        KthreaddReadyGateWaitLock
+                    );
+                    completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
+                    completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
+                    smp_concurrency_closed();
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -1427,6 +1480,53 @@ object BootInitRestInitPhase: PhaseObject {
             rest_init_dispatch_ready(BootInitRestInitPhase);
             smp_concurrency_closed();
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    ProcessPreparePhase.state == State::Online;
+                    rcu_scheduler_starting_ready(RcuCore);
+                    rcu_scheduler_active_level_init(RcuCore);
+                    rcu_gp_seq_baseline_synced(RcuCore);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
+                    boot_init_rest_init_ready(BootInitRestInitPhase);
+                    rest_init_dispatch_ready(BootInitRestInitPhase);
+                    KernelInitTask.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_pf_no_setaffinity(KernelInitTask);
+                    kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+                    KthreaddTask.state == State::Online;
+                    task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
+                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                    kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ready(KthreaddTask);
+                    SystemState.state == State::Ready;
+                    KthreaddReadyGate.state == State::Online;
+                    KernelInitKthreaddDoneWait.state == State::Ready;
+                    kernel_init_kthreadd_done_wait_ready(
+                        KernelInitKthreaddDoneWait,
+                        KernelInitTask,
+                        KthreaddReadyGate
+                    );
+                    kthreadd_ready_gate_completed(KthreaddReadyGate);
+                    completion_complete_committed(KthreaddReadyGate);
+                    completion_token_available(KthreaddReadyGate);
+                    completion_wait_lock_guard_used(
+                        KthreaddReadyGate,
+                        KthreaddReadyGateWaitLock
+                    );
+                    completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
+                    completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
+                    smp_concurrency_closed();
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }
 
@@ -1441,9 +1541,9 @@ object BootInitScheduleHandoffPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    BootInitRestInitPhase.state == State::Ready;
+                    BootInitRestInitPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;
                     SystemState.state == State::Ready;
@@ -1462,6 +1562,9 @@ object BootInitScheduleHandoffPhase: PhaseObject {
 
                 ensures {
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     scheduler_first_schedule_committed(Scheduler);
                     scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
                     scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
@@ -1498,13 +1601,64 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 deferred {
                     "完整 scheduler class 策略、MM/FPU/vector 切换和通用任务返回策略后续展开。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    BootInitRestInitPhase.state == State::Online;
+                    boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
+                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
+                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
+                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
+                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_prepare_task_switch_done(
+                        Scheduler,
+                        BootRunQueue,
+                        CurrentTaskRef,
+                        KernelInitTaskRef
+                    );
+                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
+                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
+                    scheduler_finish_task_switch_restores_preempt_count(
+                        Scheduler,
+                        KernelInitTaskRef
+                    );
+                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
+                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
+                    task_concurrency_open();
+                    smp_concurrency_closed();
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
 
     state State::Ready {
         invariant {
-            BootInitRestInitPhase.state == State::Ready;
+            BootInitRestInitPhase.state == State::Online;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
             scheduler_first_schedule_committed(Scheduler);
             scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
@@ -1533,6 +1687,50 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             task_concurrency_open();
             smp_concurrency_closed();
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    BootInitRestInitPhase.state == State::Online;
+                    boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+                    scheduler_first_schedule_committed(Scheduler);
+                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
+                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
+                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
+                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
+                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_prepare_task_switch_done(
+                        Scheduler,
+                        BootRunQueue,
+                        CurrentTaskRef,
+                        KernelInitTaskRef
+                    );
+                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
+                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
+                    scheduler_finish_task_switch_restores_preempt_count(
+                        Scheduler,
+                        KernelInitTaskRef
+                    );
+                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
+                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
+                    task_concurrency_open();
+                    smp_concurrency_closed();
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }
 
@@ -1547,9 +1745,9 @@ object BootIdleEntryPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    BootInitScheduleHandoffPhase.state == State::Ready;
+                    BootInitScheduleHandoffPhase.state == State::Online;
                     scheduler_first_schedule_committed(Scheduler);
                     BootIdleTask.state == State::Ready;
                     BootIdleRuntime.state == State::Base;
@@ -1593,6 +1791,11 @@ object BootIdleEntryPhase: PhaseObject {
 
                 ensures {
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                     boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
                     boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
                     boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
@@ -1629,13 +1832,58 @@ object BootIdleEntryPhase: PhaseObject {
                     "finite derivation 只展开 boot idle loop 的一轮代表性 no-need-resched -> need-resched -> schedule_idle；实现 continuation 必须允许无限重复，完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
                     "secondary CPU 启动仍保持 deferred，后续 SMP Runtime Phase 再推进。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    BootInitScheduleHandoffPhase.state == State::Online;
+                    BootIdleRuntime.state == State::Ready;
+                    boot_idle_entry_phase_ready(BootIdleEntryPhase);
+                    boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+                    boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
+                    boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
+                    boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
+                    boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+                    boot_idle_nohz_run_idle_balance_done(BootIdleRuntime, BootCPU);
+                    boot_idle_local_irq_disabled_for_sleep(
+                        BootIdleRuntime,
+                        BootCpuLocalInterrupt
+                    );
+                    boot_idle_preempt_need_resched_set(BootIdleTask);
+                    boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
+                    boot_idle_loop_continues(BootIdleRuntime);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
+                    task_concurrency_open();
+                    smp_concurrency_closed();
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
 
     state State::Ready {
         invariant {
-            BootInitScheduleHandoffPhase.state == State::Ready;
+            BootInitScheduleHandoffPhase.state == State::Online;
             BootIdleRuntime.state == State::Ready;
             boot_idle_entry_phase_ready(BootIdleEntryPhase);
             boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
@@ -1656,5 +1904,43 @@ object BootIdleEntryPhase: PhaseObject {
             task_concurrency_open();
             smp_concurrency_closed();
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    BootInitScheduleHandoffPhase.state == State::Online;
+                    BootIdleRuntime.state == State::Ready;
+                    boot_idle_entry_phase_ready(BootIdleEntryPhase);
+                    boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+                    boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
+                    boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
+                    boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
+                    boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+                    boot_idle_nohz_run_idle_balance_done(BootIdleRuntime, BootCPU);
+                    boot_idle_local_irq_disabled_for_sleep(
+                        BootIdleRuntime,
+                        BootCpuLocalInterrupt
+                    );
+                    boot_idle_preempt_need_resched_set(BootIdleTask);
+                    boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
+                    boot_idle_loop_continues(BootIdleRuntime);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootIdleTask,
+                        KernelInitTask
+                    );
+                    task_concurrency_open();
+                    smp_concurrency_closed();
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

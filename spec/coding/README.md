@@ -57,8 +57,9 @@ coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 
 Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删除不可解析的 `main.spec`
 和 `arceos_ex.spec` 后剩余 24 个；Boot 子树批次迁移并删除 3 个 phase 文件，Interrupt 子树
 批次又把 `irq-time-init.spec`、`local-irq-enable.spec`、`irq-open-prepare.spec` 和
-`process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除，当前剩余 17 个：通用
-映射/构建/架构/语言 4 个、project 1 个、phase 7 个、object 5 个。后续继续按阶段树审计批次
+`process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除；UpMultitask 子树又迁移删除
+`rest-init.spec`，当前剩余 16 个：通用映射/构建/架构/语言 4 个、project 1 个、phase 6 个、
+object 5 个。后续继续按阶段树审计批次
 迁移 phase 文件，最后处理其它类别。
 
 ## 当前实践目标

@@ -203,8 +203,8 @@ object PreSmpInitBoundary: KernelObject {
  * 观察 KthreaddReadyGate 已被 BootInitTask complete，然后进入
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
- * 绑定为 TaskEntry::KernelInit 并指向 SmpRuntimePhase 入口；它不由
- * UP Multitask 的任何聚合 wrapper 顺序启动。
+ * 绑定为 TaskEntry::KernelInit 并指向 SmpRuntimePhase 入口。该真实任务入口
+ * 只在 UpMultitaskPhase.Online 后由 Kernel.Enable continuation 启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;
@@ -214,6 +214,7 @@ object PreSmpInitPhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
+                    UpMultitaskPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -279,6 +280,7 @@ object PreSmpInitPhase: PhaseObject {
 
     state State::Ready {
         invariant {
+            UpMultitaskPhase.state == State::Online;
             KernelInitKthreaddDoneWait.state == State::Online;
             kernel_init_kthreadd_done_wait_released(
                 KernelInitKthreaddDoneWait,

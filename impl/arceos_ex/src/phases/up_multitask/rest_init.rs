@@ -7,7 +7,7 @@ use crate::{
         task::{TaskEntry, TaskKind},
     },
 };
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 #[unsafe(link_section = ".data.phase")]
 static BOOT_INIT_REST_INIT_PHASE_STATE: AtomicU8 =
@@ -16,29 +16,101 @@ static BOOT_INIT_REST_INIT_PHASE_STATE: AtomicU8 =
 static BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 #[unsafe(link_section = ".data.phase")]
+static BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY: AtomicBool = AtomicBool::new(false);
+#[unsafe(link_section = ".data.phase")]
 static BOOT_IDLE_ENTRY_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(
-        setup_boot_init_rest_init(ctx).and_then(|()| checkpoint_boot_init_rest_init_ready(ctx)),
-        "arceos_ex rest init event failed\n",
+        require_boot_init_rest_init_preset(),
+        "arceos_ex rest init preset start failed\n",
     );
-    setup(ctx)
+    crate::checkpoint::checkpoint(Checkpoint::BootInitRestInitPhaseStarted);
+    crate::phases::shutdown_on_error(
+        setup_boot_init_rest_init(ctx).and_then(|()| mark_boot_init_rest_init_prepared(ctx)),
+        "arceos_ex rest init preset failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        mark_boot_init_rest_init_ready(ctx),
+        "arceos_ex rest init setup failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        mark_boot_init_rest_init_online(ctx),
+        "arceos_ex rest init enable failed\n",
+    );
+    crate::phases::up_multitask::preset_after_boot_init_rest_init()
 }
 
 pub fn setup(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(
+        require_boot_init_schedule_handoff_preset(),
+        "arceos_ex schedule handoff preset start failed\n",
+    );
+    crate::checkpoint::checkpoint(Checkpoint::BootInitScheduleHandoffPhaseStarted);
+    crate::phases::shutdown_on_error(
         setup_boot_init_schedule_handoff(ctx)
-            .and_then(|()| checkpoint_boot_init_schedule_handoff_ready(ctx))
-            .and_then(|()| enter_boot_idle_startup_context(ctx))
+            .and_then(|()| mark_boot_init_schedule_handoff_prepared(ctx)),
+        "arceos_ex schedule handoff preset failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        mark_boot_init_schedule_handoff_ready(ctx),
+        "arceos_ex schedule handoff setup failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        mark_boot_init_schedule_handoff_online(ctx),
+        "arceos_ex schedule handoff enable failed\n",
+    );
+    crate::phases::up_multitask::setup_after_boot_init_schedule_handoff()
+}
+
+pub fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        require_boot_idle_entry_preset(),
+        "arceos_ex boot idle entry preset start failed\n",
+    );
+    crate::checkpoint::checkpoint(Checkpoint::BootIdleEntryPhaseStarted);
+    crate::phases::shutdown_on_error(
+        enter_boot_idle_startup_context(ctx)
             .and_then(|()| setup_boot_idle_runtime(ctx))
             .and_then(|()| prepare_boot_idle_entry(ctx))
             .and_then(|()| run_boot_idle_loop(ctx))
-            .and_then(|()| checkpoint_boot_idle_entry_ready(ctx)),
-        "arceos_ex rest init tail event failed\n",
+            .and_then(|()| mark_boot_idle_entry_prepared(ctx)),
+        "arceos_ex boot idle entry preset failed\n",
     );
-    handoff()
+    crate::phases::shutdown_on_error(
+        mark_boot_idle_entry_ready(ctx),
+        "arceos_ex boot idle entry setup failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        mark_boot_idle_entry_online(ctx),
+        "arceos_ex boot idle entry enable failed\n",
+    );
+    crate::phases::up_multitask::enable_after_boot_idle_entry()
+}
+
+fn require_boot_init_rest_init_preset() -> EventResult {
+    let state = crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE);
+    if state != State::Base || !crate::phases::interrupt::is_online() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn require_boot_init_schedule_handoff_preset() -> EventResult {
+    let state = crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE);
+    if state != State::Base || !boot_init_rest_init_is_online() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn require_boot_idle_entry_preset() -> EventResult {
+    let state = crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE);
+    if state != State::Base || !boot_init_schedule_handoff_is_online() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
 }
 
 fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
@@ -85,10 +157,10 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE),
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     };
     ctx.kernel_init_task.pin_to_boot_cpu(
@@ -188,7 +260,8 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
 
 fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
     if ctx.scheduler.state() != State::Online
-        || !boot_init_rest_init_phase_ready(ctx)
+        || !boot_init_rest_init_is_online()
+        || !boot_init_rest_init_phase_ready_after_handoff(ctx)
         || ctx.kernel_init_task.state() != State::Online
         || ctx.kthreadd_task.state() != State::Online
         || ctx.system_state.state() != State::Ready
@@ -197,7 +270,7 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
         || !ctx.kthreadd_ready_gate.completion().complete_committed()
         || !ctx.kthreadd_ready_gate.completion().token_available()
     {
-        return failed_schedule_handoff_setup();
+        return failed_schedule_handoff_preset();
     }
 
     if ctx
@@ -206,7 +279,7 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
         .enable_no_resched()
         .is_err()
     {
-        return failed_schedule_handoff_setup();
+        return failed_schedule_handoff_preset();
     }
 
     let schedule_result = ctx.scheduler.schedule(
@@ -217,7 +290,7 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
         &mut ctx.boot_cpu_current_task,
     );
     if schedule_result.is_err() {
-        return failed_schedule_handoff_setup();
+        return failed_schedule_handoff_preset();
     }
     crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);
     crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToEntry, ctx);
@@ -227,10 +300,11 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
 }
 
 fn enter_boot_idle_startup_context(ctx: &mut Context) -> EventResult {
-    if !boot_init_schedule_handoff_phase_ready(ctx)
+    if !boot_init_schedule_handoff_is_online()
+        || !boot_init_schedule_handoff_phase_ready(ctx)
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
     {
-        return failed_boot_idle_entry_setup();
+        return failed_boot_idle_entry_preset();
     }
 
     // schedule_preempt_disabled() disables preemption again before entering
@@ -239,93 +313,225 @@ fn enter_boot_idle_startup_context(ctx: &mut Context) -> EventResult {
     ctx.scheduler.boot_idle_preemption_mut().disable()
 }
 
-fn failed_schedule_handoff_setup() -> EventResult {
+fn failed_schedule_handoff_preset() -> EventResult {
     failed_condition(
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE),
         State::Base,
-        State::Ready,
+        State::Prepared,
     )
 }
 
-fn failed_boot_idle_entry_setup() -> EventResult {
+fn failed_boot_idle_entry_preset() -> EventResult {
     failed_condition(
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE),
         State::Base,
-        State::Ready,
+        State::Prepared,
     )
 }
 
-fn handoff() -> ! {
-    crate::phases::up_multitask::setup_after_children()
-}
-
-fn checkpoint_boot_init_rest_init_ready(ctx: &Context) -> EventResult {
+fn mark_boot_init_rest_init_prepared(ctx: &Context) -> EventResult {
     if !boot_init_rest_init_phase_ready(ctx) {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE),
             State::Base,
+            State::Prepared,
+        );
+    }
+
+    crate::phases::state::mark_checked(
+        &BOOT_INIT_REST_INIT_PHASE_STATE,
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        Checkpoint::BootInitRestInitPhasePrepared,
+    )
+}
+
+fn mark_boot_init_rest_init_ready(ctx: &Context) -> EventResult {
+    if !boot_init_rest_init_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_INIT_REST_INIT_PHASE_STATE,
+            LifecycleEvent::Setup,
+            State::Prepared,
             State::Ready,
         );
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
         &BOOT_INIT_REST_INIT_PHASE_STATE,
         LifecycleEvent::Setup,
-        State::Base,
+        State::Prepared,
         State::Ready,
         Checkpoint::BootInitRestInitPhaseReady,
     )
 }
 
-fn checkpoint_boot_init_schedule_handoff_ready(ctx: &Context) -> EventResult {
-    if !boot_init_schedule_handoff_phase_ready(ctx) {
-        return failed_schedule_handoff_setup();
+fn mark_boot_init_rest_init_online(ctx: &Context) -> EventResult {
+    if !boot_init_rest_init_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_INIT_REST_INIT_PHASE_STATE,
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+        );
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
+        &BOOT_INIT_REST_INIT_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::BootInitRestInitPhaseOnline,
+    )
+}
+
+fn mark_boot_init_schedule_handoff_prepared(ctx: &Context) -> EventResult {
+    if !boot_init_schedule_handoff_phase_ready(ctx) {
+        return failed_schedule_handoff_preset();
+    }
+
+    crate::phases::state::mark_checked(
+        &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        Checkpoint::BootInitScheduleHandoffPhasePrepared,
+    )
+}
+
+fn mark_boot_init_schedule_handoff_ready(ctx: &Context) -> EventResult {
+    if !boot_init_schedule_handoff_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::mark_checked(
         &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
         LifecycleEvent::Setup,
-        State::Base,
+        State::Prepared,
         State::Ready,
         Checkpoint::BootInitScheduleHandoffPhaseReady,
     )
 }
 
-fn checkpoint_boot_idle_entry_ready(ctx: &Context) -> EventResult {
-    if !boot_idle_entry_phase_ready(ctx) {
-        return failed_boot_idle_entry_setup();
+fn mark_boot_init_schedule_handoff_online(ctx: &Context) -> EventResult {
+    if !boot_init_schedule_handoff_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+        );
     }
 
-    crate::phases::state::mark(
+    BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.store(true, Ordering::Release);
+    let result = crate::phases::state::mark_checked(
+        &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::BootInitScheduleHandoffPhaseOnline,
+    );
+    if result.is_err() {
+        BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.store(false, Ordering::Release);
+    }
+    result
+}
+
+fn mark_boot_idle_entry_prepared(ctx: &Context) -> EventResult {
+    if !boot_idle_entry_phase_ready(ctx) {
+        return failed_boot_idle_entry_preset();
+    }
+
+    crate::phases::state::mark_checked(
+        &BOOT_IDLE_ENTRY_PHASE_STATE,
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        Checkpoint::BootIdleEntryPhasePrepared,
+    )
+}
+
+fn mark_boot_idle_entry_ready(ctx: &Context) -> EventResult {
+    if !boot_idle_entry_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_IDLE_ENTRY_PHASE_STATE,
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::mark_checked(
         &BOOT_IDLE_ENTRY_PHASE_STATE,
         LifecycleEvent::Setup,
-        State::Base,
+        State::Prepared,
         State::Ready,
         Checkpoint::BootIdleEntryPhaseReady,
     )
 }
 
-pub fn is_ready() -> bool {
-    boot_init_rest_init_ready() && boot_init_schedule_handoff_ready() && boot_idle_entry_ready()
+fn mark_boot_idle_entry_online(ctx: &Context) -> EventResult {
+    if !boot_idle_entry_phase_ready(ctx) {
+        return phase_failure(
+            &BOOT_IDLE_ENTRY_PHASE_STATE,
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+        );
+    }
+
+    crate::phases::state::mark_checked(
+        &BOOT_IDLE_ENTRY_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::BootIdleEntryPhaseOnline,
+    )
 }
 
-pub fn boot_init_rest_init_ready() -> bool {
-    crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE) == State::Ready
+pub fn is_online() -> bool {
+    boot_init_rest_init_is_online()
+        && boot_init_schedule_handoff_is_online()
+        && boot_idle_entry_is_online()
 }
 
-pub fn boot_init_schedule_handoff_ready() -> bool {
-    crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE) == State::Ready
+pub fn boot_init_rest_init_is_online() -> bool {
+    crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE) == State::Online
 }
 
-pub fn boot_idle_entry_ready() -> bool {
-    crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE) == State::Ready
+pub fn boot_init_schedule_handoff_is_online() -> bool {
+    crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE) == State::Online
+}
+
+pub fn boot_idle_entry_is_online() -> bool {
+    crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE) == State::Online
 }
 
 pub fn dispatch_ready() -> bool {
-    boot_init_schedule_handoff_ready()
+    boot_init_schedule_handoff_is_online()
+        && BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.load(Ordering::Acquire)
+}
+
+fn phase_failure(
+    phase_state: &AtomicU8,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+) -> EventResult {
+    failed_condition(
+        event,
+        crate::phases::state::load(phase_state),
+        expected,
+        target,
+    )
 }
 
 fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
