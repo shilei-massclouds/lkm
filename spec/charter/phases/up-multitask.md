@@ -1,8 +1,8 @@
 # UpMultitaskPhase 单核多任务阶段
 
-UpMultitaskPhase 是 Kernel 的第三个直接子阶段。它从 `rest_init()` 入口开始，在 boot CPU
-上建立 PID 1、kthreadd 和首次调度事实，让原 BootInitTask 进入 BootIdleTask 运行期，最后
-通过一次真实 task stack 切换把 Kernel.Enable 的后续执行权交给 KernelInitTask。
+UpMultitaskPhase 是 Kernel 的第三个直接子阶段，由 BootInitTask 和身份转换后的
+BootIdleTask 执行。它负责准备 KernelInitTask 与 KthreaddTask、启用多任务支持，然后将
+BootInitTask 转换身份为 BootIdleTask。
 
 ## 边界与职责
 
