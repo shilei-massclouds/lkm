@@ -28,7 +28,7 @@ object LocalIrqEnablePhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    IrqTimeInitPhase.state == State::Ready;
+                    IrqTimeInitPhase.state == State::Online;
                     IrqController.state == State::Ready;
                     RiscvIntc.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
@@ -93,7 +93,7 @@ object LocalIrqEnablePhase: PhaseObject {
     state State::Ready {
         invariant {
             LocalIrqEnablePhase.state == State::Ready;
-            IrqTimeInitPhase.state == State::Ready;
+            IrqTimeInitPhase.state == State::Online;
             InterruptStream.state == State::Online;
             PlicIrqDomain.state == State::Ready;
             IrqHandlerRegistry.state == State::Ready;

@@ -14,7 +14,7 @@ static INTERRUPT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::enc
 
 pub fn setup() -> ! {
     crate::checkpoint::checkpoint(Checkpoint::InterruptPhaseStarted);
-    irq_time_init::setup(crate::context::context())
+    irq_time_init::preset(crate::context::context())
 }
 
 pub fn setup_after_children() -> ! {

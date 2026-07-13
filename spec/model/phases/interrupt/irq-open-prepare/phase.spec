@@ -386,7 +386,7 @@ object IrqOpenPreparePhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            IrqTimeInitPhase.state == State::Ready;
+            IrqTimeInitPhase.state == State::Online;
             LocalIrqEnablePhase.state == State::Ready;
             InterruptStream.state == State::Online;
             SbiIpi.state == State::Ready;

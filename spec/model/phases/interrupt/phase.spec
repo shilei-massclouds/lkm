@@ -57,7 +57,7 @@ object InterruptPhase: PhaseObject {
 
                 within SingleTaskContext {
                     drives {
-                        IrqTimeInitPhase.Transition::Setup;
+                        IrqTimeInitPhase.Transition::Preset;
                     }
                 }
 
@@ -83,7 +83,7 @@ object InterruptPhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 ensures {
-                    IrqTimeInitPhase.state == State::Ready;
+                    IrqTimeInitPhase.state == State::Online;
                     LocalIrqEnablePhase.state == State::Ready;
                     IrqOpenPreparePhase.state == State::Ready;
                     ProcessPreparePhase.state == State::Ready;
@@ -100,7 +100,7 @@ object InterruptPhase: PhaseObject {
         invariant {
             BootPhase.state == State::Online;
             SchedInitPhase.state == State::Online;
-            IrqTimeInitPhase.state == State::Ready;
+            IrqTimeInitPhase.state == State::Online;
             LocalIrqEnablePhase.state == State::Ready;
             IrqOpenPreparePhase.state == State::Ready;
             ProcessPreparePhase.state == State::Ready;

@@ -12,16 +12,16 @@ use core::sync::atomic::AtomicU8;
 static IRQ_TIME_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::IrqTimeInitPhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex irq time init event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        "arceos_ex irq time init preset failed\n",
     );
-    handoff()
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.irq_controller.setup(
         &ctx.device_tree,
         &ctx.page_allocator,
@@ -108,31 +108,71 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)
 }
 
-fn handoff() -> ! {
-    crate::phases::interrupt::local_irq_enable::setup(crate::context::context())
-}
-
-fn checkpoint_ready(ctx: &Context) -> EventResult {
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
     if !irq_time_init_phase_ready(ctx) {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE),
             State::Base,
-            State::Ready,
+            State::Prepared,
         );
     }
 
     crate::phases::state::mark(
         &IRQ_TIME_INIT_PHASE_STATE,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
+        State::Prepared,
         Checkpoint::IrqTimeInitPhaseReady,
     )
 }
 
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex irq time init setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn adopt_ready(ctx: &Context) -> EventResult {
+    if !irq_time_init_phase_ready(ctx) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::adopt(
+        &IRQ_TIME_INIT_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+    )
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        enable_event(ctx),
+        "arceos_ex irq time init enable failed\n",
+    );
+    crate::phases::interrupt::local_irq_enable::setup(crate::context::context())
+}
+
+fn enable_event(ctx: &mut Context) -> EventResult {
+    crate::phases::state::adopt(
+        &IRQ_TIME_INIT_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+    )
+}
+
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE) == State::Ready
+    let s = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
+    s == State::Ready || s == State::Online
 }
 
 fn irq_time_init_phase_ready(ctx: &Context) -> bool {

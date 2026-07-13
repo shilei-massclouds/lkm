@@ -2221,7 +2221,7 @@ object IrqTimeInitPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SchedInitPhase.state == State::Online;
                     Scheduler.state == State::Online;
@@ -2281,6 +2281,58 @@ object IrqTimeInitPhase: PhaseObject {
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
                     "更完整 UART RX、ordinary TTY runtime/FIFO 策略和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    irq_time_init_ready(IrqTimeInitPhase);
+                    IrqController.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
+                    RiscvIrqStackSet.state == State::Ready;
+                    IrqDispatchTree.state == State::Ready;
+                    IrqChipInitTable.state == State::Ready;
+                    PlicDriver.state == State::Prepared;
+                    Plic.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    Tick.state == State::Ready;
+                    TickBroadcast.state == State::Ready;
+                    IrqTimeTrimmedPaths.state == State::Ready;
+                    TimerWheel.state == State::Ready;
+                    SrcuCore.state == State::Ready;
+                    HrtimerCore.state == State::Ready;
+                    Timekeeper.state == State::Ready;
+                    ClocksourceCore.state == State::Prepared;
+                    JiffiesClocksource.state == State::Prepared;
+                    RiscvTimerProvider.state == State::Ready;
+                    Softirq.state == State::Ready;
+                    Randomness.state == State::Ready;
+                    BootStackCanary.state == State::Ready;
+                    PerfEventCore.state == State::Ready;
+                    ProfileCore.state == State::Ready;
+                    IpiMux.state == State::Ready;
+                    SbiIpi.state == State::Ready;
+                    SmpCallFunction.state == State::Ready;
+                    InterruptStream.state == State::Ready;
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    early_boot_irqs_disabled_true();
+                    time_read_smoke_available(RiscvTimerProvider);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -2323,5 +2375,50 @@ object IrqTimeInitPhase: PhaseObject {
             early_boot_irqs_disabled_true();
             time_read_smoke_available(RiscvTimerProvider);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    irq_time_init_ready(IrqTimeInitPhase);
+                    IrqController.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
+                    RiscvIrqStackSet.state == State::Ready;
+                    IrqDispatchTree.state == State::Ready;
+                    IrqChipInitTable.state == State::Ready;
+                    PlicDriver.state == State::Prepared;
+                    Plic.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    Tick.state == State::Ready;
+                    TickBroadcast.state == State::Ready;
+                    IrqTimeTrimmedPaths.state == State::Ready;
+                    TimerWheel.state == State::Ready;
+                    SrcuCore.state == State::Ready;
+                    HrtimerCore.state == State::Ready;
+                    Timekeeper.state == State::Ready;
+                    ClocksourceCore.state == State::Prepared;
+                    JiffiesClocksource.state == State::Prepared;
+                    RiscvTimerProvider.state == State::Ready;
+                    Softirq.state == State::Ready;
+                    Randomness.state == State::Ready;
+                    BootStackCanary.state == State::Ready;
+                    PerfEventCore.state == State::Ready;
+                    ProfileCore.state == State::Ready;
+                    IpiMux.state == State::Ready;
+                    SbiIpi.state == State::Ready;
+                    SmpCallFunction.state == State::Ready;
+                    InterruptStream.state == State::Ready;
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    early_boot_irqs_disabled_true();
+                    time_read_smoke_available(RiscvTimerProvider);
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }
