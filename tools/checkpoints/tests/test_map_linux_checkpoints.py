@@ -1140,6 +1140,11 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
     def test_runtime_core_object_rules_map_to_kernel_init_freeable(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
+                index=323,
+                variant="RuntimeCorePhaseStarted",
+                name="RuntimeCorePhase.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
                 index=324,
                 variant="SchedulerSmpReady",
                 name="Scheduler.SmpReady",
@@ -1188,6 +1193,10 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("sched_init_smp", scheduler.linux_anchor)
         self.assertIn("object fact", scheduler.notes)
         self.assertIn("SmpBringupPhase.Ready", scheduler.notes)
+
+        phase_started = by_name["RuntimeCorePhase.Started"]
+        self.assertIn("sched_init_smp", phase_started.linux_anchor)
+        self.assertIn("Preset starts", phase_started.notes)
 
         workqueue = by_name["Workqueue.TopologyReady"]
         self.assertIn("workqueue_init_topology", workqueue.linux_anchor)
@@ -1288,6 +1297,11 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
     def test_rootfs_tail_rules_map_to_kernel_init_freeable_and_prepare_namespace(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
+                index=352,
+                variant="RootfsPhaseStarted",
+                name="RootfsPhase.Started",
+            ),
+            map_linux_checkpoints.CheckpointInventoryRecord(
                 index=353,
                 variant="KUnitRuntimeTrimmedReady",
                 name="KUnitRuntime.TrimmedReady",
@@ -1336,6 +1350,12 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
 
         by_name = {record.checkpoint_name: record for record in mapped}
+        rootfs_started = by_name["RootfsPhase.Started"]
+        self.assertEqual(rootfs_started.mapping_kind, "exact")
+        self.assertEqual(rootfs_started.confidence, "high")
+        self.assertIn("kunit_run_all_tests", rootfs_started.linux_anchor)
+        self.assertIn("prepare_namespace pre-boundary", rootfs_started.notes)
+
         for name in (
             "KUnitRuntime.TrimmedReady",
             "InitramfsSync.DeferredReady",

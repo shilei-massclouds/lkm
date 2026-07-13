@@ -463,3 +463,17 @@
 | 458 | BootIdleEntryPhaseStarted | BootIdleEntryPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 459 | BootIdleEntryPhasePrepared | BootIdleEntryPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 460 | BootIdleEntryPhaseOnline | BootIdleEntryPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 461 | SmpRuntimePhasePrepared | SmpRuntimePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 462 | SmpRuntimePhaseOnline | SmpRuntimePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 463 | PreSmpInitPhasePrepared | PreSmpInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 464 | PreSmpInitPhaseOnline | PreSmpInitPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 465 | SmpBringupPhasePrepared | SmpBringupPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 466 | SmpBringupPhaseOnline | SmpBringupPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 467 | RuntimeCorePhasePrepared | RuntimeCorePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 468 | RuntimeCorePhaseOnline | RuntimeCorePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 469 | InitcallPhasePrepared | InitcallPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 470 | InitcallPhaseOnline | InitcallPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 471 | RootfsPhasePrepared | RootfsPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 472 | RootfsPhaseOnline | RootfsPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 473 | FinalizePhasePrepared | FinalizePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 474 | FinalizePhaseOnline | FinalizePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

@@ -1,27 +1,22 @@
 # InitcallPhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/initcall.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+InitcallPhase 是 SmpRuntimePhase 的第 4 个直接子阶段，由 KernelInitTask 执行。model 路径为
+`spec/model/phases/smp-runtime/initcall/`，实现落点为
+`impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/initcall.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+`preset()` 依赖 RuntimeCorePhase 精确 Online，接受 Preset 后发出 Started，按 model 顺序驱动
+全部对象并提交 Prepared。现有 structured diagnostic 必须继续标识首个失败对象/谓词；生命周期
+source/target 调整为 Base/Prepared。Setup/Enable 不再驱动对象，只复用 diagnostic ready check，
+分别提交 Ready/Online；Online 只返回 `smp_runtime::enable_after_initcall()`。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`initcall.spec`](initcall.spec)。
-
-### ArceosExInitcallCodingMust
-
-#### Model path
-
-InitcallPhase is SMP Runtime Phase subphase 3. Its formal model
-path is spec/model/phases/smp-runtime/initcall/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+四个 checkpoint 依次是 Started、Prepared、Ready、Online；既有 Started/Ready ID 和 stress scope
+名称保持不变。
 
 #### Entry gate
 
-InitcallPhase must run after RuntimeCorePhase.Ready and preserve
+InitcallPhase must run after RuntimeCorePhase.Online and preserve
 the do_basic_setup() entry boundary.
 
 #### Pre-do_initcalls classification
@@ -330,5 +325,3 @@ live virtio drivers have published current/default device surfaces.
 The first smoke validation must observe hwrng and block device nodes
 and registry bindings only; it must not add test-only production APIs
 and must not require reads through a VFS file path.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/initcall.spec END -->

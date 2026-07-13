@@ -1,23 +1,26 @@
 # SmpBringupPhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/smp-bringup.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+SmpBringupPhase 是 SmpRuntimePhase 的第 2 个直接子阶段。父级 Preset 与 BP 对象动作由
+KernelInitTask 执行；内部三个 AP phase 继续由目标 AP 执行。model 路径为
+`spec/model/phases/smp-runtime/smp-bringup/`，实现落点为
+`impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/smp-bringup.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+`preset()` 必须依赖 PreSmpInitPhase 精确 Online，发出 Started，然后在 BP 线上驱动准备、
+HSM 发起与 completion wait；AP phase 使用现有 AP entry，不变成 BP 调用所有权。全部结果事实
+成立后提交 Prepared。`setup()`/`enable()` 只检查结果并分别提交 Ready/Online；Online 只返回
+`smp_runtime::setup_after_smp_bringup()`。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`smp-bringup.spec`](smp-bringup.spec)。
+| Checkpoint | owner state | owner |
+| --- | --- | --- |
+| `SmpBringupPhase.Started` | Base | KernelInitTask/BP |
+| `SmpBringupPhase.Prepared` | Prepared | KernelInitTask/BP |
+| `SmpBringupPhase.Ready` | Ready | KernelInitTask/BP |
+| `SmpBringupPhase.Online` | Online | KernelInitTask/BP，父 continuation 前 |
 
-### ArceosExSmpBringupCodingMust
-
-#### Model path
-
-SmpBringupPhase is SMP Runtime Phase subphase 2. Its formal model
-path is spec/model/phases/smp-runtime/smp-bringup/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+`ApEntryPreludePhase`、`ApSmpCallinPhase`、`ApOnlineIdlePhase` 的 checkpoint 仍标注对应
+`ApIdleTask[n]`，不套用 KernelInitTask SP/owner 断言。
 
 #### BP/AP phase split
 
@@ -100,8 +103,5 @@ AP entry/callin/online-idle path itself is in scope.
 
 #### Later runtime
 
-SmpBringupPhase must hand off to RuntimeCorePhase. Later
-subphases are expanded through their own formal model and code
-steps rather than being silently assumed complete.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/smp-bringup.spec END -->
+SmpBringupPhase must return to its parent continuation after Online. The parent then starts
+RuntimeCorePhase; the leaf must not call the sibling directly.

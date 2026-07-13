@@ -14,78 +14,92 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static INITCALL_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(preset_start(), "arceos_ex initcall preset start failed\n");
     crate::checkpoint::checkpoint(Checkpoint::InitcallPhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex initcall event failed\n",
+        preset_objects(ctx).and_then(|()| {
+            transition_if_ready(
+                ctx,
+                LifecycleEvent::Preset,
+                State::Base,
+                State::Prepared,
+                Checkpoint::InitcallPhasePrepared,
+                "adopt_prepared",
+            )
+        }),
+        "arceos_ex initcall preset failed\n",
     );
-    crate::phases::smp_runtime::rootfs::setup(ctx)
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
-    if !crate::phases::smp_runtime::runtime_core::is_ready() {
+fn preset_start() -> EventResult {
+    let state = crate::phases::state::load(&INITCALL_PHASE_STATE);
+    if state != State::Base || !crate::phases::smp_runtime::runtime_core::is_online() {
         return failed_condition_with_diagnostic(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
+            state,
             State::Base,
-            State::Ready,
-            State::Ready,
+            State::Prepared,
             initcall_failure_diagnostic(
-                "setup_objects.runtime_core_ready",
+                "preset_start.runtime_core_online",
                 "RuntimeCorePhase",
-                "runtime_core_phase_ready",
+                "runtime_core_phase_online",
             ),
         );
     }
+    Ok(())
+}
 
+fn preset_objects(ctx: &mut Context) -> EventResult {
     with_initcall_diagnostic(
         ctx.cpuset_smp_trimmed.setup(&ctx.runtime_core_boundary),
-        "setup_objects.cpuset_smp_trimmed.setup",
+        "preset_objects.cpuset_smp_trimmed.setup",
         "CpusetSmpTrimmed",
         "cpuset_smp_trimmed.setup",
     )?;
     with_initcall_diagnostic(
         ctx.driver_core_base
             .setup(&ctx.cpuset_smp_trimmed, &ctx.page_allocator, &ctx.workqueue),
-        "setup_objects.driver_core_base.setup",
+        "preset_objects.driver_core_base.setup",
         "DriverCoreBase",
         "driver_core_base.setup",
     )?;
     with_initcall_diagnostic(
         ctx.platform_bus_root_device
             .setup(&ctx.driver_core_base, &ctx.static_objects),
-        "setup_objects.platform_bus_root_device.setup",
+        "preset_objects.platform_bus_root_device.setup",
         "PlatformBusRootDevice",
         "platform_bus_root_device.setup",
     )?;
     with_initcall_diagnostic(
         ctx.platform_bus
             .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device),
-        "setup_objects.platform_bus.setup",
+        "preset_objects.platform_bus.setup",
         "PlatformBus",
         "platform_bus.setup",
     )?;
     with_initcall_diagnostic(
         ctx.virtio_bus.setup(&ctx.platform_bus),
-        "setup_objects.virtio_bus.setup",
+        "preset_objects.virtio_bus.setup",
         "VirtioBus",
         "virtio_bus.setup",
     )?;
     with_initcall_diagnostic(
         ctx.hwrng_core.setup(&ctx.driver_core_base),
-        "setup_objects.hwrng_core.setup",
+        "preset_objects.hwrng_core.setup",
         "HwRngCore",
         "hwrng_core.setup",
     )?;
     with_initcall_diagnostic(
         ctx.block_device_registry.setup(&ctx.driver_core_base),
-        "setup_objects.block_device_registry.setup",
+        "preset_objects.block_device_registry.setup",
         "BlockDeviceRegistry",
         "block_device_registry.setup",
     )?;
     with_initcall_diagnostic(
         ctx.driver_core_deferred.setup(&ctx.platform_bus),
-        "setup_objects.driver_core_deferred.setup",
+        "preset_objects.driver_core_deferred.setup",
         "DriverCoreDeferred",
         "driver_core_deferred.setup",
     )?;
@@ -97,33 +111,33 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.driver_core_deferred,
             &ctx.irq_dispatch_tree,
         ),
-        "setup_objects.irq_proc_view_deferred.setup",
+        "preset_objects.irq_proc_view_deferred.setup",
         "IrqProcViewDeferred",
         "irq_proc_view_deferred.setup",
     )?;
     with_initcall_diagnostic(
         ctx.ctor_table
             .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects),
-        "setup_objects.ctor_table.setup",
+        "preset_objects.ctor_table.setup",
         "CtorTable",
         "ctor_table.setup",
     )?;
     with_initcall_diagnostic(
         ctx.initcall_table
             .preset(&ctx.ctor_table, &ctx.static_objects),
-        "setup_objects.initcall_table.preset",
+        "preset_objects.initcall_table.preset",
         "InitcallTable",
         "initcall_table.preset",
     )?;
     with_initcall_diagnostic(
         run_initcall_table(ctx),
-        "setup_objects.initcall_table.setup",
+        "preset_objects.initcall_table.setup",
         "InitcallTable",
         "initcall_table.setup",
     )?;
     with_initcall_diagnostic(
         crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic),
-        "setup_objects.plic_provider.setup_registered_provider",
+        "preset_objects.plic_provider.setup_registered_provider",
         "PlicProvider",
         "plic_provider.setup_registered_provider",
     )?;
@@ -136,7 +150,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.plic,
             &mut ctx.plic_irq_domain,
         ),
-        "setup_objects.virtio_blk.setup_live_driver",
+        "preset_objects.virtio_blk.setup_live_driver",
         "VirtioBlkDevice",
         "virtio_blk.setup_live_driver",
     )?;
@@ -150,7 +164,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &mut ctx.plic_irq_domain,
             &ctx.irq_handler_registry,
         ),
-        "setup_objects.virtio_rng.setup_live_driver",
+        "preset_objects.virtio_rng.setup_live_driver",
         "VirtioRngDevice",
         "virtio_rng.setup_live_driver",
     )?;
@@ -161,7 +175,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.hwrng_core,
             &ctx.block_device_registry,
         ),
-        "setup_objects.devfs.setup",
+        "preset_objects.devfs.setup",
         "DevFs",
         "devfs.setup",
     )?;
@@ -172,7 +186,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.irq_handler_registry,
             &mut ctx.interrupt_stream,
         ),
-        "setup_objects.uart_external_irq_enable.setup",
+        "preset_objects.uart_external_irq_enable.setup",
         "UartExternalIrqEnable",
         "uart_external_irq_enable.setup",
     )?;
@@ -181,13 +195,13 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             crate::objects::ns16550a::uart8250_port_irq_source(),
             crate::objects::ns16550a::uart8250_port_logical_irq(),
         ),
-        "setup_objects.plic_provider.exercise_uart_leaf_chip_callbacks",
+        "preset_objects.plic_provider.exercise_uart_leaf_chip_callbacks",
         "PlicProvider",
         "plic_provider.exercise_uart_leaf_chip_callbacks",
     )?;
     with_initcall_diagnostic(
         crate::objects::plic_provider::exercise_unmapped_irq_boundary(),
-        "setup_objects.plic_provider.exercise_unmapped_irq_boundary",
+        "preset_objects.plic_provider.exercise_unmapped_irq_boundary",
         "PlicProvider",
         "plic_provider.exercise_unmapped_irq_boundary",
     )?;
@@ -198,19 +212,19 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.plic_irq_domain,
             &ctx.irq_handler_registry,
         ),
-        "setup_objects.uart_interrupt_chain_probe.setup",
+        "preset_objects.uart_interrupt_chain_probe.setup",
         "UartInterruptChainProbe",
         "uart_interrupt_chain_probe.setup",
     )?;
     with_initcall_diagnostic(
         enable_serial8250_interrupt_driven_console(),
-        "setup_objects.serial8250_console.enable_interrupt_driven",
+        "preset_objects.serial8250_console.enable_interrupt_driven",
         "Serial8250Console",
         "serial8250_console.enable_interrupt_driven",
     )?;
     with_initcall_diagnostic(
         setup_uart_irq_chain_payload_probes(ctx),
-        "setup_objects.uart_irq_chain_payload_probes.setup",
+        "preset_objects.uart_irq_chain_payload_probes.setup",
         "UartIrqChainPayloadProbes",
         "uart_irq_chain_payload_probes.setup",
     )?;
@@ -221,7 +235,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.plic_irq_domain,
             &ctx.irq_handler_registry,
         ),
-        "setup_objects.serial8250_rx_loopback_probe.setup",
+        "preset_objects.serial8250_rx_loopback_probe.setup",
         "Serial8250RxLoopbackProbe",
         "serial8250_rx_loopback_probe.setup",
     )?;
@@ -232,20 +246,20 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.plic_irq_domain,
             &ctx.irq_handler_registry,
         ),
-        "setup_objects.serial8250_rx_batch_loopback_probe.setup",
+        "preset_objects.serial8250_rx_batch_loopback_probe.setup",
         "Serial8250RxBatchLoopbackProbe",
         "serial8250_rx_batch_loopback_probe.setup",
     )?;
     with_initcall_diagnostic(
         ctx.tty_xmit_fifo_probe
             .setup(&ctx.serial8250_rx_batch_loopback_probe),
-        "setup_objects.tty_xmit_fifo_probe.setup",
+        "preset_objects.tty_xmit_fifo_probe.setup",
         "TtyXmitFifoProbe",
         "tty_xmit_fifo_probe.setup",
     )?;
     with_initcall_diagnostic(
         setup_tty_runtime_tx_payload_probes(ctx),
-        "setup_objects.tty_runtime_tx_payload_probes.setup",
+        "preset_objects.tty_runtime_tx_payload_probes.setup",
         "TtyRuntimeTxPayloadProbes",
         "tty_runtime_tx_payload_probes.setup",
     )?;
@@ -267,7 +281,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
             &ctx.serial8250_rx_batch_loopback_probe,
             &ctx.tty_xmit_fifo_probe,
         ),
-        "setup_objects.initcall_boundary.setup",
+        "preset_objects.initcall_boundary.setup",
         "InitcallBoundary",
         "initcall_boundary.setup",
     )?;
@@ -279,19 +293,19 @@ fn enable_serial8250_interrupt_driven_console() -> EventResult {
         && !crate::objects::ns16550a::enable_serial8250_interrupt_driven_console()
     {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             State::Base,
-            State::Ready,
-            State::Ready,
+            State::Base,
+            State::Prepared,
         );
     }
 
     if !crate::objects::ns16550a::uart8250_interrupt_driven_configured() {
         return failed_condition(
-            LifecycleEvent::Setup,
+            LifecycleEvent::Preset,
             State::Base,
-            State::Ready,
-            State::Ready,
+            State::Base,
+            State::Prepared,
         );
     }
 
@@ -372,7 +386,45 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
     result
 }
 
-fn checkpoint_ready(ctx: &Context) -> EventResult {
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        transition_if_ready(
+            ctx,
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::InitcallPhaseReady,
+            "adopt_ready",
+        ),
+        "arceos_ex initcall setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        transition_if_ready(
+            ctx,
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::InitcallPhaseOnline,
+            "enable_event",
+        ),
+        "arceos_ex initcall enable failed\n",
+    );
+    crate::phases::smp_runtime::enable_after_initcall()
+}
+
+fn transition_if_ready(
+    ctx: &Context,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+    checkpoint: Checkpoint,
+    step: &'static str,
+) -> EventResult {
+    let state = crate::phases::state::load(&INITCALL_PHASE_STATE);
     if let Some(diagnostic) = initcall_phase_ready_diagnostic(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -392,29 +444,29 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.initcall_boundary,
     ) {
         return failed_condition_with_diagnostic(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&INITCALL_PHASE_STATE),
-            State::Base,
-            State::Ready,
-            initcall_failure_diagnostic(
-                "checkpoint_ready",
-                "InitcallPhase",
-                diagnostic.first_failed(),
-            ),
+            event,
+            state,
+            expected,
+            target,
+            initcall_failure_diagnostic(step, "InitcallPhase", diagnostic.first_failed()),
         );
     }
 
-    crate::phases::state::mark(
-        &INITCALL_PHASE_STATE,
-        LifecycleEvent::Setup,
-        State::Base,
-        State::Ready,
-        Checkpoint::InitcallPhaseReady,
-    )
+    if state != expected {
+        return failed_condition_with_diagnostic(
+            event,
+            state,
+            expected,
+            target,
+            initcall_failure_diagnostic(step, "InitcallPhase", "phase_source_state"),
+        );
+    }
+
+    crate::phases::state::mark_checked(&INITCALL_PHASE_STATE, event, expected, target, checkpoint)
 }
 
-pub fn is_ready() -> bool {
-    crate::phases::state::load(&INITCALL_PHASE_STATE) == State::Ready
+pub fn is_online() -> bool {
+    crate::phases::state::load(&INITCALL_PHASE_STATE) == State::Online
 }
 
 fn with_initcall_diagnostic(

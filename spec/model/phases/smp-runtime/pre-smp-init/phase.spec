@@ -212,7 +212,7 @@ object PreSmpInitPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     UpMultitaskPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
@@ -274,11 +274,15 @@ object PreSmpInitPhase: PhaseObject {
                     "lockup detector 留给运行期诊断模型。";
                     "smp_init() 是下一子阶段 SmpBringupPhase 的入口。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
             UpMultitaskPhase.state == State::Online;
             KernelInitKthreaddDoneWait.state == State::Online;
@@ -303,6 +307,48 @@ object PreSmpInitPhase: PhaseObject {
             PreSmpInitcallTable.state == State::Ready;
             PreSmpInitBoundary.state == State::Ready;
             pre_smp_init_ready(PreSmpInitPhase);
+            smp_init_not_called();
+            secondary_cpus_present_but_not_online(CpuGroup);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    UpMultitaskPhase.state == State::Online;
+                    pre_smp_init_ready(PreSmpInitPhase);
+                    PreSmpInitBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            UpMultitaskPhase.state == State::Online;
+            pre_smp_init_ready(PreSmpInitPhase);
+            PreSmpInitBoundary.state == State::Ready;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    pre_smp_init_ready(PreSmpInitPhase);
+                    smp_init_not_called();
+                    secondary_cpus_present_but_not_online(CpuGroup);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            UpMultitaskPhase.state == State::Online;
+            pre_smp_init_ready(PreSmpInitPhase);
+            PreSmpInitBoundary.state == State::Ready;
             smp_init_not_called();
             secondary_cpus_present_but_not_online(CpuGroup);
         }

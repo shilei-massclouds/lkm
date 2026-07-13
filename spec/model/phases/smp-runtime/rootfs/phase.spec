@@ -391,9 +391,9 @@ object RootfsPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    InitcallPhase.state == State::Ready;
+                    InitcallPhase.state == State::Online;
                     InitcallBoundary.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     Workqueue.state == State::Ready;
@@ -436,13 +436,17 @@ object RootfsPhase: PhaseObject {
                     integrity_keys_setup_deferred();
                     rootfs_boundary_ready(RootfsBoundary);
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
-            InitcallPhase.state == State::Ready;
+            InitcallPhase.state == State::Online;
             KUnitRuntimeTrimmed.state == State::Ready;
             InitramfsSyncDeferred.state == State::Ready;
             RootfsConsoleDeferred.state == State::Ready;
@@ -451,6 +455,45 @@ object RootfsPhase: PhaseObject {
             IntegrityKeysDeferred.state == State::Ready;
             RootfsBoundary.state == State::Ready;
             rootfs_phase_ready(RootfsPhase);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    InitcallPhase.state == State::Online;
+                    rootfs_phase_ready(RootfsPhase);
+                    RootfsBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            InitcallPhase.state == State::Online;
+            rootfs_phase_ready(RootfsPhase);
+            RootfsBoundary.state == State::Ready;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    rootfs_phase_ready(RootfsPhase);
+                    RootfsBoundary.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            InitcallPhase.state == State::Online;
+            rootfs_phase_ready(RootfsPhase);
+            RootfsBoundary.state == State::Ready;
         }
     }
 }

@@ -1,23 +1,22 @@
 # PreSmpInitPhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/pre-smp-init.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+PreSmpInitPhase 是 SmpRuntimePhase 的第 1 个直接子阶段，由 KernelInitTask 在自己的
+vmalloc task stack 上执行。model 路径为 `spec/model/phases/smp-runtime/pre-smp-init/`，
+实现落点为 `impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/pre-smp-init.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+`preset()` 精确检查 Base、UpMultitask Online、KernelInitTask entry/release/dispatch 与栈事实，
+发出 Started，然后按 model 顺序驱动本阶段全部对象动作并提交 Prepared。`setup()` 只检查对象
+完成事实并提交 Ready；`enable()` 再检查相同 invariant、提交 Online，并且只返回
+`smp_runtime::preset_after_pre_smp_init()`。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`pre-smp-init.spec`](pre-smp-init.spec)。
-
-### ArceosExPreSmpInitCodingMust
-
-#### Model path
-
-PreSmpInitPhase is SmpRuntimePhase subphase 1. Its formal model
-path is spec/model/phases/smp-runtime/pre-smp-init/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+| Checkpoint | owner state | 位置 |
+| --- | --- | --- |
+| `PreSmpInitPhase.Started` | Base | Preset 依赖被接受后、首个对象动作前 |
+| `PreSmpInitPhase.Prepared` | Prepared | 全部对象动作完成后 |
+| `PreSmpInitPhase.Ready` | Ready | Setup 检查完成后 |
+| `PreSmpInitPhase.Online` | Online | Enable 检查完成后、父 continuation 前 |
 
 #### Entry facts
 
@@ -62,5 +61,3 @@ and the model must use within WorkqueuePoolMutexContext { ... }.
 
 smp_init() is the next top-level phase boundary and must not be
 executed or modeled as complete here.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/pre-smp-init.spec END -->

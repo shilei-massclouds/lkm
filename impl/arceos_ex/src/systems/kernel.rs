@@ -47,7 +47,7 @@ pub fn enable_after_smp_runtime() -> ! {
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
         || !crate::phases::up_multitask::is_online()
-        || !crate::phases::smp_runtime::is_ready()
+        || !crate::phases::smp_runtime::is_online()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel enable invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
@@ -97,7 +97,7 @@ pub fn mark_online() -> EventResult {
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
         || !crate::phases::up_multitask::is_online()
-        || !crate::phases::smp_runtime::is_ready()
+        || !crate::phases::smp_runtime::is_online()
         || !crate::phases::payload::is_online()
     {
         return failed_condition(

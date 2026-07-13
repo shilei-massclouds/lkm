@@ -8,7 +8,7 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::smp_runtime::finalize::is_ready() || !phases::smp_runtime::is_ready() {
+    if !phases::smp_runtime::finalize::is_online() || !phases::smp_runtime::is_online() {
         printk::write_str("finalize phase is not ready\n");
         return SmokeResult::Failed;
     }

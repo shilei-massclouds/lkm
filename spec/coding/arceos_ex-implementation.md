@@ -32,13 +32,13 @@
 - `BootInitRestInitPhase.Online`
 - `BootInitScheduleHandoffPhase.Online`
 - `BootIdleEntryPhase.Online`
-- `PreSmpInitPhase.Ready`
-- `SmpRuntimePhase.Ready`
-- `SmpBringupPhase.Ready`
-- `RuntimeCorePhase.Ready`
-- `InitcallPhase.Ready`
-- `RootfsPhase.Ready`
-- `FinalizePhase.Ready`
+- `PreSmpInitPhase.Online`
+- `SmpRuntimePhase.Online`
+- `SmpBringupPhase.Online`
+- `RuntimeCorePhase.Online`
+- `InitcallPhase.Online`
+- `RootfsPhase.Online`
+- `FinalizePhase.Online`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -206,10 +206,10 @@ make clean
 `InterruptPhase.Online`（其当前展开子阶段包括 `IrqTimeInitPhase.Online`、`LocalIrqEnablePhase.Online`、
 `IrqOpenPreparePhase.Online` 和 `ProcessPreparePhase.Online`），再完成 `UpMultitaskPhase.Online`（当前展开
 `BootInitRestInitPhase.Online`、`BootInitScheduleHandoffPhase.Online` 和 `BootIdleEntryPhase.Online`），
-随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
-`RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
+随后完成 `SmpRuntimePhase.Online`（当前展开 `PreSmpInitPhase.Online`、`SmpBringupPhase.Online`、
+`RuntimeCorePhase.Online`、`InitcallPhase.Online`、`RootfsPhase.Online` 与 `FinalizePhase.Online`），再通过
 后续的 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`PayloadPhase` 是
-`SmpRuntimePhase` 的后续阶段，不是其最后一个子阶段；它直接衔接 `FinalizePhase.Ready` /
+`SmpRuntimePhase` 的后续阶段，不是其最后一个子阶段；它直接衔接 `FinalizePhase.Online` /
 `FinalizeBoundary.Ready`。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubSubsystem`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -430,11 +430,10 @@ payload/syscall 的事实。
 
 `RuntimeCorePhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
 `spec/model/phases/smp-runtime/runtime-core/`，目标实现路径为
-`impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。该阶段必须在 `SmpBringupPhase.Ready` 之后运行，由
+`impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。该阶段必须在 `SmpBringupPhase.Online` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `sched_init_smp()` 到 `page_alloc_init_late()` 的 BP 主线。
-为匹配 Linux paired diff exact anchor，`Scheduler.enable_smp()` 必须先发布 `Scheduler.SmpReady`；
-`RuntimeCorePhase.Started` checkpoint 表示随后的 `workqueue_init_topology()` 区间入口，不能早于
-`Scheduler.SmpReady`。
+`RuntimeCorePhase.Started` 表示 Preset 已接受，必须在 `Scheduler.enable_smp()` 前发布，并与 Linux
+`sched_init_smp()` 调用入口对齐；`Scheduler.SmpReady` 仍由该动作完成后发布。
 
 本阶段必须覆盖 `Scheduler.enable_smp()`、`Workqueue` topology action、`AsyncCore` deferred boundary、
 `PadataCore` deferred boundary、`PageAllocator` late action 和 `RuntimeCoreBoundary.setup()`。
@@ -460,15 +459,15 @@ Async deferred facts 应保留专用 `"async"` unbound workqueue 创建和 `min_
 static key disable 路径裁剪；`CONFIG_PAGE_EXTENSION=n`，page extension late 裁剪；`CONFIG_SHUFFLE_PAGE_ALLOCATOR=n`，
 shuffle late 路径裁剪。
 
-测试应覆盖 `RuntimeCorePhase.Ready`、`Scheduler.smp_initialized`、PID 1 affinity 释放、Workqueue topology
+测试应覆盖 `RuntimeCorePhase.Online`、`Scheduler.smp_initialized`、PID 1 affinity 释放、Workqueue topology
 facts 与 mutex guard、Async/Padata deferred facts、PageAllocator late facts 和裁剪依据，以及下一入口仍是
 `do_basic_setup()`。
 
 ## InitcallPhase 编码约束
 
-`InitcallPhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
+`InitcallPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为
 `spec/model/phases/smp-runtime/initcall/`，目标实现路径为
-`impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。该阶段必须在 `RuntimeCorePhase.Ready` 之后运行，由
+`impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。该阶段必须在 `RuntimeCorePhase.Online` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `do_basic_setup()` 的对象级边界。
 
 本阶段必须覆盖 `cpuset_init_smp()` 的 trimmed/no-op、`DriverCore` deferred boundary、
@@ -528,13 +527,13 @@ trace start/finish 边界、返回码、preempt count 快照与失衡修复或�
 以及 latent entropy accounting。当前 boot-only 对象级实现可以把这些责任落成显式 fact，但不得把它们当成
 不存在。
 
-测试应覆盖 `InitcallPhase.Ready`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
+测试应覆盖 `InitcallPhase.Online`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
 `InitcallTable.preset()` 的静态 range 收集事实、level/entry 摘要、entry operation binding、
 `InitcallTable.all_levels_ran`、命令行 scratch 和运行上下文事实，以及下一入口仍是 `kunit_run_all_tests()` /
 `RootfsPhase`。具体 entry 的目标副作用，例如 `of_platform_default_populate_init()` 填充 platform bus，应由
 对应对象规格和后续 smoke 测试覆盖，不混入 initcall 机制本身。
 
-`initcall_phase_ready(...)` 是 `InitcallPhase.Ready` 的聚合 ready-check。实现不得只在该聚合谓词失败时输出
+`initcall_phase_ready(...)` 是 InitcallPhase Prepared/Ready/Online 共用的聚合 ready-check。实现不得只在该聚合谓词失败时输出
 压缩的 `EventError` 字段；必须通过统一 `failure_diagnostic` payload 报告
 `phase=InitcallPhase step=checkpoint_ready object=InitcallPhase check=<stable-predicate-name>`。
 `first_failed` 必须按 `initcall_phase_ready(...)` 的规范顺序报告第一个 false 条件，并使用长期稳定名称；
@@ -1080,15 +1079,13 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 
 ## RootfsPhase 编码约束
 
-`RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为
+`RootfsPhase` 是 `SMP Runtime Phase` 的第五个子阶段，formal model 路径为
 `spec/model/phases/smp-runtime/rootfs/`，目标实现路径为
-`impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。该阶段必须在 `InitcallPhase.Ready` 之后运行，由
+`impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。该阶段必须在 `InitcallPhase.Online` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init_freeable()` 的 rootfs 准备边界。
-为匹配 Linux paired diff exact anchor，`RootfsPhase.Started` checkpoint 不得在 `rootfs::setup()` 函数入口发布；
-它表示 `init_eaccess(ramdisk_execute_command)` 之后即将进入 `prepare_namespace()` 的分支入口。因此顺序必须是
-`KUnitRuntime.TrimmedReady`、`InitramfsSync.DeferredReady`、`RootfsConsole.DeferredReady`、
-`RamdiskExecuteCommand.EaccessCheckpoint`、`RootfsPhase.Started`，随后才推进 prepare_namespace path classification
-和 `RootFS.Online`。
+`RootfsPhase.Started` 表示 Preset 已接受，位于 KUnitRuntime 对象动作前，并与 Linux
+`kunit_run_all_tests()` 调用入口对齐。`RamdiskExecuteCommand.EaccessCheckpoint` 仍位于
+`RootfsConsole.DeferredReady` 之后、prepare_namespace path classification 和 `RootFS.Online` 之前。
 
 初始 rootfs mount 不属于本阶段首次创建：它已经在 `ProcessPreparePhase` 的 `VfsCore.Setup` /
 `RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
@@ -1127,7 +1124,7 @@ deferred，并明确当前 `DevFs` 不会在 root switch 后重新挂到新的 e
 `IntegrityKeysDeferred` 必须同时记录 `CONFIG_INTEGRITY=y` 的调用位置，以及当前 `CONFIG_IMA=n`、`CONFIG_EVM=n`
 导致 IMA/EVM x509 key loading 不展开的裁剪依据。
 
-测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
+测试应覆盖 `RootfsPhase.Online`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
 ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、真实 ext2 root staging mount 曾建立于
 `/root`、`MS_MOVE` 挂载移动完成、`FsStruct.ChrootDot` 完成、当前 root 为 ext2、可直接读取 `/etc/alpine-release`、
 device-probe/rootwait/initrd/md/NFS/CIFS/devtmpfs 路径分类、integrity keys deferred/trimmed 细分事实，以及下一入口仍是
@@ -1137,7 +1134,7 @@ device-probe/rootwait/initrd/md/NFS/CIFS/devtmpfs 路径分类、integrity keys 
 
 `FinalizePhase` 是 `SMP Runtime Phase` 的第六个子阶段，formal model 路径为
 `spec/model/phases/smp-runtime/finalize/`，目标实现路径为
-`impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。该阶段必须在 `RootfsPhase.Ready` 之后运行，由
+`impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。该阶段必须在 `RootfsPhase.Online` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init()` 中 `kernel_init_freeable()` 返回后的收尾边界。
 
 本阶段覆盖 `async_synchronize_full()`、`SYSTEM_FREEING_INITMEM`、init-only memory cleanup、
@@ -1162,7 +1159,7 @@ nesting 的裁剪事实、`CONFIG_PREEMPT_RT=n` 下 `rcu_normal_after_boot` 默�
 的事实，以及 `rcu_boot_ended` publish fact。`numa_default_policy()` 的裁剪 checkpoint 必须位于
 `SYSTEM_RUNNING` 之后、`rcu_end_inkernel_boot()` 之前，不能放在 `rest_init()` 路径。
 
-测试应覆盖 `FinalizePhase.Ready`、async full sync deferred、init memory cleanup deferred/trimmed 事实、
+测试应覆盖 `FinalizePhase.Online`、async full sync deferred、init memory cleanup deferred/trimmed 事实、
 mapping protection deferred、PTI trimmed、`SystemState.Online`/`SYSTEM_RUNNING`、NUMA default policy
 trimmed、RCU in-kernel boot ended 与 atomic/WRITE_ONCE/lazy-trim facts、sysctl args deferred，以及下一入口仍是
 `PayloadPhase`。
@@ -1170,8 +1167,8 @@ trimmed、RCU in-kernel boot ended 与 atomic/WRITE_ONCE/lazy-trim facts、sysct
 ## PayloadPhase 编码约束
 
 `PayloadPhase` 是 `Kernel` 的末尾阶段，formal model 路径为 `spec/model/phases/payload/`。它必须作为
-`SmpRuntimePhase.Ready` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
-`FinalizePhase.Ready` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
+`SmpRuntimePhase.Online` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
+`FinalizePhase.Online` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
 
 KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` 通过 `TaskCreationCore` 把
 `TaskEntry::KernelInit` 绑定到 `KernelInitTask`，并提交 release/dispatch facts；`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 消费这些 entry/release/dispatch facts 后进入。后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload 的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责 idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前提供内核线程管理者 ready/provider 事实和最小 schedule-loop 入口边界。

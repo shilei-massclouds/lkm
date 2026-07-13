@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 461
+- total checkpoints: 475
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 344 |
+| unmapped | 358 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 344 |
+| none | 358 |
 | medium | 62 |
 | high | 55 |
 
@@ -59,6 +59,7 @@
 | IrqOpenPreparePhase | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
+| SmpRuntimePhase | 4 |
 | SyscallTable | 4 |
 | UpMultitaskPhase | 4 |
 | VirtioBlk | 4 |
@@ -76,7 +77,9 @@
 | CommandLine | 2 |
 | CorePreparePhase | 2 |
 | EntryPreludePhase | 2 |
+| FinalizePhase | 2 |
 | InitTask | 2 |
+| InitcallPhase | 2 |
 | IrqChipInitTable | 2 |
 | IrqOpenPrepareTrimmedPaths | 2 |
 | IrqTimeInitPhase | 2 |
@@ -87,15 +90,18 @@
 | PhysicalMemory | 2 |
 | PlatformCpuInfo | 2 |
 | PlicIrqDomain | 2 |
+| PreSmpInitPhase | 2 |
 | PreparePhase | 2 |
 | PrintkBuffer | 2 |
 | ProcessPreparePhase | 2 |
 | Randomness | 2 |
 | RcuCore | 2 |
+| RootfsPhase | 2 |
+| RuntimeCorePhase | 2 |
 | SchedInitPhase | 2 |
 | Serial8250Console | 2 |
 | SignalCore | 2 |
-| SmpRuntimePhase | 2 |
+| SmpBringupPhase | 2 |
 | Softirq | 2 |
 | SwapperVm | 2 |
 | SystemState | 2 |

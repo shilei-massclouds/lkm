@@ -69,9 +69,8 @@ SmpRuntimePhase。SmpRuntimePhase 完成后进入 `systems::kernel::enable_after
 - `Kernel.Online` 属于 Kernel.Enable 完成边界，只能在 PayloadPhase.Online 已提交后发出。
 - 子阶段 checkpoint 保留在对应 phase module，不得由 `systems/kernel.rs` 代发。
 
-Boot、Interrupt 和 UpMultitask 子树已经使用精确 `is_online()` 查询和完整四状态 checkpoint。
-SmpRuntime 等尚未审计子树中仍代表 model Online 的旧 `is_ready()`，必须在各自批次收敛；不能
-据此降低 Kernel model 的 Online 要求。
+Boot、Interrupt、UpMultitask 和 SmpRuntime 子树均使用精确 `is_online()` 查询和完整四状态
+checkpoint；Kernel.Enable 与 Payload 只消费 SmpRuntimePhase.Online。
 
 ## 所有权与范围
 

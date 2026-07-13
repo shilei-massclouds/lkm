@@ -63,7 +63,7 @@ fn payload_phase_dependencies_ready() -> bool {
         && crate::phases::boot::is_online()
         && crate::phases::interrupt::is_online()
         && crate::phases::up_multitask::is_online()
-        && crate::phases::smp_runtime::is_ready()
+        && crate::phases::smp_runtime::is_online()
         && crate::phases::boot::core_prepare::is_online()
         && crate::phases::boot::mm_core_init::is_online()
         && printk::is_ready()

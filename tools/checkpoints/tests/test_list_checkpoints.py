@@ -155,6 +155,13 @@ class ListCheckpointsTests(unittest.TestCase):
             "BootInitRestInitPhase",
             "BootInitScheduleHandoffPhase",
             "BootIdleEntryPhase",
+            "SmpRuntimePhase",
+            "PreSmpInitPhase",
+            "SmpBringupPhase",
+            "RuntimeCorePhase",
+            "InitcallPhase",
+            "RootfsPhase",
+            "FinalizePhase",
         ):
             for boundary in ("Started", "Prepared", "Ready", "Online"):
                 self.assertIn(f"{phase}.{boundary}", by_name)
@@ -179,6 +186,38 @@ class ListCheckpointsTests(unittest.TestCase):
             "BootInitScheduleHandoffPhaseReady": 271,
             "BootIdleEntryPhaseReady": 272,
         }
+        stable_smp_runtime_ids = {
+            "PreSmpInitPhaseStarted": 294,
+            "PreSmpInitPhaseReady": 295,
+            "SmpRuntimePhaseStarted": 303,
+            "SmpRuntimePhaseReady": 304,
+            "SmpBringupPhaseStarted": 305,
+            "SmpBringupPhaseReady": 306,
+            "RuntimeCorePhaseStarted": 340,
+            "RuntimeCorePhaseReady": 341,
+            "InitcallPhaseStarted": 348,
+            "InitcallPhaseReady": 349,
+            "RootfsPhaseStarted": 369,
+            "RootfsPhaseReady": 370,
+            "FinalizePhaseStarted": 379,
+            "FinalizePhaseReady": 380,
+        }
+        appended_smp_runtime_ids = {
+            "SmpRuntimePhasePrepared": 461,
+            "SmpRuntimePhaseOnline": 462,
+            "PreSmpInitPhasePrepared": 463,
+            "PreSmpInitPhaseOnline": 464,
+            "SmpBringupPhasePrepared": 465,
+            "SmpBringupPhaseOnline": 466,
+            "RuntimeCorePhasePrepared": 467,
+            "RuntimeCorePhaseOnline": 468,
+            "InitcallPhasePrepared": 469,
+            "InitcallPhaseOnline": 470,
+            "RootfsPhasePrepared": 471,
+            "RootfsPhaseOnline": 472,
+            "FinalizePhasePrepared": 473,
+            "FinalizePhaseOnline": 474,
+        }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
             {
@@ -194,6 +233,21 @@ class ListCheckpointsTests(unittest.TestCase):
             },
             stable_up_multitask_ids,
         )
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
+                for variant in stable_smp_runtime_ids
+            },
+            stable_smp_runtime_ids,
+        )
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
+                for variant in appended_smp_runtime_ids
+            },
+            appended_smp_runtime_ids,
+        )
+        self.assertEqual(len(records), 475)
 
 
 if __name__ == "__main__":

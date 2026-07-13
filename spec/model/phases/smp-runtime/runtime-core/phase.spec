@@ -90,7 +90,7 @@ object SchedulerSmpRuntime: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    SmpBringupPhase.state == State::Ready;
+                    SmpBringupPhase.state == State::Online;
                     Scheduler.state == State::Online;
                     KernelInitTask.state == State::Online;
                     CpuGroup.state == State::Ready;
@@ -400,9 +400,9 @@ object RuntimeCorePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    SmpBringupPhase.state == State::Ready;
+                    SmpBringupPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
                     Scheduler.state == State::Online;
                     Workqueue.state == State::Ready;
@@ -448,13 +448,17 @@ object RuntimeCorePhase: PhaseObject {
                     "padata_init() 的 CPU hotplug online/dead state 注册、possible-CPU work array 和 free list 继续作为 RuntimeCorePhase 的 deferred boundary，不展开 padata instance 或具体用户。";
                     "CONFIG_DEFERRED_STRUCT_PAGE_INIT=n、CONFIG_PAGE_EXTENSION=n、CONFIG_SHUFFLE_PAGE_ALLOCATOR=n 的 late page allocator 分支由 PageAllocatorLate 结构化记录为 trimmed/no-op。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
-            SmpBringupPhase.state == State::Ready;
+            SmpBringupPhase.state == State::Online;
             SchedDomainsMutex.state == State::Ready;
             SchedulerSmpRuntime.state == State::Ready;
             WorkqueueTopology.state == State::Ready;
@@ -466,6 +470,45 @@ object RuntimeCorePhase: PhaseObject {
             scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
             workqueue_topology_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
             workqueue_topology_struct_mutex_guard_used(Workqueue, WorkqueueStructMutex);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    SmpBringupPhase.state == State::Online;
+                    runtime_core_phase_ready(RuntimeCorePhase);
+                    RuntimeCoreBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            SmpBringupPhase.state == State::Online;
+            runtime_core_phase_ready(RuntimeCorePhase);
+            RuntimeCoreBoundary.state == State::Ready;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    runtime_core_phase_ready(RuntimeCorePhase);
+                    RuntimeCoreBoundary.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            SmpBringupPhase.state == State::Online;
+            runtime_core_phase_ready(RuntimeCorePhase);
+            RuntimeCoreBoundary.state == State::Ready;
         }
     }
 }

@@ -33,7 +33,7 @@ const ELF_MACHINE_RISCV: u16 = 243;
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::smp_runtime::rootfs::is_ready() || !phases::smp_runtime::is_ready() {
+    if !phases::smp_runtime::rootfs::is_online() || !phases::smp_runtime::is_online() {
         printk::write_str("rootfs phase is not ready\n");
         return SmokeResult::Failed;
     }

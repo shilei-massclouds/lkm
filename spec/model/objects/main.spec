@@ -377,6 +377,7 @@ predicate task_entry_bound<T>(task: T, entry: TaskEntry) -> bool;
 predicate task_entry_first_phase<T, U>(task: T, phase: U) -> bool;
 predicate kernel_init_entry_reaches_smp_runtime<T, U>(task: T, phase: U) -> bool;
 predicate kernel_init_task_stack_switch_committed<T, U, V>(scheduler: T, prev_task: U, next_task: V) -> bool;
+predicate kernel_init_task_owns_smp_runtime_mainline<T, U>(task: T, phase: U) -> bool;
 predicate payload_execution_owned_by_kernel_init_task<T, U>(payload_phase: T, task: U) -> bool;
 predicate kernel_init_still_waiting_for_kthreadd_done<T>(task: T) -> bool;
 predicate kernel_init_kthreadd_done_wait_ready<T, U, V>(wait: T, task: U, gate: V) -> bool;

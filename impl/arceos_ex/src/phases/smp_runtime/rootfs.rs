@@ -11,31 +11,31 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static ROOTFS_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(preset_start(), "arceos_ex rootfs preset start failed\n");
+    crate::checkpoint::checkpoint(Checkpoint::RootfsPhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex rootfs event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared(ctx)),
+        "arceos_ex rootfs preset failed\n",
     );
-    crate::phases::smp_runtime::finalize::setup(ctx)
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
-    if !crate::phases::smp_runtime::initcall::is_ready() {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            State::Ready,
-        );
+fn preset_start() -> EventResult {
+    let state = crate::phases::state::load(&ROOTFS_PHASE_STATE);
+    if state != State::Base || !crate::phases::smp_runtime::initcall::is_online() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
+    Ok(())
+}
 
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.kunit_runtime_trimmed.setup(&ctx.initcall_boundary)?;
     ctx.initramfs_sync_deferred
         .setup(&ctx.kunit_runtime_trimmed, &ctx.workqueue)?;
     ctx.rootfs_console_deferred
         .setup(&ctx.initramfs_sync_deferred, &ctx.kernel_init_task)?;
     crate::checkpoint::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
-    crate::checkpoint::checkpoint(Checkpoint::RootfsPhaseStarted);
     ctx.rootfs_prepare_namespace_paths.setup(
         &ctx.rootfs_console_deferred,
         &ctx.saved_command_line,
@@ -88,40 +88,76 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 fn rootfs_setup_error() -> EventError {
     EventError::failed(
         EventErrorCode::ConditionFailed,
-        LifecycleEvent::Setup,
+        LifecycleEvent::Preset,
         State::Base,
-        State::Ready,
-        State::Ready,
+        State::Base,
+        State::Prepared,
     )
 }
 
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !rootfs_phase_ready(
-        &ctx.kunit_runtime_trimmed,
-        &ctx.initramfs_sync_deferred,
-        &ctx.rootfs_console_deferred,
-        &ctx.rootfs_prepare_namespace_paths,
-        &ctx.rootfs,
-        &ctx.integrity_keys_deferred,
-        &ctx.rootfs_boundary,
-    ) {
-        return failed_condition(
+fn adopt_prepared(ctx: &Context) -> EventResult {
+    transition_if_ready(
+        ctx,
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        Checkpoint::RootfsPhasePrepared,
+    )
+}
+
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        transition_if_ready(
+            ctx,
             LifecycleEvent::Setup,
-            crate::phases::state::load(&ROOTFS_PHASE_STATE),
-            State::Base,
+            State::Prepared,
             State::Ready,
-        );
+            Checkpoint::RootfsPhaseReady,
+        ),
+        "arceos_ex rootfs setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        transition_if_ready(
+            ctx,
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::RootfsPhaseOnline,
+        ),
+        "arceos_ex rootfs enable failed\n",
+    );
+    crate::phases::smp_runtime::enable_after_rootfs()
+}
+
+fn transition_if_ready(
+    ctx: &Context,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+    checkpoint: Checkpoint,
+) -> EventResult {
+    let state = crate::phases::state::load(&ROOTFS_PHASE_STATE);
+    if state != expected
+        || !rootfs_phase_ready(
+            &ctx.kunit_runtime_trimmed,
+            &ctx.initramfs_sync_deferred,
+            &ctx.rootfs_console_deferred,
+            &ctx.rootfs_prepare_namespace_paths,
+            &ctx.rootfs,
+            &ctx.integrity_keys_deferred,
+            &ctx.rootfs_boundary,
+        )
+    {
+        return failed_condition(event, state, expected, target);
     }
 
-    crate::phases::state::mark(
-        &ROOTFS_PHASE_STATE,
-        LifecycleEvent::Setup,
-        State::Base,
-        State::Ready,
-        Checkpoint::RootfsPhaseReady,
-    )
+    crate::phases::state::mark_checked(&ROOTFS_PHASE_STATE, event, expected, target, checkpoint)
 }
 
-pub fn is_ready() -> bool {
-    crate::phases::state::load(&ROOTFS_PHASE_STATE) == State::Ready
+pub fn is_online() -> bool {
+    crate::phases::state::load(&ROOTFS_PHASE_STATE) == State::Online
 }

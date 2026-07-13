@@ -63,6 +63,9 @@ Kernel
 ├── SmpRuntimePhase
 │   ├── PreSmpInitPhase
 │   ├── SmpBringupPhase
+│   │   ├── ApEntryPreludePhase
+│   │   ├── ApSmpCallinPhase
+│   │   └── ApOnlineIdlePhase
 │   ├── RuntimeCorePhase
 │   ├── InitcallPhase
 │   ├── RootfsPhase
@@ -110,14 +113,22 @@ Kernel
    450–460，旧 268–272 不变且 Linux exact mapping 仍只保留 RestInit.Ready。announce 实测
    三组 child Online -> parent state -> next child Started、UpMultitask.Online -> real switch ->
    KernelInit entry -> SmpRuntime.Started，并最终到达 Kernel.Online 与 Hello；stress 一轮 3/3 通过。
-7. **SmpRuntimePhase（待办）**：审计六个叶子阶段，确认整棵运行期初始化链由
-   KernelInitTask 驱动。
-8. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
+7. **SmpRuntimePhase BP 主线（完成）**：charter 固定六个由 KernelInitTask 执行的直接子阶段，
+   父 Preset/Setup/Enable 按 1/1/4 分别驱动 PreSmpInit、SmpBringup 和其余四阶段；父与六个
+   叶子统一四态，叶子 Online 只返回六个具名父 continuation，下游只消费精确 Online。
+   SmpRuntime 入口及父 continuation 均验证当前 task、唯一切栈/入口事实和实际 SP 位于
+   KernelInitTask 栈。六个 legacy coding `.spec` 已迁移删除；14 个新 checkpoint 只追加为
+   461–474 且默认 unmapped。announce 验证完整父子顺序及所有 BP 主线 checkpoint owner，
+   smoke 54/54、stress 一轮 3/3、根目录 `make test` 167/167 通过。
+8. **SmpBringup AP 子树（待办）**：独立审计 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和
+   `ApOnlineIdlePhase` 的 AP owner、HSM/completion/hotplug guard 与阶段四层映射；不把 BP 上的
+   SmpBringup 聚合 checkpoint 误归为 AP task checkpoint。
+9. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
    selected payload、KernelInitTask owner、不返回语义和关机边界。
-9. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
+10. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
    阶段树完成后处理 project、mapping、build、riscv64、rust 和 object 类剩余文件，迁移所有
    工具与文档引用，最终确保 `find spec/coding -name '*.spec'` 为空。
-10. **全树验收（待办）**：复核一致性矩阵无未分类缺口，运行 `make verify`、必要 focused
+11. **全树验收（待办）**：复核一致性矩阵无未分类缺口，运行 `make verify`、必要 focused
    `make run`、根目录 `make test`，最后执行 `make test-stress STRESS_RUNS=30`。
 
 ## 批次门禁
@@ -151,13 +162,16 @@ Kernel
 | BootInitRestInitPhase | BootInitTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |
 | BootInitScheduleHandoffPhase | BootInitTask 首次调度边界 | 标准四态、Scheduler action context 保持 | dispatch 锁存与父返回已映射 | 四 checkpoint、长期 dispatch query 已验证 | complete |
 | BootIdleEntryPhase | BootIdleTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
-| SmpRuntimePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| PreSmpInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| SmpBringupPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| RuntimeCorePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| InitcallPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| RootfsPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| FinalizePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| SmpRuntimePhase | 六个直接子阶段、Up.Online 入口和 Payload 出口固定 | 1/1/4 drives、四态和精确 Online 完整 | KernelInitTask owner、栈检查与六个 continuation 已映射 | 四 checkpoint、实际 SP 和父 continuation 已验证 | complete |
+| PreSmpInitPhase | BP 预备边界一致 | 标准四态、下游依赖 Online | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
+| SmpBringupPhase | BP 协调 AP 启动边界一致 | 标准四态、AP 模型保持 | completion/HSM/hotplug guard 与父返回已映射 | 四个 BP checkpoint、精确 Online 已验证 | complete |
+| ApEntryPreludePhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
+| ApSmpCallinPhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
+| ApOnlineIdlePhase | 已显式列入 SmpBringup AP 子树 | 待审计 | 待审计 | AP owner 待独立验证 | pending |
+| RuntimeCorePhase | runtime core 边界一致 | 标准四态、下游依赖 Online | Started 位于 sched_init_smp 动作前 | 四 checkpoint、精确 Online 已验证 | complete |
+| InitcallPhase | initcall 边界一致 | 标准四态、下游依赖 Online | 首失败诊断与父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
+| RootfsPhase | rootfs 边界一致 | 标准四态、下游依赖 Online | Started 位于 Preset/KUnit 入口 | 四 checkpoint、namespace 前边界保持独立 | complete |
+| FinalizePhase | running-state 边界一致 | 标准四态、父 Online 出口 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、SmpRuntime.Online 已验证 | complete |
 | PayloadPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 
 ## 当前基线
@@ -165,14 +179,14 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录已从 26 个 `.spec` 降到 16 个；剩余分类为通用映射/构建/架构/语言 4 个、
-  project 1 个、phase 6 个、object 5 个。
+- coding 目录已从 26 个 `.spec` 降到 10 个；剩余分类为通用映射/构建/架构/语言 4 个、
+  project 1 个、phase 0 个、object 5 个。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Boot、Interrupt 与 UpMultitask 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；
-  剩余问题继续按 SmpRuntime、Payload 子树批次逐项修正。
+- Boot、Interrupt、UpMultitask 与 SmpRuntime BP 主线已消除 model Online 被实现命名/记录为
+  Ready 的漂移；剩余问题继续按 SmpBringup AP 子树、Payload 批次逐项修正。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
@@ -182,5 +196,12 @@ Kernel
   `make build APP=hello PROBE=announce`、`make run APP=hello PROBE=announce`、
   `make run APP=smoke` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为 461，Linux
   mapping 为 exact 103 / range 14 / unmapped 344，instrumentation plan 仍为 103，stress 为 3/3。
-- 本批开始前根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
+- SmpRuntime BP 主线批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+  `make build APP=hello PROBE=announce`、`make run APP=hello PROBE=announce`、
+  `make run APP=smoke` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为 475，Linux
+  mapping 为 exact 103 / range 14 / unmapped 358，instrumentation plan 仍为 103。announce 观察到
+  六个直接子阶段完整 Online -> parent continuation 顺序，全部 BP 主线 checkpoint 位于
+  KernelInitTask 执行线，实际 SP 栈范围检查与唯一切栈/入口计数均成立；AP checkpoint 保持 AP
+  task owner，不套用 BP 断言。
+- 本批根目录直接 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
   基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。

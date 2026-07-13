@@ -39,7 +39,7 @@ object PayloadPhase: PhaseObject {
                     OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
-                    FinalizePhase.state == State::Ready;
+                    FinalizePhase.state == State::Online;
                     FinalizeBoundary.state == State::Ready;
                     SystemState.state == State::Online;
                     KernelInitTask.state == State::Online;
@@ -85,7 +85,7 @@ object PayloadPhase: PhaseObject {
             InterruptPhase.state == State::Online;
             UpMultitaskPhase.state == State::Online;
             SmpRuntimePhase.state == State::Online;
-            FinalizePhase.state == State::Ready;
+            FinalizePhase.state == State::Online;
             FinalizeBoundary.state == State::Ready;
             SystemState.state == State::Online;
             KernelInitTask.state == State::Online;
@@ -139,7 +139,7 @@ object PayloadPhase: PhaseObject {
             InterruptPhase.state == State::Online;
             UpMultitaskPhase.state == State::Online;
             SmpRuntimePhase.state == State::Online;
-            FinalizePhase.state == State::Ready;
+            FinalizePhase.state == State::Online;
             FinalizeBoundary.state == State::Ready;
             SystemState.state == State::Online;
             KernelInitTask.state == State::Online;

@@ -748,9 +748,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             mapping_kind="exact",
             linux_file="init/main.c",
             linux_symbol="kernel_init_freeable",
-            anchor_pattern=r"\bprepare_namespace\s*\(",
+            anchor_pattern=r"\bkunit_run_all_tests\s*\(\s*\)\s*;",
             confidence="high",
-            notes="Linux kernel_init_freeable() call site for prepare_namespace().",
+            notes="Linux kernel_init_freeable() RootfsPhase entry at kunit_run_all_tests(); the later RamdiskExecuteCommand.EaccessCheckpoint preserves the prepare_namespace pre-boundary.",
         ),
         "RootfsPhase.Ready": MappingRule(
             mapping_kind="exact",
@@ -1084,9 +1084,9 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             mapping_kind="exact",
             linux_file="init/main.c",
             linux_symbol="kernel_init_freeable",
-            anchor_pattern=r"\bworkqueue_init_topology\s*\(",
+            anchor_pattern=r"\bsched_init_smp\s*\(",
             confidence="medium",
-            notes="Linux kernel_init_freeable() runtime core follow-up interval starts after SMP scheduler setup.",
+            notes="Linux kernel_init_freeable() RuntimeCorePhase Preset starts at the sched_init_smp() action entry.",
         ),
         "RuntimeCorePhase.Ready": MappingRule(
             mapping_kind="range",

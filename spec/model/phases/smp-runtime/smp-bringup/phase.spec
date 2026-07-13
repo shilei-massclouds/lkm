@@ -257,7 +257,7 @@ object SecondaryIdleTaskSet: TaskObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    PreSmpInitPhase.state == State::Ready;
+                    PreSmpInitPhase.state == State::Online;
                     CpuGroup.state == State::Ready;
                     Scheduler.state == State::Online;
                     PerCpuStorage.state == State::Ready;
@@ -301,7 +301,7 @@ object CpuHotplugSyncSet: KernelObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    PreSmpInitPhase.state == State::Ready;
+                    PreSmpInitPhase.state == State::Online;
                     CpuGroup.state == State::Ready;
                     BootCPU.state == State::Online;
                     KthreaddTask.state == State::Online;
@@ -762,9 +762,9 @@ object SmpBringupPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    PreSmpInitPhase.state == State::Ready;
+                    PreSmpInitPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
                     BootIdleTask.state == State::Ready;
                     BootIdleRuntime.state == State::Ready;
@@ -828,11 +828,15 @@ object SmpBringupPhase: PhaseObject {
                     "AP hotplug thread callback 细节留给后续 CPU hotplug 模型。";
                     "FinalizePhase 内部的 async/initmem/mapping/sysctl 细节逐步展开，AP 侧仍留给后续模型。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
             SecondaryIdleTaskSet.state == State::Prepared;
             SmpbootThreadsLock.state == State::Ready;
@@ -865,6 +869,50 @@ object SmpBringupPhase: PhaseObject {
             ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
             ap_ipi_enable_observed(ApSmpCallinPhase);
             ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    PreSmpInitPhase.state == State::Online;
+                    smp_bringup_phase_ready(SmpBringupPhase);
+                    SmpBringupBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            PreSmpInitPhase.state == State::Online;
+            smp_bringup_phase_ready(SmpBringupPhase);
+            SmpBringupBoundary.state == State::Ready;
+            secondary_cpus_online(CpuGroup);
+            smp_concurrency_open(CpuGroup);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    smp_bringup_phase_ready(SmpBringupPhase);
+                    secondary_cpus_online(CpuGroup);
+                    smp_concurrency_open(CpuGroup);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            PreSmpInitPhase.state == State::Online;
+            smp_bringup_phase_ready(SmpBringupPhase);
+            SmpBringupBoundary.state == State::Ready;
+            secondary_cpus_online(CpuGroup);
+            smp_concurrency_open(CpuGroup);
         }
     }
 }

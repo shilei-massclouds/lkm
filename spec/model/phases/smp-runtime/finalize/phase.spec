@@ -303,9 +303,9 @@ object FinalizePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    RootfsPhase.state == State::Ready;
+                    RootfsPhase.state == State::Online;
                     RootfsBoundary.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     SystemState.state == State::Ready;
@@ -338,13 +338,17 @@ object FinalizePhase: PhaseObject {
                     sysctl_args_apply_deferred();
                     finalize_boundary_ready(FinalizeBoundary);
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
-            RootfsPhase.state == State::Ready;
+            RootfsPhase.state == State::Online;
             AsyncFullSyncDeferred.state == State::Ready;
             InitMemoryCleanupDeferred.state == State::Ready;
             KernelMappingProtectionDeferred.state == State::Ready;
@@ -355,6 +359,45 @@ object FinalizePhase: PhaseObject {
             SysctlArgsDeferred.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
             finalize_phase_ready(FinalizePhase);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    RootfsPhase.state == State::Online;
+                    finalize_phase_ready(FinalizePhase);
+                    FinalizeBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            RootfsPhase.state == State::Online;
+            finalize_phase_ready(FinalizePhase);
+            FinalizeBoundary.state == State::Ready;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    finalize_phase_ready(FinalizePhase);
+                    FinalizeBoundary.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            RootfsPhase.state == State::Online;
+            finalize_phase_ready(FinalizePhase);
+            FinalizeBoundary.state == State::Ready;
         }
     }
 }

@@ -3225,5 +3225,103 @@
     "name": "BootIdleEntryPhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 461,
+    "variant": "SmpRuntimePhasePrepared",
+    "name": "SmpRuntimePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 462,
+    "variant": "SmpRuntimePhaseOnline",
+    "name": "SmpRuntimePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 463,
+    "variant": "PreSmpInitPhasePrepared",
+    "name": "PreSmpInitPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 464,
+    "variant": "PreSmpInitPhaseOnline",
+    "name": "PreSmpInitPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 465,
+    "variant": "SmpBringupPhasePrepared",
+    "name": "SmpBringupPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 466,
+    "variant": "SmpBringupPhaseOnline",
+    "name": "SmpBringupPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 467,
+    "variant": "RuntimeCorePhasePrepared",
+    "name": "RuntimeCorePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 468,
+    "variant": "RuntimeCorePhaseOnline",
+    "name": "RuntimeCorePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 469,
+    "variant": "InitcallPhasePrepared",
+    "name": "InitcallPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 470,
+    "variant": "InitcallPhaseOnline",
+    "name": "InitcallPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 471,
+    "variant": "RootfsPhasePrepared",
+    "name": "RootfsPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 472,
+    "variant": "RootfsPhaseOnline",
+    "name": "RootfsPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 473,
+    "variant": "FinalizePhasePrepared",
+    "name": "FinalizePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 474,
+    "variant": "FinalizePhaseOnline",
+    "name": "FinalizePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

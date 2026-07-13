@@ -585,6 +585,20 @@ pub enum Checkpoint {
     BootIdleEntryPhaseStarted,
     BootIdleEntryPhasePrepared,
     BootIdleEntryPhaseOnline,
+    SmpRuntimePhasePrepared,
+    SmpRuntimePhaseOnline,
+    PreSmpInitPhasePrepared,
+    PreSmpInitPhaseOnline,
+    SmpBringupPhasePrepared,
+    SmpBringupPhaseOnline,
+    RuntimeCorePhasePrepared,
+    RuntimeCorePhaseOnline,
+    InitcallPhasePrepared,
+    InitcallPhaseOnline,
+    RootfsPhasePrepared,
+    RootfsPhaseOnline,
+    FinalizePhasePrepared,
+    FinalizePhaseOnline,
 }
 
 impl Checkpoint {
@@ -1085,6 +1099,20 @@ impl Checkpoint {
             Self::BootIdleEntryPhaseStarted => "BootIdleEntryPhase.Started",
             Self::BootIdleEntryPhasePrepared => "BootIdleEntryPhase.Prepared",
             Self::BootIdleEntryPhaseOnline => "BootIdleEntryPhase.Online",
+            Self::SmpRuntimePhasePrepared => "SmpRuntimePhase.Prepared",
+            Self::SmpRuntimePhaseOnline => "SmpRuntimePhase.Online",
+            Self::PreSmpInitPhasePrepared => "PreSmpInitPhase.Prepared",
+            Self::PreSmpInitPhaseOnline => "PreSmpInitPhase.Online",
+            Self::SmpBringupPhasePrepared => "SmpBringupPhase.Prepared",
+            Self::SmpBringupPhaseOnline => "SmpBringupPhase.Online",
+            Self::RuntimeCorePhasePrepared => "RuntimeCorePhase.Prepared",
+            Self::RuntimeCorePhaseOnline => "RuntimeCorePhase.Online",
+            Self::InitcallPhasePrepared => "InitcallPhase.Prepared",
+            Self::InitcallPhaseOnline => "InitcallPhase.Online",
+            Self::RootfsPhasePrepared => "RootfsPhase.Prepared",
+            Self::RootfsPhaseOnline => "RootfsPhase.Online",
+            Self::FinalizePhasePrepared => "FinalizePhase.Prepared",
+            Self::FinalizePhaseOnline => "FinalizePhase.Online",
         }
     }
 }

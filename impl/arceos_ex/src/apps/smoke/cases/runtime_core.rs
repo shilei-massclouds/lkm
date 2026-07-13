@@ -12,7 +12,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     };
 
-    if !phases::smp_runtime::runtime_core::is_ready() || !phases::smp_runtime::is_ready() {
+    if !phases::smp_runtime::runtime_core::is_online() || !phases::smp_runtime::is_online() {
         printk::write_str("runtime core phase is not ready\n");
         return SmokeResult::Failed;
     }

@@ -1,27 +1,19 @@
 # FinalizePhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/finalize.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+FinalizePhase 是 SmpRuntimePhase 的第 6 个直接子阶段，由 KernelInitTask 执行。model 路径为
+`spec/model/phases/smp-runtime/finalize/`，实现落点为
+`impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/finalize.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
-
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`finalize.spec`](finalize.spec)。
-
-### ArceosExFinalizeCodingMust
-
-#### Model path
-
-FinalizePhase is SMP Runtime Phase subphase 5. Its formal model
-path is spec/model/phases/smp-runtime/finalize/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+`preset()` 依赖 RootfsPhase 精确 Online，发出 Started，按 model 顺序驱动收尾对象并提交
+Prepared。Setup/Enable 只检查 `finalize_phase_ready()` 与 FinalizeBoundary，分别提交
+Ready/Online。Online 后只能返回 `smp_runtime::enable_after_finalize()`；由父阶段提交
+SmpRuntimePhase.Online 后，才进入 `kernel::enable_after_smp_runtime()` 和 PayloadPhase。
 
 #### Entry gate
 
-FinalizePhase must run after RootfsPhase.Ready and preserve the
+FinalizePhase must run after RootfsPhase.Online and preserve the
 kernel_init_freeable() return boundary before PayloadPhase.
 
 #### Deferred cleanup details
@@ -60,5 +52,3 @@ without claiming full runtime RCU GP service implementation.
 #### Boundary
 
 FinalizeBoundary must mark the next boundary as PayloadPhase.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/finalize.spec END -->

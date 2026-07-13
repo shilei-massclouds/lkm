@@ -1,27 +1,23 @@
 # RuntimeCorePhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/runtime-core.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+RuntimeCorePhase 是 SmpRuntimePhase 的第 3 个直接子阶段，由 KernelInitTask 执行。model 路径为
+`spec/model/phases/smp-runtime/runtime-core/`，实现落点为
+`impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/runtime-core.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+`preset()` 依赖 SmpBringupPhase 精确 Online。依赖接受后立即发出
+`RuntimeCorePhase.Started`，因此该事件位于 `Scheduler.enable_smp()` / Linux
+`sched_init_smp()` 动作之前；随后驱动全部对象并提交 Prepared。Setup/Enable 只检查
+`runtime_core_ready()` 和 RuntimeCoreBoundary，分别提交 Ready/Online；Online 只返回
+`smp_runtime::enable_after_runtime_core()`。
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`runtime-core.spec`](runtime-core.spec)。
-
-### ArceosExRuntimeCoreCodingMust
-
-#### Model path
-
-RuntimeCorePhase is SMP Runtime Phase subphase 3. Its formal model
-path is spec/model/phases/smp-runtime/runtime-core/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+四个 checkpoint 依次是 Started、Prepared、Ready、Online；Started/Ready 保持既有 ID，
+Prepared/Online 追加且默认 unmapped。
 
 #### Entry gate
 
-RuntimeCorePhase must run after SmpBringupPhase.Ready, with
+RuntimeCorePhase must run after SmpBringupPhase.Online, with
 secondary CPUs online and SMP concurrency open.
 
 #### Scheduler SMP action
@@ -53,5 +49,3 @@ including memory stats, buffer init, memblock private discard, zone
 contiguous, sysctl and current-config trimmed late paths. Deferred
 struct page completion/static key, page extension and shuffle late
 paths must be recorded with config-trimmed reasons.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/runtime-core.spec END -->

@@ -17,7 +17,7 @@ object CpusetSmpTrimmed: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    RuntimeCorePhase.state == State::Ready;
+                    RuntimeCorePhase.state == State::Online;
                 }
 
                 ensures {
@@ -790,9 +790,9 @@ object InitcallPhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    RuntimeCorePhase.state == State::Ready;
+                    RuntimeCorePhase.state == State::Online;
                     RuntimeCoreBoundary.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     Lds.state == State::Online;
@@ -1013,13 +1013,17 @@ object InitcallPhase: PhaseObject {
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
+
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
 
-    state State::Ready {
+    state State::Prepared {
         invariant {
-            RuntimeCorePhase.state == State::Ready;
+            RuntimeCorePhase.state == State::Online;
             CpusetSmpTrimmed.state == State::Ready;
             DriverCoreBase.state == State::Ready;
             PlatformBusRootDevice.state == State::Ready;
@@ -1075,6 +1079,45 @@ object InitcallPhase: PhaseObject {
             irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred);
             irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred);
             constructors_trimmed_because_config_constructors_disabled(CtorTable);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    RuntimeCorePhase.state == State::Online;
+                    initcall_phase_ready(InitcallPhase);
+                    InitcallBoundary.state == State::Ready;
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            RuntimeCorePhase.state == State::Online;
+            initcall_phase_ready(InitcallPhase);
+            InitcallBoundary.state == State::Ready;
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    initcall_phase_ready(InitcallPhase);
+                    InitcallBoundary.state == State::Ready;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            RuntimeCorePhase.state == State::Online;
+            initcall_phase_ready(InitcallPhase);
+            InitcallBoundary.state == State::Ready;
         }
     }
 }

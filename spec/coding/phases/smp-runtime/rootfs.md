@@ -1,34 +1,25 @@
 # RootfsPhase coding
 
-本文件承载 `spec/coding/phases/smp-runtime/rootfs.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+RootfsPhase 是 SmpRuntimePhase 的第 5 个直接子阶段，由 KernelInitTask 执行。model 路径为
+`spec/model/phases/smp-runtime/rootfs/`，实现落点为
+`impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。
 
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/rootfs.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
-
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`rootfs.spec`](rootfs.spec)。
-
-### ArceosExRootfsCodingMust
-
-#### Model path
-
-RootfsPhase is SMP Runtime Phase subphase 4. Its formal model path
-is spec/model/phases/smp-runtime/rootfs/.
-
-#### Code path
-
-Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+`preset()` 依赖 InitcallPhase 精确 Online；依赖接受后立即发出 RootfsPhase.Started，再从
+KUnitRuntimeTrimmed 开始驱动全部对象并提交 Prepared。因此 Started 表示 Rootfs Preset/KUnit
+入口，不再表示 `prepare_namespace()` 前边界。`RamdiskExecuteCommand.EaccessCheckpoint` 继续位于
+RootfsConsole 之后、prepare_namespace 分类与 RootFS.Enable 之前。Setup/Enable 只检查 rootfs
+结果并提交 Ready/Online；Online 只返回 `smp_runtime::enable_after_rootfs()`。
 
 #### Entry gate
 
-RootfsPhase must run after InitcallPhase.Ready and preserve the
+RootfsPhase must run after InitcallPhase.Online and preserve the
 kunit_run_all_tests() entry position inside RootfsPhase.
-Its RootfsPhase.Started paired-diff checkpoint is not a Rust phase
-function-entry marker: it is anchored to the Linux
-init_eaccess(ramdisk_execute_command) branch immediately before
-prepare_namespace(). Therefore RamdiskExecuteCommand.EaccessCheckpoint
-must precede RootfsPhase.Started, and prepare_namespace
-classification/rootfs enable must follow it.
+Its RootfsPhase.Started paired-diff checkpoint maps to the Linux
+kunit_run_all_tests() call at the phase entrance. The later
+RamdiskExecuteCommand.EaccessCheckpoint remains the explicit
+prepare_namespace pre-boundary.
 
 #### KUnit runtime
 
@@ -102,5 +93,3 @@ in model and implementation checks.
 #### Boundary
 
 RootfsBoundary must mark the next boundary as FinalizePhase.
-
-<!-- formal-predicate-notes:spec/coding/phases/smp-runtime/rootfs.spec END -->

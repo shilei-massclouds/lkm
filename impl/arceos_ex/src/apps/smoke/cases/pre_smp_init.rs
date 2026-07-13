@@ -7,7 +7,7 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let pre_smp_ready = phases::smp_runtime::pre_smp_init::is_ready();
+    let pre_smp_ready = phases::smp_runtime::pre_smp_init::is_online();
     let dispatch_ready = phases::up_multitask::rest_init::dispatch_ready();
     let up_multitask_online = phases::up_multitask::is_online();
 

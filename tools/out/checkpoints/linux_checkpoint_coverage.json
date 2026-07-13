@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 461,
+  "total_checkpoints": 475,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 344
+      "count": 358
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 344
+      "count": 358
     },
     {
       "confidence": "medium",
@@ -160,6 +160,10 @@
       "count": 4
     },
     {
+      "family": "SmpRuntimePhase",
+      "count": 4
+    },
+    {
       "family": "SyscallTable",
       "count": 4
     },
@@ -228,7 +232,15 @@
       "count": 2
     },
     {
+      "family": "FinalizePhase",
+      "count": 2
+    },
+    {
       "family": "InitTask",
+      "count": 2
+    },
+    {
+      "family": "InitcallPhase",
       "count": 2
     },
     {
@@ -272,6 +284,10 @@
       "count": 2
     },
     {
+      "family": "PreSmpInitPhase",
+      "count": 2
+    },
+    {
       "family": "PreparePhase",
       "count": 2
     },
@@ -292,6 +308,14 @@
       "count": 2
     },
     {
+      "family": "RootfsPhase",
+      "count": 2
+    },
+    {
+      "family": "RuntimeCorePhase",
+      "count": 2
+    },
+    {
       "family": "SchedInitPhase",
       "count": 2
     },
@@ -304,7 +328,7 @@
       "count": 2
     },
     {
-      "family": "SmpRuntimePhase",
+      "family": "SmpBringupPhase",
       "count": 2
     },
     {

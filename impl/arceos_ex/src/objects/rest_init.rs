@@ -166,6 +166,20 @@ impl KernelInitTask {
         self.kernel_stack_top
     }
 
+    pub const fn kernel_stack_base(&self) -> usize {
+        self.kernel_stack_top.saturating_sub(KERNEL_TASK_STACK_SIZE)
+    }
+
+    pub const fn stack_pointer_in_range(&self, stack_pointer: usize) -> bool {
+        self.kernel_stack_top != 0
+            && stack_pointer >= self.kernel_stack_base()
+            && stack_pointer <= self.kernel_stack_top
+    }
+
+    pub fn current_stack_pointer_in_range(&self) -> bool {
+        self.stack_pointer_in_range(crate::arch::riscv64::csr::read_sp())
+    }
+
     pub const fn entry_started_count(&self) -> usize {
         self.entry_started_count
     }
@@ -187,11 +201,9 @@ impl KernelInitTask {
     }
 
     pub fn mark_entry_started(&mut self, stack_pointer: usize) -> EventResult {
-        let stack_base = self.kernel_stack_top.saturating_sub(KERNEL_TASK_STACK_SIZE);
         if self.lifecycle.state() != State::Online
             || self.entry_started_count != 0
-            || stack_pointer < stack_base
-            || stack_pointer > self.kernel_stack_top
+            || !self.stack_pointer_in_range(stack_pointer)
         {
             return failed_condition(
                 LifecycleEvent::Setup,

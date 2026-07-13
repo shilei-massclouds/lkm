@@ -73,7 +73,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if !phases::smp_runtime::runtime_core::is_ready()
+    if !phases::smp_runtime::runtime_core::is_online()
         && (!ctx.kernel_init_task.pinned_to_boot_cpu() || !ctx.kernel_init_task.pf_no_setaffinity())
     {
         printk::write_str("kernel_init pre-runtime affinity facts invalid\n");
@@ -250,6 +250,11 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
+        || !ctx
+            .kernel_init_task
+            .stack_pointer_in_range(ctx.kernel_init_task.entry_stack_pointer())
+        || !ctx.kernel_init_task.current_stack_pointer_in_range()
+        || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || ctx.workqueue.workers_running()
     {
         printk::write_str("boot idle runtime facts invalid\n");

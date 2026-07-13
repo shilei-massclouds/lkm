@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 344
+- unmapped: 358
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -346,7 +346,7 @@
 | 337 | SecondaryCpuOnlineAck.ApLocalSyncSummary | SecondaryCpuApLocalSyncSummary | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 338 | SecondaryCpuOnlineAck.Ready | SecondaryCpuOnlineAckReady | exact | high | kernel/cpu.c | bringup_wait_for_ap_online | bringup_wait_for_ap_online() line 797: wait_for_ap_thread(st, true); | Linux generic CPU hotplug waits until the AP reaches CPUHP_AP_ONLINE_IDLE and done_up has completed. |
 | 339 | SmpBringupBoundary.Ready | SmpBringupBoundaryReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 340 | RuntimeCorePhase.Started | RuntimeCorePhaseStarted | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1575: workqueue_init_topology(); | Linux kernel_init_freeable() runtime core follow-up interval starts after SMP scheduler setup. |
+| 340 | RuntimeCorePhase.Started | RuntimeCorePhaseStarted | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1573: sched_init_smp(); | Linux kernel_init_freeable() RuntimeCorePhase Preset starts at the sched_init_smp() action entry. |
 | 341 | RuntimeCorePhase.Ready | RuntimeCorePhaseReady | range | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() lines 1575-1578: workqueue_init_topology(); .. page_alloc_init_late(); | Linux kernel_init_freeable() runtime core topology/async/padata/page-alloc-late interval. |
 | 342 | Scheduler.SmpReady | SchedulerSmpReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1573: sched_init_smp(); | Linux kernel_init_freeable() sched_init_smp() call; reuses the SmpBringupPhase.Ready anchor but records the scheduler SMP runtime object fact. |
 | 343 | Workqueue.TopologyReady | WorkqueueTopologyReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1575: workqueue_init_topology(); | Linux kernel_init_freeable() workqueue_init_topology() call; records the Workqueue topology object fact after SMP scheduler setup. |
@@ -375,7 +375,7 @@
 | 366 | TtyWriteRuntimeTx.Ready | TtyWriteRuntimeTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 367 | TtyWriteBatchRuntimeTx.Ready | TtyWriteBatchRuntimeTxReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 368 | InitcallBoundary.Ready | InitcallBoundaryReady | exact | medium | init/main.c | do_basic_setup | do_basic_setup() line 1366: do_initcalls(); | Linux do_basic_setup() do_initcalls() call; marks the do_basic_setup() end boundary before kernel_init_freeable() continues to kunit_run_all_tests(), not an independent Linux object. |
-| 369 | RootfsPhase.Started | RootfsPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1593: prepare_namespace(); | Linux kernel_init_freeable() call site for prepare_namespace(). |
+| 369 | RootfsPhase.Started | RootfsPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1582: kunit_run_all_tests(); | Linux kernel_init_freeable() RootfsPhase entry at kunit_run_all_tests(); the later RamdiskExecuteCommand.EaccessCheckpoint preserves the prepare_namespace pre-boundary. |
 | 370 | RootfsPhase.Ready | RootfsPhaseReady | exact | high | init/do_mounts.c | prepare_namespace | prepare_namespace() definition line 464 | Linux prepare_namespace() rootfs preparation boundary. |
 | 371 | KUnitRuntime.TrimmedReady | KUnitRuntimeTrimmedReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1582: kunit_run_all_tests(); | Linux kernel_init_freeable() reserves the KUnit run position; arceos_ex records the CONFIG_KUNIT=n trimmed/no-op fact at this call site. |
 | 372 | InitramfsSync.DeferredReady | InitramfsSyncDeferredReady | exact | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1584: wait_for_initramfs(); | Linux kernel_init_freeable() waits for initramfs unpacking; arceos_ex maps only the deferred initramfs synchronization boundary. |
@@ -467,3 +467,17 @@
 | 458 | BootIdleEntryPhase.Started | BootIdleEntryPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 459 | BootIdleEntryPhase.Prepared | BootIdleEntryPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 460 | BootIdleEntryPhase.Online | BootIdleEntryPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 461 | SmpRuntimePhase.Prepared | SmpRuntimePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 462 | SmpRuntimePhase.Online | SmpRuntimePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 463 | PreSmpInitPhase.Prepared | PreSmpInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 464 | PreSmpInitPhase.Online | PreSmpInitPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 465 | SmpBringupPhase.Prepared | SmpBringupPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 466 | SmpBringupPhase.Online | SmpBringupPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 467 | RuntimeCorePhase.Prepared | RuntimeCorePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 468 | RuntimeCorePhase.Online | RuntimeCorePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 469 | InitcallPhase.Prepared | InitcallPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 470 | InitcallPhase.Online | InitcallPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 471 | RootfsPhase.Prepared | RootfsPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 472 | RootfsPhase.Online | RootfsPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 473 | FinalizePhase.Prepared | FinalizePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 474 | FinalizePhase.Online | FinalizePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

@@ -3745,10 +3745,10 @@
     "checkpoint_variant": "RuntimeCorePhaseStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "kernel_init_freeable",
-    "linux_anchor": "kernel_init_freeable() line 1575: workqueue_init_topology();",
+    "linux_anchor": "kernel_init_freeable() line 1573: sched_init_smp();",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "Linux kernel_init_freeable() runtime core follow-up interval starts after SMP scheduler setup."
+    "notes": "Linux kernel_init_freeable() RuntimeCorePhase Preset starts at the sched_init_smp() action entry."
   },
   {
     "checkpoint_index": 341,
@@ -4064,10 +4064,10 @@
     "checkpoint_variant": "RootfsPhaseStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "kernel_init_freeable",
-    "linux_anchor": "kernel_init_freeable() line 1593: prepare_namespace();",
+    "linux_anchor": "kernel_init_freeable() line 1582: kunit_run_all_tests();",
     "mapping_kind": "exact",
     "confidence": "high",
-    "notes": "Linux kernel_init_freeable() call site for prepare_namespace()."
+    "notes": "Linux kernel_init_freeable() RootfsPhase entry at kunit_run_all_tests(); the later RamdiskExecuteCommand.EaccessCheckpoint preserves the prepare_namespace pre-boundary."
   },
   {
     "checkpoint_index": 370,
@@ -5063,6 +5063,160 @@
     "checkpoint_index": 460,
     "checkpoint_name": "BootIdleEntryPhase.Online",
     "checkpoint_variant": "BootIdleEntryPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 461,
+    "checkpoint_name": "SmpRuntimePhase.Prepared",
+    "checkpoint_variant": "SmpRuntimePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 462,
+    "checkpoint_name": "SmpRuntimePhase.Online",
+    "checkpoint_variant": "SmpRuntimePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 463,
+    "checkpoint_name": "PreSmpInitPhase.Prepared",
+    "checkpoint_variant": "PreSmpInitPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 464,
+    "checkpoint_name": "PreSmpInitPhase.Online",
+    "checkpoint_variant": "PreSmpInitPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 465,
+    "checkpoint_name": "SmpBringupPhase.Prepared",
+    "checkpoint_variant": "SmpBringupPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 466,
+    "checkpoint_name": "SmpBringupPhase.Online",
+    "checkpoint_variant": "SmpBringupPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 467,
+    "checkpoint_name": "RuntimeCorePhase.Prepared",
+    "checkpoint_variant": "RuntimeCorePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 468,
+    "checkpoint_name": "RuntimeCorePhase.Online",
+    "checkpoint_variant": "RuntimeCorePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 469,
+    "checkpoint_name": "InitcallPhase.Prepared",
+    "checkpoint_variant": "InitcallPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 470,
+    "checkpoint_name": "InitcallPhase.Online",
+    "checkpoint_variant": "InitcallPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 471,
+    "checkpoint_name": "RootfsPhase.Prepared",
+    "checkpoint_variant": "RootfsPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 472,
+    "checkpoint_name": "RootfsPhase.Online",
+    "checkpoint_variant": "RootfsPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 473,
+    "checkpoint_name": "FinalizePhase.Prepared",
+    "checkpoint_variant": "FinalizePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 474,
+    "checkpoint_name": "FinalizePhase.Online",
+    "checkpoint_variant": "FinalizePhaseOnline",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

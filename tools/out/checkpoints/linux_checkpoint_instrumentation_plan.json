@@ -467,10 +467,10 @@
     "checkpoint_variant": "RuntimeCorePhaseStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "kernel_init_freeable",
-    "linux_anchor": "kernel_init_freeable() line 1575: workqueue_init_topology();",
+    "linux_anchor": "kernel_init_freeable() line 1573: sched_init_smp();",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=RuntimeCorePhase.Started variant=RuntimeCorePhaseStarted fingerprint=sha256:03dfeb8f64384687156aeddedf07992345fb047ee1f56b3abb305105a96fbd1d */",
-    "anchor_fingerprint": "sha256:03dfeb8f64384687156aeddedf07992345fb047ee1f56b3abb305105a96fbd1d"
+    "marker": "/* LKM_CHECKPOINT name=RuntimeCorePhase.Started variant=RuntimeCorePhaseStarted fingerprint=sha256:675d01169b756a814d0e8fe57b9ad1c49594664305e8521af77e097e9f33c3bf */",
+    "anchor_fingerprint": "sha256:675d01169b756a814d0e8fe57b9ad1c49594664305e8521af77e097e9f33c3bf"
   },
   {
     "checkpoint_index": 342,
@@ -632,10 +632,10 @@
     "checkpoint_variant": "RootfsPhaseStarted",
     "linux_file": "init/main.c",
     "linux_symbol": "kernel_init_freeable",
-    "linux_anchor": "kernel_init_freeable() line 1593: prepare_namespace();",
+    "linux_anchor": "kernel_init_freeable() line 1582: kunit_run_all_tests();",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=RootfsPhase.Started variant=RootfsPhaseStarted fingerprint=sha256:40771e6159d99116aed1044932e4ac26854ff6484cd995c1380162fee3db40a4 */",
-    "anchor_fingerprint": "sha256:40771e6159d99116aed1044932e4ac26854ff6484cd995c1380162fee3db40a4"
+    "marker": "/* LKM_CHECKPOINT name=RootfsPhase.Started variant=RootfsPhaseStarted fingerprint=sha256:3d33db533450fcce68e9b91ec9cdfbe64176119c483e3fa123bb8da7273f09d0 */",
+    "anchor_fingerprint": "sha256:3d33db533450fcce68e9b91ec9cdfbe64176119c483e3fa123bb8da7273f09d0"
   },
   {
     "checkpoint_index": 370,
