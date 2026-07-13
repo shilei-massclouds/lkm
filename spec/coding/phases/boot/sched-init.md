@@ -6,7 +6,7 @@
 
 本阶段从 `MmCoreInitPhase.Online` 开始，驱动 Scheduler、RadixTree、MapleTree、Workqueue、Softirq、RcuCore 等调度与同步子系统的建立，对应 Linux `sched_init()` 核心路径。
 
-按[阶段链式映射规则](../../mapping.md#阶段链式映射规则)，每个迁移对应一个概念函数。
+按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。
 
 ## preset()
 

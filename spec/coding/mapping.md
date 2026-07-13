@@ -58,84 +58,20 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 `SHOULD`：承载 `Context` 的函数参数和局部变量应命名为 `ctx` 或 `context`，不应命名为 `objects`，以免与模型中的 `object` 概念混淆。
 
-## 阶段链式映射规则
+## Phase 对象
 
-基于[阶段范式](../charter/phase-paradigm.md)，模型中的阶段树在 impl 中映射为平坦的函数调用链。本条规则取代下文"Phase 对象"节中的旧生成规则。
+Phase 对象表示 system/phase 树中的过程编排边界。它们的状态、transition、父子 continuation、
+同对象 `emits` 和 checkpoint 映射统一由独立的
+[`phase-paradigm.md`](phase-paradigm.md) 规定；该文件取代此前平坦 DFS、`setup()/handoff()`
+以及 child-to-sibling 调用规则。
 
-### 基本映射
+本文件只保留所有模型对象共享的源码组织、状态、事件、依赖和观察规则。任何 Phase 专题文件
+都必须同时遵守通用规则和阶段范式代码映射；不得再从目录顺序或阶段树位置推导隐式 sibling
+边。
 
-1. **每一级都保留可追踪边界**。叶子阶段生成完整 `preset()`、`setup()`、`enable()` 过程；
-   composite system/phase 可以生成轻量 module、状态记录和 transition continuation，但不得把
-   子阶段对象动作吸收到父层。父层 `drives` 在运行时展开为子阶段调用链。
-
-2. **每个子阶段的每个迁移对应一个函数**：`preset()`、`setup()`、`enable()`。函数体遵循统一结构：
-
-   ```
-   fn xxx_preset/setup/enable() {
-       // 1. depends_on → 断言检查
-       // 2. drives → 调用被驱动对象的迁移函数
-       // 3. ensures → 断言 + 推进自身状态
-       // 4. emits → 调用本子阶段下一迁移函数
-   }
-   ```
-
-3. **子阶段间串接**：前一个子阶段的 `enable()` 提交 `Online` 后，在 `emits` 位置调用后一个
-   子阶段的 `preset()`。若它完成父 transition 的最后一个 `drives`，则先进入父 transition
-   completion：检查 `ensures`、提交父状态，再由父 transition 的 `emits` 启动下一迁移或下一
-   sibling。不得跳过父层状态提交直接穿越到其它阶段树。
-
-4. **编排层 coding 文件**记录每个父 transition 驱动哪些子阶段、completion continuation 的
-   进入点、父状态提交和后续 `emits`。impl 不生成一个同步包裹全部子阶段的父函数，但可以
-   生成 `preset_start()`、`preset_after_children()` 等明确 continuation；名称必须在 coding
-   文件说明。
-
-5. **叶子子阶段 coding 文件**详细描述每个迁移的 `depends_on`/`drives`/`ensures`/`emits` 到 impl 的具体映射。
-
-### 整体调用形状
-
-```
-EntryPreludePhase.preset()   ← 由启动入口调用
-  → .setup()
-    → .enable()
-      → EntrySuccessorPhase.preset()
-        → .setup()
-          → .enable()
-            → CorePreparePhase.preset()
-              → ...
-                → PayloadPhase.preset()
-                  → .setup()
-                    → .enable()    → 不返回
-```
-
-## Phase 对象（旧规则，已被阶段链式映射规则替代）
-
-Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`PayloadPhase`。
-
-Phase 代码生成以模型中的阶段树为输入，默认采用深度优先遍历。生成器从顶层启动对象进入第一个阶段；若该阶段不属于当前内核代码生成范围，则只生成必要的事实采纳、检查或发布边界，然后回到父层级继续处理下一个阶段。若该阶段属于当前内核代码生成范围且包含子 Phase，则递归处理其子 Phase；若该阶段没有子 Phase，则生成该叶子 Phase 的主体 `setup()` 过程。
-
-父 Phase 在模型中声明和组织直接子 Phase 的顺序，这一顺序是 coding 生成 `handoff()` 链的依据。父 Phase 本身不应被机械生成成"直接逐个调用子 Phase `setup()`"的串行过程；运行时控制流应由当前 Phase 的 `handoff()` 显式连接到同层下一个 Phase 的 `setup()`。当某个 Phase 是本层级最后一个子 Phase 时，它的 `handoff()` 回到父 Phase 的完成确认过程。
-
-非叶子 Phase 的代码职责主要是边界确认：在所有子 Phase 通过 `handoff()` 链完成后，执行自身 `depends_on`、`ensures`、`invariant` 对应的检查和 checkpoint，并将父 Phase 推进到对应完成边界。叶子 Phase 的代码职责主要是按本 Phase 规格中的 `drives` 顺序推进普通对象 transition，并在完成后调用自身 `handoff()`。
-
-特殊 Phase 可以由 coding 规格或对象规格显式覆盖默认生成方式。覆盖必须说明生效范围、原因和仍需保留的模型边界。例如入口前导期的 `setup()` 可以从架构入口符号开始，并由必要汇编和 Rust 续段共同组成；这种覆盖不改变 Phase 仍需提供 `setup()`、`handoff()`、边界检查和 checkpoint 的要求。
-
-Phase 对象在源码中不得对应资源对象式 Rust `struct`。默认实现方式是函数和 module，例如：
-
-- `entry_prelude_phase_setup(...)`
-- `entry_prelude_phase_handoff(...)`
-- `entry_successor_phase_setup(...)`
-- `entry_successor_phase_handoff(...)`
-- `boot_phase_setup(...)`
-
-每个 Phase 对象在 coding 阶段默认生成 `setup()` 和 `handoff()` 两个过程函数。`handoff()` 是 Phase coding 中对模型 `cleanup` 的本地别名，表达"本阶段退出服务并移交控制权"。若模型中显式定义了该 Phase 的 `cleanup`，则 `handoff()` 的前半段必须实现对应动作、检查和 checkpoint；若模型没有显式 `cleanup`，则 `handoff()` 只负责移交执行权。
-
-Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外，`setup()` 成功完成本阶段目标后，最后一步必须调用本 Phase 的 `handoff()`。同一层级内，前一个 Phase 的 `handoff()` 调用下一个兄弟 Phase 的 `setup()`；若当前 Phase 是本层级最后一个阶段，则调用父 Phase 的 `setup()` 或父 Phase 的完成确认过程。父 Phase 是子 Phase 顺序的组织者和规格来源，但 coding 中不应简单生成"父 Phase 直接逐个调用子 Phase"的控制流。
-
-Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期 transition，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
-
-为了支持阶段 invariant、父阶段完成确认和未来状态差分，可以为每个 Phase 设置轻量的全局状态记录变量。该变量只记录 `Base`、`Ready`、`Online`、`Destroyed` 等模型边界状态，不负责事件合法性推进，也不替代资源对象的 `Lifecycle`。Phase 的事件唯一性和顺序约束由生成出的 `setup()/handoff()` 调用结构、检查器和测试共同保证。
-
-`PreparePhase` 表示入口前已经形成的准备边界，当前 coding 中作为明确例外处理。它可以生成准备事实的检查或发布函数，但不强制生成普通 Phase 的 `setup()/handoff()` 链。`PreparePhase.Enable` 的代码映射另行讨论，不应影响普通 Phase 的生成规则。
+`PreparePhase` 表示入口执行前已由构建、链接和平台共同形成的准备边界，属于显式例外。它的
+adoption 方式必须由 project/system coding 文件记录，但不能降低普通标准 Phase 的四状态和
+三迁移要求。
 
 ### ArceOS/Unikernel 引导边界
 
@@ -201,6 +137,9 @@ transition 函数应尽量只推进一个对象的一次生命周期迁移。若
 如果某个操作成功时会推进被建模状态，应建模为 event，而不是 action。例如普通非嵌套自旋锁的 `lock`、`try_lock`、`unlock` 都是操作事件；它们可以反复触发，但每次成功都会提交锁运行状态迁移。
 
 ## 状态与检查点
+
+Phase 对象的四状态存储、精确 source/target 检查和状态 checkpoint 时点采用更严格的
+[`phase-paradigm.md`](phase-paradigm.md)；本节是普通对象与 Phase 共享的观察规则。
 
 状态可以通过以下方式表示：
 
@@ -341,26 +280,27 @@ its explicit submodules unless a recorded exception exists.
 #### Object ownership
 
 The main implementation of a model object must live in that object's
-mapped file. Phase setup/handoff/checkpoint code belongs to the Phase
-file; resource-object state and event methods belong to the resource
-object file.
+mapped file. Phase transition, state, continuation and checkpoint code
+belongs to the Phase file; resource-object state and event methods
+belong to the resource object file.
 
 #### Phase tree path
 
 Phase file paths must reflect the model parent/child phase tree.
 
-#### DFS generation
+#### Phase-tree lowering
 
-Phase code must be generated from the phase tree using depth-first
-traversal. Runtime control between sibling phases is connected by
-handoff() -> next.setup(), not by flattening all child phase bodies
-into the parent phase.
+Phase code must preserve the model's source-ordered transition body.
+A parent transition owns its drives sequence; a driven child completes
+its own emits chain and returns to the parent's next continuation.
+There is no implicit child-to-sibling handoff edge.
 
 #### Phase shape
 
 Phase objects must not be implemented as resource-object style
 struct + impl lifecycle state machines. They are process modules with
-setup(), handoff(), boundary checks and checkpoints.
+preset(), setup(), enable(), explicit state storage, parent
+continuations, boundary checks and checkpoints.
 
 #### Transition boundaries
 
@@ -371,16 +311,17 @@ checks and checkpoint boundaries.
 
 #### Checks before checkpoints
 
-depends_on, ensures and invariant facts must be checked before the
-target state is committed, a checkpoint is emitted or later code uses
-the fact as an established dependency.
+depends_on and all pre-commit postconditions must be checked before the
+target state is committed. The committed target state and target-state
+invariant must then be checked before a checkpoint is emitted, emits is
+executed or later code uses the fact as an established dependency.
 
 #### Checkpoint ownership
 
 A checkpoint may only be emitted by the mapped implementation of the
 object event or phase boundary whose fact it reports. A lower-level
 phase, resource object, assembly entry point or continuation must not
-emit synthetic checkpoints for parent phases, sibling phases,
+emit synthetic checkpoints for parent phases, other phases,
 preparation phases or other objects merely to make the runtime trace
 visually match the derived trace.
 

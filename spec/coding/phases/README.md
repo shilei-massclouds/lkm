@@ -6,7 +6,7 @@ will be removed as each subtree audit completes.
 
 ## Boot
 
-- [`boot.md`](boot.md) — BootPhase 编排链串接顺序
+- [`boot.md`](boot.md) — BootPhase 父 transition 驱动映射
 - `boot/entry-prelude.md`
 - `boot/entry-successor.md`
 - `boot/core-prepare.md`
@@ -15,7 +15,7 @@ will be removed as each subtree audit completes.
 
 ## Interrupt
 
-- [`interrupt.md`](interrupt.md) — InterruptPhase 编排链串接顺序
+- [`interrupt.md`](interrupt.md) — InterruptPhase 父 transition 驱动映射
 - `interrupt/irq-time-init.md`
 - `interrupt/local-irq-enable.md`
 - `interrupt/irq-open-prepare.md`
@@ -23,12 +23,12 @@ will be removed as each subtree audit completes.
 
 ## UpMultitask
 
-- [`up-multitask.md`](up-multitask.md) — UpMultitaskPhase 编排链串接顺序
+- [`up-multitask.md`](up-multitask.md) — UpMultitaskPhase 父 transition 驱动映射
 - `up-multitask/rest-init.md`
 
 ## SmpRuntime
 
-- [`smp-runtime.md`](smp-runtime.md) — SmpRuntimePhase 编排链串接顺序
+- [`smp-runtime.md`](smp-runtime.md) — SmpRuntimePhase 父 transition 驱动映射
 - `smp-runtime/pre-smp-init.md`
 - `smp-runtime/smp-bringup.md`
 - `smp-runtime/runtime-core.md`
@@ -38,4 +38,4 @@ will be removed as each subtree audit completes.
 
 ## Payload
 
-- [`payload.md`](payload.md) — PayloadPhase 编排链串接顺序
+- [`payload.md`](payload.md) — PayloadPhase transition 映射

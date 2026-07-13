@@ -2,7 +2,8 @@
 
 本文件把 [`Kernel` model](../../model/systems/kernel.spec) 映射到
 `impl/arceos_ex/src/systems/kernel.rs` 及其驱动的阶段调用链。生命周期和阶段顺序由 model
-定义；本文只规定具体实现落点。
+定义；具体 lowering 遵循[阶段范式代码映射](../phase-paradigm.md)，本文只规定 Kernel 的实现
+落点。
 
 ## Composite 映射
 
@@ -71,8 +72,8 @@ SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，
 ## 所有权与范围
 
 Kernel 只拥有顶层生命周期和阶段顺序。ELF、地址空间、syscall、文件系统、TTY、凭据等由
-对应 phase/object coding 文件描述。Payload 是 SmpRuntime 的 sibling，不是 RuntimeCore 的
-隐式副作用；`UserBootPayload` 是 selected payload variant，不是第二条启动链。
+对应 phase/object coding 文件描述。Payload 是 Kernel.Enable 的直接 `drives` 目标，不是
+RuntimeCore 的隐式副作用；`UserBootPayload` 是 selected payload variant，不是第二条启动链。
 
 BootIdle continuation 若恢复，只能进入无限 idle 调度循环。SmpRuntime 和 Payload 必须由
 `kernel_init_entry()` 在 KernelInitTask task stack 上执行；KThreaddTask 不得沿启动栈执行

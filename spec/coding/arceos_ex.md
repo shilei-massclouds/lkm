@@ -8,7 +8,8 @@
 
 ## 阅读顺序
 
-1. [`README.md`](README.md) 和 [`mapping.md`](mapping.md)：coding 职责及通用映射规则。
+1. [`README.md`](README.md)、[`mapping.md`](mapping.md) 和
+   [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
 2. [`projects/kernel.md`](projects/kernel.md)：KernelProject 映射。
 3. [`systems/kernel.md`](systems/kernel.md)：Kernel 生命周期和顶层阶段树映射。
 4. 编排阶段：Boot -> Interrupt -> UpMultitask -> SmpRuntime -> Payload。

@@ -17,6 +17,10 @@ coding 层不维护第二套模型语义。长期权威来源是 `spec/coding/**
 模型语义的约束上移到 model，属于实现映射的约束迁入 `.md`，重复或失效内容删除。所有引用
 和工具入口迁移完成后，最终清零 `spec/coding/**/*.spec`。
 
+两层范式的权威入口分别是：[`spec/charter/phase-paradigm.md`](../../spec/charter/phase-paradigm.md)
+定义 charter -> model，[`spec/coding/phase-paradigm.md`](../../spec/coding/phase-paradigm.md)
+定义 model -> impl。通用 [`mapping.md`](../../spec/coding/mapping.md) 不再维护第二套阶段调用规则。
+
 ## 审计契约
 
 每个 system、编排阶段和叶子阶段都检查同一组项目：
@@ -24,12 +28,12 @@ coding 层不维护第二套模型语义。长期权威来源是 `spec/coding/**
 | 检查项 | 判定标准 |
 | --- | --- |
 | 职责 | charter、model、coding、impl 对该层负责和不负责的内容一致。 |
-| 生命周期 | 标准阶段使用 `Base -> Prepared -> Ready -> Online` 和 `Preset/Setup/Enable`；例外必须在 charter/model/coding 同时说明。 |
+| 生命周期 | 标准阶段使用 `Base -> Prepared -> Ready -> Online` 和 `Preset/Setup/Enable`；impl 对每个 source/target state 有精确设置与检查，例外必须在 charter/model/coding 同时说明。 |
 | 前置条件 | charter 意图能在 model `depends_on` 中找到，coding 映射为明确检查，impl 不提前消费依赖。 |
 | 驱动 | model `drives` 的对象动作或子阶段迁移在 coding 和 impl 中保持顺序与所有权。 |
 | 完成条件 | model `ensures`/invariant 在 coding 中有映射，并由 impl 状态、检查或长期测试支撑。 |
-| 串接 | 当前阶段到下一迁移或 sibling 的推进由 `emits` 表达；coding 和 impl 不另造第二条时间线。 |
-| checkpoint | 只能由对应阶段/对象边界发出；名称、时点和 owner 与 model 一致。 |
+| 层级推进 | 父子关系只由父 transition 的 source-ordered `drives` 表达；`emits` 只连接标准阶段自身的 Preset -> Setup -> Enable，子阶段完成后返回父 continuation。 |
+| checkpoint | 只能由对应阶段/对象边界发出；每个状态点明确记录 checkpoint 或省略理由，名称、时点和 owner 与已提交状态一致。 |
 | deferred | 未实现边界在 model/coding/impl 中显式且不被验收误报为完成。 |
 | coding 来源 | 实现映射正文位于 `.md`；同主题 `.spec` 完成迁移后删除。 |
 
@@ -68,26 +72,29 @@ Kernel
 
 1. **计划与基线（完成）**：已建立本文并冻结审计契约，记录了现存文件、失效引用、四层
    检查项和批次门禁；根目录 `make test` 为 167/167。
-2. **Kernel 根与 coding 权威来源（完成）**：Kernel charter/model/coding/impl 已对齐；sibling
-   串接改为前一阶段 `Enable` 提交 Online 后 `emits` 下一阶段 Preset；coding README/mapping
-   已改为 `.md` 权威；删除不可解析的 `coding/main.spec` 和 `coding/arceos_ex.spec`，顶层
+2. **Kernel 根与 coding 权威来源（完成）**：Kernel charter/model/coding/impl 的状态与
+   continuation 已完成首轮对齐；coding README/mapping 已改为 `.md` 权威；删除不可解析的
+   `coding/main.spec` 和 `coding/arceos_ex.spec`，顶层
    `spec/main.spec` 恢复可解析；剩余 24 个 coding `.spec` 已分类。announce 运行以
    `RAI...` 证明 `Kernel.Started` 先于 `EntryPreludePhase.Started`，并最终到达
    `Kernel.Online -> Hello, world!`。
-3. **BootPhase（待办）**：先审计编排层，再按五个叶子阶段顺序执行；EntryPrelude 作为已实现
+3. **两层阶段范式（完成）**：charter 范式只负责生成 model 的标准生命周期、父 `drives` 和
+   同对象 `emits`；coding 范式独立负责四状态设置/检查、父 continuation、执行主体交接和
+   checkpoint lowering。旧的 sibling emits、平坦 DFS 和 `handoff() -> next.setup()` 规则已删除。
+4. **BootPhase（待办）**：先审计编排层，再按五个叶子阶段顺序执行；EntryPrelude 作为已实现
    样板重新复核，入口汇编例外必须有四层对应说明。
-4. **InterruptPhase（待办）**：审计四个叶子阶段，重点核对中断开关、effective context、
-   checkpoint owner 和 sibling 串接。
-5. **UpMultitaskPhase（待办）**：审计 rest-init 子阶段链，重点核对 BootIdle、KernelInit、
+5. **InterruptPhase（待办）**：审计四个叶子阶段，重点核对中断开关、effective context、
+   非标准 transition 入口、父 continuation 和 checkpoint owner。
+6. **UpMultitaskPhase（待办）**：审计 rest-init 子阶段链，重点核对 BootIdle、KernelInit、
    KThreadd 的任务所有权、真实栈切换和无限调度循环。
-6. **SmpRuntimePhase（待办）**：审计六个叶子阶段，确认整棵运行期初始化链由
+7. **SmpRuntimePhase（待办）**：审计六个叶子阶段，确认整棵运行期初始化链由
    KernelInitTask 驱动。
-7. **PayloadPhase（待办）**：核对 selected payload、KernelInitTask owner、不返回语义和关机
-   边界。
-8. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
+8. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
+   selected payload、KernelInitTask owner、不返回语义和关机边界。
+9. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
    阶段树完成后处理 project、mapping、build、riscv64、rust 和 object 类剩余文件，迁移所有
    工具与文档引用，最终确保 `find spec/coding -name '*.spec'` 为空。
-9. **全树验收（待办）**：复核一致性矩阵无未分类缺口，运行 `make verify`、必要 focused
+10. **全树验收（待办）**：复核一致性矩阵无未分类缺口，运行 `make verify`、必要 focused
    `make run`、根目录 `make test`，最后执行 `make test-stress STRESS_RUNS=30`。
 
 ## 批次门禁
@@ -104,6 +111,7 @@ Kernel
 
 | 节点 | Charter | Model | Coding `.md` | Impl | 结论 |
 | --- | --- | --- | --- | --- | --- |
+| 两层阶段范式 | `drives` 父子关系、同对象 `emits` | model 作为唯一执行语义 | 独立状态/continuation/checkpoint lowering | 各子树逐项应用 | complete |
 | Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RAI...`、Kernel.Online 已验证 | complete |
 | BootPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | EntryPreludePhase | 已有首轮 | 已有首轮 | 已有首轮 | 已有首轮 | recheck |
@@ -136,7 +144,8 @@ Kernel
   project 1 个、phase 14 个、object 5 个。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
-- sibling 串接 Fix 已闭合为“前一阶段 Enable 提交 Online 后 emits 下一阶段 Preset”。
+- 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
+  Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
 - Kernel 根审计发现各 composite phase 当前 impl 仍把 model Online 完成边界命名/记录为
   `Ready`；该问题按 Boot、Interrupt、UpMultitask、SmpRuntime 子树批次逐项修正。
 - 更新本计划前，根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次，

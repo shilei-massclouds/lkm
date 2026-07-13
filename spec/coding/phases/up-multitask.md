@@ -1,24 +1,18 @@
 # UpMultitaskPhase 编码指引
 
-UpMultitaskPhase 是[Kernel 系统编码](../systems/kernel.md)的第三个子阶段编排层。按[阶段链式映射规则](../mapping.md#阶段链式映射规则)，编排层在 impl 中不出现独立函数，其 `drives` 语义坍缩为子阶段间的调用顺序。
+UpMultitaskPhase 是[Kernel 系统编码](../systems/kernel.md)的第三个直接子阶段。其实现遵循
+[阶段范式代码映射](../phase-paradigm.md)；跨 BootInitTask、BootIdleTask 和 KernelInitTask 的
+物理控制权交接必须仍能定位到 UpMultitask/Kernel 的父 continuation。
 
-## 串接顺序
+## 父 Transition 驱动顺序
 
-UpMultitaskPhase 的子阶段在 impl 中的串接链：
+- `UpMultitask.Preset` 按 model 顺序驱动 `BootInitRestInit.Setup`、
+  `BootInitScheduleHandoff.Setup`、`BootIdleEntry.Setup`；完成后提交 UpMultitask.Prepared，再由
+  UpMultitask 自身 `emits Setup`。
+- `UpMultitask.Setup` 检查三个子阶段 Ready，提交 UpMultitask.Ready，再由本阶段
+  `emits Enable`。
+- `UpMultitask.Enable` 提交 UpMultitask.Online，再返回 `Kernel.Enable` 的下一 drive
+  continuation。BootIdle 无限循环不拥有 SmpRuntime 的 sibling 调用权。
 
-```
-ProcessPreparePhase.enable() 完成
-  → BootInitRestInitPhase.preset()
-    → .setup()
-      → .enable()
-        → BootInitScheduleHandoffPhase.preset()
-          → .setup()
-            → .enable()
-              → BootIdleEntryPhase.preset()
-                → .setup()
-                  → .enable()
-                    → SmpRuntimePhase 首个子阶段
-```
-
-各子阶段的详细迁移映射分别在对应文件中：
-- [up-multitask/rest-init.md](up-multitask/rest-init.md)
+任务所有权、非标准子阶段入口、状态/checkpoint 和跨栈 continuation 在本子树审计中确认。
+叶子阶段专题为 [up-multitask/rest-init.md](up-multitask/rest-init.md)。

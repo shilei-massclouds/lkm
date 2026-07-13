@@ -1,34 +1,22 @@
 # BootPhase 编码指引
 
-BootPhase 是[Kernel 系统编码](../systems/kernel.md)的首个子阶段编排层。按[阶段链式映射规则](../mapping.md#阶段链式映射规则)，编排层在 impl 中不出现独立函数，其 `drives` 语义坍缩为子阶段间的调用顺序。
+BootPhase 是[Kernel 系统编码](../systems/kernel.md)的首个直接子阶段。其实现遵循
+[阶段范式代码映射](../phase-paradigm.md)：Boot 的 transition 拥有子阶段 `drives` 顺序，
+子阶段完成后返回 Boot continuation；子阶段之间不存在直接 sibling 调用。
 
-## 串接顺序
+## 父 Transition 驱动顺序
 
-BootPhase 的子阶段在 impl 中的串接链：
+- `Boot.Preset` 驱动 `EntryPrelude.Preset`；子阶段 Online 后提交 Boot.Prepared，并由 Boot
+  自身 `emits Setup`。
+- `Boot.Setup` 驱动 `EntrySuccessor.Preset`；子阶段 Online 后提交 Boot.Ready，并由 Boot
+  自身 `emits Enable`。
+- `Boot.Enable` 依次驱动 `CorePrepare.Preset`、`MmCoreInit.Preset`、`SchedInit.Preset`；三个
+  continuation 完成后提交 Boot.Online，再返回 `Kernel.Preset` continuation。
 
-```
-entry_prelude 启动入口
-  → EntryPreludePhase.preset()
-    → .setup()
-      → .enable()
-        → EntrySuccessorPhase.preset()
-          → .setup()
-            → .enable()
-              → CorePreparePhase.preset()
-                → .setup()
-                  → .enable()
-                    → MmCoreInitPhase.preset()
-                      → .setup()
-                        → .enable()
-                          → SchedInitPhase.preset()
-                            → .setup()
-                              → .enable()
-                                → InterruptPhase 首个子阶段
-```
+状态设置、checkpoint 和实际 continuation 名称在 Boot 子树审计中逐项确认。子阶段专题为：
 
-各子阶段的详细迁移映射分别在对应文件中：
 - [boot/entry-prelude.md](boot/entry-prelude.md)
 - [boot/entry-successor.md](boot/entry-successor.md)
 - [boot/core-prepare.md](boot/core-prepare.md)
 - [boot/mm-core-init.md](boot/mm-core-init.md)
-- [boot/sched-init.md](boot/sched-init.md)（待创建）
+- [boot/sched-init.md](boot/sched-init.md)

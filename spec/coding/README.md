@@ -9,8 +9,8 @@ checkpoint、架构边界和源码落点。
 ## 阅读入口
 
 `spec/coding/README.md` 是目录入口，[`mapping.md`](mapping.md) 是通用 model-to-impl 映射
-入口。实现某个 system、phase 或 object 前，再按模型树读取对应的 `.md`。coding 层没有
-独立 formal 入口。
+入口，[`phase-paradigm.md`](phase-paradigm.md) 是阶段对象的专用映射规则。实现某个 system、
+phase 或 object 前，再按模型树读取对应的 `.md`。coding 层没有独立 formal 入口。
 
 ## `.spec` 与 `.md` 分工
 
@@ -22,12 +22,13 @@ checkpoint、架构边界和源码落点。
 当前阅读顺序为：
 
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
-2. `mapping.md`：对象、Phase、状态、事件、checkpoint 和源码落点的通用映射规则。
-3. `build.md`、`riscv64.md`、`rust.md`：构建、架构和语言映射规则。
-4. `projects/kernel.md`、`systems/kernel.md`：project/system 层级映射。
-5. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
-6. `arceos_ex.md`：当前目标内核的 coding 索引。
-7. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
+2. `mapping.md`：对象、状态、事件、checkpoint 和源码落点的通用映射规则。
+3. `phase-paradigm.md`：Phase 的四状态、父子 continuation、`emits` 和 checkpoint 映射。
+4. `build.md`、`riscv64.md`、`rust.md`：构建、架构和语言映射规则。
+5. `projects/kernel.md`、`systems/kernel.md`：project/system 层级映射。
+6. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
+7. `arceos_ex.md`：当前目标内核的 coding 索引。
+8. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
 
 若四层发生冲突，不能选择更方便的解释：先回到 charter 明确意图，再修正 model，随后更新
 coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 coding。
@@ -93,9 +94,10 @@ object 5 个。后续按阶段树审计批次迁移 phase 文件，最后处理�
 | `ensures` | 后置状态记录、运行期检查、测试断言或可观测 trace 点 |
 | `invariant` | 对象状态保持条件、debug 检查或规格化单元测试 |
 | `drives` | 父对象过程中的调用编排顺序 |
+| `emits` | owner transition 提交后触发的 completion event；Phase 标准用法只连接同对象迁移 |
 | `deferred` | 显式 stub、TODO 或 feature gate，不得隐式实现 |
 
-更细的映射规则见 [`mapping.md`](mapping.md)。
+更细的映射规则见 [`mapping.md`](mapping.md) 和 [`phase-paradigm.md`](phase-paradigm.md)。
 
 ## 最小编码原则
 
@@ -104,7 +106,7 @@ object 5 个。后续按阶段树审计批次迁移 phase 文件，最后处理�
 - 先完成对象级语义正确的最小内核路径，再进入组件组合和通用框架整理。
 - 对象实现建议优先使用能表达当前语义的高粒度复合对象边界，由该对象封装属性和子对象状态，并驱动子对象 transition完成自身事件；若必须展开为较低粒度对象或临时混合承载，应记录原因。
 - 对象生命周期函数必须使用模型 transition名称，除非 coding 规格明确给出本地别名。
-- checkpoint 只能由对应对象 transition或阶段边界的映射实现发出。低层阶段、资源对象、入口汇编或 continuation 不得为了让运行期 trace 视觉上贴合推导 trace，而代发父阶段、兄弟阶段、准备期或其它对象的合成 checkpoint。
+- checkpoint 只能由对应对象 transition或阶段边界的映射实现发出。低层阶段、资源对象、入口汇编或 continuation 不得为了让运行期 trace 视觉上贴合推导 trace，而代发父阶段、其它阶段、准备期或其它对象的合成 checkpoint。
 - linker script 是 model 中 `Lds` 准备期对象的代码生成产物，必须由 `Lds` 属性及其依赖的 `Config` 属性共同驱动。硬编码链接常量只能作为带记录的过渡例外存在，并必须指出对应的 `Lds`/`Config` 来源。
 - 每个 `unsafe` 块必须对应清晰的硬件、链接器、启动 ABI 或裸机内存访问边界。
 - 参考 ArceOS 时优先参考工程边界和成熟实现经验，不以逐行复刻为目标。
@@ -127,6 +129,7 @@ object 5 个。后续按阶段树审计批次迁移 phase 文件，最后处理�
 - `rust.md`：Rust 语言和安全边界相关编码约束。
 - `arceos.md`：参考 ArceOS 时的取舍原则和映射约束。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的权威映射规则。
+- `phase-paradigm.md`：阶段 model 到状态、continuation、迁移链和 checkpoint 的专用映射规则。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
 - `arceos_ex.md`：`arceos_ex` coding 索引入口，链接 system、phase、object 和实现说明。
 - `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。

@@ -6,7 +6,7 @@
 
 本阶段从 `EntryPreludePhase.Online` 开始，推进到 `SwapperVm.Online`、`MemBlock.Online`、`EarlyDtb.Destroyed`，对应 Linux `start_kernel()` 中从 `setup_arch()`/`paging_init()` 完成后到 `mm_core_init()` 之前的核心路径。
 
-按[阶段链式映射规则](../../mapping.md#阶段链式映射规则)，每个迁移对应一个概念函数。
+按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。
 
 ## preset()
 

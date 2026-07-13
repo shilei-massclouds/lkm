@@ -1,60 +1,126 @@
 # 阶段范式
 
-阶段（Phase）是内核生命周期的基本编排单元。每个阶段服从统一的状态模型，使系统各层级的建立过程具有一致的可推导结构。同级阶段之间可以串接，上下级阶段之间可以嵌套。
+本文定义 charter 层如何把阶段设计意图生成到 model。它只规定阶段对象、生命周期、父子驱动
+和迁移完成事件的语义，不规定函数、状态变量或 checkpoint 的实现方式；model 到 impl 的映射见
+[`spec/coding/phase-paradigm.md`](../coding/phase-paradigm.md)。
+
+阶段（Phase）是内核生命周期中的编排对象。每一级阶段都使用同一套生命周期，并通过
+`drives` 显式驱动下一级阶段；阶段自身的 `Preset`、`Setup`、`Enable` 由同对象的 `emits`
+完成连续推进。
 
 ## 标准生命周期
 
-```
+```text
 Base --[Preset]--> Prepared --[Setup]--> Ready --[Enable]--> Online
 ```
 
-### 状态定义
-
 | 状态 | 含义 |
-|---|---|
-| Base | 阶段对象已实例化，但尚未收到启动事件。前置条件应在 Preset 的 `depends_on` 中声明。 |
-| Prepared | 阶段已收到启动事件，完成初始检查和前置条件确认，准备工作完成。 |
-| Ready | 阶段已完成必要内部建立，具备进入正式运行状态的条件，但尚未真正使能。 |
-| Online | 阶段已使能，其提供的功能或服务可被上层或其他阶段依赖使用。 |
+| --- | --- |
+| Base | 阶段对象已进入模型，但尚未收到 `Preset` 启动事件。 |
+| Prepared | `Preset` 已完成，阶段的初始依赖和准备结果已经成立。 |
+| Ready | `Setup` 已完成，阶段具备上线条件，但尚未提交对外可用边界。 |
+| Online | `Enable` 已完成，阶段承诺的能力和后置事实可供上层依赖。 |
 
-### 迁移定义
-迁移对调用者/发起者来说是事件，对于对象来说是响应事件的过程，过程中完成内部动作，把状态推进到下一步。阶段对象同样符合上述定义。
-`Preset`迁移是阶段的启动事件。
+标准阶段必须保留四个状态和三个迁移。某个迁移可以没有实际 `drives` 动作，但不得因此省略
+状态边界。确实无法使用标准生命周期的对象必须在 charter 中说明原因和范围，并在 model 中
+作为显式例外，而不能让缺失的迁移由工具或实现隐式补齐。
 
-| 迁移 | 语义 | 典型行为 |
-|---|---|---|
-| Preset | 启动事件，初始准备，驱动阶段进入 Prepared | 检查依赖条件，执行初始检查，自动向Prepared状态发出Setup迁移请求 |
-| Setup | 构造事件，建立内部框架，进入 Ready | 基于 Prepared 阶段的成果，建立内部组织关系，向Ready状态发出Enable迁移请求 |
-| Enable | 上线事件，收尾本阶段任务，进入 Online | 启动阶段涉及对象的服务或功能，使它们对外可用 |
+## 同对象迁移链
 
-每个迁移通过向目标状态 `emits` 下一级迁移事件，在到达目标状态后再次触发迁移过程，形成连续的链式状态驱动。
+标准阶段的三个迁移按以下规则生成：
 
-## 串接关系
+1. `Preset` 从 `Base` 迁移到 `Prepared`，成功提交后 `emits Transition::Setup`。
+2. `Setup` 从 `Prepared` 迁移到 `Ready`，成功提交后 `emits Transition::Enable`。
+3. `Enable` 从 `Ready` 迁移到 `Online`；它不隐式发出其它阶段的事件。
 
-对于阶段范式，同级阶段之间可以前后自动串接。
+这里的 `emits` 只串联当前阶段对象自己的生命周期迁移。它表示当前迁移已经提交目标状态并
+通过目标状态 invariant 后产生的 completion event，不是 `drives` 的别名，也不用于自动连接
+同级阶段。阶段范式不生成 `PhaseA.Enable emits PhaseB.Preset` 形式的 sibling 边。
 
-前一阶段的 `Enable` 完成、提交 `Online` 状态后，通过 `emits` 发出后一阶段的 `Preset`。
-`Online` 和后一阶段 `Base` 是两个不同对象各自的状态，不发生状态重叠。后一阶段是否还需要在
-`Preset.depends_on` 中检查前一阶段 `Online`，取决于父阶段 `drives` 和 `emits` 链是否已经
-唯一保证顺序；若为了非确定性推导或外部入口仍需该事实，应显式保留检查。
+## 父子驱动
 
+上下级阶段之间只通过父 transition 中显式声明的 `drives` 建立关系。父阶段负责选择被驱动的
+子阶段和顺序；子阶段不拥有下一 sibling 的推进权。
+
+标准的完整子阶段驱动写作：
+
+```text
+drives {
+    ChildPhase.Transition::Preset;
+}
 ```
-Level N-1 Enable commits Online --emits--> Level N Preset
-Level N   Enable commits Online --emits--> Level N+1 Preset
+
+`ChildPhase.Preset` 被触发后，子阶段通过自己的 `emits` 依次完成 `Setup` 和 `Enable`。子阶段
+达到 `Online` 后，该次 `drives` 才完成，父 transition 继续执行其后续 body member。一个父
+transition 中有多个 `drives` 条目或多个 `drives` 块时，严格按照 model 源码顺序执行。
+
+若 charter 只要求推进一个已经由其它边界建立到 `Prepared` 或 `Ready` 的阶段，可以显式驱动
+其 `Setup` 或 `Enable`，但必须说明先前状态由谁建立以及为何不由该父阶段驱动完整生命周期。
+这种情况是跨边界续推例外，不得被解释成标准阶段可以省略 `Preset`、`Setup` 或 `Enable`。
+
+同一父阶段下的多个子阶段只是结构上的 siblings，不存在子阶段之间的隐式执行边。它们的
+可观察顺序完全来自共同父 transition 的 source-ordered `drives`，以及父阶段自身的迁移链。
+
+## 递归推进
+
+父子驱动和同对象迁移链在每一级递归应用，形成嵌套的阶段推进：
+
+```text
+Parent.Preset
+  drives ChildA.Preset
+    ChildA.Preset commits Prepared, emits ChildA.Setup
+    ChildA.Setup  commits Ready,    emits ChildA.Enable
+    ChildA.Enable commits Online
+  Parent.Preset commits Prepared, emits Parent.Setup
+Parent.Setup
+  drives ChildB.Preset
+    ... ChildB commits Online
+  Parent.Setup commits Ready, emits Parent.Enable
+Parent.Enable
+  drives ChildC.Preset
+    ... ChildC commits Online
+  Parent.Enable commits Online
 ```
 
-串接关系的具体粒度取决于实际编排时序：父阶段的驱动链（`drives`）保证阶段顺序，`depends_on` 只在模型非确定性推进需额外约束时使用。不加 `depends_on` 的 Preset 意味着父阶段结构已足够保证排序。`invariant` 不用于 `Base` 状态，因为初始状态无法匹配尚未到达的 predecessor Online 条件。
+如果一个父 transition 顺序驱动 `ChildC`、`ChildD`，`ChildC.Online` 后发生的是“返回父
+transition 并执行下一条 `drives`”，不是 `ChildC` 直接触发 `ChildD`。这一规则使 model 可以
+从任一父阶段向下展开，同时保持每一级状态提交和职责所有权。
+
+## 条件与完成事实
+
+- `depends_on` 描述 transition 被触发时必须已经成立的外部事实。父 `drives` 已唯一保证的
+  结构顺序不需要伪装成 sibling 前驱关系；若 transition 还有独立入口或推导需要该事实，则
+  应显式保留依赖。
+- `ensures` 描述 transition 成功后成立的事实。父 transition 驱动完整子阶段时，应明确确认
+  该子阶段到达 `Online`，以及父层真正依赖的其它结果。
+- `invariant` 描述进入某状态后持续成立的事实。`Base` 不用于承载前一 sibling 的 `Online`
+  条件；需要的前置事实属于触发该 transition 的 `depends_on`。
+- `within` 只保护自己的词法 body。`drives`、`ensures` 和其它块按 model 源码顺序保留，不能
+  为了生成方便统一前移或后移。
+- `deferred` 必须留在实际未闭合的 transition 或对象边界，不得借父阶段 `Online` 隐式宣称
+  deferred 能力已经实现。
 
 ## 清理路径
 
-阶段在其主推进链之外保留可选的清理路径：
+阶段可在主推进链之外定义清理路径：
 
+```text
+Cleanup: allowed source state -> Destroyed
 ```
-Cleanup: 任一状态 → Destroyed
-```
 
-清理路径可从 Preset、Setup 或 Enable 的失败处理进入，也用于阶段退出或资源释放。
+清理路径只在 model 明确定义时存在。它不承担父 continuation、控制权移交或 sibling 推进
+语义，也不能用 `handoff` 名称隐式替代。
 
-## 适用范围
+## 生成检查
 
-本范式适用于所有标准阶段对象。轻量级阶段可为 Preset、Setup 或 Enable 定义空操作，但状态机结构保持一致。
+从 charter 生成每一级阶段 model 时，至少检查：
+
+1. 阶段的 parent、职责和执行主体边界明确。
+2. 标准四状态和三个迁移完整，或存在有理由的显式例外。
+3. `Preset` 只 `emits` 本阶段 `Setup`，`Setup` 只 `emits` 本阶段 `Enable`。
+4. 上下级关系由父 transition 的 source-ordered `drives` 明确表达。
+5. 每个被驱动阶段的完成状态和父层所需事实由 `ensures`/invariant 明确确认。
+6. context、执行主体交接和 deferred 边界没有被阶段树的视觉顺序掩盖。
+
+本范式适用于 `Kernel` 驱动的各级标准阶段对象。普通资源对象仍遵循通用对象生命周期语义，
+不因为被 Phase 驱动而自动成为阶段。

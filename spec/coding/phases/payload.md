@@ -1,17 +1,13 @@
 # PayloadPhase 编码指引
 
-PayloadPhase 是[Kernel 系统编码](../systems/kernel.md)的最后一个子阶段编排层。按[阶段链式映射规则](../mapping.md#阶段链式映射规则)，编排层在 impl 中不出现独立函数，其 `drives` 语义坍缩为子阶段间的调用顺序。
+PayloadPhase 是[Kernel 系统编码](../systems/kernel.md)中 `Kernel.Enable` 的最后一个直接 drive
+目标。它必须遵循[阶段范式代码映射](../phase-paradigm.md)，由 Kernel continuation 调用
+`Payload.Preset`，不能由 Finalize 子阶段直接作为 sibling 推进。
 
-## 串接顺序
+当前 model 已定义 `Payload.Preset -> Prepared` 和 `Payload.Enable -> Online`，但尚未定义
+`Prepared -> Ready` 的 `Setup` 以及 Preset/Setup 的同对象 `emits`。因此 coding 层不能生成一条
+虚构的完整调用链；该 model 缺口在 Payload 批次按 charter -> model -> coding -> impl 顺序
+修正。修正前，现有实现路径只作为审计证据，不覆盖阶段范式。
 
-PayloadPhase 当前为叶子阶段（其子阶段未展开），直接实现其三个迁移：
-
-```
-FinalizePhase.enable() 完成
-  → PayloadPhase.preset()
-    → .setup()
-      → .enable()  → 不返回
-```
-
-具体迁移映射在对应文件中：
-- [payload.md](payload.md)（待细化，或由载荷形态区分）
+Payload.Online 提交、Kernel.Online continuation 和 selected payload 不返回交接必须是三个可
+定位边界；具体状态、checkpoint 和函数落点在 Payload 审计批次细化。
