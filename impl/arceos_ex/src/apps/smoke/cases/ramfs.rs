@@ -38,8 +38,8 @@ impl SmokeScenario for RamFsOperationsScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
         assertions.assert(
-            "process prepare ready",
-            phases::interrupt::process_prepare::is_ready(),
+            "process prepare online",
+            phases::interrupt::process_prepare::is_online(),
         );
         assertions.assert("vfs core ready", ctx.vfs_core.state() == State::Ready);
         assertions.assert("ramfs ready", ctx.ramfs_type.state() == State::Ready);

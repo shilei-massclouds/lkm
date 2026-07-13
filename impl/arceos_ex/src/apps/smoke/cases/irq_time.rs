@@ -14,7 +14,7 @@ const TIME_ADVANCE_SPIN_LIMIT: usize = 1_000_000;
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::interrupt::irq_time_init::is_ready()
+    if !phases::interrupt::irq_time_init::is_online()
         || ctx.interrupt_stream.state() != State::Online
         || !ctx
             .interrupt_stream

@@ -4849,5 +4849,104 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 441,
+    "checkpoint_name": "InterruptPhase.Prepared",
+    "checkpoint_variant": "InterruptPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 442,
+    "checkpoint_name": "InterruptPhase.Online",
+    "checkpoint_variant": "InterruptPhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 443,
+    "checkpoint_name": "IrqTimeInitPhase.Prepared",
+    "checkpoint_variant": "IrqTimeInitPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 444,
+    "checkpoint_name": "LocalIrqEnablePhase.Prepared",
+    "checkpoint_variant": "LocalIrqEnablePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 445,
+    "checkpoint_name": "LocalIrqEnablePhase.Online",
+    "checkpoint_variant": "LocalIrqEnablePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 446,
+    "checkpoint_name": "IrqOpenPreparePhase.Prepared",
+    "checkpoint_variant": "IrqOpenPreparePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 447,
+    "checkpoint_name": "IrqOpenPreparePhase.Online",
+    "checkpoint_variant": "IrqOpenPreparePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 448,
+    "checkpoint_name": "ProcessPreparePhase.Prepared",
+    "checkpoint_variant": "ProcessPreparePhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 449,
+    "checkpoint_name": "ProcessPreparePhase.Online",
+    "checkpoint_variant": "ProcessPreparePhaseOnline",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   }
 ]

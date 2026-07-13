@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 324
+- unmapped: 333
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -447,3 +447,12 @@
 | 438 | CorePreparePhase.Prepared | CorePreparePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 439 | MmCoreInitPhase.Prepared | MmCoreInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 440 | SchedInitPhase.Prepared | SchedInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 441 | InterruptPhase.Prepared | InterruptPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 442 | InterruptPhase.Online | InterruptPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 443 | IrqTimeInitPhase.Prepared | IrqTimeInitPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 444 | LocalIrqEnablePhase.Prepared | LocalIrqEnablePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 445 | LocalIrqEnablePhase.Online | LocalIrqEnablePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 446 | IrqOpenPreparePhase.Prepared | IrqOpenPreparePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 447 | IrqOpenPreparePhase.Online | IrqOpenPreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 448 | ProcessPreparePhase.Prepared | ProcessPreparePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 449 | ProcessPreparePhase.Online | ProcessPreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

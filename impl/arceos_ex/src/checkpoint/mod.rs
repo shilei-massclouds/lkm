@@ -565,6 +565,15 @@ pub enum Checkpoint {
     CorePreparePhasePrepared,
     MmCoreInitPhasePrepared,
     SchedInitPhasePrepared,
+    InterruptPhasePrepared,
+    InterruptPhaseOnline,
+    IrqTimeInitPhasePrepared,
+    LocalIrqEnablePhasePrepared,
+    LocalIrqEnablePhaseOnline,
+    IrqOpenPreparePhasePrepared,
+    IrqOpenPreparePhaseOnline,
+    ProcessPreparePhasePrepared,
+    ProcessPreparePhaseOnline,
 }
 
 impl Checkpoint {
@@ -1045,6 +1054,15 @@ impl Checkpoint {
             Self::CorePreparePhasePrepared => "CorePreparePhase.Prepared",
             Self::MmCoreInitPhasePrepared => "MmCoreInitPhase.Prepared",
             Self::SchedInitPhasePrepared => "SchedInitPhase.Prepared",
+            Self::InterruptPhasePrepared => "InterruptPhase.Prepared",
+            Self::InterruptPhaseOnline => "InterruptPhase.Online",
+            Self::IrqTimeInitPhasePrepared => "IrqTimeInitPhase.Prepared",
+            Self::LocalIrqEnablePhasePrepared => "LocalIrqEnablePhase.Prepared",
+            Self::LocalIrqEnablePhaseOnline => "LocalIrqEnablePhase.Online",
+            Self::IrqOpenPreparePhasePrepared => "IrqOpenPreparePhase.Prepared",
+            Self::IrqOpenPreparePhaseOnline => "IrqOpenPreparePhase.Online",
+            Self::ProcessPreparePhasePrepared => "ProcessPreparePhase.Prepared",
+            Self::ProcessPreparePhaseOnline => "ProcessPreparePhase.Online",
         }
     }
 }

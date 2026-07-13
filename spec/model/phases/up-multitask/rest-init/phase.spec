@@ -1288,7 +1288,7 @@ object BootInitRestInitPhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    ProcessPreparePhase.state == State::Ready;
+                    ProcessPreparePhase.state == State::Online;
                     InterruptStream.state == State::Online;
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
@@ -1393,7 +1393,7 @@ object BootInitRestInitPhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            ProcessPreparePhase.state == State::Ready;
+            ProcessPreparePhase.state == State::Online;
             rcu_scheduler_starting_ready(RcuCore);
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);

@@ -3085,5 +3085,68 @@
     "name": "SchedInitPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 441,
+    "variant": "InterruptPhasePrepared",
+    "name": "InterruptPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 442,
+    "variant": "InterruptPhaseOnline",
+    "name": "InterruptPhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 443,
+    "variant": "IrqTimeInitPhasePrepared",
+    "name": "IrqTimeInitPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 444,
+    "variant": "LocalIrqEnablePhasePrepared",
+    "name": "LocalIrqEnablePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 445,
+    "variant": "LocalIrqEnablePhaseOnline",
+    "name": "LocalIrqEnablePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 446,
+    "variant": "IrqOpenPreparePhasePrepared",
+    "name": "IrqOpenPreparePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 447,
+    "variant": "IrqOpenPreparePhaseOnline",
+    "name": "IrqOpenPreparePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 448,
+    "variant": "ProcessPreparePhasePrepared",
+    "name": "ProcessPreparePhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 449,
+    "variant": "ProcessPreparePhaseOnline",
+    "name": "ProcessPreparePhase.Online",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

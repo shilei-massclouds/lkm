@@ -26,7 +26,7 @@ object LocalIrqEnablePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     IrqTimeInitPhase.state == State::Online;
                     IrqController.state == State::Ready;
@@ -86,6 +86,33 @@ object LocalIrqEnablePhase: PhaseObject {
                     "local_irq_enable() 只打开 boot CPU sstatus.SIE 总入口；PLIC UART source gate 和 root supervisor external input gate 仍由后续 UartExternalIrqEnable 显式打开。";
                     "周期 tick、完整 softirq 执行、IPI runtime、workqueue worker、RCU GP kthread、task concurrency 和 secondary CPU execution 仍不得随本阶段隐式 Online。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    local_irq_enable_phase_ready(LocalIrqEnablePhase);
+                    local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
+                    early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
+                    interrupt_concurrency_open_for_boot_cpu();
+                    InterruptStream.state == State::Online;
+                    boot_cpu_local_irq_enabled();
+                    early_boot_irqs_disabled_false();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -125,5 +152,25 @@ object LocalIrqEnablePhase: PhaseObject {
             time_read_smoke_available(RiscvTimerProvider);
             clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    local_irq_enable_phase_ready(LocalIrqEnablePhase);
+                    local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
+                    early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
+                    interrupt_concurrency_open_for_boot_cpu();
+                    InterruptStream.state == State::Online;
+                    boot_cpu_local_irq_enabled();
+                    early_boot_irqs_disabled_false();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

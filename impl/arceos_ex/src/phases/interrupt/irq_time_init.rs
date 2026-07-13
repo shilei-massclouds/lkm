@@ -13,12 +13,39 @@ static IRQ_TIME_INIT_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex irq time init preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::IrqTimeInitPhaseStarted);
     crate::phases::shutdown_on_error(
         preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
         "arceos_ex irq time init preset failed\n",
     );
     setup(ctx)
+}
+
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::boot::sched_init::is_online()
+        && ctx.scheduler.state() == State::Online
+        && ctx.rcu_core.state() == State::Ready
+        && ctx.workqueue.state() == State::Prepared
+        && ctx.softirq.state() == State::Prepared
+        && ctx.randomness.state() == State::Prepared
+        && ctx.interrupt_stream.state() == State::Ready
+        && ctx.interrupt_stream.early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.disabled()
+        && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
+        && !ctx.cpu_group.smp_concurrency_open()
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -109,70 +136,62 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    if !irq_time_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE),
-            State::Base,
-            State::Prepared,
-        );
+    let state = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
+    if state != State::Base || !irq_time_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
         &IRQ_TIME_INIT_PHASE_STATE,
         LifecycleEvent::Preset,
         State::Base,
         State::Prepared,
-        Checkpoint::IrqTimeInitPhaseReady,
+        Checkpoint::IrqTimeInitPhasePrepared,
     )
 }
 
 fn setup(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex irq time init setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex irq time init setup failed\n");
     enable(ctx)
 }
 
 fn adopt_ready(ctx: &Context) -> EventResult {
-    if !irq_time_init_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE),
-            State::Prepared,
-            State::Ready,
-        );
+    let state = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
+    if state != State::Prepared || !irq_time_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
     }
 
-    crate::phases::state::adopt(
+    crate::phases::state::mark_checked(
         &IRQ_TIME_INIT_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Prepared,
         State::Ready,
+        Checkpoint::IrqTimeInitPhaseReady,
     )
 }
 
 fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        enable_event(ctx),
-        "arceos_ex irq time init enable failed\n",
-    );
-    crate::phases::interrupt::local_irq_enable::setup(crate::context::context())
+    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex irq time init enable failed\n");
+    crate::phases::interrupt::preset_after_irq_time_init()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
-    crate::phases::state::adopt(
+    let state = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
+    if state != State::Ready || !irq_time_init_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
         &IRQ_TIME_INIT_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
         State::Online,
+        Checkpoint::IrqTimeInitPhaseOnline,
     )
 }
 
-pub fn is_ready() -> bool {
-    let s = crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE);
-    s == State::Ready || s == State::Online
+pub fn is_online() -> bool {
+    crate::phases::state::load(&IRQ_TIME_INIT_PHASE_STATE) == State::Online
 }
 
 fn irq_time_init_phase_ready(ctx: &Context) -> bool {

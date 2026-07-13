@@ -1,14 +1,21 @@
 # ProcessPreparePhase coding
 
-本文件承载 `spec/coding/phases/interrupt/process-prepare.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+model 来源为 `spec/model/phases/interrupt/process-prepare/phase.spec`，实现落点为
+`impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。本文件同时承载原 legacy formal rule
+的有效实现约束；coding 层不再保留同主题 `.spec`。
 
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/process-prepare.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+| Transition | depends / drives / ensures | checkpoint 与 continuation |
+| --- | --- | --- |
+| Preset: Base -> Prepared | 在 `SingleTaskInterruptStreamContext` 下精确检查 Base、IrqOpenPrepare Online 及对象依赖；按 model 顺序执行现有 PID/task/cred/VMA/namespace/key/security/VFS/trimmed 对象动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Setup: Prepared -> Ready | 精确检查 Prepared 和完整 `process_prepare_phase_ready()` | 提交后发出 Ready，调用 Enable |
+| Enable: Ready -> Online | 精确检查 Ready，重新确认未创建 PID 1/kthreadd 且 task/SMP 门关闭 | 提交后发出 Online，返回 `interrupt::preset_after_process_prepare()` |
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`process-prepare.spec`](process-prepare.spec)。
+`is_online()` 只接受精确 Online。ProcessPrepare 不得提交 Interrupt 状态；父 continuation 在该叶子
+Online 后提交 Interrupt.Prepared。
 
-### ArceosExProcessPrepareCodingMust
+## 已迁移实现约束
 
 #### Model path
 
@@ -23,7 +30,7 @@ for example impl/arceos_ex/src/phases/interrupt/process_prepare.rs.
 
 #### Ordering
 
-ProcessPreparePhase must run after IrqOpenPreparePhase.Ready, with
+ProcessPreparePhase must run after IrqOpenPreparePhase.Online, with
 Console.Prepared, SchedClock.Ready, DelayLoop.Ready and the boot CPU
 local interrupt gate already established.
 
@@ -80,5 +87,3 @@ net_ns_init(), pagecache_init(), seq_file_init(), proc_root_init(),
 nsfs_init() and pidfs_init(). rcu_init_tasks_generic() is not in
 this subphase and must be recorded as out-of-scope rather than
 silently pulled into ProcessPreparePhase.
-
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/process-prepare.spec END -->

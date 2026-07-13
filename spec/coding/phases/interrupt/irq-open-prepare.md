@@ -1,14 +1,20 @@
 # IrqOpenPreparePhase coding
 
-本文件承载 `spec/coding/phases/interrupt/irq-open-prepare.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+model 来源为 `spec/model/phases/interrupt/irq-open-prepare/phase.spec`，实现落点为
+`impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs`。本文件同时承载原 legacy formal rule
+的有效实现约束；coding 层不再保留同主题 `.spec`。
 
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/irq-open-prepare.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+| Transition | depends / drives / ensures | checkpoint 与 continuation |
+| --- | --- | --- |
+| Preset: Base -> Prepared | 在 `SingleTaskInterruptStreamContext` 下精确检查 Base、LocalIrqEnable Online 及对象依赖；按 model 顺序执行现有 SLUB flush、Console、trimmed paths、SchedClock 和 DelayLoop 动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Setup: Prepared -> Ready | 精确检查 Prepared 和完整 `irq_open_prepare_phase_ready()` | 提交后发出 Ready，调用 Enable |
+| Enable: Ready -> Online | 精确检查 Ready 并重新确认 invariant | 提交后发出 Online，返回 `interrupt::preset_after_irq_open_prepare()` |
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`irq-open-prepare.spec`](irq-open-prepare.spec)。
+`is_online()` 只接受精确 Online。IrqOpenPrepare 不得启动 ProcessPrepare。
 
-### ArceosExIrqOpenPrepareCodingMust
+## 已迁移实现约束
 
 #### Model path
 
@@ -23,7 +29,7 @@ for example impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs.
 
 #### Ordering
 
-IrqOpenPreparePhase must run after LocalIrqEnablePhase.Ready, with
+IrqOpenPreparePhase must run after LocalIrqEnablePhase.Online, with
 the boot CPU local interrupt gate already open. It must not contain
 another local_irq_enable() boundary.
 
@@ -68,7 +74,5 @@ remain an explicit protocol fact.
 #### Smoke actions
 
 SchedClock.setup() and DelayLoop.setup() must expose enough action
-surface for smoke checks after IrqOpenPreparePhase.Ready: a sched
+surface for smoke checks after IrqOpenPreparePhase.Online: a sched
 clock read that advances and a bounded busy-wait delay action.
-
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/irq-open-prepare.spec END -->

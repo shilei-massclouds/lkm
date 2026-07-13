@@ -443,3 +443,12 @@
 | 438 | CorePreparePhasePrepared | CorePreparePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 439 | MmCoreInitPhasePrepared | MmCoreInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 440 | SchedInitPhasePrepared | SchedInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 441 | InterruptPhasePrepared | InterruptPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 442 | InterruptPhaseOnline | InterruptPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 443 | IrqTimeInitPhasePrepared | IrqTimeInitPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 444 | LocalIrqEnablePhasePrepared | LocalIrqEnablePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 445 | LocalIrqEnablePhaseOnline | LocalIrqEnablePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 446 | IrqOpenPreparePhasePrepared | IrqOpenPreparePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 447 | IrqOpenPreparePhaseOnline | IrqOpenPreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 448 | ProcessPreparePhasePrepared | ProcessPreparePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 449 | ProcessPreparePhaseOnline | ProcessPreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

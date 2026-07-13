@@ -2073,7 +2073,7 @@ flowchart LR
 
 当前先将 `InterruptPhase` 子阶段 3 的对象和边界记录如下：
 
-1. `中断开放后准备期对象`（暂名 `IrqOpenPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第三个子阶段对象。它从 `LocalIrqEnablePhase.Ready` 接续，即 boot CPU 本地中断总入口已经开放；随后按 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 调用点完成的有效顺序编排对象推进，并以“下一步进入进程准备期”为完成边界。
+1. `中断开放后准备期对象`（暂名 `IrqOpenPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第三个子阶段对象。它从 `LocalIrqEnablePhase.Online` 接续，即 boot CPU 本地中断总入口已经开放；随后按 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 调用点完成的有效顺序编排对象推进，并以“下一步进入进程准备期”为完成边界。
 2. `SLUB flush workqueue 资源`：覆盖 `kmem_cache_init_late()`。它不是独立生命周期对象，而是 `SlubSubsystem` 的内部 workqueue 资源事实：依赖 `SlubSubsystem.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，通过 `alloc_workqueue("slub_flushwq", WQ_MEM_RECLAIM, 0)` 建立后续 flush CPU slab 使用的 workqueue 句柄，并记录 `SlubSubsystem.flush_workqueue_ready == true`。它不把 `SlubSubsystem` 推进到 `Online`；Linux 内部 `slab_state = FULL` 仍留给后续 `slab_sysfs_init()` / `SlubSubsystem.enable()`。
 3. `Console 对象`：覆盖 `console_init()`。这是正式 `Console` 对象的首次构造点，因此当前建模为 `Console.preset()`，使对象进入 `Prepared`。它承接已经可用的 `PrintkBuffer` 和早期 console 输出条件，先驱动 `TtyLineDisciplineRegistry.preset()`，把静态 `NTtyLineDiscipline`（Linux `n_tty_ops`）注册到 `N_TTY` slot；随后读取 `Lds` 提供的 `__con_initcall_start..__con_initcall_end` console initcall 表边界，驱动当前配置下的 `ConsoleDriver` 对象执行 early register。该过程可能注册可用的 real console，并在 real console 成为 `CON_CONSDEV` 时触发 early/boot console handoff；但由于此时仍早于很多 bus/device probe，设备树上的真实串口 console 不保证已经完整 probe，复杂设备 probe、boot console 注销和完整 console handoff 都不能作为本阶段必然后置条件。
 4. `panic_later checkpoint`：覆盖 `console_init()` 之后的 `if (panic_later) panic(...)`。这是对过多 boot 参数等早期异常的延迟失败处理，只作为阶段内 checkpoint 或 fail boundary，不建立对象。
@@ -2164,7 +2164,7 @@ flowchart LR
 
 当前先将 `InterruptPhase` 子阶段 4 的对象和边界记录如下：
 
-1. `进程准备期对象`（暂名 `ProcessPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第四个子阶段对象。它从 `IrqOpenPreparePhase.Ready` 接续，按 `pid_idr_init()` 到 `kcsan_init()` 的有效顺序编排对象推进，并以“下一步进入 `rest_init()`，创建 PID 1 和 `kthreadd`”作为完成边界。
+1. `进程准备期对象`（暂名 `ProcessPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第四个子阶段对象。它从 `IrqOpenPreparePhase.Online` 接续，按 `pid_idr_init()` 到 `kcsan_init()` 的有效顺序编排对象推进，并以“下一步进入 `rest_init()`，创建 PID 1 和 `kthreadd`”作为完成边界。
 2. `根 PID namespace 对象`（暂名 `RootPidNamespace`）：覆盖 `pid_idr_init()`。当前建模为 `RootPidNamespace.setup()`：`BUILD_BUG_ON(PID_MAX_LIMIT >= PIDNS_ADDING)` 是编译期 checkpoint；`PidAllocator.configure_limits()` 基于 possible CPU 数更新全局 `pid_max/pid_max_min`；随后初始化静态 `init_pid_ns.idr`，并创建 level-0 `"pid"` SLUB cache 绑定到 `init_pid_ns.pid_cachep`，使根 PID namespace 具备为 `rest_init()` 后续任务分配 PID 的基础结构。`PidAllocator` 保留为 `RootPidNamespace` 关联的分配策略/API 面，承载后续 `alloc_pid()`、`free_pid()`、`find_pid_ns()` 等运行期动作，不作为本调用推进到 `Ready` 的顶层对象。
 3. `匿名内存反向映射核心对象`（暂名 `AnonVmaCore`）：覆盖 `anon_vma_init()`。它是匿名内存 rmap graph 的管理核心，用来维护匿名 folio/page 反向定位相关 `Vma` 的关系，而不是普通 VMA cache 的附属品。运行期中，`Vma` 通过 `AnonVmaChain` 连接到 `AnonVma` 节点，匿名 folio/page 再通过 mapping 标记间接指向 `AnonVma`，使 COW、unmap、migration、reclaim、memory failure 和 rmap walk 等路径能够找到所有相关映射。`anon_vma_init()` 当前只创建 `anon_vma` 与 `anon_vma_chain` 两类 cache，使这套图结构的分配基础进入 `Ready`；具体 `AnonVma` 实例和链接关系留给 VMA fault、fork/link 等运行期动作建立。
 4. `任务创建核心对象`（暂名 `TaskCreationCore`）的线程栈准备：覆盖 `thread_stack_cache_init()`。当前 `CONFIG_VMAP_STACK=y`，该调用建模为 `TaskCreationCore.preset()`：创建 `TaskCreationCore.thread_stack_cache` 属性/子资源，为后续 `kernel_init`、`kthreadd` 和普通任务分配内核线程栈提供缓存基础。它不是独立顶层对象，也不是 SLUB 的生命周期推进。
@@ -2243,7 +2243,7 @@ flowchart LR
 
 本子阶段的结束状态暂定至少包含：
 
-- `ProcessPreparePhase.state == Ready`
+- `ProcessPreparePhase.state == Online`
 - `RootPidNamespace.state == Ready`，并且 `init_pid_ns.idr` 与 level-0 PID cache 已建立；`PidAllocator` 作为关联分配策略/API 面具备已配置的 `pid_max/pid_max_min`
 - `AnonVmaCore.state == Ready`
 - `CredentialCore.state == Prepared`，表示 `cred` cache 已建立，但完整凭据关系和 key/security 语义尚未在本调用中完成
@@ -2268,7 +2268,7 @@ flowchart LR
 
 本阶段的输入事实至少包括：
 
-- `ProcessPreparePhase.state == Ready`
+- `ProcessPreparePhase.state == Online`
 - `InterruptStream.state == Online`，限定为 boot CPU 本地中断总入口已经打开
 - `RootPidNamespace.state == Ready`
 - `TaskCreationCore.state == Ready`
@@ -2339,7 +2339,7 @@ UP multitask 聚合 wrapper。
 
 当前先将 rest_init 路径的对象和边界记录如下：
 
-1. `BootInitRestInitPhase`：属于阶段对象，是 `UP Multitask Phase` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Ready` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
+1. `BootInitRestInitPhase`：属于阶段对象，是 `UP Multitask Phase` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Online` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
 2. `RCU 核心对象`（暂名 `RcuCore`）的调度启动动作：覆盖 `rcu_scheduler_starting()`。它不是创建新的 RCU 对象，而是在前序 `RcuCore.Ready` 基础上执行 `RcuCore.setup()`，把 RCU 退出 early boot 模式并记录 scheduler 开始参与 RCU 语义；Linux 当前要求此时仍只有一个 online CPU，且尚未发生普通上下文切换。后续 `rcu_set_runtime_mode()` 可作为 `RcuCore.enable()` 推进到 `Online`；`rcu_end_inkernel_boot()` 不消耗主对象 slot，作为 `RcuCore.end_inkernel_boot()` action 修改内部 `boot_mode` / `inkernel_boot_ended` 子状态。将来若需要细化 RCU 流程，可以增加 `RcuTree`、`RcuSoftirqHook`、`RcuGpWorker` 或 `RcuBootMode` 等下级子对象，主对象 slots 仍然足够。
 3. `内核 init 任务对象`（暂名 `KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的 PID 1。它是本子阶段创建的第一个非 idle task，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 可通过公共 `TaskCreationCore.spawn_task(spec)` 以 `BootInitTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；它承载后续常规执行语义，但不再另建独立 flow 对象。`KernelInitTask` 的 slot 语义暂定为：
 

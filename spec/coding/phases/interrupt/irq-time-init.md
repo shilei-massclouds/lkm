@@ -1,14 +1,21 @@
 # IrqTimeInitPhase coding
 
-本文件承载 `spec/coding/phases/interrupt/irq-time-init.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+model 来源为 `spec/model/phases/interrupt/irq-time-init/phase.spec`，实现落点为
+`impl/arceos_ex/src/phases/interrupt/irq_time_init.rs`。本文件同时承载原 legacy formal rule 的
+有效实现约束；coding 层不再保留同主题 `.spec`。
 
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/irq-time-init.spec START -->
+## 生命周期映射
 
-## Formal predicate notes
+| Transition | depends / drives / ensures | checkpoint 与 continuation |
+| --- | --- | --- |
+| Preset: Base -> Prepared | 在 `SingleTaskContext` 下精确检查 Base、SchedInit Online、SIE 关闭及对象依赖；按 model 顺序执行现有 IRQ/time 对象动作；确认中断、任务和 SMP 并发仍关闭 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Setup: Prepared -> Ready | 精确检查 Prepared，重新检查 `irq_time_init_phase_ready()` 和中断关闭事实 | 提交后发出 Ready，调用 Enable |
+| Enable: Ready -> Online | 精确检查 Ready，重新检查同一 invariant | 提交后发出 Online，返回 `interrupt::preset_after_irq_time_init()` |
 
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`irq-time-init.spec`](irq-time-init.spec)。
+`is_online()` 只接受精确 Online。IrqTimeInit 不得启动 LocalIrqEnable；父 Interrupt continuation
+持有后续顺序。
 
-### ArceosExIrqTimeInitCodingMust
+## 已迁移实现约束
 
 #### Model path
 
@@ -525,5 +532,3 @@ RiscvTimerProvider.setup() must expose enough action surface for two
 smoke checks after InterruptStream.enable(): a monotonic time read
 check and a one-shot clockevent callback check through the timer IRQ
 route. These checks do not imply full periodic tick service.
-
-<!-- formal-predicate-notes:spec/coding/phases/interrupt/irq-time-init.spec END -->

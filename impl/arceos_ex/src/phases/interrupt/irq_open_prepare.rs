@@ -13,16 +13,57 @@ use core::sync::atomic::AtomicU8;
 static IRQ_OPEN_PREPARE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn setup(ctx: &mut Context) -> ! {
+pub fn preset(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        preset_start(ctx),
+        "arceos_ex irq open prepare preset start failed\n",
+    );
     crate::checkpoint::checkpoint(Checkpoint::IrqOpenPreparePhaseStarted);
     crate::phases::shutdown_on_error(
-        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
-        "arceos_ex irq open prepare event failed\n",
+        preset_objects(ctx).and_then(|()| adopt_prepared_with_check(ctx)),
+        "arceos_ex irq open prepare preset failed\n",
     );
-    handoff()
+    setup(ctx)
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
+fn preset_start(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE);
+    if state != State::Base || !preset_dependencies_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+    Ok(())
+}
+
+fn preset_dependencies_ready(ctx: &Context) -> bool {
+    crate::phases::interrupt::local_irq_enable::is_online()
+        && ctx.interrupt_stream.state() == State::Online
+        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && !ctx.interrupt_stream.early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.enabled()
+        && csr::supervisor_interrupts_enabled()
+        && ctx.irq_dispatch_tree.state() == State::Ready
+        && ctx.sbi_ipi.state() == State::Ready
+        && ctx.sbi_ipi.enable_deferred()
+        && ctx.tick.state() == State::Ready
+        && ctx.timer_wheel.state() == State::Ready
+        && ctx.hrtimer_core.state() == State::Ready
+        && ctx.softirq.state() == State::Ready
+        && !ctx.softirq.execution_open()
+        && ctx.timekeeper.state() == State::Ready
+        && ctx.riscv_timer_provider.state() == State::Ready
+        && ctx.smp_call_function.state() == State::Ready
+        && ctx.smp_call_function.runtime_ipi_delivery_deferred()
+        && ctx.workqueue.state() == State::Prepared
+        && !ctx.workqueue.workers_running()
+        && ctx.slub_subsystem.state() == State::Ready
+        && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
+        && ctx.page_allocator.state() == State::Ready
+        && ctx.per_cpu_storage.state() == State::Ready
+        && printk::is_ready()
+}
+
+fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.slub_subsystem.setup_flush_workqueue(&ctx.workqueue)?;
     ctx.console.preset(&ctx.static_objects)?;
     ctx.irq_open_prepare_trimmed_paths
@@ -40,35 +81,73 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.config, &ctx.sched_clock, &ctx.delay_loop)
 }
 
-fn handoff() -> ! {
-    crate::phases::interrupt::process_prepare::setup(crate::context::context())
-}
-
-fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !irq_open_prepare_phase_ready(ctx) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE),
-            State::Base,
-            State::Ready,
-        );
+fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE);
+    if state != State::Base || !irq_open_prepare_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
 
-    crate::phases::state::mark(
+    crate::phases::state::mark_checked(
+        &IRQ_OPEN_PREPARE_PHASE_STATE,
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        Checkpoint::IrqOpenPreparePhasePrepared,
+    )
+}
+
+fn setup(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        adopt_ready(ctx),
+        "arceos_ex irq open prepare setup failed\n",
+    );
+    enable(ctx)
+}
+
+fn adopt_ready(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE);
+    if state != State::Prepared || !irq_open_prepare_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
+    }
+
+    crate::phases::state::mark_checked(
         &IRQ_OPEN_PREPARE_PHASE_STATE,
         LifecycleEvent::Setup,
-        State::Base,
+        State::Prepared,
         State::Ready,
         Checkpoint::IrqOpenPreparePhaseReady,
     )
 }
 
-pub fn is_ready() -> bool {
-    crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE) == State::Ready
+fn enable(ctx: &mut Context) -> ! {
+    crate::phases::shutdown_on_error(
+        enable_event(ctx),
+        "arceos_ex irq open prepare enable failed\n",
+    );
+    crate::phases::interrupt::preset_after_irq_open_prepare()
+}
+
+fn enable_event(ctx: &Context) -> EventResult {
+    let state = crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE);
+    if state != State::Ready || !irq_open_prepare_phase_ready(ctx) {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    crate::phases::state::mark_checked(
+        &IRQ_OPEN_PREPARE_PHASE_STATE,
+        LifecycleEvent::Enable,
+        State::Ready,
+        State::Online,
+        Checkpoint::IrqOpenPreparePhaseOnline,
+    )
+}
+
+pub fn is_online() -> bool {
+    crate::phases::state::load(&IRQ_OPEN_PREPARE_PHASE_STATE) == State::Online
 }
 
 fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
-    crate::phases::interrupt::local_irq_enable::is_ready()
+    crate::phases::interrupt::local_irq_enable::is_online()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()

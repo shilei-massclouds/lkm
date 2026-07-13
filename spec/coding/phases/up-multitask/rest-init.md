@@ -26,7 +26,7 @@ subtree, for example impl/arceos_ex/src/phases/up_multitask/rest_init.rs.
 
 #### Ordering
 
-BootInitRestInitPhase must run after ProcessPreparePhase.Ready;
+BootInitRestInitPhase must run after ProcessPreparePhase.Online;
 BootInitScheduleHandoffPhase then opens task-concurrency through the
 first scheduler handoff; BootIdleEntryPhase records the boot idle
 continuation. UpMultitaskPhase.Ready is the direct aggregate over

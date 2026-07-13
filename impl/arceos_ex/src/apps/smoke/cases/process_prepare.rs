@@ -12,8 +12,8 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::interrupt::process_prepare::is_ready() || !phases::interrupt::is_ready() {
-        printk::write_str("process prepare phase is not ready\n");
+    if !phases::interrupt::process_prepare::is_online() || !phases::interrupt::is_online() {
+        printk::write_str("process prepare phase is not online\n");
         return SmokeResult::Failed;
     }
 

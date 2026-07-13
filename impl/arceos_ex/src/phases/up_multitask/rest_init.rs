@@ -337,7 +337,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         return false;
     };
 
-    crate::phases::interrupt::process_prepare::is_ready()
+    crate::phases::interrupt::process_prepare::is_online()
         && ctx.rcu_core.scheduler_starting_ready()
         && ctx.rcu_core.scheduler_active_init()
         && ctx.rcu_core.scheduler_start_single_online_cpu()
@@ -455,7 +455,7 @@ fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
         return false;
     };
 
-    crate::phases::interrupt::process_prepare::is_ready()
+    crate::phases::interrupt::process_prepare::is_online()
         && ctx.rcu_core.scheduler_starting_ready()
         && ctx.rcu_core.scheduler_active_init()
         && ctx.rcu_core.scheduler_start_single_online_cpu()

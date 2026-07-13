@@ -89,8 +89,14 @@ Kernel
    continuation，查询收敛为精确 Online。announce 实测 `RBAIKOZHTS`，并观察
    EntryPrelude.Online < Boot.Prepared < EntrySuccessor.Started、EntrySuccessor.Online <
    Boot.Ready < CorePrepare.Started、SchedInit.Online < Boot.Online < InterruptPhase.Started。
-5. **InterruptPhase（待办）**：审计四个叶子阶段，重点核对中断开关、effective context、
-   非标准 transition 入口、父 continuation 和 checkpoint owner。
+5. **InterruptPhase（完成）**：charter 固定四个直接子阶段与 Kernel.Setup 入口/continuation
+   出口；model、coding 和 impl 统一四态生命周期，IrqTime 使用 SingleTaskContext，LocalIrqEnable
+   不使用外层 context，IrqOpenPrepare/ProcessPrepare 使用 SingleTaskInterruptStreamContext。
+   叶子对象动作归入 Preset，Setup/Enable 只检查和发布；四个 sibling 直调改为 Interrupt 父
+   continuation，查询收敛为精确 Online。四个 legacy coding `.spec` 已迁移删除。五个阶段均完整
+   观察 Started/Prepared/Ready/Online，旧 ID 保持，新 Prepared/Online 默认 unmapped。announce
+   实测四条 Online -> sibling Started 顺序、ProcessPrepare.Online -> Interrupt.Prepared/Ready/Online
+   -> UpMultitask.Started，并最终到达 Kernel.Online 与 Hello；默认 stress 一轮 3/3 通过。
 6. **UpMultitaskPhase（待办）**：审计 rest-init 子阶段链，重点核对 BootIdle、KernelInit、
    KThreadd 的任务所有权、真实栈切换和无限调度循环。
 7. **SmpRuntimePhase（待办）**：审计六个叶子阶段，确认整棵运行期初始化链由
@@ -125,11 +131,11 @@ Kernel
 | CorePreparePhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
 | MmCoreInitPhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
 | SchedInitPhase | 边界一致 | 既有 transition 保持 | 四状态/父返回已映射 | depends/四状态/Boot.Online 已验证 | complete |
-| InterruptPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| IrqTimeInitPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| LocalIrqEnablePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| IrqOpenPreparePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
-| ProcessPreparePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| InterruptPhase | 四子阶段与 Kernel 边界固定 | 父 Preset 顺序和四态完整 | context/continuation/checkpoint 完整映射 | Prepared/Ready/Online 与 Kernel continuation 已验证 | complete |
+| IrqTimeInitPhase | IRQ/time 且 SIE 关闭 | 标准四态、SingleTaskContext | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
+| LocalIrqEnablePhase | 只开放 boot CPU 总入口 | 标准四态、无外层 context | early flag/SIE 顺序与负向 gates 已映射 | 四 checkpoint、父返回已验证 | complete |
+| IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptStream context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
+| ProcessPreparePhase | rest_init 前准备边界一致 | 标准四态、下游依赖 Online | 对象覆盖/deferred/父返回已映射 | 四 checkpoint、Interrupt.Prepared 已验证 | complete |
 | UpMultitaskPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | RestInit 子阶段链 | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | SmpRuntimePhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
@@ -146,15 +152,18 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录已从 26 个 `.spec` 降到 21 个；剩余分类为通用映射/构建/架构/语言 4 个、
-  project 1 个、phase 11 个、object 5 个。
+- coding 目录已从 26 个 `.spec` 降到 17 个；剩余分类为通用映射/构建/架构/语言 4 个、
+  project 1 个、phase 7 个、object 5 个。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Boot 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；剩余问题继续按 Interrupt、
-  UpMultitask、SmpRuntime 子树批次逐项修正。
+- Boot 与 Interrupt 子树已消除 model Online 被实现命名/记录为 Ready 的漂移；剩余问题继续按
+  UpMultitask、SmpRuntime、Payload 子树批次逐项修正。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
-- 本批开始前根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次，
-  总计 90/90，通过且每个 case 只有一个成功事件序列。
+- Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+  `make run APP=hello PROBE=announce` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为
+  450，Linux mapping 为 exact 103 / range 14 / unmapped 333，instrumentation plan 仍为 103。
+- 本批开始前根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
+  基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。

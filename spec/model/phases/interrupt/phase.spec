@@ -62,14 +62,21 @@ object InterruptPhase: PhaseObject {
                 }
 
                 drives {
-                    LocalIrqEnablePhase.Transition::Setup;
+                    LocalIrqEnablePhase.Transition::Preset;
                 }
 
                 within SingleTaskInterruptStreamContext {
                     drives {
-                        IrqOpenPreparePhase.Transition::Setup;
-                        ProcessPreparePhase.Transition::Setup;
+                        IrqOpenPreparePhase.Transition::Preset;
+                        ProcessPreparePhase.Transition::Preset;
                     }
+                }
+
+                ensures {
+                    IrqTimeInitPhase.state == State::Online;
+                    LocalIrqEnablePhase.state == State::Online;
+                    IrqOpenPreparePhase.state == State::Online;
+                    ProcessPreparePhase.state == State::Online;
                 }
 
                 emits {
@@ -84,9 +91,9 @@ object InterruptPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     IrqTimeInitPhase.state == State::Online;
-                    LocalIrqEnablePhase.state == State::Ready;
-                    IrqOpenPreparePhase.state == State::Ready;
-                    ProcessPreparePhase.state == State::Ready;
+                    LocalIrqEnablePhase.state == State::Online;
+                    IrqOpenPreparePhase.state == State::Online;
+                    ProcessPreparePhase.state == State::Online;
                 }
 
                 emits {
@@ -101,9 +108,9 @@ object InterruptPhase: PhaseObject {
             BootPhase.state == State::Online;
             SchedInitPhase.state == State::Online;
             IrqTimeInitPhase.state == State::Online;
-            LocalIrqEnablePhase.state == State::Ready;
-            IrqOpenPreparePhase.state == State::Ready;
-            ProcessPreparePhase.state == State::Ready;
+            LocalIrqEnablePhase.state == State::Online;
+            IrqOpenPreparePhase.state == State::Online;
+            ProcessPreparePhase.state == State::Online;
         }
 
         transitions {

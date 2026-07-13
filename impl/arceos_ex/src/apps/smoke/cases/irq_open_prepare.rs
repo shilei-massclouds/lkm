@@ -11,11 +11,11 @@ const TIME_ADVANCE_SPIN_LIMIT: usize = 1_000_000;
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::interrupt::irq_open_prepare::is_ready()
-        || !phases::interrupt::is_ready()
+    if !phases::interrupt::irq_open_prepare::is_online()
+        || !phases::interrupt::is_online()
         || !csr::supervisor_interrupts_enabled()
     {
-        printk::write_str("irq open prepare phase is not ready\n");
+        printk::write_str("irq open prepare phase is not online\n");
         return SmokeResult::Failed;
     }
 

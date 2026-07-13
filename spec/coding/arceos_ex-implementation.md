@@ -24,10 +24,10 @@
 - `MmCoreInitPhase.Ready`
 - `SchedInitPhase.Ready`
 - `InterruptPhase.Ready`
-- `IrqTimeInitPhase.Ready`
-- `LocalIrqEnablePhase.Ready`
-- `IrqOpenPreparePhase.Ready`
-- `ProcessPreparePhase.Ready`
+- `IrqTimeInitPhase.Online`
+- `LocalIrqEnablePhase.Online`
+- `IrqOpenPreparePhase.Online`
+- `ProcessPreparePhase.Online`
 - `UpMultitaskPhase.Ready`
 - `BootInitRestInitPhase.Ready`
 - `BootInitScheduleHandoffPhase.Ready`
@@ -203,8 +203,8 @@ make clean
 
 当前对象级实现已经能通过 `make run` 和 `make run PROBE=announce` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
-`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`LocalIrqEnablePhase.Ready`、
-`IrqOpenPreparePhase.Ready` 和 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开
+`InterruptPhase.Online`（其当前展开子阶段包括 `IrqTimeInitPhase.Online`、`LocalIrqEnablePhase.Online`、
+`IrqOpenPreparePhase.Online` 和 `ProcessPreparePhase.Online`），再完成 `UpMultitaskPhase.Ready`（当前展开
 `BootInitRestInitPhase.Ready`、`BootInitScheduleHandoffPhase.Ready` 和 `BootIdleEntryPhase.Ready`），
 随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
 `RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
@@ -219,7 +219,7 @@ make clean
 
 `ProcessPreparePhase` 是 `InterruptPhase` 的第四个子阶段，formal model 路径为
 `spec/model/phases/interrupt/process-prepare/`，目标实现路径为
-`impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。该阶段必须在 `IrqOpenPreparePhase.Ready`
+`impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。该阶段必须在 `IrqOpenPreparePhase.Online`
 之后运行，复用已打开的 boot CPU local IRQ、`Console.Prepared`、`SchedClock.Ready` 和 `DelayLoop.Ready`
 事实，为后续 `rest_init()` 创建 `kernel_init`/`kthreadd` 准备对象基础。
 
@@ -2116,7 +2116,7 @@ kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提
 ## `LocalIrqEnablePhase` 编码约束
 
 `LocalIrqEnablePhase` 已正式落到 `spec/model/phases/interrupt/local-irq-enable/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
-`IrqTimeInitPhase.Ready` 之后运行，且只能执行 boot CPU 的 `local_irq_enable()` 边界：通过
+`IrqTimeInitPhase.Online` 之后运行，且只能执行 boot CPU 的 `local_irq_enable()` 边界：通过
 `InterruptStream.enable()` 先把 `early_boot_irqs_disabled` 清为 false，再打开 RISC-V `sstatus.SIE` 本地中断总入口；该顺序必须匹配
 Linux `start_kernel()` 中 `early_boot_irqs_disabled = false; local_irq_enable();`，不得留下 SIE 已开但 early flag 仍为 true 的窗口。
 本阶段不得打开 PLIC UART source gate、root INTC supervisor external input gate、周期 tick、完整 softirq、IPI runtime、
@@ -2141,7 +2141,7 @@ checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 ## `IrqOpenPreparePhase` 编码约束
 
 `IrqOpenPreparePhase` 已正式落到 `spec/model/phases/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第三个子阶段。它必须接在
-`LocalIrqEnablePhase.Ready` 之后运行，此时 boot CPU 本地中断总入口已经开放；本阶段不得再执行
+`LocalIrqEnablePhase.Online` 之后运行，此时 boot CPU 本地中断总入口已经开放；本阶段不得再执行
 `local_irq_enable()`。
 
 目录、文件和对象命名必须跟阶段树一致：实现文件位于

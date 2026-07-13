@@ -328,9 +328,9 @@ object IrqOpenPreparePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    LocalIrqEnablePhase.state == State::Ready;
+                    LocalIrqEnablePhase.state == State::Online;
                     InterruptStream.state == State::Online;
                     IrqDispatchTree.state == State::Ready;
                     SbiIpi.state == State::Ready;
@@ -380,6 +380,33 @@ object IrqOpenPreparePhase: PhaseObject {
                     "SlubSubsystem.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
                     "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 ../linux-6.12/.config 的 RISC-V 配置下由 IrqOpenPrepareTrimmedPaths 记录为 trimmed/no-op。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    irq_open_prepare_ready(IrqOpenPreparePhase);
+                    interrupt_concurrency_open_for_boot_cpu();
+                    LocalIrqEnablePhase.state == State::Online;
+                    Console.state == State::Prepared;
+                    IrqOpenPrepareTrimmedPaths.state == State::Ready;
+                    SchedClock.state == State::Ready;
+                    DelayLoop.state == State::Ready;
+                    slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -387,7 +414,7 @@ object IrqOpenPreparePhase: PhaseObject {
     state State::Ready {
         invariant {
             IrqTimeInitPhase.state == State::Online;
-            LocalIrqEnablePhase.state == State::Ready;
+            LocalIrqEnablePhase.state == State::Online;
             InterruptStream.state == State::Online;
             SbiIpi.state == State::Ready;
             Softirq.state == State::Ready;
@@ -414,5 +441,25 @@ object IrqOpenPreparePhase: PhaseObject {
             slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
             irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    irq_open_prepare_ready(IrqOpenPreparePhase);
+                    interrupt_concurrency_open_for_boot_cpu();
+                    LocalIrqEnablePhase.state == State::Online;
+                    Console.state == State::Prepared;
+                    IrqOpenPrepareTrimmedPaths.state == State::Ready;
+                    SchedClock.state == State::Ready;
+                    DelayLoop.state == State::Ready;
+                    slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

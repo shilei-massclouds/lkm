@@ -780,9 +780,9 @@ object ProcessPreparePhase: PhaseObject {
 
     state State::Base {
         transitions {
-            on Transition::Setup -> State::Ready {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
-                    IrqOpenPreparePhase.state == State::Ready;
+                    IrqOpenPreparePhase.state == State::Online;
                     InterruptStream.state == State::Online;
                     Console.state == State::Prepared;
                     SchedClock.state == State::Ready;
@@ -831,6 +831,11 @@ object ProcessPreparePhase: PhaseObject {
                     kernel_init_task_not_created_yet();
                     kthreadd_task_not_created_yet();
                     system_state_not_scheduling_yet();
+                    ramfs_type_registered(VfsCore, RamFsType);
+                    rootfs_mount_created(VfsCore);
+                    vfs_rootfs_mount_set(VfsCore, Mount);
+                    vfs_rootfs_dentry_set(VfsCore, Dentry);
+                    fs_struct_root_pwd_same(FsStruct);
                     process_prepare_trimmed_paths_prepared(ProcessPrepareTrimmedPaths);
                     process_prepare_x86_efi_runtime_switch_trimmed_noop(ProcessPrepareTrimmedPaths);
                     process_prepare_shadow_call_stack_init_trimmed_noop(ProcessPrepareTrimmedPaths);
@@ -878,13 +883,43 @@ object ProcessPreparePhase: PhaseObject {
                     "fork_init() 中 cpuhp_setup_state(\"fork:vm_stack_cache\") 只注册后续 CPU hotplug 回调；AP/BP 同步和 hotplug 状态机执行属于后续 SMP bring-up。";
                     "key_init() 的 key_types_sem 写侧保护、security_init() 的 LSM hook dispatcher 和 proc/nsfs/pidfs mount 内部锁在本阶段只发布启动期 registry 事实；完整运行期同步协议留给对应对象 action。";
                 }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    process_prepare_ready(ProcessPreparePhase);
+                    IrqOpenPreparePhase.state == State::Online;
+                    rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    kernel_init_task_not_created_yet();
+                    kthreadd_task_not_created_yet();
+                    system_state_not_scheduling_yet();
+                    ramfs_type_registered(VfsCore, RamFsType);
+                    rootfs_mount_created(VfsCore);
+                    vfs_rootfs_mount_set(VfsCore, Mount);
+                    vfs_rootfs_dentry_set(VfsCore, Dentry);
+                    fs_struct_root_pwd_same(FsStruct);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
 
     state State::Ready {
         invariant {
-            IrqOpenPreparePhase.state == State::Ready;
+            IrqOpenPreparePhase.state == State::Online;
             RootPidNamespace.state == State::Ready;
             AnonVmaCore.state == State::Ready;
             TaskCreationCore.state == State::Ready;
@@ -929,5 +964,23 @@ object ProcessPreparePhase: PhaseObject {
             process_prepare_vfs_pseudo_filesystems_deferred(ProcessPrepareTrimmedPaths);
             process_prepare_rcu_tasks_generic_out_of_scope(ProcessPrepareTrimmedPaths);
         }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                ensures {
+                    process_prepare_ready(ProcessPreparePhase);
+                    IrqOpenPreparePhase.state == State::Online;
+                    rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    kernel_init_task_not_created_yet();
+                    kthreadd_task_not_created_yet();
+                    system_state_not_scheduling_yet();
+                }
+            }
+        }
+    }
+
+    state State::Online {
     }
 }

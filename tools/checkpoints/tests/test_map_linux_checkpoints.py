@@ -611,6 +611,41 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(mapped[3].linux_symbol, "prepare_namespace")
         self.assertIn('try_to_run_init_process("/sbin/init")', mapped[4].linux_anchor)
 
+    def test_interrupt_lifecycle_additions_default_to_unmapped(self) -> None:
+        names = [
+            "InterruptPhase.Prepared",
+            "InterruptPhase.Online",
+            "IrqTimeInitPhase.Prepared",
+            "LocalIrqEnablePhase.Prepared",
+            "LocalIrqEnablePhase.Online",
+            "IrqOpenPreparePhase.Prepared",
+            "IrqOpenPreparePhase.Online",
+            "ProcessPreparePhase.Prepared",
+            "ProcessPreparePhase.Online",
+        ]
+        records = [
+            map_linux_checkpoints.CheckpointInventoryRecord(
+                index=560 + index,
+                variant=name.replace(".", ""),
+                name=name,
+            )
+            for index, name in enumerate(names)
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mapped = map_linux_checkpoints.map_checkpoints(
+                records,
+                linux_tree=self._write_linux_fixture(tmp),
+            )
+
+        self.assertEqual([record.checkpoint_name for record in mapped], names)
+        self.assertTrue(all(record.mapping_kind == "unmapped" for record in mapped))
+
+        rules = map_linux_checkpoints.default_mapping_rules()
+        self.assertEqual(rules["IrqTimeInitPhase.Ready"].mapping_kind, "range")
+        self.assertEqual(rules["LocalIrqEnablePhase.Ready"].mapping_kind, "exact")
+        self.assertEqual(rules["ProcessPreparePhase.Ready"].mapping_kind, "range")
+
     def test_mapping_ignores_generated_marker_comment_lines(self) -> None:
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(

@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 441
+- total checkpoints: 450
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 324 |
+| unmapped | 333 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 324 |
+| none | 333 |
 | medium | 62 |
 | high | 55 |
 
@@ -53,6 +53,8 @@
 | CpuGroup | 4 |
 | EarlyCon | 4 |
 | EntrySuccessorPhase | 4 |
+| InterruptPhase | 4 |
+| IrqOpenPreparePhase | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
 | SyscallTable | 4 |
@@ -71,18 +73,19 @@
 | CorePreparePhase | 2 |
 | EntryPreludePhase | 2 |
 | InitTask | 2 |
-| InterruptPhase | 2 |
 | IrqChipInitTable | 2 |
-| IrqOpenPreparePhase | 2 |
 | IrqOpenPrepareTrimmedPaths | 2 |
+| IrqTimeInitPhase | 2 |
 | IrqTimeTrimmedPaths | 2 |
 | KthreaddReadyGate | 2 |
+| LocalIrqEnablePhase | 2 |
 | MmCoreInitPhase | 2 |
 | PhysicalMemory | 2 |
 | PlatformCpuInfo | 2 |
 | PlicIrqDomain | 2 |
 | PreparePhase | 2 |
 | PrintkBuffer | 2 |
+| ProcessPreparePhase | 2 |
 | Randomness | 2 |
 | RcuCore | 2 |
 | SchedInitPhase | 2 |
@@ -102,4 +105,4 @@
 | VirtioBus | 2 |
 | Workqueue | 2 |
 
-- singleton unmapped families: 175
+- singleton unmapped families: 174

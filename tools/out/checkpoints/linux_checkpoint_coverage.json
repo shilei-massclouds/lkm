@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 441,
+  "total_checkpoints": 450,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 324
+      "count": 333
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 324
+      "count": 333
     },
     {
       "confidence": "medium",
@@ -136,6 +136,14 @@
       "count": 4
     },
     {
+      "family": "InterruptPhase",
+      "count": 4
+    },
+    {
+      "family": "IrqOpenPreparePhase",
+      "count": 4
+    },
+    {
       "family": "KthreaddTask",
       "count": 4
     },
@@ -208,19 +216,15 @@
       "count": 2
     },
     {
-      "family": "InterruptPhase",
-      "count": 2
-    },
-    {
       "family": "IrqChipInitTable",
       "count": 2
     },
     {
-      "family": "IrqOpenPreparePhase",
+      "family": "IrqOpenPrepareTrimmedPaths",
       "count": 2
     },
     {
-      "family": "IrqOpenPrepareTrimmedPaths",
+      "family": "IrqTimeInitPhase",
       "count": 2
     },
     {
@@ -229,6 +233,10 @@
     },
     {
       "family": "KthreaddReadyGate",
+      "count": 2
+    },
+    {
+      "family": "LocalIrqEnablePhase",
       "count": 2
     },
     {
@@ -253,6 +261,10 @@
     },
     {
       "family": "PrintkBuffer",
+      "count": 2
+    },
+    {
+      "family": "ProcessPreparePhase",
       "count": 2
     },
     {
@@ -561,10 +573,6 @@
     },
     {
       "family": "IrqHandlerRegistry",
-      "count": 1
-    },
-    {
-      "family": "IrqTimeInitPhase",
       "count": 1
     },
     {
@@ -1028,5 +1036,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 175
+  "unmapped_singleton_family_count": 174
 }

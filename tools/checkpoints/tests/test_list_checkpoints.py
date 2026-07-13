@@ -146,9 +146,36 @@ class ListCheckpointsTests(unittest.TestCase):
             "CorePreparePhase",
             "MmCoreInitPhase",
             "SchedInitPhase",
+            "InterruptPhase",
+            "IrqTimeInitPhase",
+            "LocalIrqEnablePhase",
+            "IrqOpenPreparePhase",
+            "ProcessPreparePhase",
         ):
             for boundary in ("Started", "Prepared", "Ready", "Online"):
                 self.assertIn(f"{phase}.{boundary}", by_name)
+
+        stable_interrupt_ids = {
+            "InterruptPhaseStarted": 6,
+            "InterruptPhaseReady": 7,
+            "IrqTimeInitPhaseStarted": 174,
+            "IrqTimeInitPhaseReady": 175,
+            "IrqTimeInitPhaseOnline": 176,
+            "LocalIrqEnablePhaseStarted": 211,
+            "LocalIrqEnablePhaseReady": 212,
+            "IrqOpenPreparePhaseStarted": 214,
+            "IrqOpenPreparePhaseReady": 215,
+            "ProcessPreparePhaseStarted": 233,
+            "ProcessPreparePhaseReady": 234,
+        }
+        by_variant = {record.variant: record for record in records}
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index
+                for variant in stable_interrupt_ids
+            },
+            stable_interrupt_ids,
+        )
 
 
 if __name__ == "__main__":

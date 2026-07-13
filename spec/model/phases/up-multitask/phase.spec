@@ -29,7 +29,7 @@ object UpMultitaskPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     InterruptPhase.state == State::Online;
-                    ProcessPreparePhase.state == State::Ready;
+                    ProcessPreparePhase.state == State::Online;
                 }
 
                 drives {
@@ -64,7 +64,7 @@ object UpMultitaskPhase: PhaseObject {
     state State::Ready {
         invariant {
             InterruptPhase.state == State::Online;
-            ProcessPreparePhase.state == State::Ready;
+            ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Ready;
             BootInitScheduleHandoffPhase.state == State::Ready;
             BootIdleEntryPhase.state == State::Ready;
