@@ -8,6 +8,5 @@
 
 include "model/main.spec";
 include "guidance/main.spec";
-include "coding/main.spec";
 include "compose/main.spec";
 include "testing/main.spec";

@@ -564,6 +564,7 @@ impl Checkpoint {
     #[allow(dead_code)]
     pub(crate) const fn early_byte(self) -> u8 {
         match self {
+            Self::KernelStarted => b'R',
             Self::EntryPreludePhaseStarted => b'A',
             Self::InterruptStreamPrepared => b'I',
             Self::KernelImagePrepared => b'K',

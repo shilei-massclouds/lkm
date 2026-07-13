@@ -2,15 +2,19 @@
 
 本文记录 `spec/model` 中的模型元素映射到 Rust 内核代码时的默认规则。该文件会随着 `arceos_ex` 实践持续细化。
 
-## 正式规格入口
+## Coding 权威入口
 
-本文件是说明性文档。对象级代码生成和实现阶段必须遵守的硬性要求已经移入正式规格 [`main.spec`](main.spec)，并由 [`mapping.spec`](mapping.spec) 承载。
+本文是 model 到 impl 的权威自然语言映射规则。coding 层不再建立与 model 并行的 formal
+语义；对象、状态、迁移、依赖和阶段顺序以 `spec/model` 为准，本文只说明这些语义如何落到
+代码。现存 `spec/coding/**/*.spec` 是迁移期遗留索引，不得覆盖本文或 model，也不得新增；
+其内容按主题迁入 `.md` 或上移 model 后分批删除。
 
-后续说明、例子和建议不得降低 `mapping.spec` 中的硬约束。若无法满足正式规格中的任一硬约束，必须停止实现并报告规格缺口、工具缺口或实现阻塞。
+若本文映射无法落实 model，必须停止实现并报告 charter、model、coding 或工具缺口，不能在
+coding 层另造 predicate 来覆盖冲突。
 
 ## 规则强度
 
-正式 coding 规格使用以下规则强度：
+coding 自然语言规则使用以下强度：
 
 - `MUST`：硬约束。违反时必须停止实现，直到模型、coding 规格、工具或实现被修正。
 - `SHOULD`：强建议。实现默认应遵循；若偏离，必须记录原因、生效范围和未来收敛路径。
@@ -60,7 +64,9 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 ### 基本映射
 
-1. **叶子子阶段是 impl 中唯一出现实体的层**。编排层（Kernel、BootPhase、InterruptPhase、UpMultitaskPhase、SmpRuntimePhase、PayloadPhase）不生成独立函数或模块；其 `drives` 语义坍缩为子阶段间的调用顺序。
+1. **每一级都保留可追踪边界**。叶子阶段生成完整 `preset()`、`setup()`、`enable()` 过程；
+   composite system/phase 可以生成轻量 module、状态记录和 transition continuation，但不得把
+   子阶段对象动作吸收到父层。父层 `drives` 在运行时展开为子阶段调用链。
 
 2. **每个子阶段的每个迁移对应一个函数**：`preset()`、`setup()`、`enable()`。函数体遵循统一结构：
 
@@ -73,9 +79,15 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
    }
    ```
 
-3. **子阶段间串接**：前一个子阶段的 `enable()` 末尾（emits 位置）调用后一个子阶段的 `preset()`。若本子阶段是本层最后一个，则 `enable()` 末尾调用下一编排层首个子阶段的 `preset()`。
+3. **子阶段间串接**：前一个子阶段的 `enable()` 提交 `Online` 后，在 `emits` 位置调用后一个
+   子阶段的 `preset()`。若它完成父 transition 的最后一个 `drives`，则先进入父 transition
+   completion：检查 `ensures`、提交父状态，再由父 transition 的 `emits` 启动下一迁移或下一
+   sibling。不得跳过父层状态提交直接穿越到其它阶段树。
 
-4. **编排层 coding 文件**只记录子阶段的串接顺序，不生成函数。例如 `coding/phases/boot.md` 描述 `EntryPreludePhase → EntrySuccessorPhase → CorePreparePhase → MmCoreInitPhase → SchedInitPhase` 的串接关系。
+4. **编排层 coding 文件**记录每个父 transition 驱动哪些子阶段、completion continuation 的
+   进入点、父状态提交和后续 `emits`。impl 不生成一个同步包裹全部子阶段的父函数，但可以
+   生成 `preset_start()`、`preset_after_children()` 等明确 continuation；名称必须在 coding
+   文件说明。
 
 5. **叶子子阶段 coding 文件**详细描述每个迁移的 `depends_on`/`drives`/`ensures`/`emits` 到 impl 的具体映射。
 
@@ -282,11 +294,10 @@ object fact 还是 deferred boundary。Runtime Core 窗口中的 `sched_init_smp
 - 与 Linux 状态差分的采集接口。
 - typestate 与运行期状态字段的选择规则。
 
-<!-- formal-predicate-notes:spec/coding/mapping.spec START -->
+## 遗留规则迁移正文
 
-## Formal predicate notes
-
-以下说明从 `spec/coding/mapping.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+以下内容最初从迁移期 `mapping.spec` 汇入，现已属于本文权威映射正文。`mapping.spec` 在最终
+coding `.spec` 退场批次删除；过渡期间其中的 rule ID 不得覆盖本文。
 
 ### CodingRuleLevels
 
@@ -487,5 +498,3 @@ Their notes must distinguish cpuset/cgroup trimmed no-op position
 reservation, driver core deferred boundary, procfs IRQ view deferred
 boundary, constructor table dispatch, initcall table dispatcher, and
 the do_basic_setup() end boundary before the KUnit handoff.
-
-<!-- formal-predicate-notes:spec/coding/mapping.spec END -->

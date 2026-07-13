@@ -1,48 +1,56 @@
 # arceos_ex coding index
 
-本文是 `arceos_ex` coding 规格的兼容入口和阅读索引。正式硬约束入口仍是 [`arceos_ex.spec`](arceos_ex.spec)，该文件只 include 拆分后的 system、phase 和 object formal 文件。
+本文是 `arceos_ex` 的 coding 阅读索引。coding 层以自然语言 `.md` 为权威来源；对象、状态、
+迁移、依赖和阶段顺序来自 `spec/model`，本目录只说明它们如何映射到当前 Rust 实现。
 
-当前目标仍是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成 Boot、Interrupt、UpMultitask、SmpRuntime 到 Payload 的启动链路。长篇对象级实现说明、命令和工程边界保留在 [`arceos_ex-implementation.md`](arceos_ex-implementation.md)。
+长篇实现说明、命令和阶段性取舍位于
+[`arceos_ex-implementation.md`](arceos_ex-implementation.md)。
 
 ## 阅读顺序
 
-1. [`main.spec`](main.spec)：coding 目录正式入口。
-2. [`arceos_ex.spec`](arceos_ex.spec)：`arceos_ex` 兼容入口，按拆分后的 formal 文件 include。
-3. [`systems/kernel.spec`](systems/kernel.spec) / [`systems/kernel.md`](systems/kernel.md)：Kernel system 与 startup/payload handoff 约束。
-4. Phase topic：按 Boot -> Interrupt -> UpMultitask -> SmpRuntime 阅读对应 `phases/` 文件。
-5. Object topic：按需要阅读 `objects/` 下的 reusable object/subsystem 约束。
-6. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现说明、命令、阶段性取舍和专题方案。
+1. [`README.md`](README.md) 和 [`mapping.md`](mapping.md)：coding 职责及通用映射规则。
+2. [`projects/kernel.md`](projects/kernel.md)：KernelProject 映射。
+3. [`systems/kernel.md`](systems/kernel.md)：Kernel 生命周期和顶层阶段树映射。
+4. 编排阶段：Boot -> Interrupt -> UpMultitask -> SmpRuntime -> Payload。
+5. 对应叶子阶段和普通对象主题。
+6. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
 
-## Formal topic index
+## System 与阶段索引
 
-| Scope | Formal | Notes |
-| --- | --- | --- |
-| Kernel system/startup | [`systems/kernel.spec`](systems/kernel.spec) | [`systems/kernel.md`](systems/kernel.md) |
-| Boot phase: `entry-prelude` | [`phases/boot/entry-prelude.spec`](phases/boot/entry-prelude.spec) | [`phases/boot/entry-prelude.md`](phases/boot/entry-prelude.md) |
-| Boot phase: `entry-successor` | [`phases/boot/entry-successor.spec`](phases/boot/entry-successor.spec) | [`phases/boot/entry-successor.md`](phases/boot/entry-successor.md) |
-| Boot phase: `core-prepare` | [`phases/boot/core-prepare.spec`](phases/boot/core-prepare.spec) | [`phases/boot/core-prepare.md`](phases/boot/core-prepare.md) |
-| Boot phase: `mm-core-init` | [`phases/boot/mm-core-init.spec`](phases/boot/mm-core-init.spec) | [`phases/boot/mm-core-init.md`](phases/boot/mm-core-init.md) |
-| Interrupt phase: `irq-time-init` | [`phases/interrupt/irq-time-init.spec`](phases/interrupt/irq-time-init.spec) | [`phases/interrupt/irq-time-init.md`](phases/interrupt/irq-time-init.md) |
-| Interrupt phase: `local-irq-enable` | [`phases/interrupt/local-irq-enable.spec`](phases/interrupt/local-irq-enable.spec) | [`phases/interrupt/local-irq-enable.md`](phases/interrupt/local-irq-enable.md) |
-| Interrupt phase: `irq-open-prepare` | [`phases/interrupt/irq-open-prepare.spec`](phases/interrupt/irq-open-prepare.spec) | [`phases/interrupt/irq-open-prepare.md`](phases/interrupt/irq-open-prepare.md) |
-| Interrupt phase: `process-prepare` | [`phases/interrupt/process-prepare.spec`](phases/interrupt/process-prepare.spec) | [`phases/interrupt/process-prepare.md`](phases/interrupt/process-prepare.md) |
-| Up-multitask phase: `rest-init` | [`phases/up-multitask/rest-init.spec`](phases/up-multitask/rest-init.spec) | [`phases/up-multitask/rest-init.md`](phases/up-multitask/rest-init.md) |
-| SMP runtime phase: `pre-smp-init` | [`phases/smp-runtime/pre-smp-init.spec`](phases/smp-runtime/pre-smp-init.spec) | [`phases/smp-runtime/pre-smp-init.md`](phases/smp-runtime/pre-smp-init.md) |
-| SMP runtime phase: `smp-bringup` | [`phases/smp-runtime/smp-bringup.spec`](phases/smp-runtime/smp-bringup.spec) | [`phases/smp-runtime/smp-bringup.md`](phases/smp-runtime/smp-bringup.md) |
-| SMP runtime phase: `runtime-core` | [`phases/smp-runtime/runtime-core.spec`](phases/smp-runtime/runtime-core.spec) | [`phases/smp-runtime/runtime-core.md`](phases/smp-runtime/runtime-core.md) |
-| SMP runtime phase: `initcall` | [`phases/smp-runtime/initcall.spec`](phases/smp-runtime/initcall.spec) | [`phases/smp-runtime/initcall.md`](phases/smp-runtime/initcall.md) |
-| SMP runtime phase: `rootfs` | [`phases/smp-runtime/rootfs.spec`](phases/smp-runtime/rootfs.spec) | [`phases/smp-runtime/rootfs.md`](phases/smp-runtime/rootfs.md) |
-| SMP runtime phase: `finalize` | [`phases/smp-runtime/finalize.spec`](phases/smp-runtime/finalize.spec) | [`phases/smp-runtime/finalize.md`](phases/smp-runtime/finalize.md) |
-| Object/subsystem: `device-tree MUST` | [`objects/device-tree-must.spec`](objects/device-tree-must.spec) | [`objects/device-tree-must.md`](objects/device-tree-must.md) |
-| Object/subsystem: `device-tree SHOULD` | [`objects/device-tree-should.spec`](objects/device-tree-should.spec) | [`objects/device-tree-should.md`](objects/device-tree-should.md) |
-| Object/subsystem: `effective-context` | [`objects/effective-context.spec`](objects/effective-context.spec) | [`objects/effective-context.md`](objects/effective-context.md) |
-| Object/subsystem: `completion` | [`objects/completion.spec`](objects/completion.spec) | [`objects/completion.md`](objects/completion.md) |
-| Object/subsystem: `block-io` | [`objects/block-io.spec`](objects/block-io.spec) | [`objects/block-io.md`](objects/block-io.md) |
+| Scope | Coding 映射 |
+| --- | --- |
+| Kernel system/startup | [`systems/kernel.md`](systems/kernel.md) |
+| Boot orchestration | [`phases/boot.md`](phases/boot.md) |
+| Boot `entry-prelude` | [`phases/boot/entry-prelude.md`](phases/boot/entry-prelude.md) |
+| Boot `entry-successor` | [`phases/boot/entry-successor.md`](phases/boot/entry-successor.md) |
+| Boot `core-prepare` | [`phases/boot/core-prepare.md`](phases/boot/core-prepare.md) |
+| Boot `mm-core-init` | [`phases/boot/mm-core-init.md`](phases/boot/mm-core-init.md) |
+| Boot `sched-init` | [`phases/boot/sched-init.md`](phases/boot/sched-init.md) |
+| Interrupt orchestration | [`phases/interrupt.md`](phases/interrupt.md) |
+| Interrupt `irq-time-init` | [`phases/interrupt/irq-time-init.md`](phases/interrupt/irq-time-init.md) |
+| Interrupt `local-irq-enable` | [`phases/interrupt/local-irq-enable.md`](phases/interrupt/local-irq-enable.md) |
+| Interrupt `irq-open-prepare` | [`phases/interrupt/irq-open-prepare.md`](phases/interrupt/irq-open-prepare.md) |
+| Interrupt `process-prepare` | [`phases/interrupt/process-prepare.md`](phases/interrupt/process-prepare.md) |
+| UpMultitask orchestration | [`phases/up-multitask.md`](phases/up-multitask.md) |
+| UpMultitask `rest-init` | [`phases/up-multitask/rest-init.md`](phases/up-multitask/rest-init.md) |
+| SMP runtime orchestration | [`phases/smp-runtime.md`](phases/smp-runtime.md) |
+| SMP runtime `pre-smp-init` | [`phases/smp-runtime/pre-smp-init.md`](phases/smp-runtime/pre-smp-init.md) |
+| SMP runtime `smp-bringup` | [`phases/smp-runtime/smp-bringup.md`](phases/smp-runtime/smp-bringup.md) |
+| SMP runtime `runtime-core` | [`phases/smp-runtime/runtime-core.md`](phases/smp-runtime/runtime-core.md) |
+| SMP runtime `initcall` | [`phases/smp-runtime/initcall.md`](phases/smp-runtime/initcall.md) |
+| SMP runtime `rootfs` | [`phases/smp-runtime/rootfs.md`](phases/smp-runtime/rootfs.md) |
+| SMP runtime `finalize` | [`phases/smp-runtime/finalize.md`](phases/smp-runtime/finalize.md) |
+| Payload | [`phases/payload.md`](phases/payload.md) |
 
-<!-- formal-predicate-notes:spec/coding/arceos_ex.spec START -->
+## Object 索引
 
-## Formal predicate notes
+| Scope | Coding 映射 |
+| --- | --- |
+| Device tree MUST | [`objects/device-tree-must.md`](objects/device-tree-must.md) |
+| Device tree SHOULD | [`objects/device-tree-should.md`](objects/device-tree-should.md) |
+| Effective context | [`objects/effective-context.md`](objects/effective-context.md) |
+| Completion | [`objects/completion.md`](objects/completion.md) |
+| Block I/O | [`objects/block-io.md`](objects/block-io.md) |
 
-`arceos_ex.spec` 现在是 include-only 兼容入口；predicate notes 不再集中维护在本文件。请按上表进入对应 topic `.md`，或从 [`arceos_ex.spec`](arceos_ex.spec) 的 include 顺序跳转。
-
-<!-- formal-predicate-notes:spec/coding/arceos_ex.spec END -->
+现存同主题 `.spec` 是待迁移遗留文件，不是阅读入口，也不得覆盖上述 `.md`。迁移状态见
+[`../../docs/roadmap/phase-paradigm-audit.md`](../../docs/roadmap/phase-paradigm-audit.md)。

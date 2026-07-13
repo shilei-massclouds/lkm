@@ -163,16 +163,20 @@ class StressRunnerTests(unittest.TestCase):
         text = "checkpoint: EntryPreludePhase.Ready\n"
         size = len(text.encode())
         line = (
-            f"AIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
+            f"RAIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
             f"overflow=0 dropped=0 data={text.encode().hex()}\n"
         )
         observed, stress_mem = runner._observed_text(line)
 
-        self.assertEqual(observed, "AIKOZHTS\n" + text)
+        self.assertEqual(observed, "RAIKOZHTS\n" + text)
         self.assertIsNotNone(stress_mem)
         events = runner._extract_events(observed)
         self.assertEqual(
             runner._event_token(events[0]),
+            "checkpoint:Kernel.Started",
+        )
+        self.assertEqual(
+            runner._event_token(events[1]),
             "checkpoint:EntryPreludePhase.Started",
         )
 

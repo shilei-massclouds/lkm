@@ -58,5 +58,4 @@
 
 ## 映射目标
 
-* [model/kernel](spec/model/systems/kernel.spec)
-
+* [model/kernel](../../model/systems/kernel.spec)

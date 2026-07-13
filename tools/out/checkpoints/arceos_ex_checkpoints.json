@@ -3,7 +3,7 @@
     "index": 0,
     "variant": "KernelStarted",
     "name": "Kernel.Started",
-    "early_byte": null,
+    "early_byte": "R",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {

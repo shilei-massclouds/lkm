@@ -33,13 +33,14 @@ Base --[Preset]--> Prepared --[Setup]--> Ready --[Enable]--> Online
 
 对于阶段范式，同级阶段之间可以前后自动串接。
 
-前一阶段的 Online 状态自动与后一阶段的Base状态重叠，并自动触发后一阶段的Preset。后一阶段 Preset 的 `depends_on` 中，检查确认前一阶段达到`Online` 状态。
-
-> Fix: 上面这段描述，后续需要改成前一阶段的Enable emits 后一阶段的Preset。
+前一阶段的 `Enable` 完成、提交 `Online` 状态后，通过 `emits` 发出后一阶段的 `Preset`。
+`Online` 和后一阶段 `Base` 是两个不同对象各自的状态，不发生状态重叠。后一阶段是否还需要在
+`Preset.depends_on` 中检查前一阶段 `Online`，取决于父阶段 `drives` 和 `emits` 链是否已经
+唯一保证顺序；若为了非确定性推导或外部入口仍需该事实，应显式保留检查。
 
 ```
-Level N-1 Online → Level N Preset
-Level N Online   → Level N+1 Preset
+Level N-1 Enable commits Online --emits--> Level N Preset
+Level N   Enable commits Online --emits--> Level N+1 Preset
 ```
 
 串接关系的具体粒度取决于实际编排时序：父阶段的驱动链（`drives`）保证阶段顺序，`depends_on` 只在模型非确定性推进需额外约束时使用。不加 `depends_on` 的 Preset 意味着父阶段结构已足够保证排序。`invariant` 不用于 `Base` 状态，因为初始状态无法匹配尚未到达的 predecessor Online 条件。

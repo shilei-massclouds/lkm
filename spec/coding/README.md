@@ -1,39 +1,36 @@
 # Coding 规格
 
-本目录记录从模型规格生成或指导内核代码实现时需要遵守的补充约束。
+本目录用自然语言记录模型规格到具体代码实现的映射规则。
 
-主规格和 `spec/model` 仍是对象、状态、事件、依赖、阶段顺序和证明边界的权威来源；本目录不重新定义模型语义，只补充对象级编码阶段必须知道的架构、语言、参考实现和工程组织要求。若 coding 规格需要覆盖某条模型规格，必须明确列出覆盖范围、理由和生效对象。
+charter 说明设计意图，`spec/model` 是对象、状态、事件、依赖、阶段顺序和证明边界的正式
+来源；coding 不重新定义或覆盖模型语义，只描述模型元素在目标实现中的函数、状态、检查、
+checkpoint、架构边界和源码落点。
 
 ## 阅读入口
 
-`spec/coding/README.md` 是 coding 规格目录的说明入口，只负责说明范围、文档优先级和阅读顺序。正式规格入口是 [`main.spec`](main.spec)；对象级代码生成的硬性约束从 `main.spec` include 的 [`mapping.spec`](mapping.spec) 进入。实现代码前必须先阅读正式 `.spec` 入口，再阅读对应 `.md` 说明。
+`spec/coding/README.md` 是目录入口，[`mapping.md`](mapping.md) 是通用 model-to-impl 映射
+入口。实现某个 system、phase 或 object 前，再按模型树读取对应的 `.md`。coding 层没有
+独立 formal 入口。
 
 ## `.spec` 与 `.md` 分工
 
-`.spec` 文件只作为 formal 硬约束索引：保留 predicate/type 名称、规则强度分层、type 分组、最短规则标签，以及被实现 metadata、model 注释或工具引用的稳定路径。长背景、Linux/ArceOS 参考路径解释、实现例子、阶段性取舍、deferred 细节和重复说明必须维护在对应 `.md` 中。
-
-新增 coding 约束时默认先写 `.md`。只有当该约束需要成为 formal 硬约束、需要被工具/模型引用，或需要稳定 rule ID 承载实现门禁时，才在 `.spec` 中新增 predicate，并用 1 行短标签指向 `.md` 正文。不得在 `.spec` 中重新复制 `.md` 的解释性正文。
+`.md` 是 coding 层唯一权威来源。不得新增 coding `.spec`、predicate 或 type。现存 `.spec`
+是迁移期遗留：其中属于生命周期、对象关系或依赖的内容上移到 model，属于实现落点、语言、
+架构、测试和工程映射的内容迁入对应 `.md`，重复内容删除。每一批只有在引用和工具消费者
+迁移后才删除对应 `.spec`。
 
 当前阅读顺序为：
 
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
-2. `main.spec`：coding 目录正式规格入口。
-3. `mapping.spec`：对象、Phase、状态、事件、checkpoint、源码落点和规则强度分层的正式规格。
-4. `build.spec`：Makefile、helper scripts、生成产物、磁盘镜像、QEMU 和测试命令链相关的正式规格。
-5. `riscv64.spec`：RISC-V64 架构、链接脚本和入口地址语义相关的正式规格。
-6. `rust.spec`：Rust 语言、安全边界和 ABI 相关的正式规格。
-7. `arceos_ex.spec`：当前 `arceos_ex` 目标内核的兼容 formal 入口；该文件只 include 拆分后的 system、phase 和 object topic。
-8. `projects/kernel.spec`、`systems/kernel.spec`：project/system 层级的 formal 编码约束，其中 `systems/kernel.spec` 也承载 `arceos_ex` startup/payload handoff 系统约束。
-9. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
-10. `build.md`：对 `build.spec` 的说明、当前 Makefile 入口和脚本约束。
-11. `riscv64.md`：RISC-V64 架构相关补充说明。
-12. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
-13. `arceos.md`：参考 ArceOS 时的取舍原则。
-14. `arceos_ex.md`：当前实验内核的 coding 索引入口，链接拆分后的 formal topic 和实现说明。
-15. `arceos_ex-implementation.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
-16. `projects/kernel.md`、`systems/kernel.md`：project/system 层级 formal predicate 的解释性正文。
+2. `mapping.md`：对象、Phase、状态、事件、checkpoint 和源码落点的通用映射规则。
+3. `build.md`、`riscv64.md`、`rust.md`：构建、架构和语言映射规则。
+4. `projects/kernel.md`、`systems/kernel.md`：project/system 层级映射。
+5. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
+6. `arceos_ex.md`：当前目标内核的 coding 索引。
+7. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
 
-若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
+若四层发生冲突，不能选择更方便的解释：先回到 charter 明确意图，再修正 model，随后更新
+coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 coding。
 
 ## 阶段边界
 
@@ -50,33 +47,15 @@
 
 `spec/coding/` 保留 `projects/`、`systems/`、`phases/`、`objects/` 四类子目录，
 与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
-`rust/` 等通用编码规格继续由本目录根入口承载；`arceos_ex.spec` 保留为稳定兼容入口，但
-其目标内核专题规则已经按系统、阶段和对象拆入上述子目录。后续新增或拆分的专题约束，
+`rust/` 等通用编码规格继续由本目录根入口承载；目标内核专题规则按系统、阶段和对象拆入
+上述子目录。后续新增或拆分的专题约束，
 若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
 
-## Formal 入口清单
+## `.spec` 迁移基线
 
-本清单记录 2026-07-09 `spec/coding` 拆分后的 formal 入口状态；predicate/type 名称在拆分中保持不变。
-
-| Formal 文件 | Predicates | Types | 瘦身前行数 | 当前行数 | 说明正文 |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `main.spec` | 0 | 0 | 14 | 14 | `README.md` |
-| `mapping.spec` | 28 | 4 | 331 | 137 | `mapping.md` |
-| `build.spec` | 18 | 2 | 219 | 88 | `build.md` |
-| `riscv64.spec` | 11 | 3 | 140 | 57 | `riscv64.md` |
-| `rust.spec` | 6 | 2 | 87 | 39 | `rust.md` |
-| `arceos_ex.spec` | 0 | 0 | 1653 | 28 | `arceos_ex.md` |
-| `projects/kernel.spec` | 6 | 1 | 68 | 35 | `projects/kernel.md` |
-| `systems/kernel.spec` | 80 | 2 | 41 | 209 | `systems/kernel.md` |
-
-`arceos_ex.spec` 是稳定兼容入口，不直接声明 predicate/type。其 include 顺序保留原 `arceos_ex` type 的迁移顺序，具体 formal 文件按以下 topic 阅读：
-
-- System：[`systems/kernel.spec`](systems/kernel.spec) / [`systems/kernel.md`](systems/kernel.md)，包括 `KernelSystemCoding` 和 `ArceosExStartupPhaseCodingMust`。
-- Boot phases：`phases/boot/entry-prelude.*`、`entry-successor.*`、`core-prepare.*`、`mm-core-init.*`。
-- Interrupt phases：`phases/interrupt/irq-time-init.*`、`local-irq-enable.*`、`irq-open-prepare.*`、`process-prepare.*`。
-- Up-multitask phase：`phases/up-multitask/rest-init.*`。
-- SMP runtime phases：`phases/smp-runtime/pre-smp-init.*`、`smp-bringup.*`、`runtime-core.*`、`initcall.*`、`rootfs.*`、`finalize.*`。
-- Objects/subsystems：`objects/device-tree-must.*`、`device-tree-should.*`、`effective-context.*`、`completion.*`、`block-io.*`。
+Kernel 根审计开始时 coding 目录有 26 个 `.spec`。本批删除已经不可解析的 `main.spec` 和
+`arceos_ex.spec` 后剩余 24 个：通用映射/构建/架构/语言 4 个、project 1 个、phase 14 个、
+object 5 个。后续按阶段树审计批次迁移 phase 文件，最后处理其它类别。
 
 ## 当前实践目标
 
@@ -97,14 +76,11 @@
 
 编码阶段按以下顺序解释规格：
 
-1. `spec/model/SEMANTICS.md`：模型生命周期硬语义，不允许被编码便利性绕过。
-2. `spec/model/**/*.spec`：对象、状态、事件、依赖、驱动顺序和阶段完成条件。
-3. `spec/charter/main.md`：项目章程、模型意图、设计背景、对象解释和参考边界。
-4. `spec/coding/main.spec` 与其 include 的正式规格：面向对象级代码实现的硬约束。
-5. `spec/coding/*.md`：面向对象级代码实现的补充说明。
-6. `spec/compose/main.spec` 与其 include 的正式规格：面向 crate/module 组合、公开接口和构建接入的硬约束。
-7. `spec/compose/*.md`：面向 crate/module 组合、公开接口和构建接入的补充说明。
-8. `tgoskits` 或当前实验内核目录内的本地约定：目录、构建、测试和已有抽象。
+1. `spec/charter`：设计意图、职责边界和参考范围；若与 model 冲突，先完成审计并修正 model。
+2. `spec/model/SEMANTICS.md` 与 `spec/model/**/*.spec`：正式生命周期、对象、迁移和依赖语义。
+3. `spec/coding/**/*.md`：model 到对象级代码实现的权威自然语言映射。
+4. `spec/compose/main.spec`、`spec/compose/*.md`：crate/module 组合和公开接口约束。
+5. 当前实现目录的工程约定：构建、测试和已有抽象；不得反向覆盖前三层。
 
 ## 模型到代码的默认映射
 
@@ -150,17 +126,9 @@
 - `riscv64.md`：RISC-V64 架构相关编码约束。
 - `rust.md`：Rust 语言和安全边界相关编码约束。
 - `arceos.md`：参考 ArceOS 时的取舍原则和映射约束。
-- `main.spec`：coding 目录正式规格入口。
-- `mapping.spec`：模型对象、阶段、状态、事件和检查点到代码的正式规则，包括 `MUST`、`SHOULD`、`MAY` 和 `NOTE` 分层。
-- `build.spec`：Makefile、helper scripts、生成产物、磁盘镜像、QEMU 和测试命令链的正式规则。
-- `riscv64.spec`：RISC-V64 链接脚本、入口地址事实和地址转换来源的正式规则。
-- `rust.spec`：Rust 语言、安全边界和 ABI 使用的正式规则。
-- `arceos_ex.spec`：当前 `arceos_ex` 目标内核的兼容 formal 入口，include 拆分后的 system、phase 和 object topic。
-- `projects/kernel.spec`：KernelProject 层级的 formal 编码约束。
-- `systems/kernel.spec`：Kernel system 层级和 `arceos_ex` startup/payload handoff 的 formal 编码约束。
-- `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
+- `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的权威映射规则。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
-- `arceos_ex.md`：`arceos_ex` coding 兼容索引入口，链接拆分后的 formal topic 和实现说明。
+- `arceos_ex.md`：`arceos_ex` coding 索引入口，链接 system、phase、object 和实现说明。
 - `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
-- `projects/kernel.md`：KernelProject formal predicate 的说明性正文。
-- `systems/kernel.md`：Kernel system formal predicate 的说明性正文。
+- `projects/kernel.md`：KernelProject 实现映射。
+- `systems/kernel.md`：Kernel system 实现映射。

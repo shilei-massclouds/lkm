@@ -21,6 +21,7 @@ const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_ADOPT_BEGIN: usize = b'A' as usize;
+const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
 const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
 const TRACE_ROOT_STREAM_PRESET: usize = b'O' as usize;
@@ -51,6 +52,10 @@ _start:
     # Preserve OpenSBI boot arguments while the head segment rewrites a0.
     mv s0, a0
     mv s1, a1
+
+    # Kernel.Preset starts before its first driven phase.
+    li a0, {trace_kernel_started}
+    call {head_checkpoint}
 
     /*
      * EntryPreludePhase.setup() head segment.
@@ -139,6 +144,7 @@ _start:
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_init_task_preset = const TRACE_INIT_TASK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
+    trace_kernel_started = const TRACE_KERNEL_STARTED,
     trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
     trace_root_stream_preset = const TRACE_ROOT_STREAM_PRESET,
 );
@@ -208,6 +214,10 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     crate::phases::shutdown_on_error(
         crate::phases::prepare::adopt_head_prefix(&boot_args),
         "arceos_ex prepare event failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        crate::systems::kernel::adopt_head_preset_start(),
+        "arceos_ex kernel preset start failed\n",
     );
     preset_flow(&boot_args)
 }
@@ -286,10 +296,7 @@ extern "C" fn after_vm_setup_continuation() -> ! {
         after_vm_setup(ctx),
         "arceos_ex entry prelude preset tail failed\n",
     );
-    crate::phases::shutdown_on_error(
-        adopt_ready(ctx),
-        "arceos_ex entry prelude setup failed\n",
-    );
+    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex entry prelude setup failed\n");
     enable(ctx)
 }
 
@@ -310,10 +317,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
 
 /// Implements the Enable migration from `EntryPreludePhase` to `EntrySuccessorPhase`.
 fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(
-        enable_event(ctx),
-        "arceos_ex entry prelude enable failed\n",
-    );
+    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex entry prelude enable failed\n");
     crate::phases::boot::entry_successor::preset(ctx)
 }
 

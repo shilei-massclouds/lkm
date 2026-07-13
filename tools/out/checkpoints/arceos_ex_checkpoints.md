@@ -2,7 +2,7 @@
 
 | index | variant | name | early_byte | source_file |
 | ---: | --- | --- | --- | --- |
-| 0 | KernelStarted | Kernel.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 0 | KernelStarted | Kernel.Started | R | impl/arceos_ex/src/checkpoint/mod.rs |
 | 1 | KernelOnline | Kernel.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 2 | PreparePhaseReady | PreparePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 3 | PreparePhaseOnline | PreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

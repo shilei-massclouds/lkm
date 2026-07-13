@@ -92,6 +92,8 @@ object Kernel: KernelObject {
                 }
 
                 ensures {
+                    UpMultitaskPhase.state == State::Online;
+                    SmpRuntimePhase.state == State::Online;
                     PayloadPhase.state == State::Online;
                 }
             }

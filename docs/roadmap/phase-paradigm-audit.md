@@ -68,9 +68,12 @@ Kernel
 
 1. **计划与基线（完成）**：已建立本文并冻结审计契约，记录了现存文件、失效引用、四层
    检查项和批次门禁；根目录 `make test` 为 167/167。
-2. **Kernel 根与 coding 权威来源（待办）**：审计 Kernel 四层；解决阶段范式 sibling 串接
-   Fix；把 coding README/mapping 改为 `.md` 权威；清理已删除 `systems/kernel.spec` 的引用；
-   对现存 coding `.spec` 建立迁移分类。
+2. **Kernel 根与 coding 权威来源（完成）**：Kernel charter/model/coding/impl 已对齐；sibling
+   串接改为前一阶段 `Enable` 提交 Online 后 `emits` 下一阶段 Preset；coding README/mapping
+   已改为 `.md` 权威；删除不可解析的 `coding/main.spec` 和 `coding/arceos_ex.spec`，顶层
+   `spec/main.spec` 恢复可解析；剩余 24 个 coding `.spec` 已分类。announce 运行以
+   `RAI...` 证明 `Kernel.Started` 先于 `EntryPreludePhase.Started`，并最终到达
+   `Kernel.Online -> Hello, world!`。
 3. **BootPhase（待办）**：先审计编排层，再按五个叶子阶段顺序执行；EntryPrelude 作为已实现
    样板重新复核，入口汇编例外必须有四层对应说明。
 4. **InterruptPhase（待办）**：审计四个叶子阶段，重点核对中断开关、effective context、
@@ -101,7 +104,7 @@ Kernel
 
 | 节点 | Charter | Model | Coding `.md` | Impl | 结论 |
 | --- | --- | --- | --- | --- | --- |
-| Kernel | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RAI...`、Kernel.Online 已验证 | complete |
 | BootPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
 | EntryPreludePhase | 已有首轮 | 已有首轮 | 已有首轮 | 已有首轮 | recheck |
 | EntrySuccessorPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
@@ -129,9 +132,12 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录当前仍有 26 个 `.spec` 文件。
-- `spec/coding/README.md`、`spec/coding/main.spec` 和 `spec/coding/arceos_ex.spec` 仍引用已删除的
-  `systems/kernel.spec`。
-- `spec/charter/phase-paradigm.md` 仍有 sibling 串接语义的 Fix 注记。
+- coding 目录已从 26 个 `.spec` 降到 24 个；剩余分类为通用映射/构建/架构/语言 4 个、
+  project 1 个、phase 14 个、object 5 个。
+- coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
+  已通过 pyveri 检查。
+- sibling 串接 Fix 已闭合为“前一阶段 Enable 提交 Online 后 emits 下一阶段 Preset”。
+- Kernel 根审计发现各 composite phase 当前 impl 仍把 model Online 完成边界命名/记录为
+  `Ready`；该问题按 Boot、Interrupt、UpMultitask、SmpRuntime 子树批次逐项修正。
 - 更新本计划前，根目录 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次，
   总计 90/90，通过且每个 case 只有一个成功事件序列。

@@ -10,6 +10,15 @@ use crate::{
 #[unsafe(link_section = ".data.phase")]
 static KERNEL_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
+pub fn adopt_head_preset_start() -> EventResult {
+    let state = crate::phases::state::load(&KERNEL_STATE);
+    if state != State::Base || !crate::phases::prepare::is_online() {
+        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    }
+
+    Ok(())
+}
+
 pub fn preset_after_boot() -> ! {
     if !crate::phases::prepare::is_online() || !crate::phases::boot::is_ready() {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel preset invariant failed\n");

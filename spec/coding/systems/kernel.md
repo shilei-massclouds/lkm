@@ -1,41 +1,79 @@
-# Kernel 系统编码指引
+# Kernel 系统编码映射
 
-`systems/kernel` 是 Kernel 生命周期的编排层。按[阶段链式映射规则](../mapping.md#阶段链式映射规则)，编排层在 impl 中不出现独立函数，其 `drives` 语义坍缩为子阶段间的调用顺序。
+本文件把 [`Kernel` model](../../model/systems/kernel.spec) 映射到
+`impl/arceos_ex/src/systems/kernel.rs` 及其驱动的阶段调用链。生命周期和阶段顺序由 model
+定义；本文只规定具体实现落点。
 
-## 串接顺序
+## Composite 映射
 
-Kernel 在模型中编排以下阶段树顶层子阶段。impl 中的串接链为：
+Kernel 是 composite system，仍完整保留 `Base -> Prepared -> Ready -> Online` 状态和
+`Preset/Setup/Enable` transition 边界。实现不使用一个同步函数包裹整棵子阶段树，而采用
+start/completion continuation：
 
+1. transition start 检查进入条件并调用首个 `drives` 子阶段；
+2. 子阶段通过自己的 `emits` 链运行；
+3. 最后一个子阶段回到 Kernel completion continuation；
+4. continuation 检查 `ensures`、提交 Kernel 目标状态，再执行 Kernel `emits`。
+
+因此 `systems/kernel.rs` 可以有轻量状态和 continuation 函数，但不得吸收叶子阶段对象动作、
+检查或 checkpoint。
+
+## 生命周期调用链
+
+### Preset
+
+OpenSBI 进入 `_start` 后，架构入口先保存固件参数，并在任何子阶段 checkpoint 之前输出
+`Kernel.Started` 的稳定早期编码。该几条入口指令是 Kernel.Preset start 的架构 lowering，
+物理上与 EntryPrelude 汇编同段，但不得排在 `EntryPreludePhase.Started` 之后。进入 Rust、完成
+`PreparePhase` adoption 后，`systems::kernel::adopt_head_preset_start()` 校验 Kernel 仍为
+`Base` 和准备条件，不重复输出 checkpoint。由于首个 `drives` 是
+`BootPhase.Preset -> EntryPreludePhase.Preset`，入口 ABI 随后直接继续 EntryPrelude，不额外
+绕过一个 Rust wrapper。
+
+BootPhase 达到 model `Online` 后进入 `systems::kernel::preset_after_boot()`。该 continuation
+检查 Prepare 和 Boot 完成条件，提交 Kernel `Base -> Prepared`，随后按 `emits Setup` 启动
+InterruptPhase 首个叶子阶段。
+
+### Setup
+
+InterruptPhase 达到 model `Online` 后进入 `systems::kernel::setup_after_interrupt()`。它检查
+Boot/Interrupt 完成条件，提交 Kernel `Prepared -> Ready`，随后按 `emits Enable` 启动
+UpMultitaskPhase。
+
+### Enable
+
+Kernel.Enable 的三个 `drives` 必须保持连续 owner 和顺序：
+
+```text
+UpMultitaskPhase
+  -> real BootIdleTask-to-KernelInitTask stack handoff
+  -> SmpRuntimePhase on KernelInitTask
+  -> PayloadPhase on KernelInitTask
 ```
-BootPhase 叶子链完成
-  → prepare: EntryPreludePhase.preset()  ← 启动入口
-  → EntryPreludePhase → EntrySuccessorPhase → CorePreparePhase → MmCoreInitPhase → SchedInitPhase
-  → InterruptPhase 叶子链:
-    → IrqTimeInitPhase → LocalIrqEnablePhase → IrqOpenPreparePhase → ProcessPreparePhase
-  → UpMultitaskPhase 叶子链:
-    → BootInitRestInitPhase → BootInitScheduleHandoffPhase → BootIdleEntryPhase
-  → SmpRuntimePhase 叶子链:
-    → PreSmpInitPhase → SmpBringupPhase → RuntimeCorePhase → InitcallPhase → RootfsPhase → FinalizePhase
-  → PayloadPhase.preset() → .setup() → .enable()  → 不返回
-```
 
-各段串接分别在对应编排层 coding 文件中详述。
+SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，检查前两棵子树已
+完成并启动 PayloadPhase。PayloadPhase 提交 `Online` 后调用 `systems::kernel::mark_online()`；
+该函数检查三个 `drives` 阶段均已达到 model `Online`，提交 Kernel `Ready -> Online` 并记录
+`Kernel.Online`，然后 selected payload 继续执行且不返回。
 
-`UpMultitaskPhase` 之后的串接必须服从任务所有权：实现可以先线性提交
-BootIdle owner-split 的对象/checkpoint 事实，但离开该阶段时必须真实切换到
-`KernelInitTask` 的 task stack；`SmpRuntimePhase` 和 `PayloadPhase` 只能由
-`kernel_init_entry()` 执行。BootIdle continuation 若恢复，必须留在无限 idle
-调度循环；KthreaddTask 当前可使用临时的无限主动 schedule 循环。二者均不得
-沿原启动调用栈直接执行 selected payload。
+## 状态与 checkpoint
 
-## 状态记录
+- `KERNEL_STATE` 只记录 Kernel 四个 model 状态，不驱动子对象生命周期。
+- `Kernel.Started` 属于 Kernel.Preset 开始边界；早期入口必须在任何子阶段 marker 前发出其
+  稳定编码，Rust system adoption 不得重复发出。
+- `Kernel.Online` 属于 Kernel.Enable 完成边界，只能在 PayloadPhase.Online 已提交后发出。
+- 子阶段 checkpoint 保留在对应 phase module，不得由 `systems/kernel.rs` 代发。
 
-Kernel 在 impl 中需要一个轻量状态变量用于记录和检查生命周期边界。但该变量不驱动任何阶段，仅用于 invariant 检查和 checkpoint。
+当前部分编排 phase 的实现查询仍命名为 `is_ready()`，但它们代表 model `Online` 完成边界；
+该命名和四状态记录必须在对应 Boot、Interrupt、UpMultitask、SmpRuntime 子树审计中收敛，
+不能据此降低 Kernel model 的 `Online` 要求。
 
-## 范围边界
+## 所有权与范围
 
-`systems/kernel` 只负责生命周期迁移的编排。子层关注点（ELF 加载、系统调用分发、地址空间设置、信号运行时、TTY、文件系统、凭据等）由各自的阶段或对象模块负责。这些主题的编码规则位于对应的阶段/对象编码文件中，不在此处。
+Kernel 只拥有顶层生命周期和阶段顺序。ELF、地址空间、syscall、文件系统、TTY、凭据等由
+对应 phase/object coding 文件描述。Payload 是 SmpRuntime 的 sibling，不是 RuntimeCore 的
+隐式副作用；`UserBootPayload` 是 selected payload variant，不是第二条启动链。
 
-## 形式谓词
-
-本层不定义形式谓词。以上生命周期和范围规则是对 Kernel 系统的完整编码指引。
+BootIdle continuation 若恢复，只能进入无限 idle 调度循环。SmpRuntime 和 Payload 必须由
+`kernel_init_entry()` 在 KernelInitTask task stack 上执行；KThreaddTask 不得沿启动栈执行
+payload。
