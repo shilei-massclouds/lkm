@@ -1,19 +1,16 @@
 # DeviceTree SHOULD coding
 
-本文件承载 `spec/coding/objects/device-tree-should.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+本文件是 DeviceTree SHOULD 实现映射的权威 coding 规格，保留稳定 rule ID、原
+`ArceosExDeviceTreeCodingShould` type 分组和 SHOULD 层级；这些 ID 用于评审和追踪，不是 pyveri predicate。
 
-<!-- formal-predicate-notes:spec/coding/objects/device-tree-should.spec START -->
-
-## Formal predicate notes
-
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`device-tree-should.spec`](device-tree-should.spec)。
+## Rule catalog
 
 ### ArceosExDeviceTreeCodingShould
 
 #### Unsafe encapsulation
 
+Rule ID: `arceos_ex_should_encapsulate_device_tree_unflatten_unsafe` (SHOULD).
+
 Raw pointer writes into MemBlock-backed storage should be kept behind
 a narrow internal boundary. The public DeviceTree event surface
 should expose safe state/query operations.
-
-<!-- formal-predicate-notes:spec/coding/objects/device-tree-should.spec END -->

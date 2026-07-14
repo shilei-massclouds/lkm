@@ -6,7 +6,7 @@
 
 本文件补充 `spec/model` 中与 RISC-V64 启动、CSR、页表、SBI、FDT 和中断异常入口相关的编码约束。它不重新定义对象生命周期，也不改变 `Preset`、`Setup`、`Enable`、`Cleanup` 的状态迁移语义。
 
-正式硬约束位于 [`riscv64.spec`](riscv64.spec)，并由 [`main.spec`](main.spec) 统一 include。本文只提供说明、背景和参考建议。
+本文是 RISC-V64 coding 层的权威约束来源；对象与生命周期语义仍以 `spec/model` 为准。
 
 第一轮实现只支持 RISC-V64，不要求提供其它架构的兼容层或空实现。
 
@@ -132,21 +132,23 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 - RISC-V64 链接脚本符号列表。
 - QEMU virt 与真实硬件之间的差异处理。
 
-<!-- formal-predicate-notes:spec/coding/riscv64.spec START -->
+## Rule catalog
 
-## Formal predicate notes
-
-以下说明从 `spec/coding/riscv64.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+以下规则是本文件的权威约束。迁移自旧索引的稳定 rule ID、原 type 分组和 MUST/SHOULD 层级在此保留；这些 ID 用于评审和追踪，不是 pyveri predicate。
 
 ### Riscv64LinkerScriptMust
 
 #### No fixed physical kernel load address
+
+Rule ID: `riscv64_must_linker_script_ignore_fixed_kernel_phys_addr` (MUST).
 
 RISC-V64 linker script generation must not define, require or
 consume a fixed kernel physical load address such as
 KERNEL_PHYS_ADDR. The physical load address is not a Config fact.
 
 #### Link address source
+
+Rule ID: `riscv64_must_linker_script_use_config_kernel_link_addr` (MUST).
 
 The kernel link virtual address used by the linker script must come
 from Config.kernel_link_addr. The linker script may also depend on
@@ -155,12 +157,16 @@ boot-stack size, section alignment and head-text layout.
 
 #### Runtime physical start
 
+Rule ID: `riscv64_must_kernel_phys_start_from_kernel_image` (MUST).
+
 The kernel physical image start is a runtime fact established by
 KernelImage.Preset from the actual entry/image position observed in
 the pre-MMU stage. It must be represented as KernelImage.phys_start
 or an equivalent model-backed resource fact.
 
 #### Address translation source
+
+Rule ID: `riscv64_must_address_translation_use_kernel_image_offset` (MUST).
 
 Runtime physical/link/virtual address conversion must derive its
 offset from KernelImage.phys_start and Config.kernel_link_addr. It
@@ -169,6 +175,11 @@ must not use a fixed Config.kernel_phys_addr-style constant.
 ### Riscv64AddressTranslationMust
 
 #### Trampoline page table handoff
+
+Rule IDs (MUST):
+
+- `riscv64_must_trampoline_vm_enable_flush_tlb_before_satp`
+- `riscv64_must_trampoline_vm_enable_commit_sync_fact_after_tlb_flush`
 
 Code generated for TrampolineVm.Enable must flush or otherwise
 invalidate the local address-translation cache after building the
@@ -185,6 +196,11 @@ The minimum acceptable implementation order is:
 
 #### Early page table handoff
 
+Rule IDs (MUST):
+
+- `riscv64_must_early_vm_enable_flush_tlb_after_satp`
+- `riscv64_must_early_vm_enable_commit_sync_fact_after_tlb_flush`
+
 Code generated for EarlyVm.Enable must flush or otherwise
 invalidate the local address-translation cache after writing the
 early SATP value. This maps Linux/RISC-V relocate_enable_mmu()'s
@@ -198,6 +214,11 @@ The minimum acceptable implementation order is:
    early_vm_translation_sync_complete(EarlyVm).
 
 #### Swapper page table handoff
+
+Rule IDs (MUST):
+
+- `riscv64_must_swapper_vm_enable_flush_tlb_after_satp`
+- `riscv64_must_swapper_vm_enable_commit_sync_fact_after_tlb_flush`
 
 Code generated for SwapperVm.Enable must flush or otherwise
 invalidate the local address-translation cache after writing the
@@ -216,6 +237,8 @@ The minimum acceptable implementation order is:
 
 #### Current task reference
 
+Rule ID: `riscv64_should_current_task_ref_follow_linux_tp` (SHOULD).
+
 RISC-V64 code should realize the model's CPU-local CurrentTaskRef by
 following the Linux-style use of the tp register as the current-task
 view. The object-level CurrentTaskSlot is the implementation
@@ -225,5 +248,3 @@ arch/riscv/kernel/entry.S::__switch_to, which moves next
 task_struct from a1 into tp. This is an implementation reference for
 this target; the model semantics remain CPU-view based and do not
 require per-cpu storage as the CurrentTaskRef abstraction.
-
-<!-- formal-predicate-notes:spec/coding/riscv64.spec END -->

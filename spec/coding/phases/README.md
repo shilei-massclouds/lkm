@@ -1,8 +1,8 @@
 # Coding Phases
 
 Phase-level model-to-impl mappings live in the `.md` files here. Read them in
-model phase-tree order. Same-name `.spec` files are migration leftovers and
-will be removed as each subtree audit completes.
+model phase-tree order. Coding `.spec` files have been retired and are forbidden
+by the repository `coding-spec-check` gate.
 
 ## Boot
 

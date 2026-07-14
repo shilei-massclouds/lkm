@@ -1,16 +1,14 @@
 # Block I/O coding
 
-本文件承载 `spec/coding/objects/block-io.spec` 的说明性正文。Formal 文件只保留 rule ID、type 分组和短标签。
+本文件是 Block I/O、只读 Ext2、rootfs fixture 与相关差分入口的权威 coding 规格。迁移自旧索引的稳定 rule ID、原 `ArceosExBlockIoCodingMust` type 分组和 MUST 层级在此保留；这些 ID 用于评审和追踪，不是 pyveri predicate。旧索引 invariant 中 8 个未配套顶层 predicate 声明的 ID 也按其有效 MUST 使用点完整保留。
 
-<!-- formal-predicate-notes:spec/coding/objects/block-io.spec START -->
-
-## Formal predicate notes
-
-以下说明从 `spec/coding/arceos_ex.md` 迁移而来；对应 formal 规则位于 [`block-io.spec`](block-io.spec)。
+## Rule catalog
 
 ### ArceosExBlockIoCodingMust
 
 #### Linux-like block I/O adapter
+
+Rule ID: `arceos_ex_must_block_io_model_bio_buffer_head_before_ext2` (MUST).
 
 Before read-only ext2 is introduced, the first filesystem-facing
 block I/O surface must be modeled as Bio, submit_bio_wait(),
@@ -19,6 +17,8 @@ introduce BlockReadRequest or BlockIoBuffer as substitute Linux
 top-level objects.
 
 #### Registry read role
+
+Rule ID: `arceos_ex_must_block_io_registry_read_remain_lower_level_adapter` (MUST).
 
 BlockDeviceRegistry::read_default()/read_by_devt(), or equivalent
 direct registry reads, are a lower-level synchronous adapter below
@@ -29,12 +29,16 @@ the public block layer.
 
 #### Smoke entry
 
+Rule ID: `arceos_ex_must_block_io_smoke_use_sb_bread_path` (MUST).
+
 App smoke coverage for the current ext2-superblock read must use
 sb_bread()/BufferHead over submit_bio_wait(). It may still validate
 registry facts produced underneath, but it must not bypass the new
 block I/O adapter by directly calling registry read APIs.
 
 #### BufferHead storage
+
+Rule ID: `arceos_ex_must_buffer_head_data_not_be_large_stack_storage` (MUST).
 
 BufferHead may carry up to 4KiB ext2 blocks, so its data payload
 must not be embedded as a large stack-allocated array or returned
@@ -43,12 +47,16 @@ heap-backed or equivalent exclusive dynamic storage for block data.
 
 #### Read-only ext2 first slice
 
+Rule ID: `arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based` (MUST).
+
 The next filesystem step must model and implement the Linux
 ext2_fill_super()/ext2_iget()/ext2_find_entry()/direct-block read
 shape over BufferHead. It must remain read-only and must not bypass
 the Bio/BufferHead layer by calling VirtioBlkDevice private reads.
 
 #### Ext2 object model
+
+Rule ID: `arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle` (MUST).
 
 Ext2Driver must replace the older Ext2Type role and hold the
 filesystem driver/operation-set facts. Ext2Volume must model the
@@ -61,6 +69,8 @@ VFS through the minimal mount-to-parent boundary.
 
 #### 4K Buffer / ext2 block-size support
 
+Rule ID: `arceos_ex_must_ext2_support_4k_buffer_and_block_sizes` (MUST).
+
 The next ext2 step must raise BufferHead and virtio-blk read buffers
 to at least 4KiB, and Ext2Volume/Ext2FileSystem must accept ext2
 block_size values 1024, 2048 and 4096. The superblock is still
@@ -70,6 +80,11 @@ reads must use the actual filesystem block size and block-number
 layout. make disk must not force 1KiB blocks by default.
 
 #### Direct-block read path generalization
+
+Rule IDs (MUST):
+
+- `arceos_ex_must_ext2_read_path_support_multi_direct_blocks`
+- `arceos_ex_must_ext2_read_path_support_single_indirect_blocks`
 
 Ext2FileSystem directory lookup must scan direct blocks of the
 current ext2 directory inode until a matching dirent is found or the
@@ -82,6 +97,8 @@ scope.
 
 #### Stable Alpine smoke targets
 
+Rule ID: `arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files` (MUST).
+
 make disk must construct the ext2 image from the configured Alpine
 minirootfs tarball instead of creating smoke-only files. The ext2
 smoke must keep using the read-only Ext2FileSystem path through
@@ -90,6 +107,33 @@ a regular file whose size spans more than one ext2 block so the
 multi-direct-block path is actually observed.
 
 #### Build-time rootfs overlay
+
+Rule IDs (MUST):
+
+- `arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build`
+- `arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides`
+- `arceos_ex_must_rootfs_overlay_read_default_map_unless_disabled`
+- `arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user`
+- `arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile`
+- `arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode`
+- `arceos_ex_must_user_probe_print_per_syscall_success_marker`
+- `arceos_ex_must_user_probe_cover_directory_openat_getdents64`
+- `arceos_ex_must_user_syscall_analysis_use_existing_static_tools`
+- `arceos_ex_must_user_syscall_analysis_stay_out_of_default_build_path`
+- `arceos_ex_must_user_syscall_analysis_mark_busybox_candidates_conservative`
+- `arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12`
+- `arceos_ex_must_disk_build_default_not_rebuild_existing_image`
+- `arceos_ex_must_qemu_append_default_user_boot_to_bin_sh_and_passthrough`
+- `arceos_ex_must_test_harness_pin_user_smoke_qemu_append`
+- `arceos_ex_must_test_harness_cover_no_overlay_bin_ls`
+- `arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input`
+- `arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay`
+- `arceos_ex_must_rc_local_test_use_inittab_direct_marker_only`
+- `arceos_ex_must_rc_local_difftest_be_default_case`
+- `arceos_ex_must_rc_local_difftest_report_hard_scope_coverage_counts`
+- `arceos_ex_must_openrc_login_test_use_explicit_account_overlay`
+- `arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified`
+- `arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support`
 
 The current temporary user init fixture is supplied by a rootfs
 image-construction overlay, not by runtime overlayfs. The overlay
@@ -291,6 +335,8 @@ status 0 as pass criteria.
 
 #### Directory path lookup
 
+Rule ID: `arceos_ex_must_ext2_lookup_support_path_components_from_directories` (MUST).
+
 Since the rootfs is no longer a handcrafted root directory fixture,
 VFS/ext2 lookup must support path components below arbitrary ext2
 directories backed by direct blocks. Smoke must not require artificial
@@ -298,6 +344,8 @@ root-directory filler entries just to move a dirent into a later
 block.
 
 #### Minimal VFS read-only mount
+
+Rule ID: `arceos_ex_must_ext2_support_minimal_vfs_read_only_mount` (MUST).
 
 The next ext2 step must let VfsCore mount a prepared Ext2FileSystem
 at a normal VFS dentry and route lookup/open/read through VFS before
@@ -307,6 +355,8 @@ VFS mount path instead of treating direct Ext2FileSystem calls as
 the acceptance boundary.
 
 #### Minimal pathname walk/read
+
+Rule ID: `arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read` (MUST).
 
 VfsCore must support absolute path walk from current root, direct
 component lookup, mount crossing, open-by-path and read-by-path for
@@ -331,6 +381,15 @@ and page cache remain deferred.
 
 #### Long-term observation checkpoints
 
+Rule IDs (MUST):
+
+- `arceos_ex_must_long_term_checkpoints_follow_model_coding_contracts`
+- `arceos_ex_must_payload_vfs_ext2_read_emit_observation_checkpoints`
+- `arceos_ex_must_block_io_task_wait_checkpoints_cover_submit_wait_and_timeout`
+- `arceos_ex_must_block_io_irq_completion_checkpoints_cover_begin_end_failure`
+- `arceos_ex_must_block_io_completion_source_distinguish_irq_and_task_poll`
+- `arceos_ex_must_read_path_error_classification_checkpoint_be_structured`
+
 Checkpoints used by nightly/stress longitudinal comparison and
 Linux-like cross comparison must be specified in model/coding
 before implementation. The first batch covers the user payload
@@ -340,6 +399,8 @@ observations must use structured classes instead of temporary log
 text so repeated event sequences can be grouped and compared.
 
 #### Virtio-blk synchronous request lifecycle
+
+Rule ID: `arceos_ex_must_virtio_blk_sync_reads_submit_wait_complete_before_return` (MUST).
 
 The current read-only block path is synchronous from Bio/
 BufferHead's perspective. Every live virtio-blk read must submit one
@@ -352,6 +413,8 @@ with a structured block I/O error.
 
 #### Initcall superblock probe convergence
 
+Rule ID: `arceos_ex_must_virtio_blk_initcall_superblock_probe_converge_before_ready` (MUST).
+
 The initcall-time virtio-blk ext2 superblock probe is the first
 production read request. It must complete before VirtioBlkReady and
 before RootfsPhase/VFS/ext2 consumers can issue their own reads.
@@ -362,6 +425,8 @@ phase to inherit.
 
 #### Single completion consumer
 
+Rule ID: `arceos_ex_must_virtio_blk_completion_consumer_be_single_owner` (MUST).
+
 IRQ completion and task-side polling are both valid observation
 sources, but the same pending token may be consumed only once. The
 implementation must guard the virtqueue/device/static read-buffer
@@ -370,6 +435,11 @@ through get_buf/status validation/descriptors release for the same
 request.
 
 #### Virtqueue memory ordering
+
+Rule IDs (MUST):
+
+- `arceos_ex_must_virtqueue_publish_avail_before_notify_with_release_order`
+- `arceos_ex_must_virtqueue_observe_used_with_acquire_order`
 
 Publishing a descriptor chain must order descriptor and avail-ring
 stores before avail idx and MMIO notify. Observing a used-ring idx
@@ -380,11 +450,11 @@ ordering boundaries.
 
 #### Deferred ext2 scope
 
+Rule ID: `arceos_ex_must_ext2_defer_page_cache_indirect_and_writes` (MUST).
+
 Page cache/folios, indirect blocks, slow symlinks, permissions,
 xattrs, quotas, allocation, writes and remount/error recovery
 remain explicit deferred scope in this slice. Fast symlink target
 extraction from inline i_block bytes is part of the current VFS
 path-walk slice and must not be implemented by treating the symlink
 inode as a regular file.
-
-<!-- formal-predicate-notes:spec/coding/objects/block-io.spec END -->

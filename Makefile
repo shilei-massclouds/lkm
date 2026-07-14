@@ -27,7 +27,7 @@ PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
 
-.PHONY: build run disk disk-clean fmt fmt-check clippy-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -55,6 +55,14 @@ clippy-check:
 		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))" PLIC_PROVIDER="$$provider"; \
 		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=user-boot PLIC_PROVIDER="$$provider"; \
 	done
+
+coding-spec-check:
+	@files="$$(find spec/coding -type f -name '*.spec' -print | sort)"; \
+	if [ -n "$$files" ]; then \
+		echo "coding .spec files are forbidden; move authoritative rules to Markdown:" >&2; \
+		printf '%s\n' "$$files" >&2; \
+		exit 1; \
+	fi
 
 verify:
 ifeq ($(REPORT),graph)
@@ -87,6 +95,7 @@ checkpoints-linux-check:
 
 test: fmt-check
 	$(MAKE) clippy-check
+	$(MAKE) coding-spec-check
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
 test-verify:

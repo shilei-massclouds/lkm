@@ -1,6 +1,6 @@
 # Build and Script Coding Guidance
 
-This document explains the formal rules in [`build.spec`](build.spec). It covers Makefile targets and helper scripts used by object-level implementation, generated artifacts, disk images, QEMU runs and validation.
+This document is the authoritative coding specification for Makefile targets and helper scripts used by object-level implementation, generated artifacts, disk images, QEMU runs and validation.
 
 ## Scope
 
@@ -18,6 +18,7 @@ make checkpoints
 make fmt
 make fmt-check
 make clippy-check
+make coding-spec-check
 make run
 make verify
 make test
@@ -52,7 +53,8 @@ Targets must remain composable:
 - `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
 - `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
 - `clippy-check` runs the selected kernel crate through the active pinned toolchain's `clippy-driver` in metadata-only mode. It must reject all ordinary rustc warnings and the complete `clippy::all` group for every kernel configuration used by the default test matrix.
-- `test` must run `fmt-check`, then `clippy-check`, before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
+- `coding-spec-check` is the permanent independent gate that rejects every `spec/coding/**/*.spec` file and lists every offending path. Coding rules are authoritative Markdown and a coding `.spec` must never be reintroduced.
+- `test` must run `fmt-check`, then the complete `clippy-check` matrix, then `coding-spec-check`, before formal verification, checkpoint checks, builds or runtime stages, and must preserve the remaining validation order and individual entry points.
 - `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
@@ -128,15 +130,15 @@ Unknown configuration must fail fast. Examples:
 
 Silent fallback to a nearby default is not acceptable when it changes the object path, payload, disk contents, provider or validation scope.
 
-<!-- formal-predicate-notes:spec/coding/build.spec START -->
+## Rule catalog
 
-## Formal predicate notes
-
-以下说明从 `spec/coding/build.spec` 的长注释迁移而来。`*.spec` 文件只保留 rule ID、type 分组、MUST/SHOULD/MAY/NOTE 层级和最短标签；解释、背景、参考路径、阶段性取舍与例子在这里维护。
+以下规则是本文件的权威约束。迁移自旧索引的稳定 rule ID、原 type 分组和 MUST/SHOULD 层级在此保留；这些 ID 用于评审和追踪，不是 pyveri predicate。
 
 ### BuildAndScriptCodingMust
 
 #### Stable entry
+
+Rule ID: `build_must_keep_top_level_make_as_stable_entry` (MUST).
 
 The repository top-level Makefile is the stable developer and CI
 entry for object-level implementation. New routine commands should
@@ -144,6 +146,8 @@ be reachable from it or intentionally documented as lower-level
 implementation details.
 
 #### Delegation
+
+Rule ID: `build_must_delegate_kernel_specific_rules_to_kernel_dir` (MUST).
 
 Kernel-specific build, image, disk and QEMU rules belong to the
 selected kernel implementation directory, for example
@@ -153,12 +157,16 @@ bodies.
 
 #### Composable targets
 
+Rule ID: `build_must_keep_targets_composable` (MUST).
+
 Targets such as build, generate, disk, run, verify, test-verify,
 test-kunit, test-smoke and test must remain separately callable.
 An aggregate target may sequence them, but it must not hide a step
 so that developers cannot rerun or diagnose it independently.
 
 #### Disk image input
+
+Rule ID: `build_must_make_disk_reproducible_input_builder` (MUST).
 
 make disk is the canonical builder for runtime block-device images
 used by QEMU. It must be reproducible from explicit Make variables
@@ -168,12 +176,16 @@ depend on manually prepared local disk state.
 
 #### Idempotent disk creation
 
+Rule ID: `build_must_make_disk_create_image_only_when_missing_by_default` (MUST).
+
 The default make disk behavior must create the configured disk image
 only when the image path is missing. Existing runtime disk images
 are local runtime state and must not be reformatted by default; an
 explicit clean/delete/rebuild step is required to regenerate them.
 
 #### Downloaded rootfs cache
+
+Rule ID: `build_must_cache_downloaded_rootfs_inputs_under_build` (MUST).
 
 Downloaded rootfs inputs such as Alpine minirootfs tarballs must be
 cached under a build artifact directory controlled by Make
@@ -182,12 +194,16 @@ not download it again.
 
 #### Runtime dependencies
 
+Rule ID: `build_must_run_depend_on_required_runtime_inputs` (MUST).
+
 make run must depend on runtime inputs it needs, including the disk
 image when QEMU devices include virtio-blk. make build must not
 create or mutate runtime disk images unless the target explicitly
 requires it.
 
 #### Visible model/codegen boundary
+
+Rule ID: `build_must_not_hide_model_codegen_or_verification_boundaries` (MUST).
 
 Makefiles and helper scripts must keep model derivation, generated
 artifact creation and kernel compilation as visible target edges.
@@ -196,11 +212,15 @@ stale generated files, or turn verification failures into warnings.
 
 #### Payload selection
 
+Rule ID: `build_must_preserve_app_payload_selection_as_explicit_parameter` (MUST).
+
 Selected payload or test app must remain an explicit build parameter
 such as APP. Scripts must not infer a different payload from local
 files, previous runs or environment side effects.
 
 #### External tool commands
+
+Rule ID: `build_must_stage_external_tools_as_configurable_commands` (MUST).
 
 External tools such as rustc, rust-objcopy, QEMU, wget, tar, mkfs
 and pyveri must be configurable through Make variables or
@@ -208,6 +228,8 @@ documented script parameters. Hard-coded host-local absolute paths
 are not allowed in ordinary build targets.
 
 #### Pinned Rust source formatting
+
+Rule ID: `build_must_format_selected_kernel_rust_sources_with_pinned_toolchain` (MUST).
 
 The selected kernel implementation owns the complete Rust source set under its `src/` tree. `fmt` and
 `fmt-check` must use the same pinned stable toolchain as the default kernel compiler, Rust edition 2024 and an
@@ -217,6 +239,8 @@ default toolchain.
 
 #### Repository Rust toolchain
 
+Rule ID: `build_must_pin_repository_rust_toolchain_and_components` (MUST).
+
 The repository root rust-toolchain.toml pins the exact stable compiler release and the common developer
 components and RISC-V compilation target. It is the single version source: selected kernel Makefiles must defer
 to the active rustup toolchain rather than restating the release, while retaining documented individual command
@@ -225,11 +249,15 @@ pin.
 
 #### Early Rust format gate
 
+Rule ID: `build_must_gate_rust_format_before_other_test_stages` (MUST).
+
 The aggregate `make test` target must depend on the independently runnable, read-only `fmt-check` target
 before starting formal verification, checkpoint artifact validation, compilation or QEMU. Format drift
 must fail fast and must never be repaired implicitly by `make test`.
 
 #### Full Clippy and rustc warning gate after formatting
+
+Rule ID: `build_must_gate_full_clippy_and_rust_warnings_after_rust_format` (MUST).
 
 The selected kernel implementation must expose an independently runnable, read-only `clippy-check` target.
 It must compile metadata with the pinned stable toolchain's configurable `clippy-driver`, so the gate neither
@@ -249,12 +277,16 @@ builds or QEMU, including when make is invoked with parallel jobs.
 
 #### Decomposable tests
 
+Rule ID: `build_must_keep_test_aggregate_decomposable` (MUST).
+
 The aggregate make test target must preserve independently runnable
 verify, KUnit/checkpoint and smoke stages. Adding a new validation
 stage requires documenting its ordering, inputs and whether it is
 part of the default acceptance gate.
 
 #### Checkpoint artifact drift gate
+
+Rule ID: `build_must_gate_checkpoint_artifact_drift_before_runtime_tests` (MUST).
 
 The aggregate make test target must run checkpoint inventory,
 Linux mapping, Linux mapping coverage and Linux instrumentation
@@ -276,6 +308,8 @@ their specific diagnostics and must not fabricate a result summary.
 
 #### Generated output hygiene
 
+Rule ID: `build_must_not_check_in_generated_or_runtime_local_outputs` (MUST).
+
 Generated files, runtime disk images, QEMU logs, temporary debugfs
 scripts and trace reports must stay in build/tools/out/tmp-style
 locations or documented artifact directories. They must not be
@@ -283,6 +317,8 @@ committed unless a specification explicitly classifies them as
 stable source inputs.
 
 #### Clean scope
+
+Rule ID: `build_must_make_clean_remove_routine_artifacts_only` (MUST).
 
 The repository top-level make clean target must remove routine
 build, code-generation and test-cache artifacts created under the
@@ -299,11 +335,15 @@ the owner of kernel-specific build artifacts.
 
 #### Explicit image and file-system knobs
 
+Rule ID: `build_should_name_image_and_fs_knobs_explicitly` (SHOULD).
+
 Disk-image paths, sizes, FS_TYPE, ext2 block size and deterministic
 fixture file knobs should have explicit variable names. Avoid
 embedding these decisions in opaque shell fragments.
 
 #### Data-driven QEMU devices
+
+Rule ID: `build_should_make_qemu_devices_data_driven` (SHOULD).
 
 QEMU devices should be composed from variables such as QEMU_DEVICES
 and disk-image paths. The default may target QEMU virt, but the rule
@@ -311,13 +351,15 @@ should allow tests to remove or replace devices explicitly.
 
 #### Unknown configuration
 
+Rule ID: `build_should_fail_fast_on_unknown_configuration` (SHOULD).
+
 Unknown provider names, file-system types, payload names or feature
 values should fail fast at build time rather than falling back to a
 nearby default.
 
 #### Target documentation
 
+Rule ID: `build_should_document_new_targets_before_use` (SHOULD).
+
 New Makefile targets or helper scripts should be documented in this
 coding directory before they become part of the normal workflow.
-
-<!-- formal-predicate-notes:spec/coding/build.spec END -->

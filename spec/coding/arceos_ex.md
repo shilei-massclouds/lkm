@@ -53,5 +53,6 @@
 | Completion | [`objects/completion.md`](objects/completion.md) |
 | Block I/O | [`objects/block-io.md`](objects/block-io.md) |
 
-现存同主题 `.spec` 是待迁移遗留文件，不是阅读入口，也不得覆盖上述 `.md`。迁移状态见
+上述 `.md` 是唯一 coding 权威来源；稳定 legacy rule ID 已归并到对应主题文件，coding `.spec`
+已退场且不得重新引入。审计结果见
 [`../../docs/roadmap/phase-paradigm-audit.md`](../../docs/roadmap/phase-paradigm-audit.md)。

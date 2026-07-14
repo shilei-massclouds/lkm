@@ -2,5 +2,4 @@
 
 Project-level coding constraints live here when they need a dedicated topic file.
 
-- `kernel.spec` is the formal KernelProject coding rule index.
-- `kernel.md` carries the explanatory text for those formal predicates.
+- [`kernel.md`](kernel.md) is the authoritative KernelProject coding specification and retains the stable legacy rule IDs for review traceability.

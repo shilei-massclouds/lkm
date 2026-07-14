@@ -2,11 +2,12 @@
 
 Object-level coding constraints live here when they need a dedicated topic file.
 
-`../arceos_ex.spec` remains the compatibility entry and includes these
-formal object/subsystem files:
+The authoritative object/subsystem coding files are:
 
-- `device-tree-must.spec` / `device-tree-must.md`
-- `device-tree-should.spec` / `device-tree-should.md`
-- `effective-context.spec` / `effective-context.md`
-- `completion.spec` / `completion.md`
-- `block-io.spec` / `block-io.md`
+- [`device-tree-must.md`](device-tree-must.md)
+- [`device-tree-should.md`](device-tree-should.md)
+- [`effective-context.md`](effective-context.md)
+- [`completion.md`](completion.md)
+- [`block-io.md`](block-io.md)
+
+Coding `.spec` files are forbidden by the repository `coding-spec-check` gate.

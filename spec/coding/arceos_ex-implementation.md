@@ -1,11 +1,13 @@
 # arceos_ex 对象级实现说明
 
-本文件从 [`arceos_ex.md`](arceos_ex.md) 拆出，保留当前对象级实现说明、命令、工程边界和专题方案；根 `arceos_ex.md` 现在作为兼容索引入口。
+本文件从 [`arceos_ex.md`](arceos_ex.md) 拆出，保留当前对象级实现说明、命令、工程边界和专题方案；根 `arceos_ex.md` 是当前 coding 阅读索引。
 
 本文记录 `arceos_ex` 第一轮对象级实现的设计背景、命令、工程边界和专题方案。统一任务优先级和状态以
 [`docs/ROADMAP.md`](../../docs/ROADMAP.md) 为准；本文不维护独立计划表。
 
-正式硬约束位于 [`arceos_ex.spec`](arceos_ex.spec)，并由 [`main.spec`](main.spec) 统一 include。本文承载解释、背景、参考路径和阶段性取舍；formal predicate 说明已拆入根索引链接的 phase/object/system topic 文档。不得用本文覆盖 `.spec` 中的 rule ID 或硬约束层级。
+coding 硬约束位于根索引链接的 project/system/phase/object 主题 `.md`；对象与生命周期语义来自
+`spec/model`。本文承载实现证据、背景、命令和阶段性取舍，不得覆盖主题 coding 文件中的稳定
+rule ID、MUST/SHOULD/MAY/NOTE 层级或 model 语义。
 
 当前执行路线已经调整为：先在本仓库内直接完成对象级实现实验，源码放在
 `impl/arceos_ex/`，使用 `Makefile` 编译和运行；暂时不进入 `tgoskits`、`xtask`、ArceOS crate 兼容和 feature 传递问题。

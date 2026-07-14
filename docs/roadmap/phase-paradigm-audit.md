@@ -13,9 +13,9 @@
 3. `spec/coding`：用自然语言 `.md` 说明 model 到具体 impl 的映射规则和必要例外。
 4. `impl/arceos_ex`：按 coding 映射承载调用链、对象动作、状态检查和 checkpoint。
 
-coding 层不维护第二套模型语义。长期权威来源是 `spec/coding/**/*.md`；现存 `.spec` 中属于
-模型语义的约束上移到 model，属于实现映射的约束迁入 `.md`，重复或失效内容删除。所有引用
-和工具入口迁移完成后，最终清零 `spec/coding/**/*.spec`。
+coding 层不维护第二套模型语义。长期权威来源是 `spec/coding/**/*.md`；旧 `.spec` 中属于
+模型语义的约束已上移到 model，属于实现映射的约束已迁入 `.md`，重复或失效内容已删除。
+`spec/coding/**/*.spec` 已清零，并由根目录 `make coding-spec-check` 永久禁止重新引入。
 
 两层范式的权威入口分别是：[`spec/charter/phase-paradigm.md`](../../spec/charter/phase-paradigm.md)
 定义 charter -> model，[`spec/coding/phase-paradigm.md`](../../spec/coding/phase-paradigm.md)
@@ -134,11 +134,14 @@ Kernel
    再按 selected handoff Online -> Payload Online/handlers -> Kernel Online -> no-return entry 推进。
    user-boot prepare/enter 已拆分，requested/default init 失败均停在 Payload Ready。旧 ID 432/433
    稳定，新增 481/482 默认 unmapped；inventory 483，mapping exact 103 / range 14 / unmapped 366。
-10. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
-   阶段树完成后处理 project、mapping、build、riscv64、rust 和 object 类剩余文件，迁移所有
-   工具与文档引用，最终确保 `find spec/coding -name '*.spec'` 为空。
-11. **全树验收（待办）**：复核一致性矩阵无未分类缺口，运行 `make verify`、必要 focused
-   `make run`、根目录 `make test`，最后执行 `make test-stress STRESS_RUNS=30`。
+10. **coding `.spec` 退场（完成）**：阶段树文件退场后，已逐项审计 project、mapping、build、
+   riscv64、rust 和 5 个 object 遗留文件的 629 行内容；142 个唯一 rule ID、原 type 分组及
+   MUST/SHOULD/MAY/NOTE 层级均保留在对应权威 `.md`。charter/model/coding 索引和入口引用已
+   切换到 Markdown，10 个遗留 `.spec` 已删除；独立 `coding-spec-check` 会列出并拒绝任何回归，
+   `make test` 在完整 Clippy 矩阵之后执行该门禁。
+11. **全树验收（完成）**：`make coding-spec-check` 通过；根目录直接 `make test` 为 169/169；
+   `make test-stress STRESS_RUNS=30` 的三个 ordinary-path case 各 30/30，总计 90/90；默认
+   `make difftest` 为 1/1，并确认 103 个 Linux markers 为 0 missing / 0 stale / 0 mismatch。
 
 ## 批次门禁
 
@@ -188,14 +191,14 @@ Kernel
 - `72fa66c`：建立阶段范式并把顶层阶段模型收敛到四状态生命周期。
 - `28e9bd9`：建立阶段链式 coding 映射并闭合 EntryPreludePhase 首轮实现。
 - `dc6834a`：完成 BootIdle 到 KernelInit 的真实 task stack handoff。
-- coding 目录已从 26 个 `.spec` 降到 10 个；剩余分类为通用映射/构建/架构/语言 4 个、
-  project 1 个、phase 0 个、object 5 个。
+- coding 目录已从 26 个 `.spec` 清零；最后 10 个文件的 629 行规则已迁入 Markdown，142 个
+  唯一 rule ID、原 type 分组和层级均已保留。
 - coding 权威入口已经切换为 `.md`；顶层 `spec/main.spec` 不再 include coding formal 入口并
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Kernel 根和完整阶段树已消除 model Online 被实现命名/记录为 Ready 的漂移；下一批清理剩余
-  coding `.spec`。
+- Kernel 根和完整阶段树已消除 model Online 被实现命名/记录为 Ready 的漂移；coding `.spec`
+  已全部退场并由 `coding-spec-check` 永久门禁保护。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
@@ -222,5 +225,6 @@ Kernel
   Linux mapping 为 exact 103 / range 14 / unmapped 366，instrumentation plan 仍为 103。hello 四个
   Payload checkpoint 均由 KernelInitTask 发出；user-boot 实测 UserAddressSpace.Ready <
   Payload.Online < Kernel.Online < UserModeEntry，两个失败分支都没有后三个成功事件。
-- 本批根目录直接 `make test` 为 169/169；默认 ordinary-path stress 三个 case 各 30 次的前批
-  基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。
+- coding `.spec` 退场批次通过 `make coding-spec-check`；根目录直接 `make test` 为 169/169；
+  默认 ordinary-path stress 三个 case 各 30/30，总计 90/90；默认 rc-local difftest 为 1/1，
+  103 个 Linux markers 为 0 missing / 0 stale / 0 mismatch。

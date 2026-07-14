@@ -6,8 +6,8 @@
 
 本文是 model 到 impl 的权威自然语言映射规则。coding 层不再建立与 model 并行的 formal
 语义；对象、状态、迁移、依赖和阶段顺序以 `spec/model` 为准，本文只说明这些语义如何落到
-代码。现存 `spec/coding/**/*.spec` 是迁移期遗留索引，不得覆盖本文或 model，也不得新增；
-其内容按主题迁入 `.md` 或上移 model 后分批删除。
+代码。coding 目录只允许权威 `.md`，不得新增 `.spec`、predicate 或 type；根目录
+`make coding-spec-check` 永久执行这一约束。
 
 若本文映射无法落实 model，必须停止实现并报告 charter、model、coding 或工具缺口，不能在
 coding 层另造 predicate 来覆盖冲突。
@@ -233,19 +233,23 @@ object fact 还是 deferred boundary。Runtime Core 窗口中的 `sched_init_smp
 - 与 Linux 状态差分的采集接口。
 - typestate 与运行期状态字段的选择规则。
 
-## 遗留规则迁移正文
+## Rule catalog
 
-以下内容最初从迁移期 `mapping.spec` 汇入，现已属于本文权威映射正文。`mapping.spec` 在最终
-coding `.spec` 退场批次删除；过渡期间其中的 rule ID 不得覆盖本文。
+以下内容已从旧索引完整迁入并属于本文权威映射正文。稳定 rule ID、原 type 分组和
+MUST/SHOULD/MAY/NOTE 层级在此保留；这些 ID 用于评审和追踪，不是 pyveri predicate。
 
 ### CodingRuleLevels
 
 #### MUST
 
+Rule ID: `coding_rule_level_must_defined` (MUST 定义)。
+
 A mandatory rule. Violating a MUST rule blocks implementation until
 the model, coding spec, tool or implementation is corrected.
 
 #### SHOULD
+
+Rule ID: `coding_rule_level_should_defined` (SHOULD 定义)。
 
 A strong recommendation. Generated or handwritten code is expected to
 follow it by default. A deviation is allowed only with an explicit
@@ -253,10 +257,14 @@ recorded reason, scope and future convergence path.
 
 #### MAY
 
+Rule ID: `coding_rule_level_may_defined` (MAY 定义)。
+
 An optional technique. It is permitted when useful but must not be
 required by later code unless promoted to SHOULD or MUST.
 
 #### NOTE
+
+Rule ID: `coding_rule_level_note_defined` (NOTE 定义)。
 
 Explanatory guidance. It carries no direct implementation obligation
 and cannot override MUST or SHOULD rules.
@@ -264,6 +272,8 @@ and cannot override MUST or SHOULD rules.
 ### CodingMappingMust
 
 #### Model priority
+
+Rule ID: `coding_must_model_priority` (MUST).
 
 Implementation must strictly follow objects, states, transitions,
 dependencies, drive order, phase boundaries and proof obligations
@@ -273,11 +283,15 @@ are not valid reasons to diverge from model semantics.
 
 #### Map before coding
 
+Rule ID: `coding_must_map_before_coding` (MUST).
+
 Code generation or modification must first identify the model object
 to source-file mapping. Code may only be written to the mapped file or
 its explicit submodules unless a recorded exception exists.
 
 #### Object ownership
+
+Rule ID: `coding_must_preserve_object_ownership` (MUST).
 
 The main implementation of a model object must live in that object's
 mapped file. Phase transition, state, continuation and checkpoint code
@@ -286,9 +300,13 @@ belong to the resource object file.
 
 #### Phase tree path
 
+Rule ID: `coding_must_phase_path_matches_tree` (MUST).
+
 Phase file paths must reflect the model parent/child phase tree.
 
 #### Phase-tree lowering
+
+Rule ID: `coding_must_phase_dfs_generation` (MUST).
 
 Phase code must preserve the model's source-ordered transition body.
 A parent transition owns its drives sequence; a driven child completes
@@ -297,12 +315,16 @@ There is no implicit child-to-sibling handoff edge.
 
 #### Phase shape
 
+Rule ID: `coding_must_phase_not_resource_lifecycle` (MUST).
+
 Phase objects must not be implemented as resource-object style
 struct + impl lifecycle state machines. They are process modules with
 preset(), setup(), enable(), explicit state storage, parent
 continuations, boundary checks and checkpoints.
 
 #### Transition boundaries
+
+Rule ID: `coding_must_keep_transition_boundaries` (MUST).
 
 Each model transition must keep a locatable code boundary. If low-level
 code must complete adjacent transitions without a hardware-visible gap, the
@@ -311,12 +333,16 @@ checks and checkpoint boundaries.
 
 #### Checks before checkpoints
 
+Rule ID: `coding_must_check_before_checkpoint` (MUST).
+
 depends_on and all pre-commit postconditions must be checked before the
 target state is committed. The committed target state and target-state
 invariant must then be checked before a checkpoint is emitted, emits is
 executed or later code uses the fact as an established dependency.
 
 #### Checkpoint ownership
+
+Rule ID: `coding_must_checkpoint_owner_matches_transition` (MUST).
 
 A checkpoint may only be emitted by the mapped implementation of the
 object event or phase boundary whose fact it reports. A lower-level
@@ -327,12 +353,16 @@ visually match the derived trace.
 
 #### Checkpoint as observation timing
 
+Rule ID: `coding_must_checkpoint_hook_be_observation_timing_only` (MUST).
+
 A checkpoint is a stable observation timing boundary. It may trigger
 trace backends or observer handlers, but it is not ordinary logging,
 does not advance object state by itself, and must not become a
 dependency of the transition whose boundary it observes.
 
 #### Observation facts
+
+Rule ID: `coding_must_observation_facts_live_on_objects_or_providers` (MUST).
 
 Structured observation content must live on the owning object,
 provider or explicit context object as long-term facts. Handlers may
@@ -341,6 +371,8 @@ facts through handler-local debug state.
 
 #### Failure diagnostic separation
 
+Rule ID: `coding_must_failure_diagnostic_not_be_checkpoint_handler` (MUST).
+
 Failure diagnostics are structured error payloads collected on a
 failing predicate/check path and emitted when the error is reported.
 They are not additional checkpoints and are not checkpoint handlers
@@ -348,6 +380,8 @@ registered on a failure point. Supporting them must not change the
 successful checkpoint sequence.
 
 #### Linker script mapping
+
+Rule ID: `coding_must_linker_script_driven_by_model_lds` (MUST).
 
 A generated or maintained linker script is the coding artifact that
 realizes the model Lds object. It must be driven by the PreparePhase
@@ -359,11 +393,15 @@ Lds/Config source named.
 
 #### Explicit exceptions
 
+Rule ID: `coding_must_record_exceptions` (MUST).
+
 Architecture, linker, Rust-language or boot-ABI constraints that force
 code outside the default mapped file must be recorded with reason,
 scope and the preserved model boundary.
 
 #### Verification gates
+
+Rule ID: `coding_must_run_verification_gates` (MUST).
 
 Changes touching model semantics, phase call chains, object states or
 entry paths must pass the configured build/verify/run gates before
@@ -373,6 +411,8 @@ they are treated as complete.
 
 #### Global context
 
+Rule ID: `coding_should_use_global_context` (SHOULD).
+
 Object Coding Phase should maintain long-lived resource objects in a
 single implementation Context rather than in phase-local object
 carriers. Phase modules should borrow this Context and use it to
@@ -380,17 +420,23 @@ drive resource-object transitions.
 
 #### Context parameter names
 
+Rule ID: `coding_should_name_context_parameters_ctx` (SHOULD).
+
 Function parameters and local variables that carry the implementation
 Context should be named ctx or context. They should not be named
 objects, because objects has a formal model meaning.
 
 #### Context resource layout
 
+Rule ID: `coding_should_group_context_resources_by_category` (SHOULD).
+
 Context fields should be grouped by resource-object category, matching
 the source directory hierarchy as it evolves. They should not be
 grouped by Phase except as an explicitly recorded transitional step.
 
 #### Context accessor placement
+
+Rule ID: `coding_should_avoid_phase_local_context_accessors` (SHOULD).
 
 Context accessors should be centralized, for example as
 crate::context::context() and crate::context::context_ref(). Phase
@@ -400,6 +446,8 @@ files should not define their own local objects()/context() accessors.
 
 #### Static source only
 
+Rule ID: `linux_checkpoint_mapping_must_be_static_source_only` (MUST).
+
 Linux checkpoint mapping artifacts record reviewable anchors in the
 read-only Linux reference tree. The mapping pass must not modify
 Linux source, add probes, or depend on runtime collection to justify
@@ -407,11 +455,15 @@ a mapping.
 
 #### Unproven stays unmapped
 
+Rule ID: `linux_checkpoint_mapping_must_keep_unproven_unmapped` (MUST).
+
 If a checkpoint cannot be tied to a stable Linux source boundary from
 the reference tree, it must remain unmapped and the notes must record
 why no reliable boundary was claimed.
 
 #### Partial boundaries
+
+Rule ID: `linux_checkpoint_mapping_should_mark_partial_boundaries` (SHOULD).
 
 When Linux lacks a local object boundary matching the arceos_ex
 checkpoint, the mapping should use a range or medium confidence to
@@ -419,12 +471,16 @@ make the partial alignment explicit.
 
 #### UserBoot versus UserExec
 
+Rule ID: `linux_checkpoint_mapping_must_distinguish_user_boot_from_user_exec` (MUST).
+
 Boot-time init exec checkpoints may reuse Linux exec/binfmt/return
 anchors that also describe runtime exec syscall checkpoints, but the
 notes must distinguish the boot-time init exec view from the runtime
 exec syscall view.
 
 #### Shared call-site semantics
+
+Rule ID: `linux_checkpoint_mapping_must_distinguish_shared_call_site_semantics` (MUST).
 
 Multiple arceos_ex checkpoints may reuse the same Linux call site
 when a single Linux boundary is the reviewable anchor for a phase

@@ -39,7 +39,7 @@ pub const KERNEL_PROJECT_MAPPING: KernelProjectMapping = KernelProjectMapping {
     },
     coding: SpecPath {
         layer: "coding",
-        path: "spec/coding/projects/kernel.spec",
+        path: "spec/coding/projects/kernel.md",
     },
     implementation: "impl/arceos_ex/src/projects/kernel.rs",
     status: MappingStatus::SkeletonOnly,

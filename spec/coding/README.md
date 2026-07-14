@@ -12,12 +12,13 @@ checkpoint、架构边界和源码落点。
 入口，[`phase-paradigm.md`](phase-paradigm.md) 是阶段对象的专用映射规则。实现某个 system、
 phase 或 object 前，再按模型树读取对应的 `.md`。coding 层没有独立 formal 入口。
 
-## `.spec` 与 `.md` 分工
+## 权威格式与永久门禁
 
-`.md` 是 coding 层唯一权威来源。不得新增 coding `.spec`、predicate 或 type。现存 `.spec`
-是迁移期遗留：其中属于生命周期、对象关系或依赖的内容上移到 model，属于实现落点、语言、
-架构、测试和工程映射的内容迁入对应 `.md`，重复内容删除。每一批只有在引用和工具消费者
-迁移后才删除对应 `.spec`。
+`.md` 是 coding 层唯一权威来源。不得新增 coding `.spec`、predicate 或 type。原迁移期文件
+中属于生命周期、对象关系或依赖的内容已上移到 model，属于实现落点、语言、架构、测试和
+工程映射的内容已迁入对应 `.md`；稳定 rule ID 和原 MUST/SHOULD/MAY/NOTE 层级保留在
+Markdown 中用于评审追踪，但不再是 pyveri predicate。根目录 `make coding-spec-check` 会列出并
+拒绝任何重新引入的 `spec/coding/**/*.spec`，`make test` 在完整 Clippy 矩阵之后执行该门禁。
 
 当前阅读顺序为：
 
@@ -52,15 +53,14 @@ coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 
 上述子目录。后续新增或拆分的专题约束，
 若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
 
-## `.spec` 迁移基线
+## `.spec` 迁移结果
 
 Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删除不可解析的 `main.spec`
 和 `arceos_ex.spec` 后剩余 24 个；Boot 子树批次迁移并删除 3 个 phase 文件，Interrupt 子树
 批次又把 `irq-time-init.spec`、`local-irq-enable.spec`、`irq-open-prepare.spec` 和
 `process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除；UpMultitask 子树又迁移删除
-`rest-init.spec`，当前剩余 16 个：通用映射/构建/架构/语言 4 个、project 1 个、phase 6 个、
-object 5 个。后续继续按阶段树审计批次
-迁移 phase 文件，最后处理其它类别。
+`rest-init.spec`，SmpRuntime 子树迁移删除 6 个 phase 文件。最后一批审计并迁移通用
+mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后，coding `.spec` 已清零。
 
 ## 当前实践目标
 

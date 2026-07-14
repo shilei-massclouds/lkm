@@ -6,7 +6,7 @@
  * evaluate the resulting kernel instance.
  *
  * Four-level chain:
- * spec/charter/projects/kernel.md -> this model -> spec/coding/projects/kernel.spec
+ * spec/charter/projects/kernel.md -> this model -> spec/coding/projects/kernel.md
  * -> impl/arceos_ex/src/projects/kernel.rs.
  */
 

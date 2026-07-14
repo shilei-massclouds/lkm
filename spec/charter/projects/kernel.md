@@ -38,5 +38,5 @@ belong to `Kernel`.
 ## Mapping
 
 - Model: `spec/model/projects/kernel.spec`
-- Coding: `spec/coding/projects/kernel.spec`
+- Coding: `spec/coding/projects/kernel.md`
 - Implementation: `impl/arceos_ex/src/projects/kernel.rs`
