@@ -32,7 +32,7 @@ make clean
 
 Kernel-specific command bodies belong under the selected kernel directory, currently `impl/arceos_ex/Makefile`. The top-level file should pass explicit parameters such as `KERNEL`, `APP`, `LOG`, `SPEC`, `PROBE`, `PROBE_FILE`, `KUNIT_HANDLERS`, `KUNIT_APP` and `SMOKE_APP`; it should not duplicate the kernel-specific Rust, linker, disk or QEMU command lines.
 
-`make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, diagnostic logs, editor state or other unlisted local files.
+`make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. Stress, difftest and focused diagnostic reports under the managed `impl/arceos_ex/tests/stress/out/` root are routine test artifacts; cleanup must preserve only that directory's tracked `.gitignore`, and developers must move any report that needs long-term retention elsewhere before cleanup. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, ordinary diagnostic logs outside that managed report root, editor state or other unlisted local files.
 
 ## Target Boundaries
 
@@ -51,7 +51,7 @@ Targets must remain composable:
 - `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
 - `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
 - `test` must run `fmt-check` before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
-- `clean` removes generated build and cache artifacts, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
+- `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
 
@@ -247,11 +247,14 @@ stable source inputs.
 
 The repository top-level make clean target must remove routine
 build, code-generation and test-cache artifacts created under the
-repository, while preserving tracked checkpoint review artifacts
-under tools/out/checkpoints/, user-local environments, diagnostic
-logs, editor state and other unlisted local files. It must keep
-the selected kernel implementation clean as the owner of
-kernel-specific build artifacts.
+repository, including successful, failed, difftest and focused
+diagnostic reports below impl/arceos_ex/tests/stress/out/. It must
+preserve that managed output directory's tracked .gitignore,
+tracked checkpoint review artifacts under tools/out/checkpoints/,
+user-local environments, ordinary diagnostic logs outside the
+managed stress output root, editor state and other unlisted local
+files. It must keep the selected kernel implementation clean as
+the owner of kernel-specific build artifacts.
 
 ### BuildAndScriptCodingShould
 
