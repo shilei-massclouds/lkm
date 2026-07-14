@@ -86,6 +86,19 @@ configuration check without executing QEMU:
 make difftest DIFFTEST_RUNS=0
 ```
 
+Every `make difftest` invocation first runs a read-only preflight in this
+order: `make test-checkpoints`, then `make checkpoints-linux-check`. The
+second target checks both the committed instrumentation-plan artifacts and the
+sibling Linux markers, requiring `0 missing / 0 stale / 0 mismatch`. If either
+step fails, the paired runner does not start and the command prints an explicit
+manual synchronization reminder; it never runs `make checkpoints`, emits a
+marker patch, or modifies either source tree.
+
+The reviewed synchronization workflow is: update mapping/semantics, review and
+adjust the sibling Linux instrumentation, explicitly run `make checkpoints`,
+run `make checkpoints-linux-check`, then run `make difftest`. Keep the two
+repositories as independent review and commit units.
+
 The default rc.local case carries an exact checkpoint coverage audit. The
 current accounting is `required_total=103`, `in_scope=59`,
 `accounted_outside_scope=44`, and `unaccounted=0`: every exact-mapped
@@ -134,11 +147,10 @@ Completed stages:
   because its Linux mapping is range, not exact. Linux runtime instrumentation
   must keep `kernel_execve()` ownership separate from user
   `execve()/execveat()` ownership before extending this stage deeper.
-  `PayloadPhase.Online` remains in hard scope because Linux now records the
-  selected-payload handoff before the requested-init
-  `run_init_process(execute_command)` path as well as before the default
-  fallback block; the single-fingerprint `LKM_CHECKPOINT` comment remains on
-  the canonical mapping anchor.
+  `PayloadPhase.Online` remains in hard scope because Linux records it at the
+  shared `run_init_process()` success boundary after `kernel_execve()` returns
+  zero. This covers requested, configured, ramdisk, and fallback init variants
+  without recording Online on a failed candidate.
   The latest recorded run at
   `impl/arceos_ex/tests/stress/out/20260705T122918Z-pd-0004-linux-payload-syscall-paired/`
   completed with `success: 1` and `failure: 0`. The case file has been deleted;

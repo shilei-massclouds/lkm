@@ -36,7 +36,9 @@ make test-checkpoints
 
 `make checkpoints` 会按 inventory -> Linux mapping -> Linux mapping coverage -> Linux instrumentation plan 顺序更新产物。coverage report 是 mapping-only 的紧凑审阅视图，汇总映射分类、confidence、Linux 文件和 unmapped checkpoint family 覆盖情况，不包含逐 checkpoint 明细。instrumentation plan 只从 exact Linux mapping 派生，输出未来 Linux marker 同步工具需要的 marker 和 anchor fingerprint；range/unmapped 映射不会生成插桩计划项。
 
-`test-checkpoints` 会先跑 checkpoint 工具单元测试，再以只读 `--check` 模式比较 `tools/out/checkpoints/` 下的 JSON/Markdown；它不会重写已提交产物。Linux marker 扫描通过 `tools/checkpoints/plan_linux_instrumentation.py --check-markers` 显式运行，当前不属于默认门禁，因为 `../linux-6.12` 尚未插入 marker。`make test` 会在 QEMU/runtime 用例前运行 artifact drift 门禁。
+`test-checkpoints` 会先跑 checkpoint 工具单元测试，再以只读 `--check` 模式比较 `tools/out/checkpoints/` 下的 JSON/Markdown；它不会重写已提交产物。`make checkpoints-linux-check` 通过 instrumentation plan 的 `--check --check-markers` 同时校验已提交产物和 `../linux-6.12` markers，并报告 missing/stale/fingerprint mismatch。`make difftest` 会先串行运行 `test-checkpoints` 与 `checkpoints-linux-check`；任一失败都会在 paired runner 启动前停止，且不会自动更新产物或 Linux tree。`make test` 会在 QEMU/runtime 用例前运行本仓 artifact drift 门禁。
+
+人工同步顺序固定为：修改 mapping/语义并审核 Linux instrumentation，显式运行 `make checkpoints`，再运行 `make checkpoints-linux-check` 和 `make difftest`。两棵仓库应分别审核和提交。
 
 需要生成 Linux marker 补丁时，先更新本仓库审阅产物，再从已提交 instrumentation plan 输出可审阅 patch；该流程不会直接修改 `../linux-6.12`：
 

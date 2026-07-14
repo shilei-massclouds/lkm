@@ -1126,10 +1126,10 @@
     "checkpoint_name": "PayloadPhase.Online",
     "checkpoint_variant": "PayloadPhaseOnline",
     "linux_file": "init/main.c",
-    "linux_symbol": "kernel_init",
-    "linux_anchor": "kernel_init() line 1525: if (!try_to_run_init_process(\"/sbin/init\") ||",
+    "linux_symbol": "run_init_process",
+    "linux_anchor": "run_init_process() definition line 1378",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=PayloadPhase.Online variant=PayloadPhaseOnline fingerprint=sha256:e00e7171e78e8e3250b0da24ae019fd51af8b634105d2e403636a2428b54b49f */",
-    "anchor_fingerprint": "sha256:e00e7171e78e8e3250b0da24ae019fd51af8b634105d2e403636a2428b54b49f"
+    "marker": "/* LKM_CHECKPOINT name=PayloadPhase.Online variant=PayloadPhaseOnline fingerprint=sha256:9f1de807883b6e45dbfb0acb2024d721681600ea904b12ba51fd443c94f8a643 */",
+    "anchor_fingerprint": "sha256:9f1de807883b6e45dbfb0acb2024d721681600ea904b12ba51fd443c94f8a643"
   }
 ]

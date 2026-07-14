@@ -26,7 +26,8 @@ void setup_arch(char **cmdline) {}
 void mm_core_init(void) {}
 void sched_init(void) {}
 void rest_init(void) {}
-int run_init_process(const char *init_filename) { return 0; }
+int kernel_execve(const char *init_filename, const char *const *argv,
+                  const char *const *envp) { return 0; }
 void async_synchronize_full(void) {}
 void kprobe_free_init_mem(void) {}
 void ftrace_free_init_mem(void) {}
@@ -50,6 +51,11 @@ int init_eaccess(const char *path) { return 0; }
 void prepare_namespace(void) {}
 void integrity_load_keys(void) {}
 char *ramdisk_execute_command;
+
+static int run_init_process(const char *init_filename)
+{
+    return lkm_checkpoint_record_payload_online(kernel_execve(init_filename, argv_init, envp_init));
+}
 
 static int try_to_run_init_process(const char *init_filename)
 {
@@ -609,7 +615,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(mapped[1].mapping_kind, "exact")
         self.assertEqual(mapped[2].linux_file, "mm/mm_init.c")
         self.assertEqual(mapped[3].linux_symbol, "prepare_namespace")
-        self.assertIn('try_to_run_init_process("/sbin/init")', mapped[4].linux_anchor)
+        self.assertEqual(mapped[4].linux_symbol, "run_init_process")
+        self.assertIn("definition", mapped[4].linux_anchor)
 
     def test_interrupt_lifecycle_additions_default_to_unmapped(self) -> None:
         names = [
@@ -1848,7 +1855,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["RootFS.Online"].linux_symbol, "prepare_namespace")
         self.assertEqual(by_name["IntegrityKeys.DeferredReady"].linux_symbol, "kernel_init_freeable")
         self.assertEqual(by_name["RootfsBoundary.Ready"].confidence, "medium")
-        self.assertEqual(by_name["PayloadPhase.Online"].linux_symbol, "kernel_init")
+        self.assertEqual(by_name["PayloadPhase.Online"].linux_symbol, "run_init_process")
+        self.assertIn("definition", by_name["PayloadPhase.Online"].linux_anchor)
         self.assertEqual(by_name["SyscallTable.Read"].linux_symbol, "SYSCALL_DEFINE3(read)")
         self.assertEqual(by_name["SyscallTable.Write"].linux_symbol, "SYSCALL_DEFINE3(write)")
         self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")

@@ -27,7 +27,7 @@ PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
 
-.PHONY: build run disk disk-clean fmt fmt-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -68,6 +68,14 @@ checkpoints-instrumentation-plan: checkpoints-map-linux checkpoints-coverage
 
 checkpoints: checkpoints-instrumentation-plan
 
+checkpoints-linux-check:
+	@python3 tools/checkpoints/plan_linux_instrumentation.py --check --check-markers || { \
+		status=$$?; \
+		echo "Linux checkpoint synchronization requires manual review." >&2; \
+		echo "Review mapping/semantics and sibling Linux instrumentation, then run 'make checkpoints' and 'make checkpoints-linux-check'." >&2; \
+		exit $$status; \
+	}
+
 test: fmt-check
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
@@ -92,7 +100,16 @@ test-stress:
 
 stress-test: test-stress
 
-difftest:
+difftest-preflight:
+	@$(MAKE) test-checkpoints || { \
+		status=$$?; \
+		echo "Checkpoint artifacts require manual review; difftest did not regenerate them." >&2; \
+		echo "Review mapping/semantics and sibling Linux instrumentation, then run 'make checkpoints' and 'make checkpoints-linux-check'." >&2; \
+		exit $$status; \
+	}
+	@$(MAKE) checkpoints-linux-check
+
+difftest: difftest-preflight
 	$(STRESS_RUNNER) $(DIFFTEST_CASE) --runs $(DIFFTEST_RUNS) $(DIFFTEST_TIMEOUT_ARG)
 
 clean:

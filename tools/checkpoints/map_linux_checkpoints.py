@@ -835,14 +835,15 @@ def default_mapping_rules() -> dict[str, MappingRule]:
         "PayloadPhase.Online": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
-            linux_symbol="kernel_init",
-            anchor_pattern=r'try_to_run_init_process\s*\(\s*"/sbin/init"',
+            linux_symbol="run_init_process",
             confidence="medium",
             notes=(
-                "Linux kernel_init() default init candidate handoff anchor. "
-                "Requested-init paths record the same runtime checkpoint before "
-                "run_init_process(execute_command), but the single-fingerprint "
-                "LKM_CHECKPOINT marker remains on this canonical fallback anchor."
+                "Linux run_init_process() is the stable shared init handoff anchor; "
+                "runtime instrumentation passes the kernel_execve() result through "
+                "a recorder that emits the selected payload online boundary only "
+                "on success. The shared path covers ramdisk, requested, "
+                "configured-default, and fallback init variants without recording "
+                "failed candidates."
             ),
         ),
         "CorePreparePhase.Started": MappingRule(

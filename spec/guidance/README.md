@@ -37,6 +37,10 @@ Linux marker patch 只能由已提交 `linux_checkpoint_instrumentation_plan.jso
 同一 `checkpoint_name + checkpoint_variant` 但 fingerprint 不同的 marker，或存在不属于当前 plan 的 stale marker，patch 生成必须失败。
 若同一个运行时 checkpoint 必须覆盖 Linux 同一语义的多个分支等价 call-site，mapping/plan 仍只能选择一个规范 marker anchor；
 其它分支只能添加同一 checkpoint id 的 runtime record call，不得添加第二个不同 fingerprint 的 `LKM_CHECKPOINT` marker。
+根目录 `make difftest` 必须先以只读方式运行本仓 artifact drift 检查和 sibling Linux marker 检查；任何 missing、stale 或
+fingerprint mismatch 都必须在 paired runner 启动前失败并提示人工同步。同步流程只能由开发者显式执行：先修改并审核
+mapping/语义与 Linux instrumentation，再运行 `make checkpoints`、marker check 和 difftest；验证入口不得自动重写源码、
+tracked artifacts 或生成/apply marker patch。
 
 根目录 [`../../AGENTS.md`](../../AGENTS.md) 是给支持该机制的代理使用的短入口；本目录是这些约束的正式规格位置。
 

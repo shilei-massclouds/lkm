@@ -22,8 +22,11 @@ make verify
 make test
 make test-verify
 make test-checkpoints
+make checkpoints-linux-check
 make test-kunit
 make test-smoke
+make test-stress
+make difftest
 make clean
 ```
 
@@ -41,14 +44,18 @@ Targets must remain composable:
 - `run` prepares required runtime inputs, builds the selected kernel/payload and starts QEMU.
 - `verify` runs formal derivation or trace generation.
 - `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
-- `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping and Linux mapping coverage.
+- `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping, Linux mapping coverage and the Linux instrumentation plan.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
+- `checkpoints-linux-check` validates the tracked instrumentation plan and the sibling Linux marker names, variants and fingerprints in read-only mode. It must report missing, stale and mismatched markers and must not regenerate artifacts, emit a patch or modify the Linux tree.
+- `difftest-preflight` must run `test-checkpoints` before `checkpoints-linux-check`; `difftest` must not start its paired runner unless both read-only checks pass. A preflight failure must retain the detailed drift diagnostics and direct the developer to the explicit manual synchronization workflow instead of invoking `checkpoints` automatically.
 - `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
 - `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
 - `test` must run `fmt-check` before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
 - `clean` removes generated build and cache artifacts, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
+
+Checkpoint synchronization is an explicit reviewed workflow: change the mapping or semantic specification, review and update the sibling Linux instrumentation, run `make checkpoints`, then run `make checkpoints-linux-check` before `make difftest`. The read-only `make difftest` entry point must never rewrite source, regenerate tracked checkpoint artifacts or emit/apply a Linux patch.
 
 ## Disk Images
 
