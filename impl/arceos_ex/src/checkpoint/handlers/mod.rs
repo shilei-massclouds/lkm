@@ -387,8 +387,8 @@ fn next_priority(checkpoint: Checkpoint, after: Option<i16>) -> Option<i16> {
     while index < POST_VM_HANDLERS.len() {
         let handler = &POST_VM_HANDLERS[index];
         if handler_matches(handler, checkpoint)
-            && after.map_or(true, |priority| handler.priority > priority)
-            && next.map_or(true, |priority| handler.priority < priority)
+            && after.is_none_or(|priority| handler.priority > priority)
+            && next.is_none_or(|priority| handler.priority < priority)
         {
             next = Some(handler.priority);
         }

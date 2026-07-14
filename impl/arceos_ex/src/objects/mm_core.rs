@@ -51,6 +51,8 @@ pub struct ZoneRef {
     free_pages: usize,
 }
 
+// Allocator topology and metadata views are consumed by smoke/KUnit observations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl ZoneRef {
     const fn empty() -> Self {
         Self {
@@ -300,6 +302,7 @@ pub struct ZonelistSet {
     null_sentinel_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl ZonelistSet {
     pub const fn new() -> Self {
         Self {
@@ -425,6 +428,7 @@ pub struct GfpFlags {
     bits: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl GfpFlags {
     pub const EMPTY: Self = Self { bits: 0 };
     pub const KERNEL: Self = Self { bits: 1 << 0 };
@@ -498,6 +502,7 @@ pub struct PageMetadata {
     buddy_next: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PageMetadata {
     const fn new(pfn: usize) -> Self {
         Self {
@@ -582,6 +587,7 @@ pub struct PageMetadataMap {
     metadata_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PageMetadataMap {
     pub const fn new() -> Self {
         Self {
@@ -732,7 +738,7 @@ impl PageMetadataMap {
         if self.lifecycle.state() != State::Ready || self.page_size == 0 {
             return None;
         }
-        if phys.value() % self.page_size != 0 {
+        if !phys.value().is_multiple_of(self.page_size) {
             return None;
         }
         let pfn = phys_to_pfn_value(phys.value(), self.page_size)?;
@@ -855,12 +861,14 @@ impl PageMetadataMap {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct BuddyFreeBlock {
     zone: ZoneKind,
     order: usize,
     page: PageRef,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl BuddyFreeBlock {
     pub const fn zone(self) -> ZoneKind {
         self.zone
@@ -904,6 +912,7 @@ struct BuddyFreePageSets {
     free_block_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl BuddyFreePageSets {
     const fn new() -> Self {
         Self {
@@ -1024,9 +1033,7 @@ impl BuddyFreePageSets {
 
         let mut fallback_index = 0usize;
         while fallback_index < zonelist.fallback_count() {
-            let Some(zone_kind) = zonelist.fallback_zone_kind(fallback_index) else {
-                return None;
-            };
+            let zone_kind = zonelist.fallback_zone_kind(fallback_index)?;
             let Some(zone_index) = self.zone_index(zone_kind) else {
                 fallback_index += 1;
                 continue;
@@ -1551,6 +1558,7 @@ pub struct PageAllocator {
     zone_fact_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PageAllocator {
     pub const fn new() -> Self {
         Self {
@@ -2060,6 +2068,7 @@ pub struct KmallocAllocRef {
     cache_index: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl KmallocAllocRef {
     pub const fn addr(self) -> usize {
         self.addr
@@ -2079,6 +2088,7 @@ impl KmallocAllocRef {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 struct KmallocSlab {
     page: PageRef,
     order: usize,
@@ -2466,6 +2476,7 @@ pub struct SlubSubsystem {
     kmalloc_caches: KmallocCaches,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SlubSubsystem {
     pub const fn new() -> Self {
         Self {
@@ -2942,6 +2953,7 @@ pub struct SlubCacheRegistry {
     named_cache_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SlubCacheRegistry {
     const fn new() -> Self {
         Self {
@@ -3097,6 +3109,7 @@ pub struct KmallocCaches {
     count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl KmallocCaches {
     const fn new() -> Self {
         Self {
@@ -3218,9 +3231,7 @@ impl KmallocCaches {
         }
         let next = read_freelist_next(addr);
         cache.free_head = next;
-        let Some(slab_index) = self.slab_index_for_addr(addr) else {
-            return None;
-        };
+        let slab_index = self.slab_index_for_addr(addr)?;
         if self.slabs[slab_index].free_count == 0 {
             return None;
         }
@@ -3464,6 +3475,8 @@ pub struct PageTableCaches {
     lifecycle: Lifecycle,
     lock_cache: PageTableLockCache,
     vmalloc_install_range: PageTableInstallRange,
+    // Each boxed chunk keeps a stable address recorded in vmalloc_install_range.
+    #[allow(clippy::vec_box)]
     vmalloc_l0_slot_chunks: Vec<Box<PageTablePageSlotChunk>>,
     dynamic_vmalloc_pgtable_pages: Vec<PageRef>,
     vmalloc_pgtable_preallocated: bool,
@@ -3513,6 +3526,8 @@ impl PageTableCaches {
         self.vmalloc_install_range
     }
 
+    // Page-table cache setup binds allocator, VM and kernel-image address facts together.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         slub_subsystem: &mut SlubSubsystem,
@@ -3816,6 +3831,7 @@ pub struct VmapArea {
     released: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmapArea {
     pub const fn empty() -> Self {
         Self {
@@ -3908,6 +3924,7 @@ pub struct VmapMapping {
     removed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmapMapping {
     pub const fn empty() -> Self {
         Self {
@@ -4028,6 +4045,7 @@ pub struct VmallocAllocator {
     reclaim_hook_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmallocAllocator {
     pub const fn new() -> Self {
         Self {
@@ -4319,6 +4337,8 @@ impl VmallocAllocator {
         Some(area)
     }
 
+    // Runtime vmap installation keeps area, physical range, policy and allocators explicit.
+    #[allow(clippy::too_many_arguments)]
     pub fn map_page_range(
         &mut self,
         page_table_caches: &mut PageTableCaches,
@@ -4579,6 +4599,7 @@ pub struct VmapAddressSpace {
     free_space_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmapAddressSpace {
     const fn new() -> Self {
         Self {
@@ -4656,6 +4677,7 @@ pub struct VmapNodeSet {
     guard_contract_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmapNodeSet {
     const fn new() -> Self {
         Self {
@@ -4716,6 +4738,7 @@ pub struct VmapBlockQueues {
     fast_path_metadata_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmapBlockQueues {
     const fn new() -> Self {
         Self {
@@ -4762,6 +4785,7 @@ pub struct VfreeDeferredSet {
     rcu_runtime_path_deferred: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VfreeDeferredSet {
     const fn new() -> Self {
         Self {

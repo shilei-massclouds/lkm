@@ -93,6 +93,8 @@ impl IrqChipInitEntry {
         self.compatible
     }
 
+    // An irqchip table entry forwards the complete specified provider installation context.
+    #[allow(clippy::too_many_arguments)]
     fn run(
         &self,
         plic: &mut Plic,
@@ -121,6 +123,8 @@ impl IrqChipInitEntry {
     }
 }
 
+// Irqchip scan records are stable smoke/KUnit observation views.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct IrqChipInitRunRecord {
     name: &'static str,
@@ -130,6 +134,7 @@ pub struct IrqChipInitRunRecord {
     return_ok: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl IrqChipInitRunRecord {
     const fn empty() -> Self {
         Self {
@@ -166,15 +171,15 @@ crate::irqchip_declare!(sifive_plic, "sifive,plic-1.0.0", plic_irqchip_init);
 crate::irqchip_declare!(riscv_plic0, "riscv,plic0", plic_irqchip_init);
 
 fn irqchip_init_range() -> &'static [IrqChipInitEntry] {
-    let start = &raw const __irqchip_init_start as *const u8;
-    let end = &raw const __irqchip_init_end as *const u8;
+    let start = &raw const __irqchip_init_start;
+    let end = &raw const __irqchip_init_end;
     let start_addr = start as usize;
     let end_addr = end as usize;
     let entry_size = size_of::<IrqChipInitEntry>();
     if start_addr == 0
         || end_addr < start_addr
         || entry_size == 0
-        || (end_addr - start_addr) % entry_size != 0
+        || !(end_addr - start_addr).is_multiple_of(entry_size)
     {
         return &[];
     }
@@ -194,6 +199,8 @@ fn irqchip_init_range_valid(range: &[IrqChipInitEntry]) -> bool {
     true
 }
 
+// The init callback signature matches the irqchip-table provider boundary.
+#[allow(clippy::too_many_arguments)]
 fn plic_irqchip_init(
     plic: &mut Plic,
     node: DeviceNodeRef<'_>,
@@ -541,6 +548,7 @@ pub struct IrqHandlerRegistry {
     action_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl IrqHandlerRegistry {
     pub const fn new() -> Self {
         Self {
@@ -770,6 +778,7 @@ pub struct IrqChipInitTable {
     run_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl IrqChipInitTable {
     pub const fn new() -> Self {
         Self {
@@ -902,6 +911,8 @@ impl IrqChipInitTable {
         )
     }
 
+    // IrqChipInitTable setup owns the full provider scan and installation transition.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         plic_driver: &PlicDriver,
@@ -968,6 +979,8 @@ impl IrqChipInitTable {
         )
     }
 
+    // Keep the scan helper aligned with the irqchip callback context it dispatches.
+    #[allow(clippy::too_many_arguments)]
     fn of_irq_init(
         &mut self,
         plic_driver: &PlicDriver,
@@ -1324,6 +1337,8 @@ impl IrqDispatchTree {
         self.boot_cpu_route_ready
     }
 
+    // IRQ dispatch setup binds controller, stream, domain and handler objects atomically.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         irq_controller: &IrqController,
@@ -2071,6 +2086,7 @@ pub struct RiscvTimerProvider {
     sbi_programming_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl RiscvTimerProvider {
     pub const fn new() -> Self {
         Self {
@@ -2107,6 +2123,8 @@ impl RiscvTimerProvider {
         self.sbi_programming_ready
     }
 
+    // Timer setup validates the complete specified time and interrupt provider boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         device_tree: &DeviceTree,
@@ -2642,6 +2660,8 @@ impl Plic {
         super::plic_provider::complete_count_for_source(self, source)
     }
 
+    // PLIC provider preset retains explicit MMIO and page-table installation inputs.
+    #[allow(clippy::too_many_arguments)]
     fn preset_from_irqchip(
         &mut self,
         node: DeviceNodeRef<'_>,
@@ -3039,6 +3059,7 @@ pub struct PlicIrqMapping {
     handler_registered: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PlicIrqMapping {
     const fn empty() -> Self {
         Self {
@@ -3189,6 +3210,7 @@ pub struct PlicIrqDomain {
     mapping_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PlicIrqDomain {
     pub const fn new() -> Self {
         Self {
@@ -3463,14 +3485,10 @@ fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>, cpu_group: &C
 
 fn plic_external_context_index(node: DeviceNodeRef<'_>, cpu_group: &CpuGroup) -> Option<usize> {
     let boot_intc_phandle = boot_hart_intc_phandle(node, cpu_group.boot_cpu()?.hartid())?;
-    let Some(property) = node.property(b"interrupts-extended") else {
-        return None;
-    };
+    let property = node.property(b"interrupts-extended")?;
     let value = property.raw_value();
     let start = value.as_ptr() as usize;
-    let Some(end) = start.checked_add(value.len()) else {
-        return None;
-    };
+    let end = start.checked_add(value.len())?;
     if value.len() < 8 {
         return None;
     }
@@ -3478,12 +3496,8 @@ fn plic_external_context_index(node: DeviceNodeRef<'_>, cpu_group: &CpuGroup) ->
     let mut cursor = start;
     let mut index = 0usize;
     while cursor + 8 <= end {
-        let Some(phandle) = read_be_u32(cursor, end) else {
-            return None;
-        };
-        let Some(cause) = read_be_u32(cursor + 4, end) else {
-            return None;
-        };
+        let phandle = read_be_u32(cursor, end)?;
+        let cause = read_be_u32(cursor + 4, end)?;
         if phandle == boot_intc_phandle && cause == riscv64::SUPERVISOR_EXTERNAL_IRQ as u32 {
             return Some(index);
         }
@@ -5780,6 +5794,8 @@ impl Serial8250RxBatchLoopbackProbe {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
+    // Batch-loopback diagnostics intentionally name every independently checked IRQ fact.
+    #[allow(clippy::too_many_arguments)]
     fn setup_precondition_diagnostic(
         &self,
         rx_loopback_probe: &Serial8250RxLoopbackProbe,
@@ -7046,6 +7062,8 @@ fn wait_serial8250_long_irq_tx_closed(
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
+// The closure predicate compares the complete long-burst IRQ cycle snapshot.
+#[allow(clippy::too_many_arguments)]
 fn wait_serial8250_long_burst_irq_tx_closed(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -7489,6 +7507,7 @@ impl ProfileCore {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn timer_interrupt_count() -> usize {
     TIMER_INTERRUPT_COUNT.load(Ordering::Relaxed)
 }

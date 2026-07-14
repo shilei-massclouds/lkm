@@ -33,9 +33,12 @@ make clean
 `PROBE=announce` for new checkpoint announcement runs.
 
 From the repository root, `make test` first runs the read-only Rust format gate,
-then the high-signal Clippy gate, followed by the full validation path: strict
-formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and
-the final `APP=smoke` payload smoke run. Use root `make fmt-check`,
+then the full `-D warnings -D clippy::all` gate, followed by the full validation
+path: strict formal derive, checkpoint/KUnit handlers listed in
+`tests/kunit.handlers`, and the final `APP=smoke` payload smoke run. The Clippy
+gate checks smoke, ordinary hello, handler-enabled hello and user-boot with both
+native and Linux-object PLIC providers; clean builds must likewise emit no Rust
+warnings. Use root `make fmt-check`,
 `make clippy-check`, `make test-kunit` or `make test-smoke` when only one
 validation path is needed. `make fmt` uses the same pinned stable toolchain and
 edition as the format gate to normalize every Rust source below `src/`.

@@ -39,6 +39,7 @@ pub struct RcuCore {
     boot_ended_publish_recorded: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl RcuCore {
     pub const fn new() -> Self {
         Self {
@@ -284,7 +285,7 @@ impl RcuCore {
 
         let saved_before = local_interrupt.saved_and_disabled_count();
         local_interrupt.save_and_disable()?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.scheduler_starting_ready = true;
             self.scheduler_active_init = true;
             self.gp_seq_baseline_synced = true;
@@ -292,7 +293,7 @@ impl RcuCore {
             self.scheduler_start_local_irq_save_count = local_interrupt.saved_and_disabled_count();
             crate::checkpoint::checkpoint(Checkpoint::RcuSchedulerStartingReady);
             Ok(())
-        })();
+        };
         let restore_result = local_interrupt.restore();
         if guarded_result.is_ok() && restore_result.is_ok() {
             self.scheduler_start_local_irq_restore_count = local_interrupt.restored_count();

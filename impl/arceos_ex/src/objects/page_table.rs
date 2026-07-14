@@ -317,6 +317,8 @@ pub fn page_table_storage_ready(addr: usize, page_size: usize) -> bool {
         && core::mem::size_of::<PageTablePage>() >= page_size
 }
 
+// Early page-table construction keeps all address-space inputs explicit before the VM is live.
+#[allow(clippy::too_many_arguments)]
 pub fn map_pmd_range(
     _config: &Config,
     kernel_image: &KernelImage,
@@ -339,17 +341,15 @@ pub fn map_pmd_range(
         return false;
     };
     let vpn2 = sv39_index(virt_start, 30);
-    let mut vpn1 = sv39_index(virt_start, 21);
     let mut phys = phys_start;
     let Some(leaf_table_phys) = page_table_phys_addr(kernel_image, leaf_table) else {
         return false;
     };
-    for _ in 0..covered / pmd_size {
+    for vpn1 in (sv39_index(virt_start, 21)..).take(covered / pmd_size) {
         if vpn1 >= PAGE_TABLE_ENTRIES {
             return false;
         }
         leaf_table.set(vpn1, leaf_pte(phys, PTE_LEAF_RWX));
-        vpn1 += 1;
         let Some(next_phys) = phys.checked_add(pmd_size) else {
             return false;
         };
@@ -359,6 +359,8 @@ pub fn map_pmd_range(
     true
 }
 
+// Early page-table construction keeps all address-space inputs explicit before the VM is live.
+#[allow(clippy::too_many_arguments)]
 pub fn map_page_range(
     _config: &Config,
     kernel_image: &KernelImage,
@@ -384,7 +386,6 @@ pub fn map_page_range(
     };
     let vpn2 = sv39_index(virt_start, 30);
     let vpn1 = sv39_index(virt_start, 21);
-    let mut vpn0 = sv39_index(virt_start, 12);
     let mut phys = phys_base;
     let Some(l1_table_phys) = page_table_phys_addr(kernel_image, l1_table) else {
         return false;
@@ -392,12 +393,11 @@ pub fn map_page_range(
     let Some(l0_table_phys) = page_table_phys_addr(kernel_image, l0_table) else {
         return false;
     };
-    for _ in 0..covered / page_size {
+    for vpn0 in (sv39_index(virt_start, 12)..).take(covered / page_size) {
         if vpn0 >= PAGE_TABLE_ENTRIES {
             return false;
         }
         l0_table.set(vpn0, leaf_pte(phys, PTE_LEAF_RWX));
-        vpn0 += 1;
         let Some(next_phys) = phys.checked_add(page_size) else {
             return false;
         };
@@ -557,6 +557,8 @@ pub fn unmap_page_range_runtime(
     true
 }
 
+// Linear-map construction preserves its explicit table set, ranges and mapping granularity.
+#[allow(clippy::too_many_arguments)]
 pub fn map_linear_pmd_range(
     config: &Config,
     kernel_image: &KernelImage,
@@ -656,10 +658,11 @@ pub fn copy_high_half_root_entries(dst: &mut PageTablePage, src: &PageTablePage)
     let mut copied = 0usize;
     let mut index = SV39_HIGH_HALF_ROOT_INDEX;
     while index < PAGE_TABLE_ENTRIES {
-        if let Some(entry) = src.entry(index) {
-            if entry != 0 && dst.set_entry(index, entry) {
-                copied += 1;
-            }
+        if let Some(entry) = src.entry(index)
+            && entry != 0
+            && dst.set_entry(index, entry)
+        {
+            copied += 1;
         }
         index += 1;
     }

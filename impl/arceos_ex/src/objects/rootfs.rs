@@ -495,6 +495,8 @@ impl RootFS {
         self.current_root_is_real_ext2
     }
 
+    // Root switch enable commits the complete specified VFS, block and ext2 handoff.
+    #[allow(clippy::too_many_arguments)]
     pub fn enable(
         &mut self,
         rootfs_console: &RootfsConsoleDeferred,

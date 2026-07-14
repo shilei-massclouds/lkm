@@ -283,6 +283,7 @@ pub struct SecondaryIdleTaskSet {
     pt_regs_stack_pointer: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SecondaryIdleTaskSet {
     pub const fn new() -> Self {
         Self {
@@ -639,6 +640,8 @@ impl CpuStartProvider {
         self.sbi_boot_data_publish_barriers_observed
     }
 
+    // CPU start setup retains the complete specified hotplug and SBI publication boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,
@@ -716,7 +719,8 @@ impl CpuStartProvider {
         static_objects: &StaticObjects,
         lds: &Lds,
     ) -> bool {
-        let Some(entry_pa) = kernel_image.runtime_to_phys(arceos_ex_secondary_start_sbi as usize)
+        let Some(entry_pa) =
+            kernel_image.runtime_to_phys(arceos_ex_secondary_start_sbi as *const () as usize)
         else {
             return false;
         };
@@ -724,7 +728,7 @@ impl CpuStartProvider {
             return false;
         };
         let gp = lds.global_pointer();
-        let rust_entry = arceos_ex_secondary_entry_rust as usize;
+        let rust_entry = arceos_ex_secondary_entry_rust as *const () as usize;
 
         let mut logical_id = 1usize;
         while logical_id <= cpu_group.secondary_count() && logical_id < MAX_CPUS {
@@ -929,6 +933,8 @@ impl SecondaryCpuOnlineAck {
         self.ap_hotplug_thread_mb_pair_deferred
     }
 
+    // Online acknowledgement setup commits all specified AP and synchronization facts.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         startup_ack: &SecondaryCpuStartupAck,
@@ -1042,6 +1048,8 @@ impl SmpBringupBoundary {
     }
 }
 
+// Runtime readiness is the specified conjunction across the full SMP handoff.
+#[allow(clippy::too_many_arguments)]
 pub fn smp_bringup_runtime_ready(
     kernel_init_task: &KernelInitTask,
     cpu_group: &CpuGroup,

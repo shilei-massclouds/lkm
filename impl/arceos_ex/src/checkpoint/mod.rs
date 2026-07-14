@@ -110,6 +110,8 @@ fn checkpoint_reentry_shutdown() -> ! {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
+// Names and numeric IDs are stable external checkpoint interfaces.
+#[allow(clippy::enum_variant_names)]
 pub enum Checkpoint {
     KernelStarted,
     #[allow(dead_code)]

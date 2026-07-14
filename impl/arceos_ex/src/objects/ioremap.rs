@@ -122,6 +122,7 @@ impl IoMemoryMapping {
     }
 
     #[cfg(checkpoint_handler_console_handoff)]
+    #[allow(dead_code)]
     pub const fn vmap_area(self) -> VmapArea {
         self.vmap_area
     }
@@ -367,6 +368,8 @@ impl Ioremap {
         )
     }
 
+    // MMIO mapping keeps allocator, page-table, owner, range and policy inputs explicit.
+    #[allow(clippy::too_many_arguments)]
     pub fn map_device_mmio(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -391,6 +394,8 @@ impl Ioremap {
         )
     }
 
+    // System irqchip mappings use the same explicit page-table installation boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn map_system_irqchip_mmio(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -415,7 +420,8 @@ impl Ioremap {
         )
     }
 
-    #[allow(dead_code)]
+    // Alternate mapping kinds are a specified provider interface with explicit policy inputs.
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn map_device_mmio_with_kind(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -441,6 +447,8 @@ impl Ioremap {
         )
     }
 
+    // The common installation path must retain every owner, range and page-table input.
+    #[allow(clippy::too_many_arguments)]
     fn map_mmio_for_owner(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,

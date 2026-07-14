@@ -1,12 +1,15 @@
 const EID_LEGACY_CONSOLE_PUTCHAR: usize = 1;
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 const EID_LEGACY_SET_TIMER: usize = 0;
-const EID_HSM: usize = 0x4853_4d;
+const EID_HSM: usize = 0x0048_534d;
 const EID_SRST: usize = 0x5352_5354;
 const FID_HSM_HART_START: usize = 0;
 const FID_SYSTEM_RESET: usize = 0;
 const RESET_TYPE_SHUTDOWN: usize = 0;
 const RESET_REASON_NONE: usize = 0;
 
+// Direct timer programming is exercised by smoke/KUnit configurations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn set_timer(stime_value: u64) {
     let _ = sbi_call_1(EID_LEGACY_SET_TIMER, 0, stime_value as usize);
 }

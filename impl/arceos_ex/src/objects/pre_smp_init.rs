@@ -18,6 +18,7 @@ pub struct VmstatCore {
     proc_exports_deferred: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VmstatCore {
     pub const fn new() -> Self {
         Self {
@@ -101,6 +102,7 @@ pub struct PreSmpInitcallTable {
     address_space_id_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PreSmpInitcallTable {
     pub const fn new() -> Self {
         Self {
@@ -203,6 +205,7 @@ pub struct PreSmpInitBoundary {
     secondary_cpus_present_not_online: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PreSmpInitBoundary {
     pub const fn new() -> Self {
         Self {
@@ -280,6 +283,8 @@ impl PreSmpInitBoundary {
     }
 }
 
+// Phase readiness is the specified conjunction across all pre-SMP objects.
+#[allow(clippy::too_many_arguments)]
 pub fn pre_smp_runtime_ready(
     kernel_init_task: &KernelInitTask,
     kthreadd_task: &KthreaddTask,

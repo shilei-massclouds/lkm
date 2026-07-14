@@ -94,6 +94,8 @@ pub struct Uart8250Port {
     io_page_protection: bool,
     reg_shift: u32,
     reg_io_width: u32,
+    // Retained as parsed UART provider metadata even when the default value is zero.
+    #[allow(dead_code)]
     clock_frequency: u32,
     irq_source: u32,
     logical_irq: LogicalIrq,
@@ -1300,8 +1302,6 @@ pub fn uart8250_port_resources_ready() -> bool {
         && state.port.io_page_protection
         && state.port.reg_shift <= 8
         && uart_reg_io_width_supported(state.port.reg_io_width)
-        && (state.port.clock_frequency == DEFAULT_CLOCK_FREQUENCY
-            || state.port.clock_frequency > DEFAULT_CLOCK_FREQUENCY)
         && state.port.irq_resource_ready
         && state.port.irq_parent_plic
         && state.port.irq_source != 0
@@ -1409,11 +1409,13 @@ pub fn uart8250_irq_handler_registered() -> bool {
         && state.port.irq_handler_dispatch_ready
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered && state.port.irq_handler_hardirq_context_required
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn uart8250_irq_handler_dispatch_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered && state.port.irq_handler_dispatch_ready
@@ -1550,11 +1552,13 @@ pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_port_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_port.facts_ready(state.port)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_port_not_backend_owner() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_port.ready
@@ -1563,6 +1567,7 @@ pub fn tty_port_not_backend_owner() -> bool {
         && state.tty_port.no_console_registry_policy
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn tty_flip_buffer_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.facts_ready(state.tty_port)
@@ -1644,6 +1649,8 @@ pub fn tty_flip_buffer_overflowed() -> bool {
     }
 }
 
+// Stable probe/provider observation interfaces are not used by every payload cfg.
+#[allow(dead_code)]
 pub fn tty_flip_buffer_ready_data_bound() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.ready
@@ -1652,6 +1659,7 @@ pub fn tty_flip_buffer_ready_data_bound() -> bool {
         && !state.tty_flip_buffer.overflowed
 }
 
+#[allow(dead_code)]
 pub fn tty_flip_buffer_ready_data_consumed() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.ready
@@ -1672,6 +1680,7 @@ pub fn clear_tty_ready_data() -> bool {
     state.tty_flip_buffer.clear_ready_data()
 }
 
+#[allow(dead_code)]
 pub fn read_tty_ready_data(buffer: &mut [u8]) -> Option<usize> {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
     state.tty_flip_buffer.read_ready_data(buffer)
@@ -1684,6 +1693,7 @@ pub fn read_tty_ready_data_with_mode(buffer: &mut [u8], canonical: bool) -> Opti
         .read_ready_data_with_mode(buffer, canonical)
 }
 
+#[allow(dead_code)]
 pub fn tty_ready_data_available() -> Option<bool> {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.read_ready_available()
@@ -2176,10 +2186,11 @@ pub fn handle_uart_irq() {
     }
 
     let interrupt_id = iir & UART_IIR_ID;
-    if is_uart_rx_interrupt(interrupt_id) && state.runtime_port.online {
-        if handle_rx_chars(state, lsr) {
-            UART8250_RX_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
-        }
+    if is_uart_rx_interrupt(interrupt_id)
+        && state.runtime_port.online
+        && handle_rx_chars(state, lsr)
+    {
+        UART8250_RX_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
     }
 
     if interrupt_id != UART_IIR_THRI
@@ -2318,6 +2329,7 @@ pub fn serial8250_console_registered() -> bool {
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn serial8250_write_backend_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.serial_console_registered && state.write_backend.facts_ready(state.port)
@@ -2334,6 +2346,7 @@ pub fn serial8250_write_uses_membase() -> bool {
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn serial8250_write_uses_lsr_thr_polling() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready
@@ -2350,6 +2363,7 @@ pub fn serial8250_write_does_not_use_sbi() -> bool {
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn serial8250_interrupt_output_deferred() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready
@@ -2385,6 +2399,7 @@ pub fn serial8250_tx_byte_count() -> usize {
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn serial8250_mmio_writes_performed() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -2396,6 +2411,7 @@ pub fn serial8250_mmio_writes_performed() -> bool {
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn serial8250_write_timed_out() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)

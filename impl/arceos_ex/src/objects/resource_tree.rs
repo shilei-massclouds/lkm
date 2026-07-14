@@ -23,6 +23,7 @@ pub enum ResourceKind {
     KernelBss,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl ResourceKind {
     pub const fn name(self) -> &'static str {
         match self {
@@ -46,6 +47,7 @@ pub struct ResourceTree {
     resource_lock_write_guard_used: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl ResourceTree {
     pub const fn new() -> Self {
         Self {
@@ -368,12 +370,14 @@ impl ResourceRecord {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct ResourceRef<'tree> {
     tree: &'tree ResourceTree,
     index: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl<'tree> ResourceRef<'tree> {
     pub fn kind(self) -> ResourceKind {
         self.tree.records[self.index].kind
@@ -420,6 +424,7 @@ impl<'tree> Iterator for ResourceIter<'tree> {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct ResourceChildIter<'tree> {
     tree: &'tree ResourceTree,
     next: usize,

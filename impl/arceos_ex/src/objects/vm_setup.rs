@@ -40,7 +40,7 @@ static mut VM_SETUP_CONTEXT: VmSetupContext = VmSetupContext {
 };
 
 pub fn continuation_addr(kernel_image: &KernelImage) -> Option<usize> {
-    kernel_image.runtime_to_link(vm_setup_continuation as usize)
+    kernel_image.runtime_to_link(vm_setup_continuation as *const () as usize)
 }
 
 pub fn set_context(kernel_image: &KernelImage, context: VmSetupContext) {

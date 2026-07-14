@@ -336,10 +336,8 @@ pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
             .unwrap()
             .register_serial8250_console(preferred_from_stdout)
     };
-    if registered && console_handoff_complete() {
-        if earlycon::disable_after_handoff().is_err() {
-            panic!("earlycon disable failed during console handoff");
-        }
+    if registered && console_handoff_complete() && earlycon::disable_after_handoff().is_err() {
+        panic!("earlycon disable failed during console handoff");
     }
     registered
 }

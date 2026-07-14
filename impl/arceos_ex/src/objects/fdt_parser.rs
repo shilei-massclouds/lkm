@@ -275,7 +275,7 @@ impl Parser {
 
         let entry_cells = addr_cells.checked_add(size_cells)?;
         let entry_size = entry_cells.checked_mul(4)?;
-        if entry_size == 0 || len % entry_size != 0 {
+        if entry_size == 0 || !len.is_multiple_of(entry_size) {
             return None;
         }
 

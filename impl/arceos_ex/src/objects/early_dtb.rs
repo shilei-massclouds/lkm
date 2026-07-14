@@ -80,23 +80,11 @@ impl EarlyDtb {
         };
         self.facts = facts;
 
-        let result = platform_cpu_info.preset(raw_dtb, &self.facts, boot_hartid);
-        if result.is_err() {
-            return result;
-        }
-        let result = platform_cpu_info.enable();
-        if result.is_err() {
-            return result;
-        }
+        platform_cpu_info.preset(raw_dtb, &self.facts, boot_hartid)?;
+        platform_cpu_info.enable()?;
 
-        let result = physical_memory.preset(raw_dtb, &self.facts);
-        if result.is_err() {
-            return result;
-        }
-        let result = physical_memory.enable();
-        if result.is_err() {
-            return result;
-        }
+        physical_memory.preset(raw_dtb, &self.facts)?;
+        physical_memory.enable()?;
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -126,15 +114,9 @@ impl EarlyDtb {
             );
         }
 
-        let result = memblock.preset(self, physical_memory, raw_dtb);
-        if result.is_err() {
-            return result;
-        }
+        memblock.preset(self, physical_memory, raw_dtb)?;
 
-        let result = command_line.preset(raw_dtb, &self.facts, kernel_cmdline);
-        if result.is_err() {
-            return result;
-        }
+        command_line.preset(raw_dtb, &self.facts, kernel_cmdline)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

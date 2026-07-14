@@ -43,18 +43,9 @@ impl EarlyParam {
             );
         }
 
-        let result = earlycon::preset(kernel_cmdline.has_earlycon_sbi());
-        if result.is_err() {
-            return result;
-        }
-        let result = earlycon::setup(sbi.state() == State::Ready);
-        if result.is_err() {
-            return result;
-        }
-        let result = earlycon::enable();
-        if result.is_err() {
-            return result;
-        }
+        earlycon::preset(kernel_cmdline.has_earlycon_sbi())?;
+        earlycon::setup(sbi.state() == State::Ready)?;
+        earlycon::enable()?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

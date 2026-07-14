@@ -31,6 +31,8 @@ pub struct Console {
     handoff_complete: bool,
 }
 
+// Console and timing observation getters are exercised by smoke/KUnit configurations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Console {
     pub const fn new() -> Self {
         Self {
@@ -355,6 +357,7 @@ impl SchedClock {
         )
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn read(&self, timer_provider: &RiscvTimerProvider) -> Option<u64> {
         if self.lifecycle.state() != State::Ready || !self.reader_ready {
             return None;
@@ -433,6 +436,7 @@ impl DelayLoop {
         )
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn udelay(&self, timer_provider: &RiscvTimerProvider, usec: u64) -> Option<u64> {
         if self.lifecycle.state() != State::Ready || !self.delay_actions_ready {
             return None;

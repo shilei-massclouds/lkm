@@ -62,7 +62,7 @@ RUSTFMT ?= rustfmt
 CLIPPY ?= clippy-driver
 RUSTFMT_EDITION ?= 2024
 RUSTFMT_CONFIG ?= skip_children=true
-CLIPPY_FLAGS ?= -D clippy::correctness -D clippy::suspicious -D clippy::perf -A clippy::style -A clippy::complexity
+CLIPPY_FLAGS ?= -D warnings -D clippy::all
 RUST_SYSROOT ?= $(shell $(RUSTC) --print sysroot)
 RUST_HOST ?= $(shell $(RUSTC) --version --verbose | sed -n 's/^host: //p')
 RUST_OBJCOPY ?= $(RUST_SYSROOT)/lib/rustlib/$(RUST_HOST)/bin/rust-objcopy
@@ -105,7 +105,6 @@ PLIC_PROVIDER_CFG := --cfg $(if $(filter native,$(PLIC_PROVIDER)),plic_provider_
 PLIC_PROVIDER_LINK_ARGS := $(foreach obj,$(PLIC_PROVIDER_OBJECTS),-C link-arg=$(obj))
 
 RUSTFLAGS := \
-	$(if $(filter hello user-boot,$(APP)),-A dead_code,) \
 	-C opt-level=2 \
 	-C panic=abort \
 	-C relocation-model=static \

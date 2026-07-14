@@ -16,7 +16,10 @@ compile_error!("one selected payload cfg must be enabled");
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SelectedPayloadKind {
     Hello,
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     Smoke,
+    // Constructed only when the user-boot payload cfg is selected.
+    #[allow(dead_code)]
     UserBoot,
 }
 

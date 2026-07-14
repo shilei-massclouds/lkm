@@ -42,6 +42,7 @@ pub struct RootPidNamespace {
     compiletime_limit_checked: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl RootPidNamespace {
     pub const fn new() -> Self {
         Self {
@@ -189,6 +190,7 @@ pub struct CredentialCore {
     runtime_relations_deferred: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CredentialCore {
     pub const fn new() -> Self {
         Self {
@@ -474,6 +476,8 @@ impl TaskCreationCore {
         self.kthreadd_created
     }
 
+    // Observed by the optional user-boot checkpoint handlers.
+    #[allow(dead_code)]
     pub const fn user_child_created(&self) -> bool {
         self.user_child_created
     }

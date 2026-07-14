@@ -194,6 +194,7 @@ impl CpuGroup {
         self.pre_smp_topology_ready
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub const fn boot_cpu_topology_recorded(&self) -> bool {
         self.boot_cpu_topology_recorded
     }

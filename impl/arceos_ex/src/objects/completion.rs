@@ -3,6 +3,7 @@ use super::state::{
 };
 use crate::checkpoint::Checkpoint;
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 const COMPLETION_DONE_ALL: usize = usize::MAX;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -12,6 +13,8 @@ pub enum CompletionExtState {
     CompletedAll,
 }
 
+// Extended completion observations are exercised by smoke/KUnit configurations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct SimpleWaitQueue {
     lifecycle: Lifecycle,
     wake_one_committed: bool,
@@ -20,6 +23,7 @@ pub struct SimpleWaitQueue {
     waiter_finished: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SimpleWaitQueue {
     pub const fn new() -> Self {
         Self {
@@ -140,6 +144,7 @@ pub struct Completion {
     done_observed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Completion {
     pub const fn new() -> Self {
         Self {

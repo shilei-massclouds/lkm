@@ -33,10 +33,15 @@ use super::{
 };
 
 pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
+// Alternate candidates are consumed only by the user-boot init-selection path.
+#[allow(dead_code)]
 pub const USER_ETC_INIT_PATH: &[u8] = b"/etc/init";
+#[allow(dead_code)]
 pub const USER_BIN_INIT_PATH: &[u8] = b"/bin/init";
+#[allow(dead_code)]
 pub const USER_BIN_SH_PATH: &[u8] = b"/bin/sh";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
+#[allow(dead_code)]
 const USER_SMOKE_STDIN_MARKER: &[u8] = b"user-smoke: begin";
 pub const USER_SIGNAL_COUNT: usize = 64;
 pub const USER_CHILD_PID: usize = 3;
@@ -48,6 +53,7 @@ pub const USER_SIGNAL_WAIT_REASON_NONE: usize = 0;
 pub const USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE: usize = 1;
 
 pub const ELF_HEADER_LEN: usize = 64;
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
 pub const USER_STACK_SIZE: usize = 16 * 1024;
 pub const USER_STACK_TOP: usize = 0x4000_0000;
@@ -67,22 +73,31 @@ pub const USER_KERNEL_TRAP_STACK_ALIGN: usize = USER_KERNEL_TRAP_STACK_SIZE * 2;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_GUARD_SIZE: usize = USER_PAGE_SIZE;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = USER_PAGE_SIZE;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_IRQ_STACK_SIZE: usize = USER_KERNEL_TRAP_STACK_SIZE;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_THREAD_INFO_IN_TASK: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_VMAP_STACK: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_IRQ_STACKS: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_GUARD_PAGE_READY: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_OVERFLOW_STACK_READY: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED: bool = true;
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED: bool = true;
 
 #[derive(Clone, Copy)]
@@ -681,6 +696,8 @@ pub enum UserInitPathRef {
 }
 
 impl UserInitPathRef {
+    // Stable indices and paths are emitted by optional user-boot diagnostics.
+    #[allow(dead_code)]
     pub const fn index(self) -> usize {
         match self {
             Self::DefaultInit => 0,
@@ -691,6 +708,7 @@ impl UserInitPathRef {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn path(self) -> &'static [u8] {
         match self {
             Self::DefaultInit => USER_INIT_PATH,
@@ -702,6 +720,8 @@ impl UserInitPathRef {
     }
 }
 
+// Non-None stages are constructed only by the user-boot init-selection path.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum UserInitAttemptStage {
     None,
@@ -713,6 +733,7 @@ pub enum UserInitAttemptStage {
 }
 
 impl UserInitAttemptStage {
+    #[allow(dead_code)]
     pub const fn index(self) -> usize {
         match self {
             Self::None => 0,
@@ -724,6 +745,7 @@ impl UserInitAttemptStage {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -736,6 +758,8 @@ impl UserInitAttemptStage {
     }
 }
 
+// Non-None reasons are constructed only by the user-boot init-selection path.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum UserInitAttemptReason {
     None,
@@ -747,6 +771,7 @@ pub enum UserInitAttemptReason {
 }
 
 impl UserInitAttemptReason {
+    #[allow(dead_code)]
     pub const fn index(self) -> usize {
         match self {
             Self::None => 0,
@@ -758,6 +783,7 @@ impl UserInitAttemptReason {
         }
     }
 
+    #[allow(dead_code)]
     pub const fn name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -770,6 +796,8 @@ impl UserInitAttemptReason {
     }
 }
 
+// The complete failure record is consumed by optional user-boot diagnostics.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct UserInitAttemptFailure {
     path: UserInitPathRef,
@@ -784,6 +812,7 @@ pub struct UserInitAttemptFailure {
     elf_error: Option<ElfError>,
 }
 
+#[allow(dead_code)]
 impl UserInitAttemptFailure {
     pub const fn empty() -> Self {
         Self {
@@ -915,6 +944,8 @@ pub enum ElfError {
     UserCopyOutOfRange,
 }
 
+// Stable error indices and names are consumed by optional user-boot diagnostics.
+#[allow(dead_code)]
 impl ElfError {
     pub const fn index(self) -> usize {
         match self {
@@ -2083,6 +2114,8 @@ impl UserAddressSpace {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
+    // Address-space setup keeps ELF, interpreter, stack and allocator inputs explicit.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         elf: &ElfObject,
@@ -2297,7 +2330,7 @@ impl UserAddressSpace {
         const MAP_FIXED: usize = 0x10;
         const MAP_ANONYMOUS: usize = 0x20;
         const SUPPORTED_FLAGS: usize = MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS;
-        if offset % USER_PAGE_SIZE != 0 {
+        if !offset.is_multiple_of(USER_PAGE_SIZE) {
             return Err(UserMmapError::Invalid);
         }
         if flags & !SUPPORTED_FLAGS != 0 {
@@ -2311,7 +2344,7 @@ impl UserAddressSpace {
         let heap_end = self.heap_base + self.heap_size;
         if flags == (MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS) {
             if prot == PROT_NONE
-                && addr % USER_PAGE_SIZE == 0
+                && addr.is_multiple_of(USER_PAGE_SIZE)
                 && len == USER_PAGE_SIZE
                 && addr >= self.heap_base
                 && addr
@@ -2590,6 +2623,8 @@ impl UserAddressSpace {
         true
     }
 
+    // Leaf installation keeps permission and allocator inputs explicit for rollback accounting.
+    #[allow(clippy::too_many_arguments)]
     fn install_user_leaf_pte(
         &mut self,
         virt: usize,
@@ -2600,7 +2635,7 @@ impl UserAddressSpace {
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
-        if virt % USER_PAGE_SIZE != 0 || phys % USER_PAGE_SIZE != 0 {
+        if !virt.is_multiple_of(USER_PAGE_SIZE) || !phys.is_multiple_of(USER_PAGE_SIZE) {
             return false;
         }
         let (vpn2, vpn1, vpn0) = sv39_indices(virt);
@@ -2779,11 +2814,13 @@ static USER_KERNEL_TRAP_STACK_RUNTIME: UserKernelTrapStackRuntime =
 
 #[cfg(app_user_boot)]
 #[repr(align(16))]
+#[allow(dead_code)]
 struct UserKernelTrapOverflowStack {
     bytes: [u8; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 static mut USER_KERNEL_TRAP_OVERFLOW_STACK: UserKernelTrapOverflowStack =
     UserKernelTrapOverflowStack {
         bytes: [0; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
@@ -3893,11 +3930,7 @@ impl UserChildProcess {
     }
 
     pub const fn completed_child_record_free_count(&self) -> usize {
-        if self.completed_child_record_count >= USER_COMPLETED_CHILD_RECORD_CAPACITY {
-            0
-        } else {
-            USER_COMPLETED_CHILD_RECORD_CAPACITY - self.completed_child_record_count
-        }
+        USER_COMPLETED_CHILD_RECORD_CAPACITY.saturating_sub(self.completed_child_record_count)
     }
 
     pub const fn completed_child_records_full(&self) -> bool {
@@ -4199,6 +4232,7 @@ impl UserChildProcess {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
+    // Plain-fork copy validates the complete specified parent and child task snapshot.
     #[allow(clippy::too_many_arguments)]
     pub fn copy_plain_fork_from_parent(
         &mut self,
@@ -4334,6 +4368,7 @@ impl UserChildProcess {
         Some(self.pid)
     }
 
+    // Vfork copy keeps the shared-VM, pidfd and saved-frame handoff inputs explicit.
     #[allow(clippy::too_many_arguments)]
     pub fn copy_vfork_from_parent(
         &mut self,
@@ -4399,15 +4434,13 @@ impl UserChildProcess {
                 1,
             );
         }
-        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
             address_space,
             page_allocator,
             page_metadata_map,
             &mut self.parent_wait_writable_page_snapshot_pages,
             &mut self.parent_wait_writable_page_checksums,
-        ) else {
-            return None;
-        };
+        )?;
 
         let child_pid = self.next_child_pid;
         let next_child_accepted =
@@ -4500,6 +4533,7 @@ impl UserChildProcess {
         Some(child_frame)
     }
 
+    // Nested vfork copy retains the full current-child and parent resume boundary.
     #[allow(clippy::too_many_arguments)]
     pub fn copy_nested_vfork_from_current_child(
         &mut self,
@@ -4574,15 +4608,13 @@ impl UserChildProcess {
                 1,
             );
         }
-        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
             address_space,
             page_allocator,
             page_metadata_map,
             &mut self.parent_wait_writable_page_snapshot_pages,
             &mut self.parent_wait_writable_page_checksums,
-        ) else {
-            return None;
-        };
+        )?;
 
         self.pid = child_pid;
         self.parent_pid = parent_pid;
@@ -4664,6 +4696,7 @@ impl UserChildProcess {
         Some((child_frame, parent_pid))
     }
 
+    // Child-originated plain fork validates the full inherited task and address-space state.
     #[allow(clippy::too_many_arguments)]
     pub fn copy_plain_fork_from_current_child(
         &mut self,
@@ -4768,6 +4801,8 @@ impl UserChildProcess {
         true
     }
 
+    // This handoff records the complete specified parent wait and child continuation boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn wait4_yield_to_child_continuation(
         &mut self,
         parent: &UserInitProcess,
@@ -4831,26 +4866,22 @@ impl UserChildProcess {
         ) {
             return None;
         }
-        let Some(parent_stack_snapshot_len) = copy_user_stack_snapshot(
+        let parent_stack_snapshot_len = copy_user_stack_snapshot(
             address_space,
             page_metadata_map,
             &mut self.parent_wait_stack_snapshot,
-        ) else {
-            return None;
-        };
+        )?;
         self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
         self.parent_wait_stack_snapshot_copied = true;
         self.parent_wait_stack_snapshot_restored = false;
 
-        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
             address_space,
             page_allocator,
             page_metadata_map,
             &mut self.parent_wait_writable_page_snapshot_pages,
             &mut self.parent_wait_writable_page_checksums,
-        ) else {
-            return None;
-        };
+        )?;
         self.parent_wait_writable_page_count = writable_page_count;
         self.parent_wait_writable_page_snapshot_saved = true;
         self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
@@ -4882,6 +4913,8 @@ impl UserChildProcess {
         Some(child_frame)
     }
 
+    // Observed-fork handoff retains all parent wait and snapshot inputs explicitly.
+    #[allow(clippy::too_many_arguments)]
     pub fn wait4_yield_to_observed_child_continuation(
         &mut self,
         parent: &UserInitProcess,
@@ -4938,26 +4971,22 @@ impl UserChildProcess {
         ) {
             return None;
         }
-        let Some(parent_stack_snapshot_len) = copy_user_stack_snapshot(
+        let parent_stack_snapshot_len = copy_user_stack_snapshot(
             address_space,
             page_metadata_map,
             &mut self.parent_wait_stack_snapshot,
-        ) else {
-            return None;
-        };
+        )?;
         self.parent_wait_stack_snapshot_len = parent_stack_snapshot_len;
         self.parent_wait_stack_snapshot_copied = true;
         self.parent_wait_stack_snapshot_restored = false;
 
-        let Some((writable_page_count, writable_page_truncated)) = capture_writable_page_snapshot(
+        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
             address_space,
             page_allocator,
             page_metadata_map,
             &mut self.parent_wait_writable_page_snapshot_pages,
             &mut self.parent_wait_writable_page_checksums,
-        ) else {
-            return None;
-        };
+        )?;
         self.parent_wait_writable_page_count = writable_page_count;
         self.parent_wait_writable_page_snapshot_saved = true;
         self.parent_wait_writable_page_snapshot_truncated = writable_page_truncated;
@@ -6536,6 +6565,8 @@ impl UserInitProcess {
         self.getcwd_observed
     }
 
+    // User-init setup binds the selected image, trap, task and file-system handoff facts.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         kernel_init_task: &KernelInitTask,
@@ -7740,6 +7771,7 @@ impl UserBootPayload {
 }
 
 #[cfg(app_user_boot)]
+// First user-init preparation is the specified cross-object exec and task handoff.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_first_user_init(
     payload: &mut UserBootPayload,
@@ -8025,6 +8057,8 @@ impl SelectedUserInit {
 }
 
 #[cfg(app_user_boot)]
+// Init selection is a specified cross-object handoff with explicit failure attribution.
+#[allow(clippy::too_many_arguments)]
 fn select_user_init_candidate(
     payload: &mut UserBootPayload,
     vfs_core: &mut VfsCore,
@@ -8353,6 +8387,7 @@ fn sbi_put_usize(mut value: usize) {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_base() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .stack_base
@@ -8367,8 +8402,9 @@ pub fn user_kernel_trap_stack_top() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_base_aligned() -> bool {
-    user_kernel_trap_stack_base() % USER_KERNEL_TRAP_STACK_ALIGN == 0
+    user_kernel_trap_stack_base().is_multiple_of(USER_KERNEL_TRAP_STACK_ALIGN)
 }
 
 #[cfg(app_user_boot)]
@@ -8377,6 +8413,7 @@ pub fn user_kernel_trap_stack_ready() -> bool {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_vmapped() -> bool {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .vmapped
@@ -8385,6 +8422,7 @@ pub fn user_kernel_trap_stack_vmapped() -> bool {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_guard_base() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .guard_base
@@ -8392,6 +8430,7 @@ pub fn user_kernel_trap_stack_guard_base() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_guard_size() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .guard_size
@@ -8399,6 +8438,7 @@ pub fn user_kernel_trap_stack_guard_size() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_guard_unmapped() -> bool {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .guard_unmapped
@@ -8407,6 +8447,7 @@ pub fn user_kernel_trap_stack_guard_unmapped() -> bool {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_backing_phys() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .backing_phys
@@ -8414,6 +8455,7 @@ pub fn user_kernel_trap_stack_backing_phys() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_stack_backing_order() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .backing_order
@@ -8421,16 +8463,19 @@ pub fn user_kernel_trap_stack_backing_order() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_base() -> usize {
     unsafe { core::ptr::addr_of!(USER_KERNEL_TRAP_OVERFLOW_STACK.bytes) as usize }
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_top() -> usize {
     user_kernel_trap_overflow_stack_base() + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_ready() -> bool {
     user_kernel_trap_overflow_stack_base() != 0
         && user_kernel_trap_overflow_stack_top()
@@ -8973,7 +9018,7 @@ fn pages_for_range(offset: usize, len: usize) -> Result<usize, ElfError> {
     let end = offset
         .checked_add(len)
         .ok_or(ElfError::InvalidProgramHeader)?;
-    Ok((end + USER_PAGE_SIZE - 1) / USER_PAGE_SIZE)
+    Ok(end.div_ceil(USER_PAGE_SIZE))
 }
 
 fn mappings_have_backing_pages(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {

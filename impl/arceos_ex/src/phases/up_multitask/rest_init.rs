@@ -247,15 +247,14 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     // CurrentTaskRef. The real future return to the idle-loop continuation is
     // left to the later continuation/task-stack model.
     ctx.boot_cpu_current_task.set_current_boot_idle()?;
-    let result = ctx.boot_idle_runtime.run_idle_loop(
+    ctx.boot_idle_runtime.run_idle_loop(
         &mut ctx.scheduler,
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
         &ctx.kthreadd_task,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
-    );
-    result
+    )
 }
 
 fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
@@ -497,6 +496,7 @@ fn mark_boot_idle_entry_online(ctx: &Context) -> EventResult {
     )
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn is_online() -> bool {
     boot_init_rest_init_is_online()
         && boot_init_schedule_handoff_is_online()

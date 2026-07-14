@@ -48,7 +48,13 @@ fmt-check:
 	$(MAKE) -C $(KERNEL_DIR) fmt-check
 
 clippy-check:
-	$(MAKE) -C $(KERNEL_DIR) clippy-check APP=$(SMOKE_APP) PLIC_PROVIDER=native
+	@set -e; \
+	for provider in native $(TEST_PLIC_PROVIDERS); do \
+		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=$(SMOKE_APP) PLIC_PROVIDER="$$provider"; \
+		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=hello PLIC_PROVIDER="$$provider"; \
+		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))" PLIC_PROVIDER="$$provider"; \
+		$(MAKE) -C $(KERNEL_DIR) clippy-check APP=user-boot PLIC_PROVIDER="$$provider"; \
+	done
 
 verify:
 ifeq ($(REPORT),graph)

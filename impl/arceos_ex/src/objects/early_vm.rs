@@ -89,20 +89,11 @@ impl EarlyVm {
             );
         }
 
-        let result = raw_dtb.preset(boot_args);
-        if result.is_err() {
-            return result;
-        }
+        raw_dtb.preset(boot_args)?;
 
-        let result = raw_dtb.setup();
-        if result.is_err() {
-            return result;
-        }
+        raw_dtb.setup()?;
 
-        let result = fix_map.preset(config, raw_dtb);
-        if result.is_err() {
-            return result;
-        }
+        fix_map.preset(config, raw_dtb)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,

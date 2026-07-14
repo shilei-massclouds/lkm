@@ -33,14 +33,17 @@ pub(crate) fn all_adoption_facts(cpu_group: &CpuGroup) -> bool {
     all_online(cpu_group) && all_facts(cpu_group, ALL_ADOPTION_FACTS)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn all_boot_data_verified(cpu_group: &CpuGroup) -> bool {
     all_online(cpu_group) && all_facts(cpu_group, BOOT_DATA_VERIFIED)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn all_stacks_verified(cpu_group: &CpuGroup) -> bool {
     all_online(cpu_group) && all_facts(cpu_group, STACK_VERIFIED)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub(crate) fn all_task_pointers_verified(cpu_group: &CpuGroup) -> bool {
     all_online(cpu_group) && all_facts(cpu_group, TASK_POINTER_VERIFIED)
 }

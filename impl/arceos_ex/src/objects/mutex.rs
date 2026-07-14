@@ -15,6 +15,7 @@ pub enum MutexOwner {
     None,
     BootInitTask,
     KernelInitTask,
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     SmokeMutexTask,
 }
 

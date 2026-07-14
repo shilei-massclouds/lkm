@@ -123,6 +123,8 @@ pub fn disable_supervisor_timer_interrupt() {
     clear_sie_bits(SIE_STIE);
 }
 
+// Timer-interrupt exercises are selected by smoke/KUnit configurations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn enable_supervisor_timer_interrupt() {
     set_sie_bits(SIE_STIE);
 }

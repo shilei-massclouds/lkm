@@ -16,15 +16,25 @@ pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
 pub const EXT2_FAST_SYMLINK_MAX: usize = EXT2_N_BLOCKS * core::mem::size_of::<u32>();
 pub const EXT2_SINGLE_INDIRECT_INDEX: usize = EXT2_NDIR_BLOCKS;
+// Distribution fixture constants are consumed by smoke/KUnit cases.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_RELEASE_PATH: &[u8] = b"/etc/alpine-release";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_RELEASE_FILE_NAME: &[u8] = b"alpine-release";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_RELEASE_FILE_CONTENT: &[u8] = b"3.24.1\n";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_INSTALLED_DB_PATH: &[u8] = b"/lib/apk/db/installed";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_INSTALLED_DB_FILE_NAME: &[u8] = b"installed";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_BIN_LS_PATH: &[u8] = b"/bin/ls";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_BUSYBOX_FILE_NAME: &[u8] = b"busybox";
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_SINGLE_INDIRECT_READ_MAX: usize =
     EXT2_MAX_BLOCK_SIZE * (EXT2_NDIR_BLOCKS + EXT2_MAX_BLOCK_SIZE / core::mem::size_of::<u32>());
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 
 pub const EXT2_NAME_MAX: usize = 32;

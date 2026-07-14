@@ -66,6 +66,7 @@ const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
 #[cfg(app_user_boot)]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 #[cfg(not(app_user_boot))]
+#[cfg_attr(not(app_user_boot), allow(dead_code))]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_DUP3: usize = 24;
@@ -114,6 +115,8 @@ const SYSCALL_GETGID: usize = 176;
 const SYSCALL_GETEGID: usize = 177;
 const SYSCALL_SOCKET: usize = 198;
 const SYSCALL_CONNECT: usize = 203;
+// Named by the optional user-syscall diagnostic even before sendto is implemented.
+#[allow(dead_code)]
 const SYSCALL_SENDTO: usize = 206;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
@@ -308,6 +311,8 @@ const ECHILD: usize = 10;
 const ECONNREFUSED: usize = 111;
 
 #[cfg(app_user_boot)]
+// Fields are consumed selectively by optional execve checkpoint handlers.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct ExecveCheckpointObservation {
     pub stage: usize,
@@ -497,6 +502,7 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct Wait4CheckpointObservation {
     pub saved: usize,
@@ -640,6 +646,7 @@ static WAIT4_CHECKPOINT_OBSERVATION: Wait4CheckpointObservationAtomics =
     };
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn wait4_checkpoint_observation() -> Wait4CheckpointObservation {
     let obs = &WAIT4_CHECKPOINT_OBSERVATION;
     Wait4CheckpointObservation {
@@ -946,6 +953,8 @@ pub struct SyscallTable {
     lseek_observed: AtomicU8,
     set_tid_address_observed: AtomicU8,
     clone_observed: AtomicU8,
+    // This specified observation fact is written on the user-boot execve path.
+    #[allow(dead_code)]
     execve_observed: AtomicU8,
     wait4_observed: AtomicU8,
     exit_observed: AtomicU8,
@@ -3161,6 +3170,7 @@ impl ExceptionStream {
         )
     }
 
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
     pub fn syscall_setup(&mut self, table: &mut SyscallTable) -> EventResult {
         self.syscall.setup(
             self.lifecycle.state(),
@@ -3170,6 +3180,7 @@ impl ExceptionStream {
         table.setup(self.syscall.state())
     }
 
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
     pub fn syscall_enable(&mut self, table: &SyscallTable) -> EventResult {
         self.syscall.enable(self.lifecycle.state(), table)
     }
@@ -3239,6 +3250,7 @@ impl ExceptionKind {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
     fn enable(
         &mut self,
         exception_stream_state: State,
@@ -4212,7 +4224,7 @@ fn syscall_table_connect(frame: &mut TrapFrame) {
 }
 
 fn classify_connect_sockaddr_pathname(addr_ptr: usize, addrlen: usize) -> ConnectSockaddrShape {
-    if addrlen == 0 || addrlen > SOCKADDR_STORAGE_SIZE || addrlen < SOCKADDR_UN_PATH_OFFSET {
+    if !(SOCKADDR_UN_PATH_OFFSET..=SOCKADDR_STORAGE_SIZE).contains(&addrlen) {
         return ConnectSockaddrShape::Unsupported;
     }
 
@@ -4968,8 +4980,7 @@ fn nanosleep_busy_wait(duration_ns: u64) -> bool {
     let Some(start) = ctx.riscv_timer_provider.read_time() else {
         return false;
     };
-    let delta_ticks = ((duration_ns as u128 * timebase_hz as u128) + (NSEC_PER_SEC as u128 - 1))
-        / NSEC_PER_SEC as u128;
+    let delta_ticks = (duration_ns as u128 * timebase_hz as u128).div_ceil(NSEC_PER_SEC as u128);
     if delta_ticks == 0 || delta_ticks > u64::MAX as u128 {
         return false;
     }
@@ -5969,7 +5980,6 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
         Ok(()) => {
             table.execve_observed.store(1, Ordering::Release);
         }
-        Err(ExecveFirstSliceError::Fault) => complete_error_syscall(frame, EFAULT),
         Err(ExecveFirstSliceError::NotFound) => complete_error_syscall(frame, ENOENT),
         Err(ExecveFirstSliceError::Unsupported) => complete_unsupported_syscall(frame),
     }
@@ -5978,7 +5988,6 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
 #[cfg(app_user_boot)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ExecveFirstSliceError {
-    Fault,
     NotFound,
     Unsupported,
 }
@@ -6483,6 +6492,8 @@ fn reset_frame_for_execve_start_thread(
 }
 
 #[cfg(app_user_boot)]
+// The observation writer mirrors the specified parent-wait checkpoint fields.
+#[allow(clippy::too_many_arguments)]
 fn record_wait4_parent_wait_saved(
     parent_frame: &TrapFrame,
     status_ptr: usize,
@@ -6521,6 +6532,8 @@ fn record_wait4_parent_wait_saved(
 }
 
 #[cfg(app_user_boot)]
+// The resume checkpoint intentionally records the complete restored parent state.
+#[allow(clippy::too_many_arguments)]
 fn record_wait4_parent_wait_resumed(
     parent_frame: &TrapFrame,
     parent_satp: usize,
@@ -7414,7 +7427,7 @@ fn write_usize_field(bytes: &mut [u8], offset: usize, value: usize) {
 }
 
 fn valid_rt_signal(signal: usize) -> bool {
-    signal >= 1 && signal <= USER_SIGNAL_COUNT
+    (1..=USER_SIGNAL_COUNT).contains(&signal)
 }
 
 fn kernel_only_signal(signal: usize) -> bool {
@@ -7508,12 +7521,16 @@ impl ExecveArgvCopy {
 }
 
 #[cfg(app_user_boot)]
+// Keep the bounded argv snapshot inline so user-copy failure reporting needs no extra allocation.
+#[allow(clippy::large_enum_variant)]
 enum ExecveArgvCopyError {
     Fault,
     CapacityExceeded(ExecveArgvCopy),
 }
 
 #[cfg(app_user_boot)]
+// Returning the inline argv snapshot preserves the allocation-free user-copy failure path.
+#[allow(clippy::result_large_err)]
 fn copy_execve_argv(argv_ptr: usize) -> Result<ExecveArgvCopy, ExecveArgvCopyError> {
     if argv_ptr == 0 {
         return Err(ExecveArgvCopyError::Fault);
@@ -7607,6 +7624,7 @@ pub type BreakpointHook = fn(&mut TrapFrame) -> BreakpointHookResult;
 
 static mut BREAKPOINT_HOOKS: [Option<BreakpointHook>; 4] = [None; 4];
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn register_breakpoint_hook(hook: BreakpointHook) -> bool {
     unsafe {
         for slot in (&raw mut BREAKPOINT_HOOKS).as_mut().unwrap().iter_mut() {
@@ -7638,6 +7656,7 @@ fn run_breakpoint_hooks(frame: &mut TrapFrame) -> BreakpointHookResult {
     BreakpointHookResult::NotHandled
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn resume_after_breakpoint(frame: &mut TrapFrame) {
     checkpoint::checkpoint(Checkpoint::BreakpointExceptionHandled);
     frame.sepc = frame
@@ -7649,6 +7668,7 @@ fn unexpected_exception_handler(frame: &TrapFrame) -> ! {
     panic_dispatch_frame("unexpected exception", frame)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 fn breakpoint_instruction_length(sepc: usize) -> usize {
     let insn = unsafe { core::ptr::read_unaligned(sepc as *const u16) };
     if insn & 0b11 == 0b11 { 4 } else { 2 }
@@ -9091,6 +9111,7 @@ fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
 }
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
+#[allow(dead_code)]
 fn print_execve_close_on_exec_report(_report: CloseOnExecReport) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]

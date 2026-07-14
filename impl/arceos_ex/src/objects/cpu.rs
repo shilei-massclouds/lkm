@@ -185,6 +185,7 @@ impl CpuRef {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct CpuView {
     cpu_ref: CpuRef,
@@ -197,6 +198,7 @@ pub struct CpuView {
     state: State,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CpuView {
     pub const fn invalid() -> Self {
         Self {
@@ -253,6 +255,7 @@ pub struct SecondaryCpuStore {
     count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SecondaryCpuStore {
     pub const fn new() -> Self {
         Self {

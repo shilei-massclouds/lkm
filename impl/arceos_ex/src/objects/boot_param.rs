@@ -18,6 +18,7 @@ pub struct BootParam {
     summary: BootParamSummary,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl BootParam {
     pub const fn new() -> Self {
         Self {
@@ -47,10 +48,13 @@ impl BootParam {
         self.summary.payload_boundary
     }
 
+    // These accessors are consumed by the user-boot payload configuration.
+    #[allow(dead_code)]
     pub const fn init_value_range(&self) -> Option<(usize, usize)> {
         self.summary.init_value
     }
 
+    #[allow(dead_code)]
     pub fn init_value<'a>(&self, cmdline: &'a [u8]) -> Option<&'a [u8]> {
         let (start, end) = self.summary.init_value?;
         if start <= end && end <= cmdline.len() {

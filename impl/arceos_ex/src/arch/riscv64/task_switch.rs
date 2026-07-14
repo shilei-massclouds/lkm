@@ -42,10 +42,6 @@ impl TaskSwitchContext {
         self.tp = 0;
         self.s = [0; 12];
     }
-
-    pub fn set_tp(&mut self, tp_value: usize) {
-        self.tp = tp_value;
-    }
 }
 
 global_asm!(

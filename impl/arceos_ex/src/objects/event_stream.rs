@@ -157,6 +157,7 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub const fn zeroed() -> Self {
         Self {
             regs: [0; 32],
@@ -199,7 +200,8 @@ impl EventStream {
     }
 
     pub fn preset(&mut self, kernel_image: &KernelImage) -> EventResult {
-        let Some(early_event_entry_phys) = kernel_image.runtime_to_phys(early_event_entry as usize)
+        let Some(early_event_entry_phys) =
+            kernel_image.runtime_to_phys(early_event_entry as *const () as usize)
         else {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -242,7 +244,7 @@ impl EventStream {
             );
         }
 
-        csr::write_stvec(formal_event_entry as usize);
+        csr::write_stvec(formal_event_entry as *const () as usize);
         csr::clear_sscratch();
         self.lifecycle.transition(
             LifecycleEvent::Setup,

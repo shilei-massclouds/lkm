@@ -59,6 +59,7 @@ pub struct HwRngDevice {
     last_read_len: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl HwRngDevice {
     pub const fn new_virtio_rng(index: usize) -> Self {
         let mut name = [0u8; 25];
@@ -291,6 +292,7 @@ pub struct HwRngCore {
     last_read_len: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl HwRngCore {
     pub const fn new() -> Self {
         Self {

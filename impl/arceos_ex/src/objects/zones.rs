@@ -43,6 +43,7 @@ pub struct Zone {
     free_page_set_empty: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Zone {
     const fn empty(kind: ZoneKind) -> Self {
         Self {
@@ -113,6 +114,7 @@ pub struct Zones {
     zones: [Zone; ZONE_KIND_COUNT],
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Zones {
     pub const fn new() -> Self {
         Self {

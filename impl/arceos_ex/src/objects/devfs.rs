@@ -11,6 +11,8 @@ pub enum DevFsNodeKind {
     BlockDevice,
 }
 
+// Devfs node views are consumed by smoke/KUnit observations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct DevFsNode {
     dentry_ref: DentryRef,
@@ -22,6 +24,7 @@ pub struct DevFsNode {
     devt: Option<DevT>,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl DevFsNode {
     fn new_hwrng(dentry_ref: DentryRef, hwrng_device_ref: HwRngDeviceRef) -> Self {
         let (name, name_len) = copy_node_name(b"hwrng");
@@ -93,6 +96,7 @@ pub struct DevFs {
     sysfs_deferred: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl DevFs {
     pub const fn new() -> Self {
         Self {

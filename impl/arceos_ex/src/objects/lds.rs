@@ -44,39 +44,42 @@ impl Lds {
     }
 
     pub fn kernel_start(&self) -> usize {
-        kernel_start as usize
+        kernel_start as *const () as usize
     }
 
     pub fn kernel_end(&self) -> usize {
-        kernel_end as usize
+        kernel_end as *const () as usize
     }
 
     fn text_start(&self) -> usize {
-        _start as usize
+        _start as *const () as usize
     }
 
     pub fn text_range(&self) -> (usize, usize) {
-        (_stext as usize, _etext as usize)
+        (_stext as *const () as usize, _etext as *const () as usize)
     }
 
     pub fn rodata_range(&self) -> (usize, usize) {
-        (_srodata as usize, _erodata as usize)
+        (
+            _srodata as *const () as usize,
+            _erodata as *const () as usize,
+        )
     }
 
     pub fn data_range(&self) -> (usize, usize) {
-        (_sdata as usize, _edata as usize)
+        (_sdata as *const () as usize, _edata as *const () as usize)
     }
 
     pub fn per_cpu_start(&self) -> usize {
-        __per_cpu_start as usize
+        __per_cpu_start as *const () as usize
     }
 
     pub fn per_cpu_end(&self) -> usize {
-        __per_cpu_end as usize
+        __per_cpu_end as *const () as usize
     }
 
     pub fn per_cpu_load(&self) -> usize {
-        __per_cpu_load as usize
+        __per_cpu_load as *const () as usize
     }
 
     pub fn bss_range(&self) -> (usize, usize) {
@@ -84,7 +87,7 @@ impl Lds {
     }
 
     pub fn global_pointer(&self) -> usize {
-        global_pointer as usize
+        global_pointer as *const () as usize
     }
 
     pub fn current_global_pointer(&self, kernel_image: &KernelImage) -> Option<usize> {
@@ -96,27 +99,27 @@ impl Lds {
     }
 
     fn head_text_start(&self) -> usize {
-        __head_text_start as usize
+        __head_text_start as *const () as usize
     }
 
     fn head_text_end(&self) -> usize {
-        __head_text_end as usize
+        __head_text_end as *const () as usize
     }
 
     fn bss_start(&self) -> usize {
-        _sbss as usize
+        _sbss as *const () as usize
     }
 
     fn bss_end(&self) -> usize {
-        _ebss as usize
+        _ebss as *const () as usize
     }
 
     pub fn init_stack_start(&self) -> usize {
-        init_stack_start as usize
+        init_stack_start as *const () as usize
     }
 
     pub fn init_stack_end(&self) -> usize {
-        init_stack_end as usize
+        init_stack_end as *const () as usize
     }
 
     pub fn init_stack_end_phys(&self, kernel_image: &KernelImage) -> Option<usize> {

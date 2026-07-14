@@ -95,8 +95,8 @@ impl ExceptionTable {
             );
         }
 
-        let start = __start___ex_table as usize;
-        let stop = __stop___ex_table as usize;
+        let start = __start___ex_table as *const () as usize;
+        let stop = __stop___ex_table as *const () as usize;
         let Some(byte_len) = stop.checked_sub(start) else {
             return failed_condition(
                 LifecycleEvent::Setup,

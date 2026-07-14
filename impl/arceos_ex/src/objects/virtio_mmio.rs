@@ -441,6 +441,7 @@ pub struct VirtioMmioHeader {
     vendor_id: u32,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtioMmioHeader {
     pub const fn new(magic: u32, version: u32, device_id: u32, vendor_id: u32) -> Self {
         Self {

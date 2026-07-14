@@ -188,7 +188,7 @@ fn initcall_range(start: *const u8, end: *const u8) -> &'static [InitcallEntry] 
     if start_addr == 0
         || end_addr < start_addr
         || entry_size == 0
-        || (end_addr - start_addr) % entry_size != 0
+        || !(end_addr - start_addr).is_multiple_of(entry_size)
     {
         return &[];
     }
@@ -278,6 +278,8 @@ pub enum InitcallLevelName {
     Late,
 }
 
+// Initcall run views are consumed by smoke/KUnit observations.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct InitcallLevel {
     name: InitcallLevelName,
@@ -285,6 +287,7 @@ pub struct InitcallLevel {
     entry_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl InitcallLevel {
     const fn new(name: InitcallLevelName) -> Self {
         Self {
@@ -307,6 +310,7 @@ impl InitcallLevel {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct InitcallRunRecord {
     level: InitcallLevelName,
@@ -322,6 +326,7 @@ pub struct InitcallRunRecord {
     latent_entropy_accounted: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl InitcallRunRecord {
     const fn empty() -> Self {
         Self {
@@ -675,6 +680,7 @@ impl PlatformBusProbeObservation {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct PlatformBus {
     lifecycle: Lifecycle,
     registered: bool,
@@ -719,6 +725,7 @@ pub struct PlatformBus {
     of_platform_candidate_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PlatformBus {
     pub const fn new() -> Self {
         Self {
@@ -1390,6 +1397,7 @@ impl PlatformBus {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 const fn is_device_ref_ready(_device: DeviceRef) -> bool {
     true
 }
@@ -1795,6 +1803,7 @@ pub struct InitcallTable {
     run_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl InitcallTable {
     pub const fn new() -> Self {
         Self {
@@ -2099,6 +2108,8 @@ impl InitcallBoundary {
         self.kunit_next_boundary
     }
 
+    // This boundary preserves the specified initcall ordering and object-by-object diagnostics.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         cpuset: &CpusetSmpTrimmed,
@@ -2152,6 +2163,8 @@ impl InitcallBoundary {
         )
     }
 
+    // Keep diagnostic inputs aligned one-for-one with the InitcallBoundary transition inputs.
+    #[allow(clippy::too_many_arguments)]
     fn setup_diagnostic(
         &self,
         cpuset: &CpusetSmpTrimmed,
@@ -2694,7 +2707,8 @@ impl InitcallBoundary {
     }
 }
 
-#[allow(dead_code)]
+// Phase readiness mirrors the complete specified initcall boundary.
+#[allow(dead_code, clippy::too_many_arguments)]
 pub fn initcall_phase_ready(
     cpuset: &CpusetSmpTrimmed,
     driver_core_base: &DriverCoreBase,
@@ -2745,6 +2759,8 @@ impl InitcallReadyCheckDiagnostic {
     }
 }
 
+// The diagnostic reports the first failed predicate across the specified phase objects.
+#[allow(clippy::too_many_arguments)]
 pub fn initcall_phase_ready_diagnostic(
     cpuset: &CpusetSmpTrimmed,
     driver_core_base: &DriverCoreBase,

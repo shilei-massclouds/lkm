@@ -57,6 +57,7 @@ pub struct CpuCapabilities {
     fallback_isa_used: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CpuCapabilities {
     pub const fn new() -> Self {
         Self {

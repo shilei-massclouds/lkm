@@ -2502,6 +2502,8 @@ impl FixtureElf {
         self.write_u16(56, 1);
     }
 
+    // ELF fixture construction keeps program-header fields explicit.
+    #[allow(clippy::too_many_arguments)]
     fn write_load_segment(
         &mut self,
         index: usize,

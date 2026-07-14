@@ -67,6 +67,7 @@ pub struct VirtioRngDriver {
     scan_registered_hwrng: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtioRngDriver {
     pub const fn new() -> Self {
         Self {
@@ -224,6 +225,7 @@ pub struct VirtioRngDevice {
     completion_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtioRngDevice {
     fn new(virtio_device: VirtioDevice) -> Self {
         Self {

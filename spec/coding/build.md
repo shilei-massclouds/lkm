@@ -51,7 +51,7 @@ Targets must remain composable:
 - `difftest-preflight` must run `test-checkpoints` before `checkpoints-linux-check`; `difftest` must not start its paired runner unless both read-only checks pass. A preflight failure must retain the detailed drift diagnostics and direct the developer to the explicit manual synchronization workflow instead of invoking `checkpoints` automatically.
 - `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
 - `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
-- `clippy-check` runs the selected kernel crate through the active pinned toolchain's `clippy-driver` in metadata-only mode. It must reject the `correctness`, `suspicious` and `perf` lint groups while leaving `style` and `complexity` non-blocking during the initial rollout.
+- `clippy-check` runs the selected kernel crate through the active pinned toolchain's `clippy-driver` in metadata-only mode. It must reject all ordinary rustc warnings and the complete `clippy::all` group for every kernel configuration used by the default test matrix.
 - `test` must run `fmt-check`, then `clippy-check`, before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
 - `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
@@ -229,15 +229,23 @@ The aggregate `make test` target must depend on the independently runnable, read
 before starting formal verification, checkpoint artifact validation, compilation or QEMU. Format drift
 must fail fast and must never be repaired implicitly by `make test`.
 
-#### High-signal Clippy gate after formatting
+#### Full Clippy and rustc warning gate after formatting
 
 The selected kernel implementation must expose an independently runnable, read-only `clippy-check` target.
-It must compile the default smoke/native-provider crate configuration only as metadata with the pinned stable
-toolchain's configurable `clippy-driver`, so the gate neither links a kernel image nor mutates generated or
-runtime artifacts. The initial gate must deny Clippy's `correctness`, `suspicious` and `perf` groups, explicitly
-leave `style` and `complexity` non-blocking, and leave ordinary rustc warnings visible without promoting them
-to errors. The aggregate `make test` target must run this gate strictly after `fmt-check` succeeds and before
-formal verification, checkpoint checks, builds or QEMU, including when make is invoked with parallel jobs.
+It must compile metadata with the pinned stable toolchain's configurable `clippy-driver`, so the gate neither
+links a kernel image nor mutates generated or runtime artifacts. The gate must pass `-D warnings` and
+`-D clippy::all`: every ordinary rustc warning and every lint in the standard Clippy `all` group is a permanent
+blocking failure. `clippy::pedantic` and `clippy::nursery` remain outside this gate. A semantic exception may
+use a documented allow on the narrowest applicable item, but crate-, module- and build-wide warning or lint
+exceptions are forbidden.
+
+The repository-root gate must cover the configurations compiled or run by the default test path: the smoke
+payload, the ordinary hello payload, hello with the KUnit checkpoint-handler file, and the user-boot payload.
+Each configuration must be checked with both the native PLIC provider and every configured Linux-object PLIC
+provider. This matrix is additional to clean-build observation: ordinary kernel builds must also remain free
+of rustc warnings, including after `make clean` removes cached outputs. The aggregate `make test` target must
+run the full gate strictly after `fmt-check` succeeds and before formal verification, checkpoint checks,
+builds or QEMU, including when make is invoked with parallel jobs.
 
 #### Decomposable tests
 

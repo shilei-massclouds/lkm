@@ -18,15 +18,12 @@ pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
         );
     }
 
-    let result = crate::phases::state::adopt(
+    crate::phases::state::adopt(
         &PREPARE_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Base,
         State::Ready,
-    );
-    if result.is_err() {
-        return result;
-    }
+    )?;
 
     crate::phases::state::adopt(
         &PREPARE_PHASE_STATE,

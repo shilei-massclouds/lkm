@@ -21,7 +21,7 @@ const FDT_SIZE_DT_STRINGS: usize = 32;
 const FDT_SIZE_DT_STRUCT: usize = 36;
 const MAX_DEPTH: usize = 64;
 const NO_INDEX: usize = usize::MAX;
-const ROOT_NODE_NAME: [u8; 1] = [b'/'];
+const ROOT_NODE_NAME: [u8; 1] = *b"/";
 const STDOUT_PATH_PROPERTY: &[u8] = b"stdout-path";
 const LINUX_STDOUT_PATH_PROPERTY: &[u8] = b"linux,stdout-path";
 
@@ -328,18 +328,22 @@ impl DeviceTree {
         })
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn stdout_path_node(&self) -> Option<DeviceNodeRef<'_>> {
         self.node(self.stdout_path_node?)
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub const fn stdout_path_node_id(&self) -> Option<DeviceNodeId> {
         self.stdout_path_node
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn stdout_path_path(&self) -> &[u8] {
         raw_bytes_slice(self.stdout_path_path.addr, self.stdout_path_path.len).unwrap_or(&[])
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn stdout_path_options(&self) -> &[u8] {
         raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len).unwrap_or(&[])
     }

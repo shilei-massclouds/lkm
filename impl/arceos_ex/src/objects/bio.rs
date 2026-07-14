@@ -14,6 +14,7 @@ pub enum BioOp {
     Read,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BioSubmitPath {
     DefaultBlockDevice,
@@ -36,6 +37,8 @@ impl From<BlockDeviceError> for BlockIoError {
     }
 }
 
+// The full bio observation surface is consumed by smoke/KUnit checks.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct Bio {
     lifecycle: Lifecycle,
     op: BioOp,
@@ -53,6 +56,7 @@ pub struct Bio {
     copies_to_caller: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Bio {
     fn new_read(
         device_ref: BlockDeviceRef,
@@ -159,6 +163,7 @@ impl Bio {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct BufferHead {
     lifecycle: Lifecycle,
     device_ref: BlockDeviceRef,
@@ -174,6 +179,7 @@ pub struct BufferHead {
     data_nonzero: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl BufferHead {
     fn new(
         device_ref: BlockDeviceRef,
@@ -289,6 +295,7 @@ impl BufferHead {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn sb_bread_default<P: BlockDeviceProvider>(
     registry: &mut BlockDeviceRegistry,
     provider: &mut P,
@@ -323,6 +330,7 @@ pub fn sb_bread_default<P: BlockDeviceProvider>(
     Ok(bh)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn sb_bread_by_devt<P: BlockDeviceProvider>(
     registry: &mut BlockDeviceRegistry,
     provider: &mut P,
@@ -372,6 +380,7 @@ pub fn sb_bread_by_devt_block<P: BlockDeviceProvider>(
     Ok(bh)
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 fn submit_bio_wait_default<P: BlockDeviceProvider>(
     registry: &mut BlockDeviceRegistry,
     provider: &mut P,
@@ -393,7 +402,7 @@ fn submit_bio_wait_default<P: BlockDeviceProvider>(
 const fn valid_block_size(block_size: usize) -> bool {
     block_size != 0
         && block_size <= BUFFER_HEAD_MAX_SIZE
-        && block_size % BUFFER_HEAD_SECTOR_SIZE == 0
+        && block_size.is_multiple_of(BUFFER_HEAD_SECTOR_SIZE)
 }
 
 fn submit_bio_wait_by_devt<P: BlockDeviceProvider>(

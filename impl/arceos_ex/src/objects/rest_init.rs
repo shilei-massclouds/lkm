@@ -12,7 +12,7 @@ use super::{
     init_task::InitTask,
     mm_core::{
         GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches,
-        VmallocAllocator, VmapArea, VmapAreaFlags, VmapMapping,
+        VmallocAllocator, VmapAreaFlags,
     },
     process_prepare::{
         CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCopyProcessInputs,
@@ -20,10 +20,8 @@ use super::{
     },
     rcu::RcuCore,
     scheduler::Scheduler,
-    state::{
-        EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
-    },
-    task::{Task, TaskCpuState, TaskEntry, TaskKind},
+    state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    task::{Task, TaskEntry, TaskKind},
     workqueue::Workqueue,
 };
 use crate::arch::riscv64::task_switch::TaskSwitchContext;
@@ -66,6 +64,7 @@ pub struct KernelInitTask {
     entry_stack_verified: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl KernelInitTask {
     pub const fn new() -> Self {
         Self {
@@ -162,6 +161,8 @@ impl KernelInitTask {
         self.task.running
     }
 
+    // Retained as the object-level stack-boundary observation interface.
+    #[allow(dead_code)]
     pub const fn kernel_stack_top(&self) -> usize {
         self.kernel_stack_top
     }
@@ -194,10 +195,6 @@ impl KernelInitTask {
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
         &self.task.switch_ctx
-    }
-
-    pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.task.switch_ctx
     }
 
     pub fn mark_entry_started(&mut self, stack_pointer: usize) -> EventResult {
@@ -236,6 +233,8 @@ impl KernelInitTask {
         )
     }
 
+    // KernelInitTask setup is the specified cross-object task creation transition.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         task_creation_core: &mut TaskCreationCore,
@@ -341,7 +340,7 @@ impl KernelInitTask {
         }
 
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.task.running = true;
             let selected_rq = scheduler.select_runqueue_for_task(self.task.pid, cpu_group)?;
             self.set_task_cpu(selected_rq.cpu_id())?;
@@ -353,7 +352,7 @@ impl KernelInitTask {
                 State::Online,
                 Checkpoint::KernelInitTaskOnline,
             )
-        })();
+        };
         let unlock_result =
             pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
         guarded_result.and(unlock_result)
@@ -381,13 +380,13 @@ impl KernelInitTask {
 
         let locks_before = boot_idle_rcu_read_side.read_lock_count();
         boot_idle_rcu_read_side.read_lock()?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.pid_lookup_under_rcu_read =
                 boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
             self.pinned_to_boot_cpu = true;
             self.pf_no_setaffinity = true;
             Ok(())
-        })();
+        };
         let unlock_result = boot_idle_rcu_read_side.read_unlock();
         if guarded_result.is_ok() && unlock_result.is_ok() {
             self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
@@ -500,6 +499,7 @@ pub struct KthreaddTask {
     kernel_stack_top: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl KthreaddTask {
     pub const fn new() -> Self {
         Self {
@@ -598,16 +598,14 @@ impl KthreaddTask {
         self.task.running
     }
 
+    // Retained as the object-level stack-boundary observation interface.
+    #[allow(dead_code)]
     pub const fn kernel_stack_top(&self) -> usize {
         self.kernel_stack_top
     }
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
         &self.task.switch_ctx
-    }
-
-    pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.task.switch_ctx
     }
 
     pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
@@ -630,6 +628,8 @@ impl KthreaddTask {
         )
     }
 
+    // KthreaddTask setup mirrors the specified cross-object task creation transition.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         task_creation_core: &mut TaskCreationCore,
@@ -735,7 +735,7 @@ impl KthreaddTask {
         }
 
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.task.running = true;
             let selected_rq = scheduler.select_runqueue_for_task(self.task.pid, cpu_group)?;
             self.set_task_cpu(selected_rq.cpu_id())?;
@@ -747,7 +747,7 @@ impl KthreaddTask {
                 State::Online,
                 Checkpoint::KthreaddTaskOnline,
             )
-        })();
+        };
         let unlock_result =
             pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
         guarded_result.and(unlock_result)
@@ -800,14 +800,14 @@ impl KthreaddTask {
 
         let locks_before = boot_idle_rcu_read_side.read_lock_count();
         boot_idle_rcu_read_side.read_lock()?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.pid_lookup_under_rcu_read =
                 boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
             self.global_ref_bound = true;
             self.provider_ready = true;
             crate::checkpoint::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
             Ok(())
-        })();
+        };
         let unlock_result = boot_idle_rcu_read_side.read_unlock();
         if guarded_result.is_ok() && unlock_result.is_ok() {
             self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
@@ -1087,6 +1087,7 @@ pub struct KthreaddReadyGate {
     complete_wake_guarded: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl KthreaddReadyGate {
     pub const fn new() -> Self {
         Self {
@@ -1211,7 +1212,7 @@ impl KthreaddReadyGate {
         }
 
         wait_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.complete_wait_lock_guard_used = wait_lock.locked();
             self.complete_wait_lock_irqsave_count = wait_lock.irqsave_entered_count();
             self.completion.complete()?;
@@ -1219,7 +1220,7 @@ impl KthreaddReadyGate {
                 wait_lock.locked() && self.completion.completed();
             self.complete_wake_guarded = wait_lock.locked() && self.completion.wakes_one_waiter();
             Ok(())
-        })();
+        };
         let unlock_result =
             wait_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
         if guarded_result.is_ok() && unlock_result.is_ok() {
@@ -1284,6 +1285,7 @@ pub struct BootIdleRuntime {
     kernel_init_task_switch_handoff_ready: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl BootIdleRuntime {
     pub const fn new() -> Self {
         Self {
@@ -1689,7 +1691,7 @@ impl BootIdleRuntime {
         self.nohz_idle_entered = true;
         let saves_before = local_interrupt.saved_and_disabled_count();
         local_interrupt.save_and_disable()?;
-        let guarded_result = (|| {
+        let guarded_result: EventResult = {
             self.local_irq_disabled_for_sleep = local_interrupt.disabled()
                 && local_interrupt.saved_and_disabled_count() == saves_before.wrapping_add(1);
             self.local_irq_save_count_for_sleep = local_interrupt.saved_and_disabled_count();
@@ -1699,7 +1701,7 @@ impl BootIdleRuntime {
             self.poll_or_cpuidle_path_deferred = true;
             self.arch_cpu_idle_exit_done = true;
             Ok(())
-        })();
+        };
         let restore_result = local_interrupt.restore();
         if guarded_result.is_ok() && restore_result.is_ok() {
             self.local_irq_restore_count_for_sleep = local_interrupt.restored_count();

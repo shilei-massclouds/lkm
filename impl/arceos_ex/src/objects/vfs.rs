@@ -120,6 +120,7 @@ impl FileRef {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub enum VfsError {
     CoreNotReady,
     FsTypeNotReady,
@@ -158,6 +159,7 @@ pub struct FsStruct {
     chroot_dot_done: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl FsStruct {
     pub const fn new() -> Self {
         Self {
@@ -305,6 +307,7 @@ impl Ext2InodeBinding {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct FileSystemType {
     lifecycle: Lifecycle,
     kind: FileSystemKind,
@@ -313,6 +316,7 @@ pub struct FileSystemType {
     mount_callback_bound: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl FileSystemType {
     pub const fn new_ramfs() -> Self {
         let mut name = [0u8; VFS_NAME_MAX];
@@ -371,6 +375,7 @@ pub struct RamFsType {
     memory_backed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl RamFsType {
     pub const fn new() -> Self {
         Self {
@@ -407,6 +412,7 @@ impl RamFsType {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct Mount {
     mount_ref: MountRef,
     fs_kind: FileSystemKind,
@@ -416,6 +422,7 @@ pub struct Mount {
     mounted: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Mount {
     const fn new(
         mount_ref: MountRef,
@@ -463,6 +470,7 @@ impl Mount {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct SuperBlock {
     superblock_ref: SuperBlockRef,
     fs_kind: FileSystemKind,
@@ -473,6 +481,7 @@ pub struct SuperBlock {
     ext2_private_bound: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SuperBlock {
     fn new(superblock_ref: SuperBlockRef, fs_kind: FileSystemKind) -> Self {
         Self {
@@ -520,6 +529,7 @@ impl SuperBlock {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct Inode {
     inode_ref: InodeRef,
     superblock_ref: SuperBlockRef,
@@ -532,6 +542,7 @@ pub struct Inode {
     removed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Inode {
     fn new(inode_ref: InodeRef, superblock_ref: SuperBlockRef, kind: VfsInodeKind) -> Self {
         Self {
@@ -598,6 +609,7 @@ impl Inode {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct Dentry {
     dentry_ref: DentryRef,
     superblock_ref: SuperBlockRef,
@@ -610,6 +622,7 @@ pub struct Dentry {
     mounted_root: Option<DentryRef>,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Dentry {
     const fn new(
         dentry_ref: DentryRef,
@@ -682,6 +695,7 @@ impl Dentry {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct File {
     file_ref: FileRef,
     dentry_ref: DentryRef,
@@ -694,6 +708,7 @@ pub struct File {
     last_read_len: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl File {
     const fn new(file_ref: FileRef, dentry_ref: DentryRef, inode_ref: InodeRef) -> Self {
         Self {
@@ -743,6 +758,7 @@ impl File {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct DirEntry {
     dentry_ref: DentryRef,
     inode_ref: InodeRef,
@@ -751,6 +767,7 @@ pub struct DirEntry {
     name_len: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl DirEntry {
     fn from_dentry(dentry: &Dentry, inode: &Inode) -> Self {
         Self {
@@ -783,6 +800,7 @@ impl DirEntry {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct VfsCore {
     lifecycle: Lifecycle,
     fs_type_registry_ready: bool,
@@ -823,6 +841,7 @@ pub struct VfsCore {
     mount_moved_to_root: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VfsCore {
     pub const fn new() -> Self {
         Self {

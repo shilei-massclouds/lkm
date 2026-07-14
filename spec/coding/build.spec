@@ -18,7 +18,7 @@ predicate build_must_stage_external_tools_as_configurable_commands() -> bool;
 predicate build_must_pin_repository_rust_toolchain_and_components() -> bool;
 predicate build_must_format_selected_kernel_rust_sources_with_pinned_toolchain() -> bool;
 predicate build_must_gate_rust_format_before_other_test_stages() -> bool;
-predicate build_must_gate_high_signal_clippy_after_rust_format() -> bool;
+predicate build_must_gate_full_clippy_and_rust_warnings_after_rust_format() -> bool;
 predicate build_must_keep_test_aggregate_decomposable() -> bool;
 predicate build_must_gate_checkpoint_artifact_drift_before_runtime_tests() -> bool;
 predicate build_must_not_check_in_generated_or_runtime_local_outputs() -> bool;
@@ -70,8 +70,8 @@ type BuildAndScriptCodingMust {
         /* Early Rust format gate. */
         build_must_gate_rust_format_before_other_test_stages();
 
-        /* High-signal Clippy gate after formatting. */
-        build_must_gate_high_signal_clippy_after_rust_format();
+        /* Full Clippy and rustc warning gate after formatting. */
+        build_must_gate_full_clippy_and_rust_warnings_after_rust_format();
 
         /* Decomposable tests. */
         build_must_keep_test_aggregate_decomposable();

@@ -10,6 +10,7 @@ pub struct PayloadParam {
     arg_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PayloadParam {
     pub const fn new() -> Self {
         Self {
@@ -74,6 +75,7 @@ impl PayloadParam {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 fn next_token(cmdline: &[u8], mut cursor: usize) -> Option<(usize, usize)> {
     while cursor < cmdline.len() && cmdline[cursor].is_ascii_whitespace() {
         cursor += 1;

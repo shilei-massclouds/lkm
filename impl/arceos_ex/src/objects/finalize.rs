@@ -475,6 +475,8 @@ impl FinalizeBoundary {
         self.payload_next_boundary
     }
 
+    // This transition validates the specified finalize object boundary as one atomic phase check.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
         async_full_sync: &AsyncFullSyncDeferred,
@@ -519,6 +521,8 @@ impl FinalizeBoundary {
     }
 }
 
+// Phase readiness is intentionally the conjunction of all specified finalize objects.
+#[allow(clippy::too_many_arguments)]
 pub fn finalize_phase_ready(
     async_full_sync: &AsyncFullSyncDeferred,
     init_memory: &InitMemoryCleanupDeferred,

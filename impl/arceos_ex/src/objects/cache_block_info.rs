@@ -13,6 +13,7 @@ pub struct CacheBlockInfo {
     mismatch_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CacheBlockInfo {
     pub const fn new() -> Self {
         Self {

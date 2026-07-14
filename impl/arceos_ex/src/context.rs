@@ -313,11 +313,18 @@ pub struct Context {
     pub payload_exec_sync_boundaries: PayloadExecSyncBoundaries,
     pub user_clone_deferred_boundaries: UserCloneDeferredBoundaries,
     pub selected_payload_handoff: SelectedPayloadHandoff,
+    // User payload carriers are live only in the user-boot configuration.
+    #[cfg_attr(app_hello, allow(dead_code))]
     pub user_boot_payload: UserBootPayload,
+    #[cfg_attr(app_hello, allow(dead_code))]
     pub elf_object: ElfObject,
+    #[cfg_attr(app_hello, allow(dead_code))]
     pub elf_interpreter_object: ElfObject,
     pub user_address_space: UserAddressSpace,
+    // The staging address space is activated only by the user-boot execve configuration.
+    #[allow(dead_code)]
     pub user_exec_staging_address_space: UserAddressSpace,
+    #[cfg_attr(app_hello, allow(dead_code))]
     pub user_stack: UserStack,
     pub user_trap_frame: UserTrapFrame,
     pub user_child_process: UserChildProcess,
@@ -530,46 +537,57 @@ impl Context {
         }
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_scheduler_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
         self.scheduler.setup_smoke_scheduler_task(entry)
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_scheduler_task(&mut self) -> EventResult {
         self.scheduler.enqueue_smoke_scheduler_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_mutex_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
         self.scheduler.setup_smoke_mutex_task(entry)
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
         self.scheduler.enqueue_smoke_mutex_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn dequeue_smoke_mutex_task(&mut self) -> EventResult {
         self.scheduler.dequeue_smoke_mutex_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_rwsem_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
         self.scheduler.setup_smoke_rwsem_task(entry)
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwsem_task(&mut self) -> EventResult {
         self.scheduler.enqueue_smoke_rwsem_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn dequeue_smoke_rwsem_task(&mut self) -> EventResult {
         self.scheduler.dequeue_smoke_rwsem_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_smoke_rwlock_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
         self.scheduler.setup_smoke_rwlock_task(entry)
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwlock_task(&mut self) -> EventResult {
         self.scheduler.enqueue_smoke_rwlock_task()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn dequeue_smoke_rwlock_task(&mut self) -> EventResult {
         self.scheduler.dequeue_smoke_rwlock_task()
     }
@@ -584,36 +602,44 @@ impl Context {
         )
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_scheduler_entry_ran(&mut self) -> EventResult {
         self.scheduler.smoke_scheduler_task_mut().mark_entry_ran()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_scheduler_yielded_back(&mut self) -> EventResult {
         self.scheduler
             .smoke_scheduler_task_mut()
             .mark_yielded_back()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_mutex_entry_ran(&mut self) -> EventResult {
         self.scheduler.smoke_mutex_task_mut().mark_entry_ran()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_mutex_yielded_back(&mut self) -> EventResult {
         self.scheduler.smoke_mutex_task_mut().mark_yielded_back()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwsem_entry_ran(&mut self) -> EventResult {
         self.scheduler.smoke_rwsem_task_mut().mark_entry_ran()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwsem_yielded_back(&mut self) -> EventResult {
         self.scheduler.smoke_rwsem_task_mut().mark_yielded_back()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwlock_entry_ran(&mut self) -> EventResult {
         self.scheduler.smoke_rwlock_task_mut().mark_entry_ran()
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn mark_smoke_rwlock_yielded_back(&mut self) -> EventResult {
         self.scheduler.smoke_rwlock_task_mut().mark_yielded_back()
     }

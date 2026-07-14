@@ -24,6 +24,7 @@ pub struct Device {
     registered: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Device {
     pub const fn new(node_id: DeviceNodeId) -> Self {
         Self {
@@ -54,6 +55,7 @@ impl Device {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct PlatformDevice {
     dev: Device,
     id_bound: bool,
@@ -61,6 +63,7 @@ pub struct PlatformDevice {
     added: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PlatformDevice {
     pub fn from_node_id(device_tree: &DeviceTree, node_id: DeviceNodeId) -> Option<Self> {
         device_tree.node(node_id)?;

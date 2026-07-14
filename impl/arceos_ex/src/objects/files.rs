@@ -18,6 +18,8 @@ pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
+// Consumed by the user-boot stdin fixture configuration.
+#[allow(dead_code)]
 pub const STDIN_READY_FIXTURE: &[u8] = b"stdin\n";
 const FILE_FD_COUNT: usize = 16;
 pub const FILE_POLLIN: u16 = 0x0001;
@@ -91,16 +93,6 @@ impl FdRef {
             Self::Regular0 => 3,
         }
     }
-
-    pub const fn from_fd(fd: usize) -> Option<Self> {
-        match fd {
-            STDIN_FD => Some(Self::Stdin),
-            STDOUT_FD => Some(Self::Stdout),
-            STDERR_FD => Some(Self::Stderr),
-            REGULAR0_FD => Some(Self::Regular0),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -141,9 +133,7 @@ pub fn is_tty_path(path: &[u8]) -> bool {
         return false;
     }
 
-    path[DEV_TTY_PATH.len()..]
-        .iter()
-        .all(|byte| matches!(*byte, b'0'..=b'9'))
+    path[DEV_TTY_PATH.len()..].iter().all(u8::is_ascii_digit)
 }
 
 pub fn is_null_path(path: &[u8]) -> bool {
@@ -297,13 +287,18 @@ pub enum OpenFileDescriptionRef {
     UnixSocket0,
 }
 
+// The complete fd entry view is consumed by smoke and optional syscall diagnostics.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct FdEntryDiagnostic {
     pub ofd: OpenFileDescriptionRef,
     pub readable: bool,
     pub writable: bool,
+    // Read by the optional detailed user-syscall diagnostic handler.
+    #[allow(dead_code)]
     pub flags: u32,
     pub close_on_exec: bool,
+    #[allow(dead_code)]
     pub pid: usize,
     pub owner_valid: bool,
     pub owner_uid: usize,
@@ -1361,10 +1356,10 @@ impl FileDescriptorTable {
     fn first_fd_for_ofd(&self, ofd: OpenFileDescriptionRef) -> Option<usize> {
         let mut fd = 0usize;
         while fd < FILE_FD_COUNT {
-            if let Some(entry) = self.entries[fd] {
-                if entry.ofd == ofd {
-                    return Some(fd);
-                }
+            if let Some(entry) = self.entries[fd]
+                && entry.ofd == ofd
+            {
+                return Some(fd);
             }
             fd += 1;
         }
@@ -2155,6 +2150,7 @@ impl FilesStruct {
         Ok(())
     }
 
+    // Regular-file open keeps the VFS, block provider and pathname boundary explicit.
     #[allow(clippy::too_many_arguments)]
     pub fn open_regular_path(
         &mut self,
@@ -2224,6 +2220,7 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    // Filesystem open preserves the common VFS lookup inputs used for files and directories.
     #[allow(clippy::too_many_arguments)]
     pub fn open_filesystem_path(
         &mut self,
@@ -2333,6 +2330,7 @@ impl FilesStruct {
         Ok(fd)
     }
 
+    // Directory open uses the same explicit VFS and block-provider boundary as regular open.
     #[allow(clippy::too_many_arguments)]
     pub fn open_directory_path(
         &mut self,
@@ -3079,6 +3077,7 @@ impl FilesStruct {
         Ok(target)
     }
 
+    // Path stat keeps lookup policy and every backing filesystem object explicit.
     #[allow(clippy::too_many_arguments)]
     pub fn stat_path(
         &mut self,
@@ -3207,6 +3206,7 @@ impl FilesStruct {
         }
     }
 
+    // Access checks retain the complete pathname lookup boundary before applying mode policy.
     #[allow(clippy::too_many_arguments)]
     pub fn access_path(
         &mut self,
@@ -3234,6 +3234,7 @@ impl FilesStruct {
         }
     }
 
+    // Kind lookup forwards the complete VFS and live block-provider context.
     #[allow(clippy::too_many_arguments)]
     pub fn lookup_path_kind(
         &mut self,
@@ -3267,6 +3268,7 @@ impl FilesStruct {
         Ok(kind)
     }
 
+    // Symlink reads keep the pathname, output buffer and backing filesystem context explicit.
     #[allow(clippy::too_many_arguments)]
     pub fn readlink_path(
         &mut self,

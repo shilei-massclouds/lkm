@@ -297,6 +297,8 @@ impl LinuxIrqChipCallbackSlot {
 }
 
 #[derive(Clone, Copy)]
+// Consumed by the optional Linux-Plic checkpoint handler.
+#[allow(dead_code)]
 pub struct LinuxPlicBoundaryFacts {
     pub initcall_seq: usize,
     pub driver_register_seq: usize,
@@ -519,10 +521,10 @@ fn next_event_seq() -> usize {
 }
 
 pub fn run_linux_initcall6() -> EventResult {
-    let start = &raw const __linux_initcall6_start as *const usize as usize;
-    let end = &raw const __linux_initcall6_end as *const usize as usize;
+    let start = &raw const __linux_initcall6_start as usize;
+    let end = &raw const __linux_initcall6_end as usize;
     let entry_size = size_of::<LinuxInitcall>();
-    if start == 0 || end <= start || entry_size == 0 || (end - start) % entry_size != 0 {
+    if start == 0 || end <= start || entry_size == 0 || !(end - start).is_multiple_of(entry_size) {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,
@@ -610,6 +612,7 @@ pub fn runtime_complete_count_for_source(source: u32) -> usize {
         .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
     let probe_ret = PLATFORM_DRIVER_PROBE_RET.load(Ordering::Acquire);
     let thread_info_base = linux_thread_info_base() as usize;
@@ -643,7 +646,7 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         driver_ptr: PLATFORM_DRIVER_PTR.load(Ordering::Acquire),
         probe_ptr: platform_driver_probe_ptr(),
         platform_device_ptr: &raw mut LINUX_PLIC_PLATFORM_DEVICE_VIEW as *mut c_void as usize,
-        fwnode_ptr: &raw mut LINUX_PLIC_FWNODE_VIEW as *mut LinuxOfFwnodeView as usize,
+        fwnode_ptr: &raw mut LINUX_PLIC_FWNODE_VIEW as usize,
         fwnode_ops_ptr: unsafe {
             core::ptr::read(
                 (&raw const LINUX_PLIC_FWNODE_VIEW)
@@ -1014,7 +1017,7 @@ fn prepare_linux_parent_irq_desc() {
         core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
         core::ptr::write(
             chip.add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET).cast::<usize>(),
-            linux_plic_parent_irq_eoi as usize,
+            linux_plic_parent_irq_eoi as *const () as usize,
         );
     }
 }
@@ -1684,14 +1687,14 @@ unsafe fn exercise_uart_leaf_edge_ack(index: usize) -> bool {
         )
     } == 0;
     let edge_record = unsafe { linux_update_leaf_record_from_desc(index) };
-    let edge_handler_ok = edge_record.flow_handler == handle_edge_irq as usize;
+    let edge_handler_ok = edge_record.flow_handler == handle_edge_irq as *const () as usize;
     let edge_ack_ok =
         unsafe { call_linux_chip_callback(edge_record, irq_data, LinuxIrqChipCallbackSlot::Ack) };
     let level_set_type_ok =
         unsafe { call_linux_chip_set_type(edge_record, irq_data, LINUX_IRQ_TYPE_LEVEL_HIGH) } == 0;
     let level_record = unsafe { linux_update_leaf_record_from_desc(index) };
-    let level_handler_ok =
-        level_record.chip == level_chip && level_record.flow_handler == handle_fasteoi_irq as usize;
+    let level_handler_ok = level_record.chip == level_chip
+        && level_record.flow_handler == handle_fasteoi_irq as *const () as usize;
     unsafe { linux_restore_plic_quirks(chip_data, previous_quirks) };
 
     if edge_ack_ok {
@@ -2342,7 +2345,7 @@ pub extern "C" fn of_irq_parse_one(
         return -1;
     }
     unsafe {
-        (*out).np = &raw mut LINUX_PLIC_PARENT_INTC_NODE as *mut usize as *mut c_void;
+        (*out).np = &raw mut LINUX_PLIC_PARENT_INTC_NODE as *mut c_void;
         (*out).args_count = 1;
         (*out).args[0] = LINUX_RV_IRQ_EXT;
     }
@@ -2402,7 +2405,7 @@ pub extern "C" fn register_syscore_ops(_ops: *mut c_void) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn riscv_get_intc_hwnode() -> *mut c_void {
-    &raw mut LINUX_PLIC_PARENT_INTC_NODE as *mut usize as *mut c_void
+    &raw mut LINUX_PLIC_PARENT_INTC_NODE as *mut c_void
 }
 
 #[unsafe(no_mangle)]

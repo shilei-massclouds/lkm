@@ -15,7 +15,7 @@ use super::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
     static_branch::StaticBranch,
-    task::{Task, TaskCpuState, TaskEntry, TaskKind},
+    task::{Task, TaskCpuState, TaskKind},
     user_boot::USER_CHILD_PID,
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
@@ -28,6 +28,8 @@ const SMOKE_RWLOCK_TASK_ID: usize = 1004;
 const SMOKE_SCHEDULER_STACK_WORDS: usize = 512;
 const BIT_WAIT_TABLE_SIZE: usize = 256;
 
+// Scheduler diagnostic views and local-subject helpers are consumed by smoke/KUnit cases.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct Scheduler {
     lifecycle: Lifecycle,
     sched_domains_mutex: Mutex,
@@ -99,6 +101,7 @@ pub struct Scheduler {
     smoke_rwlock_task: SmokeSchedulerTask,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl Scheduler {
     pub const fn new() -> Self {
         Self {
@@ -181,6 +184,8 @@ impl Scheduler {
         self.kernel_init_stack_switch_started_count
     }
 
+    // Preserved for stack-switch diagnostics even though normal handoff does not return.
+    #[allow(dead_code)]
     pub const fn kernel_init_stack_switch_returned_count(&self) -> usize {
         self.kernel_init_stack_switch_returned_count
     }
@@ -1333,6 +1338,8 @@ impl Scheduler {
         self.boot_runqueue.enqueue_task_ref(runqueue_ref, task_ref)
     }
 
+    // Used by the user-boot syscall continuation configuration.
+    #[allow(dead_code)]
     pub fn dequeue_user_child_from_runqueue(&mut self, cpu_group: &CpuGroup) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
@@ -1643,6 +1650,7 @@ impl RunQueueRef {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 struct CpuRunQueueMetadata {
     state: State,
     cpu_ref: CpuRef,
@@ -1706,6 +1714,7 @@ pub struct CpuRunQueueView {
     boot_backed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CpuRunQueueView {
     pub const fn state(self) -> State {
         self.state
@@ -1740,6 +1749,7 @@ impl CpuRunQueueView {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct CpuOwnedSchedulerView {
     cpu_ref: CpuRef,
@@ -1758,6 +1768,7 @@ pub struct CpuOwnedSchedulerView {
     runqueue_smoke_rwlock_task_enqueued: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CpuOwnedSchedulerView {
     pub const fn cpu_ref(self) -> CpuRef {
         self.cpu_ref
@@ -1811,6 +1822,7 @@ impl CpuOwnedSchedulerView {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct CpuIdleTaskView {
     state: State,
@@ -1826,6 +1838,7 @@ pub struct CpuIdleTaskView {
     core_restored_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl CpuIdleTaskView {
     pub const fn state(self) -> State {
         self.state
@@ -1855,6 +1868,8 @@ impl CpuIdleTaskView {
         self.no_set_affinity
     }
 
+    // Retained in the stable CPU-idle diagnostic view.
+    #[allow(dead_code)]
     pub const fn switch_ctx_ra(self) -> usize {
         self.switch_ctx_ra
     }
@@ -1885,6 +1900,7 @@ fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct SmokeSchedulerTask {
     lifecycle: Lifecycle,
     task_id: usize,
@@ -1897,6 +1913,7 @@ pub struct SmokeSchedulerTask {
     yielded_back: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl SmokeSchedulerTask {
     const fn new(task_id: usize) -> Self {
         Self {
@@ -2283,11 +2300,11 @@ impl BootRunQueue {
         self.dl_ready = true;
         self.lock
             .lock_irqsave(local_interrupt, boot_init_preemption)?;
-        let attach_result = (|| {
+        let attach_result: EventResult = {
             self.attached_to_root_domain = true;
             self.root_attach_held_runqueue_lock = true;
             Ok(())
-        })();
+        };
         let unlock_result = self
             .lock
             .unlock_irqrestore(local_interrupt, boot_init_preemption);
@@ -2302,6 +2319,7 @@ impl BootRunQueue {
         )
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn setup_for_local_subject(
         &mut self,
         cpu_group: &CpuGroup,
@@ -2649,6 +2667,8 @@ impl BootIdleTask {
             && boot_runqueue.curr_task_id() == self.task_id()
     }
 
+    // Boot idle setup binds the specified task, runqueue, RCU and CPU-local guards.
+    #[allow(clippy::too_many_arguments)]
     fn setup(
         &mut self,
         init_task: &InitTask,
@@ -2761,6 +2781,7 @@ impl BootIdleTask {
     }
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct TaskThreadContext {
     ra: usize,
     sp: usize,
@@ -2770,6 +2791,7 @@ pub struct TaskThreadContext {
     core_restored_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl TaskThreadContext {
     const fn new() -> Self {
         Self {
@@ -2792,13 +2814,6 @@ impl TaskThreadContext {
 
     pub const fn core_restored_count(&self) -> usize {
         self.core_restored_count
-    }
-
-    fn setup_boot_idle(&mut self) {
-        self.ra = 0;
-        self.sp = 0;
-        self.s = [0; 12];
-        self.core_register_set = true;
     }
 
     fn setup_smoke_scheduler(&mut self, stack_top: usize) {

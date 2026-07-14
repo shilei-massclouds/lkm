@@ -529,12 +529,12 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack.top() == USER_STACK_TOP
                 && stack.initial_sp() >= stack.base()
                 && stack.initial_sp() < stack.top()
-                && stack.initial_sp() % 16 == 0
+                && stack.initial_sp().is_multiple_of(16)
                 && stack.arg0_ptr() > stack.initial_sp()
                 && stack.arg0_ptr() < stack.top()
                 && stack.base() + stack.size() == USER_STACK_TOP
-                && stack.base() % USER_PAGE_SIZE == 0
-                && stack.top() % USER_PAGE_SIZE == 0,
+                && stack.base().is_multiple_of(USER_PAGE_SIZE)
+                && stack.top().is_multiple_of(USER_PAGE_SIZE),
         );
         assertions.assert(
             "user stack pages",
@@ -1371,13 +1371,13 @@ fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
         "sequential vfork exceeds completed record capacity",
         ctx.user_child_process
             .completed_child_record_total_archived()
-            >= USER_COMPLETED_CHILD_RECORD_CAPACITY + 1
+            > USER_COMPLETED_CHILD_RECORD_CAPACITY
             && ctx
                 .user_child_process
                 .completed_child_record_released_count()
-                >= USER_COMPLETED_CHILD_RECORD_CAPACITY + 1
+                > USER_COMPLETED_CHILD_RECORD_CAPACITY
             && ctx.user_child_process.next_child_pid()
-                >= USER_CHILD_PID + USER_COMPLETED_CHILD_RECORD_CAPACITY + 1,
+                > USER_CHILD_PID + USER_COMPLETED_CHILD_RECORD_CAPACITY,
     );
 
     let no_child_ret = wait4_completed_record(0, USER_WAIT4_WNOHANG);

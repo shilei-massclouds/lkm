@@ -409,9 +409,9 @@ unsafe extern "C" {
 fn is_allowed_lifecycle_transition(source: State, event: LifecycleEvent, target: State) -> bool {
     #[cfg(target_arch = "riscv64")]
     {
-        return unsafe {
+        unsafe {
             arceos_ex_is_allowed_lifecycle_transition(source as u8, event as u8, target as u8) != 0
-        };
+        }
     }
 
     #[cfg(not(target_arch = "riscv64"))]

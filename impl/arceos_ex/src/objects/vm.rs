@@ -41,6 +41,8 @@ impl Vm {
         self.lifecycle.state()
     }
 
+    // VM preset is the specified pre-MMU handoff across static, image, DT and fixmap objects.
+    #[allow(clippy::too_many_arguments)]
     pub fn preset(
         &mut self,
         config: &Config,
@@ -63,24 +65,13 @@ impl Vm {
             );
         }
 
-        let result = self
-            .trampoline_vm
-            .setup(config, static_objects, lds, kernel_image);
-        if result.is_err() {
-            return result;
-        }
+        self.trampoline_vm
+            .setup(config, static_objects, lds, kernel_image)?;
 
-        let result = self.early_vm.preset(config, boot_args, raw_dtb, fix_map);
-        if result.is_err() {
-            return result;
-        }
+        self.early_vm.preset(config, boot_args, raw_dtb, fix_map)?;
 
-        let result =
-            self.early_vm
-                .setup(config, static_objects, lds, kernel_image, raw_dtb, fix_map);
-        if result.is_err() {
-            return result;
-        }
+        self.early_vm
+            .setup(config, static_objects, lds, kernel_image, raw_dtb, fix_map)?;
 
         self.early_boot_alternatives_deferred = true;
         self.early_boot_alternatives_mmu_off_boundary_preserved = true;
@@ -196,22 +187,12 @@ impl Vm {
             );
         }
 
-        let result = self
-            .swapper_vm
-            .setup(config, static_objects, lds, kernel_image, memblock);
-        if result.is_err() {
-            return result;
-        }
+        self.swapper_vm
+            .setup(config, static_objects, lds, kernel_image, memblock)?;
 
-        let result = self.swapper_vm.enable(static_objects, kernel_image);
-        if result.is_err() {
-            return result;
-        }
+        self.swapper_vm.enable(static_objects, kernel_image)?;
 
-        let result = self.early_vm.cleanup(&self.swapper_vm);
-        if result.is_err() {
-            return result;
-        }
+        self.early_vm.cleanup(&self.swapper_vm)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Enable,

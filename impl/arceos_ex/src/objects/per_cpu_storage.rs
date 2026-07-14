@@ -28,10 +28,12 @@ macro_rules! define_per_cpu {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct PerCpuSymbol<T> {
     template: *const T,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl<T> PerCpuSymbol<T> {
     pub const fn new(template: &'static T) -> Self {
         Self { template }
@@ -49,6 +51,7 @@ pub struct PerCpuStorage {
     offset_table: PerCpuOffsetTable,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl PerCpuStorage {
     pub const fn new() -> Self {
         Self {

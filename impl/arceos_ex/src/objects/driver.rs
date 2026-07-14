@@ -25,6 +25,8 @@ pub struct PlatformProbeContext<'a> {
 }
 
 impl<'a> PlatformProbeContext<'a> {
+    // The probe context binds the specified cross-object driver boundary in one place.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device_tree: &'a DeviceTree,
         vmalloc_allocator: &'a mut VmallocAllocator,
@@ -149,6 +151,7 @@ impl OfMatchTable {
         Self { entries }
     }
 
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub const fn empty() -> Self {
         Self { entries: &[] }
     }
@@ -241,14 +244,17 @@ impl PartialEq for DeviceDriverRef {
 
 impl Eq for DeviceDriverRef {}
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub static MOCK_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "mock_platform_driver",
     OfMatchTable::empty(),
     mock_deferred_probe,
 );
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK_PLATFORM_DRIVER);
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 fn mock_deferred_probe(
     _context: &mut PlatformProbeContext<'_>,
     _device: DeviceRef,

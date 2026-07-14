@@ -29,6 +29,7 @@ static mut STATIC_REAL_QUEUE_BACKING: [StaticVirtqueueBacking; STATIC_REAL_QUEUE
 static NEXT_STATIC_REAL_QUEUE_SLOT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub enum VirtqueueError {
     NotReady,
     InvalidBuffer,
@@ -66,6 +67,7 @@ pub struct VirtqDescriptor {
     completed: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtqDescriptor {
     const fn empty() -> Self {
         Self {
@@ -262,6 +264,7 @@ impl VirtqUsedElem {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct VirtqueueUsedBuffer {
     token: VirtqueueBufferToken,
     addr: usize,
@@ -271,6 +274,7 @@ pub struct VirtqueueUsedBuffer {
     descriptor_count: u16,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtqueueUsedBuffer {
     pub const fn token(self) -> VirtqueueBufferToken {
         self.token
@@ -330,6 +334,7 @@ pub struct VirtioSplitRing {
     buffer_ownership_released: bool,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtioSplitRing {
     pub fn new(queue_size: u16) -> Self {
         Self {
@@ -790,6 +795,7 @@ pub struct VirtQueue {
     get_buf_count: usize,
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 impl VirtQueue {
     pub fn new(queue_size: u16) -> Self {
         Self {
@@ -1068,12 +1074,11 @@ impl VirtQueue {
             self.ring.descriptor_exhaustion_rejected = true;
             return Err(VirtqueueError::NoFreeDescriptor);
         }
-        if self.real_backing_ready {
-            if self.ring.raw_avail_ring_ptr(self.ring.avail_idx).is_none()
-                || self.ring.raw_avail_idx_ptr().is_none()
-            {
-                return Err(VirtqueueError::RingBackingUnavailable);
-            }
+        if self.real_backing_ready
+            && (self.ring.raw_avail_ring_ptr(self.ring.avail_idx).is_none()
+                || self.ring.raw_avail_idx_ptr().is_none())
+        {
+            return Err(VirtqueueError::RingBackingUnavailable);
         }
         for spec in specs {
             if spec.addr() == 0 || spec.len() == 0 {
