@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 import unittest
+from unittest import mock
 
 import runner
 
@@ -263,6 +264,23 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(stdin_result["stdin_payload_bytes"], 3)
         self.assertIn("got=ls", stdout)
 
+    def test_capture_without_delayed_stdin_uses_devnull(self) -> None:
+        real_popen = runner.subprocess.Popen
+        with mock.patch.object(runner.subprocess, "Popen", wraps=real_popen) as popen:
+            stdout, returncode, timed_out, stdin_result = runner._run_command_capture(
+                [sys.executable, "-c", "print('done')"],
+                Path.cwd(),
+                {},
+                5,
+                None,
+            )
+
+        self.assertEqual(popen.call_args.kwargs["stdin"], runner.subprocess.DEVNULL)
+        self.assertEqual(returncode, 0)
+        self.assertFalse(timed_out)
+        self.assertEqual(stdin_result, {})
+        self.assertIn("done", stdout)
+
     def test_delayed_stdin_config_is_optional(self) -> None:
         self.assertIsNone(runner._delayed_stdin({}))
         config = runner._delayed_stdin(
@@ -285,12 +303,18 @@ class StressRunnerTests(unittest.TestCase):
             f"print({line!r}, flush=True)\n"
             "time.sleep(30)\n"
         )
-        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
-            [sys.executable, "-c", script],
-            Path.cwd(),
-            {},
-            5,
-        )
+        real_popen = runner.subprocess.Popen
+        with mock.patch.object(runner.subprocess, "Popen", wraps=real_popen) as popen:
+            stdout, _returncode, timed_out, capture = (
+                runner._run_command_capture_until_stress_mem(
+                    [sys.executable, "-c", script],
+                    Path.cwd(),
+                    {},
+                    5,
+                )
+            )
+
+        self.assertEqual(popen.call_args.kwargs["stdin"], runner.subprocess.DEVNULL)
         self.assertFalse(timed_out)
         self.assertTrue(capture["terminated_after_stress_mem"])
         self.assertIn("stress_mem: v=1", stdout)

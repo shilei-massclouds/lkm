@@ -158,6 +158,9 @@ checkpoint handler；light 级别只维护长期低开销 observation facts，�
 和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`
 或后续等价开关显式开启；stress/nightly 级别负责重复执行、事件序列归档、分类和差分分析。
 
+MUST：stress/difftest runner 的非交互 command capture 在未配置 `delayed_stdin` 时必须以 `DEVNULL` 作为 stdin；
+需要输入的 case 必须显式配置 `delayed_stdin`，并只在该路径使用 pipe 提供输入，不得继承调用 runner 的当前终端 stdin。
+
 MUST：观察域应按稳定子系统或对象划分，包括 PLIC/IRQ-domain、UART8250/TTY、virtio-blk/block I/O、VFS/ext2、
 scheduler/task、payload 和 phase boundary。对象事实由对应对象或 provider 维护，handler 只能读取和输出；不得为了
 某个缺陷在 handler 内新增只对该缺陷有意义的私有事实。新增域、开关、字段或默认启用策略必须先进入 coding 规格。

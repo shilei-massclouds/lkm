@@ -29,6 +29,10 @@ make test-stress STRESS_RUNS=30
 `STRESS_TIMEOUT` is optional; when it is unset, each case keeps its own
 `timeout_seconds` value. The current cases default to 120 seconds.
 
+Non-interactive command capture uses `DEVNULL` for stdin when a case does not
+configure `delayed_stdin`. Cases that require input must configure
+`delayed_stdin` explicitly; only that path uses a pipe to provide input.
+
 Fast configuration check without executing QEMU:
 
 ```sh
