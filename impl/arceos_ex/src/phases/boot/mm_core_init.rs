@@ -5,7 +5,7 @@ use crate::{
         earlycon,
         mm_core::NamedSlubCacheKind,
         printk,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
         static_branch::StaticKey,
     },
 };

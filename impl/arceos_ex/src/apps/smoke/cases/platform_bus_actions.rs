@@ -1,12 +1,12 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context_ref,
     objects::{
         device::DeviceRef,
-        driver::{PlatformProbeContext, MOCK_PLATFORM_DRIVER_REF},
+        driver::{MOCK_PLATFORM_DRIVER_REF, PlatformProbeContext},
         initcall::PlatformBus,
         ioremap::Ioremap,
         irq_time::{IrqHandlerRegistry, PlicIrqDomain},

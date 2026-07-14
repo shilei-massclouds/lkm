@@ -4,7 +4,7 @@ use super::{
     kernel_cmdline::KernelCmdline,
     printk,
     sbi::Sbi,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

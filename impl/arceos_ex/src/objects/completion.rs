@@ -1,5 +1,5 @@
 use super::state::{
-    failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
+    EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
 };
 use crate::checkpoint::Checkpoint;
 

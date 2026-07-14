@@ -1,7 +1,7 @@
 use crate::{
+    checkpoint::Checkpoint,
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit::Sink,
-    checkpoint::Checkpoint,
     context::Context,
     objects::{
         irq_time::{IrqHandlerKind, LogicalIrq},

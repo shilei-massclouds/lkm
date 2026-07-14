@@ -1,6 +1,6 @@
 use super::{
     init_task::InitTask,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 #[allow(dead_code)]

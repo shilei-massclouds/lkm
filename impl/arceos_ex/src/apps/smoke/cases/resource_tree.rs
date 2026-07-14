@@ -117,17 +117,9 @@ fn contains(parent: ResourceRef<'_>, child: ResourceRef<'_>) -> bool {
 }
 
 fn region_word(count: usize) -> &'static str {
-    if count == 1 {
-        "region"
-    } else {
-        "regions"
-    }
+    if count == 1 { "region" } else { "regions" }
 }
 
 fn segment_word(count: usize) -> &'static str {
-    if count == 1 {
-        "segment"
-    } else {
-        "segments"
-    }
+    if count == 1 { "segment" } else { "segments" }
 }

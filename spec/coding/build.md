@@ -15,6 +15,8 @@ The repository top-level `Makefile` is the stable entry for normal work:
 ```bash
 make build
 make checkpoints
+make fmt
+make fmt-check
 make run
 make verify
 make test
@@ -41,7 +43,9 @@ Targets must remain composable:
 - `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
 - `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping and Linux mapping coverage.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
-- `test` may aggregate validation stages, but must preserve their order and individual entry points.
+- `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
+- `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
+- `test` must run `fmt-check` before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
 - `clean` removes generated build and cache artifacts, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
@@ -91,7 +95,9 @@ Build targets must keep model verification and generated-artifact boundaries vis
 External tools must be configurable by variables or documented script parameters. Current examples include:
 
 - `RUSTC`
+- `RUSTFMT`
 - `RUST_OBJCOPY`
+- `RUST_TOOLCHAIN`
 - `QEMU`
 - `PYVERI`
 - `WGET`
@@ -189,6 +195,20 @@ External tools such as rustc, rust-objcopy, QEMU, wget, tar, mkfs
 and pyveri must be configurable through Make variables or
 documented script parameters. Hard-coded host-local absolute paths
 are not allowed in ordinary build targets.
+
+#### Pinned Rust source formatting
+
+The selected kernel implementation owns the complete Rust source set under its `src/` tree. `fmt` and
+`fmt-check` must use the same pinned nightly as the default kernel compiler, Rust edition 2024 and an
+explicit `skip_children=true` configuration while passing every source file once. This avoids recursive
+module traversal changing files outside the enumerated set and makes formatting independent of the host
+default toolchain.
+
+#### Early Rust format gate
+
+The aggregate `make test` target must depend on the independently runnable, read-only `fmt-check` target
+before starting formal verification, checkpoint artifact validation, compilation or QEMU. Format drift
+must fail fast and must never be repaired implicitly by `make test`.
 
 #### Decomposable tests
 

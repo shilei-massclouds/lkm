@@ -1,7 +1,7 @@
 use super::{
-    boot_param::{payload_arg_count_after_boundary, BootParam},
+    boot_param::{BootParam, payload_arg_count_after_boundary},
     command_line::StaticCommandLine,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

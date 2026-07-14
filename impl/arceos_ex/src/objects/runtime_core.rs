@@ -3,7 +3,7 @@ use super::{
     cpu_hotplug::CpuHotplugState,
     mm_core::PageAllocator,
     scheduler::Scheduler,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     workqueue::Workqueue,
 };
 use crate::checkpoint::Checkpoint;

@@ -5,8 +5,8 @@ use super::{
     devfs::DevFs,
     ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
     initcall::{DriverCoreBase, InitcallBoundary},
-    rest_init::{KernelInitTask, KERNEL_INIT_PID},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    rest_init::{KERNEL_INIT_PID, KernelInitTask},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vfs::{DentryRef, FileSystemKind, FsStruct, MountRef, VfsCore},
     workqueue::Workqueue,
 };

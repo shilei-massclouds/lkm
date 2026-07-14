@@ -2,8 +2,8 @@ use crate::{
     checkpoint::Checkpoint,
     context::Context,
     objects::{
-        rest_init::{runtime_services_still_deferred, SystemStateValue, TaskSpawnInputs},
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        rest_init::{SystemStateValue, TaskSpawnInputs, runtime_services_still_deferred},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
         task::{TaskEntry, TaskKind},
     },
 };

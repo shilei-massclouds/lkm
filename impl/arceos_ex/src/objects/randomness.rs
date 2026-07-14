@@ -2,7 +2,7 @@ use super::{
     command_line::StaticCommandLine,
     cpu_group::CpuGroup,
     irq_time::Timekeeper,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

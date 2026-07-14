@@ -1,6 +1,6 @@
 use crate::arch::riscv64::csr;
 
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition};
 
 pub struct RootStream {
     lifecycle: Lifecycle,

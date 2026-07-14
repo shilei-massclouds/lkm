@@ -1,7 +1,7 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context,
     objects::{
@@ -9,7 +9,7 @@ use crate::{
         state::State,
         virtio::VirtioDevice,
         virtio_rng::{
-            smoke_fixture as rng_smoke_fixture, VirtioRngDevice, VirtioRngDriver, VirtioRngError,
+            VirtioRngDevice, VirtioRngDriver, VirtioRngError, smoke_fixture as rng_smoke_fixture,
         },
     },
 };

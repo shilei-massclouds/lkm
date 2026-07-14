@@ -6,7 +6,7 @@ use super::{
     lds::Lds,
     physical_memory::PhysicalMemory,
     raw_dtb::{PhysRange, RawDtb},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

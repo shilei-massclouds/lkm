@@ -3,7 +3,7 @@ use crate::checkpoint::Checkpoint;
 use super::{
     config::Config,
     raw_dtb::{PhysRange, RawDtb},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]

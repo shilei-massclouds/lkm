@@ -11,7 +11,7 @@ pub mod smp_bringup;
 use crate::{
     checkpoint::Checkpoint,
     context::Context,
-    objects::state::{failed_condition, EventResult, LifecycleEvent, State},
+    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 use core::sync::atomic::AtomicU8;
 

@@ -1,7 +1,7 @@
 use super::{
-    bio::{self, BufferHead, BUFFER_HEAD_MAX_SIZE},
+    bio::{self, BUFFER_HEAD_MAX_SIZE, BufferHead},
     block_device::{BlockDeviceProvider, BlockDeviceRegistry, DevT},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vfs::{DentryRef, MountRef, VfsCore},
 };
 use core::cmp::min;

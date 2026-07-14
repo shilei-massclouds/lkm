@@ -2,8 +2,8 @@ use super::{
     device::DeviceRef,
     device_tree::DeviceNodeId,
     initcall::PlatformBus,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_BLOCK, VIRTIO_ID_RNG},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    virtio_mmio::{VIRTIO_ID_BLOCK, VIRTIO_ID_RNG, VirtioMmioTransportDevice},
 };
 use crate::checkpoint::Checkpoint;
 use alloc::vec::Vec;

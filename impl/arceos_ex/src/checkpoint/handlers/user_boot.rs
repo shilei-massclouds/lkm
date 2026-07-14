@@ -16,20 +16,20 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(app_user_boot)]
 use crate::objects::user_boot::{
+    USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_KERNEL_IRQ_STACK_SIZE,
+    USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED, USER_KERNEL_TRAP_GUARD_PAGE_READY,
+    USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED,
+    USER_KERNEL_TRAP_IRQ_STACKS, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
+    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
+    USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
+    USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
+    USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, UserStack,
     user_kernel_trap_overflow_stack_base, user_kernel_trap_overflow_stack_ready,
     user_kernel_trap_overflow_stack_top, user_kernel_trap_stack_backing_order,
     user_kernel_trap_stack_backing_phys, user_kernel_trap_stack_base,
     user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_guard_base,
     user_kernel_trap_stack_guard_size, user_kernel_trap_stack_guard_unmapped,
     user_kernel_trap_stack_ready, user_kernel_trap_stack_top, user_kernel_trap_stack_vmapped,
-    UserStack, USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_KERNEL_IRQ_STACK_SIZE,
-    USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED, USER_KERNEL_TRAP_GUARD_PAGE_READY,
-    USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACKS,
-    USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
-    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
-    USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
-    USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
-    USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
 };
 
 #[cfg(app_user_boot)]

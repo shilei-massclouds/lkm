@@ -1,13 +1,13 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
-    arch::riscv64::{csr, SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ},
+    arch::riscv64::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ, csr},
     checkpoint::Checkpoint,
 };
 
 use super::{
     cpu_control::LocalInterruptControl,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);

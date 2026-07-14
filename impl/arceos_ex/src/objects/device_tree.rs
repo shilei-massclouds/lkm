@@ -3,7 +3,7 @@ use super::{
     fdt_reader::{align4, cstr_len, read_be_u32, read_u8},
     memblock::MemBlock,
     raw_dtb::{PhysRange, RawDtb},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vm::Vm,
 };
 use crate::checkpoint::Checkpoint;

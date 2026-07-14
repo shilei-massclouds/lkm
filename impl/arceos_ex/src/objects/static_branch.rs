@@ -3,7 +3,7 @@ use super::{
     kernel_image::KernelImage,
     mutex::Mutex,
     percpu_rw_semaphore::{PerCpuRwSemaphore, PerCpuRwSemaphoreReadOutcome},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vm::Vm,
 };
 use crate::checkpoint::Checkpoint;

@@ -2,7 +2,7 @@ use crate::checkpoint::Checkpoint;
 
 use super::{
     boot_args::BootArgs,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 const FDT_MAGIC: u32 = 0xd00d_feed;

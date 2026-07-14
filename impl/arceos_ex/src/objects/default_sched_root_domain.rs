@@ -1,7 +1,7 @@
 use super::{
     cpu::{CpuRef, MAX_CPUS},
     cpu_group::CpuGroup,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

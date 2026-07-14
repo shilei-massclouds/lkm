@@ -1,11 +1,11 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     objects::{
         state::State,
-        virtio_ring::{smoke_fixture, VirtQueue, VirtqueueDescriptorSpec, VirtqueueError},
+        virtio_ring::{VirtQueue, VirtqueueDescriptorSpec, VirtqueueError, smoke_fixture},
     },
 };
 

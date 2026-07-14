@@ -1,6 +1,6 @@
 use crate::{arch::riscv64::sbi, objects::printk};
 
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition};
 use crate::checkpoint::Checkpoint;
 
 #[allow(dead_code)]

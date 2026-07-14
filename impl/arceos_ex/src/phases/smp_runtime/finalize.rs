@@ -3,7 +3,7 @@ use crate::{
     context::Context,
     objects::{
         finalize::finalize_phase_ready,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
 use core::sync::atomic::AtomicU8;

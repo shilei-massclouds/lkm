@@ -4,8 +4,8 @@ use super::{
     config::Config,
     kernel_image::KernelImage,
     page_table::{
-        aligned, page_table_storage_ready, PageTablePage, SWAPPER_L1_TABLES,
-        SWAPPER_VMALLOC_L0_TABLES,
+        PageTablePage, SWAPPER_L1_TABLES, SWAPPER_VMALLOC_L0_TABLES, aligned,
+        page_table_storage_ready,
     },
 };
 

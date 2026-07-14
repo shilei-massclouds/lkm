@@ -17,6 +17,8 @@ Useful commands:
 make build
 make build APP=smoke
 make build APP=hello
+make fmt
+make fmt-check
 make run
 make run APP=smoke
 make run APP=hello
@@ -29,10 +31,12 @@ make clean
 `LOG=trace` remains as a compatibility alias for `PROBE=announce`. Prefer
 `PROBE=announce` for new checkpoint announcement runs.
 
-From the repository root, `make test` runs the full validation path: strict
-formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and
-the final `APP=smoke` payload smoke run. Use root `make test-kunit` or
-`make test-smoke` when only one runtime path is needed.
+From the repository root, `make test` first runs the read-only Rust format gate,
+then the full validation path: strict formal derive, checkpoint/KUnit handlers
+listed in `tests/kunit.handlers`, and the final `APP=smoke` payload smoke run.
+Use root `make fmt-check`, `make test-kunit` or `make test-smoke` when only one
+validation path is needed. `make fmt` uses the same pinned nightly and edition
+as the format gate to normalize every Rust source below `src/`.
 
 Stress tests are run from the repository root with the dedicated runner:
 
@@ -53,9 +57,10 @@ rustup target add riscv64gc-unknown-none-elf
 ```
 
 `qemu-system-riscv64` and `rust-objcopy` must also be available on `PATH`.
-The Makefile defaults to `rustc +nightly-2025-05-20` because that toolchain is
-known to have the local RISC-V64 target installed in the current environment.
-Override `RUSTC=...` if a different toolchain is prepared.  `APP ?= smoke`
+The Makefile defaults to `RUST_TOOLCHAIN=nightly-2025-05-20` for rustc,
+rustfmt and rust-objcopy because that toolchain is known to have the local
+RISC-V64 target installed in the current environment. Override the shared pin
+or an individual tool command if a different toolchain is prepared. `APP ?= smoke`
 selects the built-in smoke payload.  The Makefile maps app names to
 `--cfg app_<name>`; additional payloads should live under `src/apps/` and expose
 `run() -> !`.

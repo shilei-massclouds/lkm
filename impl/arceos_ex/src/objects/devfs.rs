@@ -1,8 +1,8 @@
 use super::{
     block_device::{BlockDeviceRef, BlockDeviceRegistry, DevT},
     hwrng::{HwRngCore, HwRngDeviceRef},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{DentryRef, FsStruct, MountRef, VfsCore, VfsError, VFS_NAME_MAX},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    vfs::{DentryRef, FsStruct, MountRef, VFS_NAME_MAX, VfsCore, VfsError},
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]

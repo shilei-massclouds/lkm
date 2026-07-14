@@ -4,9 +4,9 @@ use super::{
     },
     irq_time::{Plic, PlicIrqDomain},
     kernel_image::KernelImage,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     virtio::{VirtioBus, VirtioDevice, VirtioDeviceRef},
-    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_BLOCK, VIRTIO_MMIO_INT_VRING},
+    virtio_mmio::{VIRTIO_ID_BLOCK, VIRTIO_MMIO_INT_VRING, VirtioMmioTransportDevice},
     virtio_ring::{VirtQueue, VirtqueueBufferToken, VirtqueueDescriptorSpec, VirtqueueError},
 };
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};

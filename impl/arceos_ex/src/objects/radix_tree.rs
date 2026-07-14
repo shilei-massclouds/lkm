@@ -1,7 +1,7 @@
 use super::{
     cpu_hotplug::CpuHotplugState,
     mm_core::{NamedSlubCacheKind, SlubSubsystem},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

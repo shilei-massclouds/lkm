@@ -7,7 +7,7 @@ use crate::{
     objects::{
         boot_args::BootArgs,
         soc::Soc,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
 

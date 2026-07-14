@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
-        initcall::{InitcallLevelName, InitcallLevelState, InitcallTable, INITCALL_LEVEL_COUNT},
+        initcall::{INITCALL_LEVEL_COUNT, InitcallLevelName, InitcallLevelState, InitcallTable},
         printk,
         state::State,
     },

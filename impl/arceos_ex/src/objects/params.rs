@@ -6,7 +6,7 @@ use super::{
     payload_param::PayloadParam,
     printk,
     sbi::Sbi,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 pub struct Params {

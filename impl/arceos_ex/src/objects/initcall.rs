@@ -11,8 +11,8 @@ use super::{
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
     state::{
-        failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
-        Lifecycle, LifecycleEvent, State,
+        EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition,
+        failed_condition_with_diagnostic,
     },
     static_objects::StaticObjects,
     virtio::VirtioBus,

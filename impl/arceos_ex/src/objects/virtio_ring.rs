@@ -1,9 +1,9 @@
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition};
 use alloc::vec::Vec;
 use core::{
     mem::size_of,
     ptr,
-    sync::atomic::{fence, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering, fence},
 };
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;

@@ -4,8 +4,8 @@ use crate::{
     objects::{
         initcall::initcall_phase_ready_diagnostic,
         state::{
-            failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
-            LifecycleEvent, State,
+            EventResult, FailureDiagnostic, LifecycleEvent, State, failed_condition,
+            failed_condition_with_diagnostic,
         },
     },
 };

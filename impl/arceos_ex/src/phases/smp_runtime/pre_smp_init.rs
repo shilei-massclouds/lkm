@@ -3,7 +3,7 @@ use crate::{
     context::Context,
     objects::{
         pre_smp_init::pre_smp_runtime_ready,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
 use core::sync::atomic::AtomicU8;

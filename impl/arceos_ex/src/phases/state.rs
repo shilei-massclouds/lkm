@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
     checkpoint::Checkpoint,
-    objects::state::{failed_condition, EventResult, LifecycleEvent, State},
+    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 
 const BASE: u8 = 0;

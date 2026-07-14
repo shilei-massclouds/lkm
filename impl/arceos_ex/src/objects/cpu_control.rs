@@ -3,7 +3,7 @@ use super::{
     cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
     init_task::InitTask,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::arch::riscv64::csr;
 use crate::checkpoint::Checkpoint;

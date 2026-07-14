@@ -27,7 +27,7 @@ PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
 
-.PHONY: build run disk disk-clean verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -40,6 +40,12 @@ disk-clean:
 
 run:
 	$(MAKE) -C $(KERNEL_DIR) run LOG="$(LOG)" APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
+
+fmt:
+	$(MAKE) -C $(KERNEL_DIR) fmt
+
+fmt-check:
+	$(MAKE) -C $(KERNEL_DIR) fmt-check
 
 verify:
 ifeq ($(REPORT),graph)
@@ -62,7 +68,7 @@ checkpoints-instrumentation-plan: checkpoints-map-linux checkpoints-coverage
 
 checkpoints: checkpoints-instrumentation-plan
 
-test:
+test: fmt-check
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
 test-verify:

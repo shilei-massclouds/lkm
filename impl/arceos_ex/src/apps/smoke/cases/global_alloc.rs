@@ -61,12 +61,7 @@ pub fn run() -> SmokeResult {
 
     printk::write_fmt(format_args!(
         "global_alloc vec_len={} capacity={} growths={} free1024_before={} free1024_after={} checksum={}\n",
-        ITEM_COUNT,
-        final_capacity,
-        growths,
-        initial_free,
-        final_free,
-        checksum
+        ITEM_COUNT, final_capacity, growths, initial_free, final_free, checksum
     ));
 
     SmokeResult::Passed

@@ -4,8 +4,8 @@ use super::{
     kernel_image::KernelImage,
     memblock::MemBlock,
     page_table::{
-        aligned, map_linear_pmd_range, map_page_range, map_pmd_range, PageTableInstallRange,
-        SWAPPER_VMALLOC_L0_TABLES,
+        PageTableInstallRange, SWAPPER_VMALLOC_L0_TABLES, aligned, map_linear_pmd_range,
+        map_page_range, map_pmd_range,
     },
     raw_dtb::RawDtb,
     state::{Lifecycle, State},

@@ -1,10 +1,10 @@
 use super::{
-    cpu::{CpuRef, CpuRole, CpuView, SecondaryCpuStore, BOOT_CPU_LOGICAL_ID, MAX_CPUS},
+    cpu::{BOOT_CPU_LOGICAL_ID, CpuRef, CpuRole, CpuView, MAX_CPUS, SecondaryCpuStore},
     cpu_control::BootCurrentCpu,
     device_tree::DeviceTree,
     fdt_reader::read_cells,
     sbi::Sbi,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

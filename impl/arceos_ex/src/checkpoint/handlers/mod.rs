@@ -11,9 +11,13 @@ mod linux_plic;
 #[cfg(checkpoint_handler_memblock_api)]
 compile_error!("checkpoint handler memblock-api was renamed to memblock");
 #[cfg(checkpoint_handler_memblock)]
-compile_error!("checkpoint handler memblock mutates state; cover it through app smoke or an explicit action-level probe");
+compile_error!(
+    "checkpoint handler memblock mutates state; cover it through app smoke or an explicit action-level probe"
+);
 #[cfg(checkpoint_handler_vmalloc_mapping)]
-compile_error!("checkpoint handler vmalloc-mapping mutates state; cover it through app smoke or an explicit action-level probe");
+compile_error!(
+    "checkpoint handler vmalloc-mapping mutates state; cover it through app smoke or an explicit action-level probe"
+);
 #[cfg(checkpoint_handler_smoke)]
 compile_error!(
     "checkpoint handler smoke runs app smoke cases; app smoke must remain outside checkpoint KUnit"

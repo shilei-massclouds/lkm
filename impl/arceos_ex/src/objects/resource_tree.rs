@@ -4,7 +4,7 @@ use super::{
     memblock::MemBlock,
     raw_dtb::PhysRange,
     rwlock::{RwLock, RwLockWriteOutcome},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

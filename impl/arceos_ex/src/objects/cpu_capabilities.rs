@@ -3,7 +3,7 @@ use super::{
     cpu_group::CpuGroup,
     device_tree::{DevicePropertyRef, DeviceTree},
     fdt_reader::read_cells,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

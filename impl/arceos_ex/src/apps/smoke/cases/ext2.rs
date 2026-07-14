@@ -1,15 +1,15 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context,
     objects::{
         ext2::{
-            Ext2FileType, EXT2_ALPINE_BIN_LS_PATH, EXT2_ALPINE_BUSYBOX_FILE_NAME,
+            EXT2_ALPINE_BIN_LS_PATH, EXT2_ALPINE_BUSYBOX_FILE_NAME,
             EXT2_ALPINE_INSTALLED_DB_FILE_NAME, EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
             EXT2_ALPINE_INSTALLED_DB_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO,
-            EXT2_SINGLE_INDIRECT_READ_MAX,
+            EXT2_SINGLE_INDIRECT_READ_MAX, Ext2FileType,
         },
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,

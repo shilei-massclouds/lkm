@@ -2,7 +2,7 @@ use super::{
     block_device::{
         BlockDeviceError, BlockDeviceProvider, BlockDeviceRef, BlockDeviceRegistry, DevT,
     },
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use alloc::vec::Vec;
 

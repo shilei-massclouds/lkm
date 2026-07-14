@@ -12,7 +12,7 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     rest_init::{KernelInitTask, KthreaddTask},
     state::{
-        failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
+        EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
     static_branch::StaticBranch,
     task::{Task, TaskCpuState, TaskEntry, TaskKind},

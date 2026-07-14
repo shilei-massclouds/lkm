@@ -1,7 +1,7 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context,
     objects::{
@@ -11,12 +11,12 @@ use crate::{
         state::State,
         task::TaskEntry,
         user_boot::{
-            ElfObjectRole, UserMappingKind, UserProcessGroupLookup, UserProcessGroupUpdate,
-            UserRtSigtimedwaitResult, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
+            ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_EXEC_ARG_MAX, USER_HEAP_BASE,
             USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
             USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
-            USER_STACK_SIZE, USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN,
+            USER_STACK_SIZE, USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN, UserMappingKind,
+            UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult,
         },
         vfs::VfsError,
         virtio_blk,
@@ -1616,7 +1616,9 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
                 && ctx.user_child_process.observed_plain_fork_clone()
                 && ctx.user_child_process.observed_plain_fork_parent_pid() == shell_pid
                 && ctx.user_child_process.observed_plain_fork_child_pid() == child_pid
-                && ctx.user_child_process.observed_plain_fork_child_pending_wait()
+                && ctx
+                    .user_child_process
+                    .observed_plain_fork_child_pending_wait()
                 && ctx.user_child_process.child_trap_frame_reg(10) == Some(0),
         );
     }
@@ -1672,8 +1674,9 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
 
     let (parent_frame, exit_child_pid, exit_parent_pid) = {
         let ctx = context();
-        let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
-            ctx.user_child_process.child_exit_to_observed_child_parent_wait(
+        let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) = ctx
+            .user_child_process
+            .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
@@ -1701,11 +1704,13 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         if !ctx
             .user_child_process
             .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
-            || !ctx.user_child_process.restore_parent_wait_writable_page_snapshot(
-                &ctx.user_address_space,
-                &mut ctx.page_allocator,
-                &ctx.page_metadata_map,
-            )
+            || !ctx
+                .user_child_process
+                .restore_parent_wait_writable_page_snapshot(
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
             || !ctx
                 .user_child_process
                 .restore_parent_fd_snapshot(&mut ctx.files_struct)

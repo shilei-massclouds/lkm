@@ -1,10 +1,10 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     objects::virtio_mmio::{
-        VirtioMmioHeader, VirtioMmioHeaderStatus, VIRTIO_ID_BLOCK, VIRTIO_ID_RNG,
+        VIRTIO_ID_BLOCK, VIRTIO_ID_RNG, VirtioMmioHeader, VirtioMmioHeaderStatus,
     },
 };
 

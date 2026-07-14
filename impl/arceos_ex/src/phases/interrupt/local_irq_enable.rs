@@ -4,7 +4,7 @@ use crate::{
     context::Context,
     objects::{
         earlycon, printk,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
 use core::sync::atomic::AtomicU8;

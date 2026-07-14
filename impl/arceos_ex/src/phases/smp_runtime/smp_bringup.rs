@@ -5,7 +5,7 @@ use crate::{
         cpu::MAX_CPUS,
         cpu_group::CpuGroup,
         smp_bringup::smp_bringup_runtime_ready,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
 };
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};

@@ -3,9 +3,9 @@ use super::{
     hwrng::{HwRngCore, HwRngDevice, HwRngDeviceRef, HwRngError, HwRngProvider},
     irq_time::{IrqHandlerRegistry, Plic, PlicIrqDomain},
     kernel_image::KernelImage,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     virtio::{VirtioBus, VirtioDevice, VirtioDeviceRef},
-    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_RNG},
+    virtio_mmio::{VIRTIO_ID_RNG, VirtioMmioTransportDevice},
     virtio_ring::{VirtQueue, VirtqueueBufferToken, VirtqueueError},
 };
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};

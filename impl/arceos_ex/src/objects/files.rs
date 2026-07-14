@@ -5,7 +5,7 @@ use super::{
     ext2::{Ext2FileSystem, Ext2FileType},
     kernel_image::KernelImage,
     rest_init::KernelInitTask,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vfs::{FileRef, FsStruct, VfsCore, VfsError, VfsInodeKind},
     virtio_blk,
 };

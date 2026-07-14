@@ -23,11 +23,7 @@ pub fn read_time() -> u64 {
 
 pub fn hart_start(hartid: usize, start_addr: usize, opaque: usize) -> Result<usize, usize> {
     let (error, value) = sbi_call_3(EID_HSM, FID_HSM_HART_START, hartid, start_addr, opaque);
-    if error == 0 {
-        Ok(value)
-    } else {
-        Err(error)
-    }
+    if error == 0 { Ok(value) } else { Err(error) }
 }
 
 pub fn putchar(byte: u8) {

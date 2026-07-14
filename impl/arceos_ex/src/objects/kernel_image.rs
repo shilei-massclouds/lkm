@@ -3,7 +3,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 use super::{
     config::Config,
     lds::Lds,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
 pub struct KernelImage {

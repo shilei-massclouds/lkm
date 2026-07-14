@@ -1,4 +1,4 @@
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition};
 use alloc::vec::Vec;
 
 pub const VIRTBLK_MAJOR: u32 = 254;

@@ -19,8 +19,8 @@ use super::{
     sbi::Sbi,
     softirq::Softirq,
     state::{
-        failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
-        Lifecycle, LifecycleEvent, State,
+        EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition,
+        failed_condition_with_diagnostic,
     },
     static_branch::StaticBranch,
     workqueue::Workqueue,

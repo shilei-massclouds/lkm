@@ -4,7 +4,7 @@ use super::{
     lds::Lds,
     memblock::MemBlock,
     raw_dtb::PhysRange,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
     vm::Vm,
 };

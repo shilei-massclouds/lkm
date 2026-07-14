@@ -6,7 +6,7 @@ use super::{
     irq_time::{HrtimerCore, RiscvTimerProvider, Timekeeper},
     mm_core::{KmallocCaches, PageAllocator, SlubSubsystem},
     printk,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_branch::StaticBranch,
     static_objects::StaticObjects,
 };

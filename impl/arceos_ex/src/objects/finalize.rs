@@ -4,7 +4,7 @@ use super::{
     rest_init::{SystemState, SystemStateValue},
     rootfs::RootfsBoundary,
     runtime_core::AsyncCoreDeferred,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
 

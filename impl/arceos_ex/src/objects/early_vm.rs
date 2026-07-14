@@ -7,7 +7,7 @@ use super::{
     kernel_image::KernelImage,
     lds::Lds,
     raw_dtb::RawDtb,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
 };
 

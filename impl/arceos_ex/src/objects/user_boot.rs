@@ -21,11 +21,11 @@ use super::{
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
-        copy_high_half_root_entries, page_table_storage_ready, sv39_indices, table_pte_from_phys,
-        user_leaf_pte_from_phys, PageTablePage,
+        PageTablePage, copy_high_half_root_entries, page_table_storage_ready, sv39_indices,
+        table_pte_from_phys, user_leaf_pte_from_phys,
     },
     rest_init::{KernelInitTask, SystemState, SystemStateValue},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
     task::TaskEntry,
@@ -9028,11 +9028,7 @@ fn mappings_have_page_table_entries(
 }
 
 const fn min_usize(a: usize, b: usize) -> usize {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 
 fn loadable_content_contains(input: &[u8], parsed: &ParsedLoadSegments, needle: &[u8]) -> bool {

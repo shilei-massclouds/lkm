@@ -1,5 +1,5 @@
 #[cfg(plic_provider_linux_object)]
-use super::state::{failed_condition, LifecycleEvent};
+use super::state::{LifecycleEvent, failed_condition};
 use super::{
     device::DeviceRef,
     device_tree::DeviceTree,

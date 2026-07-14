@@ -6,7 +6,7 @@ pub mod sched_init;
 
 use crate::{
     checkpoint::Checkpoint,
-    objects::state::{failed_condition, EventResult, LifecycleEvent, State},
+    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 use core::sync::atomic::AtomicU8;
 

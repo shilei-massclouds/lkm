@@ -2,7 +2,7 @@ use core::arch::global_asm;
 use core::sync::atomic::Ordering;
 
 use super::{
-    cpu::{SecondaryCpuStore, MAX_CPUS},
+    cpu::{MAX_CPUS, SecondaryCpuStore},
     cpu_control::{LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     irq_time::SbiIpi,
@@ -18,7 +18,7 @@ use super::{
     rest_init::{BootIdleRuntime, KernelInitTask, KthreaddTask},
     sbi::Sbi,
     scheduler::Scheduler,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
 };
 use crate::checkpoint::Checkpoint;

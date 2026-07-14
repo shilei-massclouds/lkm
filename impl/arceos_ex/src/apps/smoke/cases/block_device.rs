@@ -1,11 +1,11 @@
 use crate::{
     apps::smoke::{
-        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
+        harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context,
     objects::{
-        bio::{self, BioSubmitPath, BUFFER_HEAD_SECTOR_SIZE},
+        bio::{self, BUFFER_HEAD_SECTOR_SIZE, BioSubmitPath},
         block_device::{BlockDeviceProviderKind, VIRTBLK_FIRST_MINOR, VIRTBLK_MAJOR},
         state::State,
         virtio_blk,

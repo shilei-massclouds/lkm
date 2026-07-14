@@ -56,9 +56,13 @@ RUN_EXTRA_RUSTFLAGS := $(strip $(EXTRA_RUSTFLAGS))
 RUN_BUILD_DIR := build/$(TARGET)/$(RUN_PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUILD_SUFFIX)
 RUN_KERNEL_BIN := $(RUN_BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
-SOURCES := $(shell find src -name '*.rs')
-RUSTC ?= rustc +nightly-2025-05-20
-RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
+SOURCES := $(sort $(shell find src -type f -name '*.rs'))
+RUST_TOOLCHAIN ?= nightly-2025-05-20
+RUSTC ?= rustc +$(RUST_TOOLCHAIN)
+RUSTFMT ?= rustfmt +$(RUST_TOOLCHAIN)
+RUSTFMT_EDITION ?= 2024
+RUSTFMT_CONFIG ?= skip_children=true
+RUST_OBJCOPY ?= rustup run $(RUST_TOOLCHAIN) rust-objcopy
 QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
 DEFAULT_QEMU_APPEND := earlycon=sbi
@@ -112,11 +116,19 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
+.PHONY: build run generate fmt fmt-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
 
 build: generate $(KERNEL_BIN)
 
 generate: $(LINKER)
+
+fmt:
+	@echo "rustfmt: formatting $(words $(SOURCES)) Rust source files"
+	@$(RUSTFMT) --edition $(RUSTFMT_EDITION) --config $(RUSTFMT_CONFIG) $(SOURCES)
+
+fmt-check:
+	@echo "rustfmt: checking $(words $(SOURCES)) Rust source files"
+	@$(RUSTFMT) --edition $(RUSTFMT_EDITION) --config $(RUSTFMT_CONFIG) --check $(SOURCES)
 
 $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 	mkdir -p $(ROOT)/tools/out/codegen

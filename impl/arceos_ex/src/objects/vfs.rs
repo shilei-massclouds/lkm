@@ -1,7 +1,7 @@
 use super::{
     block_device::{BlockDeviceProvider, BlockDeviceRegistry},
     ext2::{Ext2DirEntryRecord, Ext2DirectoryEntries, Ext2Error, Ext2FileSystem, Ext2InodeRecord},
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use alloc::vec::Vec;
 

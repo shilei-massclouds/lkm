@@ -8,7 +8,7 @@ use super::{
     device::DeviceRef,
     device_tree::DeviceTree,
     irq_time::{IrqHandlerKind, LogicalIrq, Plic},
-    state::{failed_condition, EventResult, LifecycleEvent, State},
+    state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 
 type LinuxInitcall = unsafe extern "C" fn() -> i32;
@@ -2407,11 +2407,7 @@ pub extern "C" fn riscv_get_intc_hwnode() -> *mut c_void {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn riscv_hartid_to_cpuid(hartid: usize) -> i32 {
-    if hartid == 0 {
-        0
-    } else {
-        -1
-    }
+    if hartid == 0 { 0 } else { -1 }
 }
 
 #[unsafe(no_mangle)]

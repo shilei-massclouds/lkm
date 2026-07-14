@@ -15,6 +15,8 @@ predicate build_must_run_depend_on_required_runtime_inputs() -> bool;
 predicate build_must_not_hide_model_codegen_or_verification_boundaries() -> bool;
 predicate build_must_preserve_app_payload_selection_as_explicit_parameter() -> bool;
 predicate build_must_stage_external_tools_as_configurable_commands() -> bool;
+predicate build_must_format_selected_kernel_rust_sources_with_pinned_toolchain() -> bool;
+predicate build_must_gate_rust_format_before_other_test_stages() -> bool;
 predicate build_must_keep_test_aggregate_decomposable() -> bool;
 predicate build_must_gate_checkpoint_artifact_drift_before_runtime_tests() -> bool;
 predicate build_must_not_check_in_generated_or_runtime_local_outputs() -> bool;
@@ -56,6 +58,12 @@ type BuildAndScriptCodingMust {
 
         /* External tool commands. */
         build_must_stage_external_tools_as_configurable_commands();
+
+        /* Pinned Rust source formatting. */
+        build_must_format_selected_kernel_rust_sources_with_pinned_toolchain();
+
+        /* Early Rust format gate. */
+        build_must_gate_rust_format_before_other_test_stages();
 
         /* Decomposable tests. */
         build_must_keep_test_aggregate_decomposable();

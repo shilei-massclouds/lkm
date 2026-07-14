@@ -2,7 +2,7 @@ use crate::{arch::riscv64::csr, checkpoint::Checkpoint};
 
 use super::{
     kernel_image::KernelImage,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     vm::Vm,
 };
 

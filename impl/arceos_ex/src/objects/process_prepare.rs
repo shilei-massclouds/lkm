@@ -8,7 +8,7 @@ use super::{
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
-    state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_branch::StaticBranch,
     task::TaskEntry,
     user_boot::{

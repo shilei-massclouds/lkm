@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
-        cpu::{CpuRole, BOOT_CPU_LOGICAL_ID},
+        cpu::{BOOT_CPU_LOGICAL_ID, CpuRole},
         printk,
         state::State,
     },

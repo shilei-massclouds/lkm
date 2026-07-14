@@ -8,22 +8,22 @@ use crate::checkpoint::{self, Checkpoint};
 use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
 use super::user_boot::{
-    ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame, USER_EXEC_ARG_MAX,
+    ElfError, ElfObject, USER_EXEC_ARG_MAX, UserAddressSpace, UserStack, UserTrapFrame,
 };
 use super::{
     event_stream::{EventStream, TrapFrame},
-    files::{is_null_path, is_tty_path, CloseOnExecReport, FileError, FILE_POLLIN, TERMIOS_SIZE},
+    files::{CloseOnExecReport, FILE_POLLIN, FileError, TERMIOS_SIZE, is_null_path, is_tty_path},
     hwrng::HwRngError,
     init_stack::InitStack,
     process_prepare::TaskCopyUserProcessInputs,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     task::TaskEntry,
     user_boot::{
-        UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
-        UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
         USER_CHILD_PID, USER_SIGNAL_COUNT,
         USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_SUPPLEMENTARY_GROUP_MAX,
-        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
+        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED, UserFaultAccess, UserFaultMappingDiagnostic,
+        UserMappingKind, UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate,
+        UserRtSigtimedwaitResult, UserSignalAction,
     },
 };
 
@@ -7503,11 +7503,7 @@ impl ExecveArgvCopy {
     }
 
     fn argv0_len(&self) -> usize {
-        if self.argc == 0 {
-            0
-        } else {
-            self.lens[0]
-        }
+        if self.argc == 0 { 0 } else { self.lens[0] }
     }
 }
 
@@ -7655,11 +7651,7 @@ fn unexpected_exception_handler(frame: &TrapFrame) -> ! {
 
 fn breakpoint_instruction_length(sepc: usize) -> usize {
     let insn = unsafe { core::ptr::read_unaligned(sepc as *const u16) };
-    if insn & 0b11 == 0b11 {
-        4
-    } else {
-        2
-    }
+    if insn & 0b11 == 0b11 { 4 } else { 2 }
 }
 
 fn panic_dispatch(message: &str) -> ! {
@@ -7926,7 +7918,9 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
         crate::arch::riscv64::sbi::putstr(" first_unreaped_pidfd_fd=");
         print_decimal(pidfd_fd);
     } else {
-        crate::arch::riscv64::sbi::putstr(" first_unreaped_pid=0 first_unreaped_status=0 first_unreaped_wait_status=0 first_unreaped_pidfd_fd=");
+        crate::arch::riscv64::sbi::putstr(
+            " first_unreaped_pid=0 first_unreaped_status=0 first_unreaped_wait_status=0 first_unreaped_pidfd_fd=",
+        );
         print_decimal(usize::MAX);
     }
 }

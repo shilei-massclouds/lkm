@@ -1,6 +1,6 @@
 use crate::{
     apps::smoke::SmokeResult,
-    context::{context, Context},
+    context::{Context, context},
     objects::{
         mm_core::{GfpFlags, LinearMappedPageAddr, PageRef, Pfn, PhysPageAddr},
         printk,
