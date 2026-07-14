@@ -7,8 +7,8 @@ description = "Kernel panic was printed."
 [[rules]]
 id = "allocation-error"
 result = "failure"
-contains = ["arceos_ex allocation error"]
-description = "Kernel allocation error was printed."
+contains = ["memory allocation of"]
+description = "The stable no_std allocation failure message was printed."
 
 [[rules]]
 id = "unsupported-visible"

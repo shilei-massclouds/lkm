@@ -57,12 +57,15 @@ RUN_BUILD_DIR := build/$(TARGET)/$(RUN_PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(P
 RUN_KERNEL_BIN := $(RUN_BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
 SOURCES := $(sort $(shell find src -type f -name '*.rs'))
-RUST_TOOLCHAIN ?= nightly-2025-05-20
-RUSTC ?= rustc +$(RUST_TOOLCHAIN)
-RUSTFMT ?= rustfmt +$(RUST_TOOLCHAIN)
+RUSTC ?= rustc
+RUSTFMT ?= rustfmt
+CLIPPY ?= clippy-driver
 RUSTFMT_EDITION ?= 2024
 RUSTFMT_CONFIG ?= skip_children=true
-RUST_OBJCOPY ?= rustup run $(RUST_TOOLCHAIN) rust-objcopy
+CLIPPY_FLAGS ?= -D clippy::correctness -D clippy::suspicious -D clippy::perf -A clippy::style -A clippy::complexity
+RUST_SYSROOT ?= $(shell $(RUSTC) --print sysroot)
+RUST_HOST ?= $(shell $(RUSTC) --version --verbose | sed -n 's/^host: //p')
+RUST_OBJCOPY ?= $(RUST_SYSROOT)/lib/rustlib/$(RUST_HOST)/bin/rust-objcopy
 QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
 DEFAULT_QEMU_APPEND := earlycon=sbi
@@ -116,7 +119,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate fmt fmt-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
+.PHONY: build run generate fmt fmt-check clippy-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -129,6 +132,20 @@ fmt:
 fmt-check:
 	@echo "rustfmt: checking $(words $(SOURCES)) Rust source files"
 	@$(RUSTFMT) --edition $(RUSTFMT_EDITION) --config $(RUSTFMT_CONFIG) --check $(SOURCES)
+
+clippy-check:
+	@echo "clippy: checking APP=$(APP) PLIC_PROVIDER=$(PLIC_PROVIDER)"
+	@output="$${TMPDIR:-/tmp}/arceos-ex-clippy.$$$$.rmeta"; \
+	trap 'rm -f "$$output"' EXIT; \
+	$(CLIPPY) src/main.rs \
+		--crate-name arceos_ex \
+		--crate-type bin \
+		--edition 2024 \
+		--target $(TARGET) \
+		$(RUSTFLAGS) \
+		--emit=metadata \
+		$(CLIPPY_FLAGS) \
+		-o "$$output"
 
 $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 	mkdir -p $(ROOT)/tools/out/codegen

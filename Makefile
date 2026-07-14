@@ -27,7 +27,7 @@ PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
 
-.PHONY: build run disk disk-clean fmt fmt-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
@@ -46,6 +46,9 @@ fmt:
 
 fmt-check:
 	$(MAKE) -C $(KERNEL_DIR) fmt-check
+
+clippy-check:
+	$(MAKE) -C $(KERNEL_DIR) clippy-check APP=$(SMOKE_APP) PLIC_PROVIDER=native
 
 verify:
 ifeq ($(REPORT),graph)
@@ -77,6 +80,7 @@ checkpoints-linux-check:
 	}
 
 test: fmt-check
+	$(MAKE) clippy-check
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
 test-verify:

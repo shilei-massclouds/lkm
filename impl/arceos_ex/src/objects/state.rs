@@ -28,13 +28,7 @@ pub enum LifecycleEvent {
 
 impl LifecycleEvent {
     const fn bit(self) -> u8 {
-        match self {
-            Self::Preset => 1 << 0,
-            Self::Setup => 1 << 1,
-            Self::Enable => 1 << 2,
-            Self::Disable => 1 << 3,
-            Self::Cleanup => 1 << 4,
-        }
+        1 << (self as u8)
     }
 
     pub const fn code(self) -> u8 {

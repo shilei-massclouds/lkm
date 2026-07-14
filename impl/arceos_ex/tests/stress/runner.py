@@ -1049,7 +1049,7 @@ def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
         return {"line": line_no, "kind": "symptom", "name": "InitcallEventFailed", "raw": line}
     if "arceos_ex panic" in line:
         return {"line": line_no, "kind": "symptom", "name": "KernelPanic", "raw": line}
-    if "arceos_ex allocation error" in line:
+    if "memory allocation of" in line:
         return {"line": line_no, "kind": "symptom", "name": "AllocationError", "raw": line}
     if line.startswith("wait4 child handoff"):
         return {"line": line_no, "kind": "boundary", "name": "Wait4ChildHandoff", "raw": line}

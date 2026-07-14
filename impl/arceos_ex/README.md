@@ -19,6 +19,7 @@ make build APP=smoke
 make build APP=hello
 make fmt
 make fmt-check
+make clippy-check
 make run
 make run APP=smoke
 make run APP=hello
@@ -32,11 +33,12 @@ make clean
 `PROBE=announce` for new checkpoint announcement runs.
 
 From the repository root, `make test` first runs the read-only Rust format gate,
-then the full validation path: strict formal derive, checkpoint/KUnit handlers
-listed in `tests/kunit.handlers`, and the final `APP=smoke` payload smoke run.
-Use root `make fmt-check`, `make test-kunit` or `make test-smoke` when only one
-validation path is needed. `make fmt` uses the same pinned nightly and edition
-as the format gate to normalize every Rust source below `src/`.
+then the high-signal Clippy gate, followed by the full validation path: strict
+formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and
+the final `APP=smoke` payload smoke run. Use root `make fmt-check`,
+`make clippy-check`, `make test-kunit` or `make test-smoke` when only one
+validation path is needed. `make fmt` uses the same pinned stable toolchain and
+edition as the format gate to normalize every Rust source below `src/`.
 
 Stress tests are run from the repository root with the dedicated runner:
 
@@ -53,15 +55,18 @@ only that case. Detailed output layout and case policy are documented in
 Prerequisites:
 
 ```bash
-rustup target add riscv64gc-unknown-none-elf
+rustup toolchain install
 ```
 
-`qemu-system-riscv64` and `rust-objcopy` must also be available on `PATH`.
-The Makefile defaults to `RUST_TOOLCHAIN=nightly-2025-05-20` for rustc,
-rustfmt and rust-objcopy because that toolchain is known to have the local
-RISC-V64 target installed in the current environment. Override the shared pin
-or an individual tool command if a different toolchain is prepared. `APP ?= smoke`
-selects the built-in smoke payload.  The Makefile maps app names to
+`qemu-system-riscv64` must also be available on `PATH`. The Makefile resolves
+`rust-objcopy` from the active compiler sysroot installed by
+`llvm-tools-preview`; it does not require a separate `rust-objcopy` proxy on
+`PATH`.
+The repository-root `rust-toolchain.toml` is the single source of truth for the
+Rust 1.97.0 toolchain, RISC-V64 target, rustfmt, Clippy and llvm-tools-preview.
+The Makefile uses that active rustup toolchain without repeating its version;
+override an individual tool command only when an alternate tool is deliberately
+prepared. `APP ?= smoke` selects the built-in smoke payload.  The Makefile maps app names to
 `--cfg app_<name>`; additional payloads should live under `src/apps/` and expose
 `run() -> !`.
 

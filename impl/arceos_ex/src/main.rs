@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(alloc_error_handler)]
 
 extern crate alloc;
 
@@ -15,21 +14,28 @@ mod projects;
 mod stress_mem;
 mod systems;
 
-use core::panic::PanicInfo;
+use core::{
+    fmt::{self, Write},
+    panic::PanicInfo,
+};
 
 use objects::mm_core::KernelGlobalAllocAdapter;
 
 #[global_allocator]
 static KERNEL_GLOBAL_ALLOCATOR: KernelGlobalAllocAdapter = KernelGlobalAllocAdapter;
 
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    arch::riscv64::sbi::putstr("arceos_ex panic\n");
-    arch::riscv64::sbi::system_shutdown()
+struct SbiPanicWriter;
+
+impl Write for SbiPanicWriter {
+    fn write_str(&mut self, message: &str) -> fmt::Result {
+        arch::riscv64::sbi::putstr(message);
+        Ok(())
+    }
 }
 
-#[alloc_error_handler]
-fn alloc_error(_layout: core::alloc::Layout) -> ! {
-    arch::riscv64::sbi::putstr("arceos_ex allocation error\n");
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    arch::riscv64::sbi::putstr("arceos_ex panic\n");
+    let _ = writeln!(SbiPanicWriter, "panic message: {}", info.message());
     arch::riscv64::sbi::system_shutdown()
 }

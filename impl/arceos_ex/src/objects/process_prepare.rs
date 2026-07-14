@@ -31,6 +31,8 @@ const BUILTIN_KEY_TYPE_COUNT: usize = 4;
 const BUILTIN_LSM_COUNT: usize = 1;
 const CAPABILITY_HOOK_COUNT: usize = 8;
 
+const _: () = assert!(PID_MAX_LIMIT < PIDNS_ADDING);
+
 pub struct RootPidNamespace {
     lifecycle: Lifecycle,
     idr_ready: bool,
@@ -87,7 +89,6 @@ impl RootPidNamespace {
             || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
             || cpu_group.possible_cpu_count() == 0
-            || PID_MAX_LIMIT >= PIDNS_ADDING
         {
             return self.failed_setup();
         }

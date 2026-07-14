@@ -79,9 +79,7 @@ impl Zone {
     }
 
     pub fn has_migration_type(&self, migration_type: MigrationType) -> bool {
-        self.migration_types
-            .iter()
-            .any(|item| *item == migration_type)
+        self.migration_types.contains(&migration_type)
     }
 
     pub const fn free_page_set_empty(&self) -> bool {

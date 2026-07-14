@@ -162,6 +162,9 @@ global_asm!(
     .align 2
     .globl arceos_ex_head_trap_entry
 arceos_ex_head_trap_entry:
+    mv      a3, ra
+    mv      a4, sp
+    csrr    a5, satp
     csrr    a0, scause
     csrr    a1, sepc
     csrr    a2, stval
@@ -194,7 +197,14 @@ unsafe extern "C" fn arceos_ex_head_checkpoint() {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn arceos_ex_head_trap_rust(scause: usize, sepc: usize, stval: usize) -> ! {
+extern "C" fn arceos_ex_head_trap_rust(
+    scause: usize,
+    sepc: usize,
+    stval: usize,
+    ra: usize,
+    sp: usize,
+    satp: usize,
+) -> ! {
     crate::arch::riscv64::sbi::putstr("arceos_ex head trap\n");
     crate::arch::riscv64::sbi::putstr("scause=0x");
     print_hex(scause);
@@ -202,6 +212,12 @@ extern "C" fn arceos_ex_head_trap_rust(scause: usize, sepc: usize, stval: usize)
     print_hex(sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
     print_hex(stval);
+    crate::arch::riscv64::sbi::putstr(" ra=0x");
+    print_hex(ra);
+    crate::arch::riscv64::sbi::putstr(" sp=0x");
+    print_hex(sp);
+    crate::arch::riscv64::sbi::putstr(" satp=0x");
+    print_hex(satp);
     crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
 }

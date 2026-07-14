@@ -17,6 +17,7 @@ make build
 make checkpoints
 make fmt
 make fmt-check
+make clippy-check
 make run
 make verify
 make test
@@ -50,7 +51,8 @@ Targets must remain composable:
 - `difftest-preflight` must run `test-checkpoints` before `checkpoints-linux-check`; `difftest` must not start its paired runner unless both read-only checks pass. A preflight failure must retain the detailed drift diagnostics and direct the developer to the explicit manual synchronization workflow instead of invoking `checkpoints` automatically.
 - `fmt` formats every Rust source file under the selected kernel's `src/` tree with the pinned kernel toolchain, edition and explicit non-recursive-per-file configuration.
 - `fmt-check` applies the exact same source set and rustfmt configuration in read-only `--check` mode.
-- `test` must run `fmt-check` before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
+- `clippy-check` runs the selected kernel crate through the active pinned toolchain's `clippy-driver` in metadata-only mode. It must reject the `correctness`, `suspicious` and `perf` lint groups while leaving `style` and `complexity` non-blocking during the initial rollout.
+- `test` must run `fmt-check`, then `clippy-check`, before formal verification, checkpoint checks, builds or runtime stages, then preserve the remaining validation order and individual entry points.
 - `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
@@ -103,8 +105,8 @@ External tools must be configurable by variables or documented script parameters
 
 - `RUSTC`
 - `RUSTFMT`
+- `CLIPPY`
 - `RUST_OBJCOPY`
-- `RUST_TOOLCHAIN`
 - `QEMU`
 - `PYVERI`
 - `WGET`
@@ -112,6 +114,8 @@ External tools must be configurable by variables or documented script parameters
 - `MKFS_EXT2`
 
 Ordinary build targets must not depend on host-local absolute paths unless the path is a documented source input, such as a third-party object intentionally stored under the repository.
+
+The repository root `rust-toolchain.toml` is the single source of truth for the default Rust developer toolchain. It must pin the exact stable `1.97.0` channel rather than the rolling `stable` channel and install the `clippy`, `rustfmt` and `llvm-tools-preview` components plus the `riscv64imac-unknown-none-elf` target. Kernel Makefiles must use the active rustup-selected `rustc` and `rustfmt` without repeating the version, and must resolve `rust-objcopy` from that same active toolchain. Because `llvm-tools-preview` tools are stored below the active compiler sysroot rather than exposed as rustup proxies, the default `rust-objcopy` path must be derived from the active `rustc` sysroot and host tuple instead of assuming that `rustup which rust-objcopy` succeeds. Individual tool-command variables remain explicit override interfaces for deliberately prepared alternate tools.
 
 ## Failure Behavior
 
@@ -206,16 +210,34 @@ are not allowed in ordinary build targets.
 #### Pinned Rust source formatting
 
 The selected kernel implementation owns the complete Rust source set under its `src/` tree. `fmt` and
-`fmt-check` must use the same pinned nightly as the default kernel compiler, Rust edition 2024 and an
+`fmt-check` must use the same pinned stable toolchain as the default kernel compiler, Rust edition 2024 and an
 explicit `skip_children=true` configuration while passing every source file once. This avoids recursive
 module traversal changing files outside the enumerated set and makes formatting independent of the host
 default toolchain.
+
+#### Repository Rust toolchain
+
+The repository root rust-toolchain.toml pins the exact stable compiler release and the common developer
+components and RISC-V compilation target. It is the single version source: selected kernel Makefiles must defer
+to the active rustup toolchain rather than restating the release, while retaining documented individual command
+overrides for deliberately prepared alternate tools. A rolling stable channel is not a reproducible repository
+pin.
 
 #### Early Rust format gate
 
 The aggregate `make test` target must depend on the independently runnable, read-only `fmt-check` target
 before starting formal verification, checkpoint artifact validation, compilation or QEMU. Format drift
 must fail fast and must never be repaired implicitly by `make test`.
+
+#### High-signal Clippy gate after formatting
+
+The selected kernel implementation must expose an independently runnable, read-only `clippy-check` target.
+It must compile the default smoke/native-provider crate configuration only as metadata with the pinned stable
+toolchain's configurable `clippy-driver`, so the gate neither links a kernel image nor mutates generated or
+runtime artifacts. The initial gate must deny Clippy's `correctness`, `suspicious` and `perf` groups, explicitly
+leave `style` and `complexity` non-blocking, and leave ordinary rustc warnings visible without promoting them
+to errors. The aggregate `make test` target must run this gate strictly after `fmt-check` succeeds and before
+formal verification, checkpoint checks, builds or QEMU, including when make is invoked with parallel jobs.
 
 #### Decomposable tests
 

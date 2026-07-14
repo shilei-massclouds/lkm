@@ -1291,6 +1291,10 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 - 使用 `li/beq/ret` 等直线比较和直接条件分支。
 - 返回 `a0 = 0/1`。
 
+`LifecycleEvent::bit()` 必须直接从连续的 `#[repr(u8)]` event 判别值计算 `1 << discriminant`，不得写成
+`match`/表驱动映射。该换算位于 `transition/adopt_transition` 的 MMU-off 必经路径，必须通过反汇编审计确认不会生成
+包含最终 high-half 绝对目标的 jump table。
+
 该函数不得访问内存，不得调用其它函数，不得使用跳转表，不得依赖 `.rodata`，不得改回普通 Rust `match`、嵌套 enum 分支或其它可能由编译器 lowering
 成 jump table 的写法。若新增 lifecycle 状态或事件，必须同步更新：
 
@@ -1349,6 +1353,13 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 1. 持续保持 `Lds`/`KernelImage` 相关符号和布局检查面，确保 `_start`、`kernel_start`、text 起点、ELF entry、head text 范围在实现中可对应。
 2. 继续实现 `RawDtb.Preset/Setup` 的最小确认路径，把 OpenSBI handoff 假设转化为 header/magic/totalsize/range 的运行期检查。
 3. 在上述事实具备后，推进 `FixMap`、`TrampolineVm`、`EarlyVm` 和 `Vm` 三段切换。
+
+`EntryPreludePhase` 的 head trap 是 MMU 切换前后共用的长期早期启动诊断。它必须在不依赖正常 console、heap 或完整
+exception stream 的条件下稳定输出 `scause`、`sepc`、`stval`、被打断上下文的 `ra`/`sp` 和 trap 时的 `satp`。
+`ra` 用于把 Rust early path 的间接跳转故障映射回具体调用者，`sp` 用于确认 init stack handoff，`satp` 用于区分
+MMU-off 与 page-table 已启用故障；诊断只能读取 trap 上下文并关机，不得推进对象状态或改变正常启动路径。
+`PROBE=announce` 的 head checkpoint 字节继续作为 Kernel/Boot/EntryPrelude、interrupt、kernel image、BSS、boot CPU、
+init task 和 init stack 边界的低依赖顺序证据。
 
 ## 应用复用
 
@@ -1754,7 +1765,10 @@ alignment fallback 均 deferred。
 集合，应依赖该 runtime，而不是恢复固定容量数组。当前 `DynamicContainerRuntime.Ready` 只承诺 documented layout subset
 内的动态容器能力：`Vec` 增长导致的单次 `Layout` 若超过 `KernelGlobalAllocator` 第一轮 `size <= 8192` 边界，应以
 allocation failure 处理，而不能被解释为 `Vec` 语义本身可用性失效。涉及 initcall 批量对象创建的 smoke 应覆盖这种边界，
-避免普通 `push` 触发 `alloc_error_handler` 后只留下不可定位的关机日志。
+避免普通 `push` 触发 allocation failure 后只留下不可定位的关机日志。仓库固定的 stable Rust 工具链不得依赖 nightly-only
+`#[alloc_error_handler]`；`no_std` 默认 allocation failure handler 应进入内核 panic handler。panic handler 必须在不使用 heap
+分配的前提下输出 `PanicInfo` message，使日志保留 `memory allocation of ... bytes failed` 这一可分类证据，然后按既有 shutdown
+路径终止。stress classifier 必须识别该 stable 默认消息，而不能继续依赖已删除的自定义 allocation handler 文本。
 `KernelGlobalAllocator` 和 `DynamicContainerRuntime` 的 runtime 同步能力继承自 SLUB/kmalloc；它们本身不消除底层 SLUB runtime 锁模型的 deferred 状态。
 
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址区间管理和 vmap 映射执行，不是物理资源策略层，也不是
