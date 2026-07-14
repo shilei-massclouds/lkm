@@ -29,6 +29,17 @@ make test-stress STRESS_RUNS=30
 `STRESS_TIMEOUT` is optional; when it is unset, each case keeps its own
 `timeout_seconds` value. The current cases default to 120 seconds.
 
+After every selected case completes, both stress and difftest invocations print
+the same terminal summary, including when only one case was selected:
+
+```text
+stress suite summary:
+  case-name: success=<n> failure=<n> report=<path>
+```
+
+Preflight, setup, or configuration validation that fails before a case result
+exists continues to report its specific error without a fabricated summary.
+
 Non-interactive command capture uses `DEVNULL` for stdin when a case does not
 configure `delayed_stdin`. Cases that require input must configure
 `delayed_stdin` explicitly; only that path uses a pipe to provide input.

@@ -114,8 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         for case_path in case_paths
     ]
-    if len(results) > 1:
-        _print_suite_summary(results)
+    _print_suite_summary(results)
     return 1 if any(_case_failed(result) for result in results) else 0
 
 

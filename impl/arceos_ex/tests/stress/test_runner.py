@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
+from io import StringIO
 import json
 import sys
 import tempfile
@@ -43,6 +45,54 @@ class StressRunnerTests(unittest.TestCase):
     def test_case_failed_reads_failure_total(self) -> None:
         self.assertFalse(runner._case_failed({"summary": {"totals": {"failure": 0}}}))
         self.assertTrue(runner._case_failed({"summary": {"totals": {"failure": 1}}}))
+
+    def test_main_prints_single_case_success_summary_and_returns_zero(self) -> None:
+        result = runner._case_result(
+            "single-case",
+            Path("/tmp/single-case.toml"),
+            Path("/tmp/single-case-report"),
+            {"totals": {"success": 1, "failure": 0}},
+        )
+        stdout = StringIO()
+
+        with (
+            mock.patch.object(runner, "_resolve_repo_root", return_value=Path("/tmp/repo")),
+            mock.patch.object(runner, "_run_case", return_value=result),
+            redirect_stdout(stdout),
+        ):
+            status = runner.main(["/tmp/single-case.toml"])
+
+        self.assertEqual(status, 0)
+        self.assertIn("stress suite summary:", stdout.getvalue())
+        self.assertIn(
+            "single-case: success=1 failure=0 "
+            "report=/tmp/single-case-report/report.md",
+            stdout.getvalue(),
+        )
+
+    def test_main_prints_single_case_failure_summary_and_returns_nonzero(self) -> None:
+        result = runner._case_result(
+            "single-case",
+            Path("/tmp/single-case.toml"),
+            Path("/tmp/single-case-report"),
+            {"totals": {"success": 0, "failure": 1}},
+        )
+        stdout = StringIO()
+
+        with (
+            mock.patch.object(runner, "_resolve_repo_root", return_value=Path("/tmp/repo")),
+            mock.patch.object(runner, "_run_case", return_value=result),
+            redirect_stdout(stdout),
+        ):
+            status = runner.main(["/tmp/single-case.toml"])
+
+        self.assertNotEqual(status, 0)
+        self.assertIn("stress suite summary:", stdout.getvalue())
+        self.assertIn(
+            "single-case: success=0 failure=1 "
+            "report=/tmp/single-case-report/report.md",
+            stdout.getvalue(),
+        )
 
     def test_extracts_user_boot_success_events(self) -> None:
         events = runner._extract_events("noise\nuser hello\nuser exit status=0\n")

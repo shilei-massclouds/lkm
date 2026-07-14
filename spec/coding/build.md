@@ -235,6 +235,15 @@ while running in test mode. Linux marker scans are useful for trees
 that already carry marker comments, but they must remain an explicit
 opt-in check until the referenced Linux tree is instrumented.
 
+#### Completed stress/difftest terminal summary
+
+After all selected stress or difftest cases complete and produce case results,
+the runner must print the existing `stress suite summary:` terminal section with
+one `case-name: success=<n> failure=<n> report=<path>` line per case. This
+requirement also applies when exactly one case is selected. Preflight, setup or
+configuration failures that occur before a case result is produced must retain
+their specific diagnostics and must not fabricate a result summary.
+
 #### Generated output hygiene
 
 Generated files, runtime disk images, QEMU logs, temporary debugfs
