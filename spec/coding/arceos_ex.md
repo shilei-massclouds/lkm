@@ -47,11 +47,19 @@
 
 | Scope | Coding 映射 |
 | --- | --- |
-| Device tree MUST | [`objects/device-tree-must.md`](objects/device-tree-must.md) |
-| Device tree SHOULD | [`objects/device-tree-should.md`](objects/device-tree-should.md) |
+| Model object 文件完整覆盖 | [`objects/README.md`](objects/README.md) |
+| Device tree | [`objects/device-tree.md`](objects/device-tree.md) |
 | Effective context | [`objects/effective-context.md`](objects/effective-context.md) |
 | Completion | [`objects/completion.md`](objects/completion.md) |
-| Block I/O | [`objects/block-io.md`](objects/block-io.md) |
+| Bio / BufferHead | [`objects/bio.md`](objects/bio.md) |
+| Block device | [`objects/block-device.md`](objects/block-device.md) |
+| Virtio core/MMIO/ring/RNG | [`objects/virtio.md`](objects/virtio.md) |
+| Virtio block | [`objects/virtio-blk.md`](objects/virtio-blk.md) |
+| Ext2 | [`objects/ext2.md`](objects/ext2.md) |
+| VFS / devfs | [`objects/vfs.md`](objects/vfs.md) |
+| User boot / files / syscall | [`objects/user-boot.md`](objects/user-boot.md) |
+| Rootfs image construction | [`projects/rootfs-image.md`](projects/rootfs-image.md) |
+| Rootfs/user acceptance testing | [`../testing/rootfs.md`](../testing/rootfs.md) |
 
 上述 `.md` 是唯一 coding 权威来源；稳定 legacy rule ID 已归并到对应主题文件，coding `.spec`
 已退场且不得重新引入。审计结果见

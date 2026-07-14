@@ -1,0 +1,62 @@
+# User boot, ELF, syscall and process coding
+
+本文件是 `spec/model/objects/user_boot.spec` 与 `files.spec` 的权威 coding 映射。VFS object/backend
+语义由 [`vfs.md`](vfs.md) 承载；本文件承载用户启动、ELF/address-space、trap return、syscall table、
+fd/OFD/backend dispatch、进程身份以及当前单 child slice 的实现边界。
+
+## Ownership and entry
+
+`UserBootPayload`、首个 `UserAddressSpace`、`UserStack` 和 `UserTrapFrame` 均属于
+`KernelInitTask` 的执行线。`UserInitProcess` 是同一 PID 1 task 经 exec/user-entry 后的身份视图，
+不是第二个 task。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
+不增加 `SyscallDispatcher`。
+
+ELF loader reads the requested init through the current `FsStruct.root` and VFS pathname API. Dynamic
+ELF keeps main/interpreter roles, PT_LOAD plans and auxv in one prepared address space. Replacement
+address spaces use Context-owned exec staging rather than placing the object on the kernel trap stack;
+commit occurs only at the successful exec boundary. User entry writes the prepared satp, performs the
+required fence and returns through the modeled trap frame.
+
+## Trap and exception mapping
+
+The RISC-V user trap frame records `scause`, `sepc`, `sstatus`, `stval` and the integer register state
+needed for transparent return. Breakpoint dispatch gives architecture single-step/probe hooks an
+opportunity before falling back to signal/unsupported handling. These are implementation mappings of
+the model trap boundary, not permission to invent a second exception stream.
+
+The user kernel stack is a VMALLOC mapping with the modeled alignment and unmapped guard gap. Large
+exec/mm objects stay out of trap-stack frames. Early overflow checking, per-task generalization and IRQ
+hardirq stacks remain explicit follow-up boundaries in the active roadmap.
+
+## Files and syscall dispatch
+
+`FilesStruct` is task-owned alongside `FsStruct`; `FileDescriptorTable` entries reference
+`OpenFileDescription`, which selects a `FileBackend`. stdio uses the console/TTY backend and ordinary
+read-only files use the VFS backend. Syscalls validate user memory and dispatch through these objects;
+they do not special-case fixture paths or add test-only kernel APIs.
+
+Current production slices include the modeled write/exit, read-only open/read/close/stat, ELF memory
+management, process/credential, TTY, time/random, signal and observed AF_UNIX pathname-error operations.
+Each slice follows the local Linux 6.12 RISC-V syscall ABI and preserves explicitly modeled errno and
+deferred boundaries. Unsupported socket success paths, complete credentials/namespaces/LSM, general
+task graphs, complete COW/mm, signals, networking and full fd sharing remain deferred.
+
+## Clone, wait and exec
+
+The supported `clone(220)` plain-fork shape decodes ABI flags in `SyscallTable` and delegates object
+creation to `TaskCreationCore.CopyUserProcess`. The current implementation deliberately uses one
+observed child slot: parent state and writable pages are saved for handoff, the child receives `a0=0`,
+and wait/exit restores the parent view before status copyout. Nested OpenRC/login slices reuse only the
+explicitly modeled continuation records; this is not a claim of a general runnable task graph or COW.
+
+Child `execve(221)` builds its replacement address space in Context-owned staging and commits it without
+a large trap-stack temporary. Old-mm reclamation, complete failure rollback, repeated staging reset,
+close-on-exec, credential/signal/binfmt transitions and full point-of-no-return semantics remain
+deferred and therefore stay active roadmap work.
+
+## Test and observation boundary
+
+KUnit/checkpoint handlers are read-only observers of production facts. Fixture building and delayed
+stdin live in [`../../testing/rootfs.md`](../../testing/rootfs.md); image construction lives in
+[`../projects/rootfs-image.md`](../projects/rootfs-image.md). The ordinary acceptance boundary is guest
+output plus modeled checkpoint facts, never mutation of a user/process object by a handler.

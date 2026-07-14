@@ -4,12 +4,16 @@ LKM 是一个围绕目标内核、规格模型和验证工具持续演进的实�
 
 ## 目录
 
-- `docs/ROADMAP.md`：统一开发计划和任务优先级入口。
+- `docs/ROADMAP.md`：仍有后续责任的统一开发计划和任务优先级入口；完成项见 `docs/roadmap/completed.md`。
 - `docs/DEFECTS.md`：尚未闭环的实现缺陷和间歇性问题记录。
 - `spec/`：项目章程、规格文档与配图资源。
 - `tools/pyveri/`：Python 版规格推导验证器工具工程目录。
 - `impl/providers/`：外部 Linux object provider registry 与来源说明。
 - `impl/arceos_ex/`：当前主要目标内核实现与测试入口。
+
+`spec/model/objects/*.spec` 的逐文件 coding 归属由
+[`spec/coding/objects/README.md`](spec/coding/objects/README.md) 统一索引；多个 model 文件可以共享
+一个专题，但不得留下未声明归属。
 
 ## 初步验证
 

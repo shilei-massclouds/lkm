@@ -136,6 +136,8 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 - `phase-paradigm.md`：阶段 model 到状态、continuation、迁移链和 checkpoint 的专用映射规则。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
 - `arceos_ex.md`：`arceos_ex` coding 索引入口，链接 system、phase、object 和实现说明。
-- `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+- `objects/README.md`：`spec/model/objects/*.spec` 的逐文件 coding 覆盖表；共享专题必须在表中明确归属。
+- `projects/rootfs-image.md`：rootfs 镜像构造与 fixture overlay 的权威项目规则。
+- `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现证据、源码落点、命令和阶段性观察；不承载 MUST/SHOULD/MAY 规则。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 - `projects/kernel.md`：KernelProject 实现映射。
 - `systems/kernel.md`：Kernel system 实现映射。

@@ -6,6 +6,8 @@
 仍是对象级实现的权威来源。`spec/testing` 不重新定义模型和编码语义，只规定测试代码如何从这些语义中选择测试目标、生成场景、隔离副作用并选择执行载体。
 
 正式规格入口是 [`main.spec`](main.spec)。当前首先规格化 smoke 测试生成规则，见 [`smoke.spec`](smoke.spec)。
+Rootfs/user fixture、发行版 smoke、OpenRC delayed stdin 和 paired difftest 的权威编排规则见
+[`rootfs.md`](rootfs.md)。
 
 ## 测试生成元规则
 

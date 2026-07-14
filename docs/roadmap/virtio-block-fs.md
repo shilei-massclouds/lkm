@@ -2,9 +2,11 @@
 
 > 本文从 `docs/ROADMAP.md` 拆出，只保留专题历史、证据和细节。当前优先级、状态和下一步顺序以 [`../ROADMAP.md`](../ROADMAP.md) 为唯一入口。
 
-## 下一阶段计划：virtio-rng 与 virtio 基础对象
+> 下文“当前”“下一阶段”“P0/P1”等措辞是当时执行快照，不构成活跃计划。
 
-本节是当前 P0 的执行清单。目标不是完整 virtio 子系统，而是用最简单的真实 virtio 设备 `virtio-rng` 推动可复用的 `virtio-mmio`、virtio core 和 split virtqueue 对象建模与实现。每完成一步必须先检查并确认执行结果，再进入下一步；检查结果应同步到本节状态，必要时同步 `spec/charter/main.md`、`spec/model` 和 `spec/coding/arceos_ex-implementation.md`。
+## virtio-rng 与 virtio 基础对象执行归档
+
+本节保存当时的执行清单。目标不是完整 virtio 子系统，而是用最简单的真实 virtio 设备 `virtio-rng` 推动可复用的 `virtio-mmio`、virtio core 和 split virtqueue 对象建模与实现。
 
 ### 已确认原则
 

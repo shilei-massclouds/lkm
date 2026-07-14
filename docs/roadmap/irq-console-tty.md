@@ -2,6 +2,8 @@
 
 > 本文从 `docs/ROADMAP.md` 拆出，只保留专题历史、证据和细节。当前优先级、状态和下一步顺序以 [`../ROADMAP.md`](../ROADMAP.md) 为唯一入口。
 
+> 下文“执行中”“后续计划”“P0/P1”等措辞是当时执行快照，不构成活跃计划。
+
 ## 已完成计划：console/earlycon handoff
 
 当前阶段已在 `PlatformBus -> ns16550a platform driver probe` 闭环上完成 Linux-like 的 early console 到真实 serial console 首轮交接。
