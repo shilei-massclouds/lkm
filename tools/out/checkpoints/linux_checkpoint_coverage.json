@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 481,
+  "total_checkpoints": 483,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 364
+      "count": 366
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 364
+      "count": 366
     },
     {
       "confidence": "medium",
@@ -281,6 +281,10 @@
     },
     {
       "family": "MmCoreInitPhase",
+      "count": 2
+    },
+    {
+      "family": "PayloadPhase",
       "count": 2
     },
     {

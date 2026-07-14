@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 364
+- unmapped: 366
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -487,3 +487,5 @@
 | 478 | ApSmpCallinPhase.Online | ApSmpCallinPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 479 | ApOnlineIdlePhase.Prepared | ApOnlineIdlePhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 480 | ApOnlineIdlePhase.Online | ApOnlineIdlePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 481 | PayloadPhase.Started | PayloadPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 482 | PayloadPhase.Prepared | PayloadPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

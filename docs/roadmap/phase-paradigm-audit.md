@@ -128,8 +128,12 @@ Kernel
    continuation，最后进入 WFI park loop。BP 只负责 HSM、all-online/completion wait、ack 和 online
    publish。旧 checkpoint 321–330 不变且均由 `ApIdleTask[n]` 发出；新增 475–480 默认 unmapped。
    SMP2/SMP8 announce 已验证 per-AP owner/pointwise 顺序、跨 AP 交错和全部 Online 后的 BP ack。
-9. **PayloadPhase（待办）**：先补齐当前 model 缺失的 `Setup` 和同对象 `emits`，再核对
-   selected payload、KernelInitTask owner、不返回语义和关机边界。
+9. **PayloadPhase（完成）**：charter/model/coding/impl 已统一四态和同对象 emits。Preset 只准备
+   公共 exec/clone deferred 边界；Setup 绑定 build-time 唯一 Hello/Smoke/UserBoot handoff，且
+   只有 user-boot 推进 UserBootPayload；Enable 在任何 Online 前完成 selected variant prepare，
+   再按 selected handoff Online -> Payload Online/handlers -> Kernel Online -> no-return entry 推进。
+   user-boot prepare/enter 已拆分，requested/default init 失败均停在 Payload Ready。旧 ID 432/433
+   稳定，新增 481/482 默认 unmapped；inventory 483，mapping exact 103 / range 14 / unmapped 366。
 10. **coding `.spec` 退场（待办）**：每审完一棵子树就迁移并删除对应 phase/system `.spec`；
    阶段树完成后处理 project、mapping、build、riscv64、rust 和 object 类剩余文件，迁移所有
    工具与文档引用，最终确保 `find spec/coding -name '*.spec'` 为空。
@@ -177,7 +181,7 @@ Kernel
 | InitcallPhase | initcall 边界一致 | 标准四态、下游依赖 Online | 首失败诊断与父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
 | RootfsPhase | rootfs 边界一致 | 标准四态、下游依赖 Online | Started 位于 Preset/KUnit 入口 | 四 checkpoint、namespace 前边界保持独立 | complete |
 | FinalizePhase | running-state 边界一致 | 标准四态、父 Online 出口 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、SmpRuntime.Online 已验证 | complete |
-| PayloadPhase | 待审计 | 待审计 | 待审计 | 待审计 | pending |
+| PayloadPhase | 公共准备、变种 setup/prepare 与三层 handoff 边界固定 | 四态、同对象 emits、SelectedPayloadHandoff 完整 | adapter、owner/SP、checkpoint/失败顺序已映射 | 三变种、四 checkpoint、失败不伪造 Online 已验证 | complete |
 
 ## 当前基线
 
@@ -190,8 +194,8 @@ Kernel
   已通过 pyveri 检查。
 - 阶段范式已纠正为两层定义：父子阶段只由父 `drives` 连接，`emits` 只连接同一标准阶段的
   Preset -> Setup -> Enable；impl 通过父 continuation 执行下一条 drive，不建立 sibling 边。
-- Boot、Interrupt、UpMultitask、SmpRuntime BP 主线与 SmpBringup AP 子树已消除 model Online
-  被实现命名/记录为 Ready 的漂移；下一批继续 PayloadPhase。
+- Kernel 根和完整阶段树已消除 model Online 被实现命名/记录为 Ready 的漂移；下一批清理剩余
+  coding `.spec`。
 - Boot 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和根目录 `make test`；最终回归为 167/167。
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
@@ -213,5 +217,10 @@ Kernel
   range 14 / unmapped 364，instrumentation plan 仍为 103。SMP8 实测不同 AP 交错，且每个
   logical ID 内四态和三个 sibling 严格有序；全部 AP Online 后 BP 才发布 completion ack、
   SmpBringup Prepared/Ready/Online。
-- 本批根目录直接 `make test` 为 167/167；默认 ordinary-path stress 三个 case 各 30 次的前批
+- PayloadPhase 批次已通过 `make checkpoints`、`make test-checkpoints`、`make verify`、hello/user-boot
+  announce、smoke 54/54 和 requested/default init 失败 focused run；checkpoint inventory 为 483，
+  Linux mapping 为 exact 103 / range 14 / unmapped 366，instrumentation plan 仍为 103。hello 四个
+  Payload checkpoint 均由 KernelInitTask 发出；user-boot 实测 UserAddressSpace.Ready <
+  Payload.Online < Kernel.Online < UserModeEntry，两个失败分支都没有后三个成功事件。
+- 本批根目录直接 `make test` 为 169/169；默认 ordinary-path stress 三个 case 各 30 次的前批
   基线总计 90/90，本批新增一轮为 3/3，通过且每个 case 只有一个成功事件序列。

@@ -96,6 +96,7 @@ impl SmokeScenario for UserBootElfScenario {
                 .setup(&ctx.kernel_init_task, &ctx.payload_exec_sync_boundaries)
                 .is_ok(),
         );
+        assertions.assert("user child preset", ctx.user_child_process.preset().is_ok());
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
         let interpreter_image = if let Some(path) = ctx.elf_object.interpreter_path() {

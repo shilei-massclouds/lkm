@@ -165,6 +165,7 @@ class ListCheckpointsTests(unittest.TestCase):
             "InitcallPhase",
             "RootfsPhase",
             "FinalizePhase",
+            "PayloadPhase",
         ):
             for boundary in ("Started", "Prepared", "Ready", "Online"):
                 self.assertIn(f"{phase}.{boundary}", by_name)
@@ -241,6 +242,14 @@ class ListCheckpointsTests(unittest.TestCase):
             "ApOnlineIdlePhasePrepared": 479,
             "ApOnlineIdlePhaseOnline": 480,
         }
+        stable_payload_ids = {
+            "PayloadPhaseReady": 432,
+            "PayloadPhaseOnline": 433,
+        }
+        appended_payload_ids = {
+            "PayloadPhaseStarted": 481,
+            "PayloadPhasePrepared": 482,
+        }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
             {
@@ -284,7 +293,19 @@ class ListCheckpointsTests(unittest.TestCase):
             },
             appended_ap_phase_ids,
         )
-        self.assertEqual(len(records), 481)
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index for variant in stable_payload_ids
+            },
+            stable_payload_ids,
+        )
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index for variant in appended_payload_ids
+            },
+            appended_payload_ids,
+        )
+        self.assertEqual(len(records), 483)
 
 
 if __name__ == "__main__":

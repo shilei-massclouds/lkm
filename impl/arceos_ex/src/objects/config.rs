@@ -3,6 +3,30 @@ use super::{
     state::{Lifecycle, State},
 };
 
+#[cfg(any(
+    all(app_hello, app_smoke),
+    all(app_hello, app_user_boot),
+    all(app_smoke, app_user_boot)
+))]
+compile_error!("exactly one selected payload cfg must be enabled");
+
+#[cfg(not(any(app_hello, app_smoke, app_user_boot)))]
+compile_error!("one selected payload cfg must be enabled");
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum SelectedPayloadKind {
+    Hello,
+    Smoke,
+    UserBoot,
+}
+
+#[cfg(app_hello)]
+const SELECTED_PAYLOAD_KIND: SelectedPayloadKind = SelectedPayloadKind::Hello;
+#[cfg(app_smoke)]
+const SELECTED_PAYLOAD_KIND: SelectedPayloadKind = SelectedPayloadKind::Smoke;
+#[cfg(app_user_boot)]
+const SELECTED_PAYLOAD_KIND: SelectedPayloadKind = SelectedPayloadKind::UserBoot;
+
 const PAGE_SIZE: usize = 4096;
 const PMD_SIZE: usize = 2 * 1024 * 1024;
 const FDT_SLOT_SIZE: usize = 2 * 1024 * 1024;
@@ -16,6 +40,7 @@ pub struct Config {
     pmd_size: usize,
     kernel_link_addr: usize,
     fixmap: FixMapConfig,
+    selected_payload_kind: SelectedPayloadKind,
 }
 
 impl Config {
@@ -26,6 +51,7 @@ impl Config {
             pmd_size: PMD_SIZE,
             kernel_link_addr: KERNEL_LINK_ADDR,
             fixmap: FixMapConfig::new(),
+            selected_payload_kind: SELECTED_PAYLOAD_KIND,
         }
     }
 
@@ -43,6 +69,10 @@ impl Config {
 
     pub const fn kernel_link_addr(&self) -> usize {
         self.kernel_link_addr
+    }
+
+    pub const fn selected_payload_kind(&self) -> SelectedPayloadKind {
+        self.selected_payload_kind
     }
 
     pub const fn stack_depot_enabled(&self) -> bool {

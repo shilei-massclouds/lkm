@@ -483,3 +483,5 @@
 | 478 | ApSmpCallinPhaseOnline | ApSmpCallinPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 479 | ApOnlineIdlePhasePrepared | ApOnlineIdlePhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 480 | ApOnlineIdlePhaseOnline | ApOnlineIdlePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 481 | PayloadPhaseStarted | PayloadPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 482 | PayloadPhasePrepared | PayloadPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |

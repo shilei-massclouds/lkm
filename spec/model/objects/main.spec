@@ -117,6 +117,13 @@ enum RunQueueRuntimeState {
     Some,
 }
 
+/* Build-time selected payload. Exactly one value is bound by Config. */
+enum SelectedPayloadKind {
+    Hello,
+    Smoke,
+    UserBoot,
+}
+
 include "device.spec";
 include "initcall.spec";
 include "vmalloc.spec";
@@ -187,6 +194,10 @@ predicate interrupt_concurrency_open_for_boot_cpu() -> bool;
 predicate boot_cpu_local_irq_enabled() -> bool;
 predicate selected_payload_ready() -> bool;
 predicate selected_payload_no_return_handoff() -> bool;
+predicate selected_payload_handoff_kind_bound<T, C>(handoff: T, config: C) -> bool;
+predicate selected_payload_variant_setup_ready<T, C, U>(handoff: T, config: C, user_boot: U) -> bool;
+predicate selected_payload_variant_prepare_ready<T, C, U>(handoff: T, config: C, user_boot: U) -> bool;
+predicate selected_payload_no_return_entry_bound<T>(handoff: T) -> bool;
 predicate static_branch_cpu_hotplug_read_guard_used<T>(static_branch: T) -> bool;
 predicate static_branch_jump_label_mutex_guard_used<T>(static_branch: T) -> bool;
 predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;

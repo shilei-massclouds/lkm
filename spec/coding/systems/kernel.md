@@ -57,9 +57,11 @@ UpMultitaskPhase
 `systems::kernel::enable_after_up_multitask()`。该具名 Kernel.Enable continuation 精确检查 Kernel
 仍为 Ready、UpMultitask Online、KernelInitTask Online、entry count 为 1 且 SP 验证成功，然后启动
 SmpRuntimePhase。SmpRuntimePhase 完成后进入 `systems::kernel::enable_after_smp_runtime()`，检查前两棵子树已
-完成并启动 PayloadPhase。PayloadPhase 提交 `Online` 后调用 `systems::kernel::mark_online()`；
-该函数检查三个 `drives` 阶段均已达到 model `Online`，提交 Kernel `Ready -> Online` 并记录
-`Kernel.Online`，然后 selected payload 继续执行且不返回。
+完成并调用 Payload.Preset。PayloadPhase 完成 selected variant prepare、SelectedPayloadHandoff.Online
+和 PayloadPhase.Online 后，先运行 Payload Online checkpoint handlers，再返回
+`systems::kernel::mark_online()`；该函数检查三个 `drives` 阶段均已达到 model `Online`，提交 Kernel
+`Ready -> Online` 并记录 `Kernel.Online`。随后 adapter 进入 selected payload 的 no-return entry。
+PayloadPhase.Online、Kernel.Online 和实际 entry 是三个独立边界。
 
 ## 状态与 checkpoint
 

@@ -605,6 +605,8 @@ pub enum Checkpoint {
     ApSmpCallinPhaseOnline,
     ApOnlineIdlePhasePrepared,
     ApOnlineIdlePhaseOnline,
+    PayloadPhaseStarted,
+    PayloadPhasePrepared,
 }
 
 impl Checkpoint {
@@ -1125,6 +1127,8 @@ impl Checkpoint {
             Self::ApSmpCallinPhaseOnline => "ApSmpCallinPhase.Online",
             Self::ApOnlineIdlePhasePrepared => "ApOnlineIdlePhase.Prepared",
             Self::ApOnlineIdlePhaseOnline => "ApOnlineIdlePhase.Online",
+            Self::PayloadPhaseStarted => "PayloadPhase.Started",
+            Self::PayloadPhasePrepared => "PayloadPhase.Prepared",
         }
     }
 }

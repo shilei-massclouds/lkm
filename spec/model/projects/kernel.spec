@@ -121,6 +121,7 @@ object Config: PrepareObject {
         kernel_image_va_window_size: Size;
         satp_mode: SatpMode;
         fixmap: FixMapConfig;
+        selected_payload_kind: SelectedPayloadKind;
     }
 
     /*

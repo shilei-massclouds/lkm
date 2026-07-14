@@ -5,7 +5,10 @@ use crate::{
         kunit::Sink,
     },
     context::Context,
-    objects::user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
+    objects::{
+        state::State,
+        user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
+    },
 };
 
 #[cfg(app_user_boot)]
@@ -33,7 +36,6 @@ use crate::objects::user_boot::{
 use crate::objects::{
     exception_stream::{execve_checkpoint_observation, wait4_checkpoint_observation},
     files::{FdRef, FileBackendKind},
-    state::State,
 };
 
 const SCOPE: &[Checkpoint] = &[
@@ -116,9 +118,9 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 36;
+pub const KUNIT_CASE_COUNT: usize = 37;
 #[cfg(not(app_user_boot))]
-pub const KUNIT_CASE_COUNT: usize = 5;
+pub const KUNIT_CASE_COUNT: usize = 6;
 
 #[cfg(app_user_boot)]
 static SYSCALL_SET_TID_ADDRESS_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -187,6 +189,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
     let total = super::kunit_case_count();
     match checkpoint {
         Checkpoint::PayloadPhaseOnline => {
+            run_selected_payload_handoff(checkpoint, ctx, sink, total);
             run_valid_fixture(checkpoint, sink, total);
             run_bad_magic(checkpoint, sink, total);
             run_wrong_machine(checkpoint, sink, total);
@@ -372,6 +375,47 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         _ => {}
     }
     CheckpointOutcome::Continue
+}
+
+fn run_selected_payload_handoff(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "payload.selected_handoff.online";
+    sink.start_case(total, "", name, checkpoint);
+
+    let handoff = &ctx.selected_payload_handoff;
+    let valid = crate::phases::payload::state() == State::Online
+        && !crate::systems::kernel::is_online()
+        && handoff.state() == State::Online
+        && handoff.kind() == ctx.config.selected_payload_kind()
+        && handoff.kind_bound()
+        && handoff.variant_setup_ready()
+        && handoff.variant_prepare_ready()
+        && handoff.no_return_entry_bound()
+        && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.kernel_init_task.current_stack_pointer_in_range()
+        && selected_variant_state_ready(ctx);
+
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "selected payload handoff facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn selected_variant_state_ready(ctx: &Context) -> bool {
+    ctx.user_boot_payload.state() == State::Online
+        && ctx.user_boot_payload.enters_user_mode()
+        && ctx.user_boot_payload.no_return_handoff()
+}
+
+#[cfg(not(app_user_boot))]
+fn selected_variant_state_ready(ctx: &Context) -> bool {
+    ctx.user_boot_payload.state() == State::Base
 }
 
 #[cfg(app_user_boot)]

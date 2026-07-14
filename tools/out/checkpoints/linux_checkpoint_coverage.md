@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 481
+- total checkpoints: 483
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 364 |
+| unmapped | 366 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 364 |
+| none | 366 |
 | medium | 62 |
 | high | 55 |
 
@@ -90,6 +90,7 @@
 | KthreaddReadyGate | 2 |
 | LocalIrqEnablePhase | 2 |
 | MmCoreInitPhase | 2 |
+| PayloadPhase | 2 |
 | PhysicalMemory | 2 |
 | PlatformCpuInfo | 2 |
 | PlicIrqDomain | 2 |

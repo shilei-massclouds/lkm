@@ -1175,6 +1175,15 @@ KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` �
 
 `UserBootPayload` 是 Linux-like 用户态首进程路径的 selected payload 变种。代码生成或手写实现必须保持以下边界：
 
+PayloadPhase 使用 build-time 唯一的 `SelectedPayloadKind::{Hello, Smoke, UserBoot}` 和 Context 中的
+`SelectedPayloadHandoff`。Preset 只准备公共 exec/clone deferred 边界；Setup 经 crate-internal adapter
+完成 selected variant setup，且 Hello/Smoke 不推进 UserBootPayload；Enable 先完成 variant prepare，
+再依次提交 selected handoff Online、Payload Online、checkpoint handlers 和 Kernel Online，最后进入
+no-return entry。user-boot 的 prepare 必须在任何上述 Online 前完成 init candidate、ELF/interpreter、
+地址空间、trap frame、syscall、UserBootPayload.Online 与用户入口准备；实际 enter 只提交
+UserInitProcess.EnterUserMode checkpoint 并 trap-return。prepare 失败保持既有 panic terminal 分类，且
+不得发出 Payload Online、Kernel Online 或 UserModeEntry。
+
 - syscall 入口沿用 `ExceptionStream -> SyscallException`，不得为了用户态 hello 新增独立根 `Syscall` 对象或绕过异常分发。
 - Linux `kernel_execve()` 完整路径中的同步协议必须保留为显式 `PayloadExecSyncBoundaries` deferred contract，而不能被 `KernelInitTask`、boot-only 或 no-return handoff 事实吞掉。该 contract 至少记录 `binfmt_lock`、`cred_guard_mutex`、`exec_update_lock`、`exec_mmap()` 中的 local IRQ disable/enable、`mmap_lock`、`exec_mmap()` task lock/mm handoff、`sighand->siglock`、`tasklist_lock`、`fs->lock` + RCU read side、membarrier/switch-mm ordering、`sched_mm_cid_*()` 的 rq_lock_irqsave+smp_mb、`bprm_mm_init()` / `finalize_exec()` 的 task_lock rlimit 边界、files unshare/CLOEXEC file_lock、io_uring cancel、POSIX timer siglock、namespace switch、exec 成功后的 rseq/perf/audit/accounting hooks、完整 binfmt/script retry 和 panic terminal 边界。当前 `../linux-6.12/.config` 中 `CONFIG_MODULES=n`，因此 `request_module("binfmt-...")` retry 必须记录为 trimmed/no-op 而不是 deferred。当前 `APP=user-boot` 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff；上述 Linux exec guard 不得标为已实现，也不得只留在 roadmap 表格。
 - `UserBootPayload.Setup` 必须由已经到达 `PayloadPhase` 的 `KernelInitTask` 执行线驱动；实现应记录 payload 归属事实，而不是把用户态入口建模为独立启动根。
@@ -1340,7 +1349,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。后续 `APP=user-boot` / `UserBootPayload` 作为第三类 selected payload 接入同一选择机制，用于从当前 rootfs 读取 `/sbin/init` 并进入第一个用户态 ELF。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
+第一轮保留三个 build-time 互斥 payload：默认 `APP=smoke`、最小独立 `APP=hello` 和 `APP=user-boot` / `UserBootPayload`。Config 必须恰好绑定一个 selected kind；user-boot 从当前 rootfs 读取 `/sbin/init` 或 requested init 并进入第一个用户态 ELF。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`。PayloadPhase 先准备 selected handoff，返回 Kernel continuation 提交 Kernel.Online 后，再调用 selected payload 的 no-return entry。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 

@@ -78,6 +78,7 @@ pub mod rwlock;
 pub mod sbi;
 pub mod sched_init_boundaries;
 pub mod scheduler;
+pub mod selected_payload;
 pub mod smp_bringup;
 pub mod soc;
 pub mod softirq;

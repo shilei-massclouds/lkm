@@ -7710,6 +7710,7 @@ impl UserBootPayload {
         elf: &ElfObject,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
+        user_init_process: &UserInitProcess,
         exception_stream: &ExceptionStream,
         syscall_table: &SyscallTable,
     ) -> EventResult {
@@ -7717,6 +7718,9 @@ impl UserBootPayload {
             || elf.state() != State::Online
             || address_space.state() != State::Online
             || trap_frame.state() != State::Ready
+            || user_init_process.state() != State::Online
+            || !user_init_process.user_entry_ready()
+            || !user_init_process.runtime_entered()
             || syscall_table.state() != State::Ready
             || exception_stream.syscall_state() != State::Online
         {
@@ -7737,13 +7741,14 @@ impl UserBootPayload {
 
 #[cfg(app_user_boot)]
 #[allow(clippy::too_many_arguments)]
-pub fn run_first_user_init(
+pub fn prepare_first_user_init(
     payload: &mut UserBootPayload,
     elf: &mut ElfObject,
     interpreter: &mut ElfObject,
     address_space: &mut UserAddressSpace,
     stack: &mut UserStack,
     trap_frame: &mut UserTrapFrame,
+    user_child_process: &mut UserChildProcess,
     user_init_process: &mut UserInitProcess,
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
@@ -7764,9 +7769,15 @@ pub fn run_first_user_init(
     vmalloc_allocator: &mut VmallocAllocator,
     page_table_caches: &mut PageTableCaches,
     config: &Config,
-) -> ! {
-    if payload.setup(kernel_init_task, exec_sync).is_err() {
+) -> EventResult {
+    if payload.state() != State::Ready
+        || !payload.driven_by_kernel_init_task()
+        || exec_sync.state() != State::Ready
+    {
         user_boot_panic("user payload setup failed\n");
+    }
+    if user_child_process.preset().is_err() {
+        user_boot_panic("user child process preset failed\n");
     }
 
     let selected = select_user_init_candidate(
@@ -7934,11 +7945,15 @@ pub fn run_first_user_init(
     {
         user_boot_panic("user init process enable failed\n");
     }
+    if user_init_process.enter_user_mode(trap_frame).is_err() {
+        user_boot_panic("user init process enter failed\n");
+    }
     if payload
         .enable_for_user_entry(
             elf,
             address_space,
             trap_frame,
+            user_init_process,
             exception_stream,
             syscall_table,
         )
@@ -7946,10 +7961,28 @@ pub fn run_first_user_init(
     {
         user_boot_panic("user payload enable failed\n");
     }
-    if user_init_process.enter_user_mode(trap_frame).is_err() {
-        user_boot_panic("user init process enter failed\n");
-    }
 
+    Ok(())
+}
+
+#[cfg(app_user_boot)]
+pub fn enter_first_user_init(
+    payload: &UserBootPayload,
+    address_space: &UserAddressSpace,
+    trap_frame: &UserTrapFrame,
+    user_init_process: &UserInitProcess,
+) -> ! {
+    if payload.state() != State::Online
+        || !payload.enters_user_mode()
+        || !payload.no_return_handoff()
+        || address_space.state() != State::Online
+        || trap_frame.state() != State::Ready
+        || user_init_process.state() != State::Online
+        || !user_init_process.user_entry_ready()
+        || !user_init_process.runtime_entered()
+    {
+        user_boot_panic("user init process entry invariant failed\n");
+    }
     crate::checkpoint::dispatch(
         crate::checkpoint::Checkpoint::UserModeEntry,
         crate::context::context_ref(),

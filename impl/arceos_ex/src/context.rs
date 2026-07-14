@@ -91,6 +91,7 @@ use crate::objects::{
     sbi::Sbi,
     sched_init_boundaries::{SchedInitPreludeTrimmedPaths, SchedInitTraceContextBoundaries},
     scheduler::Scheduler,
+    selected_payload::SelectedPayloadHandoff,
     smp_bringup::{
         CpuHotplugSyncSet, CpuStartProvider, SecondaryCpuOnlineAck, SecondaryCpuStartupAck,
         SecondaryIdleTaskSet, SmpBringupBoundary,
@@ -311,6 +312,7 @@ pub struct Context {
     pub finalize_boundary: FinalizeBoundary,
     pub payload_exec_sync_boundaries: PayloadExecSyncBoundaries,
     pub user_clone_deferred_boundaries: UserCloneDeferredBoundaries,
+    pub selected_payload_handoff: SelectedPayloadHandoff,
     pub user_boot_payload: UserBootPayload,
     pub elf_object: ElfObject,
     pub elf_interpreter_object: ElfObject,
@@ -515,6 +517,7 @@ impl Context {
             finalize_boundary: FinalizeBoundary::new(),
             payload_exec_sync_boundaries: PayloadExecSyncBoundaries::new(),
             user_clone_deferred_boundaries: UserCloneDeferredBoundaries::new(),
+            selected_payload_handoff: SelectedPayloadHandoff::new(),
             user_boot_payload: UserBootPayload::new(),
             elf_object: ElfObject::new(),
             elf_interpreter_object: ElfObject::new(),

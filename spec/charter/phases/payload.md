@@ -1,47 +1,54 @@
 # 应用交接期阶段
 
-内核初始化任务从准备应用启动环境到切换到应用的阶段。
+PayloadPhase 是 KernelInitTask 在内核初始化末尾准备并移交唯一 selected payload 的阶段。构建配置
+必须在 `Hello`、`Smoke` 和 `UserBoot` 三种 payload 中恰好选择一种；本阶段不提供运行期切换或
+插件机制。
 
-> [model] MUST：应用交接期阶段正式命名是PayloadPhase。
+> [model] MUST：应用交接期阶段正式命名是 PayloadPhase。
 
-涵盖 PayloadExecSyncBoundaries、UserCloneDeferredBoundaries、UserBootPayloadSetup和 UserBootPayloadEnable共4个阶段。
+## 边界与职责
 
-## 边界与交互
+1. 入口边界：SmpRuntimePhase 已经 Online，KernelInitTask 仍运行在自己的 vmalloc stack 上。
+2. Preset 准备所有 payload 共用的 exec 同步与 clone deferred 边界。
+3. Setup 确认唯一 selected payload，并完成该变种专属的 setup；只有 UserBoot 变种推进
+   UserBootPayload.Setup。
+4. Enable 准备不可返回入口；UserBoot 变种在此完成 ELF、地址空间、trap frame、syscall、
+   UserBootPayload.Online 和用户入口准备事实，Hello/Smoke 只确认对应内核态入口。
+5. 出口边界：PayloadPhase Online 已提交，返回 Kernel.Enable continuation；Kernel Online 提交后
+   才进入 selected payload 的不返回入口。
 
-1. 入口边界：内核初始化任务开始准备应用环境。
-2. 出口边界：应用启动。
+PayloadPhase.Online、Kernel.Online 和 selected payload no-return entry 是三个独立边界。任何变种在
+handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requested/default init 失败继续保持
+既有 panic terminal 语义。
 
 ## 生命周期
 
 ### 范式
 
-符合阶段范式，初始状态Base，启动事件Preset，自动推进状态迁移，直到Online。
-
-> [model] MUST：阶段启动事件对应Preset迁移事件。
+阶段遵循标准 `Base -> Prepared -> Ready -> Online` 生命周期。Preset、Setup 和 Enable 成功提交后，
+前两个 transition 分别发出同对象 Setup 和 Enable；Enable 完成后返回 Kernel continuation。
 
 ### 状态与迁移
 
-* Base：引导期开始。
+* Base：阶段尚未准备公共 payload 边界。
 
-* Preset：准备首个应用的启动环境。
+* Preset：驱动 PayloadExecSyncBoundaries.Setup 和 UserCloneDeferredBoundaries.Setup，等待两者 Ready，
+  提交 Prepared 并发出 Setup。
 
-  > [model] MUST：驱动PayloadExecSyncBoundaries和UserCloneDeferredBoundaries并等待其到达Online状态。
+* Setup：驱动 SelectedPayloadHandoff.Setup，确认 Config 中恰好一种 selected kind；只有 UserBoot
+  分支要求 UserBootPayload.Ready，随后提交 Ready 并发出 Enable。
 
-* Setup：以当前任务为模板建立承载应用的任务。
+* Enable：驱动 SelectedPayloadHandoff.Enable。Hello/Smoke 绑定内核态 no-return entry；UserBoot
+  完成用户映像与入口准备并提交 UserBootPayload.Online。selected handoff Online 后提交
+  PayloadPhase.Online，并返回 Kernel.Enable continuation。
 
-  > [model] MUST: 驱动UserBootPayloadSetup.Preset并等待其到达Online状态。
+* Online：selected payload 的交接条件已经提交，但 payload 尚不必已经进入；Kernel.Online 与实际
+  no-return entry 仍是后续独立边界。
 
-* Enable：准备切换到应用任务。
-
-  > [model] MUST: 驱动UserBootPayloadEnable并等待其到达Online状态。
-
-* Online：引导期完成。
+三个 transition 和它们驱动的对象动作都由 KernelInitTask 执行，并持续验证唯一 task handoff、
+entry 事实及真实 SP 位于 KernelInitTask vmalloc stack。
 
 ## 引用
 
-* [charter/phases](../phases)
-
-## 映射目标
-
-* [phases/payl](spec/model/phases/payload.spec)
-
+* [阶段范式](../phase-paradigm.md)
+* [PayloadPhase model](../../model/phases/payload/phase.spec)

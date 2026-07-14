@@ -5289,5 +5289,27 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 481,
+    "checkpoint_name": "PayloadPhase.Started",
+    "checkpoint_variant": "PayloadPhaseStarted",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 482,
+    "checkpoint_name": "PayloadPhase.Prepared",
+    "checkpoint_variant": "PayloadPhasePrepared",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   }
 ]

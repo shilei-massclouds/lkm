@@ -3365,5 +3365,19 @@
     "name": "ApOnlineIdlePhase.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 481,
+    "variant": "PayloadPhaseStarted",
+    "name": "PayloadPhase.Started",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 482,
+    "variant": "PayloadPhasePrepared",
+    "name": "PayloadPhase.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

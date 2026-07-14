@@ -4,7 +4,7 @@ use core::sync::atomic::AtomicU8;
 
 use crate::{
     checkpoint::Checkpoint,
-    objects::state::{failed_condition, EventResult, LifecycleEvent, State},
+    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
 };
 
 #[unsafe(link_section = ".data.phase")]
@@ -53,7 +53,7 @@ pub fn enable_after_smp_runtime() -> ! {
         crate::arch::riscv64::sbi::system_shutdown()
     }
 
-    crate::phases::payload::setup_then_enable()
+    crate::phases::payload::preset()
 }
 
 pub fn enable_after_up_multitask() -> ! {
@@ -115,4 +115,8 @@ pub fn mark_online() -> EventResult {
         State::Online,
         Checkpoint::KernelOnline,
     )
+}
+
+pub fn is_online() -> bool {
+    crate::phases::state::load(&KERNEL_STATE) == State::Online
 }
