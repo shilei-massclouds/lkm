@@ -16,8 +16,8 @@
 ## 当前焦点
 
 1. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
-2. 当前用户态主线是 OpenRC getty/login shell 的 job-control 边界；不在本轮信息架构治理中推进
-   `setpgid` / `TIOCSPGRP`。
+2. OpenRC getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
+   focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
 3. ordinary shell、nightly stress 和 Linux paired difftest 保持长期回归；失败样本按稳定序列和
    source-scoped 事实分类。
 4. VFS/pathname、exec lifecycle、vmalloc user trap stack 与文件系统缓存层仍按各自 active row 推进。
@@ -50,7 +50,6 @@
 | `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | 补旧 mm/stack/page-table 回收、失败回滚、重复 staging reset、close-on-exec、credentials/signal/binfmt 与 point-of-no-return 语义。 | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
 | `P0` | 当前 | model/coding/arceos_ex/trap/mm | Linux-aligned 用户 trap 栈与 VMAP guard | 补不会破坏用户寄存器的 early overflow scratch/bit-test；之后再展开 per-task vmalloc stack 与 IRQ hardirq stack。 | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
 | `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | 补完整 kthreadd 请求消费、通用 scheduler class/fairness 与更多 task-return/switch 语义；保持 BootIdle/KernelInit owner 边界。 | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |
-| `P0` | 当前计划 | validation/user/init | OpenRC getty/login shell 验收 | 先定位并规格化登录 shell 的 `setpgid` / `TIOCSPGRP` job-control 边界；focused case 保持 opt-in，不扩大为通用 fork/COW/signal。 | [用户态专题](roadmap/user-mode.md)；[测试规格](../spec/testing/rootfs.md#openrc-login-input-orchestration) |
 | `P0` | 待办 | arceos_ex/fs/vfs/smoke | 目录操作 smoke 补强 | 在 directory-capable openat/getdents64/fd offset/close 规格闭合后，覆盖生产 VFS/Ext2 路径的目录迭代和错误分类。 | [测试规格](../spec/testing/README.md) |
 | `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | root switch 后命名空间补强 | 明确 ext2 root 下 `/dev` 挂接、mount namespace 与任务 FsStruct 的运行期规则。 | [RootfsPhase coding](../spec/coding/phases/smp-runtime/rootfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界 | 对齐 iget/dentry cache、negative lookup、inode identity、refcount 与 evict 边界。 | [Ext2 coding](../spec/coding/objects/ext2.md)；[VFS coding](../spec/coding/objects/vfs.md) |

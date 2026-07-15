@@ -35,12 +35,19 @@ regex = ["user exit status=(?:-[0-9]+|[1-9][0-9]*)"]
 description = "User-mode payload exited with a nonzero status."
 
 [[rules]]
+id = "pending-child-setpgid-not-visible"
+result = "failure"
+contains = ["syscall setpgid detail", "reason=pid_not_visible"]
+description = "The login shell could not resolve its pending plain-fork child for parent-side setpgid."
+
+[[rules]]
 id = "openrc-login-focused-success"
 result = "success"
 contains = [
   "Welcome to Alpine!",
   "syscall trace nr=158 name=getgroups ret=1",
+  "syscall setpgid detail target=pending_child",
   "lost+found",
   "user exit status=0",
 ]
-description = "OpenRC login reached the shell, ran /bin/ls, observed getgroups, and exited cleanly."
+description = "OpenRC login reached the shell, set the pending child pgrp, ran /bin/ls, observed getgroups, and exited cleanly."

@@ -555,6 +555,12 @@ predicate user_init_process_child_setsid_success_observed<T, C>(process: T, chil
 predicate user_init_process_child_controlling_tty_clear_on_setsid_first_slice<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_parent_visible<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_inherits_pgrp_session<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_setpgid_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_setpgid_errno_bound<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_consumed_on_wait_handoff<T, C>(process: T, child: C) -> bool;
+predicate user_init_process_pending_plain_fork_child_cleared_on_parent_restore<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_observed_child_visible_pid_only_restore<T, C>(process: T, child: C) -> bool;
 predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
 predicate user_init_process_foreground_pgrp_bound<T>(process: T) -> bool;
@@ -2224,9 +2230,15 @@ object SyscallTable: ResourceObject {
                  * Linux 6.12 sys_setpgid() normalizes pid==0 to current and
                  * pgid==0 to the normalized pid. After plain fork, the parent
                  * may set the not-yet-exec child into a process group whose
-                 * id equals the child pid. The current slice only admits PID1
-                 * pgrp 1 and the observed child pid/pgrp 3 in the same
-                 * session; full tasklist/RCU, PF_FORKNOEXEC lifetime,
+                 * id equals the child pid while PF_FORKNOEXEC remains set.
+                 * The current slice admits PID1, the current visible child,
+                 * and one parent-visible pending grandchild between observed
+                 * plain clone return and wait4 handoff. That pending child
+                 * inherits the shell parent's pgrp/session and only the
+                 * parent-side setpgid(child_pid, child_pid) update is added.
+                 * Unknown pid remains ESRCH, negative pgid remains EINVAL,
+                 * and an unsupported/cross-session pgrp remains EPERM. The
+                 * post-handoff/exec parent update, full tasklist/RCU,
                  * security hooks and multi-process process groups remain
                  * deferred.
                  */
@@ -2244,6 +2256,8 @@ object SyscallTable: ResourceObject {
                     syscall_setpgid_child_plain_fork_first_slice(self, UserChildProcess);
                     user_init_process_process_group_set_observed(UserInitProcess);
                     user_init_process_child_process_group_set_observed(UserInitProcess, UserChildProcess);
+                    user_init_process_pending_plain_fork_child_setpgid_first_slice(UserInitProcess, UserChildProcess);
+                    user_init_process_pending_plain_fork_child_setpgid_errno_bound(UserInitProcess, UserChildProcess);
                     syscall_table_setpgid_observed(self);
                 }
             }
@@ -3150,7 +3164,8 @@ object SyscallTable: ResourceObject {
                  * and the shell parent reaches wait4.  That wait4 is the
                  * handoff point: save the shell wait frame, address-space,
                  * stack and writable-page snapshots, restore the fork-time
-                 * grandchild stack snapshot, and switch the single internal
+                 * grandchild stack snapshot, consume its pending identity
+                 * (including a parent-updated pgrp), and switch the single internal
                  * slot to the grandchild trap frame.  The grandchild exit path
                  * must then restore the shell parent view and copy out the
                  * wait status before returning the grandchild pid; this is not
@@ -3184,6 +3199,7 @@ object SyscallTable: ResourceObject {
                     user_child_process_parent_wait_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
                     user_child_process_parent_wait_writable_page_snapshot_copied(UserChildProcess, UserAddressSpace);
                     user_child_process_user_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
+                    user_init_process_pending_plain_fork_child_consumed_on_wait_handoff(UserInitProcess, UserChildProcess);
                     user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
                     syscall_wait4_observed_child_reap_first_slice(self);
@@ -3353,7 +3369,11 @@ object UserChildProcess: ResourceObject {
              * vfork child continuation.  The shell parent stays in the same
              * internal UserChild slot and clone returns the allocated
              * grandchild pid to that shell.  The grandchild is only an observed child
-             * continuation saved in the slot until the shell reaches wait4;
+             * continuation saved in the slot until the shell reaches wait4.
+             * UserInitProcess records one parent-visible pending identity
+             * containing that pid and the shell's inherited pgrp/session so
+             * the shell may perform the bounded PF_FORKNOEXEC parent-side
+             * setpgid(child_pid, child_pid) operation before handoff;
              * no second UserChildTaskRef is enqueued and no full task graph,
              * COW mm, job-control or generic wait/reap model is introduced.
              */
@@ -3373,6 +3393,8 @@ object UserChildProcess: ResourceObject {
                 user_child_process_single_active_slot(self);
                 user_child_process_observed_child_plain_fork_no_second_task(self);
                 user_child_process_next_child_pid_bound(self);
+                user_init_process_pending_plain_fork_child_parent_visible(UserInitProcess, self);
+                user_init_process_pending_plain_fork_child_inherits_pgrp_session(UserInitProcess, self);
             }
         }
 
@@ -3400,6 +3422,7 @@ object UserChildProcess: ResourceObject {
                 user_child_process_parent_wait_writable_page_snapshot_restored(self, UserAddressSpace);
                 user_child_process_parent_fd_snapshot_restored(self, FilesStruct);
                 user_init_process_observed_child_visible_pid_only_restore(UserInitProcess, self);
+                user_init_process_pending_plain_fork_child_cleared_on_parent_restore(UserInitProcess, self);
                 user_child_process_observed_child_plain_fork_parent_restored(self);
                 user_child_process_single_active_slot(self);
             }
@@ -3714,8 +3737,11 @@ object UserInitProcess: ResourceObject {
                  * OpenRC login shell slice accepts setpgid(0,
                  * inherited_child_pgrp) as a same-session join/no-op. This
                  * covers the bounded shell job-control restore after staged
-                 * /bin/ls without introducing arbitrary process-group lookup
-                 * or lifetime.
+                 * /bin/ls. One pending observed grandchild is also visible
+                 * to its shell parent from clone return until wait4 handoff;
+                 * it inherits the shell pgrp/session and only accepts
+                 * setpgid(child_pid, child_pid). No arbitrary process-group
+                 * lookup or post-exec parent update is introduced.
                  */
                 depends_on {
                     UserInitProcess.state == State::Online;
@@ -3729,6 +3755,8 @@ object UserInitProcess: ResourceObject {
                     user_init_process_child_process_group_visible(self, UserChildProcess);
                     user_init_process_child_process_group_set_observed(self, UserChildProcess);
                     user_init_process_child_same_session_pgrp_join_first_slice(self, UserChildProcess);
+                    user_init_process_pending_plain_fork_child_setpgid_first_slice(self, UserChildProcess);
+                    user_init_process_pending_plain_fork_child_setpgid_errno_bound(self, UserChildProcess);
                 }
             }
 

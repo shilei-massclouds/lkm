@@ -194,6 +194,7 @@ pub enum UserProcessGroupLookup {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserProcessGroupUpdate {
     Updated(usize),
+    UpdatedPendingChild(usize),
     Invalid,
     NoSuchProcess,
     PermissionDenied,
@@ -3472,6 +3473,12 @@ pub struct UserInitProcess {
     child_process_group_visible: bool,
     child_process_group: usize,
     child_process_session_id: usize,
+    pending_plain_fork_child_visible: bool,
+    pending_plain_fork_child_parent_pid: usize,
+    pending_plain_fork_child_pid: usize,
+    pending_plain_fork_child_process_group: usize,
+    pending_plain_fork_child_session_id: usize,
+    pending_plain_fork_child_process_group_set_observed: bool,
     observed_child_parent_identity_saved: bool,
     observed_child_parent_process_group: usize,
     observed_child_parent_session_id: usize,
@@ -6037,6 +6044,12 @@ impl UserInitProcess {
             child_process_group_visible: false,
             child_process_group: 0,
             child_process_session_id: 0,
+            pending_plain_fork_child_visible: false,
+            pending_plain_fork_child_parent_pid: 0,
+            pending_plain_fork_child_pid: 0,
+            pending_plain_fork_child_process_group: 0,
+            pending_plain_fork_child_session_id: 0,
+            pending_plain_fork_child_process_group_set_observed: false,
             observed_child_parent_identity_saved: false,
             observed_child_parent_process_group: 0,
             observed_child_parent_session_id: 0,
@@ -6315,6 +6328,30 @@ impl UserInitProcess {
 
     pub const fn child_process_session_id(&self) -> usize {
         self.child_process_session_id
+    }
+
+    pub const fn pending_plain_fork_child_visible(&self) -> bool {
+        self.pending_plain_fork_child_visible
+    }
+
+    pub const fn pending_plain_fork_child_parent_pid(&self) -> usize {
+        self.pending_plain_fork_child_parent_pid
+    }
+
+    pub const fn pending_plain_fork_child_pid(&self) -> usize {
+        self.pending_plain_fork_child_pid
+    }
+
+    pub const fn pending_plain_fork_child_process_group(&self) -> usize {
+        self.pending_plain_fork_child_process_group
+    }
+
+    pub const fn pending_plain_fork_child_session_id(&self) -> usize {
+        self.pending_plain_fork_child_session_id
+    }
+
+    pub const fn pending_plain_fork_child_process_group_set_observed(&self) -> bool {
+        self.pending_plain_fork_child_process_group_set_observed
     }
 
     pub const fn child_session_leader_first_slice(&self) -> bool {
@@ -6635,6 +6672,7 @@ impl UserInitProcess {
         self.child_process_group_visible = false;
         self.child_process_group = 0;
         self.child_process_session_id = 0;
+        self.clear_pending_plain_fork_child_identity();
         self.observed_child_parent_identity_saved = false;
         self.observed_child_parent_process_group = 0;
         self.observed_child_parent_session_id = 0;
@@ -6876,6 +6914,7 @@ impl UserInitProcess {
         self.child_process_group_visible = true;
         self.child_process_group = self.process_group;
         self.child_process_session_id = self.session_id;
+        self.clear_pending_plain_fork_child_identity();
         self.observed_child_parent_identity_saved = false;
         self.observed_child_parent_process_group = 0;
         self.observed_child_parent_session_id = 0;
@@ -6887,6 +6926,34 @@ impl UserInitProcess {
         self.child_controlling_tty_bound = self.controlling_tty_bound;
         self.child_controlling_tty_cleared_on_setsid = false;
         self.tiocsctty_observed = false;
+        true
+    }
+
+    pub fn observe_pending_plain_fork_child_process_group_visible(
+        &mut self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.pid1_preserved
+            || parent_pid == 0
+            || child_pid == 0
+            || parent_pid == child_pid
+            || self.child_process_pid != parent_pid
+            || !self.child_process_group_visible
+            || self.child_process_group == 0
+            || self.child_process_session_id == 0
+            || self.pending_plain_fork_child_visible
+        {
+            return false;
+        }
+
+        self.pending_plain_fork_child_visible = true;
+        self.pending_plain_fork_child_parent_pid = parent_pid;
+        self.pending_plain_fork_child_pid = child_pid;
+        self.pending_plain_fork_child_process_group = self.child_process_group;
+        self.pending_plain_fork_child_session_id = self.child_process_session_id;
+        self.pending_plain_fork_child_process_group_set_observed = false;
         true
     }
 
@@ -6932,6 +6999,12 @@ impl UserInitProcess {
             || !self.child_process_group_visible
             || self.child_process_group == 0
             || self.child_process_session_id == 0
+            || !self.pending_plain_fork_child_visible
+            || self.pending_plain_fork_child_parent_pid != parent_pid
+            || self.pending_plain_fork_child_pid != child_pid
+            || self.pending_plain_fork_child_process_group == 0
+            || self.pending_plain_fork_child_session_id == 0
+            || self.pending_plain_fork_child_session_id != self.child_process_session_id
         {
             return false;
         }
@@ -6945,6 +7018,13 @@ impl UserInitProcess {
         self.observed_child_parent_controlling_tty_cleared_on_setsid =
             self.child_controlling_tty_cleared_on_setsid;
         self.child_process_pid = child_pid;
+        self.child_process_group = self.pending_plain_fork_child_process_group;
+        self.child_process_session_id = self.pending_plain_fork_child_session_id;
+        self.child_session_leader_first_slice = false;
+        self.child_process_group_set_observed =
+            self.pending_plain_fork_child_process_group_set_observed;
+        self.child_setsid_success_observed = false;
+        self.clear_pending_plain_fork_child_identity();
         true
     }
 
@@ -6981,7 +7061,17 @@ impl UserInitProcess {
             self.observed_child_parent_controlling_tty_bound = false;
             self.observed_child_parent_controlling_tty_cleared_on_setsid = false;
         }
+        self.clear_pending_plain_fork_child_identity();
         true
+    }
+
+    fn clear_pending_plain_fork_child_identity(&mut self) {
+        self.pending_plain_fork_child_visible = false;
+        self.pending_plain_fork_child_parent_pid = 0;
+        self.pending_plain_fork_child_pid = 0;
+        self.pending_plain_fork_child_process_group = 0;
+        self.pending_plain_fork_child_session_id = 0;
+        self.pending_plain_fork_child_process_group_set_observed = false;
     }
 
     pub fn set_process_group_first_slice(
@@ -7016,6 +7106,27 @@ impl UserInitProcess {
         } else {
             pid as usize
         };
+
+        if current_child_continuation
+            && self.pending_plain_fork_child_visible
+            && self.child_process_pid == self.pending_plain_fork_child_parent_pid
+            && normalized_pid == self.pending_plain_fork_child_pid
+        {
+            let normalized_pgid = if pgid == 0 {
+                normalized_pid
+            } else {
+                pgid as usize
+            };
+            if self.pending_plain_fork_child_session_id != self.child_process_session_id
+                || normalized_pgid != self.pending_plain_fork_child_pid
+            {
+                return UserProcessGroupUpdate::PermissionDenied;
+            }
+            self.pending_plain_fork_child_process_group = normalized_pgid;
+            self.pending_plain_fork_child_process_group_set_observed = true;
+            self.process_group_set_observed = true;
+            return UserProcessGroupUpdate::UpdatedPendingChild(normalized_pgid);
+        }
 
         if normalized_pid == self.child_process_pid && self.child_process_group_visible {
             if !self.child_process_group_visible {

@@ -77,7 +77,8 @@ make test-stress \
 
 OpenRC login shell closure is kept as an explicit focused diagnostic case. It
 uses the checked-in account overlay, staged login/password/shell input, and the
-`user-syscall-trace,user-syscall-error` probes. It is not part of the default
+`user-syscall-trace,user-syscall-error` probes. Success includes the stable
+`target=pending_child` parent-side setpgid fact as well as the shell/rootfs markers. It is not part of the default
 stress suite and must be selected manually:
 
 ```sh

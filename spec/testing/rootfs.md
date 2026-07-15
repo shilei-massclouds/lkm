@@ -71,7 +71,12 @@ OpenRC getty/login acceptance uses `ROOTFS_OVERLAY=none` plus an explicit accoun
 does not change the locked-root semantics of the bare image or bypass authentication. The host waits for
 `login:`, optionally `Password:`, then the shell prompt before sending `/bin/ls` and `exit`. It requires a
 stable rootfs marker and `user exit status=0`. The focused case remains opt-in through `STRESS_CASES` until
-the active syscall/job-control boundary is closed; it is not part of default `make test` or test-stress.
+explicitly selected; it is not part of default `make test` or test-stress.
+The job-control acceptance requires an explicit trace fact classifying the shell parent's successful
+`setpgid(child_pid, child_pid)` target as the pending child, no `reason=pid_not_visible` rejection for that
+operation, successful foreground-pgrp handling, the `lost+found` rootfs marker and clean user exit. The
+case remains opt-in after this bounded closure; it does not claim multiple pending children, a general
+task graph, post-exec parent setpgid, job-control signal delivery or full process-group lookup.
 
 ## Long-term observation checkpoints
 

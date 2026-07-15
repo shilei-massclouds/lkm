@@ -163,8 +163,9 @@ FilesStruct/fd/OFD/backend 调度当前 syscall slice。BusyBox shell 外部命�
 handoff；exec replacement address space 放在 Context-owned staging，避免 4KiB trap stack 上的大对象。
 
 现有 focused 证据已经越过 clone/wait/exec 主线、OpenRC login 认证、基础 credential drop 和登录 shell
-内一次 `/bin/ls` child。当前仍在 roadmap 中的直接边界是 job-control 的 setpgid/TIOCSPGRP，以及完整
-task graph、COW/mm、signals、networking、完整 exec rollback/reclamation 等 deferred 行为。
+内一次 `/bin/ls` child，并闭合单 pending grandchild 在 handoff/exec 前的父侧 setpgid 与后续 TIOCSPGRP。
+完整 task graph、多 pending child、post-exec parent setpgid、COW/mm、signals、networking、完整 exec
+rollback/reclamation 等仍是 deferred 行为。
 
 ### Console、TTY 与 IRQ
 
@@ -242,7 +243,7 @@ roadmap 的后续任务决定。
 ## 阶段性待确认事项
 
 - vmalloc stack early overflow scratch 与 per-task 泛化的最终入口形状。
-- OpenRC job-control 的 setpgid/TIOCSPGRP 边界及其与 TTY/session/process-group 的对象归属。
+- OpenRC job-control 超出单 pending child 的 task graph、post-exec setpgid、signal 与通用 process-group 查找。
 - general fork/wait/reap、COW/mm、signals、networking 和完整 exec lifecycle 的展开顺序。
 - component/crate 封装恢复时与现有对象 API 的适配层位置。
 

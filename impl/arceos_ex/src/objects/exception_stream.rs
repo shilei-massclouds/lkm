@@ -4408,6 +4408,11 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
             table.setpgid_observed.store(1, Ordering::Release);
             complete_successful_syscall(frame, 0);
         }
+        UserProcessGroupUpdate::UpdatedPendingChild(_) => {
+            table.setpgid_observed.store(1, Ordering::Release);
+            print_setpgid_success_detail(pid, pgid, update);
+            complete_successful_syscall(frame, 0);
+        }
         UserProcessGroupUpdate::Invalid => {
             print_setpgid_error_detail(pid, pgid, EINVAL, update);
             complete_error_syscall(frame, EINVAL);
@@ -4432,7 +4437,7 @@ fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
             .set_session_id_first_slice(current_child_continuation)
     };
     match update {
-        UserProcessGroupUpdate::Updated(sid) => {
+        UserProcessGroupUpdate::Updated(sid) | UserProcessGroupUpdate::UpdatedPendingChild(sid) => {
             table.setsid_observed.store(1, Ordering::Release);
             complete_successful_syscall(frame, sid);
         }
@@ -5254,7 +5259,8 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 .user_init_process
                 .set_foreground_pgrp_first_slice(pgrp);
             match update {
-                UserProcessGroupUpdate::Updated(_) => {}
+                UserProcessGroupUpdate::Updated(_)
+                | UserProcessGroupUpdate::UpdatedPendingChild(_) => {}
                 UserProcessGroupUpdate::Invalid => {
                     print_ioctl_error_detail(fd, cmd, arg, EINVAL);
                     complete_error_syscall(frame, EINVAL);
@@ -5327,7 +5333,8 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                     .bind_controlling_tty_first_slice(current_child_continuation, arg)
             };
             match update {
-                UserProcessGroupUpdate::Updated(_) => {}
+                UserProcessGroupUpdate::Updated(_)
+                | UserProcessGroupUpdate::UpdatedPendingChild(_) => {}
                 UserProcessGroupUpdate::Invalid => {
                     print_ioctl_error_detail(fd, cmd, arg, EINVAL);
                     complete_error_syscall(frame, EINVAL);
@@ -5590,6 +5597,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         {
             let child_pid = {
                 let ctx = crate::context::context();
+                let parent_pid = ctx.user_child_process.pid();
                 let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
                     &ctx.user_init_process,
                     &ctx.user_clone_deferred_boundaries,
@@ -5605,6 +5613,13 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     complete_unsupported_clone_syscall(frame, "child_context_unsupported");
                     return;
                 };
+                if !ctx
+                    .user_init_process
+                    .observe_pending_plain_fork_child_process_group_visible(parent_pid, child_pid)
+                {
+                    complete_unsupported_clone_syscall(frame, "pending_child_identity");
+                    return;
+                }
                 child_pid
             };
 
@@ -8966,7 +8981,7 @@ fn print_setpgid_reject_reason(
         UserProcessGroupUpdate::NotReady => {
             crate::arch::riscv64::sbi::putstr("identity_not_ready");
         }
-        UserProcessGroupUpdate::Updated(_) => {
+        UserProcessGroupUpdate::Updated(_) | UserProcessGroupUpdate::UpdatedPendingChild(_) => {
             crate::arch::riscv64::sbi::putstr("updated");
         }
     }
@@ -8977,6 +8992,28 @@ fn print_setpgid_error_detail(
     _pid_arg: usize,
     _pgid_arg: usize,
     _errno: usize,
+    _update: UserProcessGroupUpdate,
+) {
+}
+
+#[cfg(checkpoint_handler_user_syscall_trace)]
+fn print_setpgid_success_detail(pid_arg: usize, pgid_arg: usize, update: UserProcessGroupUpdate) {
+    let UserProcessGroupUpdate::UpdatedPendingChild(pgrp) = update else {
+        return;
+    };
+    crate::arch::riscv64::sbi::putstr("syscall setpgid detail target=pending_child pid_arg=");
+    print_i64(pid_arg as u32 as i32 as i64);
+    crate::arch::riscv64::sbi::putstr(" pgid_arg=");
+    print_i64(pgid_arg as u32 as i32 as i64);
+    crate::arch::riscv64::sbi::putstr(" updated_pgrp=");
+    print_decimal(pgrp);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(not(checkpoint_handler_user_syscall_trace))]
+fn print_setpgid_success_detail(
+    _pid_arg: usize,
+    _pgid_arg: usize,
     _update: UserProcessGroupUpdate,
 ) {
 }

@@ -42,6 +42,7 @@
 | model/coding/arceos_ex/syscall/process | `clone(220)` / fork 首片 | [用户态 payload 历史](user-mode.md) |
 | validation/user/smoke | `sh_probe` 综合 smoke 拆分 | [用户态 payload 历史](user-mode.md) |
 | validation/user/process | `clone(220)` 首片 KUnit/smoke 回归 | [用户态 payload 历史](user-mode.md) |
+| validation/user/init | OpenRC getty/login shell pending-child job-control 验收 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/syscall/process | `/bin/sh` child `execve(221)` 首轮闭包 | [用户态 payload 历史](user-mode.md) |
 | arceos_ex/task/mm/arch | Per-task vmalloc 内核栈首轮 | [启动阶段审计历史](boot-audit.md) |
 | charter/model/coding/arceos_ex | Kernel 阶段范式四层一致性审计与 coding 文档化 | [阶段范式审计](phase-paradigm-audit.md) |

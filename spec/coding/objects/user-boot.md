@@ -49,6 +49,16 @@ observed child slot: parent state and writable pages are saved for handoff, the 
 and wait/exit restores the parent view before status copyout. Nested OpenRC/login slices reuse only the
 explicitly modeled continuation records; this is not a claim of a general runnable task graph or COW.
 
+For the observed OpenRC login-shell plain fork, `UserInitProcess` additionally owns one pending
+grandchild identity from clone return until the shell's wait4 handoff. It records the grandchild pid and
+the shell parent's inherited process group/session without creating another runnable task. While that
+identity is parent-visible and has not entered the handoff/exec continuation, the shell parent may issue
+only `setpgid(child_pid, child_pid)`; the update is consumed into the visible child identity at wait4
+handoff. Unknown pid remains `ESRCH`, negative pgid remains `EINVAL`, and unsupported or cross-session
+group selection remains `EPERM`. Parent-side setpgid after handoff/exec, multiple pending children and a
+general process-group/task lookup stay deferred. Grandchild exit restores the saved shell pgrp/session
+and clears any pending identity.
+
 Child `execve(221)` builds its replacement address space in Context-owned staging and commits it without
 a large trap-stack temporary. Old-mm reclamation, complete failure rollback, repeated staging reset,
 close-on-exec, credential/signal/binfmt transitions and full point-of-no-return semantics remain

@@ -1566,15 +1566,22 @@ fn exercise_nested_vfork_child_slot(assertions: &mut SmokeAssertions) {
 }
 
 fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
-    let (shell_pid, shell_parent_pid, shell_tgid) = {
+    let (shell_pid, shell_parent_pid, shell_tgid, shell_pgrp, shell_session_id) = {
         let ctx = context();
         (
             ctx.user_child_process.pid(),
             ctx.user_child_process.parent_pid(),
             ctx.user_child_process.tgid(),
+            ctx.user_init_process.child_process_group(),
+            ctx.user_init_process.child_process_session_id(),
         )
     };
-    if shell_pid == 0 || shell_parent_pid == 0 || shell_tgid == 0 {
+    if shell_pid == 0
+        || shell_parent_pid == 0
+        || shell_tgid == 0
+        || shell_pgrp == 0
+        || shell_session_id == 0
+    {
         assertions.assert("observed plain fork starts from shell child", false);
         return;
     }
@@ -1603,6 +1610,13 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             assertions.assert("copy observed child plain fork", false);
             return;
         };
+        if !ctx
+            .user_init_process
+            .observe_pending_plain_fork_child_process_group_visible(shell_pid, child_pid)
+        {
+            assertions.assert("observe pending plain fork child identity", false);
+            return;
+        }
         child_pid
     };
 
@@ -1619,7 +1633,51 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
                 && ctx
                     .user_child_process
                     .observed_plain_fork_child_pending_wait()
-                && ctx.user_child_process.child_trap_frame_reg(10) == Some(0),
+                && ctx.user_child_process.child_trap_frame_reg(10) == Some(0)
+                && ctx.user_init_process.pending_plain_fork_child_visible()
+                && ctx.user_init_process.pending_plain_fork_child_parent_pid() == shell_pid
+                && ctx.user_init_process.pending_plain_fork_child_pid() == child_pid
+                && ctx
+                    .user_init_process
+                    .pending_plain_fork_child_process_group()
+                    == shell_pgrp
+                && ctx.user_init_process.pending_plain_fork_child_session_id() == shell_session_id,
+        );
+    }
+
+    let (unknown_pid, negative_pgid, invalid_pgrp, pending_update) = {
+        let ctx = context();
+        (
+            ctx.user_init_process.set_process_group_first_slice(
+                child_pid + 100,
+                child_pid + 100,
+                true,
+            ),
+            ctx.user_init_process
+                .set_process_group_first_slice(child_pid, usize::MAX, true),
+            ctx.user_init_process
+                .set_process_group_first_slice(child_pid, child_pid + 1, true),
+            ctx.user_init_process
+                .set_process_group_first_slice(child_pid, child_pid, true),
+        )
+    };
+    {
+        let ctx = context();
+        assertions.assert(
+            "pending plain fork child parent setpgid first slice",
+            unknown_pid == UserProcessGroupUpdate::NoSuchProcess
+                && negative_pgid == UserProcessGroupUpdate::Invalid
+                && invalid_pgrp == UserProcessGroupUpdate::PermissionDenied
+                && pending_update == UserProcessGroupUpdate::UpdatedPendingChild(child_pid)
+                && ctx.user_init_process.pending_plain_fork_child_visible()
+                && ctx
+                    .user_init_process
+                    .pending_plain_fork_child_process_group()
+                    == child_pid
+                && ctx.user_init_process.pending_plain_fork_child_session_id() == shell_session_id
+                && ctx
+                    .user_init_process
+                    .pending_plain_fork_child_process_group_set_observed(),
         );
     }
 
@@ -1668,7 +1726,10 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
                 && ctx.user_child_process.pid() == child_pid
                 && ctx.user_child_process.parent_pid() == shell_pid
                 && ctx.user_child_process.observed_plain_fork_child_active()
-                && ctx.user_init_process.child_process_pid() == child_pid,
+                && ctx.user_init_process.child_process_pid() == child_pid
+                && ctx.user_init_process.child_process_group() == child_pid
+                && ctx.user_init_process.child_process_session_id() == shell_session_id
+                && !ctx.user_init_process.pending_plain_fork_child_visible(),
         );
     }
 
@@ -1736,7 +1797,10 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             && ctx.user_child_process.current_child_continuation()
             && ctx.user_child_process.observed_plain_fork_parent_restored()
             && ctx.user_child_process.last_reaped_child_pid() == child_pid
-            && ctx.user_init_process.child_process_pid() == shell_pid,
+            && ctx.user_init_process.child_process_pid() == shell_pid
+            && ctx.user_init_process.child_process_group() == shell_pgrp
+            && ctx.user_init_process.child_process_session_id() == shell_session_id
+            && !ctx.user_init_process.pending_plain_fork_child_visible(),
     );
 }
 
