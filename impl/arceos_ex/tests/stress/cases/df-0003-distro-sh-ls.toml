@@ -10,6 +10,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
 ]
 command = [
@@ -18,6 +19,7 @@ command = [
   "impl/arceos_ex",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
   "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
   "QEMU_APPEND=earlycon=sbi init=/bin/sh",

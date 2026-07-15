@@ -23,11 +23,40 @@ make clippy-check
 make run
 make run APP=smoke
 make run APP=hello
+make run APP=user-boot
 make run PROBE=announce
 make verify
 make verify REPORT=graph
 make clean
 ```
+
+`make run APP=user-boot` defaults to a manual BusyBox shell with the unpacked
+LTP rootfs staging from the sibling repository at
+`../ltp/build-riscv64-musl-syscalls/rootfs`. It creates the separate 320 MiB
+`build/virtio-blk-ltp.raw` image. In the guest, a small first run is:
+
+```sh
+cd /opt/ltp
+./run-syscalls.sh 'getpid*' 'uname*'
+```
+
+Disable LTP and retain the lean rootfs defaults with:
+
+```bash
+make run APP=user-boot ROOTFS_LTP_OVERLAY=none
+```
+
+Use another unpacked staging tree with:
+
+```bash
+make run APP=user-boot ROOTFS_LTP_OVERLAY_DIR=/path/to/rootfs FORCE=1
+```
+
+Image targets reuse an existing raw image. After rebuilding LTP, pass
+`FORCE=1` once to refresh `build/virtio-blk-ltp.raw`. A missing staging
+directory or missing/non-executable `opt/ltp/run-syscalls.sh` is an error;
+the build does not fall back to a rootfs without LTP. Repository `make test`,
+stress, and difftest cases explicitly disable this optional integration.
 
 `LOG=trace` remains as a compatibility alias for `PROBE=announce`. Prefer
 `PROBE=announce` for new checkpoint announcement runs.

@@ -11,6 +11,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-openrc-native-init.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
 ]
 
@@ -79,6 +80,7 @@ command = [
   "make",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "PROBE=announce,stress-mem,user-syscall-trace,user-syscall-error",
   "STRESS_MEM_BYTES=131072",
   "QEMU_SMP=2",

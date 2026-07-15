@@ -11,6 +11,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-rc-local-difftest.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
   "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/rc-local",
 ]
@@ -160,6 +161,7 @@ command = [
   "impl/arceos_ex",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "PROBE=announce,stress-mem",
   "STRESS_MEM_BYTES=131072",
   "QEMU_SMP=2",

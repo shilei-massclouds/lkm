@@ -10,12 +10,14 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot-stress-mem.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=default",
 ]
 command = [
   "make",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "PROBE=stress-mem",
   "STRESS_MEM_BYTES=65536",
   "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot-stress-mem.raw",

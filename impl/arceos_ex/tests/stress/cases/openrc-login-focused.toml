@@ -10,6 +10,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-openrc-login-focused.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
   "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/openrc-login",
 ]
@@ -33,6 +34,7 @@ command = [
   "impl/arceos_ex",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "PROBE=user-syscall-trace,user-syscall-error",
   "ROOTFS_OVERLAY=none",
   "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/openrc-login",

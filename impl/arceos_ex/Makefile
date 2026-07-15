@@ -73,8 +73,6 @@ ifeq ($(APP),user-boot)
 DEFAULT_QEMU_APPEND := earlycon=sbi init=/bin/sh
 endif
 QEMU_APPEND ?= $(DEFAULT_QEMU_APPEND)
-VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
-VIRTIO_BLK_IMAGE_SIZE ?= 64M
 FS_TYPE ?= ext2
 EXT2_BLOCK_SIZE ?=
 ROOTFS_URL ?= https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/releases/riscv64/alpine-minirootfs-3.24.1-riscv64.tar.gz
@@ -93,6 +91,21 @@ ROOTFS_OVERLAY_TOOLCHAIN ?= gnu
 ROOTFS_OVERLAY_LINK ?= static
 ROOTFS_OVERLAY_GNU_CC ?= riscv64-linux-gnu-gcc
 ROOTFS_OVERLAY_MUSL_CC ?= riscv64-linux-musl-gcc
+ROOTFS_LTP_OVERLAY ?= $(if $(filter user-boot,$(APP)),default,none)
+ROOTFS_LTP_OVERLAY_DIR ?= $(abspath $(ROOT)/../ltp/build-riscv64-musl-syscalls/rootfs)
+ifneq ($(words $(ROOTFS_LTP_OVERLAY)),1)
+$(error unknown ROOTFS_LTP_OVERLAY: $(ROOTFS_LTP_OVERLAY) (expected one of: default none))
+endif
+ifneq ($(filter-out default none,$(ROOTFS_LTP_OVERLAY)),)
+$(error unknown ROOTFS_LTP_OVERLAY: $(ROOTFS_LTP_OVERLAY) (expected one of: default none))
+endif
+ifeq ($(ROOTFS_LTP_OVERLAY),default)
+VIRTIO_BLK_IMAGE ?= build/virtio-blk-ltp.raw
+VIRTIO_BLK_IMAGE_SIZE ?= 320M
+else
+VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
+VIRTIO_BLK_IMAGE_SIZE ?= 64M
+endif
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -118,7 +131,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate fmt fmt-check clippy-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay clean
+.PHONY: build run generate fmt fmt-check clippy-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -229,6 +242,27 @@ rootfs-file-overlay:
 		fi; \
 	done
 
+rootfs-ltp-overlay:
+	set -e; \
+	case "$(ROOTFS_LTP_OVERLAY)" in none) exit 0;; default) ;; *) echo "unknown ROOTFS_LTP_OVERLAY: $(ROOTFS_LTP_OVERLAY) (expected one of: default none)" >&2; exit 1;; esac; \
+	overlay_dir="$(ROOTFS_LTP_OVERLAY_DIR)"; \
+	if [ ! -d "$$overlay_dir" ]; then \
+		echo "LTP rootfs overlay directory not found: $$overlay_dir" >&2; \
+		exit 1; \
+	fi; \
+	runner="$$overlay_dir/opt/ltp/run-syscalls.sh"; \
+	if [ ! -f "$$runner" ]; then \
+		echo "LTP rootfs overlay is invalid: missing opt/ltp/run-syscalls.sh in $$overlay_dir" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -x "$$runner" ]; then \
+		echo "LTP rootfs overlay is invalid: opt/ltp/run-syscalls.sh is not executable in $$overlay_dir" >&2; \
+		exit 1; \
+	fi; \
+	$(MAKE) rootfs-file-overlay \
+		ROOTFS_FILE_OVERLAY_DIR="$$overlay_dir" \
+		ROOTFS_STAGING_DIR="$(ROOTFS_STAGING_DIR)"
+
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
 ifeq ($(FS_TYPE),ext2)
@@ -241,6 +275,9 @@ ifneq ($(ROOTFS_OVERLAY),none)
 endif
 ifneq ($(strip $(ROOTFS_FILE_OVERLAY_DIR)),)
 	$(MAKE) rootfs-file-overlay ROOTFS_FILE_OVERLAY_DIR="$(ROOTFS_FILE_OVERLAY_DIR)" ROOTFS_STAGING_DIR="$(ROOTFS_STAGING_DIR)"
+endif
+ifneq ($(ROOTFS_LTP_OVERLAY),none)
+	$(MAKE) rootfs-ltp-overlay ROOTFS_LTP_OVERLAY="$(ROOTFS_LTP_OVERLAY)" ROOTFS_LTP_OVERLAY_DIR="$(ROOTFS_LTP_OVERLAY_DIR)" ROOTFS_STAGING_DIR="$(ROOTFS_STAGING_DIR)"
 endif
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@

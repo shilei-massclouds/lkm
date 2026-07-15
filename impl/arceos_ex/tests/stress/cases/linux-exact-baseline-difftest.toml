@@ -11,6 +11,7 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=none",
 ]
 
@@ -83,6 +84,7 @@ command = [
   "make",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "PROBE=announce,stress-mem",
   "STRESS_MEM_BYTES=131072",
   "QEMU_SMP=2",

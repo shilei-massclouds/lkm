@@ -72,11 +72,33 @@ does not change the locked-root semantics of the bare image or bypass authentica
 `login:`, optionally `Password:`, then the shell prompt before sending `/bin/ls` and `exit`. It requires a
 stable rootfs marker and `user exit status=0`. The focused case remains opt-in through `STRESS_CASES` until
 explicitly selected; it is not part of default `make test` or test-stress.
+
 The job-control acceptance requires an explicit trace fact classifying the shell parent's successful
 `setpgid(child_pid, child_pid)` target as the pending child, no `reason=pid_not_visible` rejection for that
 operation, successful foreground-pgrp handling, the `lost+found` rootfs marker and clean user exit. The
 case remains opt-in after this bounded closure; it does not claim multiple pending children, a general
 task graph, post-exec parent setpgid, job-control signal delivery or full process-group lookup.
+
+## Manual LTP shell
+
+Ordinary `make run APP=user-boot` is the manual syscall-test entry and uses the unpacked sibling LTP
+staging tree by default. It builds a dedicated 320 MiB image, boots `init=/bin/sh`, and leaves test
+selection to the operator. From the BusyBox shell the initial workflow is:
+
+```sh
+cd /opt/ltp
+./run-syscalls.sh 'getpid*' 'uname*'
+```
+
+This entry establishes only that the LTP tree can be staged, booted, and invoked manually. Individual
+LTP `FAIL`, `BROK`, or `TCONF` results and missing syscall, `/proc`, `/sys`, or `/dev` capabilities do not
+expand the acceptance scope of this image-construction change.
+
+All repository-owned automated user-boot cases in `make test`, stress, and paired difftest explicitly set
+`ROOTFS_LTP_OVERLAY=none`. Their existing 64 MiB or explicitly named images remain independent from the
+sibling LTP repository and do not execute LTP. Focused image checks for this interface must cover the
+default LTP image contents, the disabled lean-rootfs path, and a clear failure for missing or malformed
+LTP staging.
 
 ## Long-term observation checkpoints
 

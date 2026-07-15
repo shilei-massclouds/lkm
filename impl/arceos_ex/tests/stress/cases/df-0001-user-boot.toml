@@ -10,12 +10,14 @@ setup_command = [
   "disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
+  "ROOTFS_LTP_OVERLAY=none",
   "ROOTFS_OVERLAY=default",
 ]
 command = [
   "make",
   "run",
   "APP=user-boot",
+  "ROOTFS_LTP_OVERLAY=none",
   "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
   "QEMU_APPEND=earlycon=sbi",
 ]

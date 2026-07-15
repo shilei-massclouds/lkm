@@ -284,7 +284,8 @@ run_user_boot_overlay_case() {
     local image=$5
 
     run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
+        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
 run_user_boot_overlay_append_case() {
@@ -296,7 +297,8 @@ run_user_boot_overlay_append_case() {
     local image=$6
 
     run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
+        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
 
 run_user_boot_no_overlay_append_case() {
@@ -307,7 +309,8 @@ run_user_boot_no_overlay_append_case() {
     local image=$5
 
     run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY=none VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
+        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
 
 run_user_boot_no_overlay_input_append_case() {
@@ -321,7 +324,8 @@ run_user_boot_no_overlay_input_append_case() {
     local image=$8
 
     run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" "$make_cmd" run APP=user-boot \
-        PLIC_PROVIDER="$provider" ROOTFS_OVERLAY=none VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
+        PLIC_PROVIDER="$provider" ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
 
 run_user_boot_openrc_login_case() {
@@ -338,7 +342,7 @@ run_user_boot_openrc_login_case() {
         --input-step "Password:" "$password_input" \
         --input-step '$ ' "$shell_input" \
         -- "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
+        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
@@ -351,7 +355,7 @@ run_user_boot_rc_local_case() {
 
     run_user_boot_marker_only_case "$name" "$log" "$expected_markers" \
         "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$rc_local_overlay_dir" \
+        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$rc_local_overlay_dir" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 

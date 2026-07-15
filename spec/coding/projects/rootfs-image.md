@@ -43,6 +43,34 @@ Rule ID: `arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay` (MUST)
 unpacked and after compiled fixture overlay processing. `ROOTFS_OVERLAY=none` disables only the compiled
 map; without a file overlay the bare Alpine account state, including locked `root:*`, remains unchanged.
 
+## LTP rootfs overlay
+
+Rule IDs (MUST):
+
+- `arceos_ex_must_user_boot_default_to_ltp_rootfs_overlay`
+- `arceos_ex_must_ltp_rootfs_overlay_apply_after_fixture_and_file_overlays`
+- `arceos_ex_must_ltp_rootfs_overlay_validate_staging_before_copy`
+- `arceos_ex_must_ltp_rootfs_overlay_use_dedicated_sized_image`
+- `arceos_ex_must_automated_rootfs_workflows_disable_ltp_overlay`
+
+`ROOTFS_LTP_OVERLAY` accepts only `default` and `none`. It defaults to `default` for `APP=user-boot` and
+to `none` for every other app. `default` consumes an already unpacked sibling-repository staging tree;
+`ROOTFS_LTP_OVERLAY_DIR` defaults to `../ltp/build-riscv64-musl-syscalls/rootfs` relative to the repository
+root. Image construction must fail with a specific diagnostic when that directory is absent, when
+`opt/ltp/run-syscalls.sh` is absent, or when the runner is not executable. It must not silently fall back
+to a rootfs without LTP.
+
+The LTP staging tree is copied with the same semantics as `ROOTFS_FILE_OVERLAY_DIR`, but in a dedicated
+final overlay stage after the compiled fixture and ordinary file overlay. This order lets LTP staging
+provide its intended final files without changing the fixture and static-file interfaces.
+
+An enabled LTP overlay defaults to the separate `build/virtio-blk-ltp.raw` image and a `320M` image size.
+With LTP disabled, the defaults remain `build/virtio-blk.raw` and `64M`. Existing images are still reused
+according to the deterministic disk lifecycle rule, so a rebuilt or replaced LTP staging tree requires
+`FORCE=1` to refresh an existing image. Repository `make test`, stress, and difftest user-boot image
+commands must explicitly set `ROOTFS_LTP_OVERLAY=none`; they retain their existing fixture selection,
+image sizes, execution scope, and independence from the sibling LTP build.
+
 ## Kernel command line and fixture separation
 
 Rule IDs (MUST):
