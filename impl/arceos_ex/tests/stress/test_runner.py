@@ -331,6 +331,43 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(stdin_result, {})
         self.assertIn("done", stdout)
 
+    def test_setup_command_reports_progress_when_stdout_is_captured(self) -> None:
+        script = "import time; print('building', flush=True); time.sleep(0.05)"
+        terminal = StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "case"
+            output_dir.mkdir()
+            with (
+                mock.patch.object(runner, "SETUP_PROGRESS_INTERVAL_SECONDS", 0.01),
+                redirect_stdout(terminal),
+            ):
+                runner._run_setup_command(
+                    [sys.executable, "-c", script],
+                    Path.cwd(),
+                    Path.cwd(),
+                    2,
+                    output_dir,
+                    label="linux-build",
+                )
+
+            log_path = output_dir / "linux-build" / "stdout.log"
+            result = json.loads((output_dir / "linux-build" / "result.json").read_text())
+            log_text = log_path.read_text()
+
+        progress = terminal.getvalue()
+        self.assertIn("[stress] linux-build start timeout=2s", progress)
+        self.assertIn("[stress] linux-build running elapsed=", progress)
+        self.assertIn(
+            "[stress] linux-build finish returncode=0 timed_out=false",
+            progress,
+        )
+        self.assertIn(f"log={log_path}", progress)
+        self.assertEqual(log_text, "building\n")
+        self.assertEqual(result["returncode"], 0)
+        self.assertFalse(result["timed_out"])
+        self.assertGreater(result["duration_seconds"], 0)
+
     def test_delayed_stdin_config_is_optional(self) -> None:
         self.assertIsNone(runner._delayed_stdin({}))
         config = runner._delayed_stdin(

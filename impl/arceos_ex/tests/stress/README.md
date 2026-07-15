@@ -40,6 +40,13 @@ stress suite summary:
 Preflight, setup, or configuration validation that fails before a case result
 exists continues to report its specific error without a fabricated summary.
 
+Long-running setup commands, including the paired Linux build used by
+`make difftest`, print a flushed start line with the stage timeout and log path,
+an elapsed-time heartbeat at least every 30 seconds, and a finish line with the
+return code and timeout result. Raw build output stays in the reported
+`setup/stdout.log` or `linux-build/stdout.log`; it is not mixed into guest event
+output.
+
 Non-interactive command capture uses `DEVNULL` for stdin when a case does not
 configure `delayed_stdin`. Cases that require input must configure
 `delayed_stdin` explicitly; only that path uses a pipe to provide input.

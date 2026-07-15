@@ -306,6 +306,21 @@ requirement also applies when exactly one case is selected. Preflight, setup or
 configuration failures that occur before a case result is produced must retain
 their specific diagnostics and must not fabricate a result summary.
 
+#### Visible stress/difftest setup progress
+
+Rule ID: `build_must_report_long_running_stress_difftest_setup_progress` (MUST).
+
+Before a stress or difftest setup command, including a paired Linux build,
+starts, the runner must immediately print and flush a stage line that identifies
+the stage, its timeout and the retained output-log path. While that command is
+still running, the runner must print and flush an elapsed-time heartbeat at
+least once every 30 seconds. It must print and flush a finish line with the
+return code, timeout result, duration and retained output-log path before
+returning or raising the stage-specific failure. These progress diagnostics
+must remain visible when runner stdout is redirected or captured. The command's
+raw output remains captured in the stage log rather than being live-forwarded
+into the guest event stream.
+
 #### Generated output hygiene
 
 Rule ID: `build_must_not_check_in_generated_or_runtime_local_outputs` (MUST).

@@ -29,6 +29,7 @@ DEFAULT_SUITE = (
     STRESS_DIR / "cases" / "df-0003-distro-sh-ls.toml",
 )
 DEFAULT_OUT_ROOT = Path(__file__).resolve().parent / "out"
+SETUP_PROGRESS_INTERVAL_SECONDS = 30.0
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 CHECKPOINT_RE = re.compile(
     r"^(?P<prefix>checkpoint|trace): (?P<name>[^ ]+)(?: task=(?P<task>[^ ]+))?"
@@ -539,10 +540,23 @@ def _run_setup_command(
 ) -> None:
     setup_dir = output_dir / _safe_path(label)
     setup_dir.mkdir(parents=True)
-    stdout, returncode, timed_out, _ = _run_command_capture(
-        command, workdir, os.environ.copy(), timeout, None
+    log_path = setup_dir / "stdout.log"
+    log_path.touch()
+    print(
+        f"[stress] {label} start timeout={timeout}s log={log_path}",
+        flush=True,
     )
-    (setup_dir / "stdout.log").write_text(stdout, encoding="utf-8", errors="replace")
+    started = time.monotonic()
+    stdout, returncode, timed_out, _ = _run_command_capture(
+        command,
+        workdir,
+        os.environ.copy(),
+        timeout,
+        None,
+        progress_label=label,
+    )
+    duration = time.monotonic() - started
+    log_path.write_text(stdout, encoding="utf-8", errors="replace")
     _write_json(
         setup_dir / "result.json",
         {
@@ -552,12 +566,18 @@ def _run_setup_command(
             "working_directory": str(workdir),
             "returncode": returncode,
             "timed_out": timed_out,
+            "duration_seconds": round(duration, 3),
         },
     )
+    print(
+        f"[stress] {label} finish returncode={returncode} "
+        f"timed_out={str(timed_out).lower()} duration={duration:.3f}s log={log_path}",
+        flush=True,
+    )
     if timed_out:
-        raise SystemExit("setup command timed out")
+        raise SystemExit(f"{label} command timed out")
     if returncode != 0:
-        raise SystemExit(f"setup command failed with return code {returncode}")
+        raise SystemExit(f"{label} command failed with return code {returncode}")
 
 
 def _execute_paired_side(
@@ -667,6 +687,8 @@ def _run_command_capture(
     env: dict[str, str],
     timeout: int,
     delayed_stdin: DelayedStdin | None,
+    *,
+    progress_label: str | None = None,
 ) -> tuple[str, int | None, bool, dict[str, Any]]:
     if delayed_stdin is not None:
         return _run_command_capture_with_delayed_stdin(
@@ -683,13 +705,31 @@ def _run_command_capture(
         text=True,
         start_new_session=True,
     )
-    try:
-        stdout, _ = process.communicate(timeout=timeout)
-        return stdout, process.returncode, False, {}
-    except subprocess.TimeoutExpired:
-        _kill_process_group(process)
-        stdout, _ = process.communicate()
-        return stdout, process.returncode, True, {}
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = max(0.001, deadline - time.monotonic())
+        wait_time = (
+            remaining
+            if progress_label is None
+            else min(SETUP_PROGRESS_INTERVAL_SECONDS, remaining)
+        )
+        try:
+            stdout, _ = process.communicate(timeout=wait_time)
+            return stdout, process.returncode, False, {}
+        except subprocess.TimeoutExpired:
+            now = time.monotonic()
+            if now < deadline:
+                if progress_label is not None:
+                    elapsed = timeout - max(0.0, deadline - now)
+                    print(
+                        f"[stress] {progress_label} running "
+                        f"elapsed={elapsed:.1f}s timeout={timeout}s",
+                        flush=True,
+                    )
+                continue
+            _kill_process_group(process)
+            stdout, _ = process.communicate()
+            return stdout, process.returncode, True, {}
 
 
 def _run_command_capture_until_stress_mem(
