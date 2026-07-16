@@ -2,6 +2,7 @@
 #define USER_SMOKE_H
 
 int smoke_fileio(void);
+int smoke_trap_registers(void);
 int smoke_signal(void);
 int smoke_stdin(void);
 int smoke_fpu_mmap(void);

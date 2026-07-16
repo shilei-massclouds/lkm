@@ -12,6 +12,7 @@
 Rule IDs (MUST):
 
 - `arceos_ex_must_user_probe_print_per_syscall_success_marker`
+- `arceos_ex_must_user_smoke_ecall_preserve_callee_saved_registers`
 - `arceos_ex_must_user_probe_cover_directory_openat_getdents64`
 - `arceos_ex_must_user_syscall_analysis_use_existing_static_tools`
 - `arceos_ex_must_user_syscall_analysis_stay_out_of_default_build_path`
@@ -22,6 +23,8 @@ Staged syscall subtests print an explicit success marker after each validated pa
 uses the `user-smoke:` prefix, begin/end markers, `status=N` and blank-line case separation; the host still
 determines success from `user exit status=N`. Directory probing uses the RISC-V ABI for
 `openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY)`, `getdents64(61)`, record validation and close.
+The fixture also performs one explicit `ecall` with sentinels in all callee-saved integer registers and
+requires both the syscall result and every sentinel to survive the ordinary user trap round trip.
 
 The libc-linked stack smoke reads auxv through `getauxval()` and requires the independent exec filename to
 match that fixture invocation's startup `argv[0]` (the same binary is installed as both `/sbin/init` and

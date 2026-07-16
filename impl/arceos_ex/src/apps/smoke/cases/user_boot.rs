@@ -7,7 +7,11 @@ use crate::{
     },
     context::context,
     objects::{
-        event_stream::TrapFrame,
+        event_stream::{
+            KERNEL_TRAP_OVERFLOW_STACK_SIZE, KERNEL_TRAP_THREAD_SHIFT, TRAP_FRAME_SIZE,
+            TrapEntryOrigin, TrapFrame, formal_trap_entry_prelude, kernel_trap_frame_overflows,
+            kernel_trap_overflow_stack_base, kernel_trap_overflow_stack_top,
+        },
         files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
         process_prepare::TaskCopyUserProcessInputs,
         state::State,
@@ -738,6 +742,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && trap.sp() == stack.initial_sp()
                 && trap.sstatus() == crate::objects::user_boot::USER_SSTATUS_INITIAL,
         );
+        exercise_kernel_trap_overflow_contract(assertions);
         exercise_user_stack_growth(assertions, ctx);
         assertions.assert(
             "syscall setup",
@@ -1413,6 +1418,83 @@ impl SmokeScenario for UserBootElfScenario {
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
+    const ALIGNED_STACK_BASE: usize = 0x8000_0000;
+    const THREAD_SIZE: usize = 1 << KERNEL_TRAP_THREAD_SHIFT;
+
+    let stack_top = ALIGNED_STACK_BASE + THREAD_SIZE;
+    let lowest_legal_sp = ALIGNED_STACK_BASE + TRAP_FRAME_SIZE;
+    let first_guard_sp = lowest_legal_sp - 1;
+    let adjacent_half_sp = stack_top + TRAP_FRAME_SIZE;
+    assertions.assert(
+        "kernel trap frame size and overflow stack layout",
+        core::mem::size_of::<TrapFrame>() == TRAP_FRAME_SIZE
+            && TRAP_FRAME_SIZE == 288
+            && KERNEL_TRAP_THREAD_SHIFT == 14
+            && kernel_trap_overflow_stack_base().is_multiple_of(16)
+            && kernel_trap_overflow_stack_top()
+                == kernel_trap_overflow_stack_base() + KERNEL_TRAP_OVERFLOW_STACK_SIZE,
+    );
+    assertions.assert(
+        "kernel trap VMAP overflow classification endpoints",
+        !kernel_trap_frame_overflows(stack_top)
+            && !kernel_trap_frame_overflows(lowest_legal_sp)
+            && kernel_trap_frame_overflows(first_guard_sp)
+            && kernel_trap_frame_overflows(adjacent_half_sp),
+    );
+
+    let kernel_entry = formal_trap_entry_prelude(lowest_legal_sp, 0);
+    let kernel_overflow_entry = formal_trap_entry_prelude(first_guard_sp, 0);
+    let user_entry = formal_trap_entry_prelude(first_guard_sp, stack_top);
+    assertions.assert(
+        "kernel trap prelude restores sp and sscratch",
+        kernel_entry.origin == TrapEntryOrigin::Kernel
+            && kernel_entry.stack_pointer == lowest_legal_sp
+            && kernel_entry.scratch == 0
+            && kernel_entry.early_check_performed
+            && !kernel_entry.overflow
+            && kernel_overflow_entry.origin == TrapEntryOrigin::Kernel
+            && kernel_overflow_entry.stack_pointer == first_guard_sp
+            && kernel_overflow_entry.scratch == 0
+            && kernel_overflow_entry.early_check_performed
+            && kernel_overflow_entry.overflow,
+    );
+    assertions.assert(
+        "user trap prelude bypasses overflow bit test",
+        kernel_trap_frame_overflows(first_guard_sp)
+            && user_entry.origin == TrapEntryOrigin::User
+            && user_entry.stack_pointer == stack_top
+            && user_entry.scratch == first_guard_sp
+            && !user_entry.early_check_performed
+            && !user_entry.overflow,
+    );
+
+    let mut regs = [0usize; 32];
+    let mut index = 0usize;
+    while index < regs.len() {
+        regs[index] = 0x1000 + index;
+        index += 1;
+    }
+    let original_t6 = regs[31];
+    let frame =
+        TrapFrame::from_kernel_stack_overflow(regs, first_guard_sp, 0x2000, 0x3000, 0x4000, 0x5000);
+    let mut complete = frame.reg(0) == 0
+        && frame.reg(2) == first_guard_sp
+        && frame.reg(31) == original_t6
+        && frame.sstatus == 0x2000
+        && frame.sepc == 0x3000
+        && frame.scause == 0x4000
+        && frame.stval == 0x5000;
+    index = 1;
+    while index < 32 {
+        if index != 2 {
+            complete &= frame.reg(index) == regs[index];
+        }
+        index += 1;
+    }
+    assertions.assert("kernel trap overflow frame complete", complete);
 }
 
 #[inline(never)]

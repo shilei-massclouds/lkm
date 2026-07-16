@@ -46,6 +46,7 @@
 | model/coding/arceos_ex/syscall/process | `/bin/sh` child `execve(221)` 首轮闭包 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/exec/mm/user | 用户栈 initial ABI、`AT_EXECFN` 与页粒度 ASLR 首片 | [用户态 payload 历史](user-mode.md) |
 | arceos_ex/task/mm/arch | Per-task vmalloc 内核栈首轮 | [启动阶段审计历史](boot-audit.md) |
+| model/coding/arceos_ex/trap/mm | RISC-V VMAP trap 栈 early overflow 首片 | [启动阶段审计历史](boot-audit.md#已完成专题risc-v-vmap-trap-栈-early-overflow) |
 | charter/model/coding/arceos_ex | Kernel 阶段范式四层一致性审计与 coding 文档化 | [阶段范式审计](phase-paradigm-audit.md) |
 | model/coding/arceos_ex/block/fs | Ext2 single-indirect read 支持 | [virtio / block / VFS / Ext2 历史](virtio-block-fs.md) |
 | arceos_ex/irq | PLIC 驱动与 UART 外部中断链首轮 | [IRQ / console / TTY 历史](irq-console-tty.md) |

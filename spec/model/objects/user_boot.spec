@@ -401,7 +401,11 @@ predicate user_kernel_trap_stack_vmap_alignment_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_vmapped_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_vmap_guard_page_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_overflow_stack_bound<T>(frame: T) -> bool;
-predicate user_kernel_trap_stack_entry_scratch_deferred<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_kernel_context_early_overflow_check_bound<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_user_context_bit_test_bypassed<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_early_check_registers_preserved<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_overflow_frame_complete<T>(frame: T) -> bool;
+predicate user_kernel_trap_stack_overflow_terminal_panic_bound<T>(frame: T) -> bool;
 predicate user_kernel_trap_stack_irq_stack_switch_deferred<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
@@ -3371,7 +3375,11 @@ object UserInitProcess: ResourceObject {
                         user_kernel_trap_stack_vmapped_bound(UserTrapFrame);
                         user_kernel_trap_stack_vmap_guard_page_bound(UserTrapFrame);
                         user_kernel_trap_stack_overflow_stack_bound(UserTrapFrame);
-                        user_kernel_trap_stack_entry_scratch_deferred(UserTrapFrame);
+                        user_kernel_trap_stack_kernel_context_early_overflow_check_bound(UserTrapFrame);
+                        user_kernel_trap_stack_user_context_bit_test_bypassed(UserTrapFrame);
+                        user_kernel_trap_stack_early_check_registers_preserved(UserTrapFrame);
+                        user_kernel_trap_stack_overflow_frame_complete(UserTrapFrame);
+                        user_kernel_trap_stack_overflow_terminal_panic_bound(UserTrapFrame);
                         user_kernel_trap_stack_irq_stack_switch_deferred(UserTrapFrame);
                     }
                 }

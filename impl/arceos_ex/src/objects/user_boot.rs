@@ -79,7 +79,14 @@ pub const USER_KERNEL_TRAP_STACK_ALIGN: usize = USER_KERNEL_TRAP_STACK_SIZE * 2;
 pub const USER_KERNEL_TRAP_GUARD_SIZE: usize = USER_PAGE_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
-pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = USER_PAGE_SIZE;
+pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize =
+    super::event_stream::KERNEL_TRAP_OVERFLOW_STACK_SIZE;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_FRAME_SIZE: usize = super::event_stream::TRAP_FRAME_SIZE;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_THREAD_SHIFT: usize = super::event_stream::KERNEL_TRAP_THREAD_SHIFT;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_IRQ_STACK_SIZE: usize = USER_KERNEL_TRAP_STACK_SIZE;
@@ -100,7 +107,19 @@ pub const USER_KERNEL_TRAP_GUARD_PAGE_READY: bool = true;
 pub const USER_KERNEL_TRAP_OVERFLOW_STACK_READY: bool = true;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
-pub const USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED: bool = true;
+pub const USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY: bool = true;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING: bool = true;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED: bool = true;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE: bool = true;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_OVERFLOW_TERMINAL_PANIC: bool = true;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED: bool = true;
@@ -2356,20 +2375,6 @@ impl UserKernelTrapStackRuntime {
 #[cfg(app_user_boot)]
 static USER_KERNEL_TRAP_STACK_RUNTIME: UserKernelTrapStackRuntime =
     UserKernelTrapStackRuntime::new();
-
-#[cfg(app_user_boot)]
-#[repr(align(16))]
-#[allow(dead_code)]
-struct UserKernelTrapOverflowStack {
-    bytes: [u8; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
-}
-
-#[cfg(app_user_boot)]
-#[allow(dead_code)]
-static mut USER_KERNEL_TRAP_OVERFLOW_STACK: UserKernelTrapOverflowStack =
-    UserKernelTrapOverflowStack {
-        bytes: [0; USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE],
-    };
 
 pub struct UserTrapFrame {
     lifecycle: Lifecycle,
@@ -7489,13 +7494,13 @@ pub fn user_kernel_trap_stack_backing_order() -> usize {
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_base() -> usize {
-    unsafe { core::ptr::addr_of!(USER_KERNEL_TRAP_OVERFLOW_STACK.bytes) as usize }
+    super::event_stream::kernel_trap_overflow_stack_base()
 }
 
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_top() -> usize {
-    user_kernel_trap_overflow_stack_base() + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE
+    super::event_stream::kernel_trap_overflow_stack_top()
 }
 
 #[cfg(app_user_boot)]
@@ -7504,6 +7509,7 @@ pub fn user_kernel_trap_overflow_stack_ready() -> bool {
     user_kernel_trap_overflow_stack_base() != 0
         && user_kernel_trap_overflow_stack_top()
             == user_kernel_trap_overflow_stack_base() + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE
+        && user_kernel_trap_overflow_stack_base().is_multiple_of(16)
 }
 
 #[cfg(app_user_boot)]

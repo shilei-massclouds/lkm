@@ -64,6 +64,23 @@
 
 当前 formal 路径覆盖 BP 侧 `idle_threads_init()`、`cpuhp_threads_init()`、串行 CPUHP bringup、`cpu_ops_sbi.cpu_start()` boot data publish ordering、`cpu_running` / `done_up` completion 观察、secondary CPU online 和 `smp_concurrency_open`。`CONFIG_HOTPLUG_PARALLEL=n` 使 parallel bringup 为 trimmed/no-op；`setup_max_cpus == 0` 仍只作为 nosmp checkpoint，不在当前 default path 触发。AP 三阶段现已覆盖 per-logical-id 四态、pointwise sibling continuation、boot-data/SP/TP adoption 和独立 WFI park entry；AP live `CurrentCPU` / `LocalInterruptControl`、真实 `riscv_ipi_enable()` / local IRQ guard、完整 cache/TLB flush、hotplug thread callback 和 rollback/teardown 继续保持 summary/deferred。BP 在 HSM 前重置 family 并 release 发布 prerequisite，HSM 后以 Acquire 等待全部 Online，随后才观察 completion、发布 CPU online 和 SMP concurrency。smoke 覆盖 BP guard/completion 主线以及每个 secondary 的三阶段 Online、boot-data/SP/TP 和 park-loop 事实；SMP2/SMP8 announce 覆盖 AP owner、同 AP 严格顺序、不同 AP 交错和 all-online barrier。
 
+### 已完成专题：RISC-V VMAP trap 栈 early overflow
+
+boot CPU 上 `UserInitProcess` 的首个 VMAP kernel trap stack 现已完成 Linux 6.12 对齐的 early
+overflow 闭环。`APP=user-boot` 的 `formal_event_entry` 在用户来源时继续从 `sscratch` 取得安全的
+kernel stack top 并绕过 bit-test；内核来源时在保存任何通用寄存器前只使用 `sp`/`sscratch`，按
+`((sp - 288) >> 14) & 1` 分类 prospective frame。正常分支恢复原 `sp`、清零 `sscratch` 后进入
+共享 frame 保存；溢出分支通过 `t6`/`sscratch` 保留坏栈 SP 和原始 `t6`，切换到链接可见、16
+字节对齐的 4 KiB 静态 overflow stack，保存完整整数寄存器与 `sepc/scause/stval/sstatus` 后，只经
+SBI 输出 task/overflow stack 范围和 CSR 诊断并终止系统。普通 app 保持原入口，per-task owner、
+per-CPU overflow stack 与 IRQ hardirq `call_on_irq_stack()` 仍是活跃后续责任。
+
+验证覆盖 `make verify`、共享 object smoke 55/55、真实 user-smoke callee-saved sentinel `ecall`、
+随机用户栈顶下 `UserInitProcess.EnterUserMode` checkpoint facts、DF-0002 ordinary 30/30、完整默认
+stress 的 DF-0001/0002/0003 各 10/10、默认 rc.local 与 Linux exact baseline difftest 各 1/1，
+以及仓库根直接 `make test`。不可恢复分支没有测试专用 syscall/boot 参数/checkpoint；端点分类、
+frame 构造和普通 trap 往返由共享契约验证。
+
 ### 最高优先级：状态机术语与 guard lowering 策略收敛
 
 全局语义收敛已经完成，`SchedInitPhase` 当前轮已按 rest_init owner-split 路径的“Linux 对照 -> 先规格 -> 后实现补齐 -> 完整验证”口径收尾。下面第 6-10 项保留首轮材料来源，第 11 项记录当前轮完成结果；后续当前重点切换为启动阶段锁/同步复核记录回填。

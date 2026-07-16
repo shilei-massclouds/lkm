@@ -17,12 +17,14 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[cfg(app_user_boot)]
 use crate::objects::user_boot::{
     USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_KERNEL_IRQ_STACK_SIZE,
-    USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED, USER_KERNEL_TRAP_GUARD_PAGE_READY,
-    USER_KERNEL_TRAP_GUARD_SIZE, USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED,
-    USER_KERNEL_TRAP_IRQ_STACKS, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
-    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
-    USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
-    USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
+    USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING, USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY,
+    USER_KERNEL_TRAP_FRAME_SIZE, USER_KERNEL_TRAP_GUARD_PAGE_READY, USER_KERNEL_TRAP_GUARD_SIZE,
+    USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED, USER_KERNEL_TRAP_IRQ_STACKS,
+    USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
+    USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_OVERFLOW_TERMINAL_PANIC,
+    USER_KERNEL_TRAP_STACK_ALIGN, USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
+    USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_THREAD_SHIFT,
+    USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
     USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
     user_kernel_trap_overflow_stack_base, user_kernel_trap_overflow_stack_ready,
     user_kernel_trap_overflow_stack_top, user_kernel_trap_stack_backing_order,
@@ -820,11 +822,19 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && USER_KERNEL_TRAP_STACK_SIZE == 16 * 1024
         && USER_KERNEL_TRAP_STACK_SIZE == USER_PAGE_SIZE << USER_KERNEL_TRAP_STACK_ORDER
         && USER_KERNEL_TRAP_STACK_ALIGN == USER_KERNEL_TRAP_STACK_SIZE * 2
+        && USER_KERNEL_TRAP_FRAME_SIZE
+            == core::mem::size_of::<crate::objects::event_stream::TrapFrame>()
+        && USER_KERNEL_TRAP_FRAME_SIZE == 288
+        && USER_KERNEL_TRAP_THREAD_SHIFT == 14
         && USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE == USER_PAGE_SIZE
         && USER_KERNEL_IRQ_STACK_SIZE == USER_KERNEL_TRAP_STACK_SIZE
         && USER_KERNEL_TRAP_GUARD_PAGE_READY
         && USER_KERNEL_TRAP_OVERFLOW_STACK_READY
-        && USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED
+        && USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY
+        && USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING
+        && USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED
+        && USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE
+        && USER_KERNEL_TRAP_OVERFLOW_TERMINAL_PANIC
         && USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED
         && user_kernel_trap_stack_ready()
         && user_kernel_trap_stack_vmapped()
@@ -909,6 +919,8 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     sink.diag_usize("kernel_trap_stack_order", USER_KERNEL_TRAP_STACK_ORDER);
     sink.diag_usize("kernel_trap_stack_size", USER_KERNEL_TRAP_STACK_SIZE);
     sink.diag_usize("kernel_trap_stack_align", USER_KERNEL_TRAP_STACK_ALIGN);
+    sink.diag_usize("kernel_trap_frame_size", USER_KERNEL_TRAP_FRAME_SIZE);
+    sink.diag_usize("kernel_trap_thread_shift", USER_KERNEL_TRAP_THREAD_SHIFT);
     sink.diag_usize(
         "kernel_trap_stack_base_aligned",
         user_kernel_trap_stack_base_aligned() as usize,
@@ -958,8 +970,24 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         USER_KERNEL_TRAP_OVERFLOW_STACK_READY as usize,
     );
     sink.diag_usize(
-        "kernel_trap_entry_scratch_deferred",
-        USER_KERNEL_TRAP_ENTRY_SCRATCH_DEFERRED as usize,
+        "kernel_trap_early_overflow_check_ready",
+        USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_early_check_register_preserving",
+        USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_user_path_bit_test_bypassed",
+        USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_overflow_frame_complete",
+        USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE as usize,
+    );
+    sink.diag_usize(
+        "kernel_trap_overflow_terminal_panic",
+        USER_KERNEL_TRAP_OVERFLOW_TERMINAL_PANIC as usize,
     );
     sink.diag_usize(
         "kernel_trap_irq_stack_switch_deferred",

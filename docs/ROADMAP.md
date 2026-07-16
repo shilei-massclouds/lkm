@@ -20,7 +20,7 @@
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
 3. ordinary shell、nightly stress 和 Linux paired difftest 保持长期回归；失败样本按稳定序列和
    source-scoped 事实分类。
-4. VFS/pathname、exec lifecycle、vmalloc user trap stack 与文件系统缓存层仍按各自 active row 推进。
+4. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
 5. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
    [`objects/README.md`](../spec/coding/objects/README.md)、
    [`arceos_ex-implementation.md`](../spec/coding/arceos_ex-implementation.md) 与
@@ -48,7 +48,7 @@
 | `P0` | 当前 | model/coding/arceos_ex/vfs | VFS pathname walk / rootfs path read 补强 | 推进 slow symlink、通用 nofollow、magic link、RCU walk、权限、mount namespace、fd table 和 errno 边界；保持当前 read-only fast-symlink 骨架。 | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P0` | 进行中 | build/rootfs/user/validation | 发行版 rootfs smoke 与 overlay 分层 | 保持 overlay fixture 与 bare distro cases 分层；继续以真实 OpenRC/发行版路径收敛 native init 验收，不用测试专用内核 API。 | [镜像构造](../spec/coding/projects/rootfs-image.md)；[测试规格](../spec/testing/rootfs.md) |
 | `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | 补旧 mm/stack/page-table 回收、失败回滚、重复 staging reset、close-on-exec、credentials/signal/binfmt 与 point-of-no-return 语义。 | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
-| `P0` | 当前 | model/coding/arceos_ex/trap/mm | Linux-aligned 用户 trap 栈与 VMAP guard | 补不会破坏用户寄存器的 early overflow scratch/bit-test；之后再展开 per-task vmalloc stack 与 IRQ hardirq stack。 | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
+| `P1` | 待办 | model/coding/arceos_ex/trap/mm | per-task VMAP trap 栈与 IRQ hardirq 栈 | 把已闭环的 boot CPU `UserInitProcess` early overflow 基线泛化到 per-task stack owner、per-CPU overflow stack，并实现 IRQ hardirq `call_on_irq_stack()` 切换。 | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
 | `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | 补完整 kthreadd 请求消费、通用 scheduler class/fairness 与更多 task-return/switch 语义；保持 BootIdle/KernelInit owner 边界。 | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |
 | `P0` | 待办 | arceos_ex/fs/vfs/smoke | 目录操作 smoke 补强 | 在 directory-capable openat/getdents64/fd offset/close 规格闭合后，覆盖生产 VFS/Ext2 路径的目录迭代和错误分类。 | [测试规格](../spec/testing/README.md) |
 | `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | root switch 后命名空间补强 | 明确 ext2 root 下 `/dev` 挂接、mount namespace 与任务 FsStruct 的运行期规则。 | [RootfsPhase coding](../spec/coding/phases/smp-runtime/rootfs.md) |

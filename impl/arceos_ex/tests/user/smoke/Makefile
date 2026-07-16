@@ -1,4 +1,5 @@
 SMOKE_SRC := smoke.c \
+	trap_registers.S \
 	fileio.c \
 	signal.c \
 	stdin.c \

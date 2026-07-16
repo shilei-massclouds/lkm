@@ -29,8 +29,22 @@ opportunity before falling back to signal/unsupported handling. These are implem
 the model trap boundary, not permission to invent a second exception stream.
 
 The user kernel stack is a VMALLOC mapping with the modeled alignment and unmapped guard gap. Large
-exec/mm objects stay out of trap-stack frames. Early overflow checking, per-task generalization and IRQ
-hardirq stacks remain explicit follow-up boundaries in the active roadmap.
+exec/mm objects stay out of trap-stack frames. For `APP=user-boot`, the RISC-V formal entry MUST keep the
+user-origin path on the `sscratch`-provided safe kernel stack and MUST bypass the VMAP bit-test on that
+path. A kernel-origin trap MUST classify the prospective 288-byte frame before saving any general
+register, using only `sp` and `sscratch` and the Linux-shaped `((sp - frame_size) >> THREAD_SHIFT) & 1`
+test (`THREAD_SHIFT=14`). Its normal branch MUST restore the original `sp`, clear `sscratch`, and preserve
+all other registers before entering the common frame-save path.
+
+The overflow stack MUST be a linker-visible 4 KiB static region aligned to 16 bytes. The overflow branch
+MUST preserve the bad stack pointer and original `t6` through the `t6`/`sscratch` exchange, switch before
+constructing a complete `TrapFrame`, and save all integer registers plus `sepc`, `scause`, `stval` and
+`sstatus`. The non-returning handler MUST use only the SBI console to report stable bad-SP, task-stack,
+overflow-stack and CSR diagnostics before terminal shutdown; it MUST NOT use ordinary checkpoints,
+allocation, printk locking or user-signal delivery. The shared classification constants and frame
+construction contract MUST have object smoke coverage, while an ordinary user `ecall` with callee-saved
+sentinels covers transparent register return. Per-task stack ownership, per-CPU overflow stacks and IRQ
+hardirq stack switching remain explicit follow-up boundaries in the active roadmap.
 
 ## Files and syscall dispatch
 
