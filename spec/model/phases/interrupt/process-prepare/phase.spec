@@ -333,7 +333,12 @@ object TaskCreationCore: TaskObject {
              * observed child plain fork：保存 shell parent 和 grandchild
              * continuation facts，shell clone 返回 child pid，只有 shell
              * wait4 时才切入 grandchild，不 enqueue 第二个 UserChild task
-             * ref。
+             * ref。PID1-originated plain fork 在 child exit + wait4 status
+             * copyout 后已经收割内部 child，因此必须 dequeue 并把单 slot
+             * 复位为 Prepared，下一次 CopyUserProcess 使用递增 pid 复用该
+             * internal task ref。observed shell grandchild 完成则不同：
+             * UserChild 仍承载 Ready shell continuation，必须保持 enqueue，
+             * 只清理上一轮 grandchild 的 snapshot/wait/exit 临时事实。
              */
             Action::CopyUserProcess(
                 src_process: UserInitProcess,
@@ -404,7 +409,7 @@ object TaskCreationCore: TaskObject {
                 }
 
                 deferred {
-                    "用户态 CopyUserProcess 当前只覆盖 PID1 observed plain fork、顺序 OpenRC vfork active-slot reuse 和单层 OpenRC login nested vfork takeover。OpenRC login shell /bin/ls 在 child continuation 内发起的 plain fork 不进入 CopyUserProcess；它由 UserChildProcess 的 observed child plain-fork facts 复用单 internal slot，clone 返回 grandchild pid，wait4 再 handoff 到 grandchild，仍不创建第二个 runnable UserChild task ref。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
+                    "用户态 CopyUserProcess 当前只覆盖 PID1 sequential plain fork、顺序 OpenRC vfork active-slot reuse 和单层 OpenRC login nested vfork takeover。PID1 plain child 在 exit + wait4 status copyout 后已经收割，内部 UserChild task ref 出队并回到 Prepared，下一次 clone 分配递增 pid 后复用；它不产生 vfork completed record。OpenRC login shell /bin/ls 在 child continuation 内发起的 plain fork 不进入 CopyUserProcess；它由 UserChildProcess 的 observed child plain-fork facts 复用单 internal slot，clone 返回 grandchild pid，wait4 再 handoff 到 grandchild，仍不创建第二个 runnable UserChild task ref。observed grandchild 收割后内部 slot 仍承载 Ready shell 并保持调度可见，只清理该轮 snapshot/wait/exit facts，允许同一 shell 顺序创建下一 child。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
                 }
             }
         }

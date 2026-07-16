@@ -160,8 +160,10 @@ run_user_boot_input_case() {
     local input=$3
     local expected_markers=$4
     local ready_marker=$5
-    shift 5
+    local expected_marker_count=$6
+    shift 6
     local marker
+    local marker_count
     local markers_ok=1
 
     run_with_delayed_input_log "$log" "$input" "$ready_marker" "$@"
@@ -176,10 +178,12 @@ run_user_boot_input_case() {
             if [ -z "$marker" ]; then
                 continue
             fi
-            if ! grep -Fq "$marker" "$log"; then
+            marker_count=$(grep -Fc "$marker" "$log")
+            if [ "$marker_count" -lt "$expected_marker_count" ]; then
                 markers_ok=0
                 status=1
-                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
+                printf 'user-boot expected marker count for %s: %s actual=%s expected=%s\n' \
+                    "$name" "$marker" "$marker_count" "$expected_marker_count"
             fi
         done <<< "$expected_markers"
         if [ "$markers_ok" -eq 1 ]; then
@@ -323,7 +327,7 @@ run_user_boot_no_overlay_input_append_case() {
     local log=$7
     local image=$8
 
-    run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" "$make_cmd" run APP=user-boot \
+    run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" 2 "$make_cmd" run APP=user-boot \
         PLIC_PROVIDER="$provider" ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
@@ -446,7 +450,7 @@ cat > "$requested_init_overlay_map" <<'EOF'
 # target      test        toolchain  link
 /bin/ls       user_smoke  musl       dynamic
 EOF
-distro_sh_input=$'/bin/ls\nexit\n'
+distro_sh_input=$'/bin/ls\n/bin/ls\nexit\n'
 
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"

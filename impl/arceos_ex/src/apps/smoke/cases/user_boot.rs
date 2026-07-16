@@ -1787,21 +1787,113 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         }
     }
 
-    let ctx = context();
-    assertions.assert(
-        "observed plain fork restores shell continuation",
-        parent_frame.sepc == 0x8100
-            && ctx.user_child_process.pid() == shell_pid
-            && ctx.user_child_process.parent_pid() == shell_parent_pid
-            && ctx.user_child_process.tgid() == shell_tgid
-            && ctx.user_child_process.current_child_continuation()
-            && ctx.user_child_process.observed_plain_fork_parent_restored()
-            && ctx.user_child_process.last_reaped_child_pid() == child_pid
-            && ctx.user_init_process.child_process_pid() == shell_pid
-            && ctx.user_init_process.child_process_group() == shell_pgrp
-            && ctx.user_init_process.child_process_session_id() == shell_session_id
-            && !ctx.user_init_process.pending_plain_fork_child_visible(),
-    );
+    {
+        let ctx = context();
+        assertions.assert(
+            "observed plain fork restores shell continuation",
+            parent_frame.sepc == 0x8100
+                && ctx.user_child_process.pid() == shell_pid
+                && ctx.user_child_process.parent_pid() == shell_parent_pid
+                && ctx.user_child_process.tgid() == shell_tgid
+                && ctx.user_child_process.current_child_continuation()
+                && ctx.user_child_process.observed_plain_fork_parent_restored()
+                && ctx.user_child_process.last_reaped_child_pid() == child_pid
+                && ctx.user_init_process.child_process_pid() == shell_pid
+                && ctx.user_init_process.child_process_group() == shell_pgrp
+                && ctx.user_init_process.child_process_session_id() == shell_session_id
+                && !ctx.user_init_process.pending_plain_fork_child_visible(),
+        );
+    }
+
+    let first_round_cleared = context()
+        .user_child_process
+        .finish_observed_child_parent_restore();
+    {
+        let ctx = context();
+        assertions.assert(
+            "observed plain fork finishes completed round",
+            first_round_cleared,
+        );
+        assertions.assert(
+            "observed plain fork preserves shell identity",
+            ctx.user_child_process.state() == State::Ready
+                && ctx.user_child_process.pid() == shell_pid
+                && ctx.user_child_process.parent_pid() == shell_parent_pid
+                && ctx.user_child_process.tgid() == shell_tgid,
+        );
+        assertions.assert(
+            "observed plain fork preserves shell continuation",
+            ctx.user_child_process.current_child_continuation()
+                && ctx.user_child_process.enqueued(),
+        );
+        assertions.assert(
+            "observed plain fork preserves shell runqueue visibility",
+            ctx.scheduler
+                .boot_runqueue()
+                .contains_task(crate::objects::user_boot::USER_CHILD_PID),
+        );
+        assertions.assert(
+            "observed plain fork clears completed round snapshots",
+            !ctx.user_child_process.observed_plain_fork_clone()
+                && !ctx.user_child_process.child_exit_status_observed()
+                && !ctx.user_child_process.parent_wait_frame_saved()
+                && !ctx.user_child_process.parent_address_space_snapshot_saved()
+                && !ctx.user_child_process.parent_wait_stack_snapshot_copied(),
+        );
+    }
+
+    let second_child_pid = {
+        let mut clone_frame = TrapFrame::zeroed();
+        clone_frame.sepc = 0x8200;
+        clone_frame.set_reg(2, USER_STACK_TOP - 0x880);
+        clone_frame.set_reg(10, USER_PLAIN_FORK_FLAGS);
+        clone_frame.set_reg(11, 0);
+        clone_frame.set_reg(17, 220);
+
+        let ctx = context();
+        let Some(second_child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &clone_frame,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+        ) else {
+            assertions.assert("copy second observed child plain fork", false);
+            return;
+        };
+        if !ctx
+            .user_init_process
+            .observe_pending_plain_fork_child_process_group_visible(shell_pid, second_child_pid)
+        {
+            assertions.assert("observe second pending plain fork child", false);
+            return;
+        }
+        second_child_pid
+    };
+
+    {
+        let ctx = context();
+        assertions.assert(
+            "observed plain fork reuses shell for second child",
+            second_child_pid > child_pid
+                && ctx.user_child_process.pid() == shell_pid
+                && ctx.user_child_process.parent_pid() == shell_parent_pid
+                && ctx.user_child_process.tgid() == shell_tgid
+                && ctx.user_child_process.current_child_continuation()
+                && ctx.user_child_process.enqueued()
+                && ctx.user_child_process.observed_plain_fork_child_pid() == second_child_pid
+                && ctx
+                    .user_child_process
+                    .observed_plain_fork_child_pending_wait()
+                && ctx.user_child_process.next_child_pid() > second_child_pid
+                && ctx.user_init_process.pending_plain_fork_child_pid() == second_child_pid,
+        );
+    }
 }
 
 fn start_active_vfork_child(index: usize) -> Option<usize> {
@@ -1838,6 +1930,18 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
 
     {
         let ctx = context();
+        if !ctx.scheduler.boot_runqueue().contains_task(USER_CHILD_PID) {
+            let runqueue_ref = ctx
+                .scheduler
+                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
+                .ok()?;
+            ctx.scheduler
+                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+                .ok()?;
+        }
+        if !ctx.user_child_process.mark_enqueued() {
+            return None;
+        }
         if !ctx
             .user_init_process
             .observe_child_process_group_visible(child_pid)

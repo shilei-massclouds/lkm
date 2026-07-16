@@ -1,5 +1,5 @@
 name = "linux-exact-baseline-difftest"
-description = "Run the long-term Linux/arceos_ex baseline difftest for distro /bin/sh with delayed /bin/ls input, comparing the cumulative stable exact runtime checkpoint intersection."
+description = "Run the long-term Linux/arceos_ex baseline difftest for distro /bin/sh with two delayed sequential /bin/ls commands, comparing the cumulative stable exact runtime checkpoint intersection."
 mode = "paired_checkpoint_diff"
 default_runs = 1
 timeout_seconds = 360
@@ -86,7 +86,7 @@ command = [
   "APP=user-boot",
   "ROOTFS_LTP_OVERLAY=none",
   "PROBE=announce,stress-mem",
-  "STRESS_MEM_BYTES=131072",
+  "STRESS_MEM_BYTES=262144",
   "QEMU_SMP=2",
   "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
   "QEMU_APPEND=earlycon=sbi init=/bin/sh",
@@ -94,7 +94,7 @@ command = [
 
 [paired.arceos_ex.delayed_stdin]
 ready_marker = "/ #"
-payload = "/bin/ls\nexit\n"
+payload = "/bin/ls\n/bin/ls\nexit\n"
 
 [paired.linux]
 working_directory = "../linux-6.12"
@@ -134,7 +134,7 @@ stop_after_stress_mem = true
 
 [paired.linux.delayed_stdin]
 ready_marker = "~ #"
-payload = "/bin/ls\nexit\n"
+payload = "/bin/ls\n/bin/ls\nexit\n"
 
 [metadata]
 observation_mode = "baseline-paired-checkpoint-diff"
@@ -142,4 +142,4 @@ baseline_role = "long-term-linux-exact"
 linux_exact_runtime_target_count = 103
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
 cumulative_scope = "long-term stable same-semantic exact-mapped checkpoint intersection converged from pd-0005; architecture-front, early-byte-only, Linux C-entry timeline, and AP-repeatable head.S markers remain observed coverage outside this baseline hard gate; pd-0004 payload exec hard scope remains absorbed into the cumulative shell baseline"
-payload = "/bin/sh delayed /bin/ls then exit"
+payload = "/bin/sh delayed /bin/ls twice then exit"

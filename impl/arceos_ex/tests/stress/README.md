@@ -268,6 +268,7 @@ stress results are not affected by a developer's stale `build/virtio-blk.raw`
 from distro or diagnostic runs.
 
 DF-0003 must keep the ordinary non-probe distro shell path and the explicit
-external command payload `/bin/ls\nexit\n`. The case uses `delayed_stdin` only to
+two-command payload `/bin/ls\n/bin/ls\nexit\n`. Both commands must complete without
+`Function not implemented`. The case uses `delayed_stdin` only to
 wait for the BusyBox prompt before writing that payload; it must not fake
 terminal responses or change the command shape to make the case pass.

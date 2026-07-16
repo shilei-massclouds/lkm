@@ -8,10 +8,13 @@ const BUFFER_CAPACITY: usize = 32768;
 const BUFFER_CAPACITY: usize = 65536;
 #[cfg(stress_mem_bytes_131072)]
 const BUFFER_CAPACITY: usize = 131072;
+#[cfg(stress_mem_bytes_262144)]
+const BUFFER_CAPACITY: usize = 262144;
 #[cfg(not(any(
     stress_mem_bytes_32768,
     stress_mem_bytes_65536,
-    stress_mem_bytes_131072
+    stress_mem_bytes_131072,
+    stress_mem_bytes_262144
 )))]
 const BUFFER_CAPACITY: usize = 65536;
 

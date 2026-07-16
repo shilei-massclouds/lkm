@@ -41,9 +41,18 @@ Rule IDs (MUST):
 The user-smoke harness uses a case-local disk, the default overlay map, `FORCE=1` and case-local
 `QEMU_APPEND="earlycon=sbi"`; it does not inherit the manual `/bin/sh` default. Separate distro cases use
 `ROOTFS_OVERLAY=none`: one runs `init=/bin/ls`, and one waits for the BusyBox prompt before sending bounded
-host-side `/bin/ls` and `exit`. The latter requires a stable rootfs marker and `user exit status=0`.
+host-side `/bin/ls`, `/bin/ls` and `exit`. The latter requires both external commands to complete, a stable
+rootfs marker from each listing, no `Function not implemented`, and `user exit status=0`.
 Host input belongs to delayed-stdin orchestration and is not kernel-side ready data. These ordinary shell
 and native-init diagnostics remain until their replacement behavior is separately specified.
+
+DF-0003 uses that exact two-command delayed-input payload for 30-run ordinary-path stress. The
+Linux/arceos_ex exact paired shell baseline sends the same payload to both sides and compares the stable
+exact checkpoint sequence. Its arceos_ex `stress-mem` capture uses 256 KiB so the complete two-command
+announce stream is retained without overflow; a truncated one-command prefix is not an acceptable paired
+baseline. Object smoke must additionally complete one observed child fork/wait/exit/
+parent-restore round, create a second child from the same shell continuation, and assert increasing pids,
+preserved shell identity/runqueue visibility and cleared first-round snapshot/wait/exit facts.
 
 ## rc.local and paired difftest
 

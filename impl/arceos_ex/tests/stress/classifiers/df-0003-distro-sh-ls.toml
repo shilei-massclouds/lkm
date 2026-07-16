@@ -20,4 +20,5 @@ description = "BusyBox reported an unsupported syscall or command path."
 id = "distro-sh-ls-success"
 result = "success"
 contains = ["lost+found", "user exit status=0"]
-description = "Distro /bin/sh ran /bin/ls through fork/wait4/execve and exited cleanly."
+regex = ["(?s)lost\\+found.*lost\\+found"]
+description = "Distro /bin/sh ran two sequential /bin/ls commands through fork/wait4/execve and exited cleanly."

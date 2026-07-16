@@ -48,6 +48,10 @@ creation to `TaskCreationCore.CopyUserProcess`. The current implementation delib
 observed child slot: parent state and writable pages are saved for handoff, the child receives `a0=0`,
 and wait/exit restores the parent view before status copyout. Nested OpenRC/login slices reuse only the
 explicitly modeled continuation records; this is not a claim of a general runnable task graph or COW.
+For a PID1-originated plain fork, successful wait status copyout completes reaping: the exited internal
+`UserChild` task is removed from the runqueue, its slot becomes `Prepared`, and the next sequential fork
+reuses that task ref with a monotonically increasing user-visible pid. This path does not use the vfork
+completed-record archive.
 
 For the observed OpenRC login-shell plain fork, `UserInitProcess` additionally owns one pending
 grandchild identity from clone return until the shell's wait4 handoff. It records the grandchild pid and
@@ -57,7 +61,11 @@ only `setpgid(child_pid, child_pid)`; the update is consumed into the visible ch
 handoff. Unknown pid remains `ESRCH`, negative pgid remains `EINVAL`, and unsupported or cross-session
 group selection remains `EPERM`. Parent-side setpgid after handoff/exec, multiple pending children and a
 general process-group/task lookup stay deferred. Grandchild exit restores the saved shell pgrp/session
-and clears any pending identity.
+and clears any pending identity. The internal `UserChild` remains the `Ready`, enqueued shell continuation;
+the restore clears only the completed grandchild round's trap-frame, stack/address-space snapshot, wait
+frame/status and exit facts. A later sequential observed plain fork may reuse that shell slot and must
+receive the next pid. This is distinct from vfork active-slot reuse, which releases a completed execution
+slot to `Prepared`.
 
 Child `execve(221)` builds its replacement address space in Context-owned staging and commits it without
 a large trap-stack temporary. Old-mm reclamation, complete failure rollback, repeated staging reset,

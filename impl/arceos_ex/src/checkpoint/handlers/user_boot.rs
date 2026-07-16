@@ -1978,6 +1978,10 @@ fn run_user_child_parent_wait_resumed(
 
     let child = &ctx.user_child_process;
     let obs = wait4_checkpoint_observation();
+    let runqueue_contains_internal_child = ctx
+        .scheduler
+        .boot_runqueue()
+        .contains_task(crate::objects::user_boot::USER_CHILD_PID);
     let valid = child.child_exit_status_observed()
         && child.wait4_status_copied()
         && child.parent_wait_resumed()
@@ -2014,6 +2018,41 @@ fn run_user_child_parent_wait_resumed(
     sink.diag_usize("wait4_resumed_wait_status", obs.resumed_wait_status);
     sink.diag_usize("wait4_resumed_status_copied", obs.resumed_status_copied);
     sink.diag_usize("wait4_child_exit_status", obs.child_exit_status);
+    sink.diag_usize("child_lifecycle", child.state() as usize);
+    sink.diag_usize("child_pid", child.pid());
+    sink.diag_usize("child_parent_pid", child.parent_pid());
+    sink.diag_usize("child_tgid", child.tgid());
+    sink.diag_usize(
+        "child_continuation_taken",
+        child.child_continuation_taken() as usize,
+    );
+    sink.diag_usize("parent_wait_resumed", child.parent_wait_resumed() as usize);
+    sink.diag_usize(
+        "vfork_parent_resumed",
+        child.vfork_parent_resumed() as usize,
+    );
+    sink.diag_usize(
+        "observed_plain_fork_child_active",
+        child.observed_plain_fork_child_active() as usize,
+    );
+    sink.diag_usize(
+        "observed_plain_fork_parent_restored",
+        child.observed_plain_fork_parent_restored() as usize,
+    );
+    sink.diag_usize(
+        "current_child_continuation",
+        child.current_child_continuation() as usize,
+    );
+    sink.diag_usize("child_enqueued", child.enqueued() as usize);
+    sink.diag_usize(
+        "runqueue_contains_internal_child",
+        runqueue_contains_internal_child as usize,
+    );
+    sink.diag_usize("next_child_pid", child.next_child_pid());
+    sink.diag_usize(
+        "completed_child_record_count",
+        child.completed_child_record_count(),
+    );
     sink.diag_usize("wait4_stack_window_compared", obs.stack_window_compared);
     sink.diag_usize("wait4_stack_window_diff_count", obs.stack_window_diff_count);
     sink.diag_hex_pair(

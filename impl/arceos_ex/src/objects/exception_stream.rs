@@ -5681,7 +5681,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
             let runqueue_ref = match ctx
                 .scheduler
-                .select_runqueue_for_task(child_pid, &ctx.cpu_group)
+                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
             {
                 Ok(runqueue_ref) => runqueue_ref,
                 Err(_) => {
@@ -5691,7 +5691,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             };
             if ctx
                 .scheduler
-                .enqueue_task_on_runqueue(child_pid, runqueue_ref)
+                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
                 .is_err()
             {
                 complete_unsupported_clone_syscall(frame, "enqueue");
@@ -7008,6 +7008,15 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
         Checkpoint::UserChildParentWaitResumed,
         crate::context::context_ref(),
     );
+    {
+        let ctx = crate::context::context();
+        if !ctx
+            .user_child_process
+            .finish_observed_child_parent_restore()
+        {
+            return false;
+        }
+    }
     true
 }
 
@@ -7291,6 +7300,19 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         Checkpoint::UserChildParentWaitResumed,
         crate::context::context_ref(),
     );
+    if status_copied {
+        let ctx = crate::context::context();
+        if ctx
+            .scheduler
+            .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+            .is_err()
+            || !ctx
+                .user_child_process
+                .mark_plain_fork_reaped_slot_reusable()
+        {
+            return false;
+        }
+    }
     true
 }
 
@@ -7911,6 +7933,28 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     print_bool_digit(child.current_child_continuation());
     crate::arch::riscv64::sbi::putstr(" child_pid=");
     print_decimal(child.pid());
+    crate::arch::riscv64::sbi::putstr(" child_parent_pid=");
+    print_decimal(child.parent_pid());
+    crate::arch::riscv64::sbi::putstr(" child_tgid=");
+    print_decimal(child.tgid());
+    crate::arch::riscv64::sbi::putstr(" child_continuation_taken=");
+    print_bool_digit(child.child_continuation_taken());
+    crate::arch::riscv64::sbi::putstr(" parent_wait_resumed=");
+    print_bool_digit(child.parent_wait_resumed());
+    crate::arch::riscv64::sbi::putstr(" vfork_parent_resumed=");
+    print_bool_digit(child.vfork_parent_resumed());
+    crate::arch::riscv64::sbi::putstr(" observed_child_active=");
+    print_bool_digit(child.observed_plain_fork_child_active());
+    crate::arch::riscv64::sbi::putstr(" observed_parent_restored=");
+    print_bool_digit(child.observed_plain_fork_parent_restored());
+    crate::arch::riscv64::sbi::putstr(" child_enqueued=");
+    print_bool_digit(child.enqueued());
+    crate::arch::riscv64::sbi::putstr(" runqueue_contains_internal_child=");
+    print_bool_digit(
+        ctx.scheduler
+            .boot_runqueue()
+            .contains_task(crate::objects::user_boot::USER_CHILD_PID),
+    );
     crate::arch::riscv64::sbi::putstr(" child_exit_status=");
     print_decimal(child.child_exit_status());
     crate::arch::riscv64::sbi::putstr(" pending_sigchld=");

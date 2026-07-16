@@ -146,6 +146,7 @@ predicate user_clone_observed_vfork_pidfd_args_bound<T>(boundaries: T) -> bool;
 predicate user_clone_plain_fork_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_vm_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_pidfd_first_slice_bound<T>(boundaries: T) -> bool;
+predicate user_clone_bounded_sequential_plain_fork_bound<T>(boundaries: T) -> bool;
 predicate user_clone_bounded_sequential_vfork_records_bound<T>(boundaries: T) -> bool;
 predicate user_clone_single_active_child_slot_bound<T>(boundaries: T) -> bool;
 predicate user_clone_completed_child_record_capacity_bound<T>(boundaries: T) -> bool;
@@ -603,6 +604,9 @@ predicate user_child_process_observed_child_plain_fork_parent_saved<T>(process: 
 predicate user_child_process_observed_child_plain_fork_child_pid_bound<T>(process: T) -> bool;
 predicate user_child_process_observed_child_plain_fork_no_second_task<T>(process: T) -> bool;
 predicate user_child_process_observed_child_plain_fork_parent_restored<T>(process: T) -> bool;
+predicate user_child_process_observed_child_transient_state_cleared<T>(process: T) -> bool;
+predicate user_child_process_observed_shell_continuation_reusable<T>(process: T) -> bool;
+predicate user_child_process_observed_shell_runqueue_preserved<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_pidfd_copyout_observed<T>(process: T) -> bool;
 predicate user_child_process_single_active_slot<T>(process: T) -> bool;
 predicate user_child_process_completed_records_capacity_bound<T>(process: T) -> bool;
@@ -612,6 +616,7 @@ predicate user_child_process_completed_record_unreaped<T>(process: T) -> bool;
 predicate user_child_process_completed_record_reaped<T>(process: T) -> bool;
 predicate user_child_process_completed_record_released<T>(process: T) -> bool;
 predicate user_child_process_active_slot_reusable<T>(process: T) -> bool;
+predicate user_child_process_plain_fork_reaped_slot_released<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_vfork_next_child_accepted<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_frame_saved<T>(process: T) -> bool;
@@ -803,6 +808,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_plain_fork_first_slice_bound(self);
                     user_clone_vfork_vm_first_slice_bound(self);
                     user_clone_vfork_pidfd_first_slice_bound(self);
+                    user_clone_bounded_sequential_plain_fork_bound(self);
                     user_clone_bounded_sequential_vfork_records_bound(self);
                     user_clone_single_active_child_slot_bound(self);
                     user_clone_completed_child_record_capacity_bound(self);
@@ -842,6 +848,7 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_plain_fork_first_slice_bound(self);
             user_clone_vfork_vm_first_slice_bound(self);
             user_clone_vfork_pidfd_first_slice_bound(self);
+            user_clone_bounded_sequential_plain_fork_bound(self);
             user_clone_bounded_sequential_vfork_records_bound(self);
             user_clone_single_active_child_slot_bound(self);
             user_clone_completed_child_record_capacity_bound(self);
@@ -2921,7 +2928,11 @@ object SyscallTable: ResourceObject {
                  * CLONE_SETTLS is not set.  The syscall action decodes this
                  * ABI shape, then drives TaskCreationCore.CopyUserProcess;
                  * it must not synthesize a PID return without creating a
-                 * child task boundary.
+                 * child task boundary. After wait4 has restored PID1 and
+                 * reaped that child, the exited internal UserChild task is
+                 * removed from the runqueue and its execution slot returns to
+                 * Prepared. A later sequential plain fork allocates the next
+                 * user-visible pid and reuses that internal task ref.
                  * The later OpenRC login shell and rc.local direct-inittab
                  * /bin/ls focused baselines have the same plain-fork flags,
                  * but current_child=1 and the single active UserChild slot is
@@ -2941,7 +2952,12 @@ object SyscallTable: ResourceObject {
                  * when the shell later reaches wait4(-1, status,
                  * allowed_options, NULL).  Child exit restores the shell
                  * address-space, writable pages, fd snapshot and visible pid,
-                 * then returns the grandchild pid from the shell wait4.
+                 * then returns the grandchild pid from the shell wait4. This
+                 * restore does not release the internal slot: it still carries
+                 * the Ready shell continuation and remains runqueue-visible.
+                 * Only the completed grandchild round's trap/snapshot/wait/
+                 * exit facts are cleared before the shell may create the next
+                 * sequential observed child.
                  *
                  * The OpenRC native /sbin/init boundary observes
                  * clone_flags=0x4111 and diagnostics decode
@@ -3305,6 +3321,31 @@ object UserChildProcess: ResourceObject {
     }
 
     actions {
+        on Action::PlainForkChildReaped {
+            /*
+             * A PID1-originated plain-fork child is fully reaped when its
+             * exit path restores the parent wait frame and successfully
+             * copies status. The internal UserChild task no longer carries a
+             * live shell at that boundary, so it is dequeued and its slot is
+             * released for the next monotonically allocated child pid. This
+             * path does not archive a vfork completed-child record.
+             */
+            depends_on {
+                UserChildProcess.state == State::Ready;
+                UserInitProcess.state == State::Online;
+                FilesStruct.state == State::Ready;
+            }
+
+            ensures {
+                user_child_process_exit_status_observed(self);
+                user_child_process_wait4_status_copied(self);
+                user_child_process_parent_wait_resumed(self);
+                user_child_process_plain_fork_reaped_slot_released(self, Scheduler);
+                user_child_process_active_slot_reusable(self);
+                user_child_process_next_child_pid_bound(self);
+            }
+        }
+
         on Action::VforkChildExit {
             /*
              * Bounded OpenRC vfork completion: child exit restores the saved
@@ -3407,7 +3448,10 @@ object UserChildProcess: ResourceObject {
              * current child pid to the login shell parent. The restore must
              * be visible-pid-only: the shell's inherited pgrp, session id and
              * controlling-tty facts remain the shell facts and are not
-             * overwritten by the grandchild pid.
+             * overwritten by the grandchild pid. The shell remains Ready and
+             * scheduled in the same internal slot. The just-completed
+             * grandchild's saved frame/snapshot/wait/exit facts are cleared so
+             * a second sequential observed child can reuse the shell slot.
              */
             depends_on {
                 UserChildProcess.state == State::Ready;
@@ -3424,6 +3468,9 @@ object UserChildProcess: ResourceObject {
                 user_init_process_observed_child_visible_pid_only_restore(UserInitProcess, self);
                 user_init_process_pending_plain_fork_child_cleared_on_parent_restore(UserInitProcess, self);
                 user_child_process_observed_child_plain_fork_parent_restored(self);
+                user_child_process_observed_child_transient_state_cleared(self);
+                user_child_process_observed_shell_continuation_reusable(self);
+                user_child_process_observed_shell_runqueue_preserved(self, Scheduler);
                 user_child_process_single_active_slot(self);
             }
         }
