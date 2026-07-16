@@ -1,12 +1,50 @@
 use crate::{
     apps::smoke::SmokeResult,
     context::context,
-    objects::{config::SelectedPayloadKind, printk, state::State},
+    objects::{
+        binary_format_registry::BinaryFormatError,
+        config::SelectedPayloadKind,
+        elf_object::ElfObject,
+        exec_transaction::{ExecArguments, ExecError},
+        files::FILE_PATH_MAX,
+        printk,
+        state::State,
+    },
 };
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let boundaries = &ctx.payload_exec_sync_boundaries;
+    let boundaries = &ctx.exec_sync_boundaries;
+    let registry = &ctx.binary_format_registry;
+    let transaction = &ctx.exec_transaction;
+    let mut rejected_elf = ElfObject::new();
+    let four = [
+        b"/a".as_slice(),
+        b"b".as_slice(),
+        b"c".as_slice(),
+        b"d".as_slice(),
+    ];
+    let five = [
+        b"/a".as_slice(),
+        b"b".as_slice(),
+        b"c".as_slice(),
+        b"d".as_slice(),
+        b"e".as_slice(),
+    ];
+    let six = [
+        b"/a".as_slice(),
+        b"b".as_slice(),
+        b"c".as_slice(),
+        b"d".as_slice(),
+        b"e".as_slice(),
+        b"f".as_slice(),
+    ];
+    let max_string = [b'x'; FILE_PATH_MAX];
+    let mut absolute_max_string = max_string;
+    absolute_max_string[0] = b'/';
+    let mut too_long_string = [b'x'; FILE_PATH_MAX + 1];
+    too_long_string[0] = b'/';
+    let limits = ctx.config.exec_argument_limits();
 
     if crate::phases::payload::state() != State::Online
         || ctx.config.selected_payload_kind() != SelectedPayloadKind::Smoke
@@ -54,11 +92,59 @@ pub fn run() -> SmokeResult {
         || !boundaries.default_init_trimmed_because_config_default_init_empty()
         || !boundaries.binfmt_script_deferred()
         || !boundaries.exec_panic_terminal_bound()
+        || !boundaries.single_active_transaction()
+        || !boundaries.point_of_no_return_bound()
+        || !boundaries.cloexec_precheck_bound()
+        || !boundaries.current_staging_mm_handoff_bound()
+        || !boundaries.retired_mm_release_bound()
+        || !boundaries.boot_runtime_owner_handoff_bound()
+        || registry.state() != State::Ready
+        || registry.handler_count() != 1
+        || !registry.only_elf_handler()
+        || !registry.script_deferred()
+        || !registry.misc_deferred()
+        || !registry.dynamic_registration_deferred()
+        || !registry.module_retry_trimmed()
+        || !matches!(
+            registry.prepare_main(b"not-an-elf", &mut rejected_elf),
+            Err(BinaryFormatError::NoExecutableFormat)
+        )
+        || rejected_elf.state() != State::Base
+        || transaction.state() != State::Ready
+        || transaction.active()
+        || transaction.point_of_no_return()
+        || limits.max_arg_strings() != 0x7fff_ffff
+        || limits.max_arg_strlen() != 32 * 4096
+        || limits.arg_max_floor() != 128 * 1024
+        || limits.stack_rlimit() != 8 * 1024 * 1024
+        || limits.stk_lim() != 8 * 1024 * 1024
+        || limits.argument_bytes() != 2 * 1024 * 1024
+        || !limits.accepts(
+            1,
+            0,
+            limits.argument_bytes() - core::mem::size_of::<usize>(),
+        )
+        || limits.accepts(
+            1,
+            0,
+            limits.argument_bytes() - core::mem::size_of::<usize>() + 1,
+        )
+        || ExecArguments::for_boot(b"/bin/sh", limits).is_err()
+        || ExecArguments::from_slices(&absolute_max_string, &four, &four, limits).is_err()
+        || !matches!(
+            ExecArguments::from_slices(b"relative", &four, &four, limits),
+            Err(ExecError::InvalidPath)
+        )
+        || ExecArguments::from_slices(b"/bin/sh", &five, &six, limits).is_err()
+        || !matches!(
+            ExecArguments::from_slices(&too_long_string, &four, &four, limits),
+            Err(ExecError::ArgumentsTooBig)
+        )
     {
-        printk::write_str("payload lifecycle or deferred boundary facts invalid\n");
+        printk::write_str("exec object lifecycle, registry, or argument bounds invalid\n");
         return SmokeResult::Failed;
     }
 
-    printk::write_str("payload exec sync deferred\n");
+    printk::write_str("exec object lifecycle and argument bounds valid\n");
     SmokeResult::Passed
 }

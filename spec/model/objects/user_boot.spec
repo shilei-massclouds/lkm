@@ -30,7 +30,7 @@ enum UserInitPathRef {
     /*
      * Historical name for the Linux fallback candidate "/sbin/init"; this is
      * not CONFIG_DEFAULT_INIT, whose current empty value is recorded by
-     * PayloadExecSyncBoundaries.
+     * ExecSyncBoundaries.
      */
     DefaultInit,
     EtcInit,
@@ -55,10 +55,6 @@ enum UserInitAttemptReason {
     CandidateUnsupported,
 }
 
-enum ElfObjectRole {
-    MainExecutable,
-    Interpreter,
-}
 
 enum UserCloneFirstSliceKind {
     PlainFork,
@@ -108,34 +104,6 @@ predicate payload_image_read_complete_checkpoint<T, V>(payload: T, vfs: V) -> bo
 predicate payload_image_read_failed_checkpoint_defined<T>(payload: T) -> bool;
 predicate payload_image_read_error_classification_contract_ready<T>(payload: T) -> bool;
 
-predicate payload_exec_sync_boundaries_ready<T>(boundaries: T) -> bool;
-predicate payload_kernel_execve_linux_window_bound<T>(boundaries: T) -> bool;
-predicate payload_binfmt_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_cred_guard_mutex_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_update_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_mmap_local_irq_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_task_siglock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_tasklist_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_fs_lock_rcu_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_mmap_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_membarrier_deferred<T>(boundaries: T) -> bool;
-predicate payload_bprm_mm_init_task_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_mmap_task_lock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_sched_mm_cid_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_files_unshare_cloexec_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_io_uring_cancel_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_posix_timer_siglock_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_namespace_switch_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_success_accounting_hooks_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_full_binfmt_deferred<T>(boundaries: T) -> bool;
-predicate payload_binfmt_module_retry_trimmed_noop<T>(boundaries: T) -> bool;
-predicate payload_binfmt_module_retry_trimmed_because_modules_disabled<T>(boundaries: T) -> bool;
-predicate payload_ramdisk_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
-predicate payload_ramdisk_init_trimmed_because_config_initrd_disabled<T>(boundaries: T) -> bool;
-predicate payload_default_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
-predicate payload_default_init_trimmed_because_config_default_init_empty<T>(boundaries: T) -> bool;
-predicate payload_binfmt_script_deferred<T>(boundaries: T) -> bool;
-predicate payload_exec_panic_terminal_bound<T>(boundaries: T) -> bool;
 
 predicate user_clone_deferred_boundaries_ready<T>(boundaries: T) -> bool;
 predicate user_clone_linux_6_12_legacy_clone_bound<T>(boundaries: T) -> bool;
@@ -167,38 +135,6 @@ predicate user_clone_clear_child_futex_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_wait_exit_reap_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_unsupported_flags_first_slice<T>(boundaries: T) -> bool;
 
-predicate elf_object_input_bound<T>(elf: T) -> bool;
-predicate elf_object_input_from_vfs<T, V>(elf: T, vfs: V) -> bool;
-predicate elf_object_magic_valid<T>(elf: T) -> bool;
-predicate elf_object_class_elf64<T>(elf: T) -> bool;
-predicate elf_object_little_endian<T>(elf: T) -> bool;
-predicate elf_object_machine_riscv<T>(elf: T) -> bool;
-predicate elf_object_type_supported<T>(elf: T) -> bool;
-predicate elf_object_static_executable<T>(elf: T) -> bool;
-predicate elf_object_role_bound<T, R>(elf: T, role: R) -> bool;
-predicate elf_object_dynamic_executable<T>(elf: T) -> bool;
-predicate elf_object_et_dyn_pie_main_supported<T>(elf: T) -> bool;
-predicate elf_object_main_pie_load_bias_bound<T>(elf: T) -> bool;
-predicate elf_object_interpreter_required<T>(elf: T) -> bool;
-predicate elf_object_interpreter_path_bound<T>(elf: T) -> bool;
-predicate elf_object_interpreter_elf_bound<T, I>(elf: T, interpreter: I) -> bool;
-predicate elf_object_et_dyn_interpreter_supported<T>(elf: T) -> bool;
-predicate elf_object_et_dyn_loader_without_interp_deferred<T>(elf: T) -> bool;
-predicate elf_object_runtime_entry_bound<T>(elf: T) -> bool;
-predicate elf_object_auxv_exec_fields_bound<T>(elf: T) -> bool;
-predicate elf_object_program_headers_parsed<T>(elf: T) -> bool;
-predicate elf_object_pt_load_segments_bound<T>(elf: T) -> bool;
-predicate elf_object_segment_permissions_bound<T>(elf: T) -> bool;
-predicate elf_object_load_plan_bound<T>(elf: T) -> bool;
-predicate elf_object_entry_in_executable_segment<T>(elf: T) -> bool;
-predicate elf_object_init_content_observed<T>(elf: T) -> bool;
-predicate elf_object_bss_zero_plan_bound<T>(elf: T) -> bool;
-predicate elf_object_bss_zeroed<T>(elf: T) -> bool;
-predicate elf_object_entry_bound<T>(elf: T) -> bool;
-predicate elf_object_mapped_to_user_address_space<T, A>(elf: T, space: A) -> bool;
-predicate elf_object_no_separate_loader<T>(elf: T) -> bool;
-predicate elf_object_load_merged_into_setup<T>(elf: T) -> bool;
-predicate elf_object_user_entry_ready<T>(elf: T) -> bool;
 
 predicate user_address_space_allocated<T>(space: T) -> bool;
 predicate user_address_space_first_instance<T>(space: T) -> bool;
@@ -236,6 +172,7 @@ predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
 predicate user_stack_allocated<T>(stack: T) -> bool;
 predicate user_stack_fixed_size_bound<T>(stack: T) -> bool;
+predicate user_stack_exec_fixture_capacity_bound<T>(stack: T) -> bool;
 predicate user_stack_mapped_into_address_space<T, A>(stack: T, space: A) -> bool;
 predicate user_stack_backing_pages_allocated<T>(stack: T) -> bool;
 predicate user_stack_zeroed<T>(stack: T) -> bool;
@@ -621,6 +558,9 @@ predicate user_child_process_vfork_next_child_accepted<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_frame_saved<T>(process: T) -> bool;
 predicate user_child_process_parent_address_space_snapshot_saved<T, A>(process: T, space: A) -> bool;
+predicate user_child_process_parent_exec_objects_retained<T, A, S>(process: T, space: A, stack: S) -> bool;
+predicate user_child_process_replaced_child_exec_backing_released<T>(process: T) -> bool;
+predicate user_child_process_parent_user_stack_restored<T, S>(process: T, stack: S) -> bool;
 predicate user_child_process_parent_wait_register_checkpoint_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_stack_window_checkpoint_bound<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_stack_window_compared<T>(process: T) -> bool;
@@ -700,90 +640,6 @@ context UserModeTrapReturnContext: Context {
     }
 }
 
-object PayloadExecSyncBoundaries: KernelObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    PayloadParam.state == State::Ready;
-                    KernelInitTask.state == State::Online;
-                    SystemState.state == State::Online;
-                    system_state_running(SystemState);
-                }
-
-                ensures {
-                    payload_exec_sync_boundaries_ready(self);
-                    payload_kernel_execve_linux_window_bound(self);
-                    payload_binfmt_lock_deferred(self);
-                    payload_cred_guard_mutex_deferred(self);
-                    payload_exec_update_lock_deferred(self);
-                    payload_exec_mmap_local_irq_deferred(self);
-                    payload_exec_task_siglock_deferred(self);
-                    payload_exec_tasklist_lock_deferred(self);
-                    payload_exec_fs_lock_rcu_deferred(self);
-                    payload_exec_mmap_lock_deferred(self);
-                    payload_exec_membarrier_deferred(self);
-                    payload_bprm_mm_init_task_lock_deferred(self);
-                    payload_exec_mmap_task_lock_deferred(self);
-                    payload_exec_sched_mm_cid_deferred(self);
-                    payload_exec_files_unshare_cloexec_deferred(self);
-                    payload_exec_io_uring_cancel_deferred(self);
-                    payload_exec_posix_timer_siglock_deferred(self);
-                    payload_exec_namespace_switch_deferred(self);
-                    payload_exec_success_accounting_hooks_deferred(self);
-                    payload_exec_full_binfmt_deferred(self);
-                    payload_binfmt_module_retry_trimmed_noop(self);
-                    payload_binfmt_module_retry_trimmed_because_modules_disabled(self);
-                    payload_ramdisk_init_branch_trimmed_noop(self);
-                    payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
-                    payload_default_init_branch_trimmed_noop(self);
-                    payload_default_init_trimmed_because_config_default_init_empty(self);
-                    payload_binfmt_script_deferred(self);
-                    payload_exec_panic_terminal_bound(self);
-                }
-
-                deferred {
-                    "Linux 6.12 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、exec_mmap() task_lock(mm handoff)、siglock/tasklist_lock、fs->lock+RCU、membarrier、sched_mm_cid rq_lock_irqsave+smp_mb、bprm_mm_init/finalize_exec task_lock rlimit 边界、files unshare/CLOEXEC file_lock、io_uring cancel、POSIX timer siglock、namespace switch、exec 成功后的 rseq/perf/audit/accounting hooks、完整 binfmt/script retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。当前 ../linux-6.12/.config 中 CONFIG_MODULES=n，因此 request_module(\"binfmt-...\") retry 记录为 trimmed/no-op。";
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            payload_exec_sync_boundaries_ready(self);
-            payload_kernel_execve_linux_window_bound(self);
-            payload_binfmt_lock_deferred(self);
-            payload_cred_guard_mutex_deferred(self);
-            payload_exec_update_lock_deferred(self);
-            payload_exec_mmap_local_irq_deferred(self);
-            payload_exec_task_siglock_deferred(self);
-            payload_exec_tasklist_lock_deferred(self);
-            payload_exec_fs_lock_rcu_deferred(self);
-            payload_exec_mmap_lock_deferred(self);
-            payload_exec_membarrier_deferred(self);
-            payload_bprm_mm_init_task_lock_deferred(self);
-            payload_exec_mmap_task_lock_deferred(self);
-            payload_exec_sched_mm_cid_deferred(self);
-            payload_exec_files_unshare_cloexec_deferred(self);
-            payload_exec_io_uring_cancel_deferred(self);
-            payload_exec_posix_timer_siglock_deferred(self);
-            payload_exec_namespace_switch_deferred(self);
-            payload_exec_success_accounting_hooks_deferred(self);
-            payload_exec_full_binfmt_deferred(self);
-            payload_binfmt_module_retry_trimmed_noop(self);
-            payload_binfmt_module_retry_trimmed_because_modules_disabled(self);
-            payload_ramdisk_init_branch_trimmed_noop(self);
-            payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
-            payload_default_init_branch_trimmed_noop(self);
-            payload_default_init_trimmed_because_config_default_init_empty(self);
-            payload_binfmt_script_deferred(self);
-            payload_exec_panic_terminal_bound(self);
-        }
-    }
-}
 
 object UserCloneDeferredBoundaries: KernelObject {
     initial_state: State::Base;
@@ -1043,6 +899,7 @@ object UserStack: ResourceObject {
                 ensures {
                     user_stack_allocated(self);
                     user_stack_fixed_size_bound(self);
+                    user_stack_exec_fixture_capacity_bound(self);
                     user_stack_mapped_into_address_space(self, UserAddressSpace);
                     user_stack_backing_pages_allocated(self);
                     user_stack_zeroed(self);
@@ -1059,6 +916,7 @@ object UserStack: ResourceObject {
         invariant {
             user_stack_allocated(self);
             user_stack_fixed_size_bound(self);
+            user_stack_exec_fixture_capacity_bound(self);
             user_stack_mapped_into_address_space(self, UserAddressSpace);
             user_stack_backing_pages_allocated(self);
             user_stack_zeroed(self);
@@ -1070,124 +928,6 @@ object UserStack: ResourceObject {
     }
 }
 
-object ElfObject: ResourceObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    VfsCore.state == State::Ready;
-                    FsStruct.state == State::Ready;
-                    vfs_absolute_path_walk_supported(VfsCore);
-                    fs_struct_root_dentry_set(FsStruct, Dentry);
-                }
-
-                ensures {
-                    elf_object_input_bound(self);
-                    elf_object_input_from_vfs(self, VfsCore);
-                    elf_object_magic_valid(self);
-                    elf_object_class_elf64(self);
-                    elf_object_little_endian(self);
-                    elf_object_machine_riscv(self);
-                    elf_object_type_supported(self);
-                    elf_object_role_bound(self, ElfObjectRole::MainExecutable);
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        invariant {
-            elf_object_input_bound(self);
-            elf_object_input_from_vfs(self, VfsCore);
-            elf_object_magic_valid(self);
-            elf_object_class_elf64(self);
-            elf_object_little_endian(self);
-            elf_object_machine_riscv(self);
-            elf_object_type_supported(self);
-            elf_object_role_bound(self, ElfObjectRole::MainExecutable);
-        }
-
-        transitions {
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    elf_object_program_headers_parsed(self);
-                    elf_object_pt_load_segments_bound(self);
-                    elf_object_segment_permissions_bound(self);
-                    elf_object_load_plan_bound(self);
-                    elf_object_entry_in_executable_segment(self);
-                    elf_object_runtime_entry_bound(self);
-                    elf_object_auxv_exec_fields_bound(self);
-                    elf_object_init_content_observed(self);
-                    elf_object_bss_zero_plan_bound(self);
-                    elf_object_entry_bound(self);
-                    elf_object_load_merged_into_setup(self);
-                    /*
-                     * Static executables keep elf_object_no_separate_loader.
-                     * Dynamically linked executables instead bind PT_INTERP to
-                     * a second ElfObject role, Interpreter. The interpreter is
-                     * not an ElfLoader resource object and load remains merged
-                     * into ElfObject.Setup / UserAddressSpace.Setup.
-                     *
-                     * Linux 6.12 fs/binfmt_elf.c::load_elf_binary() accepts
-                     * both ET_EXEC and ET_DYN. It distinguishes ET_DYN PIE
-                     * programs by the presence of PT_INTERP and loads them away
-                     * from the interpreter/loader using a load_bias derived
-                     * from ELF_ET_DYN_BASE plus ASLR. This model keeps the same
-                     * classification but trims ASLR/VMA search to a fixed,
-                     * non-overlapping main PIE load bias for the first slice.
-                     * ET_DYN without PT_INTERP is the direct-loader form and is
-                     * explicitly deferred here.
-                     */
-                    elf_object_static_executable(self) || elf_object_dynamic_executable(self);
-                    elf_object_et_dyn_pie_main_supported(self);
-                    elf_object_et_dyn_loader_without_interp_deferred(self);
-                    elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            elf_object_program_headers_parsed(self);
-            elf_object_pt_load_segments_bound(self);
-            elf_object_segment_permissions_bound(self);
-            elf_object_load_plan_bound(self);
-            elf_object_entry_in_executable_segment(self);
-            elf_object_init_content_observed(self);
-            elf_object_bss_zero_plan_bound(self);
-            elf_object_entry_bound(self);
-            elf_object_load_merged_into_setup(self);
-            elf_object_runtime_entry_bound(self);
-            elf_object_static_executable(self) || elf_object_dynamic_executable(self);
-            elf_object_et_dyn_pie_main_supported(self);
-            elf_object_et_dyn_loader_without_interp_deferred(self);
-            elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    UserAddressSpace.state == State::Ready;
-                    UserStack.state == State::Ready;
-                    UserTrapFrame.state == State::Ready;
-                }
-
-                ensures {
-                    elf_object_user_entry_ready(self);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            elf_object_user_entry_ready(self);
-        }
-    }
-}
 
 object UserTrapFrame: ResourceObject {
     initial_state: State::Base;
@@ -3338,6 +3078,8 @@ object UserChildProcess: ResourceObject {
 
             ensures {
                 user_child_process_exit_status_observed(self);
+                user_child_process_replaced_child_exec_backing_released(self);
+                user_child_process_parent_user_stack_restored(self, UserStack);
                 user_child_process_wait4_status_copied(self);
                 user_child_process_parent_wait_resumed(self);
                 user_child_process_plain_fork_reaped_slot_released(self, Scheduler);
@@ -3367,6 +3109,8 @@ object UserChildProcess: ResourceObject {
 
             ensures {
                 user_child_process_exit_status_observed(self);
+                user_child_process_replaced_child_exec_backing_released(self);
+                user_child_process_parent_user_stack_restored(self, UserStack);
                 user_child_process_vfork_parent_resumed(self);
                 user_child_process_completed_record_archived(self);
                 user_child_process_completed_record_unreaped(self);
@@ -3461,6 +3205,8 @@ object UserChildProcess: ResourceObject {
 
             ensures {
                 user_child_process_exit_status_observed(self);
+                user_child_process_replaced_child_exec_backing_released(self);
+                user_child_process_parent_user_stack_restored(self, UserStack);
                 user_child_process_wait4_status_copied(self);
                 user_child_process_parent_wait_stack_snapshot_restored(self, UserAddressSpace);
                 user_child_process_parent_wait_writable_page_snapshot_restored(self, UserAddressSpace);
@@ -4083,7 +3829,7 @@ object UserBootPayload: ResourceObject {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     KernelInitTask.state == State::Online;
-                    PayloadExecSyncBoundaries.state == State::Ready;
+                    ExecSyncBoundaries.state == State::Ready;
                 }
 
                 ensures {
@@ -4144,7 +3890,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_init_attempt_failure_trace_defined(self);
             payload_image_read_failed_checkpoint_defined(self);
             payload_image_read_error_classification_contract_ready(self);
-            PayloadExecSyncBoundaries.state == State::Ready;
+            ExecSyncBoundaries.state == State::Ready;
         }
 
         actions {
@@ -4266,7 +4012,7 @@ object UserBootPayload: ResourceObject {
                     KernelInitTask.state == State::Online;
                     ExceptionStream.state == State::Ready;
                     SyscallException.state == State::Prepared;
-                    PayloadExecSyncBoundaries.state == State::Ready;
+                    ExecSyncBoundaries.state == State::Ready;
                 }
 
                 drives {

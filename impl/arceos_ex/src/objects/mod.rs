@@ -1,3 +1,4 @@
+pub mod binary_format_registry;
 pub mod bio;
 pub mod block_device;
 pub mod boot_args;
@@ -22,9 +23,12 @@ pub mod early_ioremap;
 pub mod early_param;
 pub mod early_vm;
 pub mod earlycon;
+pub mod elf_object;
 pub mod event_stream;
 pub mod exception_stream;
 pub mod exception_table;
+pub mod exec_sync_boundaries;
+pub mod exec_transaction;
 pub mod ext2;
 pub mod fdt;
 pub mod fdt_facts;

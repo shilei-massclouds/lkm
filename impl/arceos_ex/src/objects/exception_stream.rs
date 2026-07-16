@@ -1,4 +1,7 @@
 #[cfg(app_user_boot)]
+use alloc::vec::Vec;
+
+#[cfg(app_user_boot)]
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicU8, Ordering};
 
@@ -7,9 +10,7 @@ use crate::checkpoint::{self, Checkpoint};
 #[cfg(checkpoint_handler_user_syscall_error)]
 use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
-use super::user_boot::{
-    ElfError, ElfObject, USER_EXEC_ARG_MAX, UserAddressSpace, UserStack, UserTrapFrame,
-};
+use super::user_boot::{ElfError, ElfObject, UserAddressSpace, UserTrapFrame};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::{CloseOnExecReport, FILE_POLLIN, FileError, TERMIOS_SIZE, is_null_path, is_tty_path},
@@ -129,7 +130,7 @@ const SYSCALL_GETRANDOM: usize = 278;
 const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
-const USER_EXECVE_VECTOR_DIAG_MAX: usize = 4;
+const USER_EXECVE_VECTOR_DIAG_MAX: usize = 8;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_NONE: usize = 0;
 #[cfg(app_user_boot)]
@@ -139,15 +140,15 @@ const EXECVE_OBS_STAGE_MAIN_ELF_READY: usize = 2;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_INTERPRETER_READY: usize = 3;
 #[cfg(app_user_boot)]
-const EXECVE_OBS_STAGE_ADDRESS_SPACE_READY: usize = 4;
+pub(crate) const EXECVE_OBS_STAGE_ADDRESS_SPACE_READY: usize = 4;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_CONTEXT_REPLACED: usize = 5;
 #[cfg(app_user_boot)]
-const EXECVE_OBS_STAGE_SATP_READY: usize = 6;
+pub(crate) const EXECVE_OBS_STAGE_SATP_READY: usize = 6;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_TRAP_FRAME_READY: usize = 7;
 #[cfg(app_user_boot)]
-const EXECVE_OBS_STAGE_SATP_SWITCHED: usize = 8;
+pub(crate) const EXECVE_OBS_STAGE_SATP_SWITCHED: usize = 8;
 #[cfg(app_user_boot)]
 const EXECVE_OBS_STAGE_RETURN_FRAME_READY: usize = 9;
 #[cfg(app_user_boot)]
@@ -157,33 +158,33 @@ const EXECVE_FAIL_STAGE_CHILD_CONTINUATION: usize = 1;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_STAGE_PATH_KIND: usize = 2;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_PATH_READ: usize = 3;
+pub(crate) const EXECVE_FAIL_STAGE_PATH_READ: usize = 3;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_MAIN_PRESET: usize = 4;
+pub(crate) const EXECVE_FAIL_STAGE_MAIN_PRESET: usize = 4;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_MAIN_SETUP: usize = 5;
+pub(crate) const EXECVE_FAIL_STAGE_MAIN_SETUP: usize = 5;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_INTERPRETER_READ: usize = 6;
+pub(crate) const EXECVE_FAIL_STAGE_INTERPRETER_READ: usize = 6;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_INTERPRETER_PRESET: usize = 7;
+pub(crate) const EXECVE_FAIL_STAGE_INTERPRETER_PRESET: usize = 7;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_INTERPRETER_SETUP: usize = 8;
+pub(crate) const EXECVE_FAIL_STAGE_INTERPRETER_SETUP: usize = 8;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_INTERPRETER_BIND: usize = 9;
+pub(crate) const EXECVE_FAIL_STAGE_INTERPRETER_BIND: usize = 9;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET: usize = 10;
+pub(crate) const EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET: usize = 10;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_STACK_SETUP: usize = 11;
+pub(crate) const EXECVE_FAIL_STAGE_STACK_SETUP: usize = 11;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP: usize = 12;
+pub(crate) const EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP: usize = 12;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP: usize = 13;
+pub(crate) const EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP: usize = 13;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_ELF_ENABLE: usize = 14;
+pub(crate) const EXECVE_FAIL_STAGE_ELF_ENABLE: usize = 14;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE: usize = 15;
+pub(crate) const EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE: usize = 15;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_STAGE_CLOSE_ON_EXEC: usize = 16;
+pub(crate) const EXECVE_FAIL_STAGE_CLOSE_ON_EXEC: usize = 16;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_STAGE_ARGV_COPY: usize = 17;
 #[cfg(app_user_boot)]
@@ -195,21 +196,21 @@ const EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION: usize = 1;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_RELATIVE_PATH: usize = 2;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_VFS_READ: usize = 3;
+pub(crate) const EXECVE_FAIL_REASON_VFS_READ: usize = 3;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_UNSUPPORTED_ELF: usize = 4;
+pub(crate) const EXECVE_FAIL_REASON_UNSUPPORTED_ELF: usize = 4;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_INVALID_STATE: usize = 5;
+pub(crate) const EXECVE_FAIL_REASON_INVALID_STATE: usize = 5;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_INTERPRETER_READ: usize = 6;
+pub(crate) const EXECVE_FAIL_REASON_INTERPRETER_READ: usize = 6;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_ADDRESS_SPACE: usize = 7;
+pub(crate) const EXECVE_FAIL_REASON_ADDRESS_SPACE: usize = 7;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_STACK: usize = 8;
+pub(crate) const EXECVE_FAIL_REASON_STACK: usize = 8;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_TRAP_FRAME: usize = 9;
+pub(crate) const EXECVE_FAIL_REASON_TRAP_FRAME: usize = 9;
 #[cfg(app_user_boot)]
-const EXECVE_FAIL_REASON_CLOSE_ON_EXEC: usize = 10;
+pub(crate) const EXECVE_FAIL_REASON_CLOSE_ON_EXEC: usize = 10;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_ARGV_COPY: usize = 11;
 #[cfg(app_user_boot)]
@@ -299,6 +300,10 @@ const ENOSYS: usize = 38;
 const ENOMEM: usize = 12;
 const EAGAIN: usize = 11;
 const ENOENT: usize = 2;
+#[cfg(app_user_boot)]
+const E2BIG: usize = 7;
+#[cfg(app_user_boot)]
+const ENOEXEC: usize = 8;
 const ERANGE: usize = 34;
 const EOVERFLOW: usize = 75;
 const EREMOTEIO: usize = 121;
@@ -5936,10 +5941,12 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
             EXECVE_FAIL_STAGE_PATH_KIND,
             EXECVE_FAIL_REASON_RELATIVE_PATH,
         );
-        complete_unsupported_syscall(frame);
+        complete_error_syscall(frame, ENOEXEC);
         return;
     }
-    let argv = match copy_execve_argv(frame.reg(11)) {
+    let limits = crate::context::context_ref().config.exec_argument_limits();
+    let filename_bytes = filename_len + 1;
+    let argv = match copy_execve_vector(frame.reg(11), true, true, limits, 0, 0, filename_bytes) {
         Ok(argv) => argv,
         Err(ExecveArgvCopyError::Fault) => {
             reset_execve_checkpoint_observation();
@@ -5951,7 +5958,7 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
             record_execve_args(
                 filename_len,
                 argv.argv0_len(),
-                argv.argc,
+                argv.argc(),
                 argv.total_bytes,
                 true,
                 frame,
@@ -5959,18 +5966,55 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
             record_execve_failure_detail(
                 EXECVE_FAIL_STAGE_ARGV_COPY,
                 EXECVE_FAIL_REASON_ARGV_CAPACITY,
-                argv.argc,
+                argv.argc(),
                 0,
                 0,
             );
-            complete_unsupported_syscall(frame);
+            complete_error_syscall(frame, E2BIG);
+            return;
+        }
+        Err(ExecveArgvCopyError::NoMemory) => {
+            record_execve_failure(EXECVE_FAIL_STAGE_ARGV_COPY, EXECVE_FAIL_REASON_ARGV_COPY);
+            complete_error_syscall(frame, ENOMEM);
+            return;
+        }
+    };
+    let envp = match copy_execve_vector(
+        frame.reg(12),
+        false,
+        false,
+        limits,
+        argv.argc(),
+        0,
+        filename_bytes + argv.total_bytes,
+    ) {
+        Ok(envp) => envp,
+        Err(ExecveArgvCopyError::Fault) => {
+            record_execve_failure(EXECVE_FAIL_STAGE_ARGV_COPY, EXECVE_FAIL_REASON_ARGV_COPY);
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        Err(ExecveArgvCopyError::CapacityExceeded(envp)) => {
+            record_execve_failure_detail(
+                EXECVE_FAIL_STAGE_ARGV_COPY,
+                EXECVE_FAIL_REASON_ARGV_CAPACITY,
+                envp.argc(),
+                0,
+                0,
+            );
+            complete_error_syscall(frame, E2BIG);
+            return;
+        }
+        Err(ExecveArgvCopyError::NoMemory) => {
+            record_execve_failure(EXECVE_FAIL_STAGE_ARGV_COPY, EXECVE_FAIL_REASON_ARGV_COPY);
+            complete_error_syscall(frame, ENOMEM);
             return;
         }
     };
     record_execve_args(
         filename_len,
         argv.argv0_len(),
-        argv.argc,
+        argv.argc(),
         argv.total_bytes,
         false,
         frame,
@@ -5980,31 +6024,32 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
 
-    let argv_slices = [
-        &argv.bytes[0][..argv.lens[0]],
-        &argv.bytes[1][..argv.lens[1]],
-        &argv.bytes[2][..argv.lens[2]],
-        &argv.bytes[3][..argv.lens[3]],
-    ];
-    let result = replace_current_user_exec_image(
+    let Some(argv_slices) = argv.slices() else {
+        complete_error_syscall(frame, ENOMEM);
+        return;
+    };
+    let Some(envp_slices) = envp.slices() else {
+        complete_error_syscall(frame, ENOMEM);
+        return;
+    };
+    match super::exec_transaction::execute_slices(
+        crate::context::context(),
         &filename[..filename_len],
-        &argv_slices[..argv.argc],
-        frame,
-    );
-    match result {
-        Ok(()) => {
+        &argv_slices,
+        &envp_slices,
+        super::exec_transaction::ExecOwner::Runtime,
+        Some(frame),
+    ) {
+        Ok(_) => {
             table.execve_observed.store(1, Ordering::Release);
         }
-        Err(ExecveFirstSliceError::NotFound) => complete_error_syscall(frame, ENOENT),
-        Err(ExecveFirstSliceError::Unsupported) => complete_unsupported_syscall(frame),
+        Err(super::exec_transaction::ExecError::NotFound) => complete_error_syscall(frame, ENOENT),
+        Err(super::exec_transaction::ExecError::ArgumentsTooBig) => {
+            complete_error_syscall(frame, E2BIG)
+        }
+        Err(super::exec_transaction::ExecError::NoMemory) => complete_error_syscall(frame, ENOMEM),
+        Err(_) => complete_error_syscall(frame, ENOEXEC),
     }
-}
-
-#[cfg(app_user_boot)]
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ExecveFirstSliceError {
-    NotFound,
-    Unsupported,
 }
 
 #[cfg(app_user_boot)]
@@ -6057,7 +6102,7 @@ fn reset_execve_checkpoint_observation() {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_stage(stage: usize) {
+pub(crate) fn record_execve_stage(stage: usize) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.current_satp
         .store(crate::arch::riscv64::csr::read_satp(), Ordering::Release);
@@ -6067,12 +6112,12 @@ fn record_execve_stage(stage: usize) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_failure(stage: usize, reason: usize) {
+pub(crate) fn record_execve_failure(stage: usize, reason: usize) {
     record_execve_failure_detail(stage, reason, 0, 0, 0);
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_failure_detail(
+pub(crate) fn record_execve_failure_detail(
     stage: usize,
     reason: usize,
     detail: usize,
@@ -6093,21 +6138,21 @@ fn record_execve_failure_detail(
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_main_image_read(len: usize) {
+pub(crate) fn record_execve_main_image_read(len: usize) {
     EXECVE_CHECKPOINT_OBSERVATION
         .main_input_len
         .store(len, Ordering::Release);
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_interpreter_path(path: &[u8]) {
+pub(crate) fn record_execve_interpreter_path(path: &[u8]) {
     EXECVE_CHECKPOINT_OBSERVATION
         .interpreter_path_len
         .store(path.len(), Ordering::Release);
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_interpreter_image_read(len: usize) {
+pub(crate) fn record_execve_interpreter_image_read(len: usize) {
     EXECVE_CHECKPOINT_OBSERVATION
         .interpreter_input_len
         .store(len, Ordering::Release);
@@ -6142,7 +6187,7 @@ fn record_execve_args(
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_main_elf(elf: &ElfObject) {
+pub(crate) fn record_execve_main_elf(elf: &ElfObject) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.main_elf_type
         .store(elf.elf_type_index(), Ordering::Release);
@@ -6159,7 +6204,7 @@ fn record_execve_main_elf(elf: &ElfObject) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_interpreter(interpreter: &ElfObject) {
+pub(crate) fn record_execve_interpreter(interpreter: &ElfObject) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.interpreter_input_len
         .store(interpreter.input_len(), Ordering::Release);
@@ -6173,7 +6218,7 @@ fn record_execve_interpreter(interpreter: &ElfObject) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_address_space(stage: usize, address_space: &UserAddressSpace) {
+pub(crate) fn record_execve_address_space(stage: usize, address_space: &UserAddressSpace) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.address_space_state
         .store(address_space.state() as usize, Ordering::Release);
@@ -6189,7 +6234,7 @@ fn record_execve_address_space(stage: usize, address_space: &UserAddressSpace) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_trap_frame(trap_frame: &UserTrapFrame) {
+pub(crate) fn record_execve_trap_frame(trap_frame: &UserTrapFrame) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.trap_entry.store(trap_frame.entry(), Ordering::Release);
     obs.trap_sp.store(trap_frame.sp(), Ordering::Release);
@@ -6199,7 +6244,7 @@ fn record_execve_trap_frame(trap_frame: &UserTrapFrame) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_context_replaced(old_satp: usize, new_satp: usize) {
+pub(crate) fn record_execve_context_replaced(old_satp: usize, new_satp: usize) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.old_satp.store(old_satp, Ordering::Release);
     obs.new_satp.store(new_satp, Ordering::Release);
@@ -6207,7 +6252,7 @@ fn record_execve_context_replaced(old_satp: usize, new_satp: usize) {
 }
 
 #[cfg(app_user_boot)]
-fn record_execve_return_frame(frame: &TrapFrame) {
+pub(crate) fn record_execve_return_frame(frame: &TrapFrame) {
     let obs = &EXECVE_CHECKPOINT_OBSERVATION;
     obs.frame_after_sepc.store(frame.sepc, Ordering::Release);
     obs.frame_after_sp.store(frame.reg(2), Ordering::Release);
@@ -6215,295 +6260,6 @@ fn record_execve_return_frame(frame: &TrapFrame) {
     obs.frame_after_sstatus
         .store(frame.sstatus, Ordering::Release);
     record_execve_stage(EXECVE_OBS_STAGE_RETURN_FRAME_READY);
-}
-
-#[cfg(app_user_boot)]
-fn replace_current_user_exec_image(
-    filename: &[u8],
-    argv: &[&[u8]],
-    frame: &mut TrapFrame,
-) -> Result<(), ExecveFirstSliceError> {
-    let ctx = crate::context::context();
-    let image = super::user_boot::read_runtime_exec_path_image(
-        &mut ctx.vfs_core,
-        &ctx.fs_struct,
-        &mut ctx.ext2_filesystem,
-        &mut ctx.block_device_registry,
-        &ctx.kernel_image,
-        filename,
-        false,
-    )
-    .map_err(|_| {
-        record_execve_failure(EXECVE_FAIL_STAGE_PATH_READ, EXECVE_FAIL_REASON_VFS_READ);
-        ExecveFirstSliceError::NotFound
-    })?;
-    record_execve_main_image_read(image.len());
-
-    let mut new_elf = ElfObject::new();
-    if let Err(error) = new_elf.preset_from_vfs(image) {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_MAIN_PRESET,
-            EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
-            error.index(),
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    if let Err(error) = new_elf.setup(image) {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_MAIN_SETUP,
-            EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
-            error.index(),
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    record_execve_main_elf(&new_elf);
-    crate::checkpoint::dispatch(Checkpoint::UserExecMainElfReady, ctx);
-
-    let mut new_interpreter = ElfObject::new();
-    let interpreter_image = if let Some(interpreter_path) = new_elf.interpreter_path() {
-        record_execve_interpreter_path(interpreter_path);
-        let image = super::user_boot::read_runtime_exec_path_image(
-            &mut ctx.vfs_core,
-            &ctx.fs_struct,
-            &mut ctx.ext2_filesystem,
-            &mut ctx.block_device_registry,
-            &ctx.kernel_image,
-            interpreter_path,
-            true,
-        )
-        .map_err(|_| {
-            record_execve_failure(
-                EXECVE_FAIL_STAGE_INTERPRETER_READ,
-                EXECVE_FAIL_REASON_INTERPRETER_READ,
-            );
-            ExecveFirstSliceError::Unsupported
-        })?;
-        record_execve_interpreter_image_read(image.len());
-        if let Err(error) = new_interpreter.preset_interpreter_from_vfs(image) {
-            record_execve_failure_detail(
-                EXECVE_FAIL_STAGE_INTERPRETER_PRESET,
-                EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
-                error.index(),
-                ctx.page_allocator.buddy_total_free_pages(),
-                ctx.page_allocator.totalram_pages(),
-            );
-            return Err(ExecveFirstSliceError::Unsupported);
-        }
-        if let Err(error) = new_interpreter.setup(image) {
-            record_execve_failure_detail(
-                EXECVE_FAIL_STAGE_INTERPRETER_SETUP,
-                EXECVE_FAIL_REASON_UNSUPPORTED_ELF,
-                error.index(),
-                ctx.page_allocator.buddy_total_free_pages(),
-                ctx.page_allocator.totalram_pages(),
-            );
-            return Err(ExecveFirstSliceError::Unsupported);
-        }
-        if let Err(error) = new_elf.bind_runtime_interpreter(&new_interpreter) {
-            record_execve_failure_detail(
-                EXECVE_FAIL_STAGE_INTERPRETER_BIND,
-                EXECVE_FAIL_REASON_INVALID_STATE,
-                error.index(),
-                ctx.page_allocator.buddy_total_free_pages(),
-                ctx.page_allocator.totalram_pages(),
-            );
-            return Err(ExecveFirstSliceError::Unsupported);
-        }
-        record_execve_interpreter(&new_interpreter);
-        crate::checkpoint::dispatch(Checkpoint::UserExecInterpreterReady, ctx);
-        Some(image)
-    } else {
-        None
-    };
-    let interpreter_ref = interpreter_image.map(|_| &new_interpreter);
-
-    ctx.user_exec_staging_address_space
-        .preset(
-            ctx.vm.swapper_vm(),
-            &ctx.page_allocator,
-            &ctx.kernel_global_allocator,
-            &ctx.kernel_init_task,
-        )
-        .map_err(|_| {
-            record_execve_failure(
-                EXECVE_FAIL_STAGE_ADDRESS_SPACE_PRESET,
-                EXECVE_FAIL_REASON_ADDRESS_SPACE,
-            );
-            discard_execve_staging(ctx);
-            ExecveFirstSliceError::Unsupported
-        })?;
-
-    let mut new_stack = UserStack::new();
-    if new_stack
-        .setup(
-            &ctx.user_exec_staging_address_space,
-            &new_elf,
-            interpreter_ref,
-            argv,
-            &mut ctx.page_allocator,
-            &ctx.page_metadata_map,
-        )
-        .is_err()
-    {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_STACK_SETUP,
-            EXECVE_FAIL_REASON_STACK,
-            0,
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        discard_execve_staging(ctx);
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    if let Err(error) = ctx.user_exec_staging_address_space.setup(
-        &new_elf,
-        interpreter_ref,
-        &new_stack,
-        image,
-        interpreter_image,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-    ) {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_ADDRESS_SPACE_SETUP,
-            EXECVE_FAIL_REASON_ADDRESS_SPACE,
-            error.index(),
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        discard_execve_staging(ctx);
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    record_execve_address_space(
-        EXECVE_OBS_STAGE_ADDRESS_SPACE_READY,
-        &ctx.user_exec_staging_address_space,
-    );
-    crate::checkpoint::dispatch(Checkpoint::UserExecAddressSpaceReady, ctx);
-
-    let mut new_trap_frame = UserTrapFrame::new();
-    if new_trap_frame
-        .setup(&ctx.user_exec_staging_address_space, &new_elf, &new_stack)
-        .is_err()
-    {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_TRAP_FRAME_SETUP,
-            EXECVE_FAIL_REASON_TRAP_FRAME,
-            0,
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        discard_execve_staging(ctx);
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    if new_elf
-        .enable(
-            &ctx.user_exec_staging_address_space,
-            &new_stack,
-            &new_trap_frame,
-        )
-        .is_err()
-    {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_ELF_ENABLE,
-            EXECVE_FAIL_REASON_INVALID_STATE,
-            0,
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        discard_execve_staging(ctx);
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-    if let Err(error) = ctx.user_exec_staging_address_space.enable(
-        &new_trap_frame,
-        ctx.vm.swapper_vm(),
-        &ctx.kernel_image,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-    ) {
-        record_execve_failure_detail(
-            EXECVE_FAIL_STAGE_ADDRESS_SPACE_ENABLE,
-            EXECVE_FAIL_REASON_ADDRESS_SPACE,
-            error.index(),
-            ctx.page_allocator.buddy_total_free_pages(),
-            ctx.page_allocator.totalram_pages(),
-        );
-        discard_execve_staging(ctx);
-        return Err(ExecveFirstSliceError::Unsupported);
-    }
-
-    let entry = new_trap_frame.entry();
-    let sp = new_trap_frame.sp();
-    let sstatus = new_trap_frame.sstatus();
-    let old_satp = crate::arch::riscv64::csr::read_satp();
-    let satp = ctx.user_exec_staging_address_space.satp_token();
-    let close_on_exec_report = ctx.files_struct.close_on_exec().map_err(|_| {
-        record_execve_failure(
-            EXECVE_FAIL_STAGE_CLOSE_ON_EXEC,
-            EXECVE_FAIL_REASON_CLOSE_ON_EXEC,
-        );
-        ExecveFirstSliceError::Unsupported
-    })?;
-    print_execve_close_on_exec_report(close_on_exec_report);
-    ctx.elf_object = new_elf;
-    ctx.elf_interpreter_object = new_interpreter;
-    ctx.user_stack = new_stack;
-    commit_execve_staging_address_space(ctx);
-    record_execve_context_replaced(old_satp, satp);
-    crate::checkpoint::dispatch(Checkpoint::UserExecContextReplaced, ctx);
-    record_execve_address_space(EXECVE_OBS_STAGE_SATP_READY, &ctx.user_address_space);
-    crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
-    ctx.user_trap_frame = new_trap_frame;
-    record_execve_trap_frame(&ctx.user_trap_frame);
-    crate::checkpoint::dispatch(Checkpoint::UserExecTrapFrameReady, ctx);
-
-    crate::arch::riscv64::csr::write_satp(satp);
-    crate::arch::riscv64::csr::sfence_vma();
-    record_execve_stage(EXECVE_OBS_STAGE_SATP_SWITCHED);
-    crate::checkpoint::dispatch(Checkpoint::UserExecSatpSwitched, ctx);
-    reset_frame_for_execve_start_thread(frame, entry, sp, sstatus);
-    record_execve_return_frame(frame);
-    crate::checkpoint::dispatch(Checkpoint::UserExecReturnFrameReady, ctx);
-    Ok(())
-}
-
-#[cfg(app_user_boot)]
-fn commit_execve_staging_address_space(ctx: &mut crate::context::Context) {
-    let staging = &ctx.user_exec_staging_address_space as *const UserAddressSpace;
-    let current = &mut ctx.user_address_space as *mut UserAddressSpace;
-    // Avoid a whole-UserAddressSpace stack temporary on the trap/syscall stack.
-    unsafe {
-        core::ptr::copy_nonoverlapping(staging, current, 1);
-    }
-    ctx.user_exec_staging_address_space
-        .reset_staging_after_exec_commit();
-}
-
-#[cfg(app_user_boot)]
-fn discard_execve_staging(ctx: &mut crate::context::Context) {
-    ctx.user_exec_staging_address_space
-        .discard_staging_after_exec_failure(&mut ctx.page_allocator, &ctx.page_metadata_map);
-}
-
-#[cfg(app_user_boot)]
-fn reset_frame_for_execve_start_thread(
-    frame: &mut TrapFrame,
-    entry: usize,
-    sp: usize,
-    sstatus: usize,
-) {
-    let mut index = 1usize;
-    while index < 32 {
-        frame.set_reg(index, 0);
-        index += 1;
-    }
-    frame.set_reg(2, sp);
-    frame.sstatus = sstatus;
-    frame.sepc = entry;
-    frame.stval = 0;
 }
 
 #[cfg(app_user_boot)]
@@ -6857,6 +6613,7 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
             .user_child_process
             .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 status,
@@ -7031,6 +6788,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         let ctx = crate::context::context();
         let Some((parent_frame, child_pid)) = ctx.user_child_process.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
+            &mut ctx.user_stack,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             status,
@@ -7147,6 +6905,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         let Some((parent_frame, status_ptr, child_pid)) =
             ctx.user_child_process.child_exit_to_parent_wait(
                 &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 status,
@@ -7535,9 +7294,7 @@ fn copy_execve_cstr(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
 
 #[cfg(app_user_boot)]
 struct ExecveArgvCopy {
-    bytes: [[u8; USER_PATH_MAX]; USER_EXEC_ARG_MAX],
-    lens: [usize; USER_EXEC_ARG_MAX],
-    argc: usize,
+    entries: Vec<Vec<u8>>,
     total_bytes: usize,
 }
 
@@ -7545,15 +7302,26 @@ struct ExecveArgvCopy {
 impl ExecveArgvCopy {
     const fn new() -> Self {
         Self {
-            bytes: [[0u8; USER_PATH_MAX]; USER_EXEC_ARG_MAX],
-            lens: [0usize; USER_EXEC_ARG_MAX],
-            argc: 0,
+            entries: Vec::new(),
             total_bytes: 0,
         }
     }
 
     fn argv0_len(&self) -> usize {
-        if self.argc == 0 { 0 } else { self.lens[0] }
+        self.entries.first().map_or(0, Vec::len)
+    }
+
+    fn argc(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn slices(&self) -> Option<Vec<&[u8]>> {
+        let mut slices = Vec::new();
+        slices.try_reserve_exact(self.entries.len()).ok()?;
+        for entry in &self.entries {
+            slices.push(entry.as_slice());
+        }
+        Some(slices)
     }
 }
 
@@ -7563,19 +7331,39 @@ impl ExecveArgvCopy {
 enum ExecveArgvCopyError {
     Fault,
     CapacityExceeded(ExecveArgvCopy),
+    NoMemory,
+}
+
+#[cfg(app_user_boot)]
+enum ExecveStringCopyError {
+    Fault,
+    TooLong,
+    NoMemory,
 }
 
 #[cfg(app_user_boot)]
 // Returning the inline argv snapshot preserves the allocation-free user-copy failure path.
 #[allow(clippy::result_large_err)]
-fn copy_execve_argv(argv_ptr: usize) -> Result<ExecveArgvCopy, ExecveArgvCopyError> {
+fn copy_execve_vector(
+    argv_ptr: usize,
+    require_nonempty: bool,
+    is_argv: bool,
+    limits: super::config::ExecArgumentLimits,
+    existing_argc: usize,
+    existing_envc: usize,
+    base_string_bytes: usize,
+) -> Result<ExecveArgvCopy, ExecveArgvCopyError> {
     if argv_ptr == 0 {
-        return Err(ExecveArgvCopyError::Fault);
+        return if require_nonempty {
+            Err(ExecveArgvCopyError::Fault)
+        } else {
+            Ok(ExecveArgvCopy::new())
+        };
     }
 
     let mut copied = ExecveArgvCopy::new();
     let mut index = 0usize;
-    while index < USER_EXEC_ARG_MAX {
+    loop {
         let entry_ptr = argv_ptr
             .checked_add(index * core::mem::size_of::<usize>())
             .ok_or(ExecveArgvCopyError::Fault)?;
@@ -7587,38 +7375,93 @@ fn copy_execve_argv(argv_ptr: usize) -> Result<ExecveArgvCopy, ExecveArgvCopyErr
         }
         let arg_ptr = read_user_usize(entry_ptr).ok_or(ExecveArgvCopyError::Fault)?;
         if arg_ptr == 0 {
-            if copied.argc == 0 {
+            if copied.argc() == 0 && require_nonempty {
                 return Err(ExecveArgvCopyError::Fault);
             }
             return Ok(copied);
         }
-        let arg_len = copy_execve_cstr(arg_ptr, &mut copied.bytes[index])
-            .ok_or(ExecveArgvCopyError::Fault)?;
-        copied.lens[index] = arg_len;
-        copied.argc += 1;
-        copied.total_bytes = copied
+        let argument = match copy_execve_argument_string(arg_ptr, limits.max_arg_strlen()) {
+            Ok(argument) => argument,
+            Err(ExecveStringCopyError::Fault) => return Err(ExecveArgvCopyError::Fault),
+            Err(ExecveStringCopyError::TooLong) => {
+                return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+            }
+            Err(ExecveStringCopyError::NoMemory) => return Err(ExecveArgvCopyError::NoMemory),
+        };
+        let Some(next_count) = copied.argc().checked_add(1) else {
+            return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+        };
+        if next_count > limits.max_arg_strings() {
+            return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+        }
+        let Some(next_total_bytes) = copied
             .total_bytes
-            .checked_add(arg_len)
+            .checked_add(argument.len())
             .and_then(|bytes| bytes.checked_add(1))
-            .ok_or(ExecveArgvCopyError::Fault)?;
+        else {
+            return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+        };
+        let (argc, envc) = if is_argv {
+            let Some(argc) = existing_argc.checked_add(next_count) else {
+                return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+            };
+            (argc, existing_envc)
+        } else {
+            let Some(envc) = existing_envc.checked_add(next_count) else {
+                return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+            };
+            (existing_argc, envc)
+        };
+        let Some(string_bytes) = base_string_bytes.checked_add(next_total_bytes) else {
+            return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+        };
+        if !limits.accepts(argc, envc, string_bytes) {
+            return Err(ExecveArgvCopyError::CapacityExceeded(copied));
+        }
+        copied
+            .entries
+            .try_reserve(1)
+            .map_err(|_| ExecveArgvCopyError::NoMemory)?;
+        copied.entries.push(argument);
+        copied.total_bytes = next_total_bytes;
         index += 1;
     }
+}
 
-    let sentinel_ptr = argv_ptr
-        .checked_add(USER_EXEC_ARG_MAX * core::mem::size_of::<usize>())
-        .ok_or(ExecveArgvCopyError::Fault)?;
-    if !crate::context::context_ref()
-        .user_address_space
-        .user_range_mapped(sentinel_ptr, core::mem::size_of::<usize>())
-    {
-        return Err(ExecveArgvCopyError::Fault);
+#[cfg(app_user_boot)]
+fn copy_execve_argument_string(
+    user_ptr: usize,
+    max_len_with_nul: usize,
+) -> Result<Vec<u8>, ExecveStringCopyError> {
+    if user_ptr == 0 || max_len_with_nul == 0 {
+        return Err(ExecveStringCopyError::Fault);
     }
-    let sentinel = read_user_usize(sentinel_ptr).ok_or(ExecveArgvCopyError::Fault)?;
-    if sentinel == 0 {
-        Ok(copied)
-    } else {
-        Err(ExecveArgvCopyError::CapacityExceeded(copied))
+    let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
+    let mut bytes = Vec::new();
+    let mut index = 0usize;
+    while index < max_len_with_nul {
+        let Some(byte_ptr) = user_ptr.checked_add(index) else {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Err(ExecveStringCopyError::Fault);
+        };
+        if !user_copy_range_accessible(byte_ptr, 1, UserFaultAccess::Load) {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Err(ExecveStringCopyError::Fault);
+        }
+        let byte = unsafe { core::ptr::read_volatile(byte_ptr as *const u8) };
+        if byte == 0 {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Ok(bytes);
+        }
+        if bytes.len() == bytes.capacity() && bytes.try_reserve(1).is_err() {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return Err(ExecveStringCopyError::NoMemory);
+        }
+        bytes.push(byte);
+        index += 1;
     }
+    crate::arch::riscv64::csr::restore_user_memory_access(saved);
+    Err(ExecveStringCopyError::TooLong)
 }
 
 fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32) {
@@ -9175,7 +9018,7 @@ fn print_setgroups_error_detail(
 }
 
 #[cfg(checkpoint_handler_user_syscall_error)]
-fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
+pub(crate) fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
     crate::arch::riscv64::sbi::putstr("execve close_on_exec scanned=");
     print_decimal(report.scanned);
     crate::arch::riscv64::sbi::putstr(" closed=");
@@ -9193,7 +9036,7 @@ fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
 
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 #[allow(dead_code)]
-fn print_execve_close_on_exec_report(_report: CloseOnExecReport) {}
+pub(crate) fn print_execve_close_on_exec_report(_report: CloseOnExecReport) {}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_dirfd(dirfd: usize) {

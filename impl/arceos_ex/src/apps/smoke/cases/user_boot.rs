@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::{
     apps::smoke::{
         SmokeResult,
@@ -12,13 +14,12 @@ use crate::{
         task::TaskEntry,
         user_boot::{
             ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
-            USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_EXEC_ARG_MAX, USER_HEAP_BASE,
-            USER_HEAP_SIZE, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
-            USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
-            USER_STACK_SIZE, USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN, UserMappingKind,
-            UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult,
+            USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
+            USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
+            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
+            USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN, UserMappingKind, UserProcessGroupLookup,
+            UserProcessGroupUpdate, UserRtSigtimedwaitResult,
         },
-        vfs::VfsError,
         virtio_blk,
     },
 };
@@ -37,6 +38,93 @@ const USER_TEST_FD_CLOEXEC: u32 = 1;
 
 static mut USER_INIT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 static mut USER_INTERPRETER_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
+static USER_INIT_READ_LEN: AtomicUsize = AtomicUsize::new(0);
+static USER_INTERPRETER_READ_LEN: AtomicUsize = AtomicUsize::new(0);
+static mut USER_INTERPRETER_PATH: [u8; 128] = [0; 128];
+static USER_INTERPRETER_PATH_LEN: AtomicUsize = AtomicUsize::new(0);
+
+#[inline(never)]
+pub(super) fn stage_user_elf_images() -> bool {
+    USER_INIT_READ_LEN.store(0, Ordering::Release);
+    USER_INTERPRETER_READ_LEN.store(0, Ordering::Release);
+    USER_INTERPRETER_PATH_LEN.store(0, Ordering::Release);
+    stage_main_image() && discover_interpreter_path() && stage_interpreter_image()
+}
+
+#[inline(never)]
+fn stage_main_image() -> bool {
+    let ctx = context();
+    let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
+    let main_buffer = unsafe { &mut *core::ptr::addr_of_mut!(USER_INIT_READ_BUFFER) };
+    main_buffer.fill(0);
+    let Ok(main_len) = ctx.vfs_core.read_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &mut provider,
+        USER_INIT_PATH,
+        main_buffer,
+    ) else {
+        return false;
+    };
+    USER_INIT_READ_LEN.store(main_len, Ordering::Release);
+    true
+}
+
+#[inline(never)]
+fn discover_interpreter_path() -> bool {
+    let main_len = USER_INIT_READ_LEN.load(Ordering::Acquire);
+    let main_buffer = unsafe { &*core::ptr::addr_of!(USER_INIT_READ_BUFFER) };
+    if main_len == 0 || main_len > main_buffer.len() {
+        return false;
+    }
+    let ctx = context();
+    let mut probe_elf = crate::objects::elf_object::ElfObject::new();
+    if ctx
+        .binary_format_registry
+        .prepare_main(&main_buffer[..main_len], &mut probe_elf)
+        .is_err()
+    {
+        return false;
+    }
+    if let Some(path) = probe_elf.interpreter_path() {
+        if path.len() > 128 {
+            return false;
+        }
+        let output = unsafe { &mut *core::ptr::addr_of_mut!(USER_INTERPRETER_PATH) };
+        output[..path.len()].copy_from_slice(path);
+        USER_INTERPRETER_PATH_LEN.store(path.len(), Ordering::Release);
+    }
+    true
+}
+
+#[inline(never)]
+fn stage_interpreter_image() -> bool {
+    let path_len = USER_INTERPRETER_PATH_LEN.load(Ordering::Acquire);
+    if path_len == 0 {
+        return true;
+    }
+    let path_buffer = unsafe { &*core::ptr::addr_of!(USER_INTERPRETER_PATH) };
+    if path_len > path_buffer.len() {
+        return false;
+    }
+    let ctx = context();
+    let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
+    let interpreter_buffer = unsafe { &mut *core::ptr::addr_of_mut!(USER_INTERPRETER_READ_BUFFER) };
+    interpreter_buffer.fill(0);
+    let Ok(interpreter_len) = ctx.vfs_core.read_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &mut provider,
+        &path_buffer[..path_len],
+        interpreter_buffer,
+    ) else {
+        return false;
+    };
+    USER_INTERPRETER_READ_LEN.store(interpreter_len, Ordering::Release);
+    true
+}
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -66,59 +154,44 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert("vfs ready", ctx.vfs_core.state() == State::Ready);
         assertions.assert("fs_struct ready", ctx.fs_struct.state() == State::Ready);
+        assertions.assert(
+            "user ELF images staged",
+            USER_INIT_READ_LEN.load(Ordering::Acquire) != 0,
+        );
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
-        let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
         let buffer = unsafe {
             let ptr = core::ptr::addr_of_mut!(USER_INIT_READ_BUFFER);
             &mut *ptr
         };
-        buffer.fill(0);
-
-        let Ok(len) = ctx.vfs_core.read_path(
-            &ctx.fs_struct,
-            &mut ctx.ext2_filesystem,
-            &mut ctx.block_device_registry,
-            &mut provider,
-            USER_INIT_PATH,
-            buffer,
-        ) else {
-            assertions.assert("read /sbin/init", false);
+        let len = USER_INIT_READ_LEN.load(Ordering::Acquire);
+        if len == 0 || len > buffer.len() {
+            assertions.assert("staged /sbin/init", false);
             return;
-        };
+        }
         let image = &buffer[..len];
 
         assertions.assert(
             "payload setup",
             ctx.user_boot_payload
-                .setup(&ctx.kernel_init_task, &ctx.payload_exec_sync_boundaries)
+                .setup(&ctx.kernel_init_task, &ctx.exec_sync_boundaries)
                 .is_ok(),
         );
         assertions.assert("user child preset", ctx.user_child_process.preset().is_ok());
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
-        let interpreter_image = if let Some(path) = ctx.elf_object.interpreter_path() {
+        let interpreter_image = if let Some(_path) = ctx.elf_object.interpreter_path() {
             let interpreter_buffer = unsafe {
                 let ptr = core::ptr::addr_of_mut!(USER_INTERPRETER_READ_BUFFER);
                 &mut *ptr
             };
-            interpreter_buffer.fill(0);
-            let len = match ctx.vfs_core.read_path(
-                &ctx.fs_struct,
-                &mut ctx.ext2_filesystem,
-                &mut ctx.block_device_registry,
-                &mut provider,
-                path,
-                interpreter_buffer,
-            ) {
-                Ok(len) => len,
-                Err(error) => {
-                    assertions.assert(read_interpreter_error_label(error), false);
-                    return;
-                }
-            };
+            let len = USER_INTERPRETER_READ_LEN.load(Ordering::Acquire);
+            if len == 0 || len > interpreter_buffer.len() {
+                assertions.assert("staged interpreter", false);
+                return;
+            }
             let image = &interpreter_buffer[..len];
             assertions.assert(
                 "interpreter preset",
@@ -176,77 +249,13 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
-        let setup_word = core::mem::size_of::<usize>();
-        let getty_argv: [&[u8]; 3] = [b"/sbin/getty", b"38400", b"tty1"];
-        let mut getty_stack = crate::objects::user_boot::UserStack::new();
-        let getty_stack_ready = getty_stack
-            .setup(
-                &ctx.user_address_space,
-                &ctx.elf_object,
-                interpreter_ref,
-                &getty_argv,
-                &mut ctx.page_allocator,
-                &ctx.page_metadata_map,
-            )
-            .is_ok();
-        let getty_sp = getty_stack.initial_sp();
-        let getty_argc = stack_usize_at(&getty_stack, &ctx.page_metadata_map, getty_sp);
-        let getty_argv0 =
-            stack_usize_at(&getty_stack, &ctx.page_metadata_map, getty_sp + setup_word);
-        let getty_argv1 = stack_usize_at(
-            &getty_stack,
+        exercise_stack_argument_bounds(
+            assertions,
+            &ctx.user_address_space,
+            &ctx.elf_object,
+            interpreter_ref,
+            &mut ctx.page_allocator,
             &ctx.page_metadata_map,
-            getty_sp + 2 * setup_word,
-        );
-        let getty_argv2 = stack_usize_at(
-            &getty_stack,
-            &ctx.page_metadata_map,
-            getty_sp + 3 * setup_word,
-        );
-        let getty_argv_null = stack_usize_at(
-            &getty_stack,
-            &ctx.page_metadata_map,
-            getty_sp + 4 * setup_word,
-        );
-        let getty_envp_null = stack_usize_at(
-            &getty_stack,
-            &ctx.page_metadata_map,
-            getty_sp + 5 * setup_word,
-        );
-        assertions.assert(
-            "user stack bounded argv words",
-            getty_stack_ready
-                && getty_argc == Some(3)
-                && getty_argv0 == Some(getty_stack.arg0_ptr())
-                && getty_argv1.is_some_and(|ptr| {
-                    stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"38400\0")
-                })
-                && getty_argv2.is_some_and(|ptr| {
-                    stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"tty1\0")
-                })
-                && getty_argv_null == Some(0)
-                && getty_envp_null == Some(0),
-        );
-        assertions.assert(
-            "user stack bounded argv strings",
-            getty_argv0.is_some_and(|ptr| {
-                stack_contains_at(&getty_stack, &ctx.page_metadata_map, ptr, b"/sbin/getty\0")
-            }),
-        );
-        let oversized_argv: [&[u8]; USER_EXEC_ARG_MAX + 1] = [b"a", b"b", b"c", b"d", b"e"];
-        let mut oversized_stack = crate::objects::user_boot::UserStack::new();
-        assertions.assert(
-            "user stack bounded argv rejects overflow",
-            oversized_stack
-                .setup(
-                    &ctx.user_address_space,
-                    &ctx.elf_object,
-                    interpreter_ref,
-                    &oversized_argv,
-                    &mut ctx.page_allocator,
-                    &ctx.page_metadata_map,
-                )
-                .is_err(),
         );
         assertions.assert(
             "address space setup",
@@ -1298,6 +1307,58 @@ impl SmokeScenario for UserBootElfScenario {
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
 }
 
+#[inline(never)]
+fn exercise_stack_argument_bounds(
+    assertions: &mut SmokeAssertions,
+    address_space: &crate::objects::user_boot::UserAddressSpace,
+    elf: &crate::objects::elf_object::ElfObject,
+    interpreter: Option<&crate::objects::elf_object::ElfObject>,
+    page_allocator: &mut crate::objects::mm_core::PageAllocator,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+) {
+    let word = core::mem::size_of::<usize>();
+    let getty_argv: [&[u8]; 3] = [b"/sbin/getty", b"38400", b"tty1"];
+    let mut getty_stack = crate::objects::user_boot::UserStack::new();
+    let getty_stack_ready = getty_stack
+        .setup(
+            address_space,
+            elf,
+            interpreter,
+            &getty_argv,
+            page_allocator,
+            page_metadata_map,
+        )
+        .is_ok();
+    let getty_sp = getty_stack.initial_sp();
+    let getty_argc = stack_usize_at(&getty_stack, page_metadata_map, getty_sp);
+    let getty_argv0 = stack_usize_at(&getty_stack, page_metadata_map, getty_sp + word);
+    let getty_argv1 = stack_usize_at(&getty_stack, page_metadata_map, getty_sp + 2 * word);
+    let getty_argv2 = stack_usize_at(&getty_stack, page_metadata_map, getty_sp + 3 * word);
+    let getty_argv_null = stack_usize_at(&getty_stack, page_metadata_map, getty_sp + 4 * word);
+    let getty_envp_null = stack_usize_at(&getty_stack, page_metadata_map, getty_sp + 5 * word);
+    assertions.assert(
+        "user stack bounded argv words",
+        getty_stack_ready
+            && getty_argc == Some(3)
+            && getty_argv0 == Some(getty_stack.arg0_ptr())
+            && getty_argv1.is_some_and(|ptr| {
+                stack_contains_at(&getty_stack, page_metadata_map, ptr, b"38400\0")
+            })
+            && getty_argv2.is_some_and(|ptr| {
+                stack_contains_at(&getty_stack, page_metadata_map, ptr, b"tty1\0")
+            })
+            && getty_argv_null == Some(0)
+            && getty_envp_null == Some(0),
+    );
+    assertions.assert(
+        "user stack bounded argv strings",
+        getty_argv0.is_some_and(|ptr| {
+            stack_contains_at(&getty_stack, page_metadata_map, ptr, b"/sbin/getty\0")
+        }),
+    );
+    getty_stack.release_exec_backing(page_allocator, page_metadata_map);
+}
+
 fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
     let mut index = 0usize;
     while index <= USER_COMPLETED_CHILD_RECORD_CAPACITY {
@@ -1433,6 +1494,7 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
         let ctx = context();
         let (_parent_frame, child_pid) = ctx.user_child_process.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
+            &mut ctx.user_stack,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             index,
@@ -1739,6 +1801,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             .user_child_process
             .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
+                &mut ctx.user_stack,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,
@@ -2119,28 +2182,4 @@ fn bytes_eq(left: &[u8], right: &[u8]) -> bool {
         index += 1;
     }
     true
-}
-
-fn read_interpreter_error_label(error: VfsError) -> &'static str {
-    match error {
-        VfsError::CoreNotReady => "read interpreter core not ready",
-        VfsError::FsTypeNotReady => "read interpreter fs type not ready",
-        VfsError::FsTypeAlreadyRegistered => "read interpreter fs type duplicate",
-        VfsError::FsTypeMissing => "read interpreter fs type missing",
-        VfsError::MountMissing => "read interpreter mount missing",
-        VfsError::AlreadyMounted => "read interpreter already mounted",
-        VfsError::InvalidRef => "read interpreter invalid ref",
-        VfsError::InvalidName => "read interpreter invalid name",
-        VfsError::NameTooLong => "read interpreter name too long",
-        VfsError::NotDirectory => "read interpreter not directory",
-        VfsError::NotFile => "read interpreter not file",
-        VfsError::AlreadyExists => "read interpreter already exists",
-        VfsError::NotFound => "read interpreter not found",
-        VfsError::DirectoryNotEmpty => "read interpreter dir not empty",
-        VfsError::ReadOnly => "read interpreter read only",
-        VfsError::ShortBuffer => "read interpreter short buffer",
-        VfsError::Backend => "read interpreter backend",
-        VfsError::UnsupportedPath => "read interpreter unsupported path",
-        VfsError::SymlinkLoop => "read interpreter symlink loop",
-    }
 }

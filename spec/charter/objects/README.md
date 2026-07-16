@@ -2,6 +2,19 @@
 
 Object-level charter notes live here when they need a dedicated topic file.
 
+## Exec core objects
+
+| Object | Authoritative charter |
+| --- | --- |
+| `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
+| `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
+| `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
+| `ElfObject` | [`elf-object.md`](elf-object.md) |
+
+These are the four lifecycle objects in the shared boot/runtime exec pipeline. `BinaryFormatHandler` and
+`ElfBinaryFormat` are registry entry/type contracts; `ExecArguments`, `ExecError` and `ExecOwner` are value
+types. None of them adds another four-layer object family.
+
 Formal object specifications live under [`../../model/objects/`](../../model/objects/). Their complete
 file-level implementation mapping is maintained in
 [`../../coding/objects/README.md`](../../coding/objects/README.md); charter topics describe intent and do

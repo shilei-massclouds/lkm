@@ -196,8 +196,8 @@ Baseline difftest cases:
 - `linux-exact-baseline-difftest.toml`: long-term baseline differential test
   for the cumulative stable exact-mapped intersection on the distro `/bin/sh`
   path with delayed `/bin/ls\nexit\n`. It uses the shell rootfs image without
-  the default `/sbin/init` overlay, 2-vCPU topology on both sides, arceos_ex
-  prompt marker `/ #`, and Linux BusyBox prompt marker `~ #`. Its hard scope is
+  the default `/sbin/init` overlay, 2-vCPU topology on both sides, and the
+  BusyBox `~ #` prompt marker on both sides after exec installs `HOME=/`. Its hard scope is
   the converged `pd-0005` cumulative boot/rootfs/payload checkpoint set and
   includes the exact `UserExec.*` anchors completed by `pd-0004`. Range and
   unmapped checkpoints remain outside hard scope and are only reported as

@@ -27,7 +27,7 @@ command = [
 classifier = "../classifiers/df-0003-distro-sh-ls.toml"
 
 [delayed_stdin]
-ready_marker = "/ #"
+ready_marker = "~ #"
 payload = "/bin/ls\n/bin/ls\nexit\n"
 
 [metadata]

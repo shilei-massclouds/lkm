@@ -1,5 +1,9 @@
 # InitcallPhase coding
 
+本阶段还拥有 exec 格式注册边界：`InitcallTable` Ready 后调用 Context-owned
+`BinaryFormatRegistry.setup()`，固定注册唯一 `ElfBinaryFormat` entry，并在 InitcallPhase Prepared/Ready/
+Online 检查 registry 保持 Ready。handler 表不从 PayloadPhase 或 syscall 路径动态修改。
+
 InitcallPhase 是 SmpRuntimePhase 的第 4 个直接子阶段，由 KernelInitTask 执行。model 路径为
 `spec/model/phases/smp-runtime/initcall/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。

@@ -10,6 +10,7 @@ pub mod default_sched_root_domain;
 pub mod delay_loop;
 pub mod devfs;
 pub mod device_tree;
+pub mod exec_objects;
 pub mod ext2;
 pub mod fdt;
 pub mod finalize;

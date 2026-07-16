@@ -6,6 +6,7 @@ use crate::objects::irq_time::{
 };
 use crate::objects::state::EventResult;
 use crate::objects::{
+    binary_format_registry::BinaryFormatRegistry,
     block_device::BlockDeviceRegistry,
     boot_param::BootParam,
     cache_block_info::CacheBlockInfo,
@@ -26,6 +27,8 @@ use crate::objects::{
     event_stream::EventStream,
     exception_stream::{ExceptionStream, SyscallTable},
     exception_table::ExceptionTable,
+    exec_sync_boundaries::ExecSyncBoundaries,
+    exec_transaction::ExecTransaction,
     ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
     files::FilesStruct,
     finalize::{
@@ -100,7 +103,7 @@ use crate::objects::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     user_boot::{
-        ElfObject, PayloadExecSyncBoundaries, UserAddressSpace, UserBootPayload, UserChildProcess,
+        ElfObject, UserAddressSpace, UserBootPayload, UserChildProcess,
         UserCloneDeferredBoundaries, UserInitProcess, UserStack, UserTrapFrame,
     },
     vfs::{FsStruct, RamFsType, VfsCore},
@@ -294,6 +297,7 @@ pub struct Context {
     pub irq_proc_view_deferred: IrqProcViewDeferred,
     pub ctor_table: CtorTable,
     pub initcall_table: InitcallTable,
+    pub binary_format_registry: BinaryFormatRegistry,
     pub initcall_boundary: InitcallBoundary,
     pub kunit_runtime_trimmed: KUnitRuntimeTrimmed,
     pub initramfs_sync_deferred: InitramfsSyncDeferred,
@@ -310,7 +314,8 @@ pub struct Context {
     pub rcu_boot_end: RcuBootEnd,
     pub sysctl_args_deferred: SysctlArgsDeferred,
     pub finalize_boundary: FinalizeBoundary,
-    pub payload_exec_sync_boundaries: PayloadExecSyncBoundaries,
+    pub exec_sync_boundaries: ExecSyncBoundaries,
+    pub exec_transaction: ExecTransaction,
     pub user_clone_deferred_boundaries: UserCloneDeferredBoundaries,
     pub selected_payload_handoff: SelectedPayloadHandoff,
     // User payload carriers are live only in the user-boot configuration.
@@ -321,9 +326,6 @@ pub struct Context {
     #[cfg_attr(app_hello, allow(dead_code))]
     pub elf_interpreter_object: ElfObject,
     pub user_address_space: UserAddressSpace,
-    // The staging address space is activated only by the user-boot execve configuration.
-    #[allow(dead_code)]
-    pub user_exec_staging_address_space: UserAddressSpace,
     #[cfg_attr(app_hello, allow(dead_code))]
     pub user_stack: UserStack,
     pub user_trap_frame: UserTrapFrame,
@@ -506,6 +508,7 @@ impl Context {
             irq_proc_view_deferred: IrqProcViewDeferred::new(),
             ctor_table: CtorTable::new(),
             initcall_table: InitcallTable::new(),
+            binary_format_registry: BinaryFormatRegistry::new(),
             initcall_boundary: InitcallBoundary::new(),
             kunit_runtime_trimmed: KUnitRuntimeTrimmed::new(),
             initramfs_sync_deferred: InitramfsSyncDeferred::new(),
@@ -522,14 +525,14 @@ impl Context {
             rcu_boot_end: RcuBootEnd::new(),
             sysctl_args_deferred: SysctlArgsDeferred::new(),
             finalize_boundary: FinalizeBoundary::new(),
-            payload_exec_sync_boundaries: PayloadExecSyncBoundaries::new(),
+            exec_sync_boundaries: ExecSyncBoundaries::new(),
+            exec_transaction: ExecTransaction::new(),
             user_clone_deferred_boundaries: UserCloneDeferredBoundaries::new(),
             selected_payload_handoff: SelectedPayloadHandoff::new(),
             user_boot_payload: UserBootPayload::new(),
             elf_object: ElfObject::new(),
             elf_interpreter_object: ElfObject::new(),
             user_address_space: UserAddressSpace::new(),
-            user_exec_staging_address_space: UserAddressSpace::new(),
             user_stack: UserStack::new(),
             user_trap_frame: UserTrapFrame::new(),
             user_child_process: UserChildProcess::new(),

@@ -3008,12 +3008,19 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 当前先将 `PayloadPhase` 的对象和边界记录如下：
 
+Exec 核心对象的权威职责已经拆到
+[`ExecTransaction`](objects/exec-transaction.md)、
+[`BinaryFormatRegistry`](objects/binary-format-registry.md)、
+[`ExecSyncBoundaries`](objects/exec-sync-boundaries.md) 和
+[`ElfObject`](objects/elf-object.md)。本节只保留这些对象与 PayloadPhase、UserBootPayload、地址空间和
+进程交接的关系；不得从阶段叙述重新引入持久 `ExecCore` 或独立 `ElfLoader`。
+
 1. `Payload 交接期对象`（`PayloadPhase`）：属于阶段对象。`PayloadPhase.setup()` 确认编译期 selected payload 变种和前置条件；`PayloadPhase.enable()` 驱动 selected payload 的不可逆交接。成功后阶段进入 `Online`，启动编排链不再继续返回。
-2. `用户启动 payload 对象`（暂名 `UserBootPayload`）：Linux-like 变种对象，代表用户态启动 payload 的选择与交接流程。它的 `setup()` 从 `PayloadParam` 建立候选 init 选择上下文、参数/环境视图和 exec 前置条件；它的 `enable()` 按 Linux `kernel_init()` 末尾的顺序尝试 init 候选，成功后推进到 `Online`。`try_candidate(path)` 是 `UserBootPayload.enable()` 内部可重复调用的 action，不作为标准生命周期 slot。
+2. `用户启动 payload 对象`（`UserBootPayload`）：只负责 requested/default/fallback init 候选顺序与失败策略。它把选中的绝对路径和 boot 参数交给共享 `ExecTransaction`；不解析 ELF、不搜索 handler、不拥有 staging/commit。
 3. `Unikernel 应用对象`（暂名 `UnikernelApp`）：Unikernel 变种对象。当前只记录粗粒度约束：app 已选定、入口存在、payload 参数可用、基础输出设施可用；`enable()` 调用 app 入口，不把 Linux-like 的 `kernel_execve()` 细节套入该路径。
 4. `init 候选集合属性`（`UserBootPayload.candidates`）：覆盖 Linux 中 `ramdisk_execute_command`、`execute_command`、`CONFIG_DEFAULT_INIT` 和固定 fallback 列表。它是 `UserBootPayload` 的属性/选择上下文，不作为独立生命周期对象。由于前序 `RootfsPhase` 已要求 `init_eaccess(ramdisk_execute_command)` 必须满足调用 `prepare_namespace()` 的条件，当前 Linux-like 规格中 `ramdisk_execute_command` 分支只作为 checkpoint 保留，此处不会执行 `run_init_process(ramdisk_execute_command)`。有效候选顺序从 `execute_command`（来自 `init=`）开始，随后是 `CONFIG_DEFAULT_INIT`、`/sbin/init`、`/etc/init`、`/bin/init`、`/bin/sh`。其中 `init=` 指定路径失败会立即 panic；其它候选失败按 Linux 规则继续尝试或记录错误。
-5. `init 参数与环境对象`（暂名 `InitArgEnv`）：覆盖 `argv_init` 和 `envp_init`。`run_init_process(init_filename)` 会把 `argv_init[0]` 改为当前候选路径，再把 `argv_init` / `envp_init` 传给 `kernel_execve()`。`PayloadParam`、unknown boot options 和 `rdinit=` / `init=` 解析在前序阶段已经提供输入。
-6. `ELF 对象`（暂名 `ElfObject`）：表示从 rootfs 读取到内存后的用户态 ELF 镜像及其解析结果。它不是 `ElfLoader`，load 不是独立生命周期阶段。`ElfObject.preset()` 检查当前内核支持的 ELF 类型；`ElfObject.setup()` 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`，包含 `.bss` 清零、段权限和 entry point 记录；`ElfObject.enable()` 只确认 entry、用户栈和 trap frame 等进入用户态条件满足，并交给 `UserBootPayload`。dynamic libc 支持仍使用 `ElfObject`，但区分 main executable 与 interpreter 两种 role：主程序的 `PT_INTERP` 绑定解释器路径，`UserBootPayload` 读取该解释器并作为第二个 `ElfObject` 解析；解释器可以是 `ET_DYN`，但不建立 `ElfLoader` 资源对象。
+5. `ExecArguments` 值：覆盖 normalized filename、argv 和 envp；它是 `ExecTransaction` 的 bounded 输入，不建立独立生命周期对象。
+6. `ELF 对象`（`ElfObject`）：表示 main/interpreter artifact 与 load plan。详细职责见独立 charter；格式选择属于 registry，提交属于 transaction，不建立 `ElfLoader`。
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射、用户栈映射和阶段性的 heap/mmap arena；dynamic libc 首片要求同一个 `UserAddressSpace` 同时映射主程序 ELF 和 `PT_INTERP` 指向的 musl interpreter ELF，并用固定 non-overlap load bias 装载 `ET_DYN` interpreter。ELF 段的 backing/PTE 以页粒度覆盖 `align_down(p_vaddr)..align_up(p_vaddr + p_memsz)`，因此 `mprotect`/`munmap` 对动态链接器 RELRO 页保护请求的 mapped-range 判断也必须按页范围处理，而不是只按原始 `p_vaddr..p_vaddr+p_memsz` 字节范围拒绝页内前缀。heap/mmap arena 用于承接动态链接器早期 `brk`/anonymous `mmap` 需求，属于正式运行时语义，不是测试专用入口。完整 VMA 树、文件映射、COW、ASLR 和 page fault recovery 后续再展开。
 8. `用户栈对象`（暂名 `UserStack`）：表示第一个用户程序的初始用户栈。static libc 版用户 init 需要真实 Linux initial stack，当前至少建立固定大小栈、`argc=1`、`argv[0]="/sbin/init"`、`argv/envp` 终止空指针以及 `auxv` 中的 `AT_PAGESZ` 和 `AT_NULL`；dynamic libc 首片需要补主程序 `AT_PHDR`、`AT_PHENT`、`AT_PHNUM`、`AT_ENTRY`、解释器 `AT_BASE`、`AT_PAGESZ` 和 `AT_NULL`。完整 auxv、随机化、guard page、boot param 派生 argv/envp、`AT_RANDOM`、`AT_EXECFN` 和动态栈扩展后续再展开。
 9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserInitProcess.Action::EnterUserMode` 执行最终 trap-return handoff 的输入。
@@ -3042,7 +3049,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 | `UserBootPayload.setup()` | formal candidate | 建立 `UserBootPayload.candidates`、参数/环境和 exec 前置条件；不创建新的 PID 1。 |
 | `ramdisk_execute_command` branch | checkpoint: no run | 前序 `RootfsPhase` 已要求进入 `prepare_namespace()` 分支；此处不会执行 `run_init_process(ramdisk_execute_command)`，仅保留 Linux 原始条件位置。 |
 | `run_init_process(init_filename)` | action: `UserBootPayload.try_candidate(path)` | 设置 `argv_init[0] = init_filename`，打印候选、参数和环境，然后调用 `kernel_execve()`。 |
-| `kernel_execve(init_filename, argv_init, envp_init)` | action: `UserBootPayload.try_candidate(path)` drives `VfsCore.ReadPath` / `ElfObject` / `UserAddressSpace` | 当前轮次以固定 `/init` 小型 ELF 打通首个用户态闭环；`linux_binprm`、完整 argv/envp 复制、`bprm_execve()`、binary handler 搜索等细节延后展开。 |
+| `kernel_execve(init_filename, argv_init, envp_init)` | action: `UserBootPayload.try_candidate(path)` drives `ExecTransaction` | transaction 经 `BinaryFormatRegistry` 的唯一 `ElfBinaryFormat` entry 准备并提交 ELF/address-space；完整 Linux bprm/锁/credential 语义继续 deferred。 |
 | ELF 类型检查 | event: `ElfObject.preset()` | 检查 ELF64、little-endian、RISC-V、当前支持的 executable 类型；失败是普通候选失败，不导致内核崩溃，除非该候选来自强制 `init=`。 |
 | ELF 解析与装载 | event: `ElfObject.setup()` | 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`；`PT_INTERP` 只建立 interpreter role 的第二个 `ElfObject`，不单独引入 `ElfLoader` 或 `Load` 生命周期阶段。 |
 | 用户态入口就绪 | event: `ElfObject.enable()` | 确认 entry、用户栈和 `UserTrapFrame` 已就绪，交给 `UserBootPayload` 做最终 U-mode handoff。 |

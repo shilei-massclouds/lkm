@@ -9,7 +9,7 @@ PayloadPhase 是 [Kernel 系统编码](../systems/kernel.md)中 `Kernel.Enable` 
 
 | Transition | Source -> target | drives / completion | emits / continuation |
 | --- | --- | --- | --- |
-| Preset | Base -> Prepared | `preset()` 验证 KernelInitTask 主线，依次 Setup `PayloadExecSyncBoundaries`、`UserCloneDeferredBoundaries` | 提交 Prepared 后调用同对象 `setup()` |
+| Preset | Base -> Prepared | `preset()` 验证 KernelInitTask 主线和 `BinaryFormatRegistry.Ready`，依次 Setup `ExecSyncBoundaries`、`UserCloneDeferredBoundaries` | 提交 Prepared 后调用同对象 `setup()` |
 | Setup | Prepared -> Ready | `setup_selected_payload(ctx)` 确认唯一 build-time kind；仅 user-boot 调用 `UserBootPayload.Setup` | 提交既有 Ready 后调用同对象 `enable()` |
 | Enable | Ready -> Online | `prepare_selected_payload(ctx)`；hello/smoke 绑定内核入口，user-boot 完成 ELF/地址空间/trap/syscall、UserBootPayload.Online 和用户入口准备；随后提交 SelectedPayloadHandoff.Online | 提交 Payload Online、运行该 checkpoint handlers，再返回 `kernel::mark_online()` continuation |
 
@@ -31,9 +31,9 @@ Config 通过互斥的 `app_hello`、`app_smoke`、`app_user_boot` cfg 恰好绑
 进入对应不返回入口。hello/smoke 不推进 UserBootPayload；公共阶段也不准备 UserChildProcess。smoke
 中的对象级 user-boot case 如需该对象，必须在 case 内建立并消费自己的测试状态。
 
-user-boot 原单体入口拆成 prepare/enter。prepare 保持既有 init candidate 选择、失败分类和 panic
-terminal 行为，并完成 ELF/interpreter、地址空间、用户栈、trap frame、syscall、FilesStruct、
-UserInitProcess.EnterUserMode 准备事实和 `UserBootPayload.Enable`。enter 不再准备对象，只发出
+user-boot prepare 保持 init candidate 选择、失败分类和 panic terminal 行为，然后把 normalized boot
+arguments 交给 `ExecTransaction`；共享管线完成 ELF/interpreter、地址空间、用户栈、trap frame 和提交。
+prepare 再完成 syscall、FilesStruct、UserInitProcess.EnterUserMode 与 `UserBootPayload.Enable`。enter 不再准备对象，只发出
 `UserInitProcess.EnterUserMode` checkpoint 并执行最终 RISC-V U-mode trap return。
 
 ## 提交与 checkpoint 顺序

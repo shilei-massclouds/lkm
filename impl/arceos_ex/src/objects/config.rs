@@ -37,6 +37,85 @@ const KERNEL_LINK_ADDR: usize = 0xffff_ffff_8000_0000;
 const FDT_FIXMAP_VIRT_START: usize = 0xffff_ffc0_0000_0000;
 const LINEAR_MAP_VIRT_START: usize = 0xffff_ffd0_0000_0000;
 
+const LINUX_MAX_ARG_STRINGS: usize = 0x7fff_ffff;
+const LINUX_MAX_ARG_STRLEN: usize = PAGE_SIZE * 32;
+const LINUX_ARG_MAX: usize = PAGE_SIZE * 32;
+const LINUX_STK_LIM: usize = 8 * 1024 * 1024;
+const LINUX_INIT_RLIMIT_STACK: usize = LINUX_STK_LIM;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExecArgumentLimits {
+    max_arg_strings: usize,
+    max_arg_strlen: usize,
+    arg_max_floor: usize,
+    stack_rlimit: usize,
+    stk_lim: usize,
+    argument_bytes: usize,
+}
+
+#[allow(dead_code)]
+impl ExecArgumentLimits {
+    pub const fn linux_default() -> Self {
+        let stk_fraction = LINUX_STK_LIM / 4 * 3;
+        let rlimit_fraction = LINUX_INIT_RLIMIT_STACK / 4;
+        let smaller = if stk_fraction < rlimit_fraction {
+            stk_fraction
+        } else {
+            rlimit_fraction
+        };
+        let argument_bytes = if smaller > LINUX_ARG_MAX {
+            smaller
+        } else {
+            LINUX_ARG_MAX
+        };
+        Self {
+            max_arg_strings: LINUX_MAX_ARG_STRINGS,
+            max_arg_strlen: LINUX_MAX_ARG_STRLEN,
+            arg_max_floor: LINUX_ARG_MAX,
+            stack_rlimit: LINUX_INIT_RLIMIT_STACK,
+            stk_lim: LINUX_STK_LIM,
+            argument_bytes,
+        }
+    }
+
+    pub const fn max_arg_strings(self) -> usize {
+        self.max_arg_strings
+    }
+
+    pub const fn max_arg_strlen(self) -> usize {
+        self.max_arg_strlen
+    }
+
+    pub const fn arg_max_floor(self) -> usize {
+        self.arg_max_floor
+    }
+
+    pub const fn stack_rlimit(self) -> usize {
+        self.stack_rlimit
+    }
+
+    pub const fn stk_lim(self) -> usize {
+        self.stk_lim
+    }
+
+    pub const fn argument_bytes(self) -> usize {
+        self.argument_bytes
+    }
+
+    pub fn accepts(self, argc: usize, envc: usize, string_bytes: usize) -> bool {
+        if argc > self.max_arg_strings || envc > self.max_arg_strings {
+            return false;
+        }
+        let Some(pointer_count) = core::cmp::max(argc, 1).checked_add(envc) else {
+            return false;
+        };
+        let Some(pointer_bytes) = pointer_count.checked_mul(core::mem::size_of::<usize>()) else {
+            return false;
+        };
+        pointer_bytes < self.argument_bytes && string_bytes <= self.argument_bytes - pointer_bytes
+    }
+}
+
 pub struct Config {
     lifecycle: Lifecycle,
     page_size: usize,
@@ -44,6 +123,8 @@ pub struct Config {
     kernel_link_addr: usize,
     fixmap: FixMapConfig,
     selected_payload_kind: SelectedPayloadKind,
+    #[allow(dead_code)]
+    exec_argument_limits: ExecArgumentLimits,
 }
 
 impl Config {
@@ -55,6 +136,7 @@ impl Config {
             kernel_link_addr: KERNEL_LINK_ADDR,
             fixmap: FixMapConfig::new(),
             selected_payload_kind: SELECTED_PAYLOAD_KIND,
+            exec_argument_limits: ExecArgumentLimits::linux_default(),
         }
     }
 
@@ -76,6 +158,11 @@ impl Config {
 
     pub const fn selected_payload_kind(&self) -> SelectedPayloadKind {
         self.selected_payload_kind
+    }
+
+    #[allow(dead_code)]
+    pub const fn exec_argument_limits(&self) -> ExecArgumentLimits {
+        self.exec_argument_limits
     }
 
     pub const fn stack_depot_enabled(&self) -> bool {

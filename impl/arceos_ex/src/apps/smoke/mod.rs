@@ -223,6 +223,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::rootfs::run,
     },
     SmokeCase {
+        name: "exec_objects",
+        run: cases::exec_objects::run,
+    },
+    SmokeCase {
         name: "user_boot",
         run: cases::user_boot::run,
     },

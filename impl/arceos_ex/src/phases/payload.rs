@@ -21,11 +21,17 @@ pub fn preset() -> ! {
     crate::checkpoint::checkpoint(Checkpoint::PayloadPhaseStarted);
 
     let result = (|| {
-        ctx.payload_exec_sync_boundaries
-            .setup(&ctx.kernel_init_task, &ctx.system_state)?;
+        ctx.exec_sync_boundaries.setup(
+            &ctx.kernel_init_task,
+            &ctx.system_state,
+            &ctx.binary_format_registry,
+        )?;
+        ctx.exec_transaction
+            .setup(&ctx.binary_format_registry, &ctx.exec_sync_boundaries)?;
         ctx.user_clone_deferred_boundaries
-            .setup(&ctx.payload_exec_sync_boundaries)?;
-        if ctx.payload_exec_sync_boundaries.state() != State::Ready
+            .setup(&ctx.exec_sync_boundaries)?;
+        if ctx.exec_sync_boundaries.state() != State::Ready
+            || ctx.exec_transaction.state() != State::Ready
             || ctx.user_clone_deferred_boundaries.state() != State::Ready
             || !mainline_ready(ctx)
         {

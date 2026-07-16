@@ -9,11 +9,13 @@ PayloadPhase 是 KernelInitTask 在内核初始化末尾准备并移交唯一 se
 ## 边界与职责
 
 1. 入口边界：SmpRuntimePhase 已经 Online，KernelInitTask 仍运行在自己的 vmalloc stack 上。
-2. Preset 准备所有 payload 共用的 exec 同步与 clone deferred 边界。
+2. Preset 验证 Initcall 已建立 `BinaryFormatRegistry`，并准备所有 payload 共用的
+   `ExecSyncBoundaries` 与 clone deferred 边界。
 3. Setup 确认唯一 selected payload，并完成该变种专属的 setup；只有 UserBoot 变种推进
    UserBootPayload.Setup。
-4. Enable 准备不可返回入口；UserBoot 变种在此完成 ELF、地址空间、trap frame、syscall、
-   UserBootPayload.Online 和用户入口准备事实，Hello/Smoke 只确认对应内核态入口。
+4. Enable 准备不可返回入口；UserBoot 变种只选择 requested/default/fallback 候选并调用共享
+   `ExecTransaction`，由 registry/ELF/address-space 管线完成映像准备，再提交 UserBootPayload.Online 和
+   用户入口事实；Hello/Smoke 只确认对应内核态入口。
 5. 出口边界：PayloadPhase Online 已提交，返回 Kernel.Enable continuation；Kernel Online 提交后
    才进入 selected payload 的不返回入口。
 
@@ -32,8 +34,8 @@ handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requ
 
 * Base：阶段尚未准备公共 payload 边界。
 
-* Preset：驱动 PayloadExecSyncBoundaries.Setup 和 UserCloneDeferredBoundaries.Setup，等待两者 Ready，
-  提交 Prepared 并发出 Setup。
+* Preset：驱动 ExecSyncBoundaries.Setup 和 UserCloneDeferredBoundaries.Setup，等待两者 Ready，并验证
+  BinaryFormatRegistry.Ready，提交 Prepared 并发出 Setup。
 
 * Setup：驱动 SelectedPayloadHandoff.Setup，确认 Config 中恰好一种 selected kind；只有 UserBoot
   分支要求 UserBootPayload.Ready，随后提交 Ready 并发出 Enable。
@@ -52,3 +54,7 @@ entry 事实及真实 SP 位于 KernelInitTask vmalloc stack。
 
 * [阶段范式](../phase-paradigm.md)
 * [PayloadPhase model](../../model/phases/payload/phase.spec)
+* [ExecTransaction](../objects/exec-transaction.md)
+* [BinaryFormatRegistry](../objects/binary-format-registry.md)
+* [ExecSyncBoundaries](../objects/exec-sync-boundaries.md)
+* [ElfObject](../objects/elf-object.md)

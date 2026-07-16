@@ -69,8 +69,8 @@
     <g transform="translate(0 606)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box exec"/>
-      <text x="320" y="232" class="line1">ExecCore.execve(): kernel_execve(path, argv_init, envp_init)</text>
-      <text x="320" y="260" class="line2">当前建模为 exec 依赖动作；bprm、argv/envp、binfmt 细节 deferred</text>
+      <text x="320" y="232" class="line1">ExecTransaction.execute(): kernel_execve(path, argv_init, envp_init)</text>
+      <text x="320" y="260" class="line2">共享 prepare / registry dispatch / commit；完整 Linux bprm 同步 deferred</text>
     </g>
     <g transform="translate(0 716)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>

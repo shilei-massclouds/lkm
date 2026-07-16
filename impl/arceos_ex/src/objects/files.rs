@@ -2803,6 +2803,17 @@ impl FilesStruct {
         Ok(report)
     }
 
+    pub fn precheck_close_on_exec(&self) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.close_on_exec_ready
+            || self.fd_table.capacity() == 0
+        {
+            return Err(FileError::NotReady);
+        }
+        Ok(())
+    }
+
     pub fn save_parent_fd_snapshot(&self) -> FileResult<FilesStructSnapshot> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);

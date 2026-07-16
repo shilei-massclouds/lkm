@@ -22,7 +22,7 @@ object SelectedPayloadHandoff: ResourceObject {
             on Action::SetupSelectedVariant {
                 depends_on {
                     Config.state == State::Online;
-                    PayloadExecSyncBoundaries.state == State::Ready;
+                    ExecSyncBoundaries.state == State::Ready;
                     UserCloneDeferredBoundaries.state == State::Ready;
                 }
 
@@ -117,15 +117,18 @@ object PayloadPhase: PhaseObject {
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     payload_phase_next_boundary();
+                    BinaryFormatRegistry.state == State::Ready;
                 }
 
                 drives {
-                    PayloadExecSyncBoundaries.Transition::Setup;
+                    ExecSyncBoundaries.Transition::Setup;
+                    ExecTransaction.Transition::Setup;
                     UserCloneDeferredBoundaries.Transition::Setup;
                 }
 
                 ensures {
-                    PayloadExecSyncBoundaries.state == State::Ready;
+                    ExecSyncBoundaries.state == State::Ready;
+                    ExecTransaction.state == State::Ready;
                     UserCloneDeferredBoundaries.state == State::Ready;
                     payload_execution_owned_by_kernel_init_task(
                         PayloadPhase,
@@ -142,7 +145,8 @@ object PayloadPhase: PhaseObject {
 
     state State::Prepared {
         invariant {
-            PayloadExecSyncBoundaries.state == State::Ready;
+            ExecSyncBoundaries.state == State::Ready;
+            ExecTransaction.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
             KernelInitTask.state == State::Online;
             payload_execution_owned_by_kernel_init_task(PayloadPhase, KernelInitTask);
@@ -152,7 +156,8 @@ object PayloadPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
-                    PayloadExecSyncBoundaries.state == State::Ready;
+                    ExecSyncBoundaries.state == State::Ready;
+                    ExecTransaction.state == State::Ready;
                     UserCloneDeferredBoundaries.state == State::Ready;
                 }
 
@@ -182,7 +187,8 @@ object PayloadPhase: PhaseObject {
             FinalizeBoundary.state == State::Ready;
             SystemState.state == State::Online;
             KernelInitTask.state == State::Online;
-            PayloadExecSyncBoundaries.state == State::Ready;
+            ExecSyncBoundaries.state == State::Ready;
+            ExecTransaction.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
             SelectedPayloadHandoff.state == State::Ready;
             selected_payload_ready();
@@ -211,7 +217,8 @@ object PayloadPhase: PhaseObject {
             UpMultitaskPhase.state == State::Online;
             SmpRuntimePhase.state == State::Online;
             KernelInitTask.state == State::Online;
-            PayloadExecSyncBoundaries.state == State::Ready;
+            ExecSyncBoundaries.state == State::Ready;
+            ExecTransaction.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
             SelectedPayloadHandoff.state == State::Online;
             selected_payload_no_return_entry_bound(SelectedPayloadHandoff);

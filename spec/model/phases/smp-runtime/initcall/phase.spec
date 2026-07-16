@@ -818,6 +818,7 @@ object InitcallPhase: PhaseObject {
                     CtorTable.Transition::Setup;
                     InitcallTable.Transition::Preset;
                     InitcallTable.Transition::Setup;
+                    BinaryFormatRegistry.Transition::Setup;
                     Ns16550aPlatformDriver.Transition::Setup;
                     VirtioMmioPlatformDriver.Transition::Setup;
                     VirtioBlkDriver.Transition::Setup;
@@ -919,6 +920,8 @@ object InitcallPhase: PhaseObject {
                     constructors_trimmed_because_config_constructors_disabled(CtorTable);
                     initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
+                    BinaryFormatRegistry.state == State::Ready;
+                    binary_format_registry_only_elf_handler(BinaryFormatRegistry);
                     of_platform_default_populate_candidates_identified(PlatformBus);
                     of_platform_default_populate_candidate_names_printed(PlatformBus);
                     of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
@@ -1053,6 +1056,7 @@ object InitcallPhase: PhaseObject {
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;
             InitcallTable.state == State::Ready;
+            BinaryFormatRegistry.state == State::Ready;
             InitcallBoundary.state == State::Ready;
             initcall_phase_ready(InitcallPhase);
             initcall_phase_ready_failure_reports_first_failed_predicate(InitcallPhase);
@@ -1087,6 +1091,7 @@ object InitcallPhase: PhaseObject {
                     RuntimeCorePhase.state == State::Online;
                     initcall_phase_ready(InitcallPhase);
                     InitcallBoundary.state == State::Ready;
+                    BinaryFormatRegistry.state == State::Ready;
                 }
 
                 emits {
@@ -1101,6 +1106,7 @@ object InitcallPhase: PhaseObject {
             RuntimeCorePhase.state == State::Online;
             initcall_phase_ready(InitcallPhase);
             InitcallBoundary.state == State::Ready;
+            BinaryFormatRegistry.state == State::Ready;
         }
 
         transitions {
@@ -1108,6 +1114,7 @@ object InitcallPhase: PhaseObject {
                 ensures {
                     initcall_phase_ready(InitcallPhase);
                     InitcallBoundary.state == State::Ready;
+                    BinaryFormatRegistry.state == State::Ready;
                 }
             }
         }
@@ -1118,6 +1125,7 @@ object InitcallPhase: PhaseObject {
             RuntimeCorePhase.state == State::Online;
             initcall_phase_ready(InitcallPhase);
             InitcallBoundary.state == State::Ready;
+            BinaryFormatRegistry.state == State::Ready;
         }
     }
 }

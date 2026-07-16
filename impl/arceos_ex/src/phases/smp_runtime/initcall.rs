@@ -136,6 +136,12 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         "initcall_table.setup",
     )?;
     with_initcall_diagnostic(
+        ctx.binary_format_registry.setup(&ctx.initcall_table),
+        "preset_objects.binary_format_registry.setup",
+        "BinaryFormatRegistry",
+        "binary_format_registry.setup",
+    )?;
+    with_initcall_diagnostic(
         crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic),
         "preset_objects.plic_provider.setup_registered_provider",
         "PlicProvider",
@@ -425,6 +431,21 @@ fn transition_if_ready(
     step: &'static str,
 ) -> EventResult {
     let state = crate::phases::state::load(&INITCALL_PHASE_STATE);
+    if ctx.binary_format_registry.state() != State::Ready
+        || !ctx.binary_format_registry.only_elf_handler()
+    {
+        return failed_condition_with_diagnostic(
+            event,
+            state,
+            expected,
+            target,
+            initcall_failure_diagnostic(
+                step,
+                "BinaryFormatRegistry",
+                "binary_format_registry.ready",
+            ),
+        );
+    }
     if let Some(diagnostic) = initcall_phase_ready_diagnostic(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,

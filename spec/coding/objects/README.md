@@ -24,6 +24,10 @@ Classification meanings:
 | [`console.spec`](../../model/objects/console.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`devfs.spec`](../../model/objects/devfs.spec) | `grouped` | [`vfs.md`](vfs.md) |
 | [`device.spec`](../../model/objects/device.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
+| [`binary_format_registry.spec`](../../model/objects/binary_format_registry.spec) | `dedicated` | [`binary-format-registry.md`](binary-format-registry.md) |
+| [`elf_object.spec`](../../model/objects/elf_object.spec) | `dedicated` | [`elf-object.md`](elf-object.md) |
+| [`exec_sync_boundaries.spec`](../../model/objects/exec_sync_boundaries.spec) | `dedicated` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
+| [`exec_transaction.spec`](../../model/objects/exec_transaction.spec) | `dedicated` | [`exec-transaction.md`](exec-transaction.md) |
 | [`ext2.spec`](../../model/objects/ext2.spec) | `dedicated` | [`ext2.md`](ext2.md) |
 | [`files.spec`](../../model/objects/files.spec) | `grouped` | [`user-boot.md`](user-boot.md) |
 | [`hwrng.spec`](../../model/objects/hwrng.spec) | `grouped` | [`virtio.md`](virtio.md) |

@@ -104,9 +104,18 @@ object Lds: PrepareObject {
     }
 }
 
+type ExecArgumentLimits {
+    max_arg_strings: Size;
+    max_arg_strlen: Size;
+    arg_max_floor: Size;
+    stack_rlimit: Size;
+    stk_lim: Size;
+    argument_bytes: Size;
+}
+
 /*
  * Config 表示入口前导期可见的构建配置和静态参数。
- * 它约束页大小、内核虚拟区域、地址转换模式和 fixmap 布局。
+ * 它约束页大小、内核虚拟区域、地址转换模式、fixmap 布局和 exec 参数上限。
  */
 object Config: PrepareObject {
     initial_state: State::Online;
@@ -122,6 +131,7 @@ object Config: PrepareObject {
         satp_mode: SatpMode;
         fixmap: FixMapConfig;
         selected_payload_kind: SelectedPayloadKind;
+        exec_argument_limits: ExecArgumentLimits;
     }
 
     /*

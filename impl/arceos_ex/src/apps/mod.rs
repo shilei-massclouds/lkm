@@ -26,7 +26,7 @@ pub(crate) fn setup_selected_payload(ctx: &mut Context) -> EventResult {
 #[cfg(app_user_boot)]
 pub(crate) fn setup_selected_payload(ctx: &mut Context) -> EventResult {
     ctx.user_boot_payload
-        .setup(&ctx.kernel_init_task, &ctx.payload_exec_sync_boundaries)?;
+        .setup(&ctx.kernel_init_task, &ctx.exec_sync_boundaries)?;
     ctx.selected_payload_handoff
         .setup(&ctx.config, ctx.user_boot_payload.state() == State::Ready)
 }

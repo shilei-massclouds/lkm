@@ -93,7 +93,7 @@ command = [
 ]
 
 [paired.arceos_ex.delayed_stdin]
-ready_marker = "/ #"
+ready_marker = "~ #"
 payload = "/bin/ls\n/bin/ls\nexit\n"
 
 [paired.linux]

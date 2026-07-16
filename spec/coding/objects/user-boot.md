@@ -1,8 +1,10 @@
-# User boot, ELF, syscall and process coding
+# User boot and process integration coding
 
 本文件是 `spec/model/objects/user_boot.spec` 与 `files.spec` 的权威 coding 映射。VFS object/backend
-语义由 [`vfs.md`](vfs.md) 承载；本文件承载用户启动、ELF/address-space、trap return、syscall table、
-fd/OFD/backend dispatch、进程身份以及当前单 child slice 的实现边界。
+语义由 [`vfs.md`](vfs.md) 承载；本文件承载 init 候选策略、address-space/trap return、syscall table、
+fd/OFD/backend dispatch、进程身份以及当前单 child slice 的集成边界。共享 exec 对象分别由
+[`ExecTransaction`](exec-transaction.md)、[`BinaryFormatRegistry`](binary-format-registry.md)、
+[`ExecSyncBoundaries`](exec-sync-boundaries.md) 和 [`ElfObject`](elf-object.md) 承载。
 
 ## Ownership and entry
 
@@ -11,11 +13,10 @@ fd/OFD/backend dispatch、进程身份以及当前单 child slice 的实现边�
 不是第二个 task。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
 不增加 `SyscallDispatcher`。
 
-ELF loader reads the requested init through the current `FsStruct.root` and VFS pathname API. Dynamic
-ELF keeps main/interpreter roles, PT_LOAD plans and auxv in one prepared address space. Replacement
-address spaces use Context-owned exec staging rather than placing the object on the kernel trap stack;
-commit occurs only at the successful exec boundary. User entry writes the prepared satp, performs the
-required fence and returns through the modeled trap frame.
+`UserBootPayload` owns only requested/default/fallback candidate selection. It normalizes the selected boot
+arguments and invokes the shared transaction; ELF handler search, parser, staging and commit are not
+implemented in `user_boot.rs`. User entry writes the prepared satp, performs the required fence and returns
+through the modeled trap frame.
 
 ## Trap and exception mapping
 
@@ -67,10 +68,10 @@ frame/status and exit facts. A later sequential observed plain fork may reuse th
 receive the next pid. This is distinct from vfork active-slot reuse, which releases a completed execution
 slot to `Prepared`.
 
-Child `execve(221)` builds its replacement address space in Context-owned staging and commits it without
-a large trap-stack temporary. Old-mm reclamation, complete failure rollback, repeated staging reset,
-close-on-exec, credential/signal/binfmt transitions and full point-of-no-return semantics remain
-deferred and therefore stay active roadmap work.
+Child `execve(221)` copies filename/argv/envp through `SyscallTable`, then invokes the same Context-owned
+transaction used by boot. The transaction owns staging rollback, repeated slot reset, bounded CLOEXEC,
+old-mm reclamation and point-of-no-return. Credential/signal/LSM and the complete Linux lock protocol remain
+deferred.
 
 ## Test and observation boundary
 
