@@ -3364,7 +3364,43 @@ fn default_exception_handler(frame: &TrapFrame) -> ! {
     panic_dispatch_frame("exception fallback panic", frame)
 }
 
-fn page_fault_exception_handler(frame: &TrapFrame) -> ! {
+fn page_fault_exception_handler(frame: &mut TrapFrame) {
+    let cause = frame.scause & !SCAUSE_INTERRUPT_BIT;
+    let current_satp = crate::arch::riscv64::csr::read_satp();
+    let from_user = frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0;
+    if from_user
+        && matches!(cause, EXC_LOAD_PAGE_FAULT | EXC_STORE_PAGE_FAULT)
+        && current_satp
+            == crate::context::context_ref()
+                .user_address_space
+                .satp_token()
+    {
+        let access = page_fault_access(frame);
+        let result = {
+            let ctx = crate::context::context();
+            ctx.user_address_space.resolve_user_stack_fault(
+                &mut ctx.user_stack,
+                frame.stval,
+                access,
+                current_satp,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+        };
+        match result {
+            Ok(_) => {
+                crate::checkpoint::dispatch(
+                    crate::checkpoint::Checkpoint::UserStackGrowComplete,
+                    crate::context::context_ref(),
+                );
+                return;
+            }
+            Err(_) => crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowRejected,
+                crate::context::context_ref(),
+            ),
+        }
+    }
     panic_dispatch_frame("page fault exception", frame)
 }
 
@@ -6048,6 +6084,9 @@ fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, E2BIG)
         }
         Err(super::exec_transaction::ExecError::NoMemory) => complete_error_syscall(frame, ENOMEM),
+        Err(super::exec_transaction::ExecError::EntropyUnavailable) => {
+            complete_error_syscall(frame, EAGAIN)
+        }
         Err(_) => complete_error_syscall(frame, ENOEXEC),
     }
 }
@@ -7126,6 +7165,46 @@ fn user_copy_range_accessible(user_ptr: usize, len: usize, access: UserFaultAcce
     let Some(last) = end.checked_sub(1) else {
         return false;
     };
+
+    let stack_candidate = {
+        let ctx = crate::context::context_ref();
+        user_ptr >= ctx.user_stack.rlimit_base() && end <= ctx.user_stack.top()
+    };
+    if stack_candidate {
+        let current_satp = crate::arch::riscv64::csr::read_satp();
+        let pages_before = crate::context::context_ref()
+            .user_stack
+            .backing_page_count();
+        let resolved = {
+            let ctx = crate::context::context();
+            ctx.user_address_space.resolve_user_stack_range(
+                &mut ctx.user_stack,
+                user_ptr,
+                len,
+                access,
+                current_satp,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+        };
+        if resolved.is_err() {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowRejected,
+                crate::context::context_ref(),
+            );
+            return false;
+        }
+        if crate::context::context_ref()
+            .user_stack
+            .backing_page_count()
+            != pages_before
+        {
+            crate::checkpoint::dispatch(
+                crate::checkpoint::Checkpoint::UserStackGrowComplete,
+                crate::context::context_ref(),
+            );
+        }
+    }
 
     let space = &crate::context::context_ref().user_address_space;
     if !space.user_range_mapped(user_ptr, len) {

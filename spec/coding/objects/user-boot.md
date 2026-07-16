@@ -8,10 +8,13 @@ fd/OFD/backend dispatch、进程身份以及当前单 child slice 的集成边�
 
 ## Ownership and entry
 
-`UserBootPayload`、首个 `UserAddressSpace`、`UserStack` 和 `UserTrapFrame` 均属于
+`UserBootPayload`、首个 `UserAddressSpace` 和 `UserTrapFrame` 均属于
 `KernelInitTask` 的执行线。`UserInitProcess` 是同一 PID 1 task 经 exec/user-entry 后的身份视图，
 不是第二个 task。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
 不增加 `SyscallDispatcher`。
+
+用户栈 backing、initial stack 与增长语义由独立 [`UserStack`](user-stack.md) coding contract 承载；
+本文件只保留 address-space、trap、usercopy/syscall 和 process 集成边界。
 
 `UserBootPayload` owns only requested/default/fallback candidate selection. It normalizes the selected boot
 arguments and invokes the shared transaction; ELF handler search, parser, staging and commit are not

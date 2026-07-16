@@ -485,3 +485,5 @@
 | 480 | ApOnlineIdlePhaseOnline | ApOnlineIdlePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 481 | PayloadPhaseStarted | PayloadPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 482 | PayloadPhasePrepared | PayloadPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 483 | UserStackGrowComplete | UserStack.GrowComplete | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 484 | UserStackGrowRejected | UserStack.GrowRejected | null | impl/arceos_ex/src/checkpoint/mod.rs |

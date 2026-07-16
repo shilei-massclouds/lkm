@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 483,
+  "total_checkpoints": 485,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 366
+      "count": 368
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 366
+      "count": 368
     },
     {
       "confidence": "medium",
@@ -381,6 +381,10 @@
     },
     {
       "family": "UserSignalWait",
+      "count": 2
+    },
+    {
+      "family": "UserStack",
       "count": 2
     },
     {

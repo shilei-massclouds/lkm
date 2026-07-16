@@ -50,7 +50,7 @@ NO_LIBC_CFLAGS ?= \
 LIBC_CFLAGS ?= \
 	$(LIBC_COMMON_CFLAGS) \
 	-Os \
-	-fno-stack-protector \
+	-fstack-protector-strong \
 	-ffunction-sections \
 	-fdata-sections \
 	-no-pie \

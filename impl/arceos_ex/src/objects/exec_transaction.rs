@@ -6,7 +6,8 @@ use super::{
     elf_object::{ElfError, ElfObject},
     exec_sync_boundaries::ExecSyncBoundaries,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    user_boot::{UserAddressSpace, UserStack, UserTrapFrame},
+    user_boot::{UserAddressSpace, UserTrapFrame},
+    user_stack::UserStack,
 };
 
 #[cfg(app_user_boot)]
@@ -29,6 +30,7 @@ pub enum ExecError {
     NotFound,
     NoExecutableFormat(Option<ElfError>),
     NoMemory,
+    EntropyUnavailable,
 }
 
 pub struct ExecArguments {
@@ -432,6 +434,8 @@ pub fn smoke_abort_releases_staging(ctx: &mut crate::context::Context, image: &[
                 None,
                 &[b"/sbin/init"],
                 &[b"HOME=/"],
+                ctx.config.user_stack(),
+                &[0x5a; super::user_stack::USER_STACK_RANDOM_BYTES],
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
             )
@@ -475,6 +479,35 @@ pub fn smoke_abort_releases_staging(ctx: &mut crate::context::Context, image: &[
         && !ctx.exec_transaction.point_of_no_return()
         && ctx.exec_transaction.abort_count() == abort_count_before + 1
         && ctx.exec_transaction.last_error() == Some(ExecError::InvalidState)
+}
+
+#[cfg(app_smoke)]
+pub fn smoke_entropy_failure_preserves_current(ctx: &mut crate::context::Context) -> bool {
+    let free_pages_before = ctx.page_allocator.buddy_total_free_pages();
+    let satp_before = ctx.user_address_space.satp_token();
+    let stack_pages_before = ctx.user_stack.backing_page_count();
+    let mut unavailable_runtime = super::virtio_rng::VirtioRngRuntime::new();
+    let mut unavailable_core = super::hwrng::HwRngCore::new();
+    let unavailable = acquire_exec_random(&mut unavailable_runtime, &mut unavailable_core);
+    let short = validate_exec_random_len(super::user_stack::USER_STACK_RANDOM_BYTES - 1);
+    unavailable == Err(ExecError::EntropyUnavailable)
+        && short == Err(ExecError::EntropyUnavailable)
+        && ctx.page_allocator.buddy_total_free_pages() == free_pages_before
+        && ctx.user_address_space.satp_token() == satp_before
+        && ctx.user_stack.backing_page_count() == stack_pages_before
+        && !ctx.exec_transaction.active()
+        && !ctx.exec_transaction.point_of_no_return()
+}
+
+#[cfg(app_smoke)]
+pub fn smoke_consecutive_exec_randoms_differ(ctx: &mut crate::context::Context) -> bool {
+    let Ok(first) = acquire_exec_random(&mut ctx.virtio_rng_runtime, &mut ctx.hwrng_core) else {
+        return false;
+    };
+    let Ok(second) = acquire_exec_random(&mut ctx.virtio_rng_runtime, &mut ctx.hwrng_core) else {
+        return false;
+    };
+    first.iter().any(|byte| *byte != 0) && second.iter().any(|byte| *byte != 0) && first != second
 }
 
 #[cfg(app_user_boot)]
@@ -610,6 +643,7 @@ fn prepare_and_commit(
     }
 
     let stack_result = {
+        let random = acquire_exec_random(&mut ctx.virtio_rng_runtime, &mut ctx.hwrng_core)?;
         let transaction = &mut ctx.exec_transaction;
         let argc = transaction.arguments.argc();
         let envc = transaction.arguments.envc();
@@ -635,6 +669,8 @@ fn prepare_and_commit(
             interpreter_ref,
             &argv[..argc],
             &envp[..envc],
+            ctx.config.user_stack(),
+            &random,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
         )
@@ -725,6 +761,7 @@ fn prepare_and_commit(
     }
     if let Err(error) = ctx.exec_transaction.staging_address_space.enable(
         &ctx.exec_transaction.staging_trap_frame,
+        &ctx.exec_transaction.staging_stack,
         ctx.vm.swapper_vm(),
         &ctx.kernel_image,
         &mut ctx.page_allocator,
@@ -751,6 +788,28 @@ fn prepare_and_commit(
     }
 
     commit_prepared(ctx, owner, runtime_frame, image)
+}
+
+#[cfg(any(app_smoke, app_user_boot))]
+fn acquire_exec_random(
+    runtime: &mut super::virtio_rng::VirtioRngRuntime,
+    hwrng_core: &mut super::hwrng::HwRngCore,
+) -> Result<[u8; super::user_stack::USER_STACK_RANDOM_BYTES], ExecError> {
+    let mut random = [0u8; super::user_stack::USER_STACK_RANDOM_BYTES];
+    let len = runtime
+        .read_current_hwrng(hwrng_core, &mut random, false)
+        .map_err(|_| ExecError::EntropyUnavailable)?;
+    validate_exec_random_len(len)?;
+    Ok(random)
+}
+
+#[cfg(any(app_smoke, app_user_boot))]
+fn validate_exec_random_len(len: usize) -> Result<(), ExecError> {
+    if len == super::user_stack::USER_STACK_RANDOM_BYTES {
+        Ok(())
+    } else {
+        Err(ExecError::EntropyUnavailable)
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -808,9 +867,9 @@ fn commit_prepared(
         crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
     }
 
+    core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.retired_stack);
+    core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.staging_stack);
     unsafe {
-        core::ptr::copy_nonoverlapping(&ctx.user_stack, &mut ctx.exec_transaction.retired_stack, 1);
-        core::ptr::copy_nonoverlapping(&ctx.exec_transaction.staging_stack, &mut ctx.user_stack, 1);
         core::ptr::copy_nonoverlapping(&ctx.exec_transaction.staging_elf, &mut ctx.elf_object, 1);
         core::ptr::copy_nonoverlapping(
             &ctx.exec_transaction.staging_interpreter,
@@ -833,7 +892,7 @@ fn commit_prepared(
     if parent_exec_objects_retained
         && !ctx.user_child_process.retain_parent_exec_objects(
             &ctx.exec_transaction.retired_address_space,
-            &ctx.exec_transaction.retired_stack,
+            &mut ctx.exec_transaction.retired_stack,
         )
     {
         exec_terminal("exec parent mm ownership transfer failed\n");

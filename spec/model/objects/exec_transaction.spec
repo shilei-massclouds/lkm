@@ -11,6 +11,7 @@ enum ExecFailureKind {
     NotFound,
     NoExecutableFormat,
     NoMemory,
+    EntropyUnavailable,
 }
 
 predicate exec_transaction_context_owned_single_slot<T>(transaction: T) -> bool;
@@ -39,6 +40,9 @@ predicate exec_transaction_abort_preserves_current_state<T>(transaction: T) -> b
 predicate exec_transaction_failure_errno_bound<T, E>(transaction: T, error: E) -> bool;
 predicate exec_transaction_no_errno_after_point_of_no_return<T>(transaction: T) -> bool;
 predicate exec_transaction_checkpoint_namespace_owner_scoped<T>(transaction: T) -> bool;
+predicate exec_transaction_hwrng_random_precommit<T>(transaction: T) -> bool;
+predicate exec_transaction_entropy_failure_preserves_current<T>(transaction: T) -> bool;
+predicate exec_transaction_boot_entropy_failure_terminal<T>(transaction: T) -> bool;
 
 object ExecTransaction: KernelObject {
     initial_state: State::Base;
@@ -64,6 +68,9 @@ object ExecTransaction: KernelObject {
                     exec_transaction_all_fallible_checks_precommit(self);
                     exec_transaction_no_errno_after_point_of_no_return(self);
                     exec_transaction_checkpoint_namespace_owner_scoped(self);
+                    exec_transaction_hwrng_random_precommit(self);
+                    exec_transaction_entropy_failure_preserves_current(self);
+                    exec_transaction_boot_entropy_failure_terminal(self);
                 }
             }
         }
@@ -81,6 +88,9 @@ object ExecTransaction: KernelObject {
             exec_transaction_all_fallible_checks_precommit(self);
             exec_transaction_no_errno_after_point_of_no_return(self);
             exec_transaction_checkpoint_namespace_owner_scoped(self);
+            exec_transaction_hwrng_random_precommit(self);
+            exec_transaction_entropy_failure_preserves_current(self);
+            exec_transaction_boot_entropy_failure_terminal(self);
         }
 
         actions {

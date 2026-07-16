@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 366
+- unmapped: 368
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -489,3 +489,5 @@
 | 480 | ApOnlineIdlePhase.Online | ApOnlineIdlePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 481 | PayloadPhase.Started | PayloadPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 482 | PayloadPhase.Prepared | PayloadPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 483 | UserStack.GrowComplete | UserStackGrowComplete | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 484 | UserStack.GrowRejected | UserStackGrowRejected | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

@@ -1,6 +1,7 @@
 use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    user_boot::{UserAddressSpace, UserStack, UserTrapFrame},
+    user_boot::{UserAddressSpace, UserTrapFrame},
+    user_stack::UserStack,
 };
 
 pub const ELF_HEADER_LEN: usize = 64;

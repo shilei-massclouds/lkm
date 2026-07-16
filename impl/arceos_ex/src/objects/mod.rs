@@ -94,6 +94,7 @@ pub mod swapper_vm;
 pub mod task;
 pub mod trampoline_vm;
 pub mod user_boot;
+pub mod user_stack;
 pub mod vfs;
 pub mod virtio;
 pub mod virtio_blk;

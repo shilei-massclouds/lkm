@@ -14,10 +14,9 @@ string budget uses the `bprm_stack_limits()` calculation and is 2 MiB, less
 limits. Runtime `SyscallTable.Execve` performs gate and complete usercopy before `begin`; boot builds the same
 value with `argv[0]`, `HOME=/`, and `TERM=linux`.
 
-The shared staging `UserStack` remains fixed-size in this slice and maps 128 KiB. The current Alpine BusyBox
-shell contains an observed 64 KiB page-by-page stack probe at `0x96d86..0x96d94`; the larger bounded mapping
-also retains space for the initial argv/envp/auxv and caller frames. Dynamic growth, guard pages, kernel stack
-canaries, and compiler stack-protector policy are deferred.
+The staging `UserStack` follows the independent [`UserStack`](user-stack.md) contract: sparse physical pages,
+128 KiB initial VMA expansion, 8 MiB rlimit, 1 MiB guard gap and a 16-byte HWRNG-backed `AT_RANDOM` block.
+Kernel stack canaries and compiler stack-protector policy remain deferred.
 
 The only allowed call direction is:
 
@@ -32,7 +31,8 @@ UserBootPayload or SyscallTable
 
 Prepare owns all fallible work. Its error mapping is `EFAULT` for pre-transaction usercopy, `E2BIG` for
 argument/string capacity, `ENOENT` for main/interpreter lookup, `ENOEXEC` for format rejection, and `ENOMEM`
-for backing/page-table allocation. Abort releases every staging page/page-table and resets the active slot;
+for backing/page-table allocation, and `EAGAIN` for unavailable or short HWRNG input. Entropy acquisition is
+pre-commit; boot treats this failure as terminal while runtime preserves the old image. Abort releases every staging page/page-table and resets the active slot;
 current address space, SATP, trap frame, fd table and process identity are immutable on this path.
 
 When bounded usercopy reaches a configured count, string, or aggregate limit, the syscall-error diagnostic may

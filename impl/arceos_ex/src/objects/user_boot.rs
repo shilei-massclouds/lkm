@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use core::sync::atomic::{AtomicU8, Ordering};
 
 #[cfg(app_user_boot)]
@@ -13,6 +11,8 @@ use super::config::Config;
 use super::files::STDIN_READY_FIXTURE;
 #[cfg(app_user_boot)]
 use super::mm_core::{PageProtection, PageTableCaches, VmallocAllocator, VmapAreaFlags};
+pub use super::user_stack::UserStack;
+use super::user_stack::UserStackGrowReject;
 use super::{elf_object::MAX_LOAD_SEGMENTS, exec_sync_boundaries::ExecSyncBoundaries};
 
 #[allow(unused_imports)]
@@ -59,11 +59,12 @@ pub const USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE: usize = 1;
 
 #[cfg_attr(not(app_user_boot), allow(dead_code))]
 pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
-pub const USER_STACK_SIZE: usize = 128 * 1024;
-pub const USER_STACK_TOP: usize = 0x4000_0000;
+pub const USER_PAGE_SIZE: usize = super::user_stack::USER_PAGE_SIZE;
+pub const USER_STACK_SIZE: usize = super::user_stack::USER_STACK_SIZE;
+#[allow(dead_code)]
+pub const USER_STACK_TOP: usize = super::user_stack::USER_STACK_TOP;
 pub const USER_HEAP_BASE: usize = 0x3000_0000;
 pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
-pub const USER_PAGE_SIZE: usize = 4096;
 pub const USER_PARENT_WAIT_STACK_PROBE_LEN: usize = 512;
 pub const USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX: usize = 768;
 pub const USER_COMPLETED_CHILD_RECORD_CAPACITY: usize = 8;
@@ -219,7 +220,6 @@ pub const fn sigchld_mask_matches(mask: usize) -> bool {
     mask & USER_SIGCHLD_MASK != 0
 }
 
-const USER_INITIAL_AUXV_WORDS: usize = 14;
 #[cfg(app_user_boot)]
 const USER_INIT_CANDIDATES: [UserInitPathRef; 4] = [
     UserInitPathRef::DefaultInit,
@@ -227,15 +227,7 @@ const USER_INIT_CANDIDATES: [UserInitPathRef; 4] = [
     UserInitPathRef::BinInit,
     UserInitPathRef::BinSh,
 ];
-const AT_NULL: usize = 0;
-const AT_PHDR: usize = 3;
-const AT_PHENT: usize = 4;
-const AT_PHNUM: usize = 5;
-const AT_PAGESZ: usize = 6;
-const AT_BASE: usize = 7;
-const AT_ENTRY: usize = 9;
 const USER_SELECTED_PATH_MAX: usize = 128;
-const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
 const MAX_MAPPING_BACKING_PAGES: usize = 512;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
@@ -672,6 +664,33 @@ pub enum UserFaultAccess {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UserStackFaultResolution {
+    fault_page: usize,
+    old_base: usize,
+    new_base: usize,
+    expanded: bool,
+}
+
+#[allow(dead_code)]
+impl UserStackFaultResolution {
+    pub const fn fault_page(self) -> usize {
+        self.fault_page
+    }
+
+    pub const fn old_base(self) -> usize {
+        self.old_base
+    }
+
+    pub const fn new_base(self) -> usize {
+        self.new_base
+    }
+
+    pub const fn expanded(self) -> bool {
+        self.expanded
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct UserFaultMappingDiagnostic {
     address: usize,
@@ -789,6 +808,7 @@ pub struct UserMapping {
     file_bytes_copied: usize,
     bss_bytes_zeroed: usize,
     page_table_entry_bound: bool,
+    stack_ownership_token: usize,
 }
 
 impl UserMapping {
@@ -810,6 +830,7 @@ impl UserMapping {
             file_bytes_copied: 0,
             bss_bytes_zeroed: 0,
             page_table_entry_bound: false,
+            stack_ownership_token: 0,
         }
     }
 
@@ -830,6 +851,7 @@ impl UserMapping {
         self.file_bytes_copied = 0;
         self.bss_bytes_zeroed = 0;
         self.page_table_entry_bound = false;
+        self.stack_ownership_token = 0;
     }
 
     fn clear_backing_pages(&mut self) {
@@ -858,20 +880,15 @@ impl UserMapping {
     fn init_stack(&mut self, stack: &UserStack) {
         self.reset_empty();
         self.kind = UserMappingKind::Stack;
-        self.vaddr = stack.base;
-        self.memsz = stack.size;
+        self.vaddr = stack.base();
+        self.memsz = stack.size();
         self.readable = true;
         self.writable = true;
         self.user_accessible = true;
-        self.bss_zero_bytes = stack.size;
-        self.bss_bytes_zeroed = stack.size;
-        self.page_table_entry_bound = stack.backing_pages_allocated;
-        let mut index = 0usize;
-        while index < stack.backing_page_count && index < MAX_MAPPING_BACKING_PAGES {
-            self.backing_pages[index] = stack.backing_pages[index];
-            index += 1;
-        }
-        self.backing_page_count = stack.backing_page_count;
+        self.bss_zero_bytes = stack.size();
+        self.bss_bytes_zeroed = stack.size();
+        self.page_table_entry_bound = stack.backing_pages_allocated();
+        self.stack_ownership_token = stack.top();
     }
 
     fn init_heap(&mut self) {
@@ -954,365 +971,16 @@ impl UserMapping {
         self.page_table_entry_bound
     }
 
+    pub const fn stack_ownership_token(&self) -> usize {
+        self.stack_ownership_token
+    }
+
     pub const fn end_vaddr(&self) -> usize {
         self.vaddr + self.memsz
     }
 
     const fn contains_vaddr(&self, addr: usize) -> bool {
         self.vaddr <= addr && addr < self.end_vaddr()
-    }
-}
-
-pub struct UserStack {
-    lifecycle: Lifecycle,
-    base: usize,
-    top: usize,
-    initial_sp: usize,
-    arg0_ptr: usize,
-    size: usize,
-    backing_pages: [Option<PageRef>; MAX_STACK_PAGES],
-    backing_page_count: usize,
-    allocated: bool,
-    fixed_size_bound: bool,
-    mapped_into_address_space: bool,
-    backing_pages_allocated: bool,
-    zeroed: bool,
-    initial_sp_bound: bool,
-    minimal_arg_env_bound: bool,
-}
-
-#[allow(dead_code)]
-impl UserStack {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            base: 0,
-            top: 0,
-            initial_sp: 0,
-            arg0_ptr: 0,
-            size: 0,
-            backing_pages: [None; MAX_STACK_PAGES],
-            backing_page_count: 0,
-            allocated: false,
-            fixed_size_bound: false,
-            mapped_into_address_space: false,
-            backing_pages_allocated: false,
-            zeroed: false,
-            initial_sp_bound: false,
-            minimal_arg_env_bound: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn base(&self) -> usize {
-        self.base
-    }
-
-    pub const fn top(&self) -> usize {
-        self.top
-    }
-
-    pub const fn size(&self) -> usize {
-        self.size
-    }
-
-    pub const fn initial_sp(&self) -> usize {
-        self.initial_sp
-    }
-
-    pub const fn arg0_ptr(&self) -> usize {
-        self.arg0_ptr
-    }
-
-    pub const fn allocated(&self) -> bool {
-        self.allocated
-    }
-
-    pub const fn backing_page_count(&self) -> usize {
-        self.backing_page_count
-    }
-
-    pub const fn backing_page(&self, index: usize) -> Option<PageRef> {
-        if index < self.backing_page_count {
-            self.backing_pages[index]
-        } else {
-            None
-        }
-    }
-
-    pub const fn fixed_size_bound(&self) -> bool {
-        self.fixed_size_bound
-    }
-
-    pub const fn mapped_into_address_space(&self) -> bool {
-        self.mapped_into_address_space
-    }
-
-    pub const fn backing_pages_allocated(&self) -> bool {
-        self.backing_pages_allocated
-    }
-
-    pub const fn zeroed(&self) -> bool {
-        self.zeroed
-    }
-
-    pub const fn initial_sp_bound(&self) -> bool {
-        self.initial_sp_bound
-    }
-
-    pub const fn minimal_arg_env_bound(&self) -> bool {
-        self.minimal_arg_env_bound
-    }
-
-    pub fn release_exec_backing(
-        &mut self,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-    ) -> usize {
-        let released = self.backing_page_count;
-        while self.backing_page_count > 0 {
-            self.backing_page_count -= 1;
-            if let Some(page) = self.backing_pages[self.backing_page_count] {
-                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                self.backing_pages[self.backing_page_count] = None;
-            }
-        }
-        *self = Self::new();
-        released
-    }
-
-    pub fn reset_staging_after_exec_commit(&mut self) {
-        *self = Self::new();
-    }
-
-    pub fn setup(
-        &mut self,
-        address_space: &UserAddressSpace,
-        elf: &ElfObject,
-        interpreter: Option<&ElfObject>,
-        argv: &[&[u8]],
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-    ) -> EventResult {
-        self.setup_with_envp(
-            address_space,
-            elf,
-            interpreter,
-            argv,
-            &[],
-            page_allocator,
-            page_metadata_map,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn setup_with_envp(
-        &mut self,
-        address_space: &UserAddressSpace,
-        elf: &ElfObject,
-        interpreter: Option<&ElfObject>,
-        argv: &[&[u8]],
-        envp: &[&[u8]],
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || address_space.state() != State::Prepared
-            || page_allocator.state() != State::Ready
-            || elf.state() != State::Ready
-            || interpreter.is_some_and(|interp| interp.state() != State::Ready)
-            || argv.is_empty()
-        {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-
-        self.size = USER_STACK_SIZE;
-        self.top = USER_STACK_TOP;
-        self.base = USER_STACK_TOP - USER_STACK_SIZE;
-        self.initial_sp = 0;
-        self.arg0_ptr = 0;
-        self.backing_pages = [None; MAX_STACK_PAGES];
-        self.backing_page_count = 0;
-        let mut index = 0usize;
-        while index < MAX_STACK_PAGES {
-            let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
-            else {
-                while self.backing_page_count > 0 {
-                    self.backing_page_count -= 1;
-                    if let Some(allocated) = self.backing_pages[self.backing_page_count] {
-                        let _ = page_allocator.free_pages(allocated, 0, page_metadata_map);
-                    }
-                }
-                return failed_condition(
-                    LifecycleEvent::Setup,
-                    self.lifecycle.state(),
-                    State::Base,
-                    State::Ready,
-                );
-            };
-            let Some(linear) = page_metadata_map.page_address(page) else {
-                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
-                return failed_condition(
-                    LifecycleEvent::Setup,
-                    self.lifecycle.state(),
-                    State::Base,
-                    State::Ready,
-                );
-            };
-            unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
-            self.backing_pages[index] = Some(page);
-            self.backing_page_count += 1;
-            index += 1;
-        }
-        let Some(initial_sp) =
-            self.write_initial_arg_env(elf, interpreter, argv, envp, page_metadata_map)
-        else {
-            while self.backing_page_count > 0 {
-                self.backing_page_count -= 1;
-                if let Some(allocated) = self.backing_pages[self.backing_page_count] {
-                    let _ = page_allocator.free_pages(allocated, 0, page_metadata_map);
-                }
-            }
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        };
-        self.initial_sp = initial_sp;
-        self.allocated = true;
-        self.fixed_size_bound = true;
-        self.mapped_into_address_space = true;
-        self.backing_pages_allocated = true;
-        self.zeroed = true;
-        self.initial_sp_bound = true;
-        self.minimal_arg_env_bound = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
-    }
-
-    fn write_initial_arg_env(
-        &mut self,
-        elf: &ElfObject,
-        interpreter: Option<&ElfObject>,
-        argv: &[&[u8]],
-        envp: &[&[u8]],
-        page_metadata_map: &PageMetadataMap,
-    ) -> Option<usize> {
-        if argv.is_empty() {
-            return None;
-        }
-
-        let mut argv_ptrs = Vec::new();
-        let mut envp_ptrs = Vec::new();
-        argv_ptrs.try_reserve_exact(argv.len()).ok()?;
-        envp_ptrs.try_reserve_exact(envp.len()).ok()?;
-        argv_ptrs.resize(argv.len(), 0);
-        envp_ptrs.resize(envp.len(), 0);
-        let mut string_top = self.top;
-        let mut index = argv.len();
-        while index > 0 {
-            index -= 1;
-            let arg = argv[index];
-            let arg_len = arg.len().checked_add(1)?;
-            let arg_ptr = align_down(string_top.checked_sub(arg_len)?, 8);
-            write_stack_bytes(self, page_metadata_map, arg_ptr, arg)?;
-            write_stack_bytes(self, page_metadata_map, arg_ptr + arg.len(), &[0])?;
-            argv_ptrs[index] = arg_ptr;
-            string_top = arg_ptr;
-        }
-
-        let mut env_index = envp.len();
-        while env_index > 0 {
-            env_index -= 1;
-            let env = envp[env_index];
-            let env_len = env.len().checked_add(1)?;
-            let env_ptr = align_down(string_top.checked_sub(env_len)?, 8);
-            write_stack_bytes(self, page_metadata_map, env_ptr, env)?;
-            write_stack_bytes(self, page_metadata_map, env_ptr + env.len(), &[0])?;
-            envp_ptrs[env_index] = env_ptr;
-            string_top = env_ptr;
-        }
-
-        let word_count = 1usize
-            .checked_add(argv.len())?
-            .checked_add(1)?
-            .checked_add(envp.len())?
-            .checked_add(1)?
-            .checked_add(USER_INITIAL_AUXV_WORDS)?;
-        let words_size = word_count.checked_mul(core::mem::size_of::<usize>())?;
-        let initial_sp = align_down(string_top.checked_sub(words_size)?, 16);
-        if initial_sp < self.base {
-            return None;
-        }
-
-        let word = core::mem::size_of::<usize>();
-        let mut word_index = 0usize;
-        write_stack_usize(self, page_metadata_map, initial_sp, argv.len())?;
-        word_index += 1;
-
-        let mut argv_index = 0usize;
-        while argv_index < argv.len() {
-            write_stack_usize(
-                self,
-                page_metadata_map,
-                initial_sp + word_index * word,
-                argv_ptrs[argv_index],
-            )?;
-            word_index += 1;
-            argv_index += 1;
-        }
-        write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, 0)?;
-        word_index += 1;
-        let mut envp_index = 0usize;
-        while envp_index < envp.len() {
-            write_stack_usize(
-                self,
-                page_metadata_map,
-                initial_sp + word_index * word,
-                envp_ptrs[envp_index],
-            )?;
-            word_index += 1;
-            envp_index += 1;
-        }
-        write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, 0)?;
-        word_index += 1;
-
-        let auxv = [
-            (AT_PHDR, elf.phdr_vaddr()),
-            (AT_PHENT, elf.phentsize()),
-            (AT_PHNUM, elf.program_header_count()),
-            (AT_ENTRY, elf.entry()),
-            (AT_BASE, interpreter.map_or(0, ElfObject::load_bias)),
-            (AT_PAGESZ, USER_PAGE_SIZE),
-            (AT_NULL, 0),
-        ];
-        let mut aux_index = 0usize;
-        while aux_index < auxv.len() {
-            let (key, value) = auxv[aux_index];
-            write_stack_usize(self, page_metadata_map, initial_sp + word_index * word, key)?;
-            word_index += 1;
-            write_stack_usize(
-                self,
-                page_metadata_map,
-                initial_sp + word_index * word,
-                value,
-            )?;
-            word_index += 1;
-            aux_index += 1;
-        }
-
-        self.arg0_ptr = argv_ptrs[0];
-        Some(initial_sp)
     }
 }
 
@@ -1328,50 +996,6 @@ fn align_up_checked(value: usize, align: usize) -> Option<usize> {
     value
         .checked_add(align - 1)
         .map(|value| value & !(align - 1))
-}
-
-fn write_stack_usize(
-    stack: &UserStack,
-    page_metadata_map: &PageMetadataMap,
-    user_addr: usize,
-    value: usize,
-) -> Option<()> {
-    write_stack_bytes(stack, page_metadata_map, user_addr, &value.to_ne_bytes())
-}
-
-fn write_stack_bytes(
-    stack: &UserStack,
-    page_metadata_map: &PageMetadataMap,
-    user_addr: usize,
-    bytes: &[u8],
-) -> Option<()> {
-    if user_addr < stack.base
-        || user_addr
-            .checked_add(bytes.len())
-            .filter(|end| *end <= stack.top)
-            .is_none()
-    {
-        return None;
-    }
-
-    let mut written = 0usize;
-    while written < bytes.len() {
-        let stack_offset = user_addr - stack.base + written;
-        let page_index = stack_offset / USER_PAGE_SIZE;
-        let page_offset = stack_offset % USER_PAGE_SIZE;
-        let chunk = min_usize(bytes.len() - written, USER_PAGE_SIZE - page_offset);
-        let page = stack.backing_page(page_index)?;
-        let linear = page_metadata_map.page_address(page)?;
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                bytes.as_ptr().add(written),
-                (linear + page_offset) as *mut u8,
-                chunk,
-            );
-        }
-        written += chunk;
-    }
-    Some(())
 }
 
 pub struct UserAddressSpace {
@@ -1417,6 +1041,8 @@ pub struct UserAddressSpace {
     heap_size: usize,
     heap_brk: usize,
     mmap_next: usize,
+    #[cfg(app_smoke)]
+    fail_next_stack_pte_install: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1480,6 +1106,8 @@ impl UserAddressSpace {
             heap_size: 0,
             heap_brk: 0,
             mmap_next: 0,
+            #[cfg(app_smoke)]
+            fail_next_stack_pte_install: false,
         }
     }
 
@@ -1530,6 +1158,10 @@ impl UserAddressSpace {
         self.heap_size = 0;
         self.heap_brk = 0;
         self.mmap_next = 0;
+        #[cfg(app_smoke)]
+        {
+            self.fail_next_stack_pte_install = false;
+        }
     }
 
     pub fn reset_staging_after_exec_commit(&mut self) {
@@ -2069,10 +1701,12 @@ impl UserAddressSpace {
                 index += 1;
                 continue;
             };
-            let Some(mapping_len) = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE) else {
-                index += 1;
-                continue;
+            let mapped_bytes = if mapping.kind() == UserMappingKind::Stack {
+                mapping.memsz()
+            } else {
+                mapping.backing_page_count().saturating_mul(USER_PAGE_SIZE)
             };
+            let mapping_len = mapped_bytes;
             let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
                 index += 1;
                 continue;
@@ -2104,10 +1738,12 @@ impl UserAddressSpace {
                 index += 1;
                 continue;
             };
-            let Some(mapping_len) = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE) else {
-                index += 1;
-                continue;
+            let mapped_bytes = if mapping.kind() == UserMappingKind::Stack {
+                mapping.memsz()
+            } else {
+                mapping.backing_page_count().saturating_mul(USER_PAGE_SIZE)
             };
+            let mapping_len = mapped_bytes;
             let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
                 index += 1;
                 continue;
@@ -2139,9 +1775,194 @@ impl UserAddressSpace {
         UserFaultMappingDiagnostic::unmapped(addr, access)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_user_stack_fault(
+        &mut self,
+        stack: &mut UserStack,
+        fault_addr: usize,
+        access: UserFaultAccess,
+        current_satp: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<UserStackFaultResolution, UserStackGrowReject> {
+        let old_base = stack.base();
+        let reject = |stack: &mut UserStack, reason| {
+            stack.record_grow_rejected(fault_addr, old_base, reason);
+            Err(reason)
+        };
+        if self.lifecycle.state() != State::Online || stack.state() != State::Ready {
+            return reject(stack, UserStackGrowReject::InvalidState);
+        }
+        if current_satp == 0 || current_satp != self.satp_token {
+            return reject(stack, UserStackGrowReject::WrongAddressSpace);
+        }
+        if !matches!(access, UserFaultAccess::Load | UserFaultAccess::Store) {
+            return reject(stack, UserStackGrowReject::UnsupportedAccess);
+        }
+        if self.stack_mapping_index >= self.mapping_count {
+            return reject(stack, UserStackGrowReject::InvalidState);
+        }
+        let mapping = &self.mappings[self.stack_mapping_index];
+        if mapping.kind() != UserMappingKind::Stack
+            || mapping.stack_ownership_token() != stack.top()
+            || !mapping.user_accessible()
+            || (access == UserFaultAccess::Load && !mapping.readable())
+            || (access == UserFaultAccess::Store && !mapping.writable())
+            || mapping.executable()
+        {
+            return reject(stack, UserStackGrowReject::Permission);
+        }
+
+        let fault_page = align_down(fault_addr, USER_PAGE_SIZE);
+        if fault_addr >= stack.top() || fault_page < stack.rlimit_base() {
+            return reject(stack, UserStackGrowReject::Rlimit);
+        }
+        let new_base = if fault_page < old_base {
+            let mut index = 0usize;
+            while index < self.mapping_count {
+                if index != self.stack_mapping_index {
+                    let other = &self.mappings[index];
+                    if other.kind() != UserMappingKind::Empty {
+                        let other_start = other.vaddr().saturating_sub(other.page_offset());
+                        let other_len = other.backing_page_count().saturating_mul(USER_PAGE_SIZE);
+                        let other_end = other_start.saturating_add(other_len);
+                        if fault_page < other_end && fault_page + USER_PAGE_SIZE > other_start {
+                            return reject(stack, UserStackGrowReject::MappingCollision);
+                        }
+                        if other_end <= old_base {
+                            let guard_end = other_end.saturating_add(stack.config().guard_gap());
+                            if fault_page < guard_end {
+                                return reject(stack, UserStackGrowReject::GuardGap);
+                            }
+                        }
+                    }
+                }
+                index += 1;
+            }
+            fault_page
+        } else if fault_page < stack.top() {
+            old_base
+        } else {
+            return reject(stack, UserStackGrowReject::Rlimit);
+        };
+
+        if stack.page_for_vaddr(fault_page).is_some() {
+            return reject(stack, UserStackGrowReject::Permission);
+        }
+        let page = match stack.allocate_page(fault_page, page_allocator, page_metadata_map) {
+            Ok(page) => page,
+            Err(reason) => return reject(stack, reason),
+        };
+        let old_l0_count = self.page_table_l0_count;
+        let (_, vpn1, _) = sv39_indices(fault_page);
+        let had_l0 = self.page_table_l0s[..old_l0_count]
+            .iter()
+            .any(|slot| slot.page.is_some() && slot.vpn1 == vpn1);
+        #[cfg(app_smoke)]
+        let inject_pte_failure = core::mem::take(&mut self.fail_next_stack_pte_install);
+        #[cfg(not(app_smoke))]
+        let inject_pte_failure = false;
+        if inject_pte_failure
+            || !self.install_user_leaf_pte(
+                fault_page,
+                page.phys().value(),
+                true,
+                true,
+                false,
+                page_allocator,
+                page_metadata_map,
+            )
+        {
+            self.rollback_l0_tables(old_l0_count, page_allocator, page_metadata_map);
+            stack.rollback_page(fault_page, page_allocator, page_metadata_map);
+            let reason = if had_l0 {
+                UserStackGrowReject::PteInstall
+            } else {
+                UserStackGrowReject::PageTableAllocation
+            };
+            return reject(stack, reason);
+        }
+
+        if new_base != old_base {
+            let mapping = &mut self.mappings[self.stack_mapping_index];
+            mapping.vaddr = new_base;
+            mapping.memsz = stack.top() - new_base;
+            mapping.bss_zero_bytes = mapping.memsz;
+            mapping.bss_bytes_zeroed = mapping.memsz;
+            stack.commit_vma_base(new_base);
+        }
+        crate::arch::riscv64::csr::sfence_vma_addr(fault_page);
+        stack.record_grow_complete(fault_addr, old_base, new_base, true);
+        Ok(UserStackFaultResolution {
+            fault_page,
+            old_base,
+            new_base,
+            expanded: new_base != old_base,
+        })
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_fail_next_stack_pte_install(&mut self) {
+        self.fail_next_stack_pte_install = true;
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_set_heap_mapping_end(&mut self, end: usize) -> Option<usize> {
+        if self.heap_mapping_index >= self.mapping_count {
+            return None;
+        }
+        let mapping = &mut self.mappings[self.heap_mapping_index];
+        let bytes = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE)?;
+        let old_vaddr = mapping.vaddr;
+        mapping.vaddr = end.checked_sub(bytes)?;
+        Some(old_vaddr)
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_restore_heap_mapping_vaddr(&mut self, vaddr: usize) {
+        if self.heap_mapping_index < self.mapping_count {
+            self.mappings[self.heap_mapping_index].vaddr = vaddr;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_user_stack_range(
+        &mut self,
+        stack: &mut UserStack,
+        addr: usize,
+        len: usize,
+        access: UserFaultAccess,
+        current_satp: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<(), UserStackGrowReject> {
+        if len == 0 {
+            return Ok(());
+        }
+        let end = addr.checked_add(len).ok_or(UserStackGrowReject::Rlimit)?;
+        let mut page = align_down(addr, USER_PAGE_SIZE);
+        while page < end {
+            if stack.page_for_vaddr(page).is_none() {
+                self.resolve_user_stack_fault(
+                    stack,
+                    page,
+                    access,
+                    current_satp,
+                    page_allocator,
+                    page_metadata_map,
+                )?;
+            }
+            page = page
+                .checked_add(USER_PAGE_SIZE)
+                .ok_or(UserStackGrowReject::Rlimit)?;
+        }
+        Ok(())
+    }
+
     pub fn enable(
         &mut self,
         trap_frame: &UserTrapFrame,
+        stack: &UserStack,
         swapper_vm: &SwapperVm,
         kernel_image: &KernelImage,
         page_allocator: &mut PageAllocator,
@@ -2149,6 +1970,7 @@ impl UserAddressSpace {
     ) -> Result<(), ElfError> {
         if self.lifecycle.state() != State::Ready
             || trap_frame.state() != State::Ready
+            || stack.state() != State::Ready
             || swapper_vm.state() != State::Online
             || page_allocator.state() != State::Ready
             || page_metadata_map.state() != State::Ready
@@ -2164,7 +1986,7 @@ impl UserAddressSpace {
             return Err(ElfError::PageTableAllocationFailed);
         }
         if !self.copy_swapper_high_half(kernel_image, page_metadata_map)
-            || !self.install_all_user_leaf_ptes(page_allocator, page_metadata_map)
+            || !self.install_all_user_leaf_ptes(stack, page_allocator, page_metadata_map)
         {
             self.release_page_table_pages(page_allocator, page_metadata_map);
             return Err(ElfError::PageTableInstallFailed);
@@ -2232,6 +2054,7 @@ impl UserAddressSpace {
 
     fn install_all_user_leaf_ptes(
         &mut self,
+        stack: &UserStack,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
@@ -2242,9 +2065,31 @@ impl UserAddressSpace {
             }
             index += 1;
         }
+        let mut stack_page_index = 0usize;
+        while stack_page_index < stack.backing_page_count() {
+            let Some(virt) = stack.backing_page_vaddr(stack_page_index) else {
+                return false;
+            };
+            let Some(page) = stack.backing_page(stack_page_index) else {
+                return false;
+            };
+            if !self.install_user_leaf_pte(
+                virt,
+                page.phys().value(),
+                true,
+                true,
+                false,
+                page_allocator,
+                page_metadata_map,
+            ) {
+                return false;
+            }
+            stack_page_index += 1;
+        }
         self.user_leaf_ptes_installed = self.user_leaf_pte_count != 0
             && self.user_leaf_pte_count
-                == total_mapping_page_count(&self.mappings, self.mapping_count);
+                == total_mapping_page_count(&self.mappings, self.mapping_count)
+                    + stack.backing_page_count();
         self.user_leaf_ptes_installed
     }
 
@@ -2267,6 +2112,9 @@ impl UserAddressSpace {
         else {
             return false;
         };
+        if kind == UserMappingKind::Stack {
+            return user_accessible;
+        }
         if kind == UserMappingKind::Empty || !user_accessible || backing_page_count == 0 {
             return false;
         }
@@ -2407,6 +2255,27 @@ impl UserAddressSpace {
         self.prepared_but_not_current = false;
         self.satp_token = 0;
         self.runtime_ready = false;
+    }
+
+    fn rollback_l0_tables(
+        &mut self,
+        old_count: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) {
+        while self.page_table_l0_count > old_count {
+            self.page_table_l0_count -= 1;
+            let slot = self.page_table_l0s[self.page_table_l0_count];
+            if let Some(l1_page) = self.page_table_l1
+                && let Some(l1_table) = page_table_page_mut(l1_page, page_metadata_map)
+            {
+                let _ = l1_table.set_entry(slot.vpn1, 0);
+            }
+            if let Some(page) = slot.page {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            }
+            self.page_table_l0s[self.page_table_l0_count] = UserL0TableSlot::empty();
+        }
     }
 }
 
@@ -3321,27 +3190,20 @@ impl UserChildProcess {
     ) -> bool {
         self.runtime_exec_parent_snapshot_live(address_space)
             && stack.state() == State::Ready
-            && address_space.stack_mapping().is_some_and(|mapping| {
-                mapping.backing_page_count() == stack.backing_page_count()
-                    && mapping.backing_page(0) == stack.backing_page(0)
-            })
+            && address_space
+                .stack_mapping()
+                .is_some_and(|mapping| mapping.stack_ownership_token() == stack.top())
     }
 
     pub fn retain_parent_exec_objects(
         &mut self,
         address_space: &UserAddressSpace,
-        stack: &UserStack,
+        stack: &mut UserStack,
     ) -> bool {
         if !self.can_retain_parent_exec_objects(address_space, stack) {
             return false;
         }
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                stack as *const UserStack,
-                &mut self.parent_exec_stack_snapshot as *mut UserStack,
-                1,
-            );
-        }
+        core::mem::swap(stack, &mut self.parent_exec_stack_snapshot);
         self.parent_exec_stack_snapshot_saved = true;
         true
     }
@@ -4422,13 +4284,8 @@ impl UserChildProcess {
                 address_space as *mut UserAddressSpace,
                 1,
             );
-            core::ptr::copy_nonoverlapping(
-                &self.parent_exec_stack_snapshot as *const UserStack,
-                stack as *mut UserStack,
-                1,
-            );
         }
-        self.parent_exec_stack_snapshot = UserStack::new();
+        core::mem::swap(stack, &mut self.parent_exec_stack_snapshot);
         self.parent_exec_stack_snapshot_saved = false;
         true
     }
@@ -4466,9 +4323,10 @@ impl UserChildProcess {
         let mut first_before = 0u8;
         let mut first_after = 0u8;
         let mut index = 0usize;
+        let stack = &crate::context::context_ref().user_stack;
         while index < self.parent_wait_stack_window_len {
             let addr = self.parent_wait_stack_window_start + index;
-            let Some(after) = read_stack_mapping_byte(mapping, page_metadata_map, addr) else {
+            let Some(after) = stack.read_byte(page_metadata_map, addr) else {
                 return false;
             };
             let before = self.parent_wait_stack_window[index];
@@ -5216,16 +5074,18 @@ fn copy_user_stack_snapshot(
     if mapping.kind() != UserMappingKind::Stack || mapping.memsz() == 0 {
         return None;
     }
-    let page_bytes = mapping
-        .backing_page_count()
-        .checked_mul(USER_PAGE_SIZE)
-        .filter(|bytes| *bytes >= mapping.memsz())?;
-    let snapshot_len = min_usize(mapping.memsz(), page_bytes);
+    let stack = &crate::context::context_ref().user_stack;
+    let snapshot_len = min_usize(stack.size(), output.len());
     if snapshot_len == 0 || snapshot_len > output.len() {
         return None;
     }
-    if !copy_stack_mapping_to_buffer(mapping, page_metadata_map, &mut output[..snapshot_len]) {
-        return None;
+    let start = stack.top().checked_sub(snapshot_len)?;
+    let mut index = 0usize;
+    while index < snapshot_len {
+        output[index] = stack
+            .read_byte(page_metadata_map, start + index)
+            .unwrap_or(0);
+        index += 1;
     }
     Some(snapshot_len)
 }
@@ -5242,17 +5102,21 @@ fn restore_user_stack_snapshot(
     if mapping.kind() != UserMappingKind::Stack || len == 0 || len > input.len() {
         return false;
     }
-    let Some(page_bytes) = mapping
-        .backing_page_count()
-        .checked_mul(USER_PAGE_SIZE)
-        .filter(|bytes| *bytes >= len)
-    else {
-        return false;
-    };
-    if page_bytes < mapping.memsz() || len > mapping.memsz() {
+    let stack = &crate::context::context_ref().user_stack;
+    if len > stack.size() {
         return false;
     }
-    copy_buffer_to_stack_mapping(mapping, page_metadata_map, &input[..len])
+    let Some(start) = stack.top().checked_sub(len) else {
+        return false;
+    };
+    let mut index = 0usize;
+    while index < len {
+        if !stack.write_existing_byte(page_metadata_map, start + index, input[index]) {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 fn copy_user_stack_window_to_buffer(
@@ -5262,88 +5126,21 @@ fn copy_user_stack_window_to_buffer(
     output: &mut [u8; USER_PARENT_WAIT_STACK_PROBE_LEN],
 ) -> Option<usize> {
     let mapping = address_space.stack_mapping()?;
-    if mapping.kind() != UserMappingKind::Stack || start < mapping.vaddr() {
+    let stack = &crate::context::context_ref().user_stack;
+    if mapping.kind() != UserMappingKind::Stack || start < stack.base() {
         return None;
     }
-    let remaining = mapping.end_vaddr().checked_sub(start)?;
+    let remaining = stack.top().checked_sub(start)?;
     let len = min_usize(output.len(), remaining);
     if len == 0 {
         return None;
     }
     let mut index = 0usize;
     while index < len {
-        output[index] = read_stack_mapping_byte(mapping, page_metadata_map, start + index)?;
+        output[index] = stack.read_byte(page_metadata_map, start + index)?;
         index += 1;
     }
     Some(len)
-}
-
-fn read_stack_mapping_byte(
-    mapping: &UserMapping,
-    page_metadata_map: &PageMetadataMap,
-    user_addr: usize,
-) -> Option<u8> {
-    if user_addr < mapping.vaddr() || user_addr >= mapping.end_vaddr() {
-        return None;
-    }
-    let offset = mapping.page_offset() + (user_addr - mapping.vaddr());
-    let page_index = offset / USER_PAGE_SIZE;
-    let page_offset = offset % USER_PAGE_SIZE;
-    let page = mapping.backing_page(page_index)?;
-    let linear = page_metadata_map.page_address(page)?;
-    Some(unsafe { *((linear + page_offset) as *const u8) })
-}
-
-fn copy_stack_mapping_to_buffer(
-    mapping: &UserMapping,
-    page_metadata_map: &PageMetadataMap,
-    output: &mut [u8],
-) -> bool {
-    let mut copied = 0usize;
-    let mut page_index = 0usize;
-    while copied < output.len() {
-        let Some(page) = mapping.backing_page(page_index) else {
-            return false;
-        };
-        let Some(linear) = page_metadata_map.page_address(page) else {
-            return false;
-        };
-        let len = min_usize(USER_PAGE_SIZE, output.len() - copied);
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                linear as *const u8,
-                output.as_mut_ptr().add(copied),
-                len,
-            );
-        }
-        copied += len;
-        page_index += 1;
-    }
-    true
-}
-
-fn copy_buffer_to_stack_mapping(
-    mapping: &UserMapping,
-    page_metadata_map: &PageMetadataMap,
-    input: &[u8],
-) -> bool {
-    let mut copied = 0usize;
-    let mut page_index = 0usize;
-    while copied < input.len() {
-        let Some(page) = mapping.backing_page(page_index) else {
-            return false;
-        };
-        let Some(linear) = page_metadata_map.page_address(page) else {
-            return false;
-        };
-        let len = min_usize(USER_PAGE_SIZE, input.len() - copied);
-        unsafe {
-            core::ptr::copy_nonoverlapping(input.as_ptr().add(copied), linear as *mut u8, len);
-        }
-        copied += len;
-        page_index += 1;
-    }
-    true
 }
 
 #[allow(dead_code)]
@@ -7425,6 +7222,9 @@ fn select_and_exec_user_init(
         let path_ref = USER_INIT_CANDIDATES[index];
         match try_boot_exec_candidate(ctx, path_ref, path_ref.path()) {
             Ok(success) => return success,
+            Err(super::exec_transaction::ExecError::EntropyUnavailable) => {
+                user_boot_panic("init AT_RANDOM entropy unavailable\n")
+            }
             Err(error) => {
                 emit_exec_attempt_failure(ctx, path_ref, path_ref.path(), error, false, true)
             }
@@ -7503,6 +7303,11 @@ fn classify_exec_attempt_failure(
             None,
         ),
         ExecError::NoMemory => (
+            UserInitAttemptStage::SetupElf,
+            UserInitAttemptReason::ElfSetupFailed,
+            None,
+        ),
+        ExecError::EntropyUnavailable => (
             UserInitAttemptStage::SetupElf,
             UserInitAttemptReason::ElfSetupFailed,
             None,
@@ -8020,7 +7825,9 @@ fn pages_for_range(offset: usize, len: usize) -> Result<usize, ElfError> {
 fn mappings_have_backing_pages(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {
     let mut index = 0usize;
     while index < count {
-        if mappings[index].backing_page_count() == 0 {
+        if mappings[index].kind() != UserMappingKind::Stack
+            && mappings[index].backing_page_count() == 0
+        {
             return false;
         }
         index += 1;

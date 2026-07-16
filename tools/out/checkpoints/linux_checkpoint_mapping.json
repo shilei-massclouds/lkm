@@ -5311,5 +5311,27 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 483,
+    "checkpoint_name": "UserStack.GrowComplete",
+    "checkpoint_variant": "UserStackGrowComplete",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 484,
+    "checkpoint_name": "UserStack.GrowRejected",
+    "checkpoint_variant": "UserStackGrowRejected",
+    "linux_file": null,
+    "linux_symbol": null,
+    "linux_anchor": null,
+    "mapping_kind": "unmapped",
+    "confidence": "none",
+    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   }
 ]

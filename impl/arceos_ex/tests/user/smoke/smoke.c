@@ -130,6 +130,12 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
+	rc = RUN_CASE("stack", smoke_stack);
+	if (rc != 0) {
+		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
+		return rc;
+	}
+
 	if (say(message, sizeof(message) - 1) < 0) {
 		return 17;
 	}

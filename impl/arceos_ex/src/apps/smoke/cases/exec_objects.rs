@@ -31,6 +31,14 @@ pub fn run() -> SmokeResult {
         printk::write_str("exec rollback smoke invariant failed\n");
         return SmokeResult::Failed;
     }
+    if !exec_transaction::smoke_entropy_failure_preserves_current(ctx) {
+        printk::write_str("exec entropy rollback smoke invariant failed\n");
+        return SmokeResult::Failed;
+    }
+    if !exec_transaction::smoke_consecutive_exec_randoms_differ(ctx) {
+        printk::write_str("exec consecutive AT_RANDOM smoke invariant failed\n");
+        return SmokeResult::Failed;
+    }
     if !super::user_boot::stage_user_elf_images() {
         printk::write_str("exec object smoke could not stage user ELF images\n");
         return SmokeResult::Failed;

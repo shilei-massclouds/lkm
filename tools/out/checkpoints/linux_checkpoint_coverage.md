@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 483
+- total checkpoints: 485
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 366 |
+| unmapped | 368 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 366 |
+| none | 368 |
 | medium | 62 |
 | high | 55 |
 
@@ -115,6 +115,7 @@
 | TickBroadcast | 2 |
 | UserChildRecord | 2 |
 | UserSignalWait | 2 |
+| UserStack | 2 |
 | VirtioBus | 2 |
 | Workqueue | 2 |
 

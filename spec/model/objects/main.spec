@@ -148,6 +148,7 @@ include "binary_format_registry.spec";
 include "exec_sync_boundaries.spec";
 include "exec_transaction.spec";
 include "elf_object.spec";
+include "user_stack.spec";
 include "user_boot.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;

@@ -104,8 +104,9 @@ use crate::objects::{
     static_objects::StaticObjects,
     user_boot::{
         ElfObject, UserAddressSpace, UserBootPayload, UserChildProcess,
-        UserCloneDeferredBoundaries, UserInitProcess, UserStack, UserTrapFrame,
+        UserCloneDeferredBoundaries, UserInitProcess, UserTrapFrame,
     },
+    user_stack::UserStack,
     vfs::{FsStruct, RamFsType, VfsCore},
     virtio::VirtioBus,
     virtio_blk::VirtioBlkRuntime,

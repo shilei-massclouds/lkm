@@ -23,7 +23,7 @@ use crate::objects::user_boot::{
     USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE, USER_KERNEL_TRAP_STACK_ALIGN,
     USER_KERNEL_TRAP_STACK_ORDER, USER_KERNEL_TRAP_STACK_SIZE,
     USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
-    USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, UserStack,
+    USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
     user_kernel_trap_overflow_stack_base, user_kernel_trap_overflow_stack_ready,
     user_kernel_trap_overflow_stack_top, user_kernel_trap_stack_backing_order,
     user_kernel_trap_stack_backing_phys, user_kernel_trap_stack_base,
@@ -36,6 +36,7 @@ use crate::objects::user_boot::{
 use crate::objects::{
     exception_stream::{execve_checkpoint_observation, wait4_checkpoint_observation},
     files::{FdRef, FileBackendKind},
+    user_stack::UserStack,
 };
 
 const SCOPE: &[Checkpoint] = &[
@@ -116,6 +117,10 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::UserChildRecordReaped,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExit,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserStackGrowComplete,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserStackGrowRejected,
 ];
 #[cfg(app_user_boot)]
 pub const KUNIT_CASE_COUNT: usize = 37;
@@ -205,6 +210,21 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         #[cfg(app_user_boot)]
         Checkpoint::UserAddressSpaceReady => {
             run_user_address_space_ready(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserStackGrowComplete | Checkpoint::UserStackGrowRejected => {
+            sink.diag_usize("fault_address", ctx.user_stack.last_fault_address());
+            sink.diag_usize("old_vma_base", ctx.user_stack.last_old_base());
+            sink.diag_usize("new_vma_base", ctx.user_stack.last_new_base());
+            sink.diag_usize(
+                "allocated_pages",
+                ctx.user_stack.last_allocated_page_count(),
+            );
+            sink.diag_usize(
+                "rejection_reason",
+                ctx.user_stack.last_grow_rejection() as usize,
+            );
+            sink.diag_usize("tlb_flush", ctx.user_stack.last_tlb_flush() as usize);
         }
         #[cfg(app_user_boot)]
         Checkpoint::UserModeEntry => {
@@ -963,10 +983,10 @@ fn stack_contains_at(
         } else {
             0
         };
-        let stack_offset = user_addr - stack.base() + index;
-        let page_index = stack_offset / USER_PAGE_SIZE;
-        let page_offset = stack_offset % USER_PAGE_SIZE;
-        let Some(page) = stack.backing_page(page_index) else {
+        let current = user_addr + index;
+        let page_vaddr = current & !(USER_PAGE_SIZE - 1);
+        let page_offset = current - page_vaddr;
+        let Some(page) = stack.page_for_vaddr(page_vaddr) else {
             return false;
         };
         let Some(linear) = ctx.page_metadata_map.page_address(page) else {

@@ -170,18 +170,6 @@ predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> 
 predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
-predicate user_stack_allocated<T>(stack: T) -> bool;
-predicate user_stack_fixed_size_bound<T>(stack: T) -> bool;
-predicate user_stack_exec_fixture_capacity_bound<T>(stack: T) -> bool;
-predicate user_stack_mapped_into_address_space<T, A>(stack: T, space: A) -> bool;
-predicate user_stack_backing_pages_allocated<T>(stack: T) -> bool;
-predicate user_stack_zeroed<T>(stack: T) -> bool;
-predicate user_stack_initial_sp_bound<T>(stack: T) -> bool;
-predicate user_stack_minimal_arg_env_bound<T>(stack: T) -> bool;
-predicate user_stack_initial_argc_argv_envp_auxv_bound<T>(stack: T) -> bool;
-predicate user_stack_static_libc_entry_supported<T>(stack: T) -> bool;
-predicate user_stack_dynamic_auxv_fields_bound<T, E, I>(stack: T, elf: E, interpreter: I) -> bool;
-
 predicate user_trap_frame_allocated<T>(frame: T) -> bool;
 predicate user_trap_frame_entry_bound<T, E>(frame: T, elf: E) -> bool;
 predicate user_trap_frame_entry_uses_interpreter_when_present<T, E, I>(frame: T, elf: E, interpreter: I) -> bool;
@@ -884,50 +872,6 @@ object UserAddressSpace: ResourceObject {
         }
     }
 }
-
-object UserStack: ResourceObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    UserAddressSpace.state == State::Prepared;
-                    PageAllocator.state == State::Ready;
-                }
-
-                ensures {
-                    user_stack_allocated(self);
-                    user_stack_fixed_size_bound(self);
-                    user_stack_exec_fixture_capacity_bound(self);
-                    user_stack_mapped_into_address_space(self, UserAddressSpace);
-                    user_stack_backing_pages_allocated(self);
-                    user_stack_zeroed(self);
-                    user_stack_initial_sp_bound(self);
-                    user_stack_minimal_arg_env_bound(self);
-                    user_stack_initial_argc_argv_envp_auxv_bound(self);
-                    user_stack_static_libc_entry_supported(self);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            user_stack_allocated(self);
-            user_stack_fixed_size_bound(self);
-            user_stack_exec_fixture_capacity_bound(self);
-            user_stack_mapped_into_address_space(self, UserAddressSpace);
-            user_stack_backing_pages_allocated(self);
-            user_stack_zeroed(self);
-            user_stack_initial_sp_bound(self);
-            user_stack_minimal_arg_env_bound(self);
-            user_stack_initial_argc_argv_envp_auxv_bound(self);
-            user_stack_static_libc_entry_supported(self);
-        }
-    }
-}
-
 
 object UserTrapFrame: ResourceObject {
     initial_state: State::Base;

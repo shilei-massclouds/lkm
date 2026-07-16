@@ -249,6 +249,12 @@ pub fn sfence_vma() {
     }
 }
 
+pub fn sfence_vma_addr(addr: usize) {
+    unsafe {
+        core::arch::asm!("sfence.vma {addr}, zero", addr = in(reg) addr, options(nostack, nomem));
+    }
+}
+
 #[allow(dead_code)]
 pub fn clear_sscratch() {
     unsafe {

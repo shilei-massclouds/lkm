@@ -16,9 +16,9 @@
   `TERM=linux`，runtime 的 usercopy 在 transaction 启动前完成。
 - 经 `BinaryFormatRegistry` 选择 handler，持有 main/interpreter `ElfObject`、staging address space、stack、
   trap frame、失败事实和 point-of-no-return。
-- 首轮仍使用固定大小用户栈，但 boot/runtime transaction 的 staging stack 映射 128 KiB。当前 Alpine
-  BusyBox `/bin/sh` 在 `0x96d86..0x96d94` 可复现地逐页探测一个 64 KiB 栈帧，初始 argv/envp/auxv 与
-  调用帧还需要额外空间；动态栈扩展、guard page 和内核侧 stack canary/protector 留待后续对象化。
+- staging stack 遵守独立 [`UserStack`](user-stack.md) 对象约束：稀疏 backing、初始 VMA 向下预扩展
+  128 KiB、8 MiB rlimit、1 MiB guard gap，并在 point-of-no-return 前从当前 HWRNG 获取完整 16 字节
+  `AT_RANDOM`。内核侧 stack canary/protector 仍留待后续对象化。
 - 在 point-of-no-return 前完成文件读取、格式识别、解释器读取、所有 staging 分配、页表安装和 bounded
   CLOEXEC 预检。失败释放全部 staging backing 并保持 current mm、SATP、trap frame、fd table 和进程身份不变。
 - 成功时依次标记 point-of-no-return、交换 current/staging image、执行已预检 CLOEXEC、安装映像/stack/
@@ -30,7 +30,8 @@
 ## 错误与提交边界
 
 普通失败只能发生在 point-of-no-return 前：usercopy fault 为 `EFAULT`，参数容量超限为 `E2BIG`，文件或
-解释器缺失为 `ENOENT`，没有 handler 接受映像为 `ENOEXEC`，分配失败为 `ENOMEM`。point-of-no-return
+解释器缺失为 `ENOENT`，没有 handler 接受映像为 `ENOEXEC`，分配失败为 `ENOMEM`，HWRNG 不可用或
+短读在 runtime 为 `EAGAIN`；boot 在该错误上 terminal 且不得继续候选。point-of-no-return
 后不得返回普通 errno；内部不变量破坏进入 terminal panic，完整 fatal-signal 语义后续展开。
 
 `ExecOwner` 只决定输入来源、成功交接和 checkpoint namespace。boot/runtime 共用同一 prepare/dispatch/

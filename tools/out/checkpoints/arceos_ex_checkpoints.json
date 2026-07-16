@@ -3379,5 +3379,19 @@
     "name": "PayloadPhase.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 483,
+    "variant": "UserStackGrowComplete",
+    "name": "UserStack.GrowComplete",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 484,
+    "variant": "UserStackGrowRejected",
+    "name": "UserStack.GrowRejected",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }
 ]

@@ -7,7 +7,8 @@ SMOKE_SRC := smoke.c \
 	process_identity.c \
 	tty_termios.c \
 	uts_cwd.c \
-	time_random.c
+	time_random.c \
+	stack.c
 SMOKE_DEPS := smoke.h Makefile
 
 .PHONY: build

@@ -250,6 +250,10 @@ class ListCheckpointsTests(unittest.TestCase):
             "PayloadPhaseStarted": 481,
             "PayloadPhasePrepared": 482,
         }
+        appended_user_stack_ids = {
+            "UserStackGrowComplete": 483,
+            "UserStackGrowRejected": 484,
+        }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
             {
@@ -305,7 +309,13 @@ class ListCheckpointsTests(unittest.TestCase):
             },
             appended_payload_ids,
         )
-        self.assertEqual(len(records), 483)
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index for variant in appended_user_stack_ids
+            },
+            appended_user_stack_ids,
+        )
+        self.assertEqual(len(records), 485)
 
 
 if __name__ == "__main__":

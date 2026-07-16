@@ -609,6 +609,8 @@ pub enum Checkpoint {
     ApOnlineIdlePhaseOnline,
     PayloadPhaseStarted,
     PayloadPhasePrepared,
+    UserStackGrowComplete,
+    UserStackGrowRejected,
 }
 
 impl Checkpoint {
@@ -1131,6 +1133,8 @@ impl Checkpoint {
             Self::ApOnlineIdlePhaseOnline => "ApOnlineIdlePhase.Online",
             Self::PayloadPhaseStarted => "PayloadPhase.Started",
             Self::PayloadPhasePrepared => "PayloadPhase.Prepared",
+            Self::UserStackGrowComplete => "UserStack.GrowComplete",
+            Self::UserStackGrowRejected => "UserStack.GrowRejected",
         }
     }
 }

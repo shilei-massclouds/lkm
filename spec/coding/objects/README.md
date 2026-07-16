@@ -37,6 +37,7 @@ Classification meanings:
 | [`ns16550a_driver.spec`](../../model/objects/ns16550a_driver.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`object_kinds.spec`](../../model/objects/object_kinds.spec) | `general-only` | [`mapping.md`](../mapping.md) |
 | [`user_boot.spec`](../../model/objects/user_boot.spec) | `dedicated` | [`user-boot.md`](user-boot.md) |
+| [`user_stack.spec`](../../model/objects/user_stack.spec) | `dedicated` | [`user-stack.md`](user-stack.md) |
 | [`vfs.spec`](../../model/objects/vfs.spec) | `dedicated` | [`vfs.md`](vfs.md) |
 | [`virtio.spec`](../../model/objects/virtio.spec) | `grouped` | [`virtio.md`](virtio.md) |
 | [`virtio_blk.spec`](../../model/objects/virtio_blk.spec) | `dedicated` | [`virtio-blk.md`](virtio-blk.md) |

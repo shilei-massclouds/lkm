@@ -16,8 +16,8 @@ use crate::{
             ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
             USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
-            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_SIZE,
-            USER_STACK_TOP, USER_WAIT4_ALL_CHILDREN, UserMappingKind, UserProcessGroupLookup,
+            USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_TOP,
+            USER_WAIT4_ALL_CHILDREN, UserMappingKind, UserProcessGroupLookup,
             UserProcessGroupUpdate, UserRtSigtimedwaitResult,
         },
         virtio_blk,
@@ -244,6 +244,8 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.elf_object,
                     interpreter_ref,
                     &init_argv,
+                    ctx.config.user_stack(),
+                    &[0x3c; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -292,6 +294,7 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_address_space
                 .enable(
                     &ctx.user_trap_frame,
+                    &ctx.user_stack,
                     ctx.vm.swapper_vm(),
                     &ctx.kernel_image,
                     &mut ctx.page_allocator,
@@ -525,7 +528,6 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "user stack facts",
             stack.allocated()
-                && stack.fixed_size_bound()
                 && stack.mapped_into_address_space()
                 && stack.backing_pages_allocated()
                 && stack.zeroed()
@@ -534,7 +536,8 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "user stack bounds",
-            stack.size() == USER_STACK_SIZE
+            stack.size() >= ctx.config.user_stack().initial_expand()
+                && stack.size() <= ctx.config.user_stack().initial_expand() + 2 * USER_PAGE_SIZE
                 && stack.top() == USER_STACK_TOP
                 && stack.initial_sp() >= stack.base()
                 && stack.initial_sp() < stack.top()
@@ -546,13 +549,26 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack.top().is_multiple_of(USER_PAGE_SIZE),
         );
         assertions.assert(
+            "user stack Linux config",
+            ctx.config.user_stack().initial_expand() == crate::objects::user_stack::USER_STACK_SIZE
+                && ctx.config.user_stack().rlimit_stack()
+                    == crate::objects::user_stack::USER_STACK_RLIMIT
+                && ctx.config.user_stack().guard_gap()
+                    == crate::objects::user_stack::USER_STACK_GUARD_GAP
+                && ctx.config.user_stack().stack_top()
+                    == crate::objects::user_stack::USER_STACK_TOP
+                && ctx.config.user_stack().random_bytes()
+                    == crate::objects::user_stack::USER_STACK_RANDOM_BYTES,
+        );
+        assertions.assert(
             "user stack pages",
-            stack.backing_page_count() == USER_STACK_SIZE / USER_PAGE_SIZE
+            stack.backing_page_count() >= 1
+                && stack.backing_page_count() < stack.size() / USER_PAGE_SIZE
                 && stack.backing_page(0).is_some(),
         );
         assertions.assert(
-            "user stack zeroed",
-            stack_first_page_zeroed(stack, &ctx.page_metadata_map),
+            "user stack sparse initial vma",
+            stack.page_for_vaddr(stack.base()).is_none(),
         );
         assertions.assert(
             "user stack arg0",
@@ -577,6 +593,27 @@ impl SmokeScenario for UserBootElfScenario {
                 && init_argv_null == Some(0)
                 && init_envp_null == Some(0),
         );
+        let random_key = stack_usize_at(
+            stack,
+            &ctx.page_metadata_map,
+            stack.initial_sp() + 16 * word,
+        );
+        let random_value = stack_usize_at(
+            stack,
+            &ctx.page_metadata_map,
+            stack.initial_sp() + 17 * word,
+        );
+        assertions.assert(
+            "user stack AT_RANDOM",
+            random_key == Some(crate::objects::user_stack::AT_RANDOM)
+                && random_value == Some(stack.random_ptr())
+                && stack_contains_at(
+                    stack,
+                    &ctx.page_metadata_map,
+                    stack.random_ptr(),
+                    &[0x3c; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
+                ),
+        );
         let Some(stack_mapping) = space.stack_mapping() else {
             assertions.assert("stack mapping", false);
             return;
@@ -590,7 +627,9 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack_mapping.readable()
                 && stack_mapping.writable()
                 && !stack_mapping.executable()
-                && stack_mapping.user_accessible(),
+                && stack_mapping.user_accessible()
+                && stack_mapping.backing_page_count() == 0
+                && stack_mapping.stack_ownership_token() == stack.top(),
         );
         let Some(heap_mapping) = space.mapping(space.segment_mapping_count() + 1) else {
             assertions.assert("heap mapping", false);
@@ -631,6 +670,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && trap.sp() == stack.initial_sp()
                 && trap.sstatus() == crate::objects::user_boot::USER_SSTATUS_INITIAL,
         );
+        exercise_user_stack_growth(assertions, ctx);
         assertions.assert(
             "syscall setup",
             ctx.exception_stream
@@ -1308,6 +1348,191 @@ impl SmokeScenario for UserBootElfScenario {
 }
 
 #[inline(never)]
+fn exercise_user_stack_growth(assertions: &mut SmokeAssertions, ctx: &mut crate::context::Context) {
+    use crate::objects::{user_boot::UserFaultAccess, user_stack::UserStackGrowReject};
+
+    let satp = ctx.user_address_space.satp_token();
+    let initial_base = ctx.user_stack.base();
+    let initial_pages = ctx.user_stack.backing_page_count();
+    let inside = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        initial_base,
+        UserFaultAccess::Load,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack VMA demand page",
+        inside.is_ok_and(|resolution| {
+            resolution.fault_page() == initial_base
+                && resolution.old_base() == initial_base
+                && resolution.new_base() == initial_base
+                && !resolution.expanded()
+        }) && ctx.user_stack.base() == initial_base
+            && ctx.user_stack.backing_page_count() == initial_pages + 1,
+    );
+
+    let pages_before_jump = ctx.user_stack.backing_page_count();
+    let jump_addr = initial_base - 4 * USER_PAGE_SIZE;
+    let jump = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        jump_addr,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack sparse multi-page growth",
+        jump.is_ok_and(|resolution| resolution.expanded() && resolution.new_base() == jump_addr)
+            && ctx.user_stack.base() == jump_addr
+            && ctx.user_stack.backing_page_count() == pages_before_jump + 1
+            && ctx
+                .user_stack
+                .page_for_vaddr(initial_base - USER_PAGE_SIZE)
+                .is_none(),
+    );
+
+    let l0_before = ctx.user_address_space.page_table_l0_count();
+    let boundary_addr = (ctx.user_stack.base() & !((2 * 1024 * 1024) - 1)) - USER_PAGE_SIZE;
+    let boundary = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        boundary_addr,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack 2MiB page-table growth",
+        boundary.is_ok()
+            && ctx.user_stack.base() == boundary_addr
+            && ctx.user_address_space.page_table_l0_count() == l0_before + 1,
+    );
+
+    let base_before_reject = ctx.user_stack.base();
+    let pages_before_reject = ctx.user_stack.backing_page_count();
+    let free_before_reject = ctx.page_allocator.buddy_total_free_pages();
+    let below_rlimit = ctx.user_stack.rlimit_base() - USER_PAGE_SIZE;
+    let rlimit = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        below_rlimit,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack rlimit rejection rollback",
+        rlimit == Err(UserStackGrowReject::Rlimit)
+            && ctx.user_stack.base() == base_before_reject
+            && ctx.user_stack.backing_page_count() == pages_before_reject
+            && ctx.page_allocator.buddy_total_free_pages() == free_before_reject,
+    );
+
+    let base_before_alloc_fail = ctx.user_stack.base();
+    let pages_before_alloc_fail = ctx.user_stack.backing_page_count();
+    let free_before_alloc_fail = ctx.page_allocator.buddy_total_free_pages();
+    ctx.user_stack.smoke_fail_next_backing_allocation();
+    let alloc_fail_addr = base_before_alloc_fail - USER_PAGE_SIZE;
+    let alloc_fail = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        alloc_fail_addr,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack backing failure rollback",
+        alloc_fail == Err(UserStackGrowReject::BackingAllocation)
+            && ctx.user_stack.base() == base_before_alloc_fail
+            && ctx.user_stack.backing_page_count() == pages_before_alloc_fail
+            && ctx.page_allocator.buddy_total_free_pages() == free_before_alloc_fail,
+    );
+
+    let pte_fail_addr = base_before_alloc_fail + USER_PAGE_SIZE;
+    let pages_before_pte_fail = ctx.user_stack.backing_page_count();
+    let free_before_pte_fail = ctx.page_allocator.buddy_total_free_pages();
+    let l0_before_pte_fail = ctx.user_address_space.page_table_l0_count();
+    ctx.user_address_space.smoke_fail_next_stack_pte_install();
+    let pte_fail = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        pte_fail_addr,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack PTE failure rollback",
+        pte_fail == Err(UserStackGrowReject::PteInstall)
+            && ctx.user_stack.base() == base_before_alloc_fail
+            && ctx.user_stack.page_for_vaddr(pte_fail_addr).is_none()
+            && ctx.user_stack.backing_page_count() == pages_before_pte_fail
+            && ctx.user_address_space.page_table_l0_count() == l0_before_pte_fail
+            && ctx.page_allocator.buddy_total_free_pages() == free_before_pte_fail,
+    );
+
+    let guard_base = ctx.user_stack.base();
+    let guard_end = guard_base - ctx.user_stack.config().guard_gap() + USER_PAGE_SIZE;
+    let old_heap_vaddr = ctx.user_address_space.smoke_set_heap_mapping_end(guard_end);
+    let guard = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        guard_base - USER_PAGE_SIZE,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack guard-gap rejection",
+        old_heap_vaddr.is_some()
+            && guard == Err(UserStackGrowReject::GuardGap)
+            && ctx.user_stack.base() == guard_base,
+    );
+    if let Some(old_heap_vaddr) = old_heap_vaddr {
+        ctx.user_address_space
+            .smoke_restore_heap_mapping_vaddr(old_heap_vaddr);
+    }
+
+    let collision_end = guard_base + USER_PAGE_SIZE;
+    let old_heap_vaddr = ctx
+        .user_address_space
+        .smoke_set_heap_mapping_end(collision_end);
+    let collision = ctx.user_address_space.resolve_user_stack_fault(
+        &mut ctx.user_stack,
+        guard_base - USER_PAGE_SIZE,
+        UserFaultAccess::Store,
+        satp,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    assertions.assert(
+        "user stack adjacent mapping collision",
+        old_heap_vaddr.is_some()
+            && collision == Err(UserStackGrowReject::MappingCollision)
+            && ctx.user_stack.base() == guard_base,
+    );
+    if let Some(old_heap_vaddr) = old_heap_vaddr {
+        ctx.user_address_space
+            .smoke_restore_heap_mapping_vaddr(old_heap_vaddr);
+    }
+
+    let nx = ctx
+        .user_address_space
+        .fault_mapping_diagnostic(ctx.user_stack.top() - 1, UserFaultAccess::Instruction);
+    assertions.assert(
+        "user stack NX instruction fault",
+        nx.mapped()
+            && nx.kind() == UserMappingKind::Stack
+            && !nx.executable()
+            && !nx.permission_satisfied(),
+    );
+}
+
+#[inline(never)]
 fn exercise_stack_argument_bounds(
     assertions: &mut SmokeAssertions,
     address_space: &crate::objects::user_boot::UserAddressSpace,
@@ -1318,13 +1543,15 @@ fn exercise_stack_argument_bounds(
 ) {
     let word = core::mem::size_of::<usize>();
     let getty_argv: [&[u8]; 3] = [b"/sbin/getty", b"38400", b"tty1"];
-    let mut getty_stack = crate::objects::user_boot::UserStack::new();
+    let mut getty_stack = crate::objects::user_stack::UserStack::new();
     let getty_stack_ready = getty_stack
         .setup(
             address_space,
             elf,
             interpreter,
             &getty_argv,
+            crate::objects::config::UserStackConfig::linux_default(),
+            &[0xa5; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
             page_allocator,
             page_metadata_map,
         )
@@ -2085,29 +2312,8 @@ fn mapping_byte_at(
     Some(unsafe { *((linear + page_offset) as *const u8) })
 }
 
-fn stack_first_page_zeroed(
-    stack: &crate::objects::user_boot::UserStack,
-    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
-) -> bool {
-    let Some(page) = stack.backing_page(0) else {
-        return false;
-    };
-    let Some(linear) = page_metadata_map.page_address(page) else {
-        return false;
-    };
-    let mut index = 0usize;
-    while index < USER_PAGE_SIZE {
-        let byte = unsafe { *((linear + index) as *const u8) };
-        if byte != 0 {
-            return false;
-        }
-        index += 1;
-    }
-    true
-}
-
 fn stack_contains_at(
-    stack: &crate::objects::user_boot::UserStack,
+    stack: &crate::objects::user_stack::UserStack,
     page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
     user_addr: usize,
     expected: &[u8],
@@ -2123,10 +2329,10 @@ fn stack_contains_at(
 
     let mut index = 0usize;
     while index < expected.len() {
-        let stack_offset = user_addr - stack.base() + index;
-        let page_index = stack_offset / USER_PAGE_SIZE;
-        let page_offset = stack_offset % USER_PAGE_SIZE;
-        let Some(page) = stack.backing_page(page_index) else {
+        let current = user_addr + index;
+        let page_vaddr = current & !(USER_PAGE_SIZE - 1);
+        let page_offset = current - page_vaddr;
+        let Some(page) = stack.page_for_vaddr(page_vaddr) else {
             return false;
         };
         let Some(linear) = page_metadata_map.page_address(page) else {
@@ -2142,7 +2348,7 @@ fn stack_contains_at(
 }
 
 fn stack_usize_at(
-    stack: &crate::objects::user_boot::UserStack,
+    stack: &crate::objects::user_stack::UserStack,
     page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
     user_addr: usize,
 ) -> Option<usize> {
@@ -2158,10 +2364,10 @@ fn stack_usize_at(
 
     let mut index = 0usize;
     while index < bytes.len() {
-        let stack_offset = user_addr - stack.base() + index;
-        let page_index = stack_offset / USER_PAGE_SIZE;
-        let page_offset = stack_offset % USER_PAGE_SIZE;
-        let page = stack.backing_page(page_index)?;
+        let current = user_addr + index;
+        let page_vaddr = current & !(USER_PAGE_SIZE - 1);
+        let page_offset = current - page_vaddr;
+        let page = stack.page_for_vaddr(page_vaddr)?;
         let linear = page_metadata_map.page_address(page)?;
         bytes[index] = unsafe { *((linear + page_offset) as *const u8) };
         index += 1;

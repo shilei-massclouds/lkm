@@ -42,6 +42,51 @@ const LINUX_MAX_ARG_STRLEN: usize = PAGE_SIZE * 32;
 const LINUX_ARG_MAX: usize = PAGE_SIZE * 32;
 const LINUX_STK_LIM: usize = 8 * 1024 * 1024;
 const LINUX_INIT_RLIMIT_STACK: usize = LINUX_STK_LIM;
+const LINUX_STACK_INITIAL_EXPAND: usize = 128 * 1024;
+const LINUX_STACK_GUARD_GAP: usize = 256 * PAGE_SIZE;
+const USER_STACK_TOP: usize = 0x4000_0000;
+const USER_STACK_RANDOM_BYTES: usize = 16;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UserStackConfig {
+    initial_expand: usize,
+    rlimit_stack: usize,
+    guard_gap: usize,
+    stack_top: usize,
+    random_bytes: usize,
+}
+
+impl UserStackConfig {
+    pub const fn linux_default() -> Self {
+        Self {
+            initial_expand: LINUX_STACK_INITIAL_EXPAND,
+            rlimit_stack: LINUX_INIT_RLIMIT_STACK,
+            guard_gap: LINUX_STACK_GUARD_GAP,
+            stack_top: USER_STACK_TOP,
+            random_bytes: USER_STACK_RANDOM_BYTES,
+        }
+    }
+
+    pub const fn initial_expand(self) -> usize {
+        self.initial_expand
+    }
+
+    pub const fn rlimit_stack(self) -> usize {
+        self.rlimit_stack
+    }
+
+    pub const fn guard_gap(self) -> usize {
+        self.guard_gap
+    }
+
+    pub const fn stack_top(self) -> usize {
+        self.stack_top
+    }
+
+    pub const fn random_bytes(self) -> usize {
+        self.random_bytes
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExecArgumentLimits {
@@ -125,6 +170,8 @@ pub struct Config {
     selected_payload_kind: SelectedPayloadKind,
     #[allow(dead_code)]
     exec_argument_limits: ExecArgumentLimits,
+    #[cfg_attr(app_hello, allow(dead_code))]
+    user_stack: UserStackConfig,
 }
 
 impl Config {
@@ -137,6 +184,7 @@ impl Config {
             fixmap: FixMapConfig::new(),
             selected_payload_kind: SELECTED_PAYLOAD_KIND,
             exec_argument_limits: ExecArgumentLimits::linux_default(),
+            user_stack: UserStackConfig::linux_default(),
         }
     }
 
@@ -163,6 +211,11 @@ impl Config {
     #[allow(dead_code)]
     pub const fn exec_argument_limits(&self) -> ExecArgumentLimits {
         self.exec_argument_limits
+    }
+
+    #[cfg_attr(app_hello, allow(dead_code))]
+    pub const fn user_stack(&self) -> UserStackConfig {
+        self.user_stack
     }
 
     pub const fn stack_depot_enabled(&self) -> bool {

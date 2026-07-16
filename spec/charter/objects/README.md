@@ -7,6 +7,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 | Object | Authoritative charter |
 | --- | --- |
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
+| `UserStack` | [`user-stack.md`](user-stack.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
 | `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
 | `ElfObject` | [`elf-object.md`](elf-object.md) |
