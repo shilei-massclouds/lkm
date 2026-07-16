@@ -45,6 +45,7 @@ def derivation_to_json(
             "assumed": counts[DerivationStatus.ASSUMED.value],
             "obligation": counts[DerivationStatus.OBLIGATION.value],
             "deferred": counts[DerivationStatus.DEFERRED.value],
+            "trimmed": counts[DerivationStatus.TRIMMED.value],
             "blocked": counts[DerivationStatus.BLOCKED.value],
             "contradiction": counts[DerivationStatus.CONTRADICTION.value],
             "obligation_categories": obligation_categories,
@@ -57,6 +58,11 @@ def derivation_to_json(
             ),
         },
         "records": [_record_to_json(record) for record in result.records],
+        "boundaries": [
+            _record_to_json(record)
+            for record in result.records
+            if record.boundary_id is not None
+        ],
         "transitions": [
             _transition_to_json(transition) for transition in result.transitions
         ],
@@ -87,6 +93,11 @@ def _record_to_json(record: DerivationRecord) -> dict[str, Any]:
         "proof_class": record.proof_class,
         "proof_provider": record.proof_provider,
         "process_parent": record.process_parent,
+        "boundary_id": record.boundary_id,
+        "boundary_category": record.boundary_category,
+        "boundary_summary": record.boundary_summary,
+        "boundary_resolution": record.boundary_resolution,
+        "boundary_owner": record.boundary_owner,
     }
 
 

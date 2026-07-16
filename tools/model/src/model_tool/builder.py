@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import re
 from common.defaults import DEFAULT_TARGET
 from common.model_types import (
+    BoundaryDef,
     BuildResult,
     Diagnostic,
     TransitionDef,
@@ -16,6 +17,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ExclusiveContextDecl,
@@ -28,6 +30,7 @@ from common.spec_ast import (
     SpecDocument,
     StateDecl,
     TypeDecl,
+    WithinDecl,
 )
 
 
@@ -117,6 +120,27 @@ _LEGACY_EFFECT_KEY_MAP = {
 }
 _FALSE_HOLD_VALUES = frozenset({"false", "disabled", "closed", "single", "single_cpu", "single_task"})
 _TRUE_HOLD_VALUES = frozenset({"true", "enabled", "open", "multi", "smp", "multi_cpu", "multi_task"})
+_BOUNDARY_ID_RE = re.compile(r"\A[a-z][a-z0-9_]*\.[0-9]{3}\Z")
+_UNPARSED_LEGACY_BOUNDARY_RE = re.compile(r"(?m)^\s*(?:deferred|trimmed)\s*\{")
+_BOUNDARY_CATEGORIES = {
+    "deferred": frozenset(
+        {
+            "DeferredCategory::Feature",
+            "DeferredCategory::Protocol",
+            "DeferredCategory::ModelDetail",
+            "DeferredCategory::Proof",
+            "DeferredCategory::AlternatePath",
+        }
+    ),
+    "trimmed": frozenset(
+        {
+            "TrimmedCategory::BuildConfig",
+            "TrimmedCategory::Architecture",
+            "TrimmedCategory::ReferenceInput",
+            "TrimmedCategory::CompileTimeNoOp",
+        }
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -129,7 +153,9 @@ class _ContextContribution:
     exclusive_refs: frozenset[str] = frozenset()
 
 
-def build_model(document: SpecDocument) -> BuildResult:
+def build_model(
+    document: SpecDocument, *, allow_legacy_boundaries: bool = False
+) -> BuildResult:
     """Build an indexed static model and run first-pass checks."""
 
     diagnostics: list[Diagnostic] = []
@@ -144,6 +170,16 @@ def build_model(document: SpecDocument) -> BuildResult:
     )
     objects = _build_objects(document.objects, diagnostics)
     children = _build_children(objects, diagnostics)
+    boundaries, legacy_boundary_count = _build_boundaries(
+        document.objects,
+        diagnostics,
+        allow_legacy_boundaries=allow_legacy_boundaries,
+    )
+    legacy_boundary_count += _check_unparsed_legacy_boundaries(
+        document,
+        diagnostics,
+        allow=allow_legacy_boundaries,
+    )
 
     for parent, child_names in children.items():
         parent_obj = objects.get(parent)
@@ -160,6 +196,8 @@ def build_model(document: SpecDocument) -> BuildResult:
         exclusive_contexts=exclusive_contexts,
         objects=objects,
         children=children,
+        boundaries=boundaries,
+        legacy_boundary_count=legacy_boundary_count,
     )
 
     _check_initial_states(model, diagnostics)
@@ -183,9 +221,315 @@ def summarize_model(result: BuildResult) -> str:
             f"objects: {len(model.objects)}",
             f"states: {model.state_count}",
             f"transitions: {model.transition_count}",
+            f"deferred: {model.deferred_count}",
+            f"trimmed: {model.trimmed_count}",
+            f"legacy_boundaries: {model.legacy_boundary_count}",
             f"errors: {len(result.errors)}",
             f"warnings: {len(result.warnings)}",
         ]
+    )
+
+
+def _build_boundaries(
+    declarations: list[ObjectDecl],
+    diagnostics: list[Diagnostic],
+    *,
+    allow_legacy_boundaries: bool,
+) -> tuple[dict[str, BoundaryDef], int]:
+    boundaries: dict[str, BoundaryDef] = {}
+    legacy_count = 0
+
+    for obj in declarations:
+        for state in obj.states:
+            legacy_count += _check_legacy_boundary_blocks(
+                state.deferred,
+                diagnostics,
+                allow=allow_legacy_boundaries,
+                owner=f"{obj.name}.State::{state.name}",
+            )
+            for boundary in state.boundaries:
+                _add_boundary(
+                    boundaries,
+                    boundary,
+                    diagnostics,
+                    object_name=obj.name,
+                    state_name=state.name,
+                )
+            for transition in state.transitions:
+                owner = f"{obj.name}.Transition::{transition.name}"
+                legacy_count += _check_legacy_boundary_blocks(
+                    transition.deferred,
+                    diagnostics,
+                    allow=allow_legacy_boundaries,
+                    owner=owner,
+                )
+                for boundary in transition.boundaries:
+                    _add_boundary(
+                        boundaries,
+                        boundary,
+                        diagnostics,
+                        object_name=obj.name,
+                        state_name=state.name,
+                        transition_name=transition.name,
+                    )
+                for within in transition.within:
+                    legacy_count += _add_within_boundaries(
+                        boundaries,
+                        within,
+                        diagnostics,
+                        allow_legacy_boundaries=allow_legacy_boundaries,
+                        object_name=obj.name,
+                        state_name=state.name,
+                        transition_name=transition.name,
+                        context_path=(),
+                    )
+    return boundaries, legacy_count
+
+
+def _check_unparsed_legacy_boundaries(
+    document: SpecDocument,
+    diagnostics: list[Diagnostic],
+    *,
+    allow: bool,
+) -> int:
+    """Reject legacy blocks nested in raw type/action/unknown blocks.
+
+    Type processes and state-local action declarations are intentionally still
+    preserved as raw blocks by the parser. Scan only those unparsed blocks so
+    the final migration gate cannot silently miss a nested ``deferred { ... }``.
+    """
+
+    blocks: list[Block] = []
+    for type_decl in document.types:
+        blocks.extend(type_decl.blocks)
+    for object_decl in document.objects:
+        blocks.extend(object_decl.other_blocks)
+        for state_decl in object_decl.states:
+            blocks.extend(state_decl.other_blocks)
+            for transition_decl in state_decl.transitions:
+                blocks.extend(transition_decl.other_blocks)
+                for within in transition_decl.within:
+                    blocks.extend(_unparsed_within_blocks(within))
+
+    count = 0
+    for block in blocks:
+        matches = list(_UNPARSED_LEGACY_BOUNDARY_RE.finditer(block.body))
+        count += len(matches)
+        if allow:
+            continue
+        for _match in matches:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "legacy deferred/trimmed block is forbidden inside an "
+                    f"unparsed {block.kind} block",
+                    block.span,
+                )
+            )
+    return count
+
+
+def _unparsed_within_blocks(within: WithinDecl) -> list[Block]:
+    blocks = list(within.other_blocks)
+    for child in within.within:
+        blocks.extend(_unparsed_within_blocks(child))
+    return blocks
+
+
+def _add_within_boundaries(
+    boundaries: dict[str, BoundaryDef],
+    within: WithinDecl,
+    diagnostics: list[Diagnostic],
+    *,
+    allow_legacy_boundaries: bool,
+    object_name: str,
+    state_name: str,
+    transition_name: str,
+    context_path: tuple[str, ...],
+) -> int:
+    path = (*context_path, within.context)
+    owner = (
+        f"{object_name}.Transition::{transition_name} within "
+        + " / ".join(path)
+    )
+    legacy_count = _check_legacy_boundary_blocks(
+        within.deferred,
+        diagnostics,
+        allow=allow_legacy_boundaries,
+        owner=owner,
+    )
+    for boundary in within.boundaries:
+        _add_boundary(
+            boundaries,
+            boundary,
+            diagnostics,
+            object_name=object_name,
+            state_name=state_name,
+            transition_name=transition_name,
+            context_path=path,
+        )
+    for child in within.within:
+        legacy_count += _add_within_boundaries(
+            boundaries,
+            child,
+            diagnostics,
+            allow_legacy_boundaries=allow_legacy_boundaries,
+            object_name=object_name,
+            state_name=state_name,
+            transition_name=transition_name,
+            context_path=path,
+        )
+    return legacy_count
+
+
+def _check_legacy_boundary_blocks(
+    blocks: list[Block],
+    diagnostics: list[Diagnostic],
+    *,
+    allow: bool,
+    owner: str,
+) -> int:
+    if not allow:
+        for block in blocks:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "legacy deferred block is forbidden; migrate to a structured "
+                    f"deferred/trimmed boundary on {owner}",
+                    block.span,
+                )
+            )
+    return sum(
+        max(len(block.entry_spans), 1)
+        for block in blocks
+        if block.body.strip()
+    )
+
+
+def _add_boundary(
+    boundaries: dict[str, BoundaryDef],
+    boundary: BoundaryDecl,
+    diagnostics: list[Diagnostic],
+    *,
+    object_name: str,
+    state_name: str,
+    transition_name: str | None = None,
+    context_path: tuple[str, ...] = (),
+) -> None:
+    valid = True
+    if boundary.status not in _BOUNDARY_CATEGORIES:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown boundary status: {boundary.status}",
+                boundary.span,
+            )
+        )
+        valid = False
+    if not _BOUNDARY_ID_RE.fullmatch(boundary.id):
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"invalid boundary ID: {boundary.id or '<missing>'}",
+                boundary.span,
+            )
+        )
+        valid = False
+    elif boundary.id in boundaries:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"duplicate boundary ID: {boundary.id}",
+                boundary.span,
+            )
+        )
+        valid = False
+
+    allowed_categories = _BOUNDARY_CATEGORIES.get(boundary.status, frozenset())
+    if boundary.category not in allowed_categories:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"invalid {boundary.status} category on {boundary.id or '<missing>'}: "
+                f"{boundary.category or '<missing>'}",
+                boundary.span,
+            )
+        )
+        valid = False
+    if boundary.summary is None or not boundary.summary.strip():
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} is missing summary",
+                boundary.span,
+            )
+        )
+        valid = False
+    if boundary.resolution is None or not boundary.resolution.strip():
+        field = "close_when" if boundary.status == "deferred" else "revisit_when"
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} is missing {field}",
+                boundary.span,
+            )
+        )
+        valid = False
+    if len(boundary.evidence) != 1 or not boundary.evidence[0].entry_spans:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} must contain one non-empty evidence block",
+                boundary.span,
+            )
+        )
+        valid = False
+    if boundary.other_blocks:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} contains unsupported block: "
+                f"{boundary.other_blocks[0].kind}",
+                boundary.other_blocks[0].span,
+            )
+        )
+        valid = False
+    if boundary.unknown_properties:
+        key = sorted(boundary.unknown_properties)[0]
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} contains unsupported field: {key}",
+                boundary.span,
+            )
+        )
+        valid = False
+    for key, count in boundary.property_counts.items():
+        if count <= 1:
+            continue
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"boundary {boundary.id or '<missing>'} repeats field: {key}",
+                boundary.span,
+            )
+        )
+        valid = False
+    if not valid:
+        return
+
+    category = (boundary.category or "").split("::", 1)[-1]
+    boundaries[boundary.id] = BoundaryDef(
+        id=boundary.id,
+        status=boundary.status,
+        category=category,
+        summary=boundary.summary or "",
+        resolution=boundary.resolution or "",
+        decl=boundary,
+        object_name=object_name,
+        state_name=state_name,
+        transition_name=transition_name,
+        context_path=context_path,
     )
 
 

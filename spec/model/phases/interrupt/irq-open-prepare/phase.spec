@@ -371,14 +371,79 @@ object IrqOpenPreparePhase: PhaseObject {
                     slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
                     irq_open_prepare_trimmed_paths_ready(IrqOpenPrepareTrimmedPaths);
                     irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
+                    irq_open_real_console_handoff_deferred(IrqOpenPreparePhase);
+                    irq_open_slub_full_enable_deferred(IrqOpenPreparePhase);
                     next_interrupt_subphase_is_process_prepare();
                 }
 
-                deferred {
-                    "setup_per_cpu_pageset() 作为 PageAllocator.setup() 的 per-CPU pageset 快速路径细项暂缓，不引入新 lifecycle slot。";
-                    "完整 console device probe、boot console 注销和 real console handoff 属于条件结果或后续设备初始化，不作为本阶段固定后置条件。";
-                    "SlubSubsystem.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
-                    "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 ../linux-6.12/.config 的 RISC-V 配置下由 IrqOpenPrepareTrimmedPaths 记录为 trimmed/no-op。";
+                deferred irq_open.001 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Complete the page-allocator per-CPU pageset fast path.";
+                    evidence { irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator); }
+                    close_when: "Per-CPU pageset lifecycle, refill/drain and SMP tests pass.";
+                }
+                deferred irq_open.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete real console device probing.";
+                    evidence { console_real_device_probe_deferred(Console); }
+                    close_when: "Conditional real-console probe and failure tests pass.";
+                }
+                deferred irq_open.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Unregister the boot console after a real console is ready.";
+                    evidence { boot_console_unregister_deferred(ConsoleDriverSet); }
+                    close_when: "Boot-console unregister ordering and replay tests pass.";
+                }
+                deferred irq_open.004 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete the boot-to-real-console handoff protocol.";
+                    evidence { irq_open_real_console_handoff_deferred(IrqOpenPreparePhase); }
+                    close_when: "Buffer replay, ownership transfer and conditional handoff tests pass.";
+                }
+                deferred irq_open.005 {
+                    category: DeferredCategory::Feature;
+                    summary: "Enable the SLUB subsystem through Linux slab_state=FULL.";
+                    evidence { irq_open_slub_full_enable_deferred(IrqOpenPreparePhase); }
+                    close_when: "slab_sysfs_init and late SLUB enable behavior are modeled and tested.";
+                }
+                trimmed irq_open.006 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "lockdep_init is absent because CONFIG_DEBUG_LOCK_ALLOC=n.";
+                    evidence {
+                        irq_open_lockdep_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                        irq_open_lockdep_trimmed_because_config_debug_lock_alloc_disabled(IrqOpenPrepareTrimmedPaths);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_DEBUG_LOCK_ALLOC.";
+                }
+                trimmed irq_open.007 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "locking selftests are absent because CONFIG_DEBUG_LOCKING_API_SELFTESTS=n.";
+                    evidence { irq_open_locking_selftest_trimmed_noop(IrqOpenPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables locking API selftests.";
+                }
+                trimmed irq_open.008 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "initrd bounds setup is absent because CONFIG_BLK_DEV_INITRD=n.";
+                    evidence { irq_open_initrd_bounds_trimmed(IrqOpenPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_BLK_DEV_INITRD.";
+                }
+                trimmed irq_open.009 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "NUMA policy setup is a no-op because CONFIG_NUMA=n.";
+                    evidence { irq_open_numa_policy_trimmed_noop(IrqOpenPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_NUMA.";
+                }
+                trimmed irq_open.010 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "early ACPI setup is absent because CONFIG_ACPI=n.";
+                    evidence { irq_open_acpi_early_trimmed_noop(IrqOpenPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed irq_open.011 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "arch_cpu_finalize_init is absent because CONFIG_ARCH_HAS_CPU_FINALIZE_INIT=n.";
+                    evidence { irq_open_arch_cpu_finalize_init_trimmed_noop(IrqOpenPrepareTrimmedPaths); }
+                    revisit_when: "The target configuration enables CONFIG_ARCH_HAS_CPU_FINALIZE_INIT.";
                 }
 
                 emits {

@@ -54,6 +54,77 @@ class DeriveToolTests(unittest.TestCase):
             self.assertIn("locks", data["model"])
             self.assertIn("exclusive_contexts", data["model"])
 
+    def test_derive_json_has_separate_structured_boundary_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model = self._build_model_json(tmp)
+            derive = Path(tmp) / "model-main.derive.json"
+            self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+
+            data = read_json(derive)
+            boundaries = data["boundaries"]
+            self.assertEqual(
+                data["summary"]["deferred"],
+                sum(item["status"] == "deferred" for item in boundaries),
+            )
+            self.assertEqual(
+                data["summary"]["trimmed"],
+                sum(item["status"] == "trimmed" for item in boundaries),
+            )
+            clone = next(item for item in boundaries if item["boundary_id"] == "user_clone.001")
+            self.assertEqual(clone["boundary_category"], "Feature")
+            self.assertEqual(
+                clone["boundary_owner"],
+                "UserCloneDeferredBoundaries.Transition::Setup",
+            )
+            self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
+            self.assertGreater(clone["span"]["source_line"], 0)
+
+    def test_unproved_boundary_evidence_creates_obligation(self) -> None:
+        source = """
+            object ComputerProject: ProjectObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            deferred demo.001 {
+                                category: DeferredCategory::Proof;
+                                summary: "Prove the missing demo fact.";
+                                evidence { missing_demo_evidence(ComputerProject); }
+                                close_when: "The fact has a formal provider and a regression test.";
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "missing-evidence.spec"
+            ast = Path(tmp) / "missing-evidence.ast.json"
+            model = Path(tmp) / "missing-evidence.model.json"
+            derive = Path(tmp) / "missing-evidence.derive.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+            data = read_json(derive)
+
+            self.assertTrue(data["target"]["reached"])
+            self.assertEqual(data["summary"]["deferred"], 1)
+            self.assertEqual(data["summary"]["trimmed"], 0)
+            self.assertEqual(data["summary"]["obligation"], 1)
+            obligation = next(
+                item for item in data["records"] if item["status"] == "obligation"
+            )
+            self.assertIn("deferred demo.001 evidence", obligation["source_kind"])
+            self.assertEqual(
+                obligation["expression"], "missing_demo_evidence(ComputerProject)"
+            )
+
     def test_derive_json_contains_records_transitions_and_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)
@@ -84,10 +155,10 @@ class DeriveToolTests(unittest.TestCase):
                     for transition in data["transitions"]
                 )
             )
-            self.assertEqual(data["states"]["EntryPreludePhase"], "Destroyed")
-            self.assertEqual(data["states"]["EntrySuccessorPhase"], "Ready")
-            self.assertEqual(data["states"]["CorePreparePhase"], "Ready")
-            self.assertEqual(data["states"]["MmCoreInitPhase"], "Ready")
+            self.assertEqual(data["states"]["EntryPreludePhase"], "Online")
+            self.assertEqual(data["states"]["EntrySuccessorPhase"], "Online")
+            self.assertEqual(data["states"]["CorePreparePhase"], "Online")
+            self.assertEqual(data["states"]["MmCoreInitPhase"], "Online")
             self.assertEqual(data["states"]["SwapperVm"], "Online")
             self.assertEqual(data["states"]["MemBlock"], "Offline")
             self.assertEqual(data["states"]["PageAllocator"], "Ready")

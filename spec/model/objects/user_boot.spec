@@ -124,15 +124,21 @@ predicate user_clone_newsp_zero_inherits_parent_sp<T>(boundaries: T) -> bool;
 predicate user_clone_newsp_sets_child_sp<T>(boundaries: T) -> bool;
 predicate user_clone_legacy_pidfd_uses_parent_tidptr<T>(boundaries: T) -> bool;
 predicate user_clone_tls_ignored_without_clone_settls<T>(boundaries: T) -> bool;
-predicate user_clone_thread_group_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_clone3_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_thread_group_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_clone_vm_vfork_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_cow_mm_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_cow_mm_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_pidfd_file_ops_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_ptrace_seccomp_cgroup_audit_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_namespace_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_robust_futex_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_clear_child_futex_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_wait_exit_reap_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_ptrace_hooks_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_seccomp_hooks_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_cgroup_hooks_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_audit_hooks_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_namespace_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_robust_futex_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_clear_child_tid_wake_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_wait_sleep_wakeup_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_task_graph_reap_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_job_control_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_unsupported_flags_first_slice<T>(boundaries: T) -> bool;
 
 
@@ -666,20 +672,134 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_newsp_sets_child_sp(self);
                     user_clone_legacy_pidfd_uses_parent_tidptr(self);
                     user_clone_tls_ignored_without_clone_settls(self);
-                    user_clone_thread_group_deferred(self);
+                    user_clone_full_clone3_deferred(self);
+                    user_clone_full_thread_group_deferred(self);
                     user_clone_full_clone_vm_vfork_deferred(self);
-                    user_clone_cow_mm_deferred(self);
+                    user_clone_full_cow_mm_deferred(self);
                     user_clone_full_pidfd_file_ops_deferred(self);
-                    user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
-                    user_clone_namespace_deferred(self);
-                    user_clone_robust_futex_deferred(self);
-                    user_clone_clear_child_futex_deferred(self);
-                    user_clone_wait_exit_reap_deferred(self);
+                    user_clone_full_ptrace_hooks_deferred(self);
+                    user_clone_full_seccomp_hooks_deferred(self);
+                    user_clone_full_cgroup_hooks_deferred(self);
+                    user_clone_full_audit_hooks_deferred(self);
+                    user_clone_full_namespace_deferred(self);
+                    user_clone_full_robust_futex_deferred(self);
+                    user_clone_full_clear_child_tid_wake_deferred(self);
+                    user_clone_full_wait_sleep_wakeup_deferred(self);
+                    user_clone_full_task_graph_reap_deferred(self);
+                    user_clone_full_job_control_deferred(self);
                     user_clone_unsupported_flags_first_slice(self);
                 }
 
-                deferred {
-                    "BusyBox /bin/sh 输入 ls 的原始观察为 clone(220) a0=0x11, a1=0, a2=0, a3=8, a4=0x20096580, a5=1；按 Linux 6.12 RISC-V legacy clone ABI，a0 的低 8 位 CSIGNAL 为 SIGCHLD，去掉 CSIGNAL 后没有额外 CLONE_* flags，因此首片是 plain fork。newsp=0 表示 child 继承 parent 用户 sp；没有 CLONE_SETTLS 时 a4/tls 不写入 child tp，child 继承 parent TLS。本首片实现后，同一 guest 输入 ls 已越过 clone，下一条观察为 parent wait4(260) a0=-1, a1=0x3ffff77c, a2=2, a3=0, a4=0, a5=0；当前 wait4 首片记录 parent wait_chldexit 边界、保存 parent wait frame 和 parent address-space snapshot，然后交给 child continuation。wait4 handoff 诊断确认此前 child continuation instruction page fault 时 satp 匹配，sepc/stval 落在用户 ELF writable non-executable 页，根因是 parent 返回 child pid并执行 wait4 期间复用同一用户栈页污染 child continuation；当前首片只复制 bounded 用户栈 snapshot 并在 wait4 handoff 前恢复，已越过该 page fault。后续证据显示 child /bin/ls 成功 exit_group(0) 后不应触发全系统 shutdown，而应形成 wait4-completable child exit status、恢复 parent address space 并让 parent wait4 返回 child pid；新的 objdump 证据显示 parent wait4 返回后 BusyBox 在 stack canary 检查 `ld a5,0(s4)` 处以 `stval=1` fault，register checkpoint 又显示 parent wait saved/resumed 的 s4 均为 0x1，parent wait 用户栈窗口 checkpoint 显示 handoff 前保存的 512 字节窗口在 child exit 后已有 171 字节差异，因此定位为缺少 Linux COW/mm 隔离导致父栈页被 child continuation 污染。wait4 首片必须保存 parent wait stack snapshot，并在 child exit 恢复 parent address-space 后、wait status copyout 前恢复该 snapshot；这是完整 `dup_mm()`/COW mm deferred 前的首片替代。prompt-return 后 BusyBox 还会调用 child 已收割后的 follow-up wait4；Linux 6.12 `kernel_wait4()` 会追加 `WEXITED`，且无 eligible child 时 `__do_wait()` 返回 `-ECHILD`。当前已观察到 `wait4(-1, status, options=0, NULL)` 和 `wait4(-1, status, options=3, NULL)` 形状，因此首片在 observed child 已收割后对 valid options 返回 `ECHILD`，不得继续返回 `ENOSYS` 污染 shell 上一条命令状态。若 shell last status 仍变为 255，wait4 checkpoint 必须先保存并比较 parent writable user page checksum summary；当前证据为 checked=525、dirty=4、stack_dirty=1、non_stack_dirty=3，首个非栈 dirty 页为 ElfSegment mapping index 1 / page 4 / vaddr 0x100c9000，证明污染已经越过栈页。当前首片修正必须在 wait4 handoff 前复制 parent writable user pages 的完整页面内容，child exit 恢复 parent address-space 后先比较 checksum并保留 dirty facts，再在 wait status copyout 前恢复全部 saved writable pages；这是单 observed-child 的 parent page rollback，不等价于完整 Linux COW mm。OpenRC 原生 /sbin/init 的当前新观察为 clone_flags=0x4111，实测 flags_without_csignal=0x4100，即 SIGCHLD=17 | CLONE_VM=0x100 | CLONE_VFORK=0x4000，newsp 为 child sp；它不是 CLONE_PIDFD。当前片采用单 active child execution slot + bounded completed-child records：child bounded exit/exit_group 恢复 parent clone frame、让 parent clone 返回 child pid 后，归档 pid/status/wait status/reaped=false，释放 internal UserChild runqueue fact，并把 slot 复位为 Prepared-like reusable；下一次顺序 vfork clone 分配递增 user-visible pid 并复用同一 internal UserChild task ref。新的可复现边界是 completed records 达到固定容量后停在 `clone_vfork stage=child_records_full`，诊断为 completed_records=8、record_capacity=8、active_slot_reusable=1、next_child_pid=11 且 first_unreaped_pid=0，说明历史已 reaped records 不能继续占用 bounded slot。wait4 成功 reaping 且 status copyout 成功后必须释放对应 completed record slot，保留 last/total archived、reaped、released 诊断；status copyout EFAULT 和 rt_sigtimedwait(SIGCHLD) 消费 signal 均不得 release record。真正含 CLONE_PIDFD=0x1000 的 vfork shape 才安装 pidfd-like fd、写回 parent_tidptr，并在对应 completed record exit 后记录 pidfd readable。active child 未完成、当前 occupied records 容量耗尽、child 长驻、parent/child 并发或多个 runnable user task refs 仍必须停在明确 unsupported/diagnostic 边界。完整 clone3、线程组、完整 CLONE_VM/vfork completion scheduler、pidfs/pidfd file ops、pidfd_send_signal/pidfd_getfd/waitid(P_PIDFD)、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait sleep/wakeup、完整 task graph/zombie lifecycle/release_task/pid hash/资源累计、完整地址空间复制/COW、successful PID1 setsid、setsid controlling-tty detach、orphan pgrp、pty、job-control signal 和未观察到的 flags/options 组合保持 deferred 或 unsupported-first-slice。";
+                deferred user_clone.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement the complete clone3 syscall ABI and validation path.";
+                    evidence { user_clone_full_clone3_deferred(self); }
+                    close_when: "clone3 argument validation, task creation, rollback and Linux differential tests pass.";
+                }
+
+                deferred user_clone.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement complete thread-group clone semantics.";
+                    evidence { user_clone_full_thread_group_deferred(self); }
+                    close_when: "CLONE_THREAD/TGID/signal-sharing lifecycle and multi-thread tests pass.";
+                }
+
+                deferred user_clone.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement complete CLONE_VM and vfork completion scheduling.";
+                    evidence { user_clone_full_clone_vm_vfork_deferred(self); }
+                    close_when: "Parent blocking, child completion and concurrent scheduler semantics match Linux tests.";
+                }
+
+                deferred user_clone.004 {
+                    category: DeferredCategory::Feature;
+                    summary: "Replace bounded page rollback with complete dup_mm and COW address-space semantics.";
+                    evidence { user_clone_full_cow_mm_deferred(self); }
+                    close_when: "Independent parent/child mm, COW faults, teardown and differential tests pass without snapshots.";
+                }
+
+                deferred user_clone.005 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement complete pidfs/pidfd file operations and PIDFD wait/signal APIs.";
+                    evidence { user_clone_full_pidfd_file_ops_deferred(self); }
+                    close_when: "pidfd file lifecycle, send-signal/getfd and waitid(P_PIDFD) tests match Linux.";
+                }
+
+                deferred user_clone.006 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement clone and exit ptrace hooks.";
+                    evidence { user_clone_full_ptrace_hooks_deferred(self); }
+                    close_when: "Ptrace clone/exec/exit event ordering and differential tests pass.";
+                }
+
+                deferred user_clone.007 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement clone seccomp inheritance and filter hooks.";
+                    evidence { user_clone_full_seccomp_hooks_deferred(self); }
+                    close_when: "Seccomp filter inheritance and clone denial tests match Linux.";
+                }
+
+                deferred user_clone.008 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement clone cgroup admission and accounting hooks.";
+                    evidence { user_clone_full_cgroup_hooks_deferred(self); }
+                    close_when: "Cgroup fork admission, rollback and accounting tests pass.";
+                }
+
+                deferred user_clone.009 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement clone and exit audit hooks.";
+                    evidence { user_clone_full_audit_hooks_deferred(self); }
+                    close_when: "Audit records and ordering for clone/exit match Linux fixtures.";
+                }
+
+                deferred user_clone.010 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement complete clone namespace creation and sharing semantics.";
+                    evidence { user_clone_full_namespace_deferred(self); }
+                    close_when: "Supported namespace flags, ownership, rollback and isolation tests pass.";
+                }
+
+                deferred user_clone.011 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement robust-futex inheritance and exit cleanup.";
+                    evidence { user_clone_full_robust_futex_deferred(self); }
+                    close_when: "Robust-list inheritance, owner-death cleanup and wake tests pass.";
+                }
+
+                deferred user_clone.012 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement clear_child_tid store and futex wake on task exit.";
+                    evidence { user_clone_full_clear_child_tid_wake_deferred(self); }
+                    close_when: "clear_child_tid copyout and futex wake behavior matches Linux success and fault tests.";
+                }
+
+                deferred user_clone.013 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement general wait sleep and wakeup semantics.";
+                    evidence { user_clone_full_wait_sleep_wakeup_deferred(self); }
+                    close_when: "Blocking waits, wakeups, interruption and option handling pass multi-child differential tests.";
+                }
+
+                deferred user_clone.014 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Implement the general task graph, zombie, reap, PID hash and resource-accounting lifecycle.";
+                    evidence { user_clone_full_task_graph_reap_deferred(self); }
+                    close_when: "Multiple task relationships and zombie/release/resource accounting lifecycles are modeled and tested.";
+                }
+
+                deferred user_clone.015 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement complete session, controlling-TTY, process-group, PTY and job-control signal semantics.";
+                    evidence { user_clone_full_job_control_deferred(self); }
+                    close_when: "setsid, controlling-TTY detach, orphan pgrp, PTY and job-control signal tests match Linux.";
+                }
+
+                deferred user_clone.016 {
+                    category: DeferredCategory::AlternatePath;
+                    summary: "Handle clone flags and wait options outside the observed first-slice combinations.";
+                    evidence { user_clone_unsupported_flags_first_slice(self); }
+                    close_when: "Every supported flag/option has formal semantics and tests, and every rejected combination has Linux-compatible errno.";
                 }
             }
         }
@@ -706,15 +826,21 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_newsp_sets_child_sp(self);
             user_clone_legacy_pidfd_uses_parent_tidptr(self);
             user_clone_tls_ignored_without_clone_settls(self);
-            user_clone_thread_group_deferred(self);
+            user_clone_full_clone3_deferred(self);
+            user_clone_full_thread_group_deferred(self);
             user_clone_full_clone_vm_vfork_deferred(self);
-            user_clone_cow_mm_deferred(self);
+            user_clone_full_cow_mm_deferred(self);
             user_clone_full_pidfd_file_ops_deferred(self);
-            user_clone_ptrace_seccomp_cgroup_audit_deferred(self);
-            user_clone_namespace_deferred(self);
-            user_clone_robust_futex_deferred(self);
-            user_clone_clear_child_futex_deferred(self);
-            user_clone_wait_exit_reap_deferred(self);
+            user_clone_full_ptrace_hooks_deferred(self);
+            user_clone_full_seccomp_hooks_deferred(self);
+            user_clone_full_cgroup_hooks_deferred(self);
+            user_clone_full_audit_hooks_deferred(self);
+            user_clone_full_namespace_deferred(self);
+            user_clone_full_robust_futex_deferred(self);
+            user_clone_full_clear_child_tid_wake_deferred(self);
+            user_clone_full_wait_sleep_wakeup_deferred(self);
+            user_clone_full_task_graph_reap_deferred(self);
+            user_clone_full_job_control_deferred(self);
             user_clone_unsupported_flags_first_slice(self);
         }
     }

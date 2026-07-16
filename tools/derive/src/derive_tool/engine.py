@@ -13,7 +13,7 @@ from common.derive_types import (
     TransitionCommit,
 )
 from common.model_types import TransitionDef, ObjectDef, ObjectModel, StateDef
-from common.spec_ast import BodyMember, Block, SourceSpan, WithinDecl
+from common.spec_ast import BoundaryDecl, BodyMember, Block, SourceSpan, WithinDecl
 
 
 _TARGET_RE = re.compile(
@@ -761,6 +761,7 @@ def summarize_derivation(result: DerivationResult) -> str:
         DerivationStatus.ASSUMED,
         DerivationStatus.OBLIGATION,
         DerivationStatus.DEFERRED,
+        DerivationStatus.TRIMMED,
         DerivationStatus.BLOCKED,
         DerivationStatus.CONTRADICTION,
     ):
@@ -788,6 +789,7 @@ def render_derivation_text(result: DerivationResult) -> str:
         DerivationStatus.BLOCKED,
         DerivationStatus.CONTRADICTION,
         DerivationStatus.DEFERRED,
+        DerivationStatus.TRIMMED,
         DerivationStatus.OBLIGATION,
     ):
         records = [record for record in result.records if record.status is status]
@@ -923,7 +925,6 @@ class _Deriver:
         exit_status = DerivationStatus.BLOCKED
         exit_message: str | None = None
         try:
-            self._collect_deferred(transition.decl.deferred, transition, "transition")
             if not self._verify_blocks(transition.decl.depends_on, "depends_on", transition=transition):
                 exit_message = "depends_on blocked"
                 return False
@@ -976,6 +977,12 @@ class _Deriver:
             if not self._validate_state(object_name, transition.target_state, entered_by=transition):
                 exit_message = "target state invariant blocked"
                 return False
+            self._collect_boundaries(
+                transition.decl.boundaries, transition, "transition"
+            )
+            self._collect_deferred(
+                transition.decl.deferred, transition, "transition"
+            )
             if not self._emit_blocks(transition):
                 exit_message = "emits blocked"
                 return False
@@ -1962,7 +1969,6 @@ class _Deriver:
             source_kind="within_entered_by",
         ):
             return False
-        self._collect_deferred(within.deferred, transition, "within")
         if not self._verify_blocks(
             within.depends_on,
             "within depends_on",
@@ -1988,6 +1994,8 @@ class _Deriver:
             bindings=bindings,
         ):
             return False
+        self._collect_boundaries(within.boundaries, transition, "within")
+        self._collect_deferred(within.deferred, transition, "within")
         if not self._commit_within_boundary(
             exited_by,
             transition,
@@ -2259,13 +2267,16 @@ class _Deriver:
             )
             return False
 
-        self._collect_deferred(state.decl.deferred, state, "state")
-        return self._verify_blocks(
+        ok = self._verify_blocks(
             state.decl.invariants,
             "invariant",
             state=state,
             entered_by=self.state_validation_transitions.get(key),
         )
+        if ok:
+            self._collect_boundaries(state.decl.boundaries, state, "state")
+            self._collect_deferred(state.decl.deferred, state, "state")
+        return ok
 
     def _verify_blocks(
         self,
@@ -2473,7 +2484,10 @@ class _Deriver:
         state: StateDef | None,
         entered_by: TransitionDef | None,
     ) -> bool:
-        if kind != "invariant" or state is None or entered_by is None:
+        if (
+            kind != "invariant"
+            and not kind.endswith(" evidence")
+        ) or state is None or entered_by is None:
             return False
 
         ensure_blocks = list(entered_by.decl.ensures)
@@ -3020,6 +3034,59 @@ class _Deriver:
                     expression=entry,
                 )
 
+    def _collect_boundaries(
+        self,
+        boundaries: list[BoundaryDecl],
+        owner: TransitionDef | StateDef,
+        kind: str,
+    ) -> None:
+        for boundary in boundaries:
+            definition = self.model.boundaries.get(boundary.id)
+            if definition is None:
+                continue
+            status = (
+                DerivationStatus.DEFERRED
+                if boundary.status == "deferred"
+                else DerivationStatus.TRIMMED
+            )
+            resolution_name = (
+                "close_when" if boundary.status == "deferred" else "revisit_when"
+            )
+            self._record(
+                status,
+                f"{boundary.id} [{definition.category}] {definition.summary}; "
+                f"{resolution_name}: {definition.resolution}",
+                boundary.span,
+                object_name=owner.object_name,
+                transition_name=(
+                    owner.name if isinstance(owner, TransitionDef) else None
+                ),
+                state_name=owner.name if isinstance(owner, StateDef) else None,
+                source_kind=f"{kind}_{boundary.status}",
+                boundary_id=boundary.id,
+                boundary_category=definition.category,
+                boundary_summary=definition.summary,
+                boundary_resolution=definition.resolution,
+                boundary_owner=definition.owner,
+            )
+            # Keep the inventory record even when its evidence cannot be
+            # proved. _verify_blocks emits the verification obligation that
+            # makes the default policy fail.
+            target_state = None
+            entered_by = None
+            if isinstance(owner, TransitionDef):
+                target_state = self.model.objects[owner.object_name].states.get(
+                    owner.target_state
+                )
+                entered_by = owner
+            self._verify_blocks(
+                boundary.evidence,
+                f"{boundary.status} {boundary.id} evidence",
+                transition=owner if isinstance(owner, TransitionDef) else None,
+                state=owner if isinstance(owner, StateDef) else target_state,
+                entered_by=entered_by,
+            )
+
     def _record(
         self,
         status: DerivationStatus,
@@ -3037,6 +3104,11 @@ class _Deriver:
         proof_provider: str | None = None,
         display_expression: str | None = None,
         process_parent: str | None = None,
+        boundary_id: str | None = None,
+        boundary_category: str | None = None,
+        boundary_summary: str | None = None,
+        boundary_resolution: str | None = None,
+        boundary_owner: str | None = None,
     ) -> None:
         if status is DerivationStatus.PROVED and expression is not None:
             self.proved_expressions.add(expression)
@@ -3056,6 +3128,11 @@ class _Deriver:
                 proof_class=proof_class,
                 proof_provider=proof_provider,
                 process_parent=process_parent,
+                boundary_id=boundary_id,
+                boundary_category=boundary_category,
+                boundary_summary=boundary_summary,
+                boundary_resolution=boundary_resolution,
+                boundary_owner=boundary_owner,
             )
         )
         if status is DerivationStatus.PROVED and expression is not None:
@@ -3650,6 +3727,10 @@ def _substitute_within_bindings(
         exited_by=_substitute_blocks(within.exited_by, replacements),
         may_change=_substitute_blocks(within.may_change, replacements),
         ensures=_substitute_blocks(within.ensures, replacements),
+        boundaries=[
+            _substitute_boundary_bindings(boundary, replacements)
+            for boundary in within.boundaries
+        ],
         deferred=_substitute_blocks(within.deferred, replacements),
         other_blocks=_substitute_blocks(within.other_blocks, replacements),
         body_members=[
@@ -3672,11 +3753,17 @@ def _substitute_body_member_bindings(
         if member.within is not None
         else None
     )
+    boundary = (
+        _substitute_boundary_bindings(member.boundary, replacements)
+        if member.boundary is not None
+        else None
+    )
     return BodyMember(
         kind=member.kind,
         span=member.span,
         block=block,
         within=within,
+        boundary=boundary,
     )
 
 
@@ -3698,6 +3785,8 @@ def _ordered_body_members(decl) -> list[BodyMember]:
         members.append(_block_body_member(block))
     for block in decl.ensures:
         members.append(_block_body_member(block))
+    for boundary in getattr(decl, "boundaries", []):
+        members.append(_boundary_body_member(boundary))
     for block in decl.deferred:
         members.append(_block_body_member(block))
     for block in decl.other_blocks:
@@ -3711,6 +3800,31 @@ def _block_body_member(block: Block) -> BodyMember:
 
 def _within_body_member(within: WithinDecl) -> BodyMember:
     return BodyMember(kind="within", span=within.span, within=within)
+
+
+def _boundary_body_member(boundary: BoundaryDecl) -> BodyMember:
+    return BodyMember(
+        kind=boundary.status,
+        span=boundary.span,
+        boundary=boundary,
+    )
+
+
+def _substitute_boundary_bindings(
+    boundary: BoundaryDecl, replacements: dict[str, str]
+) -> BoundaryDecl:
+    return BoundaryDecl(
+        status=boundary.status,
+        id=boundary.id,
+        span=boundary.span,
+        category=boundary.category,
+        summary=boundary.summary,
+        evidence=_substitute_blocks(boundary.evidence, replacements),
+        resolution=boundary.resolution,
+        property_counts=boundary.property_counts,
+        other_blocks=_substitute_blocks(boundary.other_blocks, replacements),
+        unknown_properties=boundary.unknown_properties,
+    )
 
 
 def _substitute_blocks(blocks: list[Block], replacements: dict[str, str]) -> list[Block]:
@@ -4227,6 +4341,9 @@ def _prior_fact_proof_class(
         if proved_expressions.intersection(required):
             return proof_class
     if expression in proved_expressions:
+        return "derived_fact"
+    expression_key = _fact_key(expression)
+    if any(_fact_key(proved) == expression_key for proved in proved_expressions):
         return "derived_fact"
     return None
 

@@ -202,6 +202,10 @@ predicate page_allocator_boot_pagesets_initialized_for_possible_cpus<T, P>(
 ) -> bool;
 predicate page_allocator_runtime_zone_locking_contract_deferred<T>(allocator: T) -> bool;
 predicate page_allocator_runtime_pcp_locking_contract_deferred<T>(allocator: T) -> bool;
+predicate page_allocator_full_gfp_reclaim_deferred<T>(allocator: T) -> bool;
+predicate page_allocator_full_compaction_deferred<T>(allocator: T) -> bool;
+predicate page_allocator_full_oom_policy_deferred<T>(allocator: T) -> bool;
+predicate page_allocator_full_failure_propagation_deferred<T>(allocator: T) -> bool;
 predicate page_allocator_buddy_free_page_sets_bound<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_free_pages_account_matches_buddy<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_alloc_pages_api_ready<T>(allocator: T) -> bool;
@@ -268,6 +272,12 @@ predicate slub_subsystem_kzalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kfree_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_uses_page_allocator<T, P>(allocator: T, page_allocator: P) -> bool;
 predicate slub_subsystem_runtime_locking_contract_deferred<T>(allocator: T) -> bool;
+predicate slub_full_gfp_reclaim_deferred<T>(allocator: T) -> bool;
+predicate slub_full_numa_policy_deferred<T>(allocator: T) -> bool;
+predicate slub_full_memcg_accounting_deferred<T>(allocator: T) -> bool;
+predicate slub_full_debug_redzone_deferred<T>(allocator: T) -> bool;
+predicate slub_full_freelist_randomization_deferred<T>(allocator: T) -> bool;
+predicate slub_full_freelist_hardening_deferred<T>(allocator: T) -> bool;
 predicate slub_subsystem_slab_mutex_not_required_before_full<T>(allocator: T) -> bool;
 predicate slub_subsystem_kmalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
 predicate slub_subsystem_kzalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
@@ -291,6 +301,10 @@ predicate kernel_global_allocator_runtime_sync_inherits_slub_contract<T, S>(
     allocator: T,
     slub_subsystem: S
 ) -> bool;
+predicate kernel_global_allocator_large_allocation_deferred<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_oom_policy_deferred<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_realloc_deferred<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_alignment_fallback_deferred<T>(allocator: T) -> bool;
 predicate kernel_global_allocator_layout_supported<T, L>(allocator: T, layout: L) -> bool;
 predicate alloc_layout_size_nonzero<T>(layout: T) -> bool;
 predicate alloc_layout_size_bound<T, S>(layout: T, size: S) -> bool;
@@ -384,9 +398,6 @@ type PageAllocatorType: MemoryObject {
             result {
                 Available: Success(page_ref_returned);
                 NoMemory: Failed(no_buddy_pages_available);
-            }
-            deferred {
-                "当前 AllocPages 规格只展开成功返回 PageRef 的使用路径；GFP reclaim/compaction/oom 和 NULL/ERR 失败传播后续随完整内存压力模型展开。";
             }
         }
 
@@ -487,9 +498,6 @@ type KernelGlobalAllocatorType: MemoryObject {
             result {
                 Available: Success(heap_alloc_ref_returned);
                 NoMemory: Failed(no_heap_storage_available);
-            }
-            deferred {
-                "当前 GlobalAlloc 规格只展开 SLUB-backed 成功路径；large allocation、OOM policy、realloc 和特殊 alignment fallback 后续随完整 heap adapter 展开。";
             }
         }
 

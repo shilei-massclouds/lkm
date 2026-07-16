@@ -12,6 +12,7 @@ from common.model_json import model_json_to_object_model
 from .builder import (
     DEFAULT_TRACE_ACTION_DEPTH,
     build_drives_view,
+    build_boundary_view,
     build_object_view,
     build_timeline_view,
     build_trace_view,
@@ -19,7 +20,7 @@ from .builder import (
 from .view_json import view_to_json
 
 
-VIEW_CHOICES = ("object", "drives", "timeline", "trace")
+VIEW_CHOICES = ("object", "drives", "timeline", "boundaries", "trace")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,6 +79,8 @@ def _trace_action_depth(value: str) -> int | None:
 
 
 def _build_view(model, name):
+    if name == "boundaries":
+        return build_boundary_view(model)
     if name == "object":
         return build_object_view(model)
     if name == "drives":

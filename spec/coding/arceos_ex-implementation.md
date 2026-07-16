@@ -205,29 +205,12 @@ smoke 负责 payload/端到端可观察行为；checkpoint KUnit 负责真实 ch
 推导，当前报告已收敛为零 unresolved obligation。该历史用于解释为何入口布局、firmware handoff 和对象
 前序事实都保留显式 source/check 边界；obligation 的正式处理规则位于 coding 根入口与 model semantics。
 
-## 待迁移到 model 的 deferred 审计清单
+## Deferred 审计迁移状态
 
-本节不是约束来源，只记录仍需进入 model/coding 正式入口的候选缺口。完成迁移后从本表删除；实现与否由
-roadmap 的后续任务决定。
-
-| 候选项 | 参考配置/路径 | 建议归属 | 当前观察 |
-| --- | --- | --- | --- |
-| RISC-V Linux boot image/header | RISC-V 入口协议 | PreparePhase 或 Lds | 当前由 BootArgs/Lds 前置事实吸收，header 自身未展开。 |
-| EFI stub / PE header | `CONFIG_EFI=y`、`CONFIG_EFI_STUB=y` | PreparePhase 或 Lds | 现有 deferred 主要覆盖 `efi_init()`。 |
-| SATP mode 探测与页表层级降级 | `CONFIG_PGTABLE_LEVELS=5` | Config 或 Vm.Preset | 当前 satp mode 是既定配置事实。 |
-| early alternatives | `CONFIG_RISCV_ALTERNATIVE_EARLY=y` | Vm.Preset | 已有位置 deferred，patch 对象未展开。 |
-| stack end magic | `CONFIG_SCHED_STACK_END_CHECK=y` | BootInitStack | 具体 Linux marker 未展开。 |
-| build id | `start_kernel()` early path | EntrySuccessorPhase | 已有位置 deferred。 |
-| page address init | `start_kernel()` before `setup_arch()` | EntrySuccessorPhase | freelist/hash 元数据对象未展开。 |
-| saved command line | after `setup_arch()` | CommandLine | raw/saved/static 视图仍需继续核对。 |
-| DT unflatten lifecycle placement | `CONFIG_OF_FLATTREE=y` | CorePrepare/DeviceTree | 对象已实现，参考调用位置仍需完整审计。 |
-| phys RAM base / VA-PA offset | 64-bit MMU | MemBlock.Setup | 当前由 MemBlock facts 暴露。 |
-| DMA32 zone inputs | `CONFIG_ZONE_DMA32=y` | MemBlock.Setup | 输入 facts 已有，完整 Zones 由后续阶段展开。 |
-| hugetlb early reserve | `CONFIG_HUGETLB_PAGE=y` | MemBlock.Setup | 当前保留 deferred fact。 |
-| final RW/RO/NX split | `CONFIG_STRICT_KERNEL_RWX=y` | SwapperVm.Setup | mapping protection 尚未完整展开。 |
-| RISC-V hwcap/ISA publish | FPU/V/Zicbom | CpuFeature/UserIsa | 当前没有独立发布对象。 |
-| boot alternatives | `CONFIG_RISCV_ALTERNATIVE=y` | Alternative/Patch | 与 early alternatives 分开。 |
-| user ISA enable | RISC-V ISA config | UserIsa | 不属于当前最小闭环。 |
+原候选清单已经完成逐项审计：已实现内容回到正式 facts；真实剩余责任和配置/架构/输入裁剪进入
+结构化 model inventory。唯一 disposition 记录见
+[`deferred-trimmed-audit.md`](../../docs/roadmap/deferred-trimmed-audit.md)，本文件不再复制可独立演化的
+backlog。实现和评审必须引用 model boundary ID。
 
 ## 源码结构
 
@@ -242,9 +225,10 @@ roadmap 的后续任务决定。
 
 ## 阶段性待确认事项
 
-- vmalloc stack early overflow scratch 与 per-task 泛化的最终入口形状。
-- OpenRC job-control 超出单 pending child 的 task graph、post-exec setpgid、signal 与通用 process-group 查找。
-- general fork/wait/reap、COW/mm、signals、networking 和完整 exec lifecycle 的展开顺序。
+- vmalloc stack / IRQ stack 泛化：`process_prepare.011`、`irq_time.007`。
+- 通用 task graph、job control 与未观察组合：`user_clone.014`–`user_clone.016`。
+- fork/wait/reap、COW/mm、signals 和 exec synchronization：`user_clone.002`–`.014`、
+  `exec_sync.001`–`.003`。
 - component/crate 封装恢复时与现有对象 API 的适配层位置。
 
 这些事项只描述当前实现观察；是否推进、优先级和剩余责任只在

@@ -1259,9 +1259,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `addr_of`、`phys_addr`、`virt_addr` 及虚拟地址区域相关约束
 - 准备期输入对象模型
 - `Kernel` / `BootPhase` 阶段树，其中 `EntryPreludePhase` 是 Kernel 直接子阶段，`EntrySuccessorPhase`、`CorePreparePhase` 和 `MmCoreInitPhase` 是已经展开的 BootPhase 子阶段对象模型
-- 当前尚未展开但需要保留边界的 `deferred` 条目
+- 当前尚未展开或尚未证明的结构化 `deferred` 责任，以及当前参考配置、架构或输入下
+  可证明不可达/无操作的结构化 `trimmed` 边界
 
-正文中的阶段对象、对象分类、对象关系和构建时序仍作为分析性说明保留，用于解释模型意图和设计背景；验证器工具应以独立模型文件中的条目为准。模型文件中的 `/* ... */` 与 `//` 注释只面向人工阅读，工具解析时应忽略；`deferred` 是模型内的延期定义或占位标记，工具应能够识别并报告。
+正文中的阶段对象、对象分类、对象关系和构建时序仍作为分析性说明保留，用于解释模型意图和设计背景；验证器工具应以独立模型文件中的条目为准。模型文件中的 `/* ... */` 与 `//` 注释只面向人工阅读，工具解析时应忽略。`deferred` 和 `trimmed` 必须按
+[`SEM-BOUNDARY-001`](../model/SEMANTICS.md#sem-boundary-001-deferred-and-trimmed-are-structured-boundaries)
+使用全模型唯一 ID、受控分类、可验证 evidence 和关闭/重审条件。已实现内容必须移出这两类 inventory，由正式事实、coding 和完成归档承载。
 
 后续修订时，若某一对象、状态、事件、谓词或类型已经进入形式化模型，应优先修改独立模型文件；正文只在需要同步解释、图示或设计背景时更新。
 

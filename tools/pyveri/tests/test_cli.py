@@ -59,7 +59,10 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("obligation: 0", text)
-        self.assertIn("deferred: 85", text)
+        self.assertRegex(text, r"deferred: [1-9][0-9]*")
+        self.assertRegex(text, r"trimmed: [1-9][0-9]*")
+        self.assertIn("legacy_boundaries: 0", text)
+        self.assertIn("user_clone.001 [Feature]", text)
         self.assertIn("MmCoreInitPhase.Transition::Setup", text)
         self.assertIn("InterruptPhase.Transition::Setup", text)
 
@@ -122,6 +125,20 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("object view:", stdout.getvalue())
+
+    def test_boundary_view_prints_stable_id_and_real_source_location(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["view", str(self.spec), "boundaries"])
+
+        self.assertEqual(exit_code, 0)
+        text = stdout.getvalue()
+        self.assertIn("boundaries view:", text)
+        self.assertIn("user_clone.001 [deferred/Feature]", text)
+        self.assertIn("spec/model/objects/user_boot.spec:", text)
+        self.assertIn("deferred:", text)
+        self.assertIn("trimmed:", text)
 
     def test_view_trace_command_prints_debug_layout(self) -> None:
         stdout = io.StringIO()

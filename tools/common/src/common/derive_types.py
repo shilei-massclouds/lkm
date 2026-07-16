@@ -15,6 +15,7 @@ class DerivationStatus(str, Enum):
     ASSUMED = "assumed"
     OBLIGATION = "obligation"
     DEFERRED = "deferred"
+    TRIMMED = "trimmed"
     BLOCKED = "blocked"
     CONTRADICTION = "contradiction"
 
@@ -37,6 +38,11 @@ class DerivationRecord:
     proof_class: str | None = None
     proof_provider: str | None = None
     process_parent: str | None = None
+    boundary_id: str | None = None
+    boundary_category: str | None = None
+    boundary_summary: str | None = None
+    boundary_resolution: str | None = None
+    boundary_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +117,10 @@ class DerivationResult:
     @property
     def deferred(self) -> list[DerivationRecord]:
         return [record for record in self.records if record.status is DerivationStatus.DEFERRED]
+
+    @property
+    def trimmed(self) -> list[DerivationRecord]:
+        return [record for record in self.records if record.status is DerivationStatus.TRIMMED]
 
     @property
     def target_reached(self) -> bool:

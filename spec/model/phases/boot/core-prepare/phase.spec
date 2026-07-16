@@ -1409,29 +1409,133 @@ object CorePreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
+                    core_prepare_acpi_boot_tables_trimmed(CorePreparePhase);
+                    core_prepare_early_memtest_input_trimmed(CorePreparePhase);
+                    core_prepare_sparse_init_trimmed(CorePreparePhase);
+                    core_prepare_vmemmap_tlb_flush_trimmed(CorePreparePhase);
+                    core_prepare_crashkernel_trimmed(CorePreparePhase);
+                    core_prepare_kasan_trimmed(CorePreparePhase);
+                    core_prepare_acpi_rintc_trimmed(CorePreparePhase);
+                    core_prepare_acpi_cpu_numa_trimmed(CorePreparePhase);
+                    core_prepare_cbop_block_size_deferred(CorePreparePhase);
+                    core_prepare_boot_alternatives_deferred(CorePreparePhase);
+                    core_prepare_rt_signal_env_deferred(CorePreparePhase);
+                    core_prepare_user_isa_deferred(CorePreparePhase);
+                    core_prepare_static_call_trimmed(CorePreparePhase);
+                    core_prepare_early_security_deferred(CorePreparePhase);
+                    core_prepare_boot_config_trimmed(CorePreparePhase);
+                    core_prepare_boot_cpu_hook_trimmed(CorePreparePhase);
+                    core_prepare_extra_init_args_trimmed(CorePreparePhase);
+                    core_prepare_vfs_caches_early_deferred(CorePreparePhase);
                 }
 
-                deferred {
-                    "acpi_boot_table_init() 暂缓：当前最小路径以 FDT/SBI 为主，ACPI 引导路径后续单独建模。"
-                    "early_memtest() 暂缓：属于可选内存测试路径，不改变当前最小启动语义。"
-                    "sparse_init() 裁剪路径：当前 ../linux-6.12/.config 为 CONFIG_FLATMEM=y、CONFIG_SPARSEMEM=n，该调用展开为空操作。"
-                    "local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END) 暂缓：SPARSEMEM_VMEMMAP 条件路径。"
-                    "arch_reserve_crashkernel() 暂缓：crashkernel 资源保留路径后续展开。"
-                    "kasan_init() 暂缓：CONFIG_KASAN 条件路径。"
-                    "acpi_init_rintc_map() / acpi_map_cpus_to_nodes() 暂缓：依赖 ACPI CPU 拓扑和 NUMA 模型。"
-                    "CBOP block size 暂缓：DeviceTree binding 定义 riscv,cbop-block-size，但 Linux 6.12 的 riscv_init_cbo_blocksizes() 当前只发布 CBOM/CBOZ。"
-                    "apply_boot_alternatives() 暂缓：启动期 alternatives patch 后续抽象为代码补丁设施。"
-                    "init_rt_signal_env() 暂缓：用户态信号环境不属于当前最小核心准备路径。"
-                    "riscv_user_isa_enable() 暂缓：用户态 ISA 暴露路径后续建模。"
-                    "static_call_init() 暂缓：静态调用是调用目标代码补丁设施，当前不进入核心模型。"
-                    "early_security_init() 暂缓：LSM/security 框架依赖后续任务、凭据和安全对象。"
-                    "setup_boot_config() 暂缓：bootconfig/XBC/initrd 派生参数后续作为参数来源展开。"
-                    "setup_nr_cpu_ids() 作为实现 checkpoint：只验证 CpuGroup.Cpu[0] == BootCPU 和 possible CPU 映射边界，不推进对象状态。"
-                    "smp_prepare_boot_cpu() 暂缓：RISC-V64 当前弱实现为空，不建立额外对象。"
-                    "parse_early_param() 第二次调用作为实现 checkpoint：不得重新推进 EarlyParam 或 EarlyCon。"
-                    "print_unknown_bootoptions() 作为实现 checkpoint：只输出 BootParam 收集到的未知选项，不改变 BootParam 状态。"
-                    "parse_args(\"Setting extra init args\", ...) 暂缓：bootconfig init.* 路径随 BootConfig 展开。"
-                    "vfs_caches_init_early() 暂缓：VFS/inode/dentry 缓存不属于当前核心启动模型。"
+                trimmed core_prepare.001 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "acpi_boot_table_init is absent because CONFIG_ACPI=n.";
+                    evidence { core_prepare_acpi_boot_tables_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed core_prepare.002 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "early_memtest has no work because the fixed reference command line has no memtest request.";
+                    evidence { core_prepare_early_memtest_input_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference boot arguments request an early memory test.";
+                }
+                trimmed core_prepare.003 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "sparse_init is a no-op under CONFIG_FLATMEM=y and CONFIG_SPARSEMEM=n.";
+                    evidence { core_prepare_sparse_init_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration selects sparse memory.";
+                }
+                trimmed core_prepare.004 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "The VMEMMAP kernel-range TLB flush path is unreachable without SPARSEMEM_VMEMMAP.";
+                    evidence { core_prepare_vmemmap_tlb_flush_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration selects SPARSEMEM_VMEMMAP.";
+                }
+                trimmed core_prepare.005 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Crashkernel reservation is absent with KEXEC/crash support disabled.";
+                    evidence { core_prepare_crashkernel_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables crashkernel support.";
+                }
+                trimmed core_prepare.006 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "kasan_init is absent because CONFIG_KASAN=n.";
+                    evidence { core_prepare_kasan_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables CONFIG_KASAN.";
+                }
+                trimmed core_prepare.007 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "ACPI RINTC mapping is absent because CONFIG_ACPI=n.";
+                    evidence { core_prepare_acpi_rintc_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed core_prepare.008 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "ACPI CPU-to-NUMA mapping is absent because ACPI and NUMA are disabled.";
+                    evidence { core_prepare_acpi_cpu_numa_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables ACPI or NUMA CPU topology.";
+                }
+                deferred core_prepare.009 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Publish and validate the RISC-V CBOP block-size binding.";
+                    evidence { core_prepare_cbop_block_size_deferred(CorePreparePhase); }
+                    close_when: "CBOP discovery, validation and implementation tests cover supported platform data.";
+                }
+                deferred core_prepare.010 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model and implement the generic boot alternatives text-patch protocol.";
+                    evidence { core_prepare_boot_alternatives_deferred(CorePreparePhase); }
+                    close_when: "Alternative patch selection, ordering and synchronization match the reference path.";
+                }
+                deferred core_prepare.011 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize the user real-time signal environment.";
+                    evidence { core_prepare_rt_signal_env_deferred(CorePreparePhase); }
+                    close_when: "RT signal environment state and user-visible tests pass.";
+                }
+                deferred core_prepare.012 {
+                    category: DeferredCategory::Feature;
+                    summary: "Expose the supported RISC-V user ISA capabilities.";
+                    evidence { core_prepare_user_isa_deferred(CorePreparePhase); }
+                    close_when: "User ISA exposure is modeled and validated against the reference capability set.";
+                }
+                trimmed core_prepare.013 {
+                    category: TrimmedCategory::CompileTimeNoOp;
+                    summary: "static_call_init compiles to a no-op without static-call support.";
+                    evidence { core_prepare_static_call_trimmed(CorePreparePhase); }
+                    revisit_when: "The target architecture/configuration enables static calls.";
+                }
+                deferred core_prepare.014 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model early LSM initialization and hook ordering.";
+                    evidence { core_prepare_early_security_deferred(CorePreparePhase); }
+                    close_when: "Enabled early security hooks, ordering and failure tests pass.";
+                }
+                trimmed core_prepare.015 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Bootconfig/XBC setup is absent because CONFIG_BOOT_CONFIG=n.";
+                    evidence { core_prepare_boot_config_trimmed(CorePreparePhase); }
+                    revisit_when: "The reference configuration enables CONFIG_BOOT_CONFIG.";
+                }
+                trimmed core_prepare.016 {
+                    category: TrimmedCategory::Architecture;
+                    summary: "smp_prepare_boot_cpu is the empty RISC-V weak hook.";
+                    evidence { core_prepare_boot_cpu_hook_trimmed(CorePreparePhase); }
+                    revisit_when: "RISC-V supplies a non-empty smp_prepare_boot_cpu implementation.";
+                }
+                trimmed core_prepare.017 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "The extra init-argument parse has no input in the fixed boot arguments and disabled bootconfig path.";
+                    evidence { core_prepare_extra_init_args_trimmed(CorePreparePhase); }
+                    revisit_when: "Reference inputs provide bootconfig init.* or extra init arguments.";
+                }
+                deferred core_prepare.018 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model early VFS inode and dentry cache initialization.";
+                    evidence { core_prepare_vfs_caches_early_deferred(CorePreparePhase); }
+                    close_when: "Early VFS cache lifecycle, synchronization and implementation tests pass.";
                 }
 
                 emits {

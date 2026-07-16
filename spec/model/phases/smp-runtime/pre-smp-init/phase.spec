@@ -183,6 +183,9 @@ object PreSmpInitBoundary: KernelObject {
                     lockup_detector_deferred();
                     smp_init_not_called();
                     secondary_cpus_present_but_not_online(CpuGroup);
+                    pre_smp_cad_pid_deferred(PreSmpInitPhase);
+                    pre_smp_proc_vmstat_deferred(PreSmpInitPhase);
+                    pre_smp_lockup_detector_deferred(PreSmpInitPhase);
                 }
             }
         }
@@ -192,6 +195,9 @@ object PreSmpInitBoundary: KernelObject {
         invariant {
             smp_init_not_called();
             secondary_cpus_present_but_not_online(CpuGroup);
+            pre_smp_cad_pid_deferred(PreSmpInitPhase);
+            pre_smp_proc_vmstat_deferred(PreSmpInitPhase);
+            pre_smp_lockup_detector_deferred(PreSmpInitPhase);
         }
     }
 }
@@ -268,11 +274,23 @@ object PreSmpInitPhase: PhaseObject {
                     secondary_cpus_present_but_not_online(CpuGroup);
                 }
 
-                deferred {
-                    "cad_pid 绑定留给系统控制路径。";
-                    "procfs vmstat 导出留给 VFS/procfs 路径。";
-                    "lockup detector 留给运行期诊断模型。";
-                    "smp_init() 是下一子阶段 SmpBringupPhase 的入口。";
+                deferred pre_smp.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Bind cad_pid for the system-control path.";
+                    evidence { pre_smp_cad_pid_deferred(PreSmpInitPhase); }
+                    close_when: "CAD PID binding and control-action tests pass.";
+                }
+                deferred pre_smp.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Export vmstat data through procfs.";
+                    evidence { pre_smp_proc_vmstat_deferred(PreSmpInitPhase); }
+                    close_when: "Procfs vmstat publication and consistency tests pass.";
+                }
+                deferred pre_smp.003 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement the runtime lockup detector model.";
+                    evidence { pre_smp_lockup_detector_deferred(PreSmpInitPhase); }
+                    close_when: "Detector lifecycle, watchdog firing and false-positive tests pass.";
                 }
 
                 emits {

@@ -6,6 +6,7 @@ from typing import Any
 
 from common import AST_SCHEMA, AST_VERSION
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ContextGuardDecl,
@@ -177,6 +178,10 @@ def _state_from_json(item: Any) -> StateDecl:
         name=_string(data, "name"),
         span=_span_from_json(data["span"]),
         invariants=[_block_from_json(block) for block in _list(data, "invariants")],
+        boundaries=[
+            _boundary_from_json(boundary)
+            for boundary in data.get("boundaries", [])
+        ],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
         transitions=[_event_from_json(transition) for transition in _list(data, "transitions")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
@@ -191,6 +196,9 @@ def _event_from_json(item: Any) -> TransitionDecl:
     within = [_within_from_json(block) for block in _list(data, "within")]
     may_change = [_block_from_json(block) for block in _list(data, "may_change")]
     ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    boundaries = [
+        _boundary_from_json(boundary) for boundary in data.get("boundaries", [])
+    ]
     deferred = [_block_from_json(block) for block in _list(data, "deferred")]
     other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
     body_members = _body_members_from_json(
@@ -202,6 +210,7 @@ def _event_from_json(item: Any) -> TransitionDecl:
             *(_within_body_member(block) for block in within),
             *(_block_body_member(block) for block in may_change),
             *(_block_body_member(block) for block in ensures),
+            *(_boundary_body_member(boundary) for boundary in boundaries),
             *(_block_body_member(block) for block in deferred),
             *(_block_body_member(block) for block in other_blocks),
         ],
@@ -216,6 +225,7 @@ def _event_from_json(item: Any) -> TransitionDecl:
         within=within,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -231,6 +241,9 @@ def _within_from_json(item: Any) -> WithinDecl:
     exited_by = [_block_from_json(block) for block in _list(data, "exited_by")]
     may_change = [_block_from_json(block) for block in _list(data, "may_change")]
     ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    boundaries = [
+        _boundary_from_json(boundary) for boundary in data.get("boundaries", [])
+    ]
     deferred = [_block_from_json(block) for block in _list(data, "deferred")]
     other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
     body_members = _body_members_from_json(
@@ -243,6 +256,7 @@ def _within_from_json(item: Any) -> WithinDecl:
             *(_block_body_member(block) for block in exited_by),
             *(_block_body_member(block) for block in may_change),
             *(_block_body_member(block) for block in ensures),
+            *(_boundary_body_member(boundary) for boundary in boundaries),
             *(_block_body_member(block) for block in deferred),
             *(_block_body_member(block) for block in other_blocks),
         ],
@@ -259,6 +273,7 @@ def _within_from_json(item: Any) -> WithinDecl:
         exited_by=exited_by,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -278,11 +293,13 @@ def _body_member_from_json(item: Any) -> BodyMember:
     kind = _string(data, "kind")
     block = data.get("block")
     within = data.get("within")
+    boundary = data.get("boundary")
     return BodyMember(
         kind=kind,
         span=_span_from_json(data["span"]),
         block=_block_from_json(block) if block is not None else None,
         within=_within_from_json(within) if within is not None else None,
+        boundary=_boundary_from_json(boundary) if boundary is not None else None,
     )
 
 
@@ -292,6 +309,50 @@ def _block_body_member(block: Block) -> BodyMember:
 
 def _within_body_member(within: WithinDecl) -> BodyMember:
     return BodyMember(kind="within", span=within.span, within=within)
+
+
+def _boundary_body_member(boundary: BoundaryDecl) -> BodyMember:
+    return BodyMember(
+        kind=boundary.status,
+        span=boundary.span,
+        boundary=boundary,
+    )
+
+
+def _boundary_from_json(item: Any) -> BoundaryDecl:
+    data = _as_object(item, "boundary")
+    category = data.get("category")
+    summary = data.get("summary")
+    resolution = data.get("resolution")
+    for name, value in (
+        ("category", category),
+        ("summary", summary),
+        ("resolution", resolution),
+    ):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"boundary.{name} must be a string or null")
+    return BoundaryDecl(
+        status=_string(data, "status"),
+        id=_string(data, "id"),
+        span=_span_from_json(data["span"]),
+        category=category,
+        summary=summary,
+        evidence=[
+            _block_from_json(block) for block in data.get("evidence", [])
+        ],
+        resolution=resolution,
+        property_counts={
+            str(key): int(value)
+            for key, value in data.get("property_counts", {}).items()
+        },
+        other_blocks=[
+            _block_from_json(block) for block in data.get("other_blocks", [])
+        ],
+        unknown_properties={
+            str(key): str(value)
+            for key, value in data.get("unknown_properties", {}).items()
+        },
+    )
 
 
 def _block_from_json(item: Any) -> Block:

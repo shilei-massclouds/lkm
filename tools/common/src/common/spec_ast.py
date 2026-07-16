@@ -36,6 +36,22 @@ class Block:
 
 
 @dataclass(frozen=True)
+class BoundaryDecl:
+    """A structured deferred or trimmed responsibility boundary."""
+
+    status: str
+    id: str
+    span: SourceSpan
+    category: str | None = None
+    summary: str | None = None
+    evidence: list[Block] = field(default_factory=list)
+    resolution: str | None = None
+    property_counts: dict[str, int] = field(default_factory=dict)
+    other_blocks: list[Block] = field(default_factory=list)
+    unknown_properties: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class WithinDecl:
     """A transition/action block executed within an exclusive context."""
 
@@ -50,6 +66,7 @@ class WithinDecl:
     exited_by: list[Block] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
     ensures: list[Block] = field(default_factory=list)
+    boundaries: list[BoundaryDecl] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
     body_members: list["BodyMember"] = field(default_factory=list)
@@ -68,6 +85,7 @@ class TransitionDecl:
     within: list[WithinDecl] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
     ensures: list[Block] = field(default_factory=list)
+    boundaries: list[BoundaryDecl] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
     body_members: list["BodyMember"] = field(default_factory=list)
@@ -81,6 +99,7 @@ class BodyMember:
     span: SourceSpan
     block: Block | None = None
     within: WithinDecl | None = None
+    boundary: BoundaryDecl | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +109,7 @@ class StateDecl:
     name: str
     span: SourceSpan
     invariants: list[Block] = field(default_factory=list)
+    boundaries: list[BoundaryDecl] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     transitions: list[TransitionDecl] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)

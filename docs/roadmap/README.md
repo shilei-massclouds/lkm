@@ -14,3 +14,4 @@
 - [用户态 payload 历史](user-mode.md)
 - [IRQ / console / TTY 历史](irq-console-tty.md)
 - [阶段范式四层一致性审计](phase-paradigm-audit.md)
+- [Deferred / Trimmed 结构化治理审计](deferred-trimmed-audit.md)

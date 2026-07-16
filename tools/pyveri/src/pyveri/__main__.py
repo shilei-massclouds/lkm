@@ -32,7 +32,7 @@ if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
-VIEW_CHOICES = ("object", "drives", "timeline")
+VIEW_CHOICES = ("object", "drives", "timeline", "boundaries")
 TEXT_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
@@ -667,6 +667,9 @@ def _model_summary(data: dict[str, Any]) -> str:
             f"objects: {summary['objects']}",
             f"states: {summary['states']}",
             f"transitions: {summary['transitions']}",
+            f"deferred: {summary['deferred']}",
+            f"trimmed: {summary['trimmed']}",
+            f"legacy_boundaries: {summary['legacy_boundaries']}",
             f"errors: {summary['errors']}",
             f"warnings: {summary['warnings']}",
         ]
@@ -686,6 +689,7 @@ def _derive_summary(data: dict[str, Any]) -> str:
             f"assumed: {summary['assumed']}",
             f"obligation: {summary['obligation']}",
             f"deferred: {summary['deferred']}",
+            f"trimmed: {summary['trimmed']}",
             f"blocked: {summary['blocked']}",
             f"contradiction: {summary['contradiction']}",
         ]
@@ -704,6 +708,7 @@ def _check_summary(data: dict[str, Any]) -> str:
             f"contradiction: {summary['contradiction']}",
             f"obligation: {summary['obligation']}",
             f"deferred: {summary['deferred']}",
+            f"trimmed: {summary['trimmed']}",
         ]
     )
 
@@ -724,7 +729,7 @@ def _derive_report(data: dict[str, Any]) -> str:
             for transition in transitions:
                 lines.append(f"- {transition['label']}")
 
-    for status in ("blocked", "contradiction", "deferred", "obligation"):
+    for status in ("blocked", "contradiction", "deferred", "trimmed", "obligation"):
         records = [record for record in data["records"] if record["status"] == status]
         if not records:
             continue

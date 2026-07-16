@@ -75,10 +75,35 @@ object DriverCoreBase: DeviceObject {
                     driver_core_pre_platform_order_preserved();
                 }
 
-                deferred {
-                    "bdi_init(&noop_backing_dev_info) 暂缓：backing-dev writeback 语义不属于当前 platform bus 前置闭环。";
-                    "devtmpfs_init() 在当前 CONFIG_DEVTMPFS=y/CONFIG_TMPFS=y 下是真实启用路径，包含 req_lock spinlock、setup_done completion 和 kdevtmpfs kthread；本轮只保留 driver_init() 位置，不把它等同于当前 DevFs 对象已完成。";
-                    "of_core_init() 在 CONFIG_OF=y 下是真实启用路径，Linux 使用 of_mutex 保护 OF sysfs/phandle-cache 建立；本轮只记录该 guard/deferred 责任，OF runtime/dynamic devtree_lock 路径不展开。";
+                deferred driver_core.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement noop_backing_dev_info writeback semantics.";
+                    evidence { driver_core_backing_dev_info_deferred(DriverCoreBase); }
+                    close_when: "Backing-device writeback lifecycle and I/O tests pass.";
+                }
+                deferred driver_core.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete devtmpfs initialization and kdevtmpfs service-thread lifecycle.";
+                    evidence { driver_core_devtmpfs_init_deferred(DriverCoreBase); }
+                    close_when: "devtmpfs setup, request processing and service-thread tests pass.";
+                }
+                deferred driver_core.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete devtmpfs req_lock and setup_done synchronization.";
+                    evidence { driver_core_devtmpfs_sync_primitives_deferred(DriverCoreBase); }
+                    close_when: "Concurrent request and setup completion ordering tests pass.";
+                }
+                deferred driver_core.004 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete OF sysfs and phandle-cache initialization.";
+                    evidence { driver_core_of_core_init_deferred(DriverCoreBase); }
+                    close_when: "OF sysfs/phandle cache build, lookup and teardown tests pass.";
+                }
+                deferred driver_core.005 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete OF runtime and dynamic devtree locking.";
+                    evidence { driver_core_of_core_mutex_guard_deferred(DriverCoreBase); }
+                    close_when: "OF mutex/devtree lock ordering and dynamic-tree tests pass.";
                 }
             }
         }
@@ -393,8 +418,35 @@ object DriverCoreDeferred: DeviceObject {
                     driver_model_entry_position_preserved();
                 }
 
-                deferred {
-                    "driver_init() 的 auxiliary_bus_init()/memory_dev_init()/node_dev_init()/cpu_dev_init()/container_dev_init() 尾部暂缓：这些路径建立后续 system bus、memory/node/cpu/container sysfs 视图和热插拔观测，不作为当前 platform_bus_init() 的完成条件。";
+                deferred driver_core.006 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize the auxiliary bus.";
+                    evidence { driver_core_auxiliary_bus_deferred(DriverCoreDeferred); }
+                    close_when: "Auxiliary-bus registration, probe and lifecycle tests pass.";
+                }
+                deferred driver_core.007 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize memory-device sysfs views.";
+                    evidence { driver_core_memory_dev_deferred(DriverCoreDeferred); }
+                    close_when: "Memory-device view and hotplug observation tests pass.";
+                }
+                deferred driver_core.008 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize node-device sysfs views.";
+                    evidence { driver_core_node_dev_deferred(DriverCoreDeferred); }
+                    close_when: "Node-device view and hotplug observation tests pass.";
+                }
+                deferred driver_core.009 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize CPU-device sysfs views.";
+                    evidence { driver_core_cpu_dev_deferred(DriverCoreDeferred); }
+                    close_when: "CPU-device view and hotplug observation tests pass.";
+                }
+                deferred driver_core.010 {
+                    category: DeferredCategory::Feature;
+                    summary: "Initialize container-device sysfs views.";
+                    evidence { driver_core_container_dev_deferred(DriverCoreDeferred); }
+                    close_when: "Container-device view and lifecycle tests pass.";
                 }
             }
         }
@@ -443,9 +495,23 @@ object IrqProcViewDeferred: KernelObject {
                     proc_irq_export_deferred();
                 }
 
-                deferred {
-                    "init_irq_proc() 在当前 CONFIG_PROC_FS=y 下真实创建 /proc/irq，并在 CONFIG_SMP=y 下创建 default_smp_affinity；本轮只保留导出视图，不展开 proc_dir_entry 生命周期或每个 irq_desc 的 proc 文件。";
-                    "CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK=y 的 effective_affinity proc 输出保留为 deferred，不作为当前 IRQ dispatch/PLIC handler 主线的同步依据。";
+                deferred irq_proc.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Create /proc/irq and the default_smp_affinity view.";
+                    evidence { irq_proc_view_default_smp_affinity_deferred(IrqProcViewDeferred); }
+                    close_when: "Proc IRQ root/default affinity lifecycle and read/write tests pass.";
+                }
+                deferred irq_proc.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Create and maintain per-irq_desc proc entries.";
+                    evidence { irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred); }
+                    close_when: "Per-IRQ proc entry creation/removal and hotplug tests pass.";
+                }
+                deferred irq_proc.003 {
+                    category: DeferredCategory::Feature;
+                    summary: "Export effective IRQ affinity through procfs.";
+                    evidence { irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred); }
+                    close_when: "effective_affinity output and SMP affinity update tests pass.";
                 }
             }
         }
@@ -644,11 +710,14 @@ object InitcallTable: InitcallTableType {
                     platform_bus_ns16550a_device_bound(PlatformBus);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     device_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
+                    initcall_same_level_order_independence_proof_deferred(InitcallTable);
                 }
 
-                deferred {
-                    "同级 initcall 的顺序无关性暂不由当前 derivation 证明；当前模型只固定 Linux level order，同级 entries 作为该 level 的集合效果处理。";
-                    "后续若要证明同级顺序无关，需要为 entry effect 建立 commutativity/observational-equivalence 证明；在证明能力具备前，由 nightly permutation 测试比较 canonical final facts。";
+                deferred initcall.001 {
+                    category: DeferredCategory::Proof;
+                    summary: "Prove same-level initcall commutativity or observational equivalence.";
+                    evidence { initcall_same_level_order_independence_proof_deferred(InitcallTable); }
+                    close_when: "Entry effects have a machine-checked commutativity/equivalence proof and permutation tests agree on canonical facts.";
                 }
             }
         }

@@ -7,6 +7,7 @@ from typing import Any
 
 from common import AST_SCHEMA, AST_VERSION
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ContextGuardDecl,
@@ -138,6 +139,7 @@ def _state_to_json(item: StateDecl) -> dict[str, Any]:
         "name": item.name,
         "span": _span_to_json(item.span),
         "invariants": [_block_to_json(block) for block in item.invariants],
+        "boundaries": [_boundary_to_json(boundary) for boundary in item.boundaries],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "transitions": [_event_to_json(transition) for transition in item.transitions],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
@@ -155,6 +157,7 @@ def _event_to_json(item: TransitionDecl) -> dict[str, Any]:
         "within": [_within_to_json(block) for block in item.within],
         "may_change": [_block_to_json(block) for block in item.may_change],
         "ensures": [_block_to_json(block) for block in item.ensures],
+        "boundaries": [_boundary_to_json(boundary) for boundary in item.boundaries],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "body_members": [_body_member_to_json(member) for member in item.body_members],
@@ -174,6 +177,7 @@ def _within_to_json(item: WithinDecl) -> dict[str, Any]:
         "exited_by": [_block_to_json(block) for block in item.exited_by],
         "may_change": [_block_to_json(block) for block in item.may_change],
         "ensures": [_block_to_json(block) for block in item.ensures],
+        "boundaries": [_boundary_to_json(boundary) for boundary in item.boundaries],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "body_members": [_body_member_to_json(member) for member in item.body_members],
@@ -186,6 +190,24 @@ def _body_member_to_json(item: BodyMember) -> dict[str, Any]:
         "span": _span_to_json(item.span),
         "block": _block_to_json(item.block) if item.block is not None else None,
         "within": _within_to_json(item.within) if item.within is not None else None,
+        "boundary": (
+            _boundary_to_json(item.boundary) if item.boundary is not None else None
+        ),
+    }
+
+
+def _boundary_to_json(item: BoundaryDecl) -> dict[str, Any]:
+    return {
+        "status": item.status,
+        "id": item.id,
+        "category": item.category,
+        "summary": item.summary,
+        "evidence": [_block_to_json(block) for block in item.evidence],
+        "resolution": item.resolution,
+        "span": _span_to_json(item.span),
+        "property_counts": item.property_counts,
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "unknown_properties": item.unknown_properties,
     }
 
 

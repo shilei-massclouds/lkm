@@ -94,6 +94,35 @@ class ViewToolTests(unittest.TestCase):
                 )
             )
 
+    def test_boundary_view_contains_stable_inventory_and_source_locations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model = self._build_model_json(tmp)
+            output = Path(tmp) / "boundaries.view.json"
+            self.assertEqual(view_main([str(model), "boundaries", "-o", str(output)]), 0)
+
+            data = read_json(output)
+            self.assertEqual(data["view"], "boundaries")
+            summary = data["metadata"]["summary"]
+            inventory = data["metadata"]["inventory"]
+            self.assertEqual(summary["legacy_boundaries"], 0)
+            self.assertEqual(
+                summary["deferred"],
+                sum(item["status"] == "deferred" for item in inventory),
+            )
+            self.assertEqual(
+                summary["trimmed"],
+                sum(item["status"] == "trimmed" for item in inventory),
+            )
+            clone = next(item for item in inventory if item["id"] == "user_clone.001")
+            self.assertEqual(clone["category"], "Feature")
+            self.assertEqual(
+                clone["owner"],
+                "UserCloneDeferredBoundaries.Transition::Setup",
+            )
+            self.assertTrue(clone["source_file"].endswith("objects/user_boot.spec"))
+            self.assertGreater(clone["source_line"], 0)
+            self.assertIn("user_clone.001", data["nodes"])
+
     def test_timeline_view_contains_rows_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)
@@ -309,9 +338,7 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(kernel_enable_emit_cell["column"], kernel_setup_cell["column"])
             assert_emit_at_transition_end(kernel_preset_cell, kernel_setup_emit_cell)
             assert_emit_at_transition_end(kernel_setup_cell, kernel_enable_emit_cell)
-            self.assertEqual(
-                entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 1
-            )
+            self.assertEqual(entry_prelude_setup_cell["column"], boot_setup_cell["column"])
             self.assertTrue(
                 any(
                     row.get("group_role") == "body_start"

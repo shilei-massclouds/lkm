@@ -2270,16 +2270,92 @@ object IrqTimeInitPhase: PhaseObject {
                     smp_concurrency_closed();
                     early_boot_irqs_disabled_true();
                     time_read_smoke_available(RiscvTimerProvider);
+                    irq_time_full_irq_desc_allocator_deferred(IrqTimeInitPhase);
+                    irq_time_pmu_runtime_lifecycle_deferred(IrqTimeInitPhase);
+                    irq_time_late_time_hook_trimmed(IrqTimeInitPhase);
+                    irq_time_periodic_timer_service_deferred(IrqTimeInitPhase);
+                    irq_time_uart_rx_deferred(IrqTimeInitPhase);
+                    irq_time_tty_runtime_deferred(IrqTimeInitPhase);
+                    irq_time_uart_fifo_concurrency_deferred(IrqTimeInitPhase);
                 }
 
-                deferred {
-                    "early_irq_init() 的完整 irq_desc allocator 细节暂缓；当前只要求 descriptor/domain 壳和 timer IRQ mapping。";
-                    "perf_event_init() 的 event cache 分配、硬件 breakpoint 细节和运行期 PMU event 生命周期暂缓；当前只要求 PMU registry、pmus_srcu 和 CPU context locks 基础。";
-                    "profile_init() 的 profile buffer 分配和 proc export 暂缓；当前默认无 profile= 参数，只记录裁剪边界。";
-                    "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
-                    "RISC-V hardirq entry 的 call_on_irq_stack() 实际切换暂缓；当前只记录 init_IRQ() 中 per-CPU IRQ stack pointer 初始化和 SCS 裁剪事实。";
-                    "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "更完整 UART RX、ordinary TTY runtime/FIFO 策略和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
+                deferred irq_time.001 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Complete the irq_desc allocator model beyond the descriptor/domain shell.";
+                    evidence { irq_time_full_irq_desc_allocator_deferred(IrqTimeInitPhase); }
+                    close_when: "Descriptor allocation, growth, failure and lifecycle tests match the reference implementation.";
+                }
+                deferred irq_time.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete perf event-cache allocation and runtime PMU event lifecycle.";
+                    evidence {
+                        perf_event_cache_deferred(PerfEventCore);
+                        irq_time_pmu_runtime_lifecycle_deferred(IrqTimeInitPhase);
+                    }
+                    close_when: "PMU event allocation, scheduling, teardown and differential tests pass.";
+                }
+                deferred irq_time.003 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement hardware-breakpoint initialization and lifecycle.";
+                    evidence { perf_hw_breakpoint_deferred(PerfEventCore); }
+                    close_when: "Breakpoint registration, hit and teardown tests pass on the reference target.";
+                }
+                trimmed irq_time.004 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "profile buffer allocation has no work because the fixed command line has no profile= option.";
+                    evidence { profile_buffer_allocation_trimmed(ProfileCore); }
+                    revisit_when: "The reference boot arguments provide profile=.";
+                }
+                deferred irq_time.005 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement profile data proc export.";
+                    evidence { profile_proc_export_deferred(ProfileCore); }
+                    close_when: "Profile buffer export and proc lifecycle tests pass.";
+                }
+                trimmed irq_time.006 {
+                    category: TrimmedCategory::Architecture;
+                    summary: "late_time_init is absent because the RISC-V reference path installs no hook.";
+                    evidence { irq_time_late_time_hook_trimmed(IrqTimeInitPhase); }
+                    revisit_when: "The target architecture installs a late_time_init hook.";
+                }
+                deferred irq_time.007 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Switch RISC-V hardirq entry onto the per-CPU IRQ stack.";
+                    evidence { riscv_irq_stack_runtime_switch_deferred(RiscvIrqStackSet); }
+                    close_when: "call_on_irq_stack ordering, nesting and per-CPU stack tests pass.";
+                }
+                trimmed irq_time.008 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "IRQ shadow-call-stack setup is absent because CONFIG_SHADOW_CALL_STACK=n.";
+                    evidence {
+                        riscv_irq_scs_trimmed_noop(RiscvIrqStackSet);
+                        riscv_irq_scs_trimmed_because_shadow_call_stack_disabled(RiscvIrqStackSet);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_SHADOW_CALL_STACK.";
+                }
+                deferred irq_time.009 {
+                    category: DeferredCategory::Feature;
+                    summary: "Enable formal periodic tick service from the RISC-V timer provider.";
+                    evidence { irq_time_periodic_timer_service_deferred(IrqTimeInitPhase); }
+                    close_when: "Periodic timer delivery, tick accounting and runtime tests pass with interrupts enabled.";
+                }
+                deferred irq_time.010 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement complete UART receive service.";
+                    evidence { irq_time_uart_rx_deferred(IrqTimeInitPhase); }
+                    close_when: "UART RX interrupt, buffering, error and sustained-input tests pass.";
+                }
+                deferred irq_time.011 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement ordinary TTY runtime semantics above the serial port.";
+                    evidence { irq_time_tty_runtime_deferred(IrqTimeInitPhase); }
+                    close_when: "TTY file, line-discipline and ordinary I/O tests pass.";
+                }
+                deferred irq_time.012 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete UART FIFO and concurrent RX/TX synchronization policies.";
+                    evidence { irq_time_uart_fifo_concurrency_deferred(IrqTimeInitPhase); }
+                    close_when: "FIFO pressure, RX/TX concurrency and interrupt reentry tests pass.";
                 }
 
                 emits {

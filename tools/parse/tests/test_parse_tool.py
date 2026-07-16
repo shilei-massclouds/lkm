@@ -55,7 +55,7 @@ class ParseToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            expanded = _read_with_includes(self.spec, seen=set(), stack=[]).splitlines()
+            expanded = _read_with_includes(self.spec, seen=set(), stack=[])[0].splitlines()
             line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 
@@ -91,6 +91,64 @@ class ParseToolTests(unittest.TestCase):
             data = read_json(output)
             transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
             self.assertTrue(transition["within"][0]["only_once"])
+
+    def test_structured_boundaries_round_trip_with_include_source(self) -> None:
+        child_source = """
+            object IncludedBoundaryOwner: ProjectObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            ensures {
+                                deferred_fact(IncludedBoundaryOwner);
+                                trimmed_fact(IncludedBoundaryOwner);
+                            }
+
+                            deferred included.001 {
+                                category: DeferredCategory::Feature;
+                                summary: "Complete the included feature.";
+                                evidence { deferred_fact(IncludedBoundaryOwner); }
+                                close_when: "The feature and its tests are complete.";
+                            }
+                            trimmed included.002 {
+                                category: TrimmedCategory::BuildConfig;
+                                summary: "The path is disabled in this build.";
+                                evidence { trimmed_fact(IncludedBoundaryOwner); }
+                                revisit_when: "The build enables the path.";
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "included.spec"
+            spec = root / "root.spec"
+            output = root / "root.ast.json"
+            child.write_text(child_source, encoding="utf-8")
+            spec.write_text('include "included.spec";\n', encoding="utf-8")
+
+            self.assertEqual(main([str(spec), "-o", str(output)]), 0)
+            data = read_json(output)
+            transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
+            boundaries = transition["boundaries"]
+
+            self.assertEqual([item["id"] for item in boundaries], ["included.001", "included.002"])
+            self.assertEqual([item["status"] for item in boundaries], ["deferred", "trimmed"])
+            self.assertEqual(boundaries[0]["category"], "DeferredCategory::Feature")
+            self.assertEqual(boundaries[0]["resolution"], "The feature and its tests are complete.")
+            self.assertEqual(boundaries[1]["category"], "TrimmedCategory::BuildConfig")
+            self.assertEqual(boundaries[1]["resolution"], "The build enables the path.")
+            self.assertEqual(boundaries[0]["evidence"][0]["entries"][0]["text"], "deferred_fact(IncludedBoundaryOwner)")
+            self.assertTrue(
+                boundaries[0]["span"]["source_file"].endswith("included.spec")
+            )
+            self.assertGreater(boundaries[0]["span"]["source_line"], 0)
 
     def test_event_body_members_preserve_source_order(self) -> None:
         source = """
@@ -249,7 +307,7 @@ class ParseToolTests(unittest.TestCase):
             spec = root / "root.spec"
             spec.write_text('include "child.spec";\n', encoding="utf-8")
 
-            expanded = _read_source_with_includes(spec, seen=set(), stack=[])
+            expanded = _read_source_with_includes(spec, seen=set(), stack=[])[0]
 
             self.assertIn("Included note.", expanded)
             self.assertIn("IncludedWithComment", expanded)

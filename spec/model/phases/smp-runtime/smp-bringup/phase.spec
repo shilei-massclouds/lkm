@@ -987,13 +987,26 @@ object SmpBringupPhase: PhaseObject {
                     ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
                     ap_ipi_enable_observed(ApSmpCallinPhase);
                     ap_local_irq_enable_observed(ApOnlineIdlePhase);
+                    smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase);
                 }
 
-                deferred {
-                    "AP full local CurrentCPU/LocalInterruptControl/CurrentTaskSlot 对象链在 AP phase 内只记录最小事实；完整 CPU-local 控制对象后续展开。";
-                    "AP hotplug thread should_run smp_mb() 配对和 callbacks 内部细节留给后续 CPU hotplug 模型，本轮保留 memory-ordering deferred fact。";
-                    "AP hotplug thread callback 细节留给后续 CPU hotplug 模型。";
-                    "FinalizePhase 内部的 async/initmem/mapping/sysctl 细节逐步展开，AP 侧仍留给后续模型。";
+                deferred smp_bringup.001 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Complete each AP CurrentCPU, LocalInterruptControl and CurrentTaskSlot object chain.";
+                    evidence { smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase); }
+                    close_when: "Every online AP has a complete CPU-local identity/control/task chain with SMP tests.";
+                }
+                deferred smp_bringup.002 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Prove the AP hotplug-thread should_run smp_mb pairing.";
+                    evidence { ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck); }
+                    close_when: "The publish/observe memory-order proof and stress tests cover the should_run handoff.";
+                }
+                deferred smp_bringup.003 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Complete AP hotplug-thread callback execution semantics.";
+                    evidence { ap_hotplug_callback_details_deferred(); }
+                    close_when: "Callback ordering, failure and CPU online/offline tests pass.";
                 }
 
                 emits {

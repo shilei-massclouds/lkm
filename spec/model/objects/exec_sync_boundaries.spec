@@ -89,8 +89,42 @@ object ExecSyncBoundaries: KernelObject {
                     payload_exec_panic_terminal_bound(self);
                 }
 
-                deferred {
-                    "Linux 6.12 exec locks, credential/signal/LSM hooks, namespaces and accounting remain deferred; CONFIG_MODULES=n makes binfmt module retry a trimmed no-op.";
+                deferred exec_sync.001 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete Linux exec locking and synchronization protocols.";
+                    evidence {
+                        payload_exec_update_lock_deferred(self);
+                    }
+                    close_when: "Exec lock ordering, mmap/task locks and membarrier synchronization are modeled, implemented and differentially tested.";
+                }
+
+                deferred exec_sync.002 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete exec credential, signal and LSM hook protocols.";
+                    evidence {
+                        payload_cred_guard_mutex_deferred(self);
+                    }
+                    close_when: "Credential, signal and LSM hook ordering is modeled, implemented and covered by exec success and rollback tests.";
+                }
+
+                deferred exec_sync.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete exec namespace and success-accounting hooks.";
+                    evidence {
+                        payload_exec_namespace_switch_deferred(self);
+                        payload_exec_success_accounting_hooks_deferred(self);
+                    }
+                    close_when: "Namespace switching and exec success accounting hooks have formal ordering, implementation and differential coverage.";
+                }
+
+                trimmed exec_sync.004 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Binary-format module retry is a no-op because CONFIG_MODULES=n.";
+                    evidence {
+                        payload_binfmt_module_retry_trimmed_noop(self);
+                        payload_binfmt_module_retry_trimmed_because_modules_disabled(self);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_MODULES.";
                 }
             }
         }

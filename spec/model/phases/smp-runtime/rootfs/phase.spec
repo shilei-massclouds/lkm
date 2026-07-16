@@ -143,7 +143,7 @@ object RootfsPrepareNamespacePaths: KernelObject {
                     rootfs_root_wait_trimmed_because_cmdline_absent();
                     rootfs_root_wait_polling_deferred();
                     rootfs_mount_root_block_formal();
-                    rootfs_nfs_root_deferred();
+                    rootfs_nfs_root_trimmed_by_reference_input();
                     rootfs_cifs_root_trimmed_noop();
                     rootfs_nodev_root_deferred();
                     rootfs_ext4_for_ext2_linux_config_recorded();
@@ -153,15 +153,79 @@ object RootfsPrepareNamespacePaths: KernelObject {
                     rootfs_devfs_currently_not_remounted_after_root_switch();
                 }
 
-                deferred {
-                    "wait_for_device_probe() 暂缓：Linux drivers/base/dd.c 使用 deferred_probe_work、probe_count atomic 和 probe_waitqueue 等待所有 probe 结束；当前依赖 InitcallBoundary 与设备对象 ready fact，不展开 waitqueue/atomic 协议。";
-                    "md_run_setup() 暂缓：当前 CONFIG_MD=y，但 arceos_ex 根设备直接来自 BlockDeviceRegistry.default_device，不展开 md autodetect/assembly。";
-                    "saved_root_name/ROOT_DEV/parse_root_device() 暂缓：当前 RootFS enable 直接绑定默认块设备候选，不解析 root= 下的 mtd/ubi/NFS/CIFS/ram/block 变体。";
-                    "root_wait/wait_for_root() 暂缓：当前命令行不使用 rootwait/rootwait=，轮询 driver_probe_done()+early_lookup_bdev() 的睡眠等待路径不进入 formal 主线。";
-                    "CONFIG_BLK_DEV_INITRD=n，因此 initrd_load() 为 trimmed/no-op；若未来启用 initrd，handle_initrd()/linuxrc 的 mount/chroot/call_usermodehelper 路径必须单独建模。";
-                    "CONFIG_ROOT_NFS=y 但当前根设备不是 /dev/nfs，NFS root 保持 deferred；CONFIG_CIFS_ROOT 未启用，CIFS root 为 trimmed/no-op。";
-                    "CONFIG_EXT2_FS=n 且 CONFIG_EXT4_USE_FOR_EXT2=y；Linux 会经 ext4-for-ext2 挂载 ext2 格式根，当前 arceos_ex 用 Ext2Driver/Ext2FileSystem 作为阶段性替代实现。";
-                    "CONFIG_DEVTMPFS=y/CONFIG_DEVTMPFS_MOUNT=y 下 devtmpfs_mount() 是真实 Linux 路径；当前已有 DevFs 在初始 rootfs 的 /dev 下可用，但 RootFS enable 后不把 /dev remount 到新 ext2 root，相关 devtmpfs 线程/req_lock/completion 仍 deferred。";
+                deferred rootfs.001 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete wait_for_device_probe synchronization over deferred work, probe_count and probe_waitqueue.";
+                    evidence {
+                        rootfs_device_probe_wait_deferred();
+                        rootfs_device_probe_waitqueue_deferred();
+                        rootfs_device_probe_atomic_counter_deferred();
+                        rootfs_deferred_probe_work_flush_deferred();
+                    }
+                    close_when: "Probe work flush, atomic accounting and wait/wake tests pass under concurrent probing.";
+                }
+                deferred rootfs.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement MD autodetection and assembly during root setup.";
+                    evidence { rootfs_md_run_setup_deferred(); }
+                    close_when: "MD discovery, assembly, failure and root-selection tests pass.";
+                }
+                deferred rootfs.003 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model saved_root_name and ROOT_DEV ownership.";
+                    evidence { rootfs_saved_root_name_parse_deferred(); }
+                    close_when: "Root-name storage, parsing lifetime and override tests pass.";
+                }
+                deferred rootfs.004 {
+                    category: DeferredCategory::AlternatePath;
+                    summary: "Parse root= device variants beyond the default block-device candidate.";
+                    evidence {
+                        rootfs_root_device_parse_deferred();
+                        rootfs_nodev_root_deferred();
+                    }
+                    close_when: "Supported MTD/UBI/NFS/CIFS/ram/block root variants have Linux-compatible selection and errno tests.";
+                }
+                trimmed rootfs.005 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "root_wait/wait_for_root is unreachable because the fixed command line has no rootwait option.";
+                    evidence {
+                        rootfs_root_wait_trimmed_noop();
+                        rootfs_root_wait_trimmed_because_cmdline_absent();
+                    }
+                    revisit_when: "The reference boot arguments include rootwait or rootwait=.";
+                }
+                trimmed rootfs.006 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "initrd_load is absent because CONFIG_BLK_DEV_INITRD=n.";
+                    evidence {
+                        rootfs_initrd_load_trimmed_noop();
+                        rootfs_initrd_load_trimmed_because_config_blk_dev_initrd_disabled();
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_BLK_DEV_INITRD.";
+                }
+                trimmed rootfs.007 {
+                    category: TrimmedCategory::ReferenceInput;
+                    summary: "NFS root is unreachable because the fixed root device is not /dev/nfs.";
+                    evidence { rootfs_nfs_root_trimmed_by_reference_input(); }
+                    revisit_when: "The reference root device selects /dev/nfs.";
+                }
+                trimmed rootfs.008 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "CIFS root is absent because CONFIG_CIFS_ROOT=n.";
+                    evidence { rootfs_cifs_root_trimmed_noop(); }
+                    revisit_when: "The reference configuration enables CONFIG_CIFS_ROOT.";
+                }
+                deferred rootfs.009 {
+                    category: DeferredCategory::Feature;
+                    summary: "Mount devtmpfs during root namespace preparation.";
+                    evidence { rootfs_devtmpfs_mount_deferred(); }
+                    close_when: "devtmpfs mount ordering and root-switch tests pass.";
+                }
+                deferred rootfs.010 {
+                    category: DeferredCategory::Feature;
+                    summary: "Attach /dev to the new root after the ext2 root switch.";
+                    evidence { rootfs_devfs_currently_not_remounted_after_root_switch(); }
+                    close_when: "The new root exposes the intended /dev mount with namespace and task fs tests.";
                 }
             }
         }
@@ -185,7 +249,7 @@ object RootfsPrepareNamespacePaths: KernelObject {
             rootfs_root_wait_trimmed_because_cmdline_absent();
             rootfs_root_wait_polling_deferred();
             rootfs_mount_root_block_formal();
-            rootfs_nfs_root_deferred();
+            rootfs_nfs_root_trimmed_by_reference_input();
             rootfs_cifs_root_trimmed_noop();
             rootfs_nodev_root_deferred();
             rootfs_ext4_for_ext2_linux_config_recorded();
@@ -323,8 +387,17 @@ object IntegrityKeysDeferred: KernelObject {
                     integrity_evm_load_x509_trimmed_because_config_evm_disabled();
                 }
 
-                deferred {
-                    "integrity_load_keys() 在 CONFIG_INTEGRITY=y 下保留调用位置；当前 CONFIG_IMA=n、CONFIG_EVM=n，不展开 IMA/EVM x509 keyring 和证书加载。";
+                trimmed integrity_keys.001 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "IMA X.509 key loading is absent because CONFIG_IMA=n.";
+                    evidence { integrity_ima_load_x509_trimmed_because_config_ima_disabled(); }
+                    revisit_when: "The reference configuration enables CONFIG_IMA.";
+                }
+                trimmed integrity_keys.002 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "EVM X.509 key loading is absent because CONFIG_EVM=n.";
+                    evidence { integrity_evm_load_x509_trimmed_because_config_evm_disabled(); }
+                    revisit_when: "The reference configuration enables CONFIG_EVM.";
                 }
             }
         }

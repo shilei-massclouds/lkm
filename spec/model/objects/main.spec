@@ -210,12 +210,64 @@ predicate riscv_early_boot_alternatives_deferred<T>(vm: T) -> bool;
 predicate riscv_early_boot_alternatives_mmu_off_boundary_preserved<T>(vm: T) -> bool;
 predicate vmlinux_build_id_deferred<T>(phase: T) -> bool;
 predicate page_address_init_deferred<T>(phase: T) -> bool;
+predicate efi_boot_init_deferred<T>(phase: T) -> bool;
 predicate entry_successor_start_kernel_position_preserved<T>(phase: T) -> bool;
 predicate memblock_phys_ram_base_ready<T>(memblock: T) -> bool;
 predicate memblock_kernel_va_pa_offset_ready<T, U>(memblock: T, vm: U) -> bool;
 predicate memblock_dma32_limit_ready<T>(memblock: T) -> bool;
 predicate memblock_dma32_zone_input_ready<T>(memblock: T) -> bool;
 predicate memblock_hugetlb_early_reserve_deferred<T>(memblock: T) -> bool;
+predicate core_prepare_acpi_boot_tables_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_early_memtest_input_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_sparse_init_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_vmemmap_tlb_flush_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_crashkernel_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_kasan_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_acpi_rintc_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_acpi_cpu_numa_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_cbop_block_size_deferred<T>(phase: T) -> bool;
+predicate core_prepare_boot_alternatives_deferred<T>(phase: T) -> bool;
+predicate core_prepare_rt_signal_env_deferred<T>(phase: T) -> bool;
+predicate core_prepare_user_isa_deferred<T>(phase: T) -> bool;
+predicate core_prepare_static_call_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_early_security_deferred<T>(phase: T) -> bool;
+predicate core_prepare_boot_config_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_boot_cpu_hook_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_extra_init_args_trimmed<T>(phase: T) -> bool;
+predicate core_prepare_vfs_caches_early_deferred<T>(phase: T) -> bool;
+predicate sched_init_housekeeping_deferred<T>(phase: T) -> bool;
+predicate sched_init_workqueue_workers_deferred<T>(phase: T) -> bool;
+predicate sched_init_context_tracking_runtime_deferred<T>(phase: T) -> bool;
+predicate irq_time_full_irq_desc_allocator_deferred<T>(phase: T) -> bool;
+predicate irq_time_pmu_runtime_lifecycle_deferred<T>(phase: T) -> bool;
+predicate irq_time_late_time_hook_trimmed<T>(phase: T) -> bool;
+predicate irq_time_periodic_timer_service_deferred<T>(phase: T) -> bool;
+predicate irq_time_uart_rx_deferred<T>(phase: T) -> bool;
+predicate irq_time_tty_runtime_deferred<T>(phase: T) -> bool;
+predicate irq_time_uart_fifo_concurrency_deferred<T>(phase: T) -> bool;
+predicate irq_open_real_console_handoff_deferred<T>(phase: T) -> bool;
+predicate irq_open_slub_full_enable_deferred<T>(phase: T) -> bool;
+predicate process_prepare_root_pid_runtime_deferred<T>(owner: T) -> bool;
+predicate process_prepare_vm_stack_hotplug_callbacks_deferred<T>(owner: T) -> bool;
+predicate process_prepare_key_runtime_sync_deferred<T>(owner: T) -> bool;
+predicate process_prepare_lsm_runtime_sync_deferred<T>(owner: T) -> bool;
+predicate process_prepare_pseudo_fs_runtime_locks_deferred<T>(owner: T) -> bool;
+predicate scheduler_fpu_vector_switch_deferred<T>(scheduler: T) -> bool;
+predicate scheduler_generic_task_return_deferred<T>(scheduler: T) -> bool;
+predicate boot_idle_full_tick_runtime_deferred<T>(runtime: T) -> bool;
+predicate boot_idle_full_rcu_runtime_deferred<T>(runtime: T) -> bool;
+predicate boot_idle_full_irq_idle_deferred<T>(runtime: T) -> bool;
+predicate pre_smp_cad_pid_deferred<T>(phase: T) -> bool;
+predicate pre_smp_proc_vmstat_deferred<T>(phase: T) -> bool;
+predicate pre_smp_lockup_detector_deferred<T>(phase: T) -> bool;
+predicate smp_bringup_full_ap_cpu_local_chain_deferred<T>(phase: T) -> bool;
+predicate runtime_async_domains_deferred<T>(phase: T) -> bool;
+predicate runtime_async_cookies_deferred<T>(phase: T) -> bool;
+predicate runtime_async_pending_list_deferred<T>(phase: T) -> bool;
+predicate runtime_async_waitqueue_deferred<T>(phase: T) -> bool;
+predicate runtime_async_workers_deferred<T>(phase: T) -> bool;
+predicate runtime_padata_instances_deferred<T>(phase: T) -> bool;
+predicate initcall_same_level_order_independence_proof_deferred<T>(table: T) -> bool;
 predicate swapper_vm_strict_kernel_rwx_boundary_deferred<T>(swapper_vm: T) -> bool;
 predicate swapper_vm_final_permissions_not_split_yet<T>(swapper_vm: T) -> bool;
 predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bool;
@@ -380,6 +432,8 @@ predicate task_creation_copy_process_sighand_siglock_deferred<T>(core: T) -> boo
 predicate task_creation_copy_process_tasklist_lock_deferred<T>(core: T) -> bool;
 predicate task_creation_copy_process_pidmap_lock_deferred<T>(core: T) -> bool;
 predicate task_creation_copy_process_sched_fork_locks_deferred<T>(core: T) -> bool;
+predicate task_creation_copy_process_reference_sync_deferred<T>(core: T) -> bool;
+predicate task_creation_copy_process_failure_rollback_deferred<T>(core: T) -> bool;
 predicate task_struct_allocated<T>(task: T) -> bool;
 predicate task_duplicated_from<T, U>(dst_task: T, src_task: U) -> bool;
 predicate task_pid_allocated<T, U>(task: T, pid_ns: U) -> bool;
@@ -1199,9 +1253,6 @@ type SchedulerObject: TaskObject {
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_first_schedule_committed(self);
             }
-            deferred {
-                "Payload-phase Scheduler.schedule() cooperative switch branch: from KernelInitTask current, pick a smoke scheduler task, enter its stack/entry, let that task schedule/yield back, and return to KernelInitTask continuation. This branch is required for the app-smoke API test and is distinct from rest_init first-schedule checkpoints; full preemptive scheduling remains deferred.";
-            }
         }
 
         Action::ScheduleIdle {
@@ -1222,9 +1273,6 @@ type SchedulerObject: TaskObject {
                 boot_idle_schedule_idle_loop_until_resched_clear(self);
                 boot_idle_need_resched_drained_after_schedule(BootIdleTask);
                 task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
-            }
-            deferred {
-                "ScheduleIdle 当前复用 Scheduler.Schedule 的对象级 pick-next/switch-to 框架，不能手工提交 BootIdleTask -> BootIdleTask identity switch；Linux schedule_idle() 的 SM_IDLE 模式、跳过 sched_submit_work()、do { __schedule(SM_IDLE); } while (need_resched()) 循环，以及未来某刻返回 idle-loop continuation 的完整控制流后续展开。";
             }
         }
 
@@ -1253,9 +1301,6 @@ type SchedulerObject: TaskObject {
                 task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
             }
-            deferred {
-                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架、prepare_task_switch/finish_task_switch 边界和 CurrentTaskRef commit；真实栈切换、next task 上下文恢复、last 返回值、FPU/vector、MM/lazy-TLB/membarrier 细节、finish_task_switch 具体钩子和长期任务 continuation 后续展开。";
-            }
         }
 
         Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef {
@@ -1267,9 +1312,6 @@ type SchedulerObject: TaskObject {
                 scheduler_select_runqueue_returns(self, task_ref, BootRunQueueRef);
                 runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                 runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
-            }
-            deferred {
-                "当前 SelectRunQueue 固定返回 Boot CPU runqueue，并通过 runqueue_ref_cpu_is(selected_rq, BootCPURef) 证明调用方可执行 Task.SetTaskCpu(BootCPURef)；未来 SMP 选择策略仍应由 selected RunQueueRef 的 CPU 事实驱动 Task.SetTaskCpu，而不是由调用方硬编码 boot CPU。完整 select_task_rq 策略后续展开。";
             }
         }
     }
@@ -1335,9 +1377,6 @@ type BootIdleRuntimeObject: TaskObject {
                 boot_idle_loop_cycle_committed(self);
                 boot_idle_loop_continues(self);
             }
-            deferred {
-                "DoIdleCycle 当前只展开一轮代表性 do_idle() 主线；真实 while (1) do_idle() 会重复执行，后续可用循环/运行期 trace 语义表达多轮。";
-            }
         }
 
         Action::WaitWhileNoNeedResched {
@@ -1371,9 +1410,6 @@ type BootIdleRuntimeObject: TaskObject {
                 boot_idle_runtime_waiting(self, BootIdleTask);
                 boot_idle_wait_path_deferred(self);
             }
-            deferred {
-                "WaitWhileNoNeedResched 抽象 Linux do_idle() 中 while (!need_resched()) 的 idle wait 段；当前显式记录 polling rmb、本地中断关闭、arch_cpu_idle_enter/exit、RCU nocb deferred wakeup flush、offline-dead path 未进入和 poll/cpuidle 分支 deferred。cpu_idle_poll、cpuidle_idle_call、WFI、tick broadcast 和完整 context-tracking 细节后续展开。";
-            }
         }
 
         Action::ObserveNeedResched {
@@ -1389,9 +1425,6 @@ type BootIdleRuntimeObject: TaskObject {
                 boot_idle_nohz_exited(self);
                 boot_idle_polling_clear_mb_before_flush(BootIdleTask);
                 boot_idle_smp_call_function_queue_flushed(self);
-            }
-            deferred {
-                "need_resched 由本 CPU 可观察环境设置，通常来自唤醒、定时器或跨 CPU 调度请求；当前模型只把该环境结果作为 idle loop 的条件分界事实。";
             }
         }
 
@@ -1455,9 +1488,6 @@ type RunQueue: TaskObject {
                 Some: Success(additional_task_enqueued);
                 AlreadyQueued: Failed(duplicate_enqueue);
             }
-            deferred {
-                "当前 RunQueue.task_refs 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，task_refs 应改为由具体队列派生。";
-            }
         }
 
         Action::PickNextTask(prev_ref: TaskRef) -> TaskRef {
@@ -1474,9 +1504,6 @@ type RunQueue: TaskObject {
                 task_ref_targets(CurrentTaskRef, KernelInitTask);
                 task_ref_ready(CurrentTaskRef);
                 scheduler_pick_next_task_selects_runnable(Scheduler, self, CurrentTaskRef);
-            }
-            deferred {
-                "当前 UP/rest_init schedule 路径在 BootRunQueue 中优先选择已入队的 KernelInitTask；未来可扩展为 KernelInitTask/KthreaddTask 以及完整 scheduler class pick_next_task 策略。";
             }
         }
     }

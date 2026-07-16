@@ -1008,9 +1008,6 @@ object KthreaddTask: Task {
                 kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
                 kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
             }
-            deferred {
-                "kthread_create_list 消费、请求完成、wait/park/stop 和长期服务语义后续建模；当前最小循环只主动 schedule() 让出 CPU。";
-            }
         }
     }
 }
@@ -1384,8 +1381,11 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_gp_threads_still_deferred(RcuCore);
                 }
 
-                deferred {
-                    "KthreaddTask 入口循环属于 KthreaddTask 自己的执行线；本阶段只发布 entry/provider facts，不驱动 kthreadd 服务循环子阶段。";
+                deferred kthreadd.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete kthreadd request consumption, completion, wait, park, stop and long-running service semantics.";
+                    evidence { kthreadd_schedule_loop_active(KthreaddTask, Scheduler); }
+                    close_when: "kthread request creation/consumption, wait/park/stop and sustained service tests pass.";
                 }
 
                 emits {
@@ -1586,6 +1586,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     );
                     scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
                     scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    scheduler_fpu_vector_switch_deferred(Scheduler);
+                    scheduler_generic_task_return_deferred(Scheduler);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                     task_concurrency_open();
@@ -1598,8 +1600,26 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     secondary_cpus_not_started(CpuGroup);
                 }
 
-                deferred {
-                    "完整 scheduler class 策略、MM/FPU/vector 切换和通用任务返回策略后续展开。";
+                deferred schedule_handoff.001 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete address-space switch_mm/lazy-TLB and membarrier switch ordering.";
+                    evidence {
+                        scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
+                        scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    }
+                    close_when: "MM switch, lazy-TLB and membarrier ordering pass multi-mm task-switch tests.";
+                }
+                deferred schedule_handoff.002 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete FPU and vector context switching.";
+                    evidence { scheduler_fpu_vector_switch_deferred(Scheduler); }
+                    close_when: "Per-task FPU/vector save, restore and lazy-state tests pass.";
+                }
+                deferred schedule_handoff.003 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Complete generic task return handling after context switches.";
+                    evidence { scheduler_generic_task_return_deferred(Scheduler); }
+                    close_when: "All supported kernel/user task return paths are modeled and tested.";
                 }
 
                 emits {
@@ -1812,6 +1832,9 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleRuntime);
                     boot_idle_cpu_offline_dead_path_not_taken(BootIdleRuntime, BootCPU);
                     boot_idle_poll_or_cpuidle_path_deferred(BootIdleRuntime);
+                    boot_idle_full_tick_runtime_deferred(BootIdleRuntime);
+                    boot_idle_full_rcu_runtime_deferred(BootIdleRuntime);
+                    boot_idle_full_irq_idle_deferred(BootIdleRuntime);
                     boot_idle_arch_cpu_idle_exit_done(BootIdleRuntime, BootCPU);
                     boot_idle_preempt_need_resched_set(BootIdleTask);
                     boot_idle_polling_clear_mb_before_flush(BootIdleTask);
@@ -1828,9 +1851,35 @@ object BootIdleEntryPhase: PhaseObject {
                     );
                 }
 
-                deferred {
-                    "finite derivation 只展开 boot idle loop 的一轮代表性 no-need-resched -> need-resched -> schedule_idle；实现 continuation 必须允许无限重复，完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
-                    "secondary CPU 启动仍保持 deferred，后续 SMP Runtime Phase 再推进。";
+                deferred boot_idle.001 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Represent the unbounded boot idle-loop continuation beyond one finite derivation cycle.";
+                    evidence { boot_idle_loop_continues(BootIdleRuntime); }
+                    close_when: "The model represents repeated idle/schedule cycles without a finite unrolling assumption.";
+                }
+                deferred boot_idle.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete periodic tick behavior while the boot CPU is idle.";
+                    evidence { boot_idle_full_tick_runtime_deferred(BootIdleRuntime); }
+                    close_when: "Idle tick/nohz transitions and accounting tests pass.";
+                }
+                deferred boot_idle.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete RCU idle/EQS behavior in the idle loop.";
+                    evidence { boot_idle_full_rcu_runtime_deferred(BootIdleRuntime); }
+                    close_when: "RCU idle entry/exit, deferred wake and grace-period tests pass.";
+                }
+                deferred boot_idle.004 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete cpuidle polling and low-power state selection.";
+                    evidence { boot_idle_poll_or_cpuidle_path_deferred(BootIdleRuntime); }
+                    close_when: "Polling and cpuidle state selection/exit tests pass.";
+                }
+                deferred boot_idle.005 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Complete interrupt entry and exit behavior while idle.";
+                    evidence { boot_idle_full_irq_idle_deferred(BootIdleRuntime); }
+                    close_when: "Idle interrupt wake, nested entry and resume tests pass.";
                 }
 
                 emits {

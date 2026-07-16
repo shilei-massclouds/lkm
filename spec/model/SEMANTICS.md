@@ -2,6 +2,63 @@
 
 本文档记录 `.spec` 模型语言的硬语义规则。修改规格、模型构建器、推导器、检查器、视图或渲染工具前，应先阅读本文档；工具实现不得用后续阶段的“消歧”或展示逻辑绕过这些规则。
 
+## SEM-BOUNDARY-001: Deferred And Trimmed Are Structured Boundaries
+
+`deferred` 只表示当前仍未实现或未证明的责任；`trimmed` 只表示在当前参考构建配置、
+目标架构或参考输入下可证明不可达或无操作的边界。两者都不是对象状态，不得用来承载已实现
+事实、checkpoint 说明、历史调试记录或不受控的自由文本 backlog。
+
+结构化语法为：
+
+```text
+deferred user_clone.001 {
+    category: DeferredCategory::Feature;
+    summary: "Support thread-group clone semantics.";
+    evidence {
+        user_clone_thread_groups_deferred(UserCloneBoundaries);
+    }
+    close_when: "Thread-group clone facts, implementation and differential tests pass.";
+}
+
+trimmed mm_core.001 {
+    category: TrimmedCategory::BuildConfig;
+    summary: "page_ext initialization is absent when CONFIG_PAGE_EXTENSION=n.";
+    evidence {
+        mm_core_page_ext_flatmem_trimmed(MmCoreTrimmedPaths);
+    }
+    revisit_when: "The reference configuration enables CONFIG_PAGE_EXTENSION.";
+}
+```
+
+硬约束：
+
+- `deferred` 分类只能是 `Feature`、`Protocol`、`ModelDetail`、`Proof` 或
+  `AlternatePath`。
+- `trimmed` 分类只能是 `BuildConfig`、`Architecture`、`ReferenceInput` 或
+  `CompileTimeNoOp`。“当前没有实现”不是 trimmed evidence。
+- 每条记录只承载一项可关闭责任，必须声明非空 `summary`、非空 `evidence`，
+  以及 `deferred` 的 `close_when` 或 `trimmed` 的 `revisit_when`。验收条件不得使用
+  “以后处理”等无边界表述。
+- ID 必须匹配“域名 + 三位序号”，例如 `user_clone.001`。ID 在整个模型中唯一，
+  一旦分配永不复用；标题、owner 或状态变化不改变 ID。
+- owner object、owner state/transition、`within` context 和源文件位置由 AST/model
+  根据词法位置推导；源文本不得手工重复这些字段。
+- model 阶段必须拒绝缺字段、非法分类、重复/非法 ID 和最终门禁中的 legacy
+  `deferred { "..." }`。parser 可以为迁移诊断保留 legacy AST，但根模型验证不允许它通过。
+- derive 阶段必须在 owner 边界到达时验证 `evidence`。无法从模型、参考配置事实、
+  架构事实、参考输入事实或已证明前序事实推出的 evidence 必须产生 verification
+  obligation；工具不得因为记录被标记为 deferred/trimmed 就假定 evidence 成立。
+- 默认 check policy 允许 evidence 成立的 deferred/trimmed inventory 存在，但必须拒绝
+  结构错误、legacy 记录和任何未解 verification obligation。
+
+生命周期规则：
+
+- 新发现的未闭合责任必须在定位 owner 后新增结构化记录；责任变化语义时先重分类或迁移
+  owner，不得通过改摘要隐藏语义变化。
+- 责任完成时，同一变更必须删除 boundary、在 `ensures`/`invariant`/coding 中补齐正式
+  事实与验证，并在对应专题完成归档中记录原 ID、完成证据和提交。
+- active roadmap 只引用仍需推进的 boundary ID，不复制第二套责任描述。
+
 ## SEM-NAME-001: Lifecycle State And Transition Names Are Controlled
 
 生命周期状态名和生命周期转移名必须来自受控集合。规格不得临时发明新的生命周期名称来表达局部语义；如果确实需要新增名称，必须先修改本文档、`model` 阶段检查器和对应测试。
@@ -122,8 +179,11 @@ state State::Ready {
                 ...
             }
 
-            deferred {
-                ...
+            deferred action_domain.001 {
+                category: DeferredCategory::Protocol;
+                summary: "Complete the remaining action protocol.";
+                evidence { action_protocol_deferred(self); }
+                close_when: "The protocol and its failure paths are specified and tested.";
             }
         }
     }

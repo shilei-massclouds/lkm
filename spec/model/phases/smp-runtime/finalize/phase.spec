@@ -31,10 +31,36 @@ object AsyncFullSyncDeferred: KernelObject {
                     async_full_sync_async_lock_irqsave_deferred();
                     async_full_sync_entry_count_atomic_deferred();
                     async_full_sync_global_cookie_boundary_preserved();
+                    async_full_sync_worker_wake_deferred();
                 }
 
-                deferred {
-                    "Linux kernel/async.c::async_synchronize_full() waits through async_synchronize_cookie_domain(ASYNC_COOKIE_MAX, NULL); the async_done waitqueue, async_lock spin_lock_irqsave(), entry_count atomic accounting and worker wake_up() protocol remain AsyncCore runtime deferred in this round.";
+                deferred finalize_async.001 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement async_synchronize_full waiting on async_done through the global cookie boundary.";
+                    evidence {
+                        async_synchronize_full_deferred();
+                        async_full_sync_waitqueue_deferred();
+                        async_full_sync_global_cookie_boundary_preserved();
+                    }
+                    close_when: "Global-cookie wait completion and concurrent async-domain tests pass.";
+                }
+                deferred finalize_async.002 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement async_lock spin_lock_irqsave ordering for global pending work.";
+                    evidence { async_full_sync_async_lock_irqsave_deferred(); }
+                    close_when: "Lock/IRQ ordering and concurrent pending-list tests pass.";
+                }
+                deferred finalize_async.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement async entry_count atomic accounting.";
+                    evidence { async_full_sync_entry_count_atomic_deferred(); }
+                    close_when: "Atomic increment/decrement and completion-race tests pass.";
+                }
+                deferred finalize_async.004 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement worker wake_up of async_done after releasing async_lock.";
+                    evidence { async_full_sync_worker_wake_deferred(); }
+                    close_when: "Wake-after-unlock ordering and missed-wakeup stress tests pass.";
                 }
             }
         }
@@ -48,6 +74,7 @@ object AsyncFullSyncDeferred: KernelObject {
             async_full_sync_async_lock_irqsave_deferred();
             async_full_sync_entry_count_atomic_deferred();
             async_full_sync_global_cookie_boundary_preserved();
+            async_full_sync_worker_wake_deferred();
         }
     }
 }

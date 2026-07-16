@@ -236,6 +236,12 @@ object TaskCreationCore: TaskObject {
                     fork_vm_stack_cpuhp_registered(TaskCreationCore);
                     task_creation_entry_contract_ready(TaskCreationCore);
                     rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
+                    task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
+                    task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore);
+                    task_creation_copy_process_reference_sync_deferred(TaskCreationCore);
+                    task_creation_copy_process_failure_rollback_deferred(TaskCreationCore);
                 }
             }
         }
@@ -253,6 +259,49 @@ object TaskCreationCore: TaskObject {
             fork_vm_stack_cpuhp_registered(TaskCreationCore);
             task_creation_entry_contract_ready(TaskCreationCore);
             rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
+            task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
+            task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
+            task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
+            task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore);
+            task_creation_copy_process_reference_sync_deferred(TaskCreationCore);
+            task_creation_copy_process_failure_rollback_deferred(TaskCreationCore);
+        }
+
+        deferred task_creation.001 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement sighand siglock ordering inside copy_process.";
+            evidence { task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore); }
+            close_when: "Sighand sharing/copying and signal-lock ordering tests pass for clone and fork.";
+        }
+        deferred task_creation.002 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement tasklist lock ordering inside task creation.";
+            evidence { task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore); }
+            close_when: "Task publication, lookup and concurrent exit/fork lock-order tests pass.";
+        }
+        deferred task_creation.003 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement PID allocator and pidmap synchronization.";
+            evidence { task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore); }
+            close_when: "Concurrent PID allocation, wraparound and release tests pass.";
+        }
+        deferred task_creation.004 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement sched_fork and priority-inheritance initialization locking.";
+            evidence { task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore); }
+            close_when: "Scheduler fork initialization, PI state and publication ordering tests pass.";
+        }
+        deferred task_creation.005 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement reference synchronization for copy_creds, files, fs, signal and mm.";
+            evidence { task_creation_copy_process_reference_sync_deferred(TaskCreationCore); }
+            close_when: "Reference acquisition, sharing, copy and concurrent-release tests pass for every clone mode.";
+        }
+        deferred task_creation.006 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement complete copy_process failure rollback.";
+            evidence { task_creation_copy_process_failure_rollback_deferred(TaskCreationCore); }
+            close_when: "Every allocation and hook failure unwinds resources, counters and publication in reverse order under tests.";
         }
 
         actions {
@@ -309,9 +358,6 @@ object TaskCreationCore: TaskObject {
                     task_not_enqueued(dst_task);
                 }
 
-                deferred {
-                    "copy_process() 内部的 current->sighand->siglock、tasklist_lock、PID allocator/pidmap 锁、cgroup/cred/file/fs/mm 引用同步和 sched_fork()/PI 初始化锁属于 TaskCreationCore 的共享创建协议，后续在 TaskCreationCore 内展开；rest_init 子阶段只消费 CopyProcess 的成功提交结果。";
-                }
             }
 
             /*
@@ -408,9 +454,6 @@ object TaskCreationCore: TaskObject {
                     task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore);
                 }
 
-                deferred {
-                    "用户态 CopyUserProcess 当前只覆盖 PID1 sequential plain fork、顺序 OpenRC vfork active-slot reuse 和单层 OpenRC login nested vfork takeover。PID1 plain child 在 exit + wait4 status copyout 后已经收割，内部 UserChild task ref 出队并回到 Prepared，下一次 clone 分配递增 pid 后复用；它不产生 vfork completed record。OpenRC login shell /bin/ls 在 child continuation 内发起的 plain fork 不进入 CopyUserProcess；它由 UserChildProcess 的 observed child plain-fork facts 复用单 internal slot，clone 返回 grandchild pid，wait4 再 handoff 到 grandchild，仍不创建第二个 runnable UserChild task ref。observed grandchild 收割后内部 slot 仍承载 Ready shell 并保持调度可见，只清理该轮 snapshot/wait/exit facts，允许同一 shell 顺序创建下一 child。Linux copy_process() 中 sighand->siglock、tasklist_lock、PID allocator/pidmap、copy_creds/copy_files/copy_fs/copy_sighand/copy_signal/copy_mm、sched_fork、wake_up_new_task 以及失败回滚均保留为对象事实或 deferred 边界；完整 COW mm、共享 fdtable、thread group、多 runnable user task ref、ptrace/seccomp/cgroup/audit、namespace、robust futex、clear_child_tid futex wake、完整 wait/exit/reap 后续按真实 guest 证据展开。";
-                }
             }
         }
     }
@@ -719,14 +762,165 @@ object ProcessPrepareTrimmedPaths: KernelObject {
                     process_prepare_rcu_tasks_generic_out_of_scope(ProcessPrepareTrimmedPaths);
                     process_prepare_rcu_tasks_generic_belongs_to_kernel_init_freeable(ProcessPrepareTrimmedPaths);
                     process_prepare_trimmed_paths_position_preserved(ProcessPrepareTrimmedPaths);
+                    process_prepare_root_pid_runtime_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_vm_stack_hotplug_callbacks_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_key_runtime_sync_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_lsm_runtime_sync_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_pseudo_fs_runtime_locks_deferred(ProcessPrepareTrimmedPaths);
                 }
 
-                deferred {
-                    "pagecache_init() 在当前模型中不建立 PageCache 生命周期；其 folio waitqueue table 和 writeback 初始化保留为 VfsCore/PageCache deferred 事实。";
-                    "seq_file_init()、proc_root_init()、nsfs_init() 和 pidfs_init() 在当前 CONFIG_PROC_FS/CONFIG_PID_NS 路径下存在，但本阶段只保留为 VFS pseudo filesystem deferred，不声称 proc/nsfs/pidfs 已可用。";
-                    "vfs_caches_init() 中的 bdev_cache_init() 和 chrdev_init() 属于后续 block/char device registry 能力，本阶段只覆盖 VFS cache 与 ramfs-backed 初始 rootfs mount。";
-                    "net_ns_init() 在 CONFIG_NET_NS=y 下存在，但网络 namespace 运行期对象不在本阶段展开。";
-                    "rcu_init_tasks_generic() 不在 start_kernel() 的本区间内；它位于 rest_init() 后 kernel_init_freeable()，对 ProcessPreparePhase 是 out-of-scope。";
+                deferred process_prepare.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model and implement the network namespace runtime object.";
+                    evidence { process_prepare_net_namespace_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Network namespace lifecycle, isolation and enabled-config tests pass.";
+                }
+                deferred process_prepare.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model page-cache, folio waitqueue and writeback initialization.";
+                    evidence {
+                        process_prepare_pagecache_deferred(ProcessPrepareTrimmedPaths, VfsCore);
+                        process_prepare_pagecache_waitqueue_table_deferred(ProcessPrepareTrimmedPaths);
+                    }
+                    close_when: "Page-cache lifecycle, folio waits and writeback initialization tests pass.";
+                }
+                deferred process_prepare.003 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model and implement seq_file core initialization.";
+                    evidence { process_prepare_seq_file_core_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "seq_file lifecycle and representative proc readers pass tests.";
+                }
+                deferred process_prepare.004 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model and implement procfs root initialization.";
+                    evidence { process_prepare_procfs_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Procfs mount, root entries and lifecycle tests pass.";
+                }
+                deferred process_prepare.005 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model and implement nsfs initialization.";
+                    evidence { process_prepare_nsfs_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "nsfs mount and namespace-file lifecycle tests pass.";
+                }
+                deferred process_prepare.006 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model and implement pidfs initialization.";
+                    evidence { process_prepare_pidfs_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "pidfs mount and PID file lifecycle tests pass.";
+                }
+                deferred process_prepare.007 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete block-device cache initialization inside VFS setup.";
+                    evidence { process_prepare_bdev_chrdev_init_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Block-device registry/cache lifecycle tests pass.";
+                }
+                deferred process_prepare.008 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete character-device registry initialization inside VFS setup.";
+                    evidence { process_prepare_bdev_chrdev_init_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Character-device registry lifecycle and lookup tests pass.";
+                }
+                deferred process_prepare.009 {
+                    category: DeferredCategory::Feature;
+                    summary: "Complete SignalCore setup beyond its cache shell.";
+                    evidence { process_prepare_signal_core_setup_deferred(ProcessPrepareTrimmedPaths, SignalCore); }
+                    close_when: "Signal structures, delivery prerequisites and runtime tests pass.";
+                }
+                deferred process_prepare.010 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement RootPidNamespace allocation, free and lookup actions.";
+                    evidence { process_prepare_root_pid_runtime_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "PID allocation/free/hash lookup and namespace tests pass.";
+                }
+                deferred process_prepare.011 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Execute and synchronize the vm_stack_cache CPU-hotplug callbacks.";
+                    evidence { process_prepare_vm_stack_hotplug_callbacks_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "BP/AP hotplug callback ordering and stack-cache tests pass.";
+                }
+                deferred process_prepare.012 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement the KeyringCore runtime key_types_sem write protocol.";
+                    evidence { process_prepare_key_runtime_sync_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Concurrent key-type registration/removal and lock-order tests pass.";
+                }
+                deferred process_prepare.013 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement complete runtime synchronization for the LSM hook dispatcher.";
+                    evidence { process_prepare_lsm_runtime_sync_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "LSM hook registration/dispatch ordering and concurrent tests pass.";
+                }
+                deferred process_prepare.014 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement procfs, nsfs and pidfs runtime mount locking.";
+                    evidence { process_prepare_pseudo_fs_runtime_locks_deferred(ProcessPrepareTrimmedPaths); }
+                    close_when: "Pseudo-filesystem mount/unmount and concurrent namespace tests pass.";
+                }
+                trimmed process_prepare.015 {
+                    category: TrimmedCategory::Architecture;
+                    summary: "efi_enter_virtual_mode is an x86-only call and is unreachable on RISC-V64.";
+                    evidence { process_prepare_x86_efi_runtime_switch_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The target architecture changes to x86.";
+                }
+                trimmed process_prepare.016 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Shadow-call-stack initialization is absent because CONFIG_SHADOW_CALL_STACK=n.";
+                    evidence { process_prepare_shadow_call_stack_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_SHADOW_CALL_STACK.";
+                }
+                trimmed process_prepare.017 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Task lockdep initialization is absent because lockdep is disabled.";
+                    evidence { process_prepare_lockdep_init_task_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables lockdep.";
+                }
+                trimmed process_prepare.018 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "dbg_late_init is absent because CONFIG_KGDB=n.";
+                    evidence { process_prepare_dbg_late_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_KGDB.";
+                }
+                trimmed process_prepare.019 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "cpuset_init is a no-op because cpusets are disabled.";
+                    evidence { process_prepare_cpuset_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables cpusets.";
+                }
+                trimmed process_prepare.020 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "cgroup_init is a no-op because CONFIG_CGROUPS=n.";
+                    evidence { process_prepare_cgroup_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_CGROUPS.";
+                }
+                trimmed process_prepare.021 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "taskstats early initialization is absent because CONFIG_TASKSTATS=n.";
+                    evidence { process_prepare_taskstats_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_TASKSTATS.";
+                }
+                trimmed process_prepare.022 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "delay accounting initialization is absent because CONFIG_TASK_DELAY_ACCT=n.";
+                    evidence { process_prepare_delayacct_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_TASK_DELAY_ACCT.";
+                }
+                trimmed process_prepare.023 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "ACPI subsystem initialization is absent because CONFIG_ACPI=n.";
+                    evidence { process_prepare_acpi_subsystem_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_ACPI.";
+                }
+                trimmed process_prepare.024 {
+                    category: TrimmedCategory::CompileTimeNoOp;
+                    summary: "arch_post_acpi_subsys_init has no work on the current RISC-V64 ACPI-disabled build.";
+                    evidence { process_prepare_arch_post_acpi_subsys_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The target architecture supplies a non-empty post-ACPI hook.";
+                }
+                trimmed process_prepare.025 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "kcsan_init is absent because CONFIG_KCSAN=n.";
+                    evidence { process_prepare_kcsan_init_trimmed_noop(ProcessPrepareTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_KCSAN.";
                 }
             }
         }
@@ -877,16 +1071,6 @@ object ProcessPreparePhase: PhaseObject {
                     process_prepare_acpi_subsystem_init_trimmed_noop(ProcessPrepareTrimmedPaths);
                     process_prepare_arch_post_acpi_subsys_init_trimmed_noop(ProcessPrepareTrimmedPaths);
                     process_prepare_kcsan_init_trimmed_noop(ProcessPrepareTrimmedPaths);
-                }
-
-                deferred {
-                    "NetNamespace.setup() 保留 Linux net_ns_init() 时序位置，当前不推进网络 namespace 运行期对象。";
-                    "VfsCore.setup() 当前覆盖 Linux vfs_caches_init()/mnt_init() 中 rootfs 初始挂载：rootfs_fs_type 默认使用 ramfs backing，并由 init_mount_tree() 建立初始 root mount；PageCache.setup()、SeqFileCore.setup()、Procfs.setup()、Nsfs.setup() 和 Pidfs.setup() 仍保留为 deferred。";
-                    "SignalCore.setup()/signals_init() 暂缓；本阶段只要求 sighand/signal cache 进入 Prepared。";
-                    "RootPidNamespace 的 alloc_pid/free_pid/find_pid_ns 等运行期 action 留给 rest_init() 和后续任务创建路径。";
-                    "TaskCreationCore 不创建 kernel_init 或 kthreadd；rest_init() 才推进这些任务对象和 SYSTEM_SCHEDULING。";
-                    "fork_init() 中 cpuhp_setup_state(\"fork:vm_stack_cache\") 只注册后续 CPU hotplug 回调；AP/BP 同步和 hotplug 状态机执行属于后续 SMP bring-up。";
-                    "key_init() 的 key_types_sem 写侧保护、security_init() 的 LSM hook dispatcher 和 proc/nsfs/pidfs mount 内部锁在本阶段只发布启动期 registry 事实；完整运行期同步协议留给对应对象 action。";
                 }
 
                 emits {

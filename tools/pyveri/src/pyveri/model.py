@@ -16,6 +16,7 @@ for source in (
             sys.path.insert(0, source_text)
 
 from common.model_types import (
+    BoundaryDef,
     BuildResult,
     Diagnostic,
     TransitionDef,
@@ -28,6 +29,7 @@ from common.model_types import (
 from model_tool.builder import build_model, summarize_model
 
 __all__ = [
+    "BoundaryDef",
     "BuildResult",
     "Diagnostic",
     "TransitionDef",

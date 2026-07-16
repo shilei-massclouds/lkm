@@ -14,6 +14,9 @@ predicate guidance_agent_must_check_generated_result_against_concrete_requiremen
 predicate guidance_agent_must_not_guess_fix_without_reproducible_localization() -> bool;
 predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bool;
 predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
+predicate guidance_agent_must_use_structured_boundary_inventory() -> bool;
+predicate guidance_agent_must_not_treat_trimmed_as_unimplemented() -> bool;
+predicate guidance_agent_must_close_boundary_with_facts_tests_and_archive() -> bool;
 predicate guidance_agent_must_keep_linux_checkpoint_mapping_read_only() -> bool;
 predicate guidance_agent_must_make_checkpoint_artifact_checks_read_only() -> bool;
 predicate guidance_agent_must_keep_linux_checkpoint_coverage_mapping_only() -> bool;
@@ -84,6 +87,30 @@ type RepositoryChangeWorkflow {
          * gate. A focused run is not a substitute for the final regression.
          */
         guidance_agent_must_run_make_test_after_code_change();
+
+        /*
+         * Deferred/trimmed governance is inventory-driven.  Generators must
+         * use the stable structured boundary ID, controlled category,
+         * evidence and acceptance/revisit condition from the model.  They
+         * must not create or preserve free-text deferred backlogs.
+         */
+        guidance_agent_must_use_structured_boundary_inventory();
+
+        /*
+         * A trimmed boundary is a proved configuration, architecture,
+         * reference-input or compile-time no-op fact.  It must not be
+         * interpreted as an unimplemented feature or emitted as a runtime
+         * stub merely because the reference path is absent.
+         */
+        guidance_agent_must_not_treat_trimmed_as_unimplemented();
+
+        /*
+         * Closing a deferred boundary is one atomic change: remove the
+         * active record, add the formal facts and tests that satisfy its
+         * close_when condition, and archive the retired ID and evidence.
+         * Retired IDs are never reused.
+         */
+        guidance_agent_must_close_boundary_with_facts_tests_and_archive();
 
         /*
          * Linux checkpoint mapping is read-only:

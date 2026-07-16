@@ -116,8 +116,11 @@ object MemBlock: MemoryObject {
                     memblock_hugetlb_early_reserve_deferred(MemBlock);
                 }
 
-                deferred {
-                    "hugetlb_cma_reserve() 暂缓：当前 .config 启用 CONFIG_HUGETLB_PAGE，Linux/RISC-V setup_bootmem() 保留 hugetlb CMA 的调用位置；本轮只记录 MemBlock 阶段边界，不展开 Hugetlb/CMA 对象或 hugetlb_lock 等运行期同步。"
+                deferred memblock.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model hugetlb CMA reservation and its runtime synchronization boundary.";
+                    evidence { memblock_hugetlb_early_reserve_deferred(MemBlock); }
+                    close_when: "Hugetlb/CMA reservation, failure handling and hugetlb locking tests pass.";
                 }
             }
         }
@@ -1079,13 +1082,31 @@ object EntrySuccessorPhase: PhaseObject {
 
                 ensures {
                     early_boot_irqs_disabled_true();
+                    efi_boot_init_deferred(EntrySuccessorPhase);
                     vmlinux_build_id_deferred(EntrySuccessorPhase);
                     page_address_init_deferred(EntrySuccessorPhase);
                     entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
                 }
 
-                deferred {
-                    "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象；init_vmlinux_build_id() 暂缓：Linux start_kernel() early generic path 在 debug_objects_early_init() 后调用，当前不展开 build-id 元数据对象，但保留调用位置；page_address_init() 暂缓：Linux 在 boot_cpu_init() 后、setup_arch() 前调用，当前没有 page_address freelist/hash 元数据对象，但保留调用位置。"
+                deferred entry_successor.001 {
+                    category: DeferredCategory::AlternatePath;
+                    summary: "Model the enabled EFI boot initialization path as a firmware interface object.";
+                    evidence { efi_boot_init_deferred(EntrySuccessorPhase); }
+                    close_when: "EFI initialization, handoff facts and enabled-reference-path tests pass.";
+                }
+
+                deferred entry_successor.002 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model init_vmlinux_build_id metadata publication.";
+                    evidence { vmlinux_build_id_deferred(EntrySuccessorPhase); }
+                    close_when: "Build-ID metadata ownership, publication and implementation checks are modeled and tested.";
+                }
+
+                deferred entry_successor.003 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model page_address freelist and hash metadata initialization.";
+                    evidence { page_address_init_deferred(EntrySuccessorPhase); }
+                    close_when: "page_address metadata lifecycle and reference call-position tests pass.";
                 }
 
                 emits {

@@ -12,6 +12,10 @@
 - `延期`：保留责任，等待更高优先级目标或触发证据。
 - `长期回归`：首轮能力已建立，剩余责任是持续 ordinary-path 回归、维护或差分。
 - 任务没有剩余动作后，从主表移入专题归档，并在 `completed.md` 增加领域、任务名和专题链接。
+- 已进入 formal model 的未闭合责任，主表只引用结构化 deferred boundary ID；
+  分类、责任摘要、evidence 和 `close_when` 以 model inventory 为唯一来源，本文不复制第二套描述。
+- trimmed boundary 不是活跃实现任务；只有 `revisit_when` 被配置、架构或参考输入变更触发后，
+  才重新审计并必要时转为 deferred/active task。
 
 ## 当前焦点
 
@@ -32,6 +36,7 @@
 - [当前上下文、验证、构建、工具和文档历史](roadmap/current-context.md)
 - [启动阶段审计与同步/上下文历史](roadmap/boot-audit.md)
 - [阶段范式四层一致性审计](roadmap/phase-paradigm-audit.md)
+- [Deferred / Trimmed 结构化治理审计](roadmap/deferred-trimmed-audit.md)
 - [Linux PLIC object 复用历史](roadmap/linux-plic.md)
 - [virtio / block / VFS / Ext2 历史](roadmap/virtio-block-fs.md)
 - [用户态 payload、syscall 与 process 历史](roadmap/user-mode.md)
@@ -47,20 +52,20 @@
 | `P0` | 长期回归 | linux/checkpoint/stress | Linux exact-mapped runtime 插桩与横向差分 | 维护 exact marker 与默认 rc.local hard scope；继续处理 `range`/`unmapped` mapping，并在需要时规格化先纵向、后横向的 multi-run 语义。 | [charter](../spec/charter/main.md#linux-runtime-checkpoint-插桩与横向差分)；[测试规格](../spec/testing/rootfs.md#rclocal-and-paired-difftest) |
 | `P0` | 当前 | model/coding/arceos_ex/vfs | VFS pathname walk / rootfs path read 补强 | 推进 slow symlink、通用 nofollow、magic link、RCU walk、权限、mount namespace、fd table 和 errno 边界；保持当前 read-only fast-symlink 骨架。 | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P0` | 进行中 | build/rootfs/user/validation | 发行版 rootfs smoke 与 overlay 分层 | 保持 overlay fixture 与 bare distro cases 分层；继续以真实 OpenRC/发行版路径收敛 native init 验收，不用测试专用内核 API。 | [镜像构造](../spec/coding/projects/rootfs-image.md)；[测试规格](../spec/testing/rootfs.md) |
-| `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | 补旧 mm/stack/page-table 回收、失败回滚、重复 staging reset、close-on-exec、credentials/signal/binfmt 与 point-of-no-return 语义。 | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
-| `P1` | 待办 | model/coding/arceos_ex/trap/mm | per-task VMAP trap 栈与 IRQ hardirq 栈 | 把已闭环的 boot CPU `UserInitProcess` early overflow 基线泛化到 per-task stack owner、per-CPU overflow stack，并实现 IRQ hardirq `call_on_irq_stack()` 切换。 | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
-| `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | 补完整 kthreadd 请求消费、通用 scheduler class/fairness 与更多 task-return/switch 语义；保持 BootIdle/KernelInit owner 边界。 | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |
+| `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | `exec_sync.001`–`exec_sync.003` | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
+| `P1` | 待办 | model/coding/arceos_ex/trap/mm | per-task VMAP trap 栈与 IRQ hardirq 栈 | `process_prepare.011`、`irq_time.007` | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
+| `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | `kthreadd.001`、`sched_init.004`、`schedule_handoff.001`–`.003` | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |
 | `P0` | 待办 | arceos_ex/fs/vfs/smoke | 目录操作 smoke 补强 | 在 directory-capable openat/getdents64/fd offset/close 规格闭合后，覆盖生产 VFS/Ext2 路径的目录迭代和错误分类。 | [测试规格](../spec/testing/README.md) |
-| `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | root switch 后命名空间补强 | 明确 ext2 root 下 `/dev` 挂接、mount namespace 与任务 FsStruct 的运行期规则。 | [RootfsPhase coding](../spec/coding/phases/smp-runtime/rootfs.md) |
+| `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | root switch 后命名空间补强 | `rootfs.009`、`rootfs.010` | [RootfsPhase coding](../spec/coding/phases/smp-runtime/rootfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界 | 对齐 iget/dentry cache、negative lookup、inode identity、refcount 与 evict 边界。 | [Ext2 coding](../spec/coding/objects/ext2.md)；[VFS coding](../spec/coding/objects/vfs.md) |
-| `P1` | 待办 | model/coding/arceos_ex/mm/fs | page cache / address_space / folio read path | 规格化 AddressSpace/page cache/folio/readahead，让 VFS read 从直接 block copy 迁移；writeback/mmap 后置。 | [VFS coding](../spec/coding/objects/vfs.md) |
+| `P1` | 待办 | model/coding/arceos_ex/mm/fs | page cache / address_space / folio read path | `process_prepare.002` | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/syscall/mm/signal | 动态用户栈 rlimit 与越界信号 | 实现 `prlimit64/setrlimit`、动态 `RLIMIT_STACK`，并把栈越界转换为 Linux-like `SIGSEGV/si_code`。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
-| `P1` | 待办 | model/coding/arceos_ex/mm/task | 通用用户栈 VMA、COW 与多线程 | 展开 fork/COW、多个线程栈、`MAP_STACK/MAP_GROWSDOWN`、通用 VMA fault core 与并发锁。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
+| `P1` | 待办 | model/coding/arceos_ex/mm/task | 通用用户栈 VMA、COW 与多线程 | `user_clone.002`–`user_clone.004` | [UserStack charter](../spec/charter/objects/user-stack.md) |
 | `P2` | 延期 | model/coding/arceos_ex/random/hardening | 用户/内核栈随机与 protector 强化 | 在完整 CRNG 基础上补内核 compiler stack protector、per-task canary 与更强栈保护；RISC-V 原生更大 ASLR 窗口随地址布局扩展再评估。 | [UserStack coding](../spec/coding/objects/user-stack.md) |
 | `P2` | 延期 | compose/arceos_ex | 对象封装为组件试验 | 选择稳定对象后再明确 crate/component 边界、接口与验收方式。 | [compose 规格](../spec/compose/README.md) |
 | `P1` | 待办 | arceos_ex/console | printk TX 异常/压力边界 | 有 nightly/差分证据后再规格化 queue full、drop/truncate、hardirq/reentrant printk 和 handler 内 printk 策略。 | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
-| `P1` | 待办 | arceos_ex/console | serial8250 runtime 与 TTY 分层 | 收敛 RuntimePort/Console/TtyPort/FlipBuffer/XmitFifo 职责与 ordinary I/O runtime 边界。 | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
-| `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | 在 console/TTY runtime 稳定后展开 file backend、N_TTY、stdin/stdout、poll 和 pipes。 | [user boot coding](../spec/coding/objects/user-boot.md) |
+| `P1` | 待办 | arceos_ex/console | serial8250 runtime 与 TTY 分层 | `irq_time.010`–`irq_time.012` | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
+| `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P1` | 进行中 | validation/stress | stress runner 集合化差分报告 | 将报告升级为成功集合、失败类别集合与跨集合特征汇总；重复序列只计数，完整样本按稳定主键去重。 | [charter](../spec/charter/main.md#nightly压力测试与纵向差分) |
@@ -69,13 +74,12 @@
 | `P1` | 待办 | CI | 建立 GitHub Actions 快速 CI | 覆盖工具质量、核心推导、trace smoke、顶层 verify 与最小构建，不跑耗时 QEMU 全量任务。 | [构建规格](../spec/coding/build.md) |
 | `P1` | 待办 | pyveri | 默认 target 与 rule-only 检查 | 增加规格默认 target 和只执行 parse/model/rule 的 formal rule-only 模式。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#工具链架构目标) |
 | `P1` | 待办 | pyveri | 注释数据流下沉 | 由 parse 保留注释，model/view 建立关联，render 只消费结构化输入。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
-| `P1` | 待办 | model/docs | 补齐 Linux 裁剪配置的 model deferred | 把实现审计清单逐项迁入对应 model/coding 正式入口；展开实现属于后续独立任务。 | [deferred 审计清单](../spec/coding/arceos_ex-implementation.md#待迁移到-model-的-deferred-审计清单) |
 | `P1` | 进行中 | model/semantics | 正式规格化上下文和嵌套检查 | 补系统天然独占来源证明、RCU 读侧、handle_level 与更多 guard kind。 | [model semantics](../spec/model/SEMANTICS.md#sem-context-nesting-001-context-effects-compose-monotonically) |
 | `P2` | 延期 | model/derive | 多链独立推导语义 | 为 task/interrupt flow 建立独立推导链，并保持跨链状态交互显式。 | [model semantics](../spec/model/SEMANTICS.md#sem-transition-emits-001-completion-events-are-post-commit-events) |
 | `P1` | 待办 | model/arceos_ex | 抽取 wake_up_new_task 复用模型 | 统一 task wake-up context、runtime state、runqueue selection 与 nested enqueue 约束。 | [model semantics](../spec/model/SEMANTICS.md#sem-exclusive-context-001-guard-and-resource-exclusive-context-are-distinct) |
 | `P1` | 待办 | model/arceos_ex | EventStream per-CPU 归属 | 为每个 live CPU 建立自己的 Event/Interrupt/Exception stream；AP 在 secondary entry 后建立。 | [model semantics](../spec/model/SEMANTICS.md#sem-current-cpu-model-001-currentcpu-is-the-per-cpu-self-identity-entry) |
 | `P1` | 进行中 | arceos_ex | 整理对象级源码结构 | 继续按 phase/object mapping 拆分源码，并把资源对象收敛到 Context；目录主题化另列 P2。 | [object coverage](../spec/coding/objects/README.md) |
-| `P1` | 待办 | arceos_ex/console | serial8250 RX/TTY/FIFO 补强 | 依据复现/差分证据展开 file/stdin/stdout、line discipline 和更完整并发策略。 | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
+| `P1` | 待办 | arceos_ex/console | serial8250 RX/TTY/FIFO 补强 | `irq_time.010`–`irq_time.012` | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
 | `P1` | 待办 | arceos_ex/smoke | 类型行为 smoke 双任务场景 | 为 RawSpinLock、Completion 等补最小双任务竞争/等待/唤醒与跨任务可见性。 | [testing 规格](../spec/testing/README.md#测试目标分类) |
 | `P1` | 待办 | arceos_ex/codegen | RISC-V64 linker script 生成方案 | 收敛为 `.lds.S` + generated config header，并统一 Rust/linker/codegen 配置来源。 | [构建规格](../spec/coding/build.md) |
 | `P1` | 待办 | CI/Homepage | 发布 nightly/manual 结果与主页 | 在本地流水线稳定后发布 trace、测试日志、对象覆盖和推导摘要。 | [构建规格](../spec/coding/build.md) |

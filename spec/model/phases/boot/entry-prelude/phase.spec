@@ -1245,8 +1245,14 @@ object Vm: AddressSpaceObject {
                     riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
                 }
 
-                deferred {
-                    "apply_early_boot_alternatives() 暂缓：当前 .config 启用 CONFIG_RISCV_ALTERNATIVE_EARLY，Linux 在 setup_vm() 的 MMU-off 区间执行早期 alternatives/errata text patch；本轮只保留该边界，不建 Alternative/Patch 对象，也不把 text patch 同步语义伪装为已实现。"
+                deferred entry_vm.001 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model and implement early RISC-V alternatives/errata text patching in the MMU-off setup_vm window.";
+                    evidence {
+                        riscv_early_boot_alternatives_deferred(Vm);
+                        riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
+                    }
+                    close_when: "Alternative selection, MMU-off patch ordering, synchronization and reference tests pass.";
                 }
             }
         }
@@ -1669,8 +1675,14 @@ object SwapperVm: AddressSpaceObject {
                     swapper_vm_final_permissions_not_split_yet(SwapperVm);
                 }
 
-                deferred {
-                    "CONFIG_STRICT_KERNEL_RWX 下的最终 text/rodata/data RW/RO/NX 权限细分暂缓：setup_vm_final() 的完整线性映射和 SATP/TLB 同步已建模，最终 mark_rodata_ro()/细粒度权限域留给后续 mapping-protection 对象。"
+                deferred swapper_vm.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Split final kernel text, rodata and data mappings into their complete RW/RO/NX permission domains.";
+                    evidence {
+                        swapper_vm_strict_kernel_rwx_boundary_deferred(SwapperVm);
+                        swapper_vm_final_permissions_not_split_yet(SwapperVm);
+                    }
+                    close_when: "Final mapping permissions, mark_rodata_ro handoff and W^X tests match the reference path.";
                 }
             }
         }
@@ -2131,6 +2143,8 @@ object CpuGroup: HardwareObject {
 /*
  * Soc 表示片上系统平台对象。入口前导期只建模平台早期预置的边界。
  */
+predicate soc_full_early_platform_model_deferred<T>(soc: T) -> bool;
+
 object Soc: HardwareObject {
     initial_state: State::Base;
 
@@ -2153,6 +2167,7 @@ object Soc: HardwareObject {
 
                 ensures {
                     soc_early_platform_ready();
+                    soc_full_early_platform_model_deferred(Soc);
                 }
             }
         }
@@ -2165,10 +2180,14 @@ object Soc: HardwareObject {
         invariant {
             CpuGroup.state == State::Prepared;
             soc_early_platform_ready();
+            soc_full_early_platform_model_deferred(Soc);
         }
 
-        deferred {
-            "具体 SoC 早期平台状态点后续补充；当前入口前导期只要求 CpuGroup 已组织启动 CPU。"
+        deferred soc.001 {
+            category: DeferredCategory::ModelDetail;
+            summary: "Define the complete SoC-specific early platform state points beyond boot CPU organization.";
+            evidence { soc_full_early_platform_model_deferred(Soc); }
+            close_when: "The supported SoC early platform facts and their implementation checkpoints are explicitly modeled and tested.";
         }
     }
 }

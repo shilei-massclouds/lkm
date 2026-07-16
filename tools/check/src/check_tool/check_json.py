@@ -21,6 +21,7 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
     contradiction = _integer(summary, "contradiction")
     obligation = _integer(summary, "obligation")
     deferred = _integer(summary, "deferred")
+    trimmed = _integer(summary, "trimmed")
 
     reasons = []
     if not target_reached:
@@ -66,10 +67,12 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
             "contradiction": contradiction,
             "obligation": obligation,
             "deferred": deferred,
+            "trimmed": trimmed,
         },
         "allowed": {
             "obligation": False,
             "deferred": True,
+            "trimmed": True,
         },
         "reasons": reasons,
     }

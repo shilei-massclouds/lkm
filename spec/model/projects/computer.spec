@@ -84,6 +84,10 @@ object SbiSpec: PrepareObject {
 
 include "kernel.spec";
 
+predicate riscv64_soc_standard_established() -> bool;
+predicate computer_hardware_constructed() -> bool;
+predicate computer_firmware_constructed() -> bool;
+
 object ComputerProject: ProjectObject {
     initial_state: State::Base;
 
@@ -107,8 +111,7 @@ object ComputerProject: ProjectObject {
                     Transition::Setup;
                 }
 
-                deferred {
-                    /* 对应 Riscv64 的外部 ISA/SoC 标准事实。 */
+                ensures {
                     riscv64_soc_standard_established();
                 }
             }
@@ -121,6 +124,7 @@ object ComputerProject: ProjectObject {
     state State::Prepared {
         invariant {
             Riscv64.state == State::Online;
+            riscv64_soc_standard_established();
         }
 
         transitions {
@@ -140,10 +144,8 @@ object ComputerProject: ProjectObject {
                     Transition::Enable;
                 }
 
-                deferred {
-                    /* 对应 BootArgs 所承载的启动硬件/ABI 交接事实。 */
+                ensures {
                     computer_hardware_constructed();
-                    /* 对应 SbiSpec 与 OpenSBI 所承载的固件事实。 */
                     computer_firmware_constructed();
                 }
             }
@@ -159,6 +161,8 @@ object ComputerProject: ProjectObject {
             BootArgs.state == State::Online;
             SbiSpec.state == State::Online;
             OpenSBI.state == State::Ready;
+            computer_hardware_constructed();
+            computer_firmware_constructed();
         }
 
         transitions {

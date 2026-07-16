@@ -6,6 +6,7 @@ from typing import Any
 
 from common import MODEL_SCHEMA, MODEL_VERSION
 from common.model_types import (
+    BoundaryDef,
     BuildResult,
     Diagnostic,
     TransitionDef,
@@ -14,6 +15,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ContextGuardDecl,
@@ -46,6 +48,9 @@ def build_result_to_model_json(
             "objects": len(model.objects),
             "states": model.state_count,
             "transitions": model.transition_count,
+            "deferred": model.deferred_count,
+            "trimmed": model.trimmed_count,
+            "legacy_boundaries": model.legacy_boundary_count,
             "errors": len(result.errors),
             "warnings": len(result.warnings),
         },
@@ -78,6 +83,10 @@ def build_result_to_model_json(
             "objects": {
                 name: _object_to_json(item)
                 for name, item in sorted(model.objects.items())
+            },
+            "boundaries": {
+                boundary_id: _boundary_def_to_json(boundary)
+                for boundary_id, boundary in sorted(model.boundaries.items())
             },
             "children": {
                 name: children
@@ -118,6 +127,9 @@ def _state_to_json(item: StateDef) -> dict[str, Any]:
         "object_name": item.object_name,
         "span": _span_to_json(item.decl.span),
         "invariants": [_block_to_json(block) for block in item.decl.invariants],
+        "boundaries": [
+            _boundary_decl_to_json(boundary) for boundary in item.decl.boundaries
+        ],
         "deferred": [_block_to_json(block) for block in item.decl.deferred],
         "transitions": {
             name: _event_to_json(transition)
@@ -141,6 +153,9 @@ def _event_to_json(item: TransitionDef) -> dict[str, Any]:
         "within": [_within_to_json(block) for block in decl.within],
         "may_change": [_block_to_json(block) for block in decl.may_change],
         "ensures": [_block_to_json(block) for block in decl.ensures],
+        "boundaries": [
+            _boundary_decl_to_json(boundary) for boundary in decl.boundaries
+        ],
         "deferred": [_block_to_json(block) for block in decl.deferred],
         "other_blocks": [_block_to_json(block) for block in decl.other_blocks],
         "body_members": [_body_member_to_json(member) for member in decl.body_members],
@@ -231,6 +246,9 @@ def _within_to_json(item: WithinDecl) -> dict[str, Any]:
         "exited_by": [_block_to_json(block) for block in item.exited_by],
         "may_change": [_block_to_json(block) for block in item.may_change],
         "ensures": [_block_to_json(block) for block in item.ensures],
+        "boundaries": [
+            _boundary_decl_to_json(boundary) for boundary in item.boundaries
+        ],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "body_members": [_body_member_to_json(member) for member in item.body_members],
@@ -243,6 +261,44 @@ def _body_member_to_json(item: BodyMember) -> dict[str, Any]:
         "span": _span_to_json(item.span),
         "block": _block_to_json(item.block) if item.block is not None else None,
         "within": _within_to_json(item.within) if item.within is not None else None,
+        "boundary": (
+            _boundary_decl_to_json(item.boundary)
+            if item.boundary is not None
+            else None
+        ),
+    }
+
+
+def _boundary_def_to_json(item: BoundaryDef) -> dict[str, Any]:
+    data = _boundary_decl_to_json(item.decl)
+    data.update(
+        {
+            "category": item.category,
+            "source_category": item.decl.category,
+            "summary": item.summary,
+            "resolution": item.resolution,
+            "owner": item.owner,
+            "object_name": item.object_name,
+            "state_name": item.state_name,
+            "transition_name": item.transition_name,
+            "context_path": list(item.context_path),
+        }
+    )
+    return data
+
+
+def _boundary_decl_to_json(item: BoundaryDecl) -> dict[str, Any]:
+    return {
+        "status": item.status,
+        "id": item.id,
+        "category": item.category,
+        "summary": item.summary,
+        "evidence": [_block_to_json(block) for block in item.evidence],
+        "resolution": item.resolution,
+        "span": _span_to_json(item.span),
+        "property_counts": item.property_counts,
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "unknown_properties": item.unknown_properties,
     }
 
 
@@ -263,14 +319,20 @@ def _block_to_json(item: Block) -> dict[str, Any]:
     }
 
 
-def _optional_span_to_json(span: SourceSpan | None) -> dict[str, int] | None:
+def _optional_span_to_json(
+    span: SourceSpan | None,
+) -> dict[str, int | str | None] | None:
     if span is None:
         return None
     return _span_to_json(span)
 
 
-def _span_to_json(span: SourceSpan) -> dict[str, int]:
-    return {
+def _span_to_json(span: SourceSpan) -> dict[str, int | str | None]:
+    result: dict[str, int | str | None] = {
         "start_line": span.start_line,
         "end_line": span.end_line,
     }
+    if span.source_file is not None:
+        result["source_file"] = span.source_file
+        result["source_line"] = span.source_line
+    return result

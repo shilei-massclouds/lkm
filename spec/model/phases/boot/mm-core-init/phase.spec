@@ -396,6 +396,10 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_page_ref_conversion_api_ready(PageAllocator);
                     page_allocator_runtime_zone_locking_contract_deferred(PageAllocator);
                     page_allocator_runtime_pcp_locking_contract_deferred(PageAllocator);
+                    page_allocator_full_gfp_reclaim_deferred(PageAllocator);
+                    page_allocator_full_compaction_deferred(PageAllocator);
+                    page_allocator_full_oom_policy_deferred(PageAllocator);
+                    page_allocator_full_failure_propagation_deferred(PageAllocator);
                 }
             }
         }
@@ -451,6 +455,35 @@ object PageAllocator: PageAllocatorType {
             page_allocator_page_ref_conversion_api_ready(PageAllocator);
             page_allocator_runtime_zone_locking_contract_deferred(PageAllocator);
             page_allocator_runtime_pcp_locking_contract_deferred(PageAllocator);
+            page_allocator_full_gfp_reclaim_deferred(PageAllocator);
+            page_allocator_full_compaction_deferred(PageAllocator);
+            page_allocator_full_oom_policy_deferred(PageAllocator);
+            page_allocator_full_failure_propagation_deferred(PageAllocator);
+        }
+
+        deferred page_alloc.001 {
+            category: DeferredCategory::Feature;
+            summary: "Implement complete GFP reclaim behavior for page allocation.";
+            evidence { page_allocator_full_gfp_reclaim_deferred(PageAllocator); }
+            close_when: "Direct/background reclaim decisions and Linux differential pressure tests pass.";
+        }
+        deferred page_alloc.002 {
+            category: DeferredCategory::Feature;
+            summary: "Implement physical-memory compaction for higher-order page allocation.";
+            evidence { page_allocator_full_compaction_deferred(PageAllocator); }
+            close_when: "Compaction, migration and higher-order allocation pressure tests pass.";
+        }
+        deferred page_alloc.003 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement complete out-of-memory policy and victim handling.";
+            evidence { page_allocator_full_oom_policy_deferred(PageAllocator); }
+            close_when: "OOM selection, recovery, accounting and failure tests match Linux policy.";
+        }
+        deferred page_alloc.004 {
+            category: DeferredCategory::Protocol;
+            summary: "Propagate page-allocation failures through every supported caller contract.";
+            evidence { page_allocator_full_failure_propagation_deferred(PageAllocator); }
+            close_when: "NULL/ERR and retry behavior is specified and tested at all supported allocation callers.";
         }
 
     }
@@ -793,6 +826,12 @@ object SlubSubsystem: MemoryObject {
                     slub_subsystem_kfree_api_ready(SlubSubsystem);
                     slub_subsystem_runtime_locking_contract_deferred(SlubSubsystem);
                     slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
+                    slub_full_gfp_reclaim_deferred(SlubSubsystem);
+                    slub_full_numa_policy_deferred(SlubSubsystem);
+                    slub_full_memcg_accounting_deferred(SlubSubsystem);
+                    slub_full_debug_redzone_deferred(SlubSubsystem);
+                    slub_full_freelist_randomization_deferred(SlubSubsystem);
+                    slub_full_freelist_hardening_deferred(SlubSubsystem);
                 }
             }
         }
@@ -815,6 +854,49 @@ object SlubSubsystem: MemoryObject {
             slub_subsystem_kfree_api_ready(SlubSubsystem);
             slub_subsystem_runtime_locking_contract_deferred(SlubSubsystem);
             slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
+            slub_full_gfp_reclaim_deferred(SlubSubsystem);
+            slub_full_numa_policy_deferred(SlubSubsystem);
+            slub_full_memcg_accounting_deferred(SlubSubsystem);
+            slub_full_debug_redzone_deferred(SlubSubsystem);
+            slub_full_freelist_randomization_deferred(SlubSubsystem);
+            slub_full_freelist_hardening_deferred(SlubSubsystem);
+        }
+
+        deferred slub_alloc.001 {
+            category: DeferredCategory::Feature;
+            summary: "Implement SLUB allocation interaction with complete GFP reclaim.";
+            evidence { slub_full_gfp_reclaim_deferred(SlubSubsystem); }
+            close_when: "SLUB reclaim/retry behavior passes slab-pressure differential tests.";
+        }
+        deferred slub_alloc.002 {
+            category: DeferredCategory::Feature;
+            summary: "Implement NUMA-aware SLUB allocation policy.";
+            evidence { slub_full_numa_policy_deferred(SlubSubsystem); }
+            close_when: "Node selection, fallback and NUMA policy tests match Linux.";
+        }
+        deferred slub_alloc.003 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement memory-cgroup charging and rollback for SLUB allocations.";
+            evidence { slub_full_memcg_accounting_deferred(SlubSubsystem); }
+            close_when: "memcg charge, failure rollback and release accounting tests pass.";
+        }
+        deferred slub_alloc.004 {
+            category: DeferredCategory::ModelDetail;
+            summary: "Implement SLUB debug redzones and their corruption checks.";
+            evidence { slub_full_debug_redzone_deferred(SlubSubsystem); }
+            close_when: "Redzone layout, checking and fault-report tests match enabled Linux behavior.";
+        }
+        deferred slub_alloc.005 {
+            category: DeferredCategory::ModelDetail;
+            summary: "Implement SLUB freelist randomization.";
+            evidence { slub_full_freelist_randomization_deferred(SlubSubsystem); }
+            close_when: "Freelist randomization state and allocation-order tests pass under the enabled configuration.";
+        }
+        deferred slub_alloc.006 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement SLUB freelist pointer hardening.";
+            evidence { slub_full_freelist_hardening_deferred(SlubSubsystem); }
+            close_when: "Freelist encoding, validation and corruption tests pass under the enabled configuration.";
         }
 
         processes {
@@ -842,9 +924,6 @@ object SlubSubsystem: MemoryObject {
                 result {
                     Available: Success(kmalloc_alloc_ref_returned);
                     NoMemory: Failed(no_slab_objects_available);
-                }
-                deferred {
-                    "当前 Kmalloc 规格只展开成功返回分配引用的常规路径；GFP reclaim、NUMA、memcg、debug redzone、freelist random/hardened 后续随完整 SLUB 模型展开。";
                 }
             }
 
@@ -915,6 +994,10 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
                         KernelGlobalAllocator,
                         SlubSubsystem
                     );
+                    kernel_global_allocator_large_allocation_deferred(KernelGlobalAllocator);
+                    kernel_global_allocator_oom_policy_deferred(KernelGlobalAllocator);
+                    kernel_global_allocator_realloc_deferred(KernelGlobalAllocator);
+                    kernel_global_allocator_alignment_fallback_deferred(KernelGlobalAllocator);
                 }
             }
         }
@@ -933,6 +1016,35 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
                 KernelGlobalAllocator,
                 SlubSubsystem
             );
+            kernel_global_allocator_large_allocation_deferred(KernelGlobalAllocator);
+            kernel_global_allocator_oom_policy_deferred(KernelGlobalAllocator);
+            kernel_global_allocator_realloc_deferred(KernelGlobalAllocator);
+            kernel_global_allocator_alignment_fallback_deferred(KernelGlobalAllocator);
+        }
+
+        deferred global_alloc.001 {
+            category: DeferredCategory::AlternatePath;
+            summary: "Support heap allocations that bypass ordinary SLUB size classes.";
+            evidence { kernel_global_allocator_large_allocation_deferred(KernelGlobalAllocator); }
+            close_when: "Large-allocation routing, ownership and deallocation tests pass.";
+        }
+        deferred global_alloc.002 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement the global allocator out-of-memory policy.";
+            evidence { kernel_global_allocator_oom_policy_deferred(KernelGlobalAllocator); }
+            close_when: "Allocator OOM return/abort/recovery behavior is specified and tested.";
+        }
+        deferred global_alloc.003 {
+            category: DeferredCategory::Feature;
+            summary: "Implement the global allocator realloc contract.";
+            evidence { kernel_global_allocator_realloc_deferred(KernelGlobalAllocator); }
+            close_when: "Grow, shrink, move, failure and ownership tests pass.";
+        }
+        deferred global_alloc.004 {
+            category: DeferredCategory::AlternatePath;
+            summary: "Implement fallback allocation for alignments unsupported by ordinary SLUB classes.";
+            evidence { kernel_global_allocator_alignment_fallback_deferred(KernelGlobalAllocator); }
+            close_when: "Over-aligned allocation and deallocation tests pass for all supported layouts.";
         }
     }
 }
@@ -1291,6 +1403,13 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
                     vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
                     vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
+                    vmalloc_full_reusable_holes_deferred(VmallocAllocator);
+                    vmalloc_full_augmented_tree_search_deferred(VmallocAllocator);
+                    vmalloc_full_lazy_purge_batching_deferred(VmallocAllocator);
+                    vmalloc_full_rcu_metadata_lifecycle_deferred(VmallocAllocator);
+                    vmalloc_full_cross_cpu_lazy_fault_deferred(VmallocAllocator);
+                    vmalloc_full_cache_tlb_batching_deferred(VmallocAllocator);
+                    vmalloc_full_per_cpu_deferred_free_deferred(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
             }
@@ -1330,7 +1449,57 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
             vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
             vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
+            vmalloc_full_reusable_holes_deferred(VmallocAllocator);
+            vmalloc_full_augmented_tree_search_deferred(VmallocAllocator);
+            vmalloc_full_lazy_purge_batching_deferred(VmallocAllocator);
+            vmalloc_full_rcu_metadata_lifecycle_deferred(VmallocAllocator);
+            vmalloc_full_cross_cpu_lazy_fault_deferred(VmallocAllocator);
+            vmalloc_full_cache_tlb_batching_deferred(VmallocAllocator);
+            vmalloc_full_per_cpu_deferred_free_deferred(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
+        }
+
+        deferred vmalloc_runtime.001 {
+            category: DeferredCategory::ModelDetail;
+            summary: "Model reusable holes in the vmalloc virtual-address space.";
+            evidence { vmalloc_full_reusable_holes_deferred(VmallocAllocator); }
+            close_when: "Hole creation, coalescing, reuse and fragmentation tests pass.";
+        }
+        deferred vmalloc_runtime.002 {
+            category: DeferredCategory::ModelDetail;
+            summary: "Implement Linux augmented-tree search for vmap areas.";
+            evidence { vmalloc_full_augmented_tree_search_deferred(VmallocAllocator); }
+            close_when: "Augmentation maintenance and address/size/alignment search tests match Linux.";
+        }
+        deferred vmalloc_runtime.003 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement lazy vmalloc purge batching.";
+            evidence { vmalloc_full_lazy_purge_batching_deferred(VmallocAllocator); }
+            close_when: "Purge thresholds, batching, flush ordering and reuse tests pass.";
+        }
+        deferred vmalloc_runtime.004 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement the RCU lifecycle for vmalloc metadata.";
+            evidence { vmalloc_full_rcu_metadata_lifecycle_deferred(VmallocAllocator); }
+            close_when: "Publication, lookup, retirement and grace-period tests pass.";
+        }
+        deferred vmalloc_runtime.005 {
+            category: DeferredCategory::AlternatePath;
+            summary: "Implement cross-CPU lazy vmalloc fault handling.";
+            evidence { vmalloc_full_cross_cpu_lazy_fault_deferred(VmallocAllocator); }
+            close_when: "Lazy-fault synchronization and remote-CPU mapping visibility tests pass.";
+        }
+        deferred vmalloc_runtime.006 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement cache and TLB batching for vunmap and vfree.";
+            evidence { vmalloc_full_cache_tlb_batching_deferred(VmallocAllocator); }
+            close_when: "Unmap batching, architecture cache maintenance and TLB ordering tests pass.";
+        }
+        deferred vmalloc_runtime.007 {
+            category: DeferredCategory::Protocol;
+            summary: "Implement per-CPU deferred-free ordering for vmalloc areas.";
+            evidence { vmalloc_full_per_cpu_deferred_free_deferred(VmallocAllocator); }
+            close_when: "Per-CPU enqueue, drain, ownership and reuse ordering tests pass.";
         }
     }
 }
@@ -1614,15 +1783,63 @@ object MmCoreInitPhase: PhaseObject {
                     context_is(SystemExclusive);
                 }
 
-                deferred {
-                    "PageExt 裁剪路径：CONFIG_PAGE_EXTENSION=n，page_ext_init_flatmem()/page_ext_init_flatmem_late()/page_ext_init() 不建立主线对象。";
-                    "KFENCE 裁剪路径：CONFIG_KFENCE=n，kfence_alloc_pool_and_metadata() 当前不进入 formal。";
-                    "KMSAN 裁剪路径：CONFIG_KMSAN=n，kmsan_init_shadow()/kmsan_init_runtime() 当前不进入 formal。";
-                    "Kmemleak 裁剪路径：CONFIG_DEBUG_KMEMLEAK=n，kmemleak_init() 当前不进入 formal。";
-                    "DebugObjectsMemory 裁剪路径：CONFIG_DEBUG_OBJECTS=n，debug_objects_mem_init() 当前不进入 formal。";
-                    "ExecMemory 裁剪路径：CONFIG_EXECMEM 未选中，execmem_init() 当前为 include/linux/execmem.h 中的 inline no-op。";
-                    "init_espfix_bsp() 不纳入 RISC-V64 当前路径：x86 特定路径。";
-                    "pti_init() 不纳入 RISC-V64 当前路径：x86 PTI 路径。";
+                trimmed mm_core.001 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Page-extension initialization is absent because CONFIG_PAGE_EXTENSION=n.";
+                    evidence {
+                        mm_core_page_ext_flatmem_trimmed(MmCoreTrimmedPaths);
+                        mm_core_page_ext_flatmem_late_trimmed(MmCoreTrimmedPaths);
+                        mm_core_page_ext_final_trimmed(MmCoreTrimmedPaths);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_PAGE_EXTENSION.";
+                }
+                trimmed mm_core.002 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "KFENCE pool allocation is absent because CONFIG_KFENCE=n.";
+                    evidence { mm_core_kfence_pool_trimmed(MmCoreTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_KFENCE.";
+                }
+                trimmed mm_core.003 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "KMSAN shadow and runtime initialization are absent because CONFIG_KMSAN=n.";
+                    evidence {
+                        mm_core_kmsan_shadow_trimmed(MmCoreTrimmedPaths);
+                        mm_core_kmsan_runtime_trimmed(MmCoreTrimmedPaths);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_KMSAN.";
+                }
+                trimmed mm_core.004 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "kmemleak initialization is absent because CONFIG_DEBUG_KMEMLEAK=n.";
+                    evidence { mm_core_kmemleak_init_trimmed(MmCoreTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_DEBUG_KMEMLEAK.";
+                }
+                trimmed mm_core.005 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "debug_objects_mem_init is absent because CONFIG_DEBUG_OBJECTS=n.";
+                    evidence { mm_core_debug_objects_mem_trimmed(MmCoreTrimmedPaths); }
+                    revisit_when: "The reference configuration enables CONFIG_DEBUG_OBJECTS.";
+                }
+                trimmed mm_core.006 {
+                    category: TrimmedCategory::CompileTimeNoOp;
+                    summary: "execmem_init is an inline no-op because CONFIG_EXECMEM is disabled.";
+                    evidence {
+                        mm_core_execmem_init_trimmed_noop(MmCoreTrimmedPaths);
+                        mm_core_execmem_trimmed_because_config_execmem_disabled(MmCoreTrimmedPaths);
+                    }
+                    revisit_when: "The target configuration enables CONFIG_EXECMEM.";
+                }
+                trimmed mm_core.007 {
+                    category: TrimmedCategory::Architecture;
+                    summary: "init_espfix_bsp is an x86-only path and is unreachable on RISC-V64.";
+                    evidence { mm_core_x86_espfix_not_applicable(MmCoreTrimmedPaths); }
+                    revisit_when: "The model target architecture changes to x86.";
+                }
+                trimmed mm_core.008 {
+                    category: TrimmedCategory::Architecture;
+                    summary: "pti_init is an x86 PTI path and is unreachable on RISC-V64.";
+                    evidence { mm_core_x86_pti_not_applicable(MmCoreTrimmedPaths); }
+                    revisit_when: "The model target architecture changes to an architecture with this PTI initialization path.";
                 }
 
                 emits {

@@ -59,6 +59,60 @@ def build_object_view(model: ObjectModel) -> ViewModel:
     return ViewModel(name="object", nodes=nodes, edges=edges)
 
 
+def build_boundary_view(model: ObjectModel) -> ViewModel:
+    """Build the structured deferred/trimmed inventory view."""
+
+    nodes: dict[str, ViewNode] = {}
+    edges: list[ViewEdge] = []
+    inventory: list[dict[str, object]] = []
+    for boundary_id, boundary in sorted(model.boundaries.items()):
+        owner_id = f"owner::{boundary.owner}"
+        nodes.setdefault(
+            owner_id,
+            ViewNode(id=owner_id, label=boundary.owner, kind="boundary_owner"),
+        )
+        nodes[boundary_id] = ViewNode(
+            id=boundary_id,
+            label=f"{boundary_id} [{boundary.category}]\n{boundary.summary}",
+            kind=boundary.status,
+        )
+        edges.append(
+            ViewEdge(
+                source=owner_id,
+                target=boundary_id,
+                kind=boundary.status,
+                label="owns",
+            )
+        )
+        span = boundary.decl.span
+        inventory.append(
+            {
+                "id": boundary_id,
+                "status": boundary.status,
+                "category": boundary.category,
+                "summary": boundary.summary,
+                "resolution": boundary.resolution,
+                "owner": boundary.owner,
+                "source_file": span.source_file,
+                "source_line": span.source_line or span.start_line,
+            }
+        )
+    return ViewModel(
+        name="boundaries",
+        nodes=nodes,
+        edges=edges,
+        rankdir="LR",
+        metadata={
+            "inventory": inventory,
+            "summary": {
+                "deferred": model.deferred_count,
+                "trimmed": model.trimmed_count,
+                "legacy_boundaries": model.legacy_boundary_count,
+            },
+        },
+    )
+
+
 def build_drives_view(model: ObjectModel) -> ViewModel:
     """Build an transition-level view from drives blocks."""
 

@@ -82,11 +82,6 @@ object LocalIrqEnablePhase: PhaseObject {
                     clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
                 }
 
-                deferred {
-                    "local_irq_enable() 只打开 boot CPU sstatus.SIE 总入口；PLIC UART source gate 和 root supervisor external input gate 仍由后续 UartExternalIrqEnable 显式打开。";
-                    "周期 tick、完整 softirq 执行、IPI runtime、workqueue worker、RCU GP kthread、task concurrency 和 secondary CPU execution 仍不得随本阶段隐式 Online。";
-                }
-
                 emits {
                     Transition::Setup;
                 }

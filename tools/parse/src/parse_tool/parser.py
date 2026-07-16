@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 from dataclasses import dataclass, replace as dc_replace
 from pathlib import Path
 
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ContextGuardDecl,
@@ -218,6 +220,7 @@ def _enrich_state(
         state,
         span=_with_file(state.span, lf, ll),
         invariants=[_with_file_block(b, lf, ll) for b in state.invariants],
+        boundaries=[_enrich_boundary(b, lf, ll) for b in state.boundaries],
         deferred=[_with_file_block(b, lf, ll) for b in state.deferred],
         transitions=[_enrich_tr(t, lf, ll) for t in state.transitions],
         other_blocks=[_with_file_block(b, lf, ll) for b in state.other_blocks],
@@ -236,6 +239,7 @@ def _enrich_tr(
         within=[_enrich_within(w, lf, ll) for w in tr.within],
         may_change=[_with_file_block(b, lf, ll) for b in tr.may_change],
         ensures=[_with_file_block(b, lf, ll) for b in tr.ensures],
+        boundaries=[_enrich_boundary(b, lf, ll) for b in tr.boundaries],
         deferred=[_with_file_block(b, lf, ll) for b in tr.deferred],
         other_blocks=[_with_file_block(b, lf, ll) for b in tr.other_blocks],
         body_members=[_enrich_bm(bm, lf, ll) for bm in tr.body_members],
@@ -255,6 +259,7 @@ def _enrich_within(
         exited_by=[_with_file_block(b, lf, ll) for b in w.exited_by],
         may_change=[_with_file_block(b, lf, ll) for b in w.may_change],
         ensures=[_with_file_block(b, lf, ll) for b in w.ensures],
+        boundaries=[_enrich_boundary(b, lf, ll) for b in w.boundaries],
         deferred=[_with_file_block(b, lf, ll) for b in w.deferred],
         other_blocks=[_with_file_block(b, lf, ll) for b in w.other_blocks],
         body_members=[_enrich_bm(bm, lf, ll) for bm in w.body_members],
@@ -268,7 +273,29 @@ def _enrich_bm(bm: "BodyMember", lf: list[str], ll: list[int]) -> "BodyMember":
     within = None
     if bm.within is not None:
         within = _enrich_within(bm.within, lf, ll)
-    return dc_replace(bm, span=_with_file(bm.span, lf, ll), block=block, within=within)
+    boundary = None
+    if bm.boundary is not None:
+        boundary = _enrich_boundary(bm.boundary, lf, ll)
+    return dc_replace(
+        bm,
+        span=_with_file(bm.span, lf, ll),
+        block=block,
+        within=within,
+        boundary=boundary,
+    )
+
+
+def _enrich_boundary(
+    boundary: BoundaryDecl, lf: list[str], ll: list[int]
+) -> BoundaryDecl:
+    return dc_replace(
+        boundary,
+        span=_with_file(boundary.span, lf, ll),
+        evidence=[_with_file_block(block, lf, ll) for block in boundary.evidence],
+        other_blocks=[
+            _with_file_block(block, lf, ll) for block in boundary.other_blocks
+        ],
+    )
 
 
 def _enrich_type(t: "TypeDecl", lf: list[str], ll: list[int]) -> "TypeDecl":
@@ -696,6 +723,7 @@ def _parse_state(segment: _Segment) -> StateDecl:
     parts = _split_members(body, body_start_line)
 
     invariants: list[Block] = []
+    boundaries: list[BoundaryDecl] = []
     deferred: list[Block] = []
     transitions: list[TransitionDecl] = []
     other_blocks: list[Block] = []
@@ -718,13 +746,26 @@ def _parse_state(segment: _Segment) -> StateDecl:
         if block.kind == "invariant":
             invariants.append(block)
         elif block.kind == "deferred":
-            deferred.append(block)
+            if block.header.strip():
+                boundaries.append(_parse_boundary(block))
+            else:
+                deferred.append(block)
+        elif block.kind == "trimmed":
+            boundaries.append(_parse_boundary(block))
         elif block.kind == "transitions":
             transitions.extend(_parse_events_block(block))
         else:
             other_blocks.append(block)
 
-    return StateDecl(match.group(1), segment.span, invariants, deferred, transitions, other_blocks)
+    return StateDecl(
+        name=match.group(1),
+        span=segment.span,
+        invariants=invariants,
+        boundaries=boundaries,
+        deferred=deferred,
+        transitions=transitions,
+        other_blocks=other_blocks,
+    )
 
 
 def _parse_events_block(block: Block) -> list[TransitionDecl]:
@@ -755,6 +796,7 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
     within: list[WithinDecl] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
+    boundaries: list[BoundaryDecl] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
     body_members: list[BodyMember] = []
@@ -786,8 +828,17 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
             ensures.append(block)
             body_members.append(_block_body_member(block))
         elif block.kind == "deferred":
-            deferred.append(block)
-            body_members.append(_block_body_member(block))
+            if block.header.strip():
+                boundary = _parse_boundary(block)
+                boundaries.append(boundary)
+                body_members.append(_boundary_body_member(boundary))
+            else:
+                deferred.append(block)
+                body_members.append(_block_body_member(block))
+        elif block.kind == "trimmed":
+            boundary = _parse_boundary(block)
+            boundaries.append(boundary)
+            body_members.append(_boundary_body_member(boundary))
         else:
             other_blocks.append(block)
             body_members.append(_block_body_member(block))
@@ -802,6 +853,7 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
         within=within,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -823,6 +875,7 @@ def _parse_within(block: Block) -> WithinDecl:
     exited_by: list[Block] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
+    boundaries: list[BoundaryDecl] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
     body_members: list[BodyMember] = []
@@ -857,8 +910,17 @@ def _parse_within(block: Block) -> WithinDecl:
             ensures.append(child)
             body_members.append(_block_body_member(child))
         elif child.kind == "deferred":
-            deferred.append(child)
-            body_members.append(_block_body_member(child))
+            if child.header.strip():
+                boundary = _parse_boundary(child)
+                boundaries.append(boundary)
+                body_members.append(_boundary_body_member(boundary))
+            else:
+                deferred.append(child)
+                body_members.append(_block_body_member(child))
+        elif child.kind == "trimmed":
+            boundary = _parse_boundary(child)
+            boundaries.append(boundary)
+            body_members.append(_boundary_body_member(boundary))
         else:
             other_blocks.append(child)
             body_members.append(_block_body_member(child))
@@ -875,6 +937,7 @@ def _parse_within(block: Block) -> WithinDecl:
         exited_by=exited_by,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -918,6 +981,82 @@ def _block_body_member(block: Block) -> BodyMember:
 
 def _within_body_member(within: WithinDecl) -> BodyMember:
     return BodyMember(kind="within", span=within.span, within=within)
+
+
+def _boundary_body_member(boundary: BoundaryDecl) -> BodyMember:
+    return BodyMember(
+        kind=boundary.status,
+        span=boundary.span,
+        boundary=boundary,
+    )
+
+
+def _parse_boundary(block: Block) -> BoundaryDecl:
+    properties: dict[str, str] = {}
+    property_counts: dict[str, int] = {}
+    evidence: list[Block] = []
+    other_blocks: list[Block] = []
+
+    for part in _split_members(
+        block.body, block.body_start_line or block.span.start_line
+    ):
+        stripped = part.text.strip()
+        block_match = _BLOCK_RE.match(stripped)
+        if block_match:
+            child = _to_block(part, block_match.group(1))
+            if child.kind == "evidence":
+                evidence.append(child)
+            else:
+                other_blocks.append(child)
+            continue
+
+        prop_match = _PROP_RE.match(stripped)
+        if prop_match is None:
+            raise ParseError(
+                f"line {part.start_line}: invalid {block.kind} boundary member: "
+                f"{_preview(part.text)}"
+            )
+        key = prop_match.group(1)
+        value = prop_match.group(2).strip()
+        property_counts[key] = property_counts.get(key, 0) + 1
+        properties[key] = value
+
+    resolution_key = "close_when" if block.kind == "deferred" else "revisit_when"
+    known = {"category", "summary", resolution_key}
+    return BoundaryDecl(
+        status=block.kind,
+        id=block.header.strip(),
+        span=block.span,
+        category=properties.get("category"),
+        summary=_boundary_string_value(properties.get("summary"), block, "summary"),
+        evidence=evidence,
+        resolution=_boundary_string_value(
+            properties.get(resolution_key), block, resolution_key
+        ),
+        property_counts=property_counts,
+        other_blocks=other_blocks,
+        unknown_properties={
+            key: value for key, value in properties.items() if key not in known
+        },
+    )
+
+
+def _boundary_string_value(
+    raw: str | None, block: Block, field_name: str
+) -> str | None:
+    if raw is None:
+        return None
+    try:
+        value = ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        raise ParseError(
+            f"line {block.span.start_line}: {block.kind} {field_name} must be a string"
+        ) from None
+    if not isinstance(value, str):
+        raise ParseError(
+            f"line {block.span.start_line}: {block.kind} {field_name} must be a string"
+        )
+    return value
 
 
 def _parse_named_blocks(body: str, start_line: int) -> list[Block]:

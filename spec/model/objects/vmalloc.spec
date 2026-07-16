@@ -55,6 +55,13 @@ predicate vmalloc_allocator_failure_rollback_contract_ready<T>(allocator: T) -> 
 predicate vmalloc_allocator_setup_runtime_locking_spec_required<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_runtime_vmap_locking_contract_deferred<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_cross_cpu_vmalloc_flush_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_reusable_holes_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_augmented_tree_search_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_lazy_purge_batching_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_rcu_metadata_lifecycle_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_cross_cpu_lazy_fault_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_cache_tlb_batching_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_full_per_cpu_deferred_free_deferred<T>(allocator: T) -> bool;
 predicate vmap_node_guard_contract_ready<T>(node_set: T) -> bool;
 predicate vmap_node_runtime_spinlock_contract_deferred<T>(node_set: T) -> bool;
 predicate vfree_deferred_guard_contract_ready<T>(deferred_set: T) -> bool;
@@ -164,9 +171,6 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_page_aligned(mapping);
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
-            deferred {
-                "Full Linux vm_struct/vmap_area metadata behavior such as reusable holes, augmented-tree search, lazy purge batching, RCU, and cross-CPU lazy vmalloc fault handling remains deferred.";
-            }
         }
 
         /*
@@ -195,9 +199,6 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_page_range_removed(mapping, SwapperVm);
                 vmap_mapping_kernel_tlb_flushed(mapping, SwapperVm);
             }
-            deferred {
-                "Full vunmap/vfree cache/TLB batching, lazy purge, RCU, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
-            }
         }
 
         /*
@@ -215,9 +216,6 @@ type VmallocAllocatorType: MemoryObject {
             }
             ensures {
                 vmap_area_released(area, self);
-            }
-            deferred {
-                "Full vunmap/vfree TLB flush, lazy purge, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
             }
         }
     }

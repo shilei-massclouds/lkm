@@ -47,6 +47,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(
             result.model.children["Kernel"],
             [
+                "EntryPreludePhase",
                 "BootPhase",
                 "InterruptPhase",
                 "UpMultitaskPhase",
@@ -57,7 +58,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(
             result.model.objects["BootPhase"].children,
             [
-                "EntryPreludePhase",
                 "EntrySuccessorPhase",
                 "CorePreparePhase",
                 "MmCoreInitPhase",
@@ -100,7 +100,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Preset [emits]", text)
         self.assertIn("Kernel.Preset", text)
-        self.assertIn("  -> BootPhase.Setup", text)
+        self.assertIn("  -> EntryPreludePhase.Preset", text)
+        self.assertIn("Kernel.Setup", text)
+        self.assertIn("  -> BootPhase.Preset", text)
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
@@ -112,7 +114,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"ComputerProject.Enable" -> "KernelProject.Preset"', dot)
         self.assertIn('"KernelProject.Enable" -> "OpenSBI.Enable"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
-        self.assertIn('"Kernel.Preset" -> "BootPhase.Setup"', dot)
+        self.assertIn('"Kernel.Preset" -> "EntryPreludePhase.Preset"', dot)
+        self.assertIn('"Kernel.Setup" -> "BootPhase.Preset"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -123,7 +126,7 @@ class ModelBuilderTests(unittest.TestCase):
         svg = render_svg(view)
 
         self.assertIn("timeline view:", text)
-        self.assertIn("  - Riscv64.State::Online", text)
+        self.assertIn("  - BootCurrentCPU.State::Online", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)

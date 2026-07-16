@@ -12,6 +12,7 @@ if _COMMON_SRC.is_dir():
         sys.path.insert(0, common_src)
 
 from common.spec_ast import (
+    BoundaryDecl,
     Block,
     EnumDecl,
     TransitionDecl,
@@ -30,6 +31,7 @@ from common.spec_ast import (
 )
 
 __all__ = [
+    "BoundaryDecl",
     "Block",
     "EnumDecl",
     "TransitionDecl",

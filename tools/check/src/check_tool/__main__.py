@@ -47,6 +47,7 @@ def _print_summary(check_data: dict[str, object]) -> None:
     print(f"contradiction: {check_data['summary']['contradiction']}")
     print(f"obligation: {check_data['summary']['obligation']}")
     print(f"deferred: {check_data['summary']['deferred']}")
+    print(f"trimmed: {check_data['summary']['trimmed']}")
 
 
 if __name__ == "__main__":

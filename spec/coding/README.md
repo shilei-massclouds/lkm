@@ -99,7 +99,8 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 | `invariant` | 对象状态保持条件、debug 检查或规格化单元测试 |
 | `drives` | 父对象过程中的调用编排顺序 |
 | `emits` | owner transition 提交后触发的 completion event；Phase 标准用法只连接同对象迁移 |
-| `deferred` | 显式 stub、TODO 或 feature gate，不得隐式实现 |
+| `deferred <id>` | 未实现/未证明责任；实现只能保持显式 unsupported/stub/feature gate，不得隐式宣称完整能力 |
+| `trimmed <id>` | 由当前构建配置、架构、参考输入或编译期 no-op 证明不可达/无操作；不生成运行时 stub |
 
 更细的映射规则见 [`mapping.md`](mapping.md) 和 [`phase-paradigm.md`](phase-paradigm.md)。
 
@@ -115,6 +116,12 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 - 每个 `unsafe` 块必须对应清晰的硬件、链接器、启动 ABI 或裸机内存访问边界。
 - 参考 ArceOS 时优先参考工程边界和成熟实现经验，不以逐行复刻为目标。
 - 对尚未建模的实现需求，应先记录为 coding 约束或模型缺口，再决定是否直接编码。
+- 实现、代码评审和测试必须使用 model boundary ID 引用未闭合责任；不得在 coding、
+  TODO 或 roadmap 中复制一段可独立演化的 backlog 文本。一个 ID 只对应一项责任。
+- 关闭 deferred boundary 时，必须在同一变更中删除模型记录，用正式事实、实现和测试
+  替代，并把原 ID 与证据写入唯一专题归档；ID 不再复用。
+- trimmed boundary 的实现分支必须与 `evidence` 一致。当 `revisit_when` 触发时，先重新审计并
+  删除或重分类 boundary，不得继续依赖已失效的配置/架构/输入假设。
 
 ## tgoskits 落点约束
 

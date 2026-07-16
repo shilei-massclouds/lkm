@@ -357,6 +357,7 @@ object Scheduler: SchedulerObject {
             BitWaitQueueTable.state == State::Prepared;
             BootIdleRcuReadSide.state == State::Prepared;
             scheduler_preset_ready(Scheduler);
+            sched_class_skeletons_deferred(Scheduler);
             scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
             bit_wait_queue_table_ready(BitWaitQueueTable);
             bit_wait_queue_table_bucket_count_matches_wait_table_size(
@@ -458,6 +459,7 @@ object Scheduler: SchedulerObject {
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
             rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
+            sched_class_skeletons_deferred(Scheduler);
         }
 
         transitions {
@@ -494,6 +496,7 @@ object Scheduler: SchedulerObject {
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
             rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
+            sched_class_skeletons_deferred(Scheduler);
         }
     }
 }
@@ -1525,6 +1528,9 @@ object SchedInitTraceContextBoundaries: KernelObject {
                     sched_init_trace_context_boundaries_ready(
                         SchedInitTraceContextBoundaries
                     );
+                    sched_init_housekeeping_deferred(SchedInitPhase);
+                    sched_init_workqueue_workers_deferred(SchedInitPhase);
+                    sched_init_context_tracking_runtime_deferred(SchedInitPhase);
                     sched_init_trace_init_deferred(SchedInitTraceContextBoundaries);
                     sched_init_context_tracking_init_trimmed_noop(
                         SchedInitTraceContextBoundaries
@@ -1543,6 +1549,9 @@ object SchedInitTraceContextBoundaries: KernelObject {
     state State::Ready {
         invariant {
             sched_init_trace_context_boundaries_ready(SchedInitTraceContextBoundaries);
+            sched_init_housekeeping_deferred(SchedInitPhase);
+            sched_init_workqueue_workers_deferred(SchedInitPhase);
+            sched_init_context_tracking_runtime_deferred(SchedInitPhase);
             sched_init_trace_init_deferred(SchedInitTraceContextBoundaries);
             sched_init_context_tracking_init_trimmed_noop(
                 SchedInitTraceContextBoundaries
@@ -1672,13 +1681,62 @@ object SchedInitPhase: PhaseObject {
                     context_is(SystemExclusive);
                 }
 
-                deferred {
-                    "early_trace_init()/trace_init() 暂缓：当前 .config 启用 FTRACE/TRACING，Linux tracing core 与项目 checkpoint trace 的关系后续单独收敛；ftrace_init() 当前因 CONFIG_FTRACE_MCOUNT_RECORD=n 已由 SchedInitPreludeTrimmedPaths 记录为 trimmed/no-op。";
-                    "housekeeping_init() 暂缓：当前 .config 启用 CPU_ISOLATION，但 nohz_full 未启用；housekeeping/domain/cmdline mask 语义后续单独 formal。";
-                    "SchedClass 细分暂缓：当前只保留调度类壳和 boot CPU runqueue 语义。";
-                    "Workqueue.setup()/enable() 暂缓：worker kthread 创建和执行边界属于后续多任务/SMP 路径。";
-                    "TasksRcu.setup() 暂缓：GP kthread 创建留给后续 rcu_init_tasks_generic()。";
-                    "context tracking idle/user/EQS 运行期细节后续随 RCU/context tracking 展开；本调用点的 context_tracking_init() 当前因 CONFIG_CONTEXT_TRACKING_USER_FORCE=n 已由 SchedInitTraceContextBoundaries 记录为 trimmed/no-op。";
+                deferred sched_init.001 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model Linux early_trace_init and its relationship to project checkpoints.";
+                    evidence { sched_init_early_trace_init_deferred(SchedInitPreludeTrimmedPaths); }
+                    close_when: "Tracing ownership, initialization and coexistence with checkpoints are modeled and tested.";
+                }
+                deferred sched_init.002 {
+                    category: DeferredCategory::Feature;
+                    summary: "Model Linux trace_init event-tracing initialization.";
+                    evidence { sched_init_trace_init_deferred(SchedInitTraceContextBoundaries); }
+                    close_when: "trace_init lifecycle, event registration and enabled-config tests pass.";
+                }
+                deferred sched_init.003 {
+                    category: DeferredCategory::AlternatePath;
+                    summary: "Model housekeeping domains and command-line CPU masks.";
+                    evidence { sched_init_housekeeping_deferred(SchedInitPhase); }
+                    close_when: "nohz_full/isolcpus domain and mask semantics are modeled and tested.";
+                }
+                deferred sched_init.004 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Expand scheduler-class policies beyond the boot runqueue skeleton.";
+                    evidence { sched_class_skeletons_deferred(Scheduler); }
+                    close_when: "Supported scheduler classes, selection policies and differential scheduling tests pass.";
+                }
+                deferred sched_init.005 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Implement complete workqueue worker creation and execution protocols.";
+                    evidence {
+                        sched_init_workqueue_workers_deferred(SchedInitPhase);
+                        workqueue_manager_wait_deferred(Workqueue);
+                    }
+                    close_when: "Worker lifecycle, manager wait/wake and concurrent work execution tests pass.";
+                }
+                deferred sched_init.006 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model context-tracking idle, user and EQS runtime transitions.";
+                    evidence { sched_init_context_tracking_runtime_deferred(SchedInitPhase); }
+                    close_when: "Runtime context transitions and RCU interaction tests pass.";
+                }
+                trimmed sched_init.007 {
+                    category: TrimmedCategory::CompileTimeNoOp;
+                    summary: "ftrace_init is a no-op because CONFIG_FTRACE_MCOUNT_RECORD=n.";
+                    evidence {
+                        sched_init_ftrace_init_trimmed_noop(SchedInitPreludeTrimmedPaths);
+                        sched_init_ftrace_trimmed_because_mcount_record_disabled(SchedInitPreludeTrimmedPaths);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_FTRACE_MCOUNT_RECORD.";
+                }
+                trimmed sched_init.008 {
+                    category: TrimmedCategory::CompileTimeNoOp;
+                    summary: "context_tracking_init is a no-op because CONFIG_CONTEXT_TRACKING_USER_FORCE=n.";
+                    evidence {
+                        sched_init_context_tracking_init_trimmed_noop(SchedInitTraceContextBoundaries);
+                        sched_init_context_tracking_trimmed_because_user_force_disabled(SchedInitTraceContextBoundaries);
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_CONTEXT_TRACKING_USER_FORCE.";
                 }
 
                 emits {

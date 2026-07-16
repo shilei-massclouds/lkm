@@ -43,6 +43,136 @@ class ModelToolTests(unittest.TestCase):
             self.assertIn("OpenSBI", data["model"]["objects"])
             self.assertNotIn("OpenSbi" + "Firmware", data["model"]["objects"])
 
+    def test_model_json_contains_stable_structured_boundary_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ast = Path(tmp) / "model-main.ast.json"
+            model = Path(tmp) / "model-main.model.json"
+
+            self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            data = read_json(model)
+            boundaries = data["model"]["boundaries"]
+            expected_user_clone = {f"user_clone.{index:03d}" for index in range(1, 17)}
+
+            self.assertTrue(expected_user_clone.issubset(boundaries))
+            self.assertEqual(data["summary"]["legacy_boundaries"], 0)
+            self.assertEqual(
+                data["summary"]["deferred"],
+                sum(item["status"] == "deferred" for item in boundaries.values()),
+            )
+            self.assertEqual(
+                data["summary"]["trimmed"],
+                sum(item["status"] == "trimmed" for item in boundaries.values()),
+            )
+            clone = boundaries["user_clone.001"]
+            self.assertEqual(clone["category"], "Feature")
+            self.assertEqual(
+                clone["owner"],
+                "UserCloneDeferredBoundaries.Transition::Setup",
+            )
+            self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
+            self.assertGreater(clone["span"]["source_line"], 0)
+
+    def test_structured_boundary_validation_rejects_invalid_inventory(self) -> None:
+        valid_boundary = """
+            deferred demo.001 {
+                category: DeferredCategory::Feature;
+                summary: "Complete the demo feature.";
+                evidence { demo_deferred(A); }
+                close_when: "The demo feature and tests are complete.";
+            }
+        """
+        cases = {
+            "invalid-id": (
+                valid_boundary.replace("demo.001", "Demo.001"),
+                "invalid boundary ID: Demo.001",
+            ),
+            "invalid-category": (
+                valid_boundary.replace(
+                    "DeferredCategory::Feature", "TrimmedCategory::BuildConfig"
+                ),
+                "invalid deferred category on demo.001",
+            ),
+            "missing-summary": (
+                valid_boundary.replace('summary: "Complete the demo feature.";', ""),
+                "boundary demo.001 is missing summary",
+            ),
+            "duplicate-id": (
+                valid_boundary + valid_boundary,
+                "duplicate boundary ID: demo.001",
+            ),
+            "legacy": (
+                'deferred { "legacy free text"; }',
+                "legacy deferred block is forbidden",
+            ),
+        }
+
+        for name, (boundary_source, expected_error) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                source = f"""
+                    object A: T {{
+                        initial_state: State::Base;
+
+                        state State::Base {{
+                            transitions {{
+                                on Transition::Setup -> State::Ready {{
+                                    {boundary_source}
+                                }}
+                            }}
+                        }}
+
+                        state State::Ready {{
+                        }}
+                    }}
+                """
+                spec = Path(tmp) / f"{name}.spec"
+                ast = Path(tmp) / f"{name}.ast.json"
+                model = Path(tmp) / f"{name}.model.json"
+                spec.write_text(source, encoding="utf-8")
+
+                self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    exit_code = model_main([str(ast), "-o", str(model)])
+
+                self.assertEqual(exit_code, 1)
+                self.assertIn(expected_error, stderr.getvalue())
+
+    def test_legacy_boundary_nested_in_raw_type_process_is_forbidden(self) -> None:
+        source = """
+            type T {
+                processes {
+                    Action::Run {
+                        deferred {
+                            "legacy nested action text";
+                        }
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+                state State::Base {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "nested-legacy.spec"
+            ast = Path(tmp) / "nested-legacy.ast.json"
+            model = Path(tmp) / "nested-legacy.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "legacy deferred/trimmed block is forbidden inside an unparsed processes block",
+                stderr.getvalue(),
+            )
+
     def test_model_json_contains_indexed_children_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ast = Path(tmp) / "model-main.ast.json"
@@ -186,7 +316,7 @@ class ModelToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            expanded = _read_with_includes(self.spec, seen=set(), stack=[]).splitlines()
+            expanded = _read_with_includes(self.spec, seen=set(), stack=[])[0].splitlines()
             line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 

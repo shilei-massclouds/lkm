@@ -19,12 +19,14 @@ for source in (
 from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
 from render_tool.render import render_dot, render_svg, render_text, render_view
 from view_tool.builder import (
+    build_boundary_view,
     build_drives_view,
     build_object_view,
     build_timeline_view,
 )
 
 __all__ = [
+    "build_boundary_view",
     "TimelineItem",
     "TimelineRow",
     "ViewEdge",

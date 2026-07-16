@@ -382,7 +382,6 @@ class ParserTests(unittest.TestCase):
         self.assertIn("ComputerProject", object_names)
         self.assertIn("KernelProject", object_names)
         self.assertIn("Kernel", object_names)
-        self.assertIn("PreparePhase", object_names)
         self.assertIn("BootPhase", object_names)
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
@@ -397,7 +396,7 @@ class ParserTests(unittest.TestCase):
         entry, span = enable.depends_on[0].entry_spans[0]
 
         self.assertEqual(entry, "EarlyVm.state == State::Online")
-        line = _read_with_includes(spec, seen=set(), stack=[]).splitlines()[
+        line = _read_with_includes(spec, seen=set(), stack=[])[0].splitlines()[
             span.start_line - 1
         ]
         self.assertIn("EarlyVm.state == State::Online", line)

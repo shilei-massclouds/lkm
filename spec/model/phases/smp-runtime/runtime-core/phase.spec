@@ -276,6 +276,12 @@ object PadataCoreDeferred: KernelObject {
                     padata_hotplug_steps_deferred();
                     padata_hotplug_online_state_deferred();
                     padata_hotplug_dead_state_deferred();
+                    runtime_async_domains_deferred(RuntimeCorePhase);
+                    runtime_async_cookies_deferred(RuntimeCorePhase);
+                    runtime_async_pending_list_deferred(RuntimeCorePhase);
+                    runtime_async_waitqueue_deferred(RuntimeCorePhase);
+                    runtime_async_workers_deferred(RuntimeCorePhase);
+                    runtime_padata_instances_deferred(RuntimeCorePhase);
                     padata_work_array_deferred();
                     padata_free_work_list_deferred();
                 }
@@ -289,6 +295,12 @@ object PadataCoreDeferred: KernelObject {
             padata_hotplug_steps_deferred();
             padata_hotplug_online_state_deferred();
             padata_hotplug_dead_state_deferred();
+            runtime_async_domains_deferred(RuntimeCorePhase);
+            runtime_async_cookies_deferred(RuntimeCorePhase);
+            runtime_async_pending_list_deferred(RuntimeCorePhase);
+            runtime_async_waitqueue_deferred(RuntimeCorePhase);
+            runtime_async_workers_deferred(RuntimeCorePhase);
+            runtime_padata_instances_deferred(RuntimeCorePhase);
             padata_work_array_deferred();
             padata_free_work_list_deferred();
         }
@@ -443,10 +455,83 @@ object RuntimeCorePhase: PhaseObject {
                     runtime_core_boundary_ready(RuntimeCoreBoundary);
                 }
 
-                deferred {
-                    "async_init() 的 async_domain、cookie、pending list、wait queue 和 async worker 运行细节继续 deferred；本轮只记录专用 async workqueue 创建与 min_active 更新位置。";
-                    "padata_init() 的 CPU hotplug online/dead state 注册、possible-CPU work array 和 free list 继续作为 RuntimeCorePhase 的 deferred boundary，不展开 padata instance 或具体用户。";
-                    "CONFIG_DEFERRED_STRUCT_PAGE_INIT=n、CONFIG_PAGE_EXTENSION=n、CONFIG_SHUFFLE_PAGE_ALLOCATOR=n 的 late page allocator 分支由 PageAllocatorLate 结构化记录为 trimmed/no-op。";
+                deferred runtime_core.001 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model async domains and their ownership.";
+                    evidence { runtime_async_domains_deferred(RuntimeCorePhase); }
+                    close_when: "Async domain creation, ownership and teardown tests pass.";
+                }
+                deferred runtime_core.002 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model async cookie allocation and completion ordering.";
+                    evidence { runtime_async_cookies_deferred(RuntimeCorePhase); }
+                    close_when: "Cookie allocation, wrap/order and synchronization tests pass.";
+                }
+                deferred runtime_core.003 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model the async pending-list lifecycle.";
+                    evidence { runtime_async_pending_list_deferred(RuntimeCorePhase); }
+                    close_when: "Pending insertion/removal and concurrent completion tests pass.";
+                }
+                deferred runtime_core.004 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Model async waitqueue sleep and wake behavior.";
+                    evidence { runtime_async_waitqueue_deferred(RuntimeCorePhase); }
+                    close_when: "Async wait, wake and interruption tests pass.";
+                }
+                deferred runtime_core.005 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement async worker runtime execution.";
+                    evidence { runtime_async_workers_deferred(RuntimeCorePhase); }
+                    close_when: "Async worker dispatch, concurrency and shutdown tests pass.";
+                }
+                deferred runtime_core.006 {
+                    category: DeferredCategory::Protocol;
+                    summary: "Register and execute padata CPU-hotplug online/dead states.";
+                    evidence {
+                        padata_hotplug_online_state_deferred();
+                        padata_hotplug_dead_state_deferred();
+                    }
+                    close_when: "Padata hotplug online/dead ordering and CPU transition tests pass.";
+                }
+                deferred runtime_core.007 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model the possible-CPU padata work array.";
+                    evidence { padata_work_array_deferred(); }
+                    close_when: "Per-CPU work allocation and hotplug resizing tests pass.";
+                }
+                deferred runtime_core.008 {
+                    category: DeferredCategory::ModelDetail;
+                    summary: "Model the padata free-work list lifecycle.";
+                    evidence { padata_free_work_list_deferred(); }
+                    close_when: "Free-list insertion, drain and concurrency tests pass.";
+                }
+                deferred runtime_core.009 {
+                    category: DeferredCategory::Feature;
+                    summary: "Implement padata instances and their concrete users.";
+                    evidence { runtime_padata_instances_deferred(RuntimeCorePhase); }
+                    close_when: "At least one complete padata instance/user lifecycle and parallel execution tests pass.";
+                }
+                trimmed runtime_core.010 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Deferred struct-page initialization and completion are absent because CONFIG_DEFERRED_STRUCT_PAGE_INIT=n.";
+                    evidence {
+                        deferred_struct_page_init_trimmed();
+                        deferred_struct_page_completion_trimmed();
+                    }
+                    revisit_when: "The reference configuration enables CONFIG_DEFERRED_STRUCT_PAGE_INIT.";
+                }
+                trimmed runtime_core.011 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Late page-extension initialization is absent because CONFIG_PAGE_EXTENSION=n.";
+                    evidence { page_extension_late_trimmed(); }
+                    revisit_when: "The reference configuration enables CONFIG_PAGE_EXTENSION.";
+                }
+                trimmed runtime_core.012 {
+                    category: TrimmedCategory::BuildConfig;
+                    summary: "Late page shuffling is absent because CONFIG_SHUFFLE_PAGE_ALLOCATOR=n.";
+                    evidence { shuffle_page_allocator_late_trimmed(); }
+                    revisit_when: "The reference configuration enables CONFIG_SHUFFLE_PAGE_ALLOCATOR.";
                 }
 
                 emits {

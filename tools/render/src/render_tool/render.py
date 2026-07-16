@@ -58,6 +58,8 @@ def render_text(view: ViewModel) -> str:
         return _render_timeline_text(view)
     if view.name == "trace":
         return _render_trace_text(view)
+    if view.name == "boundaries":
+        return _render_boundaries_text(view)
 
     lines = [f"{view.name} view:"]
     for node in view.nodes.values():
@@ -70,6 +72,35 @@ def render_text(view: ViewModel) -> str:
             label = f" [{edge.label}]" if edge.label else ""
             lines.append(f"{edge.source} -> {edge.target}{label}")
 
+    return "\n".join(lines)
+
+
+def _render_boundaries_text(view: ViewModel) -> str:
+    summary = view.metadata.get("summary", {})
+    lines = [
+        "boundaries view:",
+        f"deferred: {summary.get('deferred', 0)}",
+        f"trimmed: {summary.get('trimmed', 0)}",
+        f"legacy_boundaries: {summary.get('legacy_boundaries', 0)}",
+    ]
+    for item in view.metadata.get("inventory", []):
+        if not isinstance(item, dict):
+            continue
+        location = item.get("source_file") or "<merged-source>"
+        line = item.get("source_line")
+        resolution_name = (
+            "close_when" if item.get("status") == "deferred" else "revisit_when"
+        )
+        lines.extend(
+            [
+                "",
+                f"- {item.get('id')} [{item.get('status')}/{item.get('category')}]",
+                f"  source: {location}:{line}",
+                f"  owner: {item.get('owner')}",
+                f"  summary: {item.get('summary')}",
+                f"  {resolution_name}: {item.get('resolution')}",
+            ]
+        )
     return "\n".join(lines)
 
 

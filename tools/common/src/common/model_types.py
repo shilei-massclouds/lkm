@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from common.spec_ast import (
+    BoundaryDecl,
     ContextGuardDecl,
     EnumDecl,
     TransitionDecl,
@@ -94,6 +95,32 @@ class ExclusiveContextDef:
 
 
 @dataclass(frozen=True)
+class BoundaryDef:
+    """A validated structured deferred or trimmed boundary with inferred owner."""
+
+    id: str
+    status: str
+    category: str
+    summary: str
+    resolution: str
+    decl: BoundaryDecl
+    object_name: str
+    state_name: str
+    transition_name: str | None = None
+    context_path: tuple[str, ...] = ()
+
+    @property
+    def owner(self) -> str:
+        if self.transition_name is None:
+            owner = f"{self.object_name}.State::{self.state_name}"
+        else:
+            owner = f"{self.object_name}.Transition::{self.transition_name}"
+        if self.context_path:
+            owner += " within " + " / ".join(self.context_path)
+        return owner
+
+
+@dataclass(frozen=True)
 class ObjectModel:
     """Static model built from the parsed spec."""
 
@@ -105,6 +132,8 @@ class ObjectModel:
     exclusive_contexts: dict[str, ExclusiveContextDef]
     objects: dict[str, ObjectDef]
     children: dict[str, list[str]]
+    boundaries: dict[str, BoundaryDef] = field(default_factory=dict)
+    legacy_boundary_count: int = 0
 
     @property
     def state_count(self) -> int:
@@ -113,6 +142,14 @@ class ObjectModel:
     @property
     def transition_count(self) -> int:
         return sum(len(state.transitions) for obj in self.objects.values() for state in obj.states.values())
+
+    @property
+    def deferred_count(self) -> int:
+        return sum(boundary.status == "deferred" for boundary in self.boundaries.values())
+
+    @property
+    def trimmed_count(self) -> int:
+        return sum(boundary.status == "trimmed" for boundary in self.boundaries.values())
 
 
 @dataclass(frozen=True)

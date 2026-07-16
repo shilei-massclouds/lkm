@@ -17,6 +17,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build model JSON from AST JSON.")
     parser.add_argument("ast", type=Path, help="path to ast.json")
     parser.add_argument("-o", "--output", type=Path, required=True, help="path to model.json")
+    parser.add_argument(
+        "--allow-legacy-boundaries",
+        action="store_true",
+        help="migration-only: accept legacy free-text deferred blocks",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -29,7 +34,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: invalid AST JSON: {exc}", file=sys.stderr)
         return 2
 
-    result = build_model(document)
+    result = build_model(
+        document, allow_legacy_boundaries=args.allow_legacy_boundaries
+    )
     for diagnostic in result.diagnostics:
         print(diagnostic.format(), file=sys.stderr)
 

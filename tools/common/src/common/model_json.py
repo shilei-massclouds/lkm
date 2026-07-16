@@ -6,6 +6,7 @@ from typing import Any
 
 from common.schemas import MODEL_SCHEMA, MODEL_VERSION
 from common.model_types import (
+    BoundaryDef,
     TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
@@ -13,6 +14,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BoundaryDecl,
     BodyMember,
     Block,
     ContextGuardDecl,
@@ -66,6 +68,10 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         name: _object_def_from_json(item)
         for name, item in _object(model_data, "objects").items()
     }
+    boundaries = {
+        boundary_id: _boundary_def_from_json(item)
+        for boundary_id, item in _object(model_data, "boundaries").items()
+    }
     children = {
         name: [_as_string(child, f"children.{name}") for child in _as_list(items, f"children.{name}")]
         for name, items in _object(model_data, "children").items()
@@ -79,6 +85,10 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         exclusive_contexts=exclusive_contexts,
         objects=objects,
         children=children,
+        boundaries=boundaries,
+        legacy_boundary_count=_integer(
+            _object(data, "summary"), "legacy_boundaries"
+        ),
     )
 
 
@@ -191,6 +201,10 @@ def _state_def_from_json(item: Any) -> StateDef:
         name=_string(data, "name"),
         span=_span_from_json(data["span"]),
         invariants=[_block_from_json(block) for block in _list(data, "invariants")],
+        boundaries=[
+            _boundary_decl_from_json(boundary)
+            for boundary in data.get("boundaries", [])
+        ],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
         transitions=[transition.decl for transition in transitions.values()],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
@@ -211,6 +225,10 @@ def _event_def_from_json(item: Any) -> TransitionDef:
     within = [_within_from_json(block) for block in _list(data, "within")]
     may_change = [_block_from_json(block) for block in _list(data, "may_change")]
     ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    boundaries = [
+        _boundary_decl_from_json(boundary)
+        for boundary in data.get("boundaries", [])
+    ]
     deferred = [_block_from_json(block) for block in _list(data, "deferred")]
     other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
     body_members = _body_members_from_json(
@@ -222,6 +240,7 @@ def _event_def_from_json(item: Any) -> TransitionDef:
             *(_within_body_member(block) for block in within),
             *(_block_body_member(block) for block in may_change),
             *(_block_body_member(block) for block in ensures),
+            *(_boundary_body_member(boundary) for boundary in boundaries),
             *(_block_body_member(block) for block in deferred),
             *(_block_body_member(block) for block in other_blocks),
         ],
@@ -236,6 +255,7 @@ def _event_def_from_json(item: Any) -> TransitionDef:
         within=within,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -300,6 +320,10 @@ def _within_from_json(item: Any) -> WithinDecl:
     exited_by = [_block_from_json(block) for block in _list(data, "exited_by")]
     may_change = [_block_from_json(block) for block in _list(data, "may_change")]
     ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    boundaries = [
+        _boundary_decl_from_json(boundary)
+        for boundary in data.get("boundaries", [])
+    ]
     deferred = [_block_from_json(block) for block in _list(data, "deferred")]
     other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
     body_members = _body_members_from_json(
@@ -312,6 +336,7 @@ def _within_from_json(item: Any) -> WithinDecl:
             *(_block_body_member(block) for block in exited_by),
             *(_block_body_member(block) for block in may_change),
             *(_block_body_member(block) for block in ensures),
+            *(_boundary_body_member(boundary) for boundary in boundaries),
             *(_block_body_member(block) for block in deferred),
             *(_block_body_member(block) for block in other_blocks),
         ],
@@ -328,6 +353,7 @@ def _within_from_json(item: Any) -> WithinDecl:
         exited_by=exited_by,
         may_change=may_change,
         ensures=ensures,
+        boundaries=boundaries,
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
@@ -346,11 +372,17 @@ def _body_member_from_json(item: Any) -> BodyMember:
     data = _as_object(item, "body_member")
     block = data.get("block")
     within = data.get("within")
+    boundary = data.get("boundary")
     return BodyMember(
         kind=_string(data, "kind"),
         span=_span_from_json(data["span"]),
         block=_block_from_json(block) if block is not None else None,
         within=_within_from_json(within) if within is not None else None,
+        boundary=(
+            _boundary_decl_from_json(boundary)
+            if boundary is not None
+            else None
+        ),
     )
 
 
@@ -360,6 +392,66 @@ def _block_body_member(block: Block) -> BodyMember:
 
 def _within_body_member(within: WithinDecl) -> BodyMember:
     return BodyMember(kind="within", span=within.span, within=within)
+
+
+def _boundary_body_member(boundary: BoundaryDecl) -> BodyMember:
+    return BodyMember(
+        kind=boundary.status,
+        span=boundary.span,
+        boundary=boundary,
+    )
+
+
+def _boundary_decl_from_json(item: Any) -> BoundaryDecl:
+    data = _as_object(item, "boundary")
+    return BoundaryDecl(
+        status=_string(data, "status"),
+        id=_string(data, "id"),
+        span=_span_from_json(data["span"]),
+        category=_optional_string(data.get("category"), "boundary.category"),
+        summary=_optional_string(data.get("summary"), "boundary.summary"),
+        evidence=[
+            _block_from_json(block) for block in data.get("evidence", [])
+        ],
+        resolution=_optional_string(
+            data.get("resolution"), "boundary.resolution"
+        ),
+        property_counts={
+            str(key): int(value)
+            for key, value in data.get("property_counts", {}).items()
+        },
+        other_blocks=[
+            _block_from_json(block) for block in data.get("other_blocks", [])
+        ],
+        unknown_properties={
+            str(key): str(value)
+            for key, value in data.get("unknown_properties", {}).items()
+        },
+    )
+
+
+def _boundary_def_from_json(item: Any) -> BoundaryDef:
+    data = _as_object(item, "boundary")
+    decl_data = dict(data)
+    decl_data["category"] = data.get("source_category")
+    decl = _boundary_decl_from_json(decl_data)
+    return BoundaryDef(
+        id=decl.id,
+        status=decl.status,
+        category=_string(data, "category"),
+        summary=_string(data, "summary"),
+        resolution=_string(data, "resolution"),
+        decl=decl,
+        object_name=_string(data, "object_name"),
+        state_name=_string(data, "state_name"),
+        transition_name=_optional_string(
+            data.get("transition_name"), "boundary.transition_name"
+        ),
+        context_path=tuple(
+            _as_string(value, "boundary.context_path")
+            for value in data.get("context_path", [])
+        ),
+    )
 
 
 def _block_from_json(item: Any) -> Block:
@@ -378,9 +470,17 @@ def _block_from_json(item: Any) -> Block:
 
 def _span_from_json(item: Any) -> SourceSpan:
     data = _as_object(item, "span")
+    source_file = data.get("source_file")
+    source_line = data.get("source_line")
+    if source_file is not None and not isinstance(source_file, str):
+        raise ValueError("span.source_file must be a string or null")
+    if source_line is not None and not isinstance(source_line, int):
+        raise ValueError("span.source_line must be an integer or null")
     return SourceSpan(
         start_line=_integer(data, "start_line"),
         end_line=_integer(data, "end_line"),
+        source_file=source_file,
+        source_line=source_line,
     )
 
 
