@@ -71,6 +71,7 @@ int main(int argc, char **argv)
 	if (argc < 1 || argv == NULL || argv[0] == NULL) {
 		return 30;
 	}
+	smoke_stack_expect_execfn(argv[0]);
 
 	if (SAY_LITERAL("user-smoke: begin\n\n") < 0) {
 		return 31;

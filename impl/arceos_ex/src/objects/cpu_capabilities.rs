@@ -48,6 +48,16 @@ impl IsaFacts {
             zicboz: self.zicboz && other.zicboz,
         }
     }
+
+    pub const fn elf_hwcap(self) -> usize {
+        self.a as usize
+            | (self.c as usize) << (b'C' - b'A')
+            | (self.d as usize) << (b'D' - b'A')
+            | (self.f as usize) << (b'F' - b'A')
+            | (self.i as usize) << (b'I' - b'A')
+            | (self.m as usize) << (b'M' - b'A')
+            | (self.v as usize) << (b'V' - b'A')
+    }
 }
 
 pub struct CpuCapabilities {
@@ -90,6 +100,10 @@ impl CpuCapabilities {
 
     pub const fn vector_supported(&self) -> bool {
         self.common_isa.v
+    }
+
+    pub const fn elf_hwcap(&self) -> usize {
+        self.common_isa.elf_hwcap()
     }
 
     pub fn setup(

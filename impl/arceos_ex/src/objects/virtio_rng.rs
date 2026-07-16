@@ -214,6 +214,7 @@ pub struct VirtioRngDevice {
     read_updates_data_idx: bool,
     read_updates_data_avail: bool,
     read_requeues_when_empty: bool,
+    read_requeues_below_request_watermark: bool,
     read_count: usize,
     last_read_len: usize,
     removed_rejects_io: bool,
@@ -261,6 +262,7 @@ impl VirtioRngDevice {
             read_updates_data_idx: false,
             read_updates_data_avail: false,
             read_requeues_when_empty: false,
+            read_requeues_below_request_watermark: false,
             read_count: 0,
             last_read_len: 0,
             removed_rejects_io: false,
@@ -403,6 +405,10 @@ impl VirtioRngDevice {
 
     pub const fn read_requeues_when_empty(&self) -> bool {
         self.read_requeues_when_empty
+    }
+
+    pub const fn read_requeues_below_request_watermark(&self) -> bool {
+        self.read_requeues_below_request_watermark
     }
 
     pub const fn read_count(&self) -> usize {
@@ -701,8 +707,14 @@ impl VirtioRngDevice {
         self.last_read_len = actual_len;
         self.hwrng.record_read(actual_len);
 
-        if self.data_avail == 0 {
-            self.read_requeues_when_empty = true;
+        let empty = self.data_avail == 0;
+        let below_request_watermark =
+            actual_len == buffer.len() && (self.data_avail as usize) < buffer.len();
+        if empty || below_request_watermark {
+            self.read_requeues_when_empty |= empty;
+            self.read_requeues_below_request_watermark |= below_request_watermark;
+            self.data_avail = 0;
+            self.data_idx = 0;
             if self.real_notify_irq_ready && !self.request_pending {
                 let (buffer_addr, buffer_len) =
                     entropy_buffer_request(&crate::context::context_ref().kernel_image)?;

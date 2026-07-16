@@ -41,6 +41,9 @@ predicate exec_transaction_failure_errno_bound<T, E>(transaction: T, error: E) -
 predicate exec_transaction_no_errno_after_point_of_no_return<T>(transaction: T) -> bool;
 predicate exec_transaction_checkpoint_namespace_owner_scoped<T>(transaction: T) -> bool;
 predicate exec_transaction_hwrng_random_precommit<T>(transaction: T) -> bool;
+predicate exec_transaction_hwrng_exact_24_bytes<T>(transaction: T) -> bool;
+predicate exec_transaction_stack_aslr_entropy_separate<T>(transaction: T) -> bool;
+predicate exec_transaction_auxv_preexec_snapshot_bound<T>(transaction: T) -> bool;
 predicate exec_transaction_entropy_failure_preserves_current<T>(transaction: T) -> bool;
 predicate exec_transaction_boot_entropy_failure_terminal<T>(transaction: T) -> bool;
 
@@ -69,6 +72,9 @@ object ExecTransaction: KernelObject {
                     exec_transaction_no_errno_after_point_of_no_return(self);
                     exec_transaction_checkpoint_namespace_owner_scoped(self);
                     exec_transaction_hwrng_random_precommit(self);
+                    exec_transaction_hwrng_exact_24_bytes(self);
+                    exec_transaction_stack_aslr_entropy_separate(self);
+                    exec_transaction_auxv_preexec_snapshot_bound(self);
                     exec_transaction_entropy_failure_preserves_current(self);
                     exec_transaction_boot_entropy_failure_terminal(self);
                 }
@@ -89,6 +95,9 @@ object ExecTransaction: KernelObject {
             exec_transaction_no_errno_after_point_of_no_return(self);
             exec_transaction_checkpoint_namespace_owner_scoped(self);
             exec_transaction_hwrng_random_precommit(self);
+            exec_transaction_hwrng_exact_24_bytes(self);
+            exec_transaction_stack_aslr_entropy_separate(self);
+            exec_transaction_auxv_preexec_snapshot_bound(self);
             exec_transaction_entropy_failure_preserves_current(self);
             exec_transaction_boot_entropy_failure_terminal(self);
         }

@@ -17,8 +17,10 @@
 - 经 `BinaryFormatRegistry` 选择 handler，持有 main/interpreter `ElfObject`、staging address space、stack、
   trap frame、失败事实和 point-of-no-return。
 - staging stack 遵守独立 [`UserStack`](user-stack.md) 对象约束：稀疏 backing、初始 VMA 向下预扩展
-  128 KiB、8 MiB rlimit、1 MiB guard gap，并在 point-of-no-return 前从当前 HWRNG 获取完整 16 字节
-  `AT_RANDOM`。内核侧 stack canary/protector 仍留待后续对象化。
+  128 KiB、8 MiB rlimit、1 MiB guard gap，并在 point-of-no-return 前从当前 HWRNG 一次取得完整
+  24 字节。16 字节只供 `AT_RANDOM`，独立 8 字节只选择 8 MiB 窗口内页对齐 stack top；任何短读
+  都是 `EntropyUnavailable`。transaction 在读取熵前快照 exec filename、公共 ISA HWCAP 和当前
+  real/effective UID/GID（boot 为 root），供 initial auxv 使用且不受提交后状态变化影响。
 - 在 point-of-no-return 前完成文件读取、格式识别、解释器读取、所有 staging 分配、页表安装和 bounded
   CLOEXEC 预检。失败释放全部 staging backing 并保持 current mm、SATP、trap frame、fd table 和进程身份不变。
 - 成功时依次标记 point-of-no-return、交换 current/staging image、执行已预检 CLOEXEC、安装映像/stack/
@@ -36,6 +38,7 @@
 
 `ExecOwner` 只决定输入来源、成功交接和 checkpoint namespace。boot/runtime 共用同一 prepare/dispatch/
 commit/abort 管线，但继续发出稳定的 `UserBoot.*` 或 `UserExec.*` checkpoint；既有 ID、名称和顺序不变。
+既有 checkpoint 诊断可追加选定栈布局与 auxv 完整性字段，但不得新增中间 checkpoint。
 
 ## 非目标
 

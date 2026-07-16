@@ -346,6 +346,11 @@ pub struct ExecveCheckpointObservation {
     pub address_space_state: usize,
     pub mapping_count: usize,
     pub segment_mapping_count: usize,
+    pub stack_top_max: usize,
+    pub stack_top: usize,
+    pub stack_aslr_offset: usize,
+    pub stack_execfn_ptr: usize,
+    pub stack_auxv_complete: usize,
     pub satp_token: usize,
     pub trap_entry: usize,
     pub trap_sp: usize,
@@ -392,6 +397,11 @@ struct ExecveCheckpointObservationAtomics {
     address_space_state: AtomicUsize,
     mapping_count: AtomicUsize,
     segment_mapping_count: AtomicUsize,
+    stack_top_max: AtomicUsize,
+    stack_top: AtomicUsize,
+    stack_aslr_offset: AtomicUsize,
+    stack_execfn_ptr: AtomicUsize,
+    stack_auxv_complete: AtomicUsize,
     satp_token: AtomicUsize,
     trap_entry: AtomicUsize,
     trap_sp: AtomicUsize,
@@ -439,6 +449,11 @@ static EXECVE_CHECKPOINT_OBSERVATION: ExecveCheckpointObservationAtomics =
         address_space_state: AtomicUsize::new(0),
         mapping_count: AtomicUsize::new(0),
         segment_mapping_count: AtomicUsize::new(0),
+        stack_top_max: AtomicUsize::new(0),
+        stack_top: AtomicUsize::new(0),
+        stack_aslr_offset: AtomicUsize::new(0),
+        stack_execfn_ptr: AtomicUsize::new(0),
+        stack_auxv_complete: AtomicUsize::new(0),
         satp_token: AtomicUsize::new(0),
         trap_entry: AtomicUsize::new(0),
         trap_sp: AtomicUsize::new(0),
@@ -487,6 +502,11 @@ pub fn execve_checkpoint_observation() -> ExecveCheckpointObservation {
         address_space_state: obs.address_space_state.load(Ordering::Acquire),
         mapping_count: obs.mapping_count.load(Ordering::Acquire),
         segment_mapping_count: obs.segment_mapping_count.load(Ordering::Acquire),
+        stack_top_max: obs.stack_top_max.load(Ordering::Acquire),
+        stack_top: obs.stack_top.load(Ordering::Acquire),
+        stack_aslr_offset: obs.stack_aslr_offset.load(Ordering::Acquire),
+        stack_execfn_ptr: obs.stack_execfn_ptr.load(Ordering::Acquire),
+        stack_auxv_complete: obs.stack_auxv_complete.load(Ordering::Acquire),
         satp_token: obs.satp_token.load(Ordering::Acquire),
         trap_entry: obs.trap_entry.load(Ordering::Acquire),
         trap_sp: obs.trap_sp.load(Ordering::Acquire),
@@ -6122,6 +6142,11 @@ fn reset_execve_checkpoint_observation() {
     obs.address_space_state.store(0, Ordering::Release);
     obs.mapping_count.store(0, Ordering::Release);
     obs.segment_mapping_count.store(0, Ordering::Release);
+    obs.stack_top_max.store(0, Ordering::Release);
+    obs.stack_top.store(0, Ordering::Release);
+    obs.stack_aslr_offset.store(0, Ordering::Release);
+    obs.stack_execfn_ptr.store(0, Ordering::Release);
+    obs.stack_auxv_complete.store(0, Ordering::Release);
     obs.satp_token.store(0, Ordering::Release);
     obs.trap_entry.store(0, Ordering::Release);
     obs.trap_sp.store(0, Ordering::Release);
@@ -6270,6 +6295,20 @@ pub(crate) fn record_execve_address_space(stage: usize, address_space: &UserAddr
     obs.new_satp
         .store(address_space.satp_token(), Ordering::Release);
     record_execve_stage(stage);
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn record_execve_stack(stack: &super::user_stack::UserStack) {
+    let obs = &EXECVE_CHECKPOINT_OBSERVATION;
+    obs.stack_top_max
+        .store(stack.config().stack_top_max(), Ordering::Release);
+    obs.stack_top.store(stack.top(), Ordering::Release);
+    obs.stack_aslr_offset
+        .store(stack.aslr_offset(), Ordering::Release);
+    obs.stack_execfn_ptr
+        .store(stack.execfn_ptr(), Ordering::Release);
+    obs.stack_auxv_complete
+        .store(stack.auxv_complete() as usize, Ordering::Release);
 }
 
 #[cfg(app_user_boot)]

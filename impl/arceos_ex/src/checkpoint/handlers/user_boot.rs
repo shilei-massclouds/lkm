@@ -482,6 +482,11 @@ fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
     sink.diag_usize("execve_address_space_state", obs.address_space_state);
     sink.diag_usize("execve_mapping_count", obs.mapping_count);
     sink.diag_usize("execve_segment_mapping_count", obs.segment_mapping_count);
+    sink.diag_usize("execve_stack_top_max", obs.stack_top_max);
+    sink.diag_usize("execve_stack_top", obs.stack_top);
+    sink.diag_usize("execve_stack_aslr_offset", obs.stack_aslr_offset);
+    sink.diag_usize("execve_stack_execfn_ptr", obs.stack_execfn_ptr);
+    sink.diag_usize("execve_stack_auxv_complete", obs.stack_auxv_complete);
     sink.diag_hex_pair("execve_satp_old_new", obs.old_satp, obs.new_satp);
     sink.diag_hex_pair(
         "execve_satp_current_token",
@@ -692,20 +697,49 @@ fn run_user_address_space_ready(
     let name = "user_boot.user_address_space.ready";
     sink.start_case(total, "", name, checkpoint);
 
-    let space = &ctx.user_address_space;
-    let stack = &ctx.user_stack;
+    let staging = ctx.exec_transaction.active()
+        && ctx.exec_transaction.staging_address_space.state() == State::Ready
+        && ctx.exec_transaction.staging_stack.state() == State::Ready;
+    let space = if staging {
+        &ctx.exec_transaction.staging_address_space
+    } else {
+        &ctx.user_address_space
+    };
+    let stack = if staging {
+        &ctx.exec_transaction.staging_stack
+    } else {
+        &ctx.user_stack
+    };
+    let layout_stack = if ctx.exec_transaction.staging_stack.auxv_complete() {
+        &ctx.exec_transaction.staging_stack
+    } else {
+        stack
+    };
     let selected_path = ctx.user_boot_payload.selected_path();
-    let selected_path_bytes = ctx.user_boot_payload.selected_path_bytes();
+    let selected_path_bytes = ctx
+        .exec_transaction
+        .active_filename()
+        .unwrap_or_else(|| ctx.user_boot_payload.selected_path_bytes());
     let argv0_matches_selected =
         stack_contains_at(stack, ctx, stack.arg0_ptr(), selected_path_bytes, true);
+    let execfn_matches_selected = stack_contains_at(
+        layout_stack,
+        ctx,
+        layout_stack.execfn_ptr(),
+        selected_path_bytes,
+        true,
+    );
     let mut valid = space.state() == State::Ready
         && space.page_table_view_ready()
         && space.elf_segments_mapped()
         && space.stack_mapped()
         && space.heap_mapped()
-        && ctx.user_boot_payload.selected_path_bound()
-        && ctx.user_boot_payload.selected_argv0_path_bound()
-        && argv0_matches_selected;
+        && (staging
+            || (ctx.user_boot_payload.selected_path_bound()
+                && ctx.user_boot_payload.selected_argv0_path_bound()))
+        && argv0_matches_selected
+        && layout_stack.auxv_complete()
+        && execfn_matches_selected;
 
     sink.diag_usize("selected_path_index", selected_path.index());
     sink.diag_usize("selected_path_len", selected_path_bytes.len());
@@ -713,6 +747,18 @@ fn run_user_address_space_ready(
     sink.diag_usize(
         "user_stack_arg0_matches_selected",
         argv0_matches_selected as usize,
+    );
+    sink.diag_usize("user_stack_top_max", layout_stack.config().stack_top_max());
+    sink.diag_usize("user_stack_selected_top", layout_stack.top());
+    sink.diag_usize("user_stack_aslr_offset", layout_stack.aslr_offset());
+    sink.diag_usize("user_stack_execfn_ptr", layout_stack.execfn_ptr());
+    sink.diag_usize(
+        "user_stack_execfn_matches_selected",
+        execfn_matches_selected as usize,
+    );
+    sink.diag_usize(
+        "user_stack_auxv_complete",
+        layout_stack.auxv_complete() as usize,
     );
     sink.diag_usize("user_mapping_count", space.mapping_count());
     sink.diag_usize("user_segment_mapping_count", space.segment_mapping_count());

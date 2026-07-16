@@ -432,7 +432,7 @@ impl SmokeScenario for HwrngReadScenario {
         );
         assertions.assert_ok(
             "fixture completion",
-            VirtioRngFixture::prepare_completion(rng, 32),
+            VirtioRngFixture::prepare_completion(rng, 40),
         );
         let len = match rng.complete_entropy() {
             Ok(len) => len,
@@ -441,7 +441,7 @@ impl SmokeScenario for HwrngReadScenario {
                 return;
             }
         };
-        assertions.assert("completion len", len == 32);
+        assertions.assert("completion len", len == 40);
 
         match driver.scan(rng, &mut self.hwrng_core) {
             Ok(device_ref) => {
@@ -492,7 +492,14 @@ impl SmokeScenario for HwrngReadScenario {
         assertions.assert("rng avail update", rng.read_updates_data_avail());
         assertions.assert("remaining data", rng.data_avail() == 0);
         assertions.assert("data idx reset for next request", rng.data_idx() == 0);
-        assertions.assert("requeued when empty", rng.read_requeues_when_empty());
+        assertions.assert(
+            "not empty before low-watermark refill",
+            !rng.read_requeues_when_empty(),
+        );
+        assertions.assert(
+            "requeued below request watermark",
+            rng.read_requeues_below_request_watermark(),
+        );
         assertions.assert("next request pending", rng.request_pending());
         assertions.assert("request count", rng.request_count() == 2);
         assertions.assert("nonzero bytes", out.iter().any(|byte| *byte != 0));

@@ -10,6 +10,7 @@ int smoke_process_identity(void);
 int smoke_tty_termios(void);
 int smoke_uts_cwd(void);
 int smoke_time_random(void);
+void smoke_stack_expect_execfn(const char *execfn);
 int smoke_stack(void);
 
 #endif

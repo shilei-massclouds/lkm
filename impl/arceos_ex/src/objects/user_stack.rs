@@ -11,22 +11,66 @@ use super::{
 pub const USER_PAGE_SIZE: usize = 4096;
 pub const USER_STACK_SIZE: usize = 128 * 1024;
 #[allow(dead_code)]
-pub const USER_STACK_TOP: usize = 0x4000_0000;
+pub const USER_STACK_TOP_MAX: usize = 0x4000_0000;
+#[allow(dead_code)]
+pub const USER_STACK_TOP: usize = USER_STACK_TOP_MAX;
+#[allow(dead_code)]
+pub const USER_STACK_ASLR_WINDOW: usize = 8 * 1024 * 1024;
 #[allow(dead_code)]
 pub const USER_STACK_RLIMIT: usize = 8 * 1024 * 1024;
 #[allow(dead_code)]
 pub const USER_STACK_GUARD_GAP: usize = 256 * USER_PAGE_SIZE;
 pub const USER_STACK_RANDOM_BYTES: usize = 16;
+pub const USER_STACK_ASLR_BYTES: usize = 8;
+#[allow(dead_code)]
+pub const USER_STACK_ENTROPY_BYTES: usize = USER_STACK_RANDOM_BYTES + USER_STACK_ASLR_BYTES;
 
-const AT_NULL: usize = 0;
-const AT_PHDR: usize = 3;
-const AT_PHENT: usize = 4;
-const AT_PHNUM: usize = 5;
-const AT_PAGESZ: usize = 6;
-const AT_BASE: usize = 7;
-const AT_ENTRY: usize = 9;
+pub const AT_NULL: usize = 0;
+pub const AT_PHDR: usize = 3;
+pub const AT_PHENT: usize = 4;
+pub const AT_PHNUM: usize = 5;
+pub const AT_PAGESZ: usize = 6;
+pub const AT_BASE: usize = 7;
+pub const AT_FLAGS: usize = 8;
+pub const AT_ENTRY: usize = 9;
+pub const AT_UID: usize = 11;
+pub const AT_EUID: usize = 12;
+pub const AT_GID: usize = 13;
+pub const AT_EGID: usize = 14;
+pub const AT_HWCAP: usize = 16;
+pub const AT_CLKTCK: usize = 17;
+pub const AT_SECURE: usize = 23;
 pub const AT_RANDOM: usize = 25;
-const USER_INITIAL_AUXV_WORDS: usize = 16;
+pub const AT_EXECFN: usize = 31;
+pub const USER_INITIAL_AUXV_ENTRIES: usize = 17;
+const USER_INITIAL_AUXV_WORDS: usize = USER_INITIAL_AUXV_ENTRIES * 2;
+const USER_CLKTCK: usize = 100;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UserStackAuxv {
+    hwcap: usize,
+    uid: usize,
+    euid: usize,
+    gid: usize,
+    egid: usize,
+}
+
+#[allow(dead_code)]
+impl UserStackAuxv {
+    pub const fn new(hwcap: usize, uid: usize, euid: usize, gid: usize, egid: usize) -> Self {
+        Self {
+            hwcap,
+            uid,
+            euid,
+            gid,
+            egid,
+        }
+    }
+
+    pub const fn root(hwcap: usize) -> Self {
+        Self::new(hwcap, 0, 0, 0, 0)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UserStackGrowReject {
@@ -67,6 +111,9 @@ pub struct UserStack {
     initial_sp: usize,
     arg0_ptr: usize,
     random_ptr: usize,
+    execfn_ptr: usize,
+    auxv_ptr: usize,
+    aslr_offset: usize,
     config: UserStackConfig,
     pages: Vec<UserStackPage>,
     allocated: bool,
@@ -74,6 +121,7 @@ pub struct UserStack {
     zeroed: bool,
     initial_sp_bound: bool,
     minimal_arg_env_bound: bool,
+    auxv_complete: bool,
     last_fault_address: usize,
     last_old_base: usize,
     last_new_base: usize,
@@ -94,6 +142,9 @@ impl UserStack {
             initial_sp: 0,
             arg0_ptr: 0,
             random_ptr: 0,
+            execfn_ptr: 0,
+            auxv_ptr: 0,
+            aslr_offset: 0,
             config: UserStackConfig::linux_default(),
             pages: Vec::new(),
             allocated: false,
@@ -101,6 +152,7 @@ impl UserStack {
             zeroed: false,
             initial_sp_bound: false,
             minimal_arg_env_bound: false,
+            auxv_complete: false,
             last_fault_address: 0,
             last_old_base: 0,
             last_new_base: 0,
@@ -142,6 +194,22 @@ impl UserStack {
 
     pub const fn random_ptr(&self) -> usize {
         self.random_ptr
+    }
+
+    pub const fn execfn_ptr(&self) -> usize {
+        self.execfn_ptr
+    }
+
+    pub const fn auxv_ptr(&self) -> usize {
+        self.auxv_ptr
+    }
+
+    pub const fn aslr_offset(&self) -> usize {
+        self.aslr_offset
+    }
+
+    pub const fn auxv_complete(&self) -> bool {
+        self.auxv_complete
     }
 
     pub const fn config(&self) -> UserStackConfig {
@@ -246,7 +314,10 @@ impl UserStack {
         interpreter: Option<&ElfObject>,
         argv: &[&[u8]],
         config: UserStackConfig,
+        execfn: &[u8],
         random: &[u8; USER_STACK_RANDOM_BYTES],
+        aslr_seed: &[u8; USER_STACK_ASLR_BYTES],
+        auxv: UserStackAuxv,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
@@ -257,7 +328,10 @@ impl UserStack {
             argv,
             &[],
             config,
+            execfn,
             random,
+            aslr_seed,
+            auxv,
             page_allocator,
             page_metadata_map,
         )
@@ -272,7 +346,10 @@ impl UserStack {
         argv: &[&[u8]],
         envp: &[&[u8]],
         config: UserStackConfig,
+        execfn: &[u8],
         random: &[u8; USER_STACK_RANDOM_BYTES],
+        aslr_seed: &[u8; USER_STACK_ASLR_BYTES],
+        auxv: UserStackAuxv,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
@@ -282,15 +359,19 @@ impl UserStack {
             || elf.state() != State::Ready
             || interpreter.is_some_and(|interp| interp.state() != State::Ready)
             || argv.is_empty()
+            || execfn.is_empty()
             || config.random_bytes() != USER_STACK_RANDOM_BYTES
-            || config.stack_top() <= config.rlimit_stack()
-            || !config.stack_top().is_multiple_of(USER_PAGE_SIZE)
         {
             return setup_failed(self.lifecycle.state());
         }
 
+        let Some((selected_top, aslr_offset)) = select_stack_top(config, aslr_seed) else {
+            return setup_failed(self.lifecycle.state());
+        };
+
         self.config = config;
-        self.top = config.stack_top();
+        self.top = selected_top;
+        self.aslr_offset = aslr_offset;
         self.base = self.top - config.rlimit_stack();
         self.pages.clear();
         let Some(initial_sp) = self.write_initial_arg_env(
@@ -298,7 +379,9 @@ impl UserStack {
             interpreter,
             argv,
             envp,
+            execfn,
             random,
+            auxv,
             page_allocator,
             page_metadata_map,
         ) else {
@@ -327,7 +410,9 @@ impl UserStack {
         interpreter: Option<&ElfObject>,
         argv: &[&[u8]],
         envp: &[&[u8]],
+        execfn: &[u8],
         random: &[u8; USER_STACK_RANDOM_BYTES],
+        auxv_facts: UserStackAuxv,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> Option<usize> {
@@ -339,6 +424,16 @@ impl UserStack {
         envp_ptrs.resize(envp.len(), 0);
 
         let mut string_top = self.top;
+        self.execfn_ptr = align_down(string_top.checked_sub(execfn.len().checked_add(1)?)?, 8);
+        self.write_bytes_allocating(self.execfn_ptr, execfn, page_allocator, page_metadata_map)?;
+        self.write_bytes_allocating(
+            self.execfn_ptr + execfn.len(),
+            &[0],
+            page_allocator,
+            page_metadata_map,
+        )?;
+        string_top = self.execfn_ptr;
+
         let mut index = argv.len();
         while index > 0 {
             index -= 1;
@@ -426,15 +521,25 @@ impl UserStack {
         word_index += 1;
 
         let auxv = [
+            (AT_HWCAP, auxv_facts.hwcap),
+            (AT_PAGESZ, USER_PAGE_SIZE),
+            (AT_CLKTCK, USER_CLKTCK),
             (AT_PHDR, elf.phdr_vaddr()),
             (AT_PHENT, elf.phentsize()),
             (AT_PHNUM, elf.program_header_count()),
-            (AT_ENTRY, elf.entry()),
             (AT_BASE, interpreter.map_or(0, ElfObject::load_bias)),
-            (AT_PAGESZ, USER_PAGE_SIZE),
+            (AT_FLAGS, 0),
+            (AT_ENTRY, elf.entry()),
+            (AT_UID, auxv_facts.uid),
+            (AT_EUID, auxv_facts.euid),
+            (AT_GID, auxv_facts.gid),
+            (AT_EGID, auxv_facts.egid),
+            (AT_SECURE, 0),
             (AT_RANDOM, self.random_ptr),
+            (AT_EXECFN, self.execfn_ptr),
             (AT_NULL, 0),
         ];
+        self.auxv_ptr = initial_sp + word_index * word;
         for (key, value) in auxv {
             self.write_usize_allocating(
                 initial_sp + word_index * word,
@@ -452,6 +557,10 @@ impl UserStack {
             word_index += 1;
         }
         self.arg0_ptr = argv_ptrs[0];
+        self.auxv_complete = word_index == word_count;
+        if !self.auxv_complete {
+            return None;
+        }
         Some(initial_sp)
     }
 
@@ -618,6 +727,16 @@ impl UserStack {
         Some(unsafe { *((linear + addr - page_vaddr) as *const u8) })
     }
 
+    pub fn read_usize(&self, page_metadata_map: &PageMetadataMap, addr: usize) -> Option<usize> {
+        let mut bytes = [0u8; core::mem::size_of::<usize>()];
+        let mut index = 0usize;
+        while index < bytes.len() {
+            bytes[index] = self.read_byte(page_metadata_map, addr + index)?;
+            index += 1;
+        }
+        Some(usize::from_ne_bytes(bytes))
+    }
+
     pub fn write_existing_byte(
         &self,
         page_metadata_map: &PageMetadataMap,
@@ -645,4 +764,33 @@ fn setup_failed(state: State) -> EventResult {
 
 const fn align_down(value: usize, align: usize) -> usize {
     value & !(align - 1)
+}
+
+pub fn select_stack_top(
+    config: UserStackConfig,
+    aslr_seed: &[u8; USER_STACK_ASLR_BYTES],
+) -> Option<(usize, usize)> {
+    let window = config.aslr_window();
+    if !config.stack_top_max().is_multiple_of(USER_PAGE_SIZE)
+        || window < USER_PAGE_SIZE
+        || !window.is_multiple_of(USER_PAGE_SIZE)
+    {
+        return None;
+    }
+    let window_pages = window / USER_PAGE_SIZE;
+    if !window_pages.is_power_of_two() {
+        return None;
+    }
+    let seed = u64::from_le_bytes(*aslr_seed);
+    let offset_pages = (seed as usize) & (window_pages - 1);
+    let offset = offset_pages.checked_mul(USER_PAGE_SIZE)?;
+    let selected_top = config.stack_top_max().checked_sub(offset)?;
+    let rlimit_base = selected_top.checked_sub(config.rlimit_stack())?;
+    let layout_floor = super::user_boot::USER_HEAP_BASE
+        .checked_add(super::user_boot::USER_HEAP_SIZE)?
+        .checked_add(config.guard_gap())?;
+    if rlimit_base < layout_floor {
+        return None;
+    }
+    Some((selected_top, offset))
 }

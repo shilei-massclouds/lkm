@@ -39,6 +39,10 @@ reset/remove 仍为 deferred。
 
 `HwRngCore` 维护 registered device 与 `current_rng`。读取经
 `HwRngCore::read_current -> HwRngDevice::read -> VirtioRngDevice::read_entropy`，普通调用与
-smoke 不绕过 core。首片只覆盖 nonblocking consumption 和耗尽后重新提交；blocking wait、
+smoke 不绕过 core。首片覆盖 nonblocking consumption 和低水位重新提交：一次非短读取后若剩余
+`data_avail` 小于该次请求长度，剩余尾部不足以服务下一次同尺寸读取，device 将其丢弃、重置
+`data_idx/data_avail` 并立即重新提交完整 input buffer；完全耗尽是该规则的特例。重新提交失败使该次
+read 失败。请求开始时已经不足而形成的短读仍把实际长度返回给 caller，caller 不得把它伪装为完整
+entropy；exec 因而继续映射 `EntropyUnavailable/EAGAIN`。blocking wait、
 random pool、完整 `/dev/hwrng` file operations、quality/sysfs、freeze/restore 和完整资源回收
 保持 deferred。devfs 的 `hwrng` 节点只提供命名空间可发现性，不增加旁路读取入口。

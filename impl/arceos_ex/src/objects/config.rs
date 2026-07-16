@@ -44,7 +44,8 @@ const LINUX_STK_LIM: usize = 8 * 1024 * 1024;
 const LINUX_INIT_RLIMIT_STACK: usize = LINUX_STK_LIM;
 const LINUX_STACK_INITIAL_EXPAND: usize = 128 * 1024;
 const LINUX_STACK_GUARD_GAP: usize = 256 * PAGE_SIZE;
-const USER_STACK_TOP: usize = 0x4000_0000;
+const USER_STACK_TOP_MAX: usize = 0x4000_0000;
+const USER_STACK_ASLR_WINDOW: usize = 8 * 1024 * 1024;
 const USER_STACK_RANDOM_BYTES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,7 +53,8 @@ pub struct UserStackConfig {
     initial_expand: usize,
     rlimit_stack: usize,
     guard_gap: usize,
-    stack_top: usize,
+    stack_top_max: usize,
+    aslr_window: usize,
     random_bytes: usize,
 }
 
@@ -62,7 +64,8 @@ impl UserStackConfig {
             initial_expand: LINUX_STACK_INITIAL_EXPAND,
             rlimit_stack: LINUX_INIT_RLIMIT_STACK,
             guard_gap: LINUX_STACK_GUARD_GAP,
-            stack_top: USER_STACK_TOP,
+            stack_top_max: USER_STACK_TOP_MAX,
+            aslr_window: USER_STACK_ASLR_WINDOW,
             random_bytes: USER_STACK_RANDOM_BYTES,
         }
     }
@@ -79,8 +82,12 @@ impl UserStackConfig {
         self.guard_gap
     }
 
-    pub const fn stack_top(self) -> usize {
-        self.stack_top
+    pub const fn stack_top_max(self) -> usize {
+        self.stack_top_max
+    }
+
+    pub const fn aslr_window(self) -> usize {
+        self.aslr_window
     }
 
     pub const fn random_bytes(self) -> usize {

@@ -15,8 +15,11 @@ limits. Runtime `SyscallTable.Execve` performs gate and complete usercopy before
 value with `argv[0]`, `HOME=/`, and `TERM=linux`.
 
 The staging `UserStack` follows the independent [`UserStack`](user-stack.md) contract: sparse physical pages,
-128 KiB initial VMA expansion, 8 MiB rlimit, 1 MiB guard gap and a 16-byte HWRNG-backed `AT_RANDOM` block.
-Kernel stack canaries and compiler stack-protector policy remain deferred.
+128 KiB initial VMA expansion, 8 MiB rlimit, 1 MiB guard gap, an 8 MiB page-granular top-ASLR window and a
+16-byte HWRNG-backed `AT_RANDOM` block. Prepare snapshots the absolute filename, common-ISA ELF HWCAP, and
+the current real/effective UID/GID before commit; boot uses root values. It then issues one exact 24-byte
+HWRNG read. The first 16 bytes and last 8-byte ASLR seed are passed as distinct inputs, so neither can affect
+or reveal the other. Kernel stack canaries and compiler stack-protector policy remain deferred.
 
 The only allowed call direction is:
 
@@ -31,7 +34,7 @@ UserBootPayload or SyscallTable
 
 Prepare owns all fallible work. Its error mapping is `EFAULT` for pre-transaction usercopy, `E2BIG` for
 argument/string capacity, `ENOENT` for main/interpreter lookup, `ENOEXEC` for format rejection, and `ENOMEM`
-for backing/page-table allocation, and `EAGAIN` for unavailable or short HWRNG input. Entropy acquisition is
+for backing/page-table allocation, and `EAGAIN` for unavailable or any non-24-byte HWRNG input. Entropy acquisition is
 pre-commit; boot treats this failure as terminal while runtime preserves the old image. Abort releases every staging page/page-table and resets the active slot;
 current address space, SATP, trap frame, fd table and process identity are immutable on this path.
 
@@ -53,4 +56,5 @@ parent. A transaction may reset only after either release or this explicit owner
 
 Checkpoint ownership stays owner-scoped. The transaction dispatches the existing stable `UserBoot.*` or
 `UserExec.*` sequence without renaming, reordering or double-emitting checkpoints. Observation fields live
-with the existing checkpoint owner and may be populated through narrow crate-internal hooks.
+with the existing checkpoint owner and may be populated through narrow crate-internal hooks. Appended fields
+cover stack top max, selected top, ASLR offset, execfn pointer and the stack-computed auxv-complete fact.

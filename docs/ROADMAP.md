@@ -54,6 +54,9 @@
 | `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | root switch 后命名空间补强 | 明确 ext2 root 下 `/dev` 挂接、mount namespace 与任务 FsStruct 的运行期规则。 | [RootfsPhase coding](../spec/coding/phases/smp-runtime/rootfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界 | 对齐 iget/dentry cache、negative lookup、inode identity、refcount 与 evict 边界。 | [Ext2 coding](../spec/coding/objects/ext2.md)；[VFS coding](../spec/coding/objects/vfs.md) |
 | `P1` | 待办 | model/coding/arceos_ex/mm/fs | page cache / address_space / folio read path | 规格化 AddressSpace/page cache/folio/readahead，让 VFS read 从直接 block copy 迁移；writeback/mmap 后置。 | [VFS coding](../spec/coding/objects/vfs.md) |
+| `P1` | 待办 | model/coding/arceos_ex/syscall/mm/signal | 动态用户栈 rlimit 与越界信号 | 实现 `prlimit64/setrlimit`、动态 `RLIMIT_STACK`，并把栈越界转换为 Linux-like `SIGSEGV/si_code`。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
+| `P1` | 待办 | model/coding/arceos_ex/mm/task | 通用用户栈 VMA、COW 与多线程 | 展开 fork/COW、多个线程栈、`MAP_STACK/MAP_GROWSDOWN`、通用 VMA fault core 与并发锁。 | [UserStack charter](../spec/charter/objects/user-stack.md) |
+| `P2` | 延期 | model/coding/arceos_ex/random/hardening | 用户/内核栈随机与 protector 强化 | 在完整 CRNG 基础上补内核 compiler stack protector、per-task canary 与更强栈保护；RISC-V 原生更大 ASLR 窗口随地址布局扩展再评估。 | [UserStack coding](../spec/coding/objects/user-stack.md) |
 | `P2` | 延期 | compose/arceos_ex | 对象封装为组件试验 | 选择稳定对象后再明确 crate/component 边界、接口与验收方式。 | [compose 规格](../spec/compose/README.md) |
 | `P1` | 待办 | arceos_ex/console | printk TX 异常/压力边界 | 有 nightly/差分证据后再规格化 queue full、drop/truncate、hardirq/reentrant printk 和 handler 内 printk 策略。 | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
 | `P1` | 待办 | arceos_ex/console | serial8250 runtime 与 TTY 分层 | 收敛 RuntimePort/Console/TtyPort/FlipBuffer/XmitFifo 职责与 ordinary I/O runtime 边界。 | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |

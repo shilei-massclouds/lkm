@@ -23,6 +23,15 @@ uses the `user-smoke:` prefix, begin/end markers, `status=N` and blank-line case
 determines success from `user exit status=N`. Directory probing uses the RISC-V ABI for
 `openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY)`, `getdents64(61)`, record validation and close.
 
+The libc-linked stack smoke reads auxv through `getauxval()` and requires the independent exec filename to
+match that fixture invocation's startup `argv[0]` (the same binary is installed as both `/sbin/init` and
+`/bin/ls` by existing cases), plus common RISC-V HWCAP, real/effective UID/GID, and a nonzero 16-byte
+`AT_RANDOM` block matching the running process. It keeps the compiler stack-protector path and the 256 KiB
+demand-growth plus cross-page usercopy probes. Object smoke separately covers ASLR endpoints/alignment/
+layout, deterministic seed selection, independence of ASLR seed and `AT_RANDOM`, filename differing from
+`argv[0]`, every supported auxv key/value and final `AT_NULL`, 16-byte SP alignment, exact-24/short/
+unavailable entropy rollback, and stack fault/snapshot behavior under randomized tops.
+
 Distribution-command analysis first uses existing local tools (`file`, `readelf`, `objdump`, headers and
 read-only sysroot inspection) and keeps temporary notes out of the default build/image/test path. BusyBox
 whole-binary symbols are conservative candidates, not an applet trace. Any promoted syscall/VFS slice is

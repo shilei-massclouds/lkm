@@ -1,15 +1,32 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/auxv.h>
 #include <sys/random.h>
 
 #ifndef AT_RANDOM
 #define AT_RANDOM 25
 #endif
+#ifndef AT_EXECFN
+#define AT_EXECFN 31
+#endif
+
+#define RISCV_HWCAP(letter) (1UL << ((letter) - 'A'))
+#define RISCV_G_HWCAP (RISCV_HWCAP('I') | RISCV_HWCAP('M') | \
+			 RISCV_HWCAP('A') | RISCV_HWCAP('F') | \
+			 RISCV_HWCAP('D'))
+#define RISCV_REQUIRED_HWCAP (RISCV_G_HWCAP | RISCV_HWCAP('C'))
 
 #define PAGE_SIZE 4096
 #define STACK_PROBE_BYTES (256 * 1024)
 #define USERCOPY_STACK_BYTES (192 * 1024)
+
+static const char *expected_execfn;
+
+void smoke_stack_expect_execfn(const char *execfn)
+{
+	expected_execfn = execfn;
+}
 
 __attribute__((noinline)) static int probe_stack_usercopy(void)
 {
@@ -42,20 +59,33 @@ __attribute__((noinline)) static int probe_growing_stack(void)
 int smoke_stack(void)
 {
 	const unsigned char *random = (const unsigned char *)(uintptr_t)getauxval(AT_RANDOM);
+	const char *execfn = (const char *)(uintptr_t)getauxval(AT_EXECFN);
+	unsigned long hwcap = getauxval(AT_HWCAP);
 	size_t index;
 	unsigned char combined = 0;
 
-	if (random == NULL) {
+	if (execfn == NULL || expected_execfn == NULL ||
+	    strcmp(execfn, expected_execfn) != 0) {
 		return 1;
+	}
+	if ((hwcap & RISCV_REQUIRED_HWCAP) != RISCV_REQUIRED_HWCAP) {
+		return 2;
+	}
+	if (getauxval(AT_UID) != 0 || getauxval(AT_EUID) != 0 ||
+	    getauxval(AT_GID) != 0 || getauxval(AT_EGID) != 0) {
+		return 3;
+	}
+	if (random == NULL) {
+		return 4;
 	}
 	for (index = 0; index < 16; ++index) {
 		combined |= random[index];
 	}
 	if (combined == 0) {
-		return 2;
+		return 5;
 	}
 	if (probe_stack_usercopy() != 0) {
-		return 3;
+		return 6;
 	}
 	return probe_growing_stack();
 }

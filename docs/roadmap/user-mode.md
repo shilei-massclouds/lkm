@@ -23,3 +23,31 @@
 3. **P0：发行版 rootfs smoke 与 overlay 分层**。overlay 继续作为 `user_smoke` 和 staged probe fixture；发行版路径已新增 `ROOTFS_OVERLAY=none init=/bin/ls` 与 delayed-input `init=/bin/sh` smoke，并已覆盖 `/bin/sh -> /bin/ls` 外部命令闭包。下一步只沿真实证据推进原生 OpenRC 的 rc.local/local service 路径，不把 overlay 机制提前删除，也不通过更换输入形态或测试专用 kernel API 制造通过结果；rc.local 初期保持 manual/focused case，不进入默认 `make test` 强制门禁。
 4. **P1：Rootfs/VFS/Ext2 正式化补强**。补 `/dev` 在 ext2 root 下的挂接策略、mount namespace/chroot/cwd/pwd 规则、VFS inode/dentry cache 边界、negative lookup/refcount/evict deferred，以及 page cache / `AddressSpace` / folio read path；这些不阻塞 dynamic fixture，但会成为发行版用户态和长期文件系统语义的前置。
 5. **P1：用户态 I/O 与 TTY 分层**。保持当前 stdio fd 到 console char-device backend 的最小路径；完整 `/dev/console`、TTY/N_TTY、line discipline、stdin/stdout 语义、poll、pipes 和普通文件写路径继续后置，需在 printk console 与 serial8250 runtime 层职责稳定后推进。
+
+## 用户栈 initial ABI 与布局首片（2026-07-16）
+
+本片把 exec initial stack 收敛到当前能够准确表达的 Linux RISC-V 基线。每次 exec 在
+point-of-no-return 前只读取一次 24 字节 HWRNG：前 16 字节仅写入 `AT_RANDOM`，后 8 字节仅用于
+在 `stack_top_max=0x40000000` 以下的 8 MiB 窗口选择页对齐栈顶；initial SP 继续 16 字节对齐，
+本次选定 top 同时约束 rlimit、guard、demand growth 和 ownership。initial stack 独立复制 exec
+filename，`AT_EXECFN` 不复用 `argv[0]`。auxv 现包含 HWCAP、PAGESZ、CLKTCK、PHDR/PHENT/PHNUM、
+BASE、FLAGS、ENTRY、exec 前 UID/EUID/GID/EGID、SECURE、RANDOM、EXECFN 和 NULL；没有事实来源的
+platform、HWCAP2、rseq 与 vDSO 条目仍不生成。short/unavailable entropy 在 commit 前返回
+`EntropyUnavailable`，runtime 映射为 `EAGAIN` 并保留旧映像。
+
+稳定的 `UserAddressSpace.Ready` checkpoint 没有插入或重排，诊断已扩展为 top max、选定 top、
+ASLR offset、execfn pointer 和 auxv completeness，并改为在 boot commit 前读取 transaction staging
+对象。对象 smoke 覆盖配置端点、布局不碰撞、seed 可预测性、两段熵独立性、filename 与
+`argv[0]` 不同、完整 auxv、24 字节熵失败回滚，以及随机 top 下既有 growth/guard/rlimit/usercopy/
+snapshot 行为；guest smoke 通过 `getauxval()` 验证当前 invocation 的 `AT_EXECFN`、HWCAP、
+credentials 和非零 `AT_RANDOM`，并保留 stack protector、192 KiB cross-page usercopy 和 256 KiB
+栈增长。
+
+DF-0003 的首轮 30 次复现给出同一稳定边界：boot 和第一次 exec 各消费 24 字节后，virtio-rng
+缓存只剩 16 字节，第二次 exec 因 short read 返回 `EAGAIN`。因此 virtio-rng 规格与实现增加长期
+可用的 request low-watermark refill：一次完整读取后，若余量小于本次请求长度，就丢弃尾部并
+重新提交 full buffer；真正的 short completion 仍向 exec 暴露实际长度并失败。修正后 DF-0003
+30/30；默认 stress 的 DF-0001、DF-0002、DF-0003 各 10/10；Linux exact baseline 与默认
+rc.local paired difftest 各 1/1。对象 smoke 55/55，真实 user guest 与 address-space checkpoint
+probe 通过，最终仓库根 `make test` 为 171/171。动态 rlimit/越界 signal、COW/多线程栈与通用
+VMA fault、完整 CRNG 和内核 compiler protector 继续由主 roadmap 的 P1/P2 行承载。

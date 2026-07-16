@@ -59,6 +59,7 @@ predicate virtio_rng_read_updates_data_idx<T>(device: T) -> bool;
 predicate virtio_rng_read_updates_data_avail<T>(device: T) -> bool;
 predicate virtio_rng_read_returns_nonzero<T>(device: T) -> bool;
 predicate virtio_rng_read_requeues_when_empty<T>(device: T) -> bool;
+predicate virtio_rng_read_requeues_below_request_watermark<T>(device: T) -> bool;
 predicate virtio_rng_read_nonblocking_first_slice<T>(device: T) -> bool;
 predicate virtio_rng_blocking_wait_deferred<T>(device: T) -> bool;
 predicate virtio_rng_device_removed<T>(device: T) -> bool;
@@ -286,6 +287,7 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_read_nonblocking_first_slice(self);
                     virtio_rng_blocking_wait_deferred(self);
                     virtio_rng_read_requeues_when_empty(self);
+                    virtio_rng_read_requeues_below_request_watermark(self);
                 }
             }
         }

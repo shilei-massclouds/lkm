@@ -245,7 +245,12 @@ impl SmokeScenario for UserBootElfScenario {
                     interpreter_ref,
                     &init_argv,
                     ctx.config.user_stack(),
+                    USER_INIT_PATH,
                     &[0x3c; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
+                    &[0; crate::objects::user_stack::USER_STACK_ASLR_BYTES],
+                    crate::objects::user_stack::UserStackAuxv::root(
+                        ctx.cpu_capabilities.elf_hwcap(),
+                    ),
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -532,7 +537,8 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack.backing_pages_allocated()
                 && stack.zeroed()
                 && stack.initial_sp_bound()
-                && stack.minimal_arg_env_bound(),
+                && stack.minimal_arg_env_bound()
+                && stack.auxv_complete(),
         );
         assertions.assert(
             "user stack bounds",
@@ -544,7 +550,9 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack.initial_sp().is_multiple_of(16)
                 && stack.arg0_ptr() > stack.initial_sp()
                 && stack.arg0_ptr() < stack.top()
-                && stack.base() + stack.size() == USER_STACK_TOP
+                && stack.execfn_ptr() > stack.initial_sp()
+                && stack.execfn_ptr() < stack.top()
+                && stack.base() + stack.size() == stack.top()
                 && stack.base().is_multiple_of(USER_PAGE_SIZE)
                 && stack.top().is_multiple_of(USER_PAGE_SIZE),
         );
@@ -555,8 +563,10 @@ impl SmokeScenario for UserBootElfScenario {
                     == crate::objects::user_stack::USER_STACK_RLIMIT
                 && ctx.config.user_stack().guard_gap()
                     == crate::objects::user_stack::USER_STACK_GUARD_GAP
-                && ctx.config.user_stack().stack_top()
-                    == crate::objects::user_stack::USER_STACK_TOP
+                && ctx.config.user_stack().stack_top_max()
+                    == crate::objects::user_stack::USER_STACK_TOP_MAX
+                && ctx.config.user_stack().aslr_window()
+                    == crate::objects::user_stack::USER_STACK_ASLR_WINDOW
                 && ctx.config.user_stack().random_bytes()
                     == crate::objects::user_stack::USER_STACK_RANDOM_BYTES,
         );
@@ -579,6 +589,16 @@ impl SmokeScenario for UserBootElfScenario {
                 b"/sbin/init\0",
             ),
         );
+        assertions.assert(
+            "user stack independent execfn",
+            stack.execfn_ptr() != stack.arg0_ptr()
+                && stack_contains_at(
+                    stack,
+                    &ctx.page_metadata_map,
+                    stack.execfn_ptr(),
+                    b"/sbin/init\0",
+                ),
+        );
         let word = core::mem::size_of::<usize>();
         let init_argc = stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp());
         let init_argv0 = stack_usize_at(stack, &ctx.page_metadata_map, stack.initial_sp() + word);
@@ -593,26 +613,74 @@ impl SmokeScenario for UserBootElfScenario {
                 && init_argv_null == Some(0)
                 && init_envp_null == Some(0),
         );
-        let random_key = stack_usize_at(
-            stack,
-            &ctx.page_metadata_map,
-            stack.initial_sp() + 16 * word,
-        );
-        let random_value = stack_usize_at(
-            stack,
-            &ctx.page_metadata_map,
-            stack.initial_sp() + 17 * word,
-        );
+        let expected_auxv = [
+            (
+                crate::objects::user_stack::AT_HWCAP,
+                ctx.cpu_capabilities.elf_hwcap(),
+            ),
+            (crate::objects::user_stack::AT_PAGESZ, USER_PAGE_SIZE),
+            (crate::objects::user_stack::AT_CLKTCK, 100),
+            (crate::objects::user_stack::AT_PHDR, elf.phdr_vaddr()),
+            (crate::objects::user_stack::AT_PHENT, elf.phentsize()),
+            (
+                crate::objects::user_stack::AT_PHNUM,
+                elf.program_header_count(),
+            ),
+            (
+                crate::objects::user_stack::AT_BASE,
+                interpreter_ref.map_or(0, |interp| interp.load_bias()),
+            ),
+            (crate::objects::user_stack::AT_FLAGS, 0),
+            (crate::objects::user_stack::AT_ENTRY, elf.entry()),
+            (crate::objects::user_stack::AT_UID, 0),
+            (crate::objects::user_stack::AT_EUID, 0),
+            (crate::objects::user_stack::AT_GID, 0),
+            (crate::objects::user_stack::AT_EGID, 0),
+            (crate::objects::user_stack::AT_SECURE, 0),
+            (crate::objects::user_stack::AT_RANDOM, stack.random_ptr()),
+            (crate::objects::user_stack::AT_EXECFN, stack.execfn_ptr()),
+            (crate::objects::user_stack::AT_NULL, 0),
+        ];
+        let mut auxv_matches = true;
+        let mut aux_index = 0usize;
+        while aux_index < expected_auxv.len() {
+            let entry = stack.auxv_ptr() + aux_index * 2 * word;
+            auxv_matches &= stack_usize_at(stack, &ctx.page_metadata_map, entry)
+                == Some(expected_auxv[aux_index].0)
+                && stack_usize_at(stack, &ctx.page_metadata_map, entry + word)
+                    == Some(expected_auxv[aux_index].1);
+            aux_index += 1;
+        }
         assertions.assert(
-            "user stack AT_RANDOM",
-            random_key == Some(crate::objects::user_stack::AT_RANDOM)
-                && random_value == Some(stack.random_ptr())
+            "user stack Linux RISC-V auxv",
+            auxv_matches
+                && expected_auxv.len() == crate::objects::user_stack::USER_INITIAL_AUXV_ENTRIES
                 && stack_contains_at(
                     stack,
                     &ctx.page_metadata_map,
                     stack.random_ptr(),
                     &[0x3c; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
                 ),
+        );
+        let config = ctx.config.user_stack();
+        let zero_seed = [0; crate::objects::user_stack::USER_STACK_ASLR_BYTES];
+        let max_seed = [0xff; crate::objects::user_stack::USER_STACK_ASLR_BYTES];
+        let zero_top = crate::objects::user_stack::select_stack_top(config, &zero_seed);
+        let max_top = crate::objects::user_stack::select_stack_top(config, &max_seed);
+        assertions.assert(
+            "user stack ASLR endpoints and layout",
+            stack.aslr_offset() == 0
+                && stack.top() == USER_STACK_TOP
+                && zero_top == Some((config.stack_top_max(), 0))
+                && max_top
+                    == Some((
+                        config.stack_top_max() - config.aslr_window() + USER_PAGE_SIZE,
+                        config.aslr_window() - USER_PAGE_SIZE,
+                    ))
+                && max_top.is_some_and(|(top, _)| {
+                    top - config.rlimit_stack()
+                        >= USER_HEAP_BASE + USER_HEAP_SIZE + config.guard_gap()
+                }),
         );
         let Some(stack_mapping) = space.stack_mapping() else {
             assertions.assert("stack mapping", false);
@@ -1551,7 +1619,10 @@ fn exercise_stack_argument_bounds(
             interpreter,
             &getty_argv,
             crate::objects::config::UserStackConfig::linux_default(),
+            b"/usr/libexec/getty",
             &[0xa5; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
+            &[0xff; crate::objects::user_stack::USER_STACK_ASLR_BYTES],
+            crate::objects::user_stack::UserStackAuxv::new(0x55aa, 1000, 1001, 1002, 1003),
             page_allocator,
             page_metadata_map,
         )
@@ -1581,7 +1652,19 @@ fn exercise_stack_argument_bounds(
         "user stack bounded argv strings",
         getty_argv0.is_some_and(|ptr| {
             stack_contains_at(&getty_stack, page_metadata_map, ptr, b"/sbin/getty\0")
-        }),
+        }) && getty_stack.execfn_ptr() != getty_stack.arg0_ptr()
+            && stack_contains_at(
+                &getty_stack,
+                page_metadata_map,
+                getty_stack.execfn_ptr(),
+                b"/usr/libexec/getty\0",
+            )
+            && getty_stack.aslr_offset()
+                == crate::objects::user_stack::USER_STACK_ASLR_WINDOW - USER_PAGE_SIZE
+            && getty_stack.top()
+                == crate::objects::user_stack::USER_STACK_TOP_MAX
+                    - crate::objects::user_stack::USER_STACK_ASLR_WINDOW
+                    + USER_PAGE_SIZE,
     );
     getty_stack.release_exec_backing(page_allocator, page_metadata_map);
 }
