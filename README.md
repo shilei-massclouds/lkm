@@ -21,10 +21,21 @@ LKM 是一个围绕目标内核、规格模型和验证工具持续演进的实�
 
 ```sh
 make verify
+make verify VERBOSE=1
+make verify REPORT=graph
 make test
 ```
 
-`make verify` 会对默认规格 `spec/model/main.spec` 执行推导检查。`make test` 会汇总规格验证、checkpoint inventory/Linux mapping/coverage/instrumentation plan 产物漂移检查、默认运行入口、用户态启动入口、KUnit 风格检查和 smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
+`make verify` 会对默认规格 `spec/model/main.spec` 执行完整、严格的 parse/model/derive/check
+验证，默认只输出各阶段概要以及包括 deferred/trimmed 在内的计数。需要查看完整 trace 和逐项
+deferred/trimmed 明细时使用 `make verify VERBOSE=1`；只有 `VERBOSE` 的值严格等于 `1` 才启用
+详细文本输出，验证范围、严格门禁和退出码保持不变。`REPORT=graph` 保持 trace SVG 报告行为，
+不受 `VERBOSE` 影响。
+
+`make test` 的规格验证阶段只执行一次 `make verify VERBOSE=1`，并通过测试日志输出详细报告；
+它不会再额外执行默认概要模式。除此之外，`make test` 会汇总 checkpoint inventory/Linux
+mapping/coverage/instrumentation plan 产物漂移检查、默认运行入口、用户态启动入口、KUnit 风格检查和
+smoke 启动测试；当前默认同时覆盖 native PLIC provider 与 Linux object provider，适合作为修改后的第一轮回归入口。
 
 checkpoint inventory、Linux mapping、Linux mapping coverage 和 Linux instrumentation plan 是已提交的审阅产物。需要重新生成时运行：
 

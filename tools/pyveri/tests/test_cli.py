@@ -62,20 +62,68 @@ class CliTests(unittest.TestCase):
         self.assertRegex(text, r"deferred: [1-9][0-9]*")
         self.assertRegex(text, r"trimmed: [1-9][0-9]*")
         self.assertIn("legacy_boundaries: 0", text)
+        self.assertIn("\ntrace:\n", text)
+        self.assertIn("\ndeferred:\n", text)
+        self.assertIn("\ntrimmed:\n", text)
         self.assertIn("user_clone.001 [Feature]", text)
         self.assertIn("MmCoreInitPhase.Transition::Setup", text)
         self.assertIn("InterruptPhase.Transition::Setup", text)
 
-    def test_default_command_runs_full_verification(self) -> None:
+    def test_summary_mode_runs_strict_full_verification_without_details(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            exit_code = main([str(self.spec)])
+            exit_code = main([str(self.spec), "--strict"])
 
         self.assertEqual(exit_code, 0)
         text = stdout.getvalue()
+        self.assertIn("parse: ok", text)
+        self.assertIn("model: ok", text)
         self.assertIn("derive: ok", text)
         self.assertIn("check: passed", text)
+        self.assertRegex(text, r"deferred: [1-9][0-9]*")
+        self.assertRegex(text, r"trimmed: [1-9][0-9]*")
+        self.assertNotIn("\ntrace:\n", text)
+        self.assertNotIn("\ndeferred:\n", text)
+        self.assertNotIn("\ntrimmed:\n", text)
+
+    def test_verbose_strict_derivation_rejects_open_obligations(self) -> None:
+        source = """
+            object ComputerProject: ProjectObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            deferred demo.001 {
+                                category: DeferredCategory::Proof;
+                                summary: "Prove the missing demo fact.";
+                                evidence { missing_demo_evidence(ComputerProject); }
+                                close_when: "The fact has a formal provider and a regression test.";
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "open-obligation.spec"
+            spec.write_text(source, encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main([str(spec), "--derive", "--strict"])
+
+        self.assertEqual(exit_code, 1)
+        text = stdout.getvalue()
+        self.assertIn("check: failed", text)
+        self.assertIn("obligation: 1", text)
+        self.assertIn("\ntrace:\n", text)
+        self.assertIn("\ndeferred:\n", text)
+        self.assertIn("\nobligation:\n", text)
 
     def test_parse_command_prints_parse_summary(self) -> None:
         stdout = io.StringIO()

@@ -3,6 +3,7 @@ include $(ROOT)/impl/providers/linux-6.12.mk
 KERNEL ?= arceos_ex
 LOG ?= info
 REPORT ?= text
+VERBOSE ?= 0
 SPEC ?= spec/model/main.spec
 TRACE_HIDE_CONTEXTS ?= SingleTaskContext,SingleTaskInterruptStreamContext,BootIdleStartupContext
 APP ?= hello
@@ -26,6 +27,12 @@ STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
 DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
+
+ifeq ($(VERBOSE),1)
+VERIFY_TEXT_ARGS := --derive --strict
+else
+VERIFY_TEXT_ARGS := --strict
+endif
 
 .PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
@@ -68,7 +75,7 @@ verify:
 ifeq ($(REPORT),graph)
 	$(PYVERI) $(SPEC) -T --trace-annotations state,transition --trace-hide-contexts "$(TRACE_HIDE_CONTEXTS)"
 else
-	$(PYVERI) $(SPEC) --derive --strict
+	$(PYVERI) $(SPEC) $(VERIFY_TEXT_ARGS)
 endif
 
 checkpoints-inventory:

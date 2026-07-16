@@ -44,7 +44,12 @@ Targets must remain composable:
 - `build` compiles the kernel image and must not mutate runtime disk images.
 - `disk` builds block-device images from documented rootfs inputs.
 - `run` prepares required runtime inputs, builds the selected kernel/payload and starts QEMU.
-- `verify` runs formal derivation or trace generation.
+- `verify` runs formal derivation or trace generation. In text report mode it always runs the
+  complete strict parse/model/derive/check pipeline. The default output contains the stage
+  summaries and counts; `VERBOSE=1` additionally prints the full trace and the individual
+  deferred/trimmed records. Only the exact value `1` enables those details, and output verbosity
+  must not change the verification scope, failure policy or exit status. `REPORT=graph` retains
+  the trace SVG behavior and is independent of `VERBOSE`.
 - `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
 - `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping, Linux mapping coverage and the Linux instrumentation plan.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
@@ -55,6 +60,8 @@ Targets must remain composable:
 - `clippy-check` runs the selected kernel crate through the active pinned toolchain's `clippy-driver` in metadata-only mode. It must reject all ordinary rustc warnings and the complete `clippy::all` group for every kernel configuration used by the default test matrix.
 - `coding-spec-check` is the permanent independent gate that rejects every `spec/coding/**/*.spec` file and lists every offending path. Coding rules are authoritative Markdown and a coding `.spec` must never be reintroduced.
 - `test` must run `fmt-check`, then the complete `clippy-check` matrix, then `coding-spec-check`, before formal verification, checkpoint checks, builds or runtime stages, and must preserve the remaining validation order and individual entry points.
+- The formal verification stage inside `test` must invoke `verify` exactly once with `VERBOSE=1`,
+  emitting the detailed report through the test log. It must not run a second summary-mode verification.
 - `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
@@ -210,6 +217,20 @@ artifact creation and kernel compilation as visible target edges.
 They must not silently bypass pyveri/codegen outputs, substitute
 stale generated files, or turn verification failures into warnings.
 
+#### Stable verification output modes
+
+Rule ID: `build_must_keep_verify_output_mode_independent_from_gate` (MUST).
+
+The top-level text `make verify` target must always run the complete
+strict pyveri parse/model/derive/check pipeline. Its default output
+must show the stage summaries, including deferred and trimmed counts,
+without the full trace or individual deferred/trimmed record sections.
+The exact Make variable value `VERBOSE=1` enables those detailed
+sections by selecting pyveri's existing derivation-report mode. Other
+values retain summary output. Verbosity must not change validation
+scope, strict failure behavior or exit status. `REPORT=graph` retains
+its trace SVG behavior regardless of `VERBOSE`.
+
 #### Payload selection
 
 Rule ID: `build_must_preserve_app_payload_selection_as_explicit_parameter` (MUST).
@@ -283,6 +304,11 @@ The aggregate make test target must preserve independently runnable
 verify, KUnit/checkpoint and smoke stages. Adding a new validation
 stage requires documenting its ordering, inputs and whether it is
 part of the default acceptance gate.
+
+Its formal verification stage must run `make verify VERBOSE=1`
+exactly once. The detailed mode remains the same strict gate as the
+standalone summary mode; the aggregate must not repeat verification
+solely to collect both output forms.
 
 #### Checkpoint artifact drift gate
 

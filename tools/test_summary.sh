@@ -426,7 +426,7 @@ run_smoke_case() {
     add_summary "$total" "$pass" "$fail"
 }
 
-run_with_log "$tmpdir/verify.log" "$make_cmd" verify REPORT=text SPEC="$spec"
+run_with_log "$tmpdir/verify.log" "$make_cmd" verify REPORT=text VERBOSE=1 SPEC="$spec"
 verify_rc=$?
 if [ "$verify_rc" -eq 0 ]; then
     verify_total=1
