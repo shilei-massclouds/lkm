@@ -19,18 +19,36 @@ pub fn adopt_head_preset_start() -> EventResult {
     Ok(())
 }
 
-pub fn preset_after_boot() -> ! {
-    if !crate::phases::prepare::is_online() || !crate::phases::boot::is_online() {
+pub fn preset_after_entry_prelude() -> ! {
+    if crate::phases::state::load(&KERNEL_STATE) != State::Base
+        || !crate::phases::prepare::is_online()
+        || !crate::phases::boot::entry_prelude::is_online()
+    {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel preset invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
 
     crate::phases::shutdown_on_error(mark_prepared(), "arceos_ex kernel preset event failed\n");
+    crate::phases::boot::preset()
+}
+
+pub fn setup_after_boot() -> ! {
+    if crate::phases::state::load(&KERNEL_STATE) != State::Prepared
+        || !crate::phases::prepare::is_online()
+        || !crate::phases::boot::entry_prelude::is_online()
+        || !crate::phases::boot::is_online()
+    {
+        crate::arch::riscv64::sbi::putstr("arceos_ex kernel setup after boot invariant failed\n");
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
+
     crate::phases::interrupt::setup()
 }
 
 pub fn setup_after_interrupt() -> ! {
-    if !crate::phases::prepare::is_online()
+    if crate::phases::state::load(&KERNEL_STATE) != State::Prepared
+        || !crate::phases::prepare::is_online()
+        || !crate::phases::boot::entry_prelude::is_online()
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
     {
@@ -44,6 +62,7 @@ pub fn setup_after_interrupt() -> ! {
 
 pub fn enable_after_smp_runtime() -> ! {
     if !crate::phases::prepare::is_online()
+        || !crate::phases::boot::entry_prelude::is_online()
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
         || !crate::phases::up_multitask::is_online()
@@ -59,6 +78,9 @@ pub fn enable_after_smp_runtime() -> ! {
 pub fn enable_after_up_multitask() -> ! {
     let ctx = crate::context::context_ref();
     if crate::phases::state::load(&KERNEL_STATE) != State::Ready
+        || !crate::phases::boot::entry_prelude::is_online()
+        || !crate::phases::boot::is_online()
+        || !crate::phases::interrupt::is_online()
         || !crate::phases::up_multitask::is_online()
         || ctx.kernel_init_task.state() != State::Online
         || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
@@ -94,6 +116,7 @@ fn mark_ready() -> EventResult {
 
 pub fn mark_online() -> EventResult {
     if !crate::phases::prepare::is_online()
+        || !crate::phases::boot::entry_prelude::is_online()
         || !crate::phases::boot::is_online()
         || !crate::phases::interrupt::is_online()
         || !crate::phases::up_multitask::is_online()
@@ -119,4 +142,8 @@ pub fn mark_online() -> EventResult {
 
 pub fn is_online() -> bool {
     crate::phases::state::load(&KERNEL_STATE) == State::Online
+}
+
+pub fn is_prepared() -> bool {
+    crate::phases::state::load(&KERNEL_STATE) == State::Prepared
 }

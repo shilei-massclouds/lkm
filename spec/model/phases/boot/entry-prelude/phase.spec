@@ -1,7 +1,7 @@
 /*
  * Entry Prelude Phase Specification
  *
- * This subphase covers the current formal model from kernel entry through
+ * This Kernel-owned phase covers the current formal model from kernel entry through
  * the point where EarlyVm is online and the entry-prelude boundary is ready.
  */
 
@@ -24,7 +24,7 @@ object RootStream: FlowObject {
                 /*
                  * Started is emitted in `_start`; source/dependency adoption occurs at the
                  * earliest Rust boundary without re-emitting it. Online returns to the
-                 * BootPhase.Preset continuation rather than starting a sibling phase.
+                 * Kernel.Preset continuation rather than starting a sibling phase.
                  */
                 depends_on {
                     Riscv64.state == State::Online;
@@ -2174,11 +2174,11 @@ object Soc: HardwareObject {
 }
 
 /*
- * EntryPreludePhase 表示引导期的入口前导子阶段对象。它编排本子阶段内各对象的状态迁移并定义阶段边界。
+ * EntryPreludePhase 表示 Kernel 直接拥有的入口前导阶段对象。它编排本阶段内各对象的状态迁移并定义阶段边界。
  */
 object EntryPreludePhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootPhase;
+    parent: Kernel;
 
     /*
      * Base 表示入口前导期刚开始，默认上下文为系统独占。

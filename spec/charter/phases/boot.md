@@ -4,16 +4,17 @@
 
 > [model] MUST：引导期阶段正式命名是 BootPhase。
 
-BootPhase 固定包含五个直接子阶段：入口先导、入口后继、核心准备、内存核心初始化和调度初始化。
-时间与中断控制初始化属于后续 InterruptPhase，不是 BootPhase 子阶段。
+BootPhase 固定包含四个直接子阶段：入口后继、核心准备、内存核心初始化和调度初始化。
+入口前导是 Kernel 的直接子阶段；时间与中断控制初始化属于后续 InterruptPhase，也不是
+BootPhase 子阶段。
 
 ## 边界与交互
 
-1. 入口边界：OpenSBI 把主 hart 控制权交给 `_start`。同一条架构入口依次接受
-   `Kernel.Preset`、`BootPhase.Preset` 和 `EntryPreludePhase.Preset`；这三个层级仍各自拥有
-   独立状态和 checkpoint，不能折叠为一个阶段。
+1. 入口边界：Kernel.Preset 驱动 EntryPreludePhase 到达 Online 并提交 Kernel.Prepared 后，
+   Kernel.Setup 才驱动 BootPhase.Preset。BootPhase.Preset 接受时 EntryPreludePhase 必须已经
+   Online。
 2. 出口边界：SchedInitPhase 达到 Online 后返回 BootPhase.Enable continuation；BootPhase
-   提交 Online，再返回 Kernel.Preset continuation。BootPhase 不直接启动 InterruptPhase。
+   提交 Online，再返回 Kernel.Setup continuation。BootPhase 不直接启动 InterruptPhase。
 
 ## 生命周期
 
@@ -29,14 +30,13 @@ BootPhase 固定包含五个直接子阶段：入口先导、入口后继、核�
 * Base：BootPhase 已进入模型但尚未接受 Preset。`BootPhase.Started` 只观察 Preset 接受时点，
   发出时状态仍为 Base。
 
-* Preset：驱动 EntryPreludePhase.Preset，并等待 EntryPreludePhase 到达 Online。
+* Preset：不驱动子阶段；依赖并确认 Kernel 直接拥有的 EntryPreludePhase 已到达 Online。
 
-  > [model] MUST：驱动 EntryPreludePhase.Preset并等待其到达 Online 状态。
+  > [model] MUST：BootPhase.Preset 仅在 EntryPreludePhase.Online 后触发，并保持该完成事实。
 
-  EntryPreludePhase.Online 必须返回 BootPhase.Preset continuation；该 continuation 提交
-  BootPhase.Prepared 并触发 BootPhase.Setup，EntryPreludePhase 不直接启动 sibling。
+  BootPhase.Preset 提交 BootPhase.Prepared 并触发 BootPhase.Setup。
 
-* Prepared：入口先导完成，BootPhase.Preset 已提交。
+* Prepared：入口前导完成事实已经确认，BootPhase.Preset 已提交。
 
 * Setup：驱动 EntrySuccessorPhase.Preset，并等待 EntrySuccessorPhase 到达 Online。
 
@@ -53,7 +53,7 @@ BootPhase 固定包含五个直接子阶段：入口先导、入口后继、核�
 
   > [model] MUST：依次驱动并等待 CorePreparePhase、MmCoreInitPhase 和 SchedInitPhase 完成。
 
-* Online：五个直接子阶段均为 Online；BootPhase.Enable 已提交，并返回 Kernel.Preset
+* Online：四个直接子阶段均为 Online；BootPhase.Enable 已提交，并返回 Kernel.Setup
   continuation。
 
 ## 引用

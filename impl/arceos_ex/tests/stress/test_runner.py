@@ -145,7 +145,7 @@ class StressRunnerTests(unittest.TestCase):
         )
         self.assertEqual(events[0]["source"], "legacy-trace")
 
-    def test_extracts_early_byte_checkpoint_events(self) -> None:
+    def test_extracts_legacy_boot_started_early_byte_checkpoint_event(self) -> None:
         events = runner._extract_events("BAV9\n")
         self.assertEqual(
             [runner._event_token(event) for event in events],
@@ -157,6 +157,18 @@ class StressRunnerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(events[0]["source"], "early-byte")
+
+    def test_extracts_new_head_without_boot_started_early_byte(self) -> None:
+        events = runner._extract_events("RAIKOZHTS\n")
+        tokens = [runner._event_token(event) for event in events]
+        self.assertEqual(
+            tokens[:2],
+            [
+                "checkpoint:Kernel.Started",
+                "checkpoint:EntryPreludePhase.Started",
+            ],
+        )
+        self.assertNotIn("checkpoint:BootPhase.Started", tokens)
 
     def test_extracts_ready_check_failed_event(self) -> None:
         events = runner._extract_events(
@@ -215,12 +227,12 @@ class StressRunnerTests(unittest.TestCase):
         text = "checkpoint: EntryPreludePhase.Ready\n"
         size = len(text.encode())
         line = (
-            f"RBAIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
+            f"RAIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
             f"overflow=0 dropped=0 data={text.encode().hex()}\n"
         )
         observed, stress_mem = runner._observed_text(line)
 
-        self.assertEqual(observed, "RBAIKOZHTS\n" + text)
+        self.assertEqual(observed, "RAIKOZHTS\n" + text)
         self.assertIsNotNone(stress_mem)
         events = runner._extract_events(observed)
         self.assertEqual(
@@ -229,10 +241,6 @@ class StressRunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             runner._event_token(events[1]),
-            "checkpoint:BootPhase.Started",
-        )
-        self.assertEqual(
-            runner._event_token(events[2]),
             "checkpoint:EntryPreludePhase.Started",
         )
 

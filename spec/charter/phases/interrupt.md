@@ -1,6 +1,6 @@
 # InterruptPhase 中断期阶段
 
-InterruptPhase 是 Kernel 的第二个直接子阶段，负责在 BootPhase 已完成且 boot CPU 仍处于
+InterruptPhase 是 Kernel 的第三个直接子阶段，负责在 BootPhase 已完成且 boot CPU 仍处于
 单任务启动上下文时，建立 IRQ/time 基础、打开 boot CPU 本地中断总入口，并完成进入
 `rest_init()` 前的 late core 与进程基础准备。
 

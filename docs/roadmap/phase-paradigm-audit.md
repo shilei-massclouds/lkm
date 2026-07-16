@@ -48,8 +48,8 @@ model -> coding -> impl；不得先改 impl 再反向解释规格。
 
 ```text
 Kernel
+├── EntryPreludePhase
 ├── BootPhase
-│   ├── EntryPreludePhase
 │   ├── EntrySuccessorPhase
 │   ├── CorePreparePhase
 │   ├── MmCoreInitPhase
@@ -89,13 +89,15 @@ Kernel
 3. **两层阶段范式（完成）**：charter 范式只负责生成 model 的标准生命周期、父 `drives` 和
    同对象 `emits`；coding 范式独立负责四状态设置/检查、父 continuation、执行主体交接和
    checkpoint lowering。旧的 sibling emits、平坦 DFS 和 `handoff() -> next.setup()` 规则已删除。
-4. **BootPhase（完成）**：Boot charter 固定五个直接子阶段；model 保持 Kernel -> Boot ->
-   EntryPrelude 的父 `drives` 和同对象 `emits`，只补入口 lowering/continuation 注释；coding
+4. **BootPhase（完成）**：Boot charter 固定四个直接子阶段；model 将 EntryPrelude 提升为
+   Kernel 直接子阶段，Kernel.Preset 驱动 EntryPrelude，Kernel.Setup 再按 Boot -> Interrupt
+   推进；coding
    逐项映射父/叶 source、target、depends、drives、ensures、state、checkpoint 和 continuation，
-   并删除三个已迁移的 Boot coding `.spec`。实现入口采用 `R -> B -> A` 与四层 Rust adoption，
-   Boot 和五个叶子均可观察 Started/Prepared/Ready/Online；所有 sibling 直调已改为 Boot 父
-   continuation，查询收敛为精确 Online。announce 实测 `RBAIKOZHTS`，并观察
-   EntryPrelude.Online < Boot.Prepared < EntrySuccessor.Started、EntrySuccessor.Online <
+   并删除三个已迁移的 Boot coding `.spec`。实现入口采用 `R -> A` 与三层 Rust adoption，
+   EntryPrelude.Online 后由普通 Rust `Boot.preset()` 发出 Boot.Started；Boot 和四个叶子均可观察
+   Started/Prepared/Ready/Online；所有 sibling 直调已改为 Boot 父 continuation，查询收敛为精确
+   Online。announce 实测 `RAIKOZHTS`，并观察 EntryPrelude.Online < Boot.Started <
+   Boot.Prepared < EntrySuccessor.Started、EntrySuccessor.Online <
    Boot.Ready < CorePrepare.Started、SchedInit.Online < Boot.Online < InterruptPhase.Started。
 5. **InterruptPhase（完成）**：charter 固定四个直接子阶段与 Kernel.Setup 入口/continuation
    出口；model、coding 和 impl 统一四态生命周期，IrqTime 使用 SingleTaskContext，LocalIrqEnable
@@ -161,9 +163,9 @@ Kernel
 | 节点 | Charter | Model | Coding `.md` | Impl | 结论 |
 | --- | --- | --- | --- | --- | --- |
 | 两层阶段范式 | `drives` 父子关系、同对象 `emits`、replicated family | model 作为唯一执行语义 | 独立状态/continuation/checkpoint lowering | 普通与 per-target 阶段逐项应用 | complete |
-| Kernel | 意图/边界一致 | 补齐三个 Enable ensures | `.md` 权威且 continuation 映射明确 | `RBA...`、Kernel.Online 已验证 | complete |
-| BootPhase | 五子阶段、入口/出口已固定 | 既有 drives/emits 保持 | 父 continuation/四状态/checkpoint 已完整映射 | Online 状态和五个父 continuation 已验证 | complete |
-| EntryPreludePhase | 入口例外已明确 | 入口 adoption/父返回注释已补 | 汇编、VM continuation、四状态已映射 | `RBA...` 且四 checkpoint 已验证 | complete |
+| Kernel | 意图/边界一致 | Preset 驱动 EntryPrelude；Setup 驱动 Boot、Interrupt | `.md` 权威且 continuation 映射明确 | `RA...`、Kernel.Online 已验证 | complete |
+| BootPhase | 四子阶段、入口/出口已固定 | Preset 依赖 EntryPrelude Online；Setup/Enable drives 保持 | 父 continuation/四状态/checkpoint 已完整映射 | Online 状态和四个父 continuation 已验证 | complete |
+| EntryPreludePhase | Kernel 直接子阶段入口例外已明确 | 入口 adoption/Kernel 父返回注释已补 | 汇编、VM continuation、四状态已映射 | `RA...` 且四 checkpoint 已验证 | complete |
 | EntrySuccessorPhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
 | CorePreparePhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |
 | MmCoreInitPhase | 边界一致 | 既有 transition 保持 | legacy rules 已迁入 `.md` | depends/四状态/父返回已验证 | complete |

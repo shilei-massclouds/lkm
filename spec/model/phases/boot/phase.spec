@@ -1,11 +1,10 @@
 /*
  * Boot Phase Specification
  *
- * This phase currently drives the entry-prelude, entry-successor, core-prepare,
- * mm-core-init, and sched-init subphases.
+ * This phase drives the entry-successor, core-prepare, mm-core-init, and
+ * sched-init subphases after the Kernel-owned entry prelude is online.
  */
 
-include "entry-prelude/main.spec";
 include "entry-successor/main.spec";
 include "core-prepare/main.spec";
 include "mm-core-init/main.spec";
@@ -30,7 +29,8 @@ context SingleTaskContext: Context {
 
 /*
  * BootPhase 引导期阶段
- * 顺序推进入口前导期、入口后继期、核心准备期、内存核心初始化期和调度准备期五个子阶段。
+ * 在 Kernel 直接拥有的入口前导期完成后，顺序推进入口后继期、核心准备期、
+ * 内存核心初始化期和调度准备期四个直接子阶段。
  */
 object BootPhase: PhaseObject {
     initial_state: State::Base;
@@ -39,24 +39,17 @@ object BootPhase: PhaseObject {
     state State::Base {
         transitions {
             /*
-             * `_start` 是 Kernel.Preset -> BootPhase.Preset ->
-             * EntryPreludePhase.Preset 的特殊架构 lowering。实现可以在 head 中先记录三个
-             * Started 观察点，再在最早 Rust 边界 adoption source state、depends_on 和
-             * SingleTaskContext；这不折叠三个 owner transition，也不改变 drives 边。
+             * Kernel.Preset 已同步驱动 EntryPreludePhase 到 Online。Kernel.Setup 随后
+             * 驱动本 transition；BootPhase 只确认这个前置阶段，不重新拥有或驱动它。
              */
             on Transition::Preset -> State::Prepared {
-                within SingleTaskContext {
-                    drives {
-                        EntryPreludePhase.Transition::Preset;
-                    }
+                depends_on {
+                    EntryPreludePhase.state == State::Online;
                 }
 
                 ensures {
                     EntryPreludePhase.state == State::Online;
                 }
-
-                /* EntryPrelude Online returns to the Boot.Preset continuation. */
-
                 emits {
                     Transition::Setup;
                 }

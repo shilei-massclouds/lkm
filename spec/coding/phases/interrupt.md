@@ -1,6 +1,6 @@
 # InterruptPhase 编码指引
 
-InterruptPhase 是 [Kernel 系统编码](../systems/kernel.md)的第二个直接子阶段。model 来源为
+InterruptPhase 是 [Kernel 系统编码](../systems/kernel.md)的第三个直接子阶段。model 来源为
 [`spec/model/phases/interrupt/phase.spec`](../../model/phases/interrupt/phase.spec)，实现落点为
 `impl/arceos_ex/src/phases/interrupt/mod.rs`。本阶段拥有四个子阶段的顺序、context 和
 continuation；子阶段之间不存在直接调用边。

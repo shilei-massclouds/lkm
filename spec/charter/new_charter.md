@@ -164,19 +164,19 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 > MUST[model]：内核系统规格，遵循''标准状态和迁移''和“内核系统模型”
 >
-> Preset：接替固件引导计算机系统，驱动完成引导期
+> Preset：接替固件引导计算机系统，驱动入口前导期
 >
-> Setup：接续引导期并推进中断期
+> Setup：接续入口前导期，依次推进引导期和中断期
 >
 > Enable：推进单核多任务期、多核运行期和 完成对选中Payload的交接，达到运行状态
 
-### 引导期BootPhase
-
-从内核入口到中断启用之前的阶段。
-
-#### EntryPreludePhase
+### 入口前导期EntryPreludePhase
 
 待补充。
+
+### 引导期BootPhase
+
+从入口前导完成到中断期开始之前的阶段。
 
 #### EntrySuccessorPhase
 
@@ -194,13 +194,13 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 待补充。
 
-#### IrqTimeInitPhase
-
-待补充。
-
 ### 中断期InterruptPhase
 
 从中断启动到多任务启动之前。
+
+#### IrqTimeInitPhase
+
+待补充。
 
 #### LocalIrqEnablePhase
 

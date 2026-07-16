@@ -46,6 +46,10 @@ coding 自然语言规则使用以下强度：
 
 Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
+EntryPreludePhase 已提升为 Kernel 直接子阶段，但当前物理路径
+`phases/boot/entry_prelude.rs` 与 Rust module 名保持不变；这是避免在所有权调整中混入目录迁移的
+显式例外，parent 与 continuation 必须以 model 为准，不能从物理目录反推。
+
 资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和transition 边界。
 
 ## Context 映射

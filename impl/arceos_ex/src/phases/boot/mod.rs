@@ -13,27 +13,29 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static BOOT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn adopt_head_preset_start() -> EventResult {
+pub fn preset() -> ! {
     let state = crate::phases::state::load(&BOOT_PHASE_STATE);
-    if state != State::Base || crate::arch::riscv64::csr::supervisor_interrupts_enabled() {
-        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
+    if state != State::Base
+        || !crate::systems::kernel::is_prepared()
+        || !entry_prelude::is_online()
+        || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
+    {
+        crate::phases::shutdown_on_error(
+            phase_failure(LifecycleEvent::Preset, State::Base, State::Prepared),
+            "arceos_ex boot preset start failed\n",
+        );
     }
 
-    Ok(())
-}
-
-pub fn preset_after_entry_prelude() -> ! {
-    let result = if entry_prelude::is_online() {
+    crate::checkpoint::checkpoint(Checkpoint::BootPhaseStarted);
+    crate::phases::shutdown_on_error(
         commit_state(
             LifecycleEvent::Preset,
             State::Base,
             State::Prepared,
             Checkpoint::BootPhasePrepared,
-        )
-    } else {
-        phase_failure(LifecycleEvent::Preset, State::Base, State::Prepared)
-    };
-    crate::phases::shutdown_on_error(result, "arceos_ex boot preset event failed\n");
+        ),
+        "arceos_ex boot preset event failed\n",
+    );
     setup()
 }
 
@@ -106,12 +108,11 @@ pub fn enable_after_sched_init() -> ! {
             phase_failure(LifecycleEvent::Enable, State::Ready, State::Online)
         };
     crate::phases::shutdown_on_error(result, "arceos_ex boot enable event failed\n");
-    crate::systems::kernel::preset_after_boot()
+    crate::systems::kernel::setup_after_boot()
 }
 
 pub fn is_online() -> bool {
     crate::phases::state::load(&BOOT_PHASE_STATE) == State::Online
-        && entry_prelude::is_online()
         && entry_successor::is_online()
         && core_prepare::is_online()
         && mm_core_init::is_online()

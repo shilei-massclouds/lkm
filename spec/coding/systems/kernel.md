@@ -23,23 +23,24 @@ start/completion continuation：
 
 ### Preset
 
-OpenSBI 进入 `_start` 后，架构入口先保存固件参数，并按 `R -> B -> A` 输出
-`Kernel.Started`、`BootPhase.Started` 和 `EntryPreludePhase.Started` 的稳定早期编码。这几条入口
-指令分别属于三层 Preset start 的架构 lowering，物理上位于同一汇编段但不折叠 owner。进入
-Rust 后依次 adoption Prepare、Kernel、Boot 和 EntryPrelude；
+OpenSBI 进入 `_start` 后，架构入口先保存固件参数，并按 `R -> A` 输出 `Kernel.Started` 和
+`EntryPreludePhase.Started` 的稳定早期编码。这两条入口指令分别属于 Kernel.Preset 和其直接
+子阶段 EntryPreludePhase.Preset 的架构 lowering，物理上位于同一汇编段但不折叠 owner。进入
+Rust 后依次 adoption Prepare、Kernel 和 EntryPrelude；
 `systems::kernel::adopt_head_preset_start()` 校验 Kernel 仍为 Base 和准备条件，不重复输出
-checkpoint。首个 `drives` 仍是 `BootPhase.Preset -> EntryPreludePhase.Preset`，入口 ABI 不额外
-绕过 Rust wrapper。
+checkpoint。Kernel.Preset 的直接 `drives` 是 `EntryPreludePhase.Preset`。
 
-BootPhase 达到 model `Online` 后进入 `systems::kernel::preset_after_boot()`。该 continuation
-检查 Prepare 和 Boot 完成条件，提交 Kernel `Base -> Prepared`，随后按 `emits Setup` 启动
-InterruptPhase 首个叶子阶段。
+EntryPreludePhase 达到 model `Online` 后进入 Kernel.Preset completion continuation。该
+continuation 精确检查 Kernel 仍为 Base、Prepare 和 EntryPrelude 完成条件，提交 Kernel
+`Base -> Prepared`，随后按 `emits Setup` 启动 BootPhase.Preset。
 
 ### Setup
 
-InterruptPhase 达到 model `Online` 后进入 `systems::kernel::setup_after_interrupt()`。它检查
-Boot/Interrupt 完成条件，提交 Kernel `Prepared -> Ready`，随后按 `emits Enable` 启动
-UpMultitaskPhase。
+BootPhase 达到 model `Online` 后进入 Kernel.Setup 的 Boot completion continuation。该
+continuation 精确检查 Kernel 仍为 Prepared、EntryPrelude 和 Boot 已 Online，然后启动
+InterruptPhase.Preset；后者在接受时精确检查自身仍为 Base。InterruptPhase 到达 Online 后进入
+`systems::kernel::setup_after_interrupt()`；它统一检查 EntryPrelude、Boot、Interrupt 均已
+Online，提交 Kernel `Prepared -> Ready`，随后按 `emits Enable` 启动 UpMultitaskPhase。
 
 ### Enable
 
@@ -71,8 +72,8 @@ PayloadPhase.Online、Kernel.Online 和实际 entry 是三个独立边界。
 - `Kernel.Online` 属于 Kernel.Enable 完成边界，只能在 PayloadPhase.Online 已提交后发出。
 - 子阶段 checkpoint 保留在对应 phase module，不得由 `systems/kernel.rs` 代发。
 
-Boot、Interrupt、UpMultitask 和 SmpRuntime 子树均使用精确 `is_online()` 查询和完整四状态
-checkpoint；Kernel.Enable 与 Payload 只消费 SmpRuntimePhase.Online。
+EntryPrelude、Boot、Interrupt、UpMultitask 和 SmpRuntime 子树均使用精确 `is_online()` 查询和
+完整四状态 checkpoint；Kernel.Enable 与 Payload 只消费 SmpRuntimePhase.Online。
 
 ## 所有权与范围
 

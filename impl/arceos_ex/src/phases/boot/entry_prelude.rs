@@ -21,7 +21,6 @@ const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
-const TRACE_BOOT_STARTED: usize = Checkpoint::BootPhaseStarted.early_byte() as usize;
 const TRACE_ENTRY_PRELUDE_STARTED: usize =
     Checkpoint::EntryPreludePhaseStarted.early_byte() as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
@@ -57,10 +56,6 @@ _start:
 
     # Kernel.Preset starts before its first driven phase.
     li a0, {trace_kernel_started}
-    call {head_checkpoint}
-
-    # BootPhase.Preset starts before its first driven phase.
-    li a0, {trace_boot_started}
     call {head_checkpoint}
 
     /*
@@ -144,7 +139,6 @@ _start:
     pt_size_on_stack = const crate::objects::init_stack::PT_SIZE_ON_STACK,
     rust_entry = sym entry_prelude_rust_entry,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
-    trace_boot_started = const TRACE_BOOT_STARTED,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
@@ -241,10 +235,6 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     crate::phases::shutdown_on_error(
         crate::systems::kernel::adopt_head_preset_start(),
         "arceos_ex kernel preset start failed\n",
-    );
-    crate::phases::shutdown_on_error(
-        crate::phases::boot::adopt_head_preset_start(),
-        "arceos_ex boot preset start failed\n",
     );
     crate::phases::shutdown_on_error(
         adopt_head_preset_start(&boot_args),
@@ -364,7 +354,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
 
 fn enable(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex entry prelude enable failed\n");
-    crate::phases::boot::preset_after_entry_prelude()
+    crate::systems::kernel::preset_after_entry_prelude()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {

@@ -5,6 +5,7 @@
  *
  */
 
+include "../phases/boot/entry-prelude/main.spec";
 include "../phases/boot/main.spec";
 include "../phases/interrupt/main.spec";
 include "../phases/up-multitask/main.spec";
@@ -38,12 +39,14 @@ object Kernel: KernelObject {
                     Config.state == State::Online;
                 }
 
-                drives {
-                    BootPhase.Transition::Preset;
+                within SingleTaskContext {
+                    drives {
+                        EntryPreludePhase.Transition::Preset;
+                    }
                 }
 
                 ensures {
-                    BootPhase.state == State::Online;
+                    EntryPreludePhase.state == State::Online;
                 }
 
                 emits {
@@ -54,16 +57,18 @@ object Kernel: KernelObject {
     }
 
     /*
-     * Prepared 状态：引导期完成，具备开启中断的条件。
+     * Prepared 状态：入口前导期完成，具备进入引导期的条件。
      */
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
                 drives {
+                    BootPhase.Transition::Preset;
                     InterruptPhase.Transition::Preset;
                 }
 
                 ensures {
+                    BootPhase.state == State::Online;
                     InterruptPhase.state == State::Online;
                 }
 
@@ -75,7 +80,7 @@ object Kernel: KernelObject {
     }
 
     /*
-     * Ready 表示引导期和中断期阶段已经完成，可以继续推进多任务、
+     * Ready 表示入口前导期、引导期和中断期阶段已经完成，可以继续推进多任务、
      * SMP/runtime 与 payload 交接。
      */
     state State::Ready {

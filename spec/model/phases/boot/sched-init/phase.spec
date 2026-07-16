@@ -1626,7 +1626,7 @@ object TasksRcu: TaskObject {
 }
 
 /*
- * SchedInitPhase 表示 BootPhase 的第五个子阶段。
+ * SchedInitPhase 表示 BootPhase 的第四个直接子阶段。
  */
 object SchedInitPhase: PhaseObject {
     initial_state: State::Base;

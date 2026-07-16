@@ -1,20 +1,18 @@
 # EntryPreludePhase Coding
 
-入口前导子阶段对应 model `EntryPreludePhase` 的完整 `Preset -> Setup -> Enable` 生命周期，实现
-落点为 `impl/arceos_ex/src/phases/boot/entry_prelude.rs`。它是 BootPhase.Preset 的直接 child；
-`_start` 虽由 OpenSBI 跳入，阶段所有权仍是 `Kernel.Preset drives Boot.Preset drives
-EntryPrelude.Preset`。
+入口前导阶段是 Kernel 的直接子阶段，对应 model `EntryPreludePhase` 的完整
+`Preset -> Setup -> Enable` 生命周期，实现落点仍为
+`impl/arceos_ex/src/phases/boot/entry_prelude.rs`。不迁移现有 Rust module 或物理目录。
 
 ## 入口例外与 adoption
 
-`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R`、`BootPhase.Started` 的 `B` 和
-`EntryPreludePhase.Started` 的 `A`。三个 checkpoint 都是 Preset 接受事件，输出时对应状态仍为
+`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R` 和
+`EntryPreludePhase.Started` 的 `A`。两个 checkpoint 都是 Preset 接受事件，输出时对应状态仍为
 Base。汇编随后完成必须发生在 Rust 前的 CSR/GPR/BSS 操作。
 
-进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel、Boot 和 EntryPrelude 的入口
+进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel 和 EntryPrelude 的入口
 边界。EntryPrelude adoption 必须检查自身精确 Base 以及 model 的 Riscv64、SbiSpec、OpenSBI、
-Lds、Config 依赖；不得再次输出 Started。Boot adoption 同时在这个最早 Rust 边界确认
-`sstatus.SIE == 0`。
+Lds、Config 依赖；不得再次输出 Started。
 
 ## Preset: Base -> Prepared
 
@@ -40,8 +38,8 @@ Ready，读回并发出 `EntryPreludePhase.Ready`，随后按 emits 调用 Enabl
 Enable start 检查精确 Ready，并验证 model Online invariant：Root/Interrupt/Exception/Event streams、
 KernelImage、RawDtb、BootInitTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
 CpuGroup 和 Soc 必须处于 model 规定状态。成功后提交 Online，发出
-`EntryPreludePhase.Online`，再返回 `boot::preset_after_entry_prelude()`。本阶段不得直接启动
-EntrySuccessorPhase。
+`EntryPreludePhase.Online`，再返回 Kernel.Preset completion continuation。该 continuation 提交
+Kernel.Prepared 后启动 BootPhase.Preset；本阶段不得直接启动 BootPhase 或 EntrySuccessorPhase。
 
 ## 状态与 checkpoint
 

@@ -1258,7 +1258,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - 状态中心对象模型记法所需的函数、谓词和基础类型声明
 - `addr_of`、`phys_addr`、`virt_addr` 及虚拟地址区域相关约束
 - 准备期输入对象模型
-- `BootPhase` 阶段树，以及已经展开的 `EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 和 `MmCoreInitPhase` 子阶段对象模型
+- `Kernel` / `BootPhase` 阶段树，其中 `EntryPreludePhase` 是 Kernel 直接子阶段，`EntrySuccessorPhase`、`CorePreparePhase` 和 `MmCoreInitPhase` 是已经展开的 BootPhase 子阶段对象模型
 - 当前尚未展开但需要保留边界的 `deferred` 条目
 
 正文中的阶段对象、对象分类、对象关系和构建时序仍作为分析性说明保留，用于解释模型意图和设计背景；验证器工具应以独立模型文件中的条目为准。模型文件中的 `/* ... */` 与 `//` 注释只面向人工阅读，工具解析时应忽略；`deferred` 是模型内的延期定义或占位标记，工具应能够识别并报告。
@@ -1707,9 +1707,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 #### 子阶段 5：调度准备期（Scheduler Init Subphase）
 
-第五个子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 返回后，到 `context_tracking_init()` 调用点完成的调度与异步基础准备段。它承接已经就绪的核心内存管理基础，先经过当前 `../linux-6.12/.config` 的 RISC-V 配置下裁剪的 `poking_init()` 和 `ftrace_init()` 调用点，再完成 `sched_init()`，建立 radix/maple 基础索引、workqueue early 框架、Softirq action table 壳和 RCU 支撑设施，使系统拥有“中断打开前所需的调度与异步基础”。当前配置下 `context_tracking_init()` 编译为空调用，只作为边界处的 trimmed/no-op 记录；后续 IRQ、timer/timekeeping、`softirq_init()` 和打开中断前收尾不属于本子阶段。
+整体启动序列的第五个阶段、BootPhase 的第四个直接子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 返回后，到 `context_tracking_init()` 调用点完成的调度与异步基础准备段。它承接已经就绪的核心内存管理基础，先经过当前 `../linux-6.12/.config` 的 RISC-V 配置下裁剪的 `poking_init()` 和 `ftrace_init()` 调用点，再完成 `sched_init()`，建立 radix/maple 基础索引、workqueue early 框架、Softirq action table 壳和 RCU 支撑设施，使系统拥有“中断打开前所需的调度与异步基础”。当前配置下 `context_tracking_init()` 编译为空调用，只作为边界处的 trimmed/no-op 记录；后续 IRQ、timer/timekeeping、`softirq_init()` 和打开中断前收尾不属于本子阶段。
 
-本小节作为 `BootPhase` 子阶段 5 的初步讨论落点。当前只做对象边界、Linux 调用分类、图示和结束状态的第一轮整理；后续逐个对象讨论稳定后，再同步进入形式化模型和 `impl/arceos_ex`。
+本小节作为整体启动序列阶段 5、`BootPhase` 直接子阶段 4 的初步讨论落点。当前只做对象边界、Linux 调用分类、图示和结束状态的第一轮整理；后续逐个对象讨论稳定后，再同步进入形式化模型和 `impl/arceos_ex`。
 
 本子阶段仍处于 `System Exclusive` 上下文中：中断总开关仍关闭，secondary hart 仍未启动，普通任务切换尚未进入并发运行。`sched_init()` 是本阶段中心动作，但不能被理解为完整 SMP 调度器已经完成；Linux 注释明确说明完整拓扑设置发生在 `smp_init()`，本阶段只要求 boot CPU 和 possible CPU 的 runqueue 元数据、idle task 关联、调度类顺序和基础调度钩子可解释。
 
@@ -1732,7 +1732,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前先将子阶段 5 的对象和边界记录如下：
 
-1. `调度准备期对象`（暂名 `SchedInitPhase`）：属于阶段对象，是 `BootPhase` 的第五个子阶段对象。它从 `MmCoreInitPhase.Ready` 接续，按 `mm_core_init()` 后到 `context_tracking_init()` 调用点完成的有效调用顺序编排对象推进。
+1. `调度准备期对象`（暂名 `SchedInitPhase`）：属于阶段对象，是 `BootPhase` 的第四个直接子阶段对象。它从 `MmCoreInitPhase.Ready` 接续，按 `mm_core_init()` 后到 `context_tracking_init()` 调用点完成的有效调用顺序编排对象推进。
 2. `调度器对象`（暂名 `Scheduler`）：覆盖 `sched_init()`。它在 `preset()` 中准备调度器的全局前置对象，并预留未来驱动各 `SchedClass.preset()` 形成基本对象壳；在 `setup()` 中驱动每个 possible CPU 的 `RunQueue`、boot CPU 的 `BootIdleTask`，并预留未来驱动各 `SchedClass.setup()` 建立正式对象；最后通过 `enable()` 设置 `scheduler_running`。当前阶段只要求 boot CPU 上调度器基础可用，不启动 secondary CPU，不建立完整 SMP 调度拓扑。`sched_class` 顺序检查更接近 Linux 链接/实现细节，暂不作为独立 checkpoint 建模。
 3. `RadixTree 对象`：覆盖 `radix_tree_init()`。当前把该调用建模为 `RadixTree.setup()`，使对象进入 `Ready`：建立 `"radix_tree_node"` SLUB cache，登记 `CPUHP_RADIX_DEAD` CPU hotplug dead 回调，并形成后续 IDR/XArray/radix tree 实例可申请 node 的全局基础。具体 radix tree 实例和使用者对象不在本阶段建立；实现阶段应至少生成 `RadixTree` 对象本体、node cache 子对象/属性、CPU hotplug 回调事实和后续 `alloc_node/free_node` API 边界。
 4. `MapleTree 对象`：覆盖 `maple_tree_init()`。当前把该调用建模为 `MapleTree.setup()`，使对象进入 `Ready`：建立 `"maple_node"` SLUB cache，并形成后续 maple tree 实例可申请 node 的全局基础。具体 maple tree 实例，例如后续 VMA tree，不在本阶段建立；实现阶段应至少生成 `MapleTree` 对象本体、node cache 子对象/属性和后续 `alloc_node/free_node` API 边界。

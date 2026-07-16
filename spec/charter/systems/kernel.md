@@ -57,19 +57,22 @@ InterruptStream 和 IRQ 对象改造形成；在决定前，不把任一现有 p
 
   > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
 
-* Preset：内核通过引导期过程。
+* Preset：内核通过入口前导期过程。
 
-  > [model] MUST：向 `BootPhase` 同步发送 Preset 启动信号，等待 `BootPhase` 到达 `Online`；
-  > 当前 model 兼容写法为驱动 `BootPhase.Transition::Preset`。
+  > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
+  > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
+  > `EntryPreludePhase.Transition::Preset`。
 
-* Prepared：内核完成早期引导；中断尚未开启。
+* Prepared：入口前导期已经完成；BootPhase 尚未启动，中断尚未开启。
 
-* Setup：内核通过中断期引导过程。
+* Setup：内核按顺序通过引导期和中断期过程。
 
-  > [model] MUST：向 `InterruptPhase` 同步发送 Preset 启动信号，等待 `InterruptPhase` 到达
-  > `Online`；当前 model 兼容写法为驱动 `InterruptPhase.Transition::Preset`。
+  > [model] MUST：先向 `BootPhase` 同步发送 Preset 启动信号并等待其到达 `Online`，再向
+  > `InterruptPhase` 同步发送 Preset 启动信号并等待其到达 `Online`；当前 model 兼容写法为
+  > 按此顺序驱动两个阶段的 `Transition::Preset`。
 
-* Ready：中断已经开启，内核具备了支持多任务的能力，但是还没有真正启动多任务。
+* Ready：入口前导期、引导期和中断期均已完成，中断已经开启，内核具备了支持多任务的能力，
+  但是还没有真正启动多任务。
 
 * Enable：内核通过单核多任务期、多核运行期和应用交接期阶段。
 

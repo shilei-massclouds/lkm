@@ -82,12 +82,60 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 kernel["children"],
                 [
+                    "EntryPreludePhase",
                     "BootPhase",
                     "InterruptPhase",
                     "UpMultitaskPhase",
                     "SmpRuntimePhase",
                     "PayloadPhase",
                 ],
+            )
+            self.assertEqual(objects["EntryPreludePhase"]["parent"], "Kernel")
+            self.assertEqual(
+                objects["BootPhase"]["children"],
+                [
+                    "EntrySuccessorPhase",
+                    "CorePreparePhase",
+                    "MmCoreInitPhase",
+                    "SchedInitPhase",
+                ],
+            )
+            kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
+            kernel_setup = kernel["states"]["Prepared"]["transitions"]["Setup"]
+            boot_preset = objects["BootPhase"]["states"]["Base"]["transitions"][
+                "Preset"
+            ]
+            self.assertEqual(
+                kernel_preset["body_members"][1]["within"]["context"],
+                "SingleTaskContext",
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for entry in kernel_preset["body_members"][1]["within"][
+                        "drives"
+                    ][0]["entries"]
+                ],
+                ["EntryPreludePhase.Transition::Preset"],
+            )
+            self.assertEqual(
+                [entry["text"] for entry in kernel_setup["drives"][0]["entries"]],
+                [
+                    "BootPhase.Transition::Preset",
+                    "InterruptPhase.Transition::Preset",
+                ],
+            )
+            self.assertEqual(
+                [entry["text"] for entry in kernel_setup["ensures"][0]["entries"]],
+                [
+                    "BootPhase.state == State::Online",
+                    "InterruptPhase.state == State::Online",
+                ],
+            )
+            self.assertEqual(boot_preset["drives"], [])
+            self.assertEqual(
+                [entry["text"] for entry in boot_preset["depends_on"][0]["entries"]],
+                ["EntryPreludePhase.state == State::Online"],
             )
             self.assertEqual(preset["source_state"], "Base")
             self.assertEqual(preset["target_state"], "Prepared")
