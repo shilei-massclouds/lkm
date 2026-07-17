@@ -7,7 +7,7 @@ setup_command = [
   "make",
   "-C",
   "impl/arceos_ex",
-  "disk",
+  "legacy-disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot-stress-mem.raw",
   "ROOTFS_LTP_OVERLAY=none",
@@ -15,7 +15,7 @@ setup_command = [
 ]
 command = [
   "make",
-  "run",
+  "legacy-run",
   "APP=user-boot",
   "ROOTFS_LTP_OVERLAY=none",
   "PROBE=stress-mem",

@@ -20,8 +20,8 @@ static mut ROOTFS_READ_BUFFER: [u8; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()] =
     [0; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()];
 static mut ROOTFS_INIT_READ_BUFFER: [u8; TEMP_USER_INIT_MAX_READ] = [0; TEMP_USER_INIT_MAX_READ];
 
-const TEMP_USER_INIT_PATH: &[u8] = b"/sbin/init";
-const TEMP_USER_INIT_FILE_NAME: &[u8] = b"init";
+const TEMP_USER_INIT_PATH: &[u8] = b"/opt/lkm/tests/user-smoke";
+const TEMP_USER_INIT_FILE_NAME: &[u8] = b"user-smoke";
 const TEMP_USER_INIT_MAX_READ: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 const ELF_HEADER_LEN: usize = 64;
 const ELF_CLASS_64: u8 = 2;
@@ -307,12 +307,12 @@ pub fn run() -> SmokeResult {
     ) {
         Ok(len) if len >= ELF_HEADER_LEN && is_temp_user_init_elf(&init_buffer[..len]) => {}
         _ => {
-            printk::write_str("rootfs temporary /sbin/init ELF read failed\n");
+            printk::write_str("rootfs canonical user-smoke ELF read failed\n");
             return SmokeResult::Failed;
         }
     }
     if !path_resolves_regular_file(TEMP_USER_INIT_PATH, TEMP_USER_INIT_FILE_NAME, &mut provider) {
-        printk::write_str("rootfs temporary init path facts invalid\n");
+        printk::write_str("rootfs canonical user-smoke path facts invalid\n");
         return SmokeResult::Failed;
     }
 

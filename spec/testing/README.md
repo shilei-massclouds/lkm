@@ -9,6 +9,9 @@
 Rootfs/user fixture、发行版 smoke、OpenRC delayed stdin 和 paired difftest 的权威编排规则见
 [`rootfs.md`](rootfs.md)。
 
+单轮 kernel/QEMU 基本测试的配置、七阶段流水线、脚本隔离、退出和结构化结果规则见
+[`basic-tests.md`](basic-tests.md)。
+
 ## 测试生成元规则
 
 测试用例生成还受 [`../guidance/main.spec`](../guidance/main.spec) 的上层元规则约束。AI 或其它代码生成器生成测试用例时必须按三步执行：

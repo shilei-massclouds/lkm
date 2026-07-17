@@ -287,7 +287,7 @@ run_user_boot_overlay_case() {
     local log=$4
     local image=$5
 
-    run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
@@ -300,7 +300,7 @@ run_user_boot_overlay_append_case() {
     local log=$5
     local image=$6
 
-    run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
@@ -312,7 +312,7 @@ run_user_boot_no_overlay_append_case() {
     local log=$4
     local image=$5
 
-    run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
@@ -327,7 +327,7 @@ run_user_boot_no_overlay_input_append_case() {
     local log=$7
     local image=$8
 
-    run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" 2 "$make_cmd" run APP=user-boot \
+    run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" 2 "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot \
         PLIC_PROVIDER="$provider" ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
 }
@@ -345,7 +345,7 @@ run_user_boot_openrc_login_case() {
         --input-step "login:" "$login_input" \
         --input-step "Password:" "$password_input" \
         --input-step '$ ' "$shell_input" \
-        -- "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        -- "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
@@ -358,17 +358,17 @@ run_user_boot_rc_local_case() {
     local expected_markers=$'lkm-rc-local: begin\nlost+found\nlkm-rc-local: end status=0'
 
     run_user_boot_marker_only_case "$name" "$log" "$expected_markers" \
-        "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
         ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$rc_local_overlay_dir" \
         VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
 }
 
 run_kunit_case() {
     local name=$1
-    local provider=$2
+    local test_name=$2
     local log=$3
 
-    run_with_log "$log" "$make_cmd" -C "$kernel_dir" run APP="$kunit_app" PROBE_FILE="$kunit_handlers" PLIC_PROVIDER="$provider"
+    run_with_log "$log" "$make_cmd" run TEST="$test_name"
     local rc=$?
     local total
     local fail
@@ -397,12 +397,10 @@ run_kunit_case() {
 
 run_smoke_case() {
     local name=$1
-    local provider=$2
+    local test_name=$2
     local log=$3
-    local image=$4
 
-    run_with_log "$log" "$make_cmd" run APP="$smoke_app" PLIC_PROVIDER="$provider" \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1
+    run_with_log "$log" "$make_cmd" run TEST="$test_name"
     local rc=$?
     local counts
     local pass
@@ -455,17 +453,13 @@ distro_sh_input=$'/bin/ls\n/bin/ls\nexit\n'
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
 run_command_case "delayed stdin" "$tmpdir/delayed-stdin.log" env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools.tests.test_delayed_stdin
+run_command_case "basic runner" "$tmpdir/basic-runner.log" "$make_cmd" test-basic
 run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkpoints
-run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
-run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
-    "$tmpdir/run-user-native.log" "$tmpdir/user-native-default.raw"
-run_user_boot_overlay_append_case "run init=ls native" native "$requested_init_overlay_map" \
-    "earlycon=sbi init=/bin/ls" "$tmpdir/run-init-ls-native.log" "$tmpdir/user-native-init-ls.raw"
-run_user_boot_no_overlay_append_case "run distro ls native" native \
-    "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-native.log" "$tmpdir/user-native-distro-ls.raw"
-run_user_boot_no_overlay_input_append_case "run distro sh native" native \
-    "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'lost+found' "~ #" \
-    "$tmpdir/run-distro-sh-native.log" "$tmpdir/user-native-distro-sh.raw"
+run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run TEST=hello-native
+run_user_boot_case "run user native" "$tmpdir/run-user-native.log" "$make_cmd" run TEST=user-smoke-native
+run_user_boot_case "run requested native" "$tmpdir/run-requested-native.log" "$make_cmd" run TEST=requested-init-native
+run_user_boot_case "run distro ls native" "$tmpdir/run-distro-ls-native.log" "$make_cmd" run TEST=distro-ls-native
+run_user_boot_case "run distro sh native" "$tmpdir/run-distro-sh-native.log" "$make_cmd" run TEST=distro-sh-native
 if [ "${TEST_OPENRC_LOGIN:-0}" = "1" ]; then
     run_user_boot_openrc_login_case "run openrc login" native \
         "$tmpdir/run-openrc-login-native.log" "$tmpdir/user-native-openrc-login.raw"
@@ -474,22 +468,17 @@ if [ "${TEST_RC_LOCAL:-0}" = "1" ]; then
     run_user_boot_rc_local_case "run rc.local" native \
         "$tmpdir/run-rc-local-native.log" "$tmpdir/user-native-rc-local.raw"
 fi
-run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
-run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
+run_kunit_case "KUnit native" kunit-native "$tmpdir/kunit-native.log"
+run_smoke_case "app smoke native" kernel-smoke-native "$tmpdir/smoke-native.log"
 
 for provider in $test_plic_providers; do
-    run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run PLIC_PROVIDER="$provider"
-    run_user_boot_overlay_case "run user $provider" "$provider" "$default_overlay_map" \
-        "$tmpdir/run-user-$provider.log" "$tmpdir/user-$provider-default.raw"
-    run_user_boot_overlay_append_case "run init=ls $provider" "$provider" "$requested_init_overlay_map" \
-        "earlycon=sbi init=/bin/ls" "$tmpdir/run-init-ls-$provider.log" "$tmpdir/user-$provider-init-ls.raw"
-    run_user_boot_no_overlay_append_case "run distro ls $provider" "$provider" \
-        "earlycon=sbi init=/bin/ls" "$tmpdir/run-distro-ls-$provider.log" "$tmpdir/user-$provider-distro-ls.raw"
-    run_user_boot_no_overlay_input_append_case "run distro sh $provider" "$provider" \
-        "earlycon=sbi init=/bin/sh" "$distro_sh_input" $'lost+found' "~ #" \
-        "$tmpdir/run-distro-sh-$provider.log" "$tmpdir/user-$provider-distro-sh.raw"
-    run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
-    run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"
+    run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run TEST="hello-$provider"
+    run_user_boot_case "run user $provider" "$tmpdir/run-user-$provider.log" "$make_cmd" run TEST="user-smoke-$provider"
+    run_user_boot_case "run requested $provider" "$tmpdir/run-requested-$provider.log" "$make_cmd" run TEST="requested-init-$provider"
+    run_user_boot_case "run distro ls $provider" "$tmpdir/run-distro-ls-$provider.log" "$make_cmd" run TEST="distro-ls-$provider"
+    run_user_boot_case "run distro sh $provider" "$tmpdir/run-distro-sh-$provider.log" "$make_cmd" run TEST="distro-sh-$provider"
+    run_kunit_case "KUnit $provider" "kunit-$provider" "$tmpdir/kunit-$provider.log"
+    run_smoke_case "app smoke $provider" "kernel-smoke-$provider" "$tmpdir/smoke-$provider.log"
 done
 printf '\nTest summary:\n'
 printf '%s' "$summary_rows"

@@ -1,0 +1,24 @@
+schema_version = 1
+name = "hello-native"
+timeout_seconds = 120
+
+[kernel]
+app = "hello"
+provider = "native"
+probe = []
+profile = "release"
+
+[disk]
+mode = "canonical-readonly"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi"
+rng = true
+exit_policy = "guest-shutdown"
+
+[expect]
+process_exit = 0
+markers = ["Hello, world!"]
+forbidden_markers = ["arceos_ex initcall event failed", "arceos_ex panic"]

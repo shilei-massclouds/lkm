@@ -19,7 +19,7 @@ use crate::{
         user_boot::{
             ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
-            USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
+            USER_INIT_EXPECTED_MESSAGE, USER_PAGE_SIZE, USER_SIGCHLD_MASK,
             USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_STACK_TOP,
             USER_WAIT4_ALL_CHILDREN, UserMappingKind, UserProcessGroupLookup,
             UserProcessGroupUpdate, UserRtSigtimedwaitResult,
@@ -29,6 +29,8 @@ use crate::{
 };
 
 const USER_OPENRC_VFORK_FLAGS: usize = 0x4111;
+const USER_SMOKE_INIT_PATH: &[u8] = b"/opt/lkm/tests/user-smoke";
+const USER_SMOKE_INIT_PATH_NUL: &[u8] = b"/opt/lkm/tests/user-smoke\0";
 const USER_PLAIN_FORK_FLAGS: usize = 0x11;
 const USER_WAIT4_WNOHANG: usize = 1;
 const USER_EFAULT_RETURN: usize = usize::MAX - 13;
@@ -66,7 +68,7 @@ fn stage_main_image() -> bool {
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
         &mut provider,
-        USER_INIT_PATH,
+        USER_SMOKE_INIT_PATH,
         main_buffer,
     ) else {
         return false;
@@ -146,7 +148,7 @@ impl UserBootElfScenario {
 
 impl SmokeScenario for UserBootElfScenario {
     fn name(&self) -> &'static str {
-        "user_boot.elf_object_from_rootfs_init"
+        "user_boot.elf_object_from_canonical_fixture"
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
@@ -172,7 +174,7 @@ impl SmokeScenario for UserBootElfScenario {
         };
         let len = USER_INIT_READ_LEN.load(Ordering::Acquire);
         if len == 0 || len > buffer.len() {
-            assertions.assert("staged /sbin/init", false);
+            assertions.assert("staged canonical user-smoke", false);
             return;
         }
         let image = &buffer[..len];
@@ -222,8 +224,8 @@ impl SmokeScenario for UserBootElfScenario {
             "payload try candidate",
             ctx.user_boot_payload
                 .try_candidate(
-                    crate::objects::user_boot::UserInitPathRef::DefaultInit,
-                    USER_INIT_PATH,
+                    crate::objects::user_boot::UserInitPathRef::RequestedInit,
+                    USER_SMOKE_INIT_PATH,
                     &ctx.elf_object,
                 )
                 .is_ok(),
@@ -239,7 +241,7 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
-        let init_argv = [USER_INIT_PATH];
+        let init_argv = [USER_SMOKE_INIT_PATH];
         assertions.assert(
             "user stack setup",
             ctx.user_stack
@@ -249,7 +251,7 @@ impl SmokeScenario for UserBootElfScenario {
                     interpreter_ref,
                     &init_argv,
                     ctx.config.user_stack(),
-                    USER_INIT_PATH,
+                    USER_SMOKE_INIT_PATH,
                     &[0x3c; crate::objects::user_stack::USER_STACK_RANDOM_BYTES],
                     &[0; crate::objects::user_stack::USER_STACK_ASLR_BYTES],
                     crate::objects::user_stack::UserStackAuxv::root(
@@ -411,7 +413,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.user_boot_payload.default_init_fallback_order_bound(),
         );
         assertions.assert(
-            "payload fallback facts",
+            "payload selection facts",
             ctx.user_boot_payload
                 .candidate_failure_nonfatal_for_fallback()
                 && ctx.user_boot_payload.first_successful_candidate_selected()
@@ -421,7 +423,7 @@ impl SmokeScenario for UserBootElfScenario {
                     .success_no_return_to_startup_orchestration()
                 && ctx.user_boot_payload.no_working_init_panic_terminal_bound()
                 && ctx.user_boot_payload.selected_path()
-                    == crate::objects::user_boot::UserInitPathRef::DefaultInit,
+                    == crate::objects::user_boot::UserInitPathRef::RequestedInit,
         );
         assertions.assert("payload fs", ctx.user_boot_payload.uses_current_fs_struct());
         assertions.assert(
@@ -434,7 +436,10 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_boot_payload.try_candidate_bound()
                 && ctx.user_boot_payload.selected_path_bound()
                 && ctx.user_boot_payload.selected_argv0_path_bound()
-                && bytes_eq(ctx.user_boot_payload.selected_path_bytes(), USER_INIT_PATH)
+                && bytes_eq(
+                    ctx.user_boot_payload.selected_path_bytes(),
+                    USER_SMOKE_INIT_PATH,
+                )
                 && ctx.user_boot_payload.reads_init_from_vfs(),
         );
         assertions.assert(
@@ -590,7 +595,7 @@ impl SmokeScenario for UserBootElfScenario {
                 stack,
                 &ctx.page_metadata_map,
                 stack.arg0_ptr(),
-                b"/sbin/init\0",
+                USER_SMOKE_INIT_PATH_NUL,
             ),
         );
         assertions.assert(
@@ -600,7 +605,7 @@ impl SmokeScenario for UserBootElfScenario {
                     stack,
                     &ctx.page_metadata_map,
                     stack.execfn_ptr(),
-                    b"/sbin/init\0",
+                    USER_SMOKE_INIT_PATH_NUL,
                 ),
         );
         let word = core::mem::size_of::<usize>();

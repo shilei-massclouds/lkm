@@ -8,7 +8,7 @@ setup_command = [
   "make",
   "-C",
   "impl/arceos_ex",
-  "disk",
+  "legacy-disk",
   "FORCE=1",
   "VIRTIO_BLK_IMAGE=build/stress-linux-exact-cumulative.raw",
   "ROOTFS_LTP_OVERLAY=none",
@@ -82,7 +82,7 @@ checkpoint_scope = [
 working_directory = "."
 command = [
   "make",
-  "run",
+  "legacy-run",
   "APP=user-boot",
   "ROOTFS_LTP_OVERLAY=none",
   "PROBE=announce,stress-mem",

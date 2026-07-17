@@ -5,7 +5,7 @@
 [`../objects/vfs.md`](../objects/vfs.md) 与 [`../objects/ext2.md`](../objects/ext2.md)，验收编排见
 [`../../testing/rootfs.md`](../../testing/rootfs.md)。
 
-## Build-time fixture overlay
+## Canonical rootfs and stable fixture paths
 
 Rule IDs (MUST):
 
@@ -16,26 +16,27 @@ Rule IDs (MUST):
 - `arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile`
 - `arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode`
 
-The temporary user init fixture is supplied by image construction, not runtime overlayfs. The operation
-must copy a built fixture into the staged rootfs target, replacing the target itself when it is a symlink.
-`ROOTFS_OVERLAY=none` skips the map; otherwise the Makefile reads `ROOTFS_OVERLAY_MAP`, defaulting to
-`impl/arceos_ex/tests/user/rootfs-overlay.map`. Each non-comment row declares target, user-test name and
-optional toolchain/link mode. `__absent__` deletes the target only for explicit negative/fallback images.
+The canonical image is a normal Alpine/OpenRC rootfs: image construction must not replace `/sbin/init`,
+`/etc/inittab` or the distribution `/etc`. Repository user programs live under
+`impl/arceos_ex/tests/user/`, are compiled through that directory's Makefile, and are installed under stable
+`/opt/lkm/tests/` names. User-mode basic tests select them with an absolute kernel `init=` value. The user-test
+Makefile continues to expose GNU/musl and static/dynamic selection, and any build failure aborts image
+construction instead of reusing stale fixture output.
 
-User programs live under `impl/arceos_ex/tests/user/` and are built by that directory's Makefile. The
-kernel Makefile does not own compiler details. The checked-in default map installs `user_smoke` as
-`/sbin/init`; fallback-specific maps are temporary harness/manual inputs. The user-test Makefile exposes
-GNU/musl and static/dynamic selection, and any build failure aborts image construction instead of reusing
-a stale output.
+The old target-map and arbitrary file-overlay mechanisms remain available only to unmigrated stress,
+rc.local, OpenRC login and paired-difftest paths. They are not inputs to the canonical image and new basic
+tests must not use them to replace a system entry point.
 
-## Deterministic disk lifecycle
+## Input-sensitive disk lifecycle
 
 Rule ID: `arceos_ex_must_disk_build_default_not_rebuild_existing_image` (MUST).
 
-`make disk` creates an image only when it is missing by default. Overlay changes do not silently rebuild
-an existing image; explicit rebuild uses `FORCE=1` or `disk-clean` followed by `make disk`.
+`make disk` records a canonical input fingerprint. It rebuilds when the Alpine tarball, rootfs configuration,
+builder implementation, repository fixture sources/build files or configured LTP staging tree changes.
+Unchanged inputs reuse the existing image and `FORCE=1` forces a rebuild. A successful rebuild atomically
+replaces the canonical image and its fingerprint; failure must not publish a partially built image.
 
-## Static file overlay order
+## Legacy static file overlay order
 
 Rule ID: `arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay` (MUST).
 
@@ -43,7 +44,7 @@ Rule ID: `arceos_ex_must_rootfs_file_overlay_apply_after_fixture_overlay` (MUST)
 unpacked and after compiled fixture overlay processing. `ROOTFS_OVERLAY=none` disables only the compiled
 map; without a file overlay the bare Alpine account state, including locked `root:*`, remains unchanged.
 
-## LTP rootfs overlay
+## Canonical LTP installation
 
 Rule IDs (MUST):
 
@@ -53,23 +54,14 @@ Rule IDs (MUST):
 - `arceos_ex_must_ltp_rootfs_overlay_use_dedicated_sized_image`
 - `arceos_ex_must_automated_rootfs_workflows_disable_ltp_overlay`
 
-`ROOTFS_LTP_OVERLAY` accepts only `default` and `none`. It defaults to `default` for `APP=user-boot` and
-to `none` for every other app. `default` consumes an already unpacked sibling-repository staging tree;
-`ROOTFS_LTP_OVERLAY_DIR` defaults to `../ltp/build-riscv64-musl-syscalls/rootfs` relative to the repository
-root. Image construction must fail with a specific diagnostic when that directory is absent, when
-`opt/ltp/run-syscalls.sh` is absent, or when the runner is not executable. It must not silently fall back
-to a rootfs without LTP.
+The canonical builder consumes an unpacked LTP staging tree whose `opt/ltp/run-syscalls.sh` exists and is
+executable. It installs that tree at `/opt/ltp` after Alpine extraction and repository fixtures, without
+overwriting Alpine `/etc`. A missing or malformed LTP source is a specific build failure, not a silent lean
+image. The canonical size must accommodate the configured LTP tree. Changes anywhere in that source are
+part of the canonical fingerprint.
 
-The LTP staging tree is copied with the same semantics as `ROOTFS_FILE_OVERLAY_DIR`, but in a dedicated
-final overlay stage after the compiled fixture and ordinary file overlay. This order lets LTP staging
-provide its intended final files without changing the fixture and static-file interfaces.
-
-An enabled LTP overlay defaults to the separate `build/virtio-blk-ltp.raw` image and a `320M` image size.
-With LTP disabled, the defaults remain `build/virtio-blk.raw` and `64M`. Existing images are still reused
-according to the deterministic disk lifecycle rule, so a rebuilt or replaced LTP staging tree requires
-`FORCE=1` to refresh an existing image. Repository `make test`, stress, and difftest user-boot image
-commands must explicitly set `ROOTFS_LTP_OVERLAY=none`; they retain their existing fixture selection,
-image sizes, execution scope, and independence from the sibling LTP build.
+Legacy specialized images may still explicitly enable/disable the old LTP overlay while they await
+migration; that behavior does not redefine the canonical image.
 
 ## Kernel command line and fixture separation
 
@@ -78,7 +70,7 @@ Rule IDs (MUST):
 - `arceos_ex_must_qemu_append_default_user_boot_to_bin_sh_and_passthrough`
 - `arceos_ex_must_keep_overlay_as_fixture_injection_after_init_cmdline_support`
 
-`QEMU_APPEND` defaults to `earlycon=sbi` for ordinary apps and to `earlycon=sbi init=/bin/sh` for a manual
-`APP=user-boot` run. The run target passes the value through to QEMU and preserves command-line overrides.
-`init=` selects the Linux-like requested-init/fallback path; it is not a replacement for image overlay.
-The overlay remains the stable injection mechanism for `user_smoke` and staged fixtures.
+Basic-test `kernel_cmdline` is fixed in TOML and passed as one QEMU append value. `init=` selects the
+Linux-like requested-init/fallback path. Repository fixtures are chosen through stable absolute paths such
+as `/opt/lkm/tests/user-smoke`; distribution commands continue to use their normal `/bin` or `/sbin` paths.
+Make command-line QEMU cmdline overrides are forbidden for basic tests.

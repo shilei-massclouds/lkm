@@ -64,93 +64,55 @@ python3 tools/checkpoints/plan_linux_instrumentation.py --emit-marker-patch /tmp
 
 随后人工审阅 `/tmp/lkm-linux-markers.patch`，确认无误后再显式应用到参考 Linux tree。
 
-## 运行目标内核
+## 基本测试流水线
 
-默认运行 hello 应用：
+`make run TEST=<name>` 是单轮基本测试的完整入口；省略 `TEST` 时运行
+`hello-native`。`make build TEST=<name>` 从同一 TOML 只构造 kernel image，不准备磁盘也不启动
+QEMU。常用配置包括：
 
 ```sh
 make run
+make run TEST=kernel-smoke-native
+make run TEST=user-smoke-native
+make run TEST=requested-init-native
+make run TEST=distro-ls-native
+make run TEST=distro-sh-native
+make build TEST=hello-linux-object
 ```
 
-运行用户态启动路径：
+配置位于 `impl/arceos_ex/tests/basic/cases/`。APP、provider、probe、profile、磁盘策略、QEMU
+cmdline/device/stdin 和结果断言都以 TOML 为唯一来源，不能从 Make 命令行覆盖。`QEMU`、编译器、
+`LINUX_PROVIDER_DIR`、rootfs cache/source 和输出根等宿主参数仍可按文档覆盖。
 
-```sh
-make run APP=user-boot
-```
+每次执行在 `impl/arceos_ex/tests/basic/out/` 下保留冻结的 `manifest.json`、完整 `qemu.log` 和
+结构化 `result.json`。流水线负责 timeout、stdin marker、guest exit、QEMU 进程组回收、
+PreScript/PostScript 和私有磁盘清理；QEMU 返回 0 本身不代表 guest 测试通过。
 
-`APP=user-boot` 会走普通用户态 payload 读取与启动路径。默认命令行会指定 `init=/bin/sh`，进入 Alpine rootfs 内的 BusyBox shell；在 shell 中输入 `exit` 可退出并触发 `user exit status=0`。该入口也是 `docs/DEFECTS.md` 中 DF-0001 的固定复现入口之一。定位这类间歇性问题时，不要只用 probe 路径替代普通路径，因为额外观测可能改变时序。
+### Canonical rootfs
 
-### Rootfs Overlay
+`make disk` 独立构造 `impl/arceos_ex/build/rootfs/canonical.raw`。该镜像保留正常 Alpine/OpenRC
+的 `/etc` 和 `/sbin/init`，把仓库 fixture 安装到 `/opt/lkm/tests/`，把经过校验的 sibling LTP
+staging 安装到 `/opt/ltp`。用户态基本测试通过 `init=/opt/lkm/tests/<fixture>` 选择 fixture，
+不会覆盖系统 init。
 
-`APP=user-boot` 默认从 Alpine minirootfs 构造 ext2 rootfs。仓库的 rootfs overlay 是镜像构造期覆盖，不是运行期 overlayfs：构造 disk 时先把 Alpine rootfs 解到 staging 目录，再按 `impl/arceos_ex/tests/user/rootfs-overlay.map` 编译用户态测试程序并复制到 rootfs 内的目标路径。
-
-当前默认 map 把 dynamic musl `user_smoke` 覆盖为 `/sbin/init`：
-
-```text
-/sbin/init    user_smoke  musl  dynamic
-```
-
-手工 `make run APP=user-boot` 默认通过 `init=/bin/sh` 进入发行版 shell，不会选择 overlay 后的 `/sbin/init`。单独运行当前用户态 smoke 时，需要显式让内核走默认 fallback 列表：
-
-```sh
-make run APP=user-boot QEMU_APPEND='earlycon=sbi' FORCE=1
-```
-
-`FORCE=1` 会重新生成 disk，确保当前 overlay map 和 `impl/arceos_ex/tests/user/smoke/` 下的源码被重新编译进 rootfs。若不加 `FORCE=1`，`make run APP=user-boot` 会复用已有的 `impl/arceos_ex/build/virtio-blk.raw`。
-
-需要不污染默认 disk 时，可以指定临时 disk：
-
-```sh
-make run APP=user-boot QEMU_APPEND='earlycon=sbi' VIRTIO_BLK_IMAGE=/tmp/lkm-user-smoke.raw FORCE=1
-```
-
-禁用构造期 overlay、直接使用 Alpine rootfs 内容时：
-
-```sh
-make run APP=user-boot ROOTFS_OVERLAY=none FORCE=1
-```
-
-需要让 checkpoint 自报基本进度时，可以启用 announce probe：
-
-```sh
-make run APP=user-boot PROBE=announce
-```
-
-`LOG=trace` 目前仍作为兼容入口保留，等价于启用 `PROBE=announce`；新用法应优先使用 `PROBE=announce`。
-
-### Kernel Command Line
-
-`impl/arceos_ex/Makefile` 对普通 app 默认设置：
-
-```text
-QEMU_APPEND ?= earlycon=sbi
-```
-
-对 `APP=user-boot`，默认值是：
-
-```text
-QEMU_APPEND ?= earlycon=sbi init=/bin/sh
-```
-
-`make run` 会把该值原样传给 QEMU 的 `-append`。需要指定 Linux-like requested init 时，可以覆盖：
-
-```sh
-make run APP=user-boot QEMU_APPEND='earlycon=sbi init=/bin/ls' FORCE=1
-```
-
-`init=` 只改变内核命令行下的 init 选择语义；rootfs overlay 仍用于构造测试 disk 时注入稳定 fixture。`make test` 的 user-boot smoke case 会显式传入 `QEMU_APPEND=earlycon=sbi`、临时 disk 和默认 overlay map，因此仍验证 `user_smoke`，不会进入交互式 shell。
+builder 记录 Alpine tarball、配置/构造脚本、fixture 和 LTP 输入指纹；输入变化会自动重建，
+输入不变则复用，`make disk FORCE=1` 强制重建。基本测试默认只读挂载 canonical image；确需写盘的
+配置使用运行期私有副本，结束后自动删除。旧 rootfs overlay 仅供尚未迁移的 stress、rc.local、
+OpenRC login 和 paired difftest 专用路径使用。
 
 ## Provider 机制
 
-Provider 是构建时选择机制，用于决定内核镜像链接哪一组底层实现对象。当前已经接入的是 PLIC provider：默认 `PLIC_PROVIDER=native` 使用仓库内实现，`PLIC_PROVIDER=linux-object` 会把 Linux 构建出的 `drivers/irqchip/irq-sifive-plic.o` 直接作为 linker input 组成新的 kernel image。这个变量影响 `make build` 产物，不是运行期动态切换开关。
+Provider 是构建时选择机制，用于决定内核镜像链接哪一组底层实现对象。当前 `native` 使用仓库内
+实现，`linux-object` 会把 Linux 构建出的 `drivers/irqchip/irq-sifive-plic.o` 作为 linker input。
+基本测试通过名称成对选择 provider，而不是通过 Make 变量覆盖：
 
 常用入口保持不变，只需要通过 make 变量选择 provider：
 
 ```sh
-make run
-make run APP=user-boot
-make run PLIC_PROVIDER=linux-object
-make run APP=user-boot PLIC_PROVIDER=linux-object
+make run TEST=hello-native
+make run TEST=hello-linux-object
+make run TEST=user-smoke-native
+make run TEST=user-smoke-linux-object
 ```
 
 完整回归入口是：
@@ -177,7 +139,7 @@ Linux object provider 声明位于 `impl/providers/linux-6.12.mk`。默认依赖
 
 ```sh
 make test LINUX_PROVIDER_DIR=/path/to/linux-6.12
-make run PLIC_PROVIDER=linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
+make run TEST=hello-linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 ```
 
 ## 压力测试

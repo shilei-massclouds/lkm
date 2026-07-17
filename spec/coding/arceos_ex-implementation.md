@@ -16,6 +16,7 @@ coding 规则来源，也不覆盖 model、project/system/phase/object/testing �
 - 普通对象：[`objects/README.md`](objects/README.md)。
 - Rootfs 镜像构造：[`projects/rootfs-image.md`](projects/rootfs-image.md)。
 - Rootfs/user 验收编排：[`../testing/rootfs.md`](../testing/rootfs.md)。
+- 基本测试流水线：[`../testing/basic-tests.md`](../testing/basic-tests.md)。
 - 构建门禁：[`build.md`](build.md)。
 
 本文件后文的“实现证据”只说明当前代码怎样落实这些入口。若证据和权威规格不一致，先把差异
@@ -35,14 +36,13 @@ payload 执行对象级用例后通过 SBI 关机；`APP=hello` 观察最终 Ker
 
 ```bash
 make build
-make build APP=smoke
-make build APP=hello
-make build APP=user-boot
+make build TEST=kernel-smoke-native
+make build TEST=user-smoke-native
 make run
-make run APP=smoke
-make run APP=hello
-make run APP=user-boot
-make run PROBE=announce
+make run TEST=kernel-smoke-native
+make run TEST=user-smoke-native
+make run TEST=distro-sh-native
+make disk
 make verify
 make verify REPORT=graph
 make coding-spec-check
@@ -52,9 +52,9 @@ make test-smoke
 make clean
 ```
 
-`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= smoke` 选择 payload。`PROBE=announce` 打开 checkpoint
-自声明 consumer；历史 `LOG=trace` 仍是兼容 alias。`make test` 的实际组成和顺序以
-[`build.md`](build.md) 及根 Makefile 为准。
+`KERNEL ?= arceos_ex` 选择默认内核，`TEST ?= hello-native` 选择基本测试。payload、provider、probe、
+磁盘和 QEMU 行为由对应 TOML 固定；旧 APP/overlay 变量只保留给尚未迁移的专用 runner。
+`make test` 的实际组成和顺序以 [`build.md`](build.md) 及根 Makefile 为准。
 
 ## 阶段实现证据
 

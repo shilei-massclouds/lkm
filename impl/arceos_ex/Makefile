@@ -77,6 +77,11 @@ FS_TYPE ?= ext2
 EXT2_BLOCK_SIZE ?=
 ROOTFS_URL ?= https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.24/releases/riscv64/alpine-minirootfs-3.24.1-riscv64.tar.gz
 ROOTFS_TARBALL ?= build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz
+CANONICAL_ROOTFS_IMAGE ?= build/rootfs/canonical.raw
+CANONICAL_ROOTFS_SIZE ?= 320M
+CANONICAL_ROOTFS_BUILDER ?= tests/basic/rootfs_builder.py
+ROOTFS_LTP_DIR ?= $(abspath $(ROOT)/../ltp/build-riscv64-musl-syscalls/rootfs)
+PYTHON ?= python3
 ROOTFS_STAGING_DIR ?= build/rootfs-staging
 WGET ?= wget
 TAR ?= tar
@@ -131,7 +136,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate fmt fmt-check clippy-check disk disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
+.PHONY: build run legacy-run generate fmt fmt-check clippy-check disk legacy-disk disk-clean legacy-disk-clean rootfs-tarball rootfs-overlay rootfs-file-overlay rootfs-ltp-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -178,12 +183,33 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(RUST_OBJCOPY) --strip-all -O binary $< $@
 
 disk:
+	$(PYTHON) $(CANONICAL_ROOTFS_BUILDER) \
+		--repo-root "$(abspath $(ROOT))" \
+		--image "$(abspath $(CANONICAL_ROOTFS_IMAGE))" \
+		--size "$(CANONICAL_ROOTFS_SIZE)" \
+		--tarball "$(abspath $(ROOTFS_TARBALL))" \
+		--url "$(ROOTFS_URL)" \
+		--ltp-dir "$(ROOTFS_LTP_DIR)" \
+		--wget "$(WGET)" \
+		--tar "$(TAR)" \
+		--mkfs-ext2 "$(MKFS_EXT2)" \
+		--mkfs-feature-args "$(EXT2_MKFS_FEATURE_ARGS)" \
+		--ext2-block-size "$(EXT2_BLOCK_SIZE)" \
+		--gnu-cc "$(ROOTFS_OVERLAY_GNU_CC)" \
+		--musl-cc "$(ROOTFS_OVERLAY_MUSL_CC)" \
+		--make "$(MAKE)" \
+		$(if $(filter 1,$(FORCE)),--force,)
+
+legacy-disk:
 ifeq ($(FORCE),1)
 	rm -f $(VIRTIO_BLK_IMAGE)
 endif
 	$(MAKE) $(VIRTIO_BLK_IMAGE)
 
 disk-clean:
+	rm -f $(CANONICAL_ROOTFS_IMAGE) $(CANONICAL_ROOTFS_IMAGE).inputs.json
+
+legacy-disk-clean:
 	rm -f $(VIRTIO_BLK_IMAGE)
 
 rootfs-tarball: $(ROOTFS_TARBALL)
@@ -287,7 +313,9 @@ else
 	$(error unknown FS_TYPE: $(FS_TYPE))
 endif
 
-run: disk
+run: legacy-run
+
+legacy-run: legacy-disk
 	$(MAKE) build APP=$(APP) PROBE="$(RUN_PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER) PROFILE=$(RUN_PROFILE) EXTRA_RUSTFLAGS="$(RUN_EXTRA_RUSTFLAGS)"
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio $(QEMU_DEVICES) -append "$(QEMU_APPEND)" -kernel $(RUN_KERNEL_BIN)
 

@@ -1,0 +1,941 @@
+#!/usr/bin/env python3
+"""Run one versioned basic kernel/QEMU test configuration."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import selectors
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import tomllib
+from typing import Any, Iterator
+
+try:
+    from .rootfs_builder import parse_size
+except ImportError:  # Direct script execution.
+    from rootfs_builder import parse_size
+
+
+SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 1
+TEST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+GUEST_EXIT_RE = re.compile(r"user exit status=(-?\d+)")
+STAGES = (
+    "config",
+    "kernel-build",
+    "disk-prepare",
+    "pre-script",
+    "qemu",
+    "post-script",
+    "result-cleanup",
+)
+ALLOWED_PROVIDERS = {"native", "linux-object"}
+ALLOWED_PROFILES = {"release", "trace"}
+ALLOWED_APPS = {"hello", "smoke", "user-boot"}
+ALLOWED_DISK_MODES = {"none", "canonical-readonly", "private-copy", "generated", "external"}
+ALLOWED_EXIT_POLICIES = {"process-exit", "guest-shutdown", "marker"}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+class PipelineTimeout(RuntimeError):
+    pass
+
+
+@dataclass
+class QemuOutcome:
+    exit_code: int | None = None
+    timed_out: bool = False
+    terminated_after_marker: bool = False
+    process_group_reaped: bool = True
+    stdin_steps: list[dict[str, Any]] | None = None
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    repo_root = args.repo_root.resolve()
+    try:
+        config_path = resolve_case(args.test, args.cases_dir, repo_root)
+    except ConfigError as error:
+        print(f"basic test configuration error: {error}", file=sys.stderr)
+        return 1
+
+    if args.command == "manifest":
+        try:
+            config = load_config(config_path, repo_root)
+            artifact_dir = _manifest_artifact_dir(args, repo_root, config["name"])
+            manifest = freeze_manifest(config, config_path, repo_root, artifact_dir)
+        except ConfigError as error:
+            print(f"basic test configuration error: {error}", file=sys.stderr)
+            return 1
+        encoded = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(encoded)
+        else:
+            print(encoded, end="")
+        return 0
+
+    return run_pipeline(
+        command=args.command,
+        config_path=config_path,
+        repo_root=repo_root,
+        out_root=args.out_root,
+        output_dir=args.output_dir,
+    )
+
+
+def _parser() -> argparse.ArgumentParser:
+    repo_root = Path(__file__).resolve().parents[4]
+    cases_dir = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases"
+    out_root = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "out"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("run", "build", "manifest"))
+    parser.add_argument("test", nargs="?", default="hello-native")
+    parser.add_argument("--repo-root", type=Path, default=repo_root)
+    parser.add_argument("--cases-dir", type=Path, default=cases_dir)
+    parser.add_argument("--out-root", type=Path, default=out_root)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--output", type=Path, help="manifest output path")
+    return parser
+
+
+def resolve_case(test: str, cases_dir: Path, repo_root: Path) -> Path:
+    if not TEST_NAME_RE.fullmatch(test):
+        raise ConfigError(f"invalid test name: {test!r}")
+    directory = cases_dir if cases_dir.is_absolute() else repo_root / cases_dir
+    path = (directory / f"{test}.toml").resolve()
+    return path
+
+
+def load_config(path: Path, repo_root: Path) -> dict[str, Any]:
+    try:
+        raw = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise ConfigError(f"cannot parse {path}: {error}") from error
+    _table(raw, "top level")
+    _keys(raw, {"schema_version", "name", "timeout_seconds", "pre_script", "post_script", "kernel", "disk", "qemu", "expect"}, "top level")
+    version = _integer(raw, "schema_version", "top level")
+    if version != SCHEMA_VERSION:
+        raise ConfigError(f"unsupported schema_version: {version}")
+    name = _string(raw, "name", "top level")
+    if not TEST_NAME_RE.fullmatch(name):
+        raise ConfigError(f"invalid configured test name: {name!r}")
+    if path.stem != name:
+        raise ConfigError(f"configured name {name!r} does not match file {path.name!r}")
+    timeout = _positive_integer(raw, "timeout_seconds", "top level")
+
+    kernel_raw = _required_table(raw, "kernel", "top level")
+    _keys(kernel_raw, {"app", "provider", "probe", "probe_file", "profile", "stress_mem_bytes", "extra_rustflags"}, "kernel")
+    app = _string(kernel_raw, "app", "kernel")
+    if app not in ALLOWED_APPS:
+        raise ConfigError(f"kernel.app must be one of {sorted(ALLOWED_APPS)}")
+    provider = _string(kernel_raw, "provider", "kernel")
+    if provider not in ALLOWED_PROVIDERS:
+        raise ConfigError(f"kernel.provider must be one of {sorted(ALLOWED_PROVIDERS)}")
+    profile = _string(kernel_raw, "profile", "kernel")
+    if profile not in ALLOWED_PROFILES:
+        raise ConfigError(f"kernel.profile must be one of {sorted(ALLOWED_PROFILES)}")
+    probe = _string_list(kernel_raw.get("probe", []), "kernel.probe")
+    probe_file = _optional_repo_path(kernel_raw, "probe_file", repo_root, "kernel")
+    stress_mem_bytes = kernel_raw.get("stress_mem_bytes")
+    if stress_mem_bytes is not None and (not _is_integer(stress_mem_bytes) or stress_mem_bytes <= 0):
+        raise ConfigError("kernel.stress_mem_bytes must be a positive integer")
+    extra_rustflags = _string_list(kernel_raw.get("extra_rustflags", []), "kernel.extra_rustflags")
+
+    disk_raw = _required_table(raw, "disk", "top level")
+    _keys(disk_raw, {"mode", "path", "readonly", "generator", "size"}, "disk")
+    disk = _parse_disk(disk_raw, repo_root)
+
+    qemu_raw = _required_table(raw, "qemu", "top level")
+    _keys(qemu_raw, {"memory_mb", "smp", "kernel_cmdline", "rng", "exit_policy", "exit_marker", "stdin_steps"}, "qemu")
+    memory_mb = _positive_integer(qemu_raw, "memory_mb", "qemu")
+    smp = _positive_integer(qemu_raw, "smp", "qemu")
+    kernel_cmdline = _string(qemu_raw, "kernel_cmdline", "qemu")
+    rng = _boolean(qemu_raw, "rng", "qemu")
+    exit_policy = _string(qemu_raw, "exit_policy", "qemu")
+    if exit_policy not in ALLOWED_EXIT_POLICIES:
+        raise ConfigError(f"qemu.exit_policy must be one of {sorted(ALLOWED_EXIT_POLICIES)}")
+    exit_marker = qemu_raw.get("exit_marker")
+    if exit_policy == "marker":
+        if not isinstance(exit_marker, str) or not exit_marker:
+            raise ConfigError("qemu.exit_marker is required for marker exit_policy")
+    elif exit_marker is not None:
+        raise ConfigError("qemu.exit_marker is only valid for marker exit_policy")
+    stdin_steps = _stdin_steps(qemu_raw.get("stdin_steps", []))
+
+    expect_raw = _required_table(raw, "expect", "top level")
+    _keys(expect_raw, {"process_exit", "guest_exit_status", "markers", "forbidden_markers", "marker_counts"}, "expect")
+    process_exit = _optional_integer(expect_raw, "process_exit", "expect")
+    guest_exit_status = _optional_integer(expect_raw, "guest_exit_status", "expect")
+    markers = _string_list(expect_raw.get("markers", []), "expect.markers")
+    forbidden_markers = _string_list(expect_raw.get("forbidden_markers", []), "expect.forbidden_markers")
+    marker_counts = _marker_counts(expect_raw.get("marker_counts", []))
+    if not markers and not forbidden_markers and not marker_counts and process_exit is None and guest_exit_status is None:
+        raise ConfigError("expect must declare at least one observable fact")
+
+    scripts = {
+        "pre": _script_path(raw, "pre_script", path),
+        "post": _script_path(raw, "post_script", path),
+    }
+    return {
+        "schema_version": version,
+        "name": name,
+        "timeout_seconds": timeout,
+        "scripts": scripts,
+        "kernel": {
+            "app": app,
+            "provider": provider,
+            "probe": probe,
+            "probe_file": str(probe_file) if probe_file else None,
+            "profile": profile,
+            "stress_mem_bytes": stress_mem_bytes,
+            "extra_rustflags": extra_rustflags,
+        },
+        "disk": disk,
+        "qemu": {
+            "memory_mb": memory_mb,
+            "smp": smp,
+            "kernel_cmdline": kernel_cmdline,
+            "rng": rng,
+            "exit_policy": exit_policy,
+            "exit_marker": exit_marker,
+            "stdin_steps": stdin_steps,
+        },
+        "expect": {
+            "process_exit": process_exit,
+            "guest_exit_status": guest_exit_status,
+            "markers": markers,
+            "forbidden_markers": forbidden_markers,
+            "marker_counts": marker_counts,
+        },
+    }
+
+
+def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, artifact_dir: Path) -> dict[str, Any]:
+    kernel_dir = repo_root / "impl" / "arceos_ex"
+    probes = set(config["kernel"]["probe"])
+    probe_file = config["kernel"]["probe_file"]
+    if probe_file:
+        for line in Path(probe_file).read_text().splitlines():
+            content = line.partition("#")[0].strip()
+            if content:
+                probes.update(content.replace(",", " ").split())
+    sorted_probes = sorted(probes)
+    kernel_image = kernel_image_path(kernel_dir, config["kernel"], sorted_probes)
+    canonical = _canonical_image(repo_root)
+    disk = dict(config["disk"])
+    disk["canonical_path"] = str(canonical)
+    if disk["mode"] in {"private-copy", "generated"}:
+        disk["runtime_path"] = str((artifact_dir / "private-disk.raw").resolve())
+    elif disk["mode"] == "canonical-readonly":
+        disk["runtime_path"] = str(canonical)
+    elif disk["mode"] == "external":
+        disk["runtime_path"] = disk["path"]
+    else:
+        disk["runtime_path"] = None
+    build_command = kernel_build_command(kernel_dir, config["kernel"])
+    qemu_command = qemu_command_for(config, kernel_image, disk)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "test": config["name"],
+        "config_path": str(config_path.resolve()),
+        "artifact_dir": str(artifact_dir.resolve()),
+        "timeout_seconds": config["timeout_seconds"],
+        "scripts": config["scripts"],
+        "kernel": {**config["kernel"], "resolved_probes": sorted_probes, "image": str(kernel_image)},
+        "disk": disk,
+        "qemu": {**config["qemu"], "command": qemu_command},
+        "expect": config["expect"],
+        "build_command": build_command,
+    }
+
+
+def kernel_image_path(kernel_dir: Path, kernel: dict[str, Any], probes: list[str]) -> Path:
+    suffix = ""
+    if kernel["provider"] != "native":
+        suffix += f"/plic-{kernel['provider']}"
+    if probes:
+        label = "+".join(probes).replace("/", "_").replace(".", "_")
+        suffix += f"/probe-{label}"
+        if "stress-mem" in probes:
+            suffix += f"-bytes{kernel['stress_mem_bytes'] or 65536}"
+    relative = f"build/riscv64imac-unknown-none-elf/{kernel['profile']}/{kernel['app']}{suffix}/arceos_ex.bin"
+    return (kernel_dir / relative).resolve()
+
+
+def kernel_build_command(kernel_dir: Path, kernel: dict[str, Any]) -> list[str]:
+    command = [
+        *_tool_command("MAKE", "make"),
+        "-C",
+        str(kernel_dir),
+        "build",
+        f"APP={kernel['app']}",
+        f"PLIC_PROVIDER={kernel['provider']}",
+        f"PROFILE={kernel['profile']}",
+        f"PROBE={','.join(kernel['probe'])}",
+        f"EXTRA_RUSTFLAGS={' '.join(kernel['extra_rustflags'])}",
+    ]
+    if kernel["probe_file"]:
+        command.append(f"PROBE_FILE={kernel['probe_file']}")
+    if kernel["stress_mem_bytes"] is not None:
+        command.append(f"STRESS_MEM_BYTES={kernel['stress_mem_bytes']}")
+    return command
+
+
+def qemu_command_for(config: dict[str, Any], kernel_image: Path, disk: dict[str, Any]) -> list[str]:
+    qemu = config["qemu"]
+    command = [
+        *_tool_command("QEMU", "qemu-system-riscv64"),
+        "-machine",
+        "virt",
+        "-cpu",
+        "rv64",
+        "-m",
+        f"{qemu['memory_mb']}M",
+        "-smp",
+        str(qemu["smp"]),
+        "-nographic",
+        "-serial",
+        "mon:stdio",
+    ]
+    if qemu["rng"]:
+        command.extend(["-object", "rng-random,id=rng0,filename=/dev/urandom", "-device", "virtio-rng-device,rng=rng0"])
+    runtime_path = disk.get("runtime_path")
+    if runtime_path:
+        readonly = disk["mode"] == "canonical-readonly" or (disk["mode"] == "external" and disk["readonly"])
+        drive = f"file={runtime_path},if=none,format=raw,id=blk0"
+        if readonly:
+            drive += ",readonly=on"
+        command.extend(["-drive", drive, "-device", "virtio-blk-device,drive=blk0"])
+    command.extend(["-append", qemu["kernel_cmdline"], "-kernel", str(kernel_image)])
+    return command
+
+
+def run_pipeline(
+    *,
+    command: str,
+    config_path: Path,
+    repo_root: Path,
+    out_root: Path,
+    output_dir: Path | None,
+) -> int:
+    test_hint = config_path.stem
+    artifact_dir = _new_artifact_dir(repo_root, out_root, output_dir, test_hint)
+    qemu_log = artifact_dir / "qemu.log"
+    qemu_log.touch()
+    result_path = artifact_dir / "result.json"
+    manifest_path = artifact_dir / "manifest.json"
+    result = _initial_result(test_hint, config_path, artifact_dir, manifest_path, qemu_log, result_path)
+    manifest: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    qemu_outcome = QemuOutcome(stdin_steps=[])
+    private_disk: Path | None = None
+    qemu_started = False
+    failure = False
+
+    try:
+        with _stage(result, "config"):
+            config = load_config(config_path, repo_root)
+            result["test"] = config["name"]
+            manifest = freeze_manifest(config, config_path, repo_root, artifact_dir)
+            _write_json(manifest_path, manifest)
+            result["manifest"] = str(manifest_path)
+
+        with _stage(result, "kernel-build"):
+            _run_logged(manifest["build_command"], repo_root, artifact_dir / "kernel-build.log")
+            kernel_image = Path(manifest["kernel"]["image"])
+            if not kernel_image.is_file():
+                raise RuntimeError(f"kernel build did not create {kernel_image}")
+
+        if command == "build":
+            _skip(result, "disk-prepare", "build-only")
+            _skip(result, "pre-script", "build-only")
+            _skip(result, "qemu", "build-only")
+            _skip(result, "post-script", "build-only")
+        else:
+            with _stage(result, "disk-prepare"):
+                if manifest["disk"]["mode"] in {"private-copy", "generated"}:
+                    private_disk = Path(manifest["disk"]["runtime_path"])
+                private_disk = _prepare_disk(manifest, repo_root, artifact_dir / "disk-prepare.log")
+
+            pre_script = manifest["scripts"]["pre"]
+            if pre_script:
+                with _stage(result, "pre-script"):
+                    _run_script(Path(pre_script), manifest, qemu_log, result_path, artifact_dir / "pre-script.log")
+            else:
+                _skip(result, "pre-script", "not configured")
+
+            try:
+                qemu_started = True
+                with _stage(result, "qemu"):
+                    qemu_outcome = _run_qemu(manifest, repo_root, qemu_log)
+                    if qemu_outcome.timed_out:
+                        raise PipelineTimeout(f"QEMU timed out after {manifest['timeout_seconds']} seconds")
+            finally:
+                post_script = manifest["scripts"]["post"]
+                if qemu_started and post_script:
+                    try:
+                        with _stage(result, "post-script"):
+                            _run_script(Path(post_script), manifest, qemu_log, result_path, artifact_dir / "post-script.log")
+                    except Exception:
+                        failure = True
+                elif result["stages"]["post-script"]["status"] == "pending":
+                    _skip(result, "post-script", "not configured" if qemu_started else "QEMU not started")
+    except Exception as error:
+        failure = True
+        result["errors"].append(str(error))
+        print(f"basic test failed: {error}", file=sys.stderr)
+        _skip_pending_before_cleanup(result, "earlier stage failed")
+    finally:
+        cleanup_errors: list[str] = []
+        cleanup = result["cleanup"]
+        cleanup["process_group_reaped"] = qemu_outcome.process_group_reaped
+        if private_disk is not None:
+            try:
+                private_disk.unlink(missing_ok=True)
+                cleanup["private_disk_removed"] = not private_disk.exists()
+            except OSError as error:
+                cleanup_errors.append(f"private disk cleanup failed: {error}")
+                cleanup["private_disk_removed"] = False
+        else:
+            cleanup["private_disk_removed"] = None
+        if not qemu_outcome.process_group_reaped:
+            cleanup_errors.append("QEMU process group was not reaped")
+        if cleanup_errors:
+            failure = True
+            result["errors"].extend(cleanup_errors)
+
+        if command == "run" and manifest is not None and result["stages"]["qemu"]["status"] in {"success", "failed"}:
+            expectation_result = evaluate_expectations(manifest["expect"], qemu_log, qemu_outcome)
+            result["expectations"] = expectation_result
+            if not expectation_result["passed"]:
+                failure = True
+                result["errors"].append("one or more expectations failed")
+
+        result["qemu"] = {
+            "exit_code": qemu_outcome.exit_code,
+            "timed_out": qemu_outcome.timed_out,
+            "terminated_after_marker": qemu_outcome.terminated_after_marker,
+            "stdin_steps": qemu_outcome.stdin_steps or [],
+        }
+        stage_failed = any(stage["status"] in {"failed", "timed_out"} for stage in result["stages"].values())
+        failure = failure or stage_failed
+        result["status"] = "failure" if failure else "success"
+        result["exit_code"] = 1 if failure else 0
+        result["ended_at"] = _now()
+        result["duration_seconds"] = time.monotonic() - result.pop("_started_monotonic")
+        cleanup_stage = result["stages"]["result-cleanup"]
+        cleanup_stage["status"] = "failed" if cleanup_errors else "success"
+        cleanup_stage["duration_seconds"] = 0.0
+        _write_json(result_path, result)
+
+    print(f"basic test result: {result_path}")
+    return result["exit_code"]
+
+
+def evaluate_expectations(expect: dict[str, Any], qemu_log: Path, outcome: QemuOutcome) -> dict[str, Any]:
+    text = qemu_log.read_text(errors="replace")
+    checks: list[dict[str, Any]] = []
+    configured_process_exit = expect["process_exit"]
+    if configured_process_exit is not None:
+        checks.append({
+            "kind": "process_exit",
+            "expected": configured_process_exit,
+            "actual": outcome.exit_code,
+            "passed": outcome.exit_code == configured_process_exit,
+        })
+    configured_guest_exit = expect["guest_exit_status"]
+    matches = GUEST_EXIT_RE.findall(text)
+    actual_guest_exit = int(matches[-1]) if matches else None
+    if configured_guest_exit is not None:
+        checks.append({
+            "kind": "guest_exit_status",
+            "expected": configured_guest_exit,
+            "actual": actual_guest_exit,
+            "passed": actual_guest_exit == configured_guest_exit,
+        })
+    for marker in expect["markers"]:
+        count = text.count(marker)
+        checks.append({"kind": "marker", "marker": marker, "actual": count, "expected": ">=1", "passed": count >= 1})
+    for marker in expect["forbidden_markers"]:
+        count = text.count(marker)
+        checks.append({"kind": "forbidden_marker", "marker": marker, "actual": count, "expected": 0, "passed": count == 0})
+    for marker_count in expect["marker_counts"]:
+        count = text.count(marker_count["marker"])
+        if marker_count["exactly"] is not None:
+            passed = count == marker_count["exactly"]
+            expected: Any = marker_count["exactly"]
+        else:
+            passed = count >= marker_count["at_least"]
+            expected = f">={marker_count['at_least']}"
+        checks.append({"kind": "marker_count", "marker": marker_count["marker"], "actual": count, "expected": expected, "passed": passed})
+    return {"passed": all(check["passed"] for check in checks), "guest_exit_status": actual_guest_exit, "checks": checks}
+
+
+def _prepare_disk(manifest: dict[str, Any], repo_root: Path, log_path: Path) -> Path | None:
+    disk = manifest["disk"]
+    mode = disk["mode"]
+    if mode == "none":
+        log_path.write_text("disk mode: none\n")
+        return None
+    if mode in {"canonical-readonly", "private-copy"}:
+        command = [
+            *_tool_command("MAKE", "make"),
+            "-C",
+            str(repo_root / "impl" / "arceos_ex"),
+            "disk",
+            f"CANONICAL_ROOTFS_IMAGE={disk['canonical_path']}",
+            "FORCE=",
+        ]
+        _run_logged(command, repo_root, log_path)
+        canonical = Path(disk["canonical_path"])
+        if not canonical.is_file():
+            raise RuntimeError(f"canonical rootfs builder did not create {canonical}")
+        if mode == "private-copy":
+            private = Path(disk["runtime_path"])
+            shutil.copy2(canonical, private)
+            return private
+        return None
+    if mode == "generated":
+        private = Path(disk["runtime_path"])
+        if disk["generator"] == "blank":
+            with private.open("wb") as output:
+                output.truncate(parse_size(disk["size"]))
+            log_path.write_text(f"generated blank disk: {private}\n")
+            return private
+        raise RuntimeError(f"unimplemented disk generator: {disk['generator']}")
+    if mode == "external":
+        external = Path(disk["runtime_path"])
+        if not external.is_file():
+            raise RuntimeError(f"external disk not found: {external}")
+        log_path.write_text(f"external disk: {external}\n")
+        return None
+    raise RuntimeError(f"unhandled disk mode: {mode}")
+
+
+def _run_qemu(manifest: dict[str, Any], cwd: Path, log_path: Path) -> QemuOutcome:
+    steps = [dict(step, sent=False) for step in manifest["qemu"]["stdin_steps"]]
+    process = subprocess.Popen(
+        manifest["qemu"]["command"],
+        cwd=cwd,
+        stdin=subprocess.PIPE if steps else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        bufsize=0,
+    )
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    deadline = time.monotonic() + manifest["timeout_seconds"]
+    captured = bytearray()
+    timed_out = False
+    terminated_after_marker = False
+    reaped = True
+    pipe_open = True
+    try:
+        with log_path.open("wb") as log:
+            while pipe_open or process.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 and process.poll() is None:
+                    timed_out = True
+                    reaped = _terminate_process_group(process)
+                events = selector.select(max(0.0, min(0.1, remaining))) if pipe_open else []
+                for key, _ in events:
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(process.stdout)
+                        pipe_open = False
+                        continue
+                    captured.extend(chunk)
+                    log.write(chunk)
+                    log.flush()
+                    _console_write(chunk)
+
+                visible = captured.decode(errors="replace")
+                for step in steps:
+                    if step["sent"]:
+                        continue
+                    if step["ready_marker"] in visible:
+                        if process.stdin is None:
+                            raise RuntimeError("stdin step configured without QEMU stdin")
+                        process.stdin.write(step["payload"].encode())
+                        process.stdin.flush()
+                        step["sent"] = True
+                    break
+                if manifest["qemu"]["exit_policy"] == "marker" and not terminated_after_marker:
+                    marker = manifest["qemu"]["exit_marker"]
+                    if marker in visible:
+                        terminated_after_marker = True
+                        reaped = _terminate_process_group(process)
+                if process.poll() is not None and not pipe_open:
+                    break
+            if process.poll() is None:
+                reaped = _terminate_process_group(process) and reaped
+        try:
+            exit_code = process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            reaped = _terminate_process_group(process) and reaped
+            exit_code = process.poll()
+    finally:
+        selector.close()
+        if process.poll() is None:
+            _terminate_process_group(process)
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except BrokenPipeError:
+                pass
+        process.stdout.close()
+    public_steps = [{"ready_marker": step["ready_marker"], "payload_length": len(step["payload"].encode()), "sent": step["sent"]} for step in steps]
+    for step in public_steps:
+        if not step["sent"]:
+            raise RuntimeError(f"QEMU exited before stdin marker: {step['ready_marker']!r}")
+    return QemuOutcome(exit_code, timed_out, terminated_after_marker, reaped, public_steps)
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> bool:
+    if process.poll() is not None:
+        return True
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    try:
+        process.wait(timeout=2)
+        return True
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=2)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+
+
+def _run_script(script: Path, manifest: dict[str, Any], qemu_log: Path, result_path: Path, log_path: Path) -> None:
+    disk_path = manifest["disk"].get("runtime_path") or ""
+    env = {
+        "PATH": os.environ.get("PATH", os.defpath),
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+        "LC_ALL": "C",
+        "LKM_TEST_NAME": manifest["test"],
+        "LKM_TEST_CONFIG": manifest["config_path"],
+        "LKM_TEST_KERNEL": manifest["kernel"]["image"],
+        "LKM_TEST_DISK": disk_path,
+        "LKM_TEST_QEMU_LOG": str(qemu_log),
+        "LKM_TEST_RESULT": str(result_path),
+        "LKM_TEST_ARTIFACTS": manifest["artifact_dir"],
+    }
+    _run_logged([str(script)], Path(manifest["artifact_dir"]), log_path, env=env)
+
+
+def _run_logged(command: list[str], cwd: Path, log_path: Path, env: dict[str, str] | None = None) -> None:
+    print("+ " + shlex.join(command), flush=True)
+    with log_path.open("wb") as log:
+        with subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+            assert process.stdout is not None
+            while chunk := process.stdout.read(65536):
+                log.write(chunk)
+                log.flush()
+                _console_write(chunk)
+            exit_code = process.wait()
+    if exit_code != 0:
+        raise RuntimeError(f"command exited with status {exit_code}: {shlex.join(command)}")
+
+
+def _console_write(chunk: bytes) -> None:
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(chunk)
+        buffer.flush()
+    else:
+        sys.stdout.write(chunk.decode(errors="replace"))
+        sys.stdout.flush()
+
+
+def _parse_disk(raw: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    mode = _string(raw, "mode", "disk")
+    if mode not in ALLOWED_DISK_MODES:
+        raise ConfigError(f"disk.mode must be one of {sorted(ALLOWED_DISK_MODES)}")
+    allowed_by_mode = {
+        "none": {"mode"},
+        "canonical-readonly": {"mode"},
+        "private-copy": {"mode"},
+        "generated": {"mode", "generator", "size"},
+        "external": {"mode", "path", "readonly"},
+    }
+    _keys(raw, allowed_by_mode[mode], f"disk mode {mode}")
+    result: dict[str, Any] = {"mode": mode}
+    if mode == "generated":
+        generator = _string(raw, "generator", "disk")
+        if generator != "blank":
+            raise ConfigError("disk.generator must be 'blank'")
+        size = _string(raw, "size", "disk")
+        try:
+            parse_size(size)
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
+        result.update(generator=generator, size=size)
+    elif mode == "external":
+        path_text = _string(raw, "path", "disk")
+        path = Path(path_text)
+        path = path.resolve() if path.is_absolute() else (repo_root / path).resolve()
+        if not path.is_file():
+            raise ConfigError(f"disk.path does not exist: {path}")
+        readonly = raw.get("readonly", True)
+        if not isinstance(readonly, bool):
+            raise ConfigError("disk.readonly must be a boolean")
+        result.update(path=str(path), readonly=readonly)
+    return result
+
+
+def _stdin_steps(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        raise ConfigError("qemu.stdin_steps must be an array of tables")
+    result = []
+    for index, step in enumerate(raw):
+        _table(step, f"qemu.stdin_steps[{index}]")
+        _keys(step, {"ready_marker", "payload"}, f"qemu.stdin_steps[{index}]")
+        marker = _string(step, "ready_marker", f"qemu.stdin_steps[{index}]")
+        payload = _string(step, "payload", f"qemu.stdin_steps[{index}]", allow_empty=True)
+        if not marker:
+            raise ConfigError(f"qemu.stdin_steps[{index}].ready_marker must not be empty")
+        result.append({"ready_marker": marker, "payload": payload})
+    return result
+
+
+def _marker_counts(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise ConfigError("expect.marker_counts must be an array of tables")
+    result = []
+    for index, item in enumerate(raw):
+        context = f"expect.marker_counts[{index}]"
+        _table(item, context)
+        _keys(item, {"marker", "at_least", "exactly"}, context)
+        marker = _string(item, "marker", context)
+        at_least = _optional_integer(item, "at_least", context)
+        exactly = _optional_integer(item, "exactly", context)
+        if (at_least is None) == (exactly is None):
+            raise ConfigError(f"{context} must set exactly one of at_least or exactly")
+        if at_least is not None and at_least <= 0:
+            raise ConfigError(f"{context}.at_least must be positive")
+        if exactly is not None and exactly < 0:
+            raise ConfigError(f"{context}.exactly must be non-negative")
+        result.append({"marker": marker, "at_least": at_least, "exactly": exactly})
+    return result
+
+
+def _script_path(raw: dict[str, Any], key: str, config_path: Path) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{key} must be a non-empty relative path")
+    path = Path(value)
+    if path.is_absolute():
+        raise ConfigError(f"{key} must be relative to the configuration")
+    resolved = (config_path.parent / path).resolve()
+    if not resolved.is_file():
+        raise ConfigError(f"{key} not found: {resolved}")
+    if not os.access(resolved, os.X_OK):
+        raise ConfigError(f"{key} is not executable: {resolved}")
+    return str(resolved)
+
+
+def _optional_repo_path(raw: dict[str, Any], key: str, repo_root: Path, context: str) -> Path | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{context}.{key} must be a non-empty path")
+    path = Path(value)
+    resolved = path.resolve() if path.is_absolute() else (repo_root / path).resolve()
+    if not resolved.is_file():
+        raise ConfigError(f"{context}.{key} not found: {resolved}")
+    return resolved
+
+
+def _canonical_image(repo_root: Path) -> Path:
+    configured = os.environ.get("CANONICAL_ROOTFS_IMAGE")
+    if configured:
+        path = Path(configured)
+        return path.resolve() if path.is_absolute() else (repo_root / path).resolve()
+    return (repo_root / "impl" / "arceos_ex" / "build" / "rootfs" / "canonical.raw").resolve()
+
+
+def _tool_command(variable: str, default: str) -> list[str]:
+    command = shlex.split(os.environ.get(variable, default))
+    if not command:
+        raise ConfigError(f"{variable} tool command must not be empty")
+    return command
+
+
+def _new_artifact_dir(repo_root: Path, out_root: Path, output_dir: Path | None, test: str) -> Path:
+    if output_dir is not None:
+        path = output_dir.resolve() if output_dir.is_absolute() else (repo_root / output_dir).resolve()
+        path.mkdir(parents=True, exist_ok=False)
+        return path
+    root = out_root.resolve() if out_root.is_absolute() else (repo_root / out_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    path = root / f"{stamp}-{test}-{os.getpid()}"
+    path.mkdir()
+    return path
+
+
+def _manifest_artifact_dir(args: argparse.Namespace, repo_root: Path, test: str) -> Path:
+    if args.output_dir:
+        return args.output_dir.resolve() if args.output_dir.is_absolute() else (repo_root / args.output_dir).resolve()
+    return (repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "out" / f"manifest-{test}").resolve()
+
+
+def _initial_result(test: str, config: Path, artifact: Path, manifest: Path, qemu_log: Path, result: Path) -> dict[str, Any]:
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "test": test,
+        "config": str(config.resolve()),
+        "manifest": None,
+        "artifacts": {
+            "directory": str(artifact),
+            "manifest": str(manifest),
+            "qemu_log": str(qemu_log),
+            "result": str(result),
+        },
+        "started_at": _now(),
+        "ended_at": None,
+        "duration_seconds": None,
+        "_started_monotonic": time.monotonic(),
+        "status": "running",
+        "exit_code": None,
+        "stages": {name: {"status": "pending", "duration_seconds": None} for name in STAGES},
+        "qemu": {},
+        "expectations": {"passed": False, "checks": []},
+        "cleanup": {"process_group_reaped": True, "private_disk_removed": None},
+        "errors": [],
+    }
+
+
+@contextmanager
+def _stage(result: dict[str, Any], name: str) -> Iterator[None]:
+    stage = result["stages"][name]
+    stage["status"] = "running"
+    started = time.monotonic()
+    try:
+        yield
+    except Exception as error:
+        stage["status"] = "timed_out" if isinstance(error, PipelineTimeout) else "failed"
+        stage["error"] = str(error)
+        raise
+    else:
+        stage["status"] = "success"
+    finally:
+        stage["duration_seconds"] = time.monotonic() - started
+
+
+def _skip(result: dict[str, Any], name: str, reason: str) -> None:
+    stage = result["stages"][name]
+    if stage["status"] == "pending":
+        stage.update(status="skipped", duration_seconds=0.0, reason=reason)
+
+
+def _skip_pending_before_cleanup(result: dict[str, Any], reason: str) -> None:
+    for name in STAGES:
+        if name != "result-cleanup":
+            _skip(result, name, reason)
+
+
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _keys(table: dict[str, Any], allowed: set[str], context: str) -> None:
+    unknown = sorted(set(table) - allowed)
+    if unknown:
+        raise ConfigError(f"unknown {context} field(s): {', '.join(unknown)}")
+
+
+def _table(value: Any, context: str) -> None:
+    if not isinstance(value, dict):
+        raise ConfigError(f"{context} must be a table")
+
+
+def _required_table(table: dict[str, Any], key: str, context: str) -> dict[str, Any]:
+    value = table.get(key)
+    if not isinstance(value, dict):
+        raise ConfigError(f"{context}.{key} must be a table")
+    return value
+
+
+def _string(table: dict[str, Any], key: str, context: str, *, allow_empty: bool = False) -> str:
+    value = table.get(key)
+    if not isinstance(value, str) or (not allow_empty and not value):
+        raise ConfigError(f"{context}.{key} must be a {'string' if allow_empty else 'non-empty string'}")
+    return value
+
+
+def _string_list(value: Any, context: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+        raise ConfigError(f"{context} must be an array of non-empty strings")
+    return list(value)
+
+
+def _is_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _integer(table: dict[str, Any], key: str, context: str) -> int:
+    value = table.get(key)
+    if not _is_integer(value):
+        raise ConfigError(f"{context}.{key} must be an integer")
+    return value
+
+
+def _positive_integer(table: dict[str, Any], key: str, context: str) -> int:
+    value = _integer(table, key, context)
+    if value <= 0:
+        raise ConfigError(f"{context}.{key} must be positive")
+    return value
+
+
+def _optional_integer(table: dict[str, Any], key: str, context: str) -> int | None:
+    value = table.get(key)
+    if value is None:
+        return None
+    if not _is_integer(value):
+        raise ConfigError(f"{context}.{key} must be an integer")
+    return value
+
+
+def _boolean(table: dict[str, Any], key: str, context: str) -> bool:
+    value = table.get(key)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{context}.{key} must be a boolean")
+    return value
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

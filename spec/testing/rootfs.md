@@ -27,8 +27,9 @@ The fixture also performs one explicit `ecall` with sentinels in all callee-save
 requires both the syscall result and every sentinel to survive the ordinary user trap round trip.
 
 The libc-linked stack smoke reads auxv through `getauxval()` and requires the independent exec filename to
-match that fixture invocation's startup `argv[0]` (the same binary is installed as both `/sbin/init` and
-`/bin/ls` by existing cases), plus common RISC-V HWCAP, real/effective UID/GID, and a nonzero 16-byte
+match that fixture invocation's startup `argv[0]`. Basic-test and object-smoke invocations use the canonical
+`/opt/lkm/tests/user-smoke` path; legacy specialized overlays may still install the same binary at another
+case-local path. The fixture also requires common RISC-V HWCAP, real/effective UID/GID, and a nonzero 16-byte
 `AT_RANDOM` block matching the running process. It keeps the compiler stack-protector path and the 256 KiB
 demand-growth plus cross-page usercopy probes. Object smoke separately covers ASLR endpoints/alignment/
 layout, deterministic seed selection, independence of ASLR seed and `AT_RANDOM`, filename differing from
@@ -41,7 +42,7 @@ whole-binary symbols are conservative candidates, not an applet trace. Any promo
 checked against the local Linux 6.12 RISC-V syscall table and relevant fs implementation, with locking,
 RCU, permission, namespace, LSM and errno omissions recorded as trimmed/deferred before implementation.
 
-## Default user and distro smoke
+## Basic user and distro smoke
 
 Rule IDs (MUST):
 
@@ -50,13 +51,19 @@ Rule IDs (MUST):
 - `arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input`
 - `arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified`
 
-The user-smoke harness uses a case-local disk, the default overlay map, `FORCE=1` and case-local
-`QEMU_APPEND="earlycon=sbi"`; it does not inherit the manual `/bin/sh` default. Separate distro cases use
-`ROOTFS_OVERLAY=none`: one runs `init=/bin/ls`, and one waits for the BusyBox prompt before sending bounded
-host-side `/bin/ls`, `/bin/ls` and `exit`. The latter requires both external commands to complete, a stable
-rootfs marker from each listing, no `Function not implemented`, and `user exit status=0`.
+The basic user-smoke TOML uses a private copy of the canonical disk and
+`init=/opt/lkm/tests/user-smoke`; it never replaces `/sbin/init`. A separate requested-init case selects
+`/opt/lkm/tests/init-hello`. Distribution cases attach the canonical disk read-only: one runs
+`init=/bin/ls`, and one waits for the BusyBox prompt before sending bounded host-side `/bin/ls`, `/bin/ls`
+and `exit`. The latter requires both external commands to complete, a stable rootfs marker from each
+listing, no `Function not implemented`, and `user exit status=0`.
 Host input belongs to delayed-stdin orchestration and is not kernel-side ready data. These ordinary shell
 and native-init diagnostics remain until their replacement behavior is separately specified.
+
+Kernel object smoke must read and stage its real user ELF from `/opt/lkm/tests/user-smoke` and exercise it as
+a requested absolute init candidate. It may continue to assert that the production default-init fallback
+order is bound, but it must not require canonical `/sbin/init` to be replaced by the fixture or claim that the
+selected candidate was the default fallback.
 
 DF-0003 uses that exact two-command delayed-input payload for 30-run ordinary-path stress. The
 Linux/arceos_ex exact paired shell baseline sends the same payload to both sides and compares the stable
@@ -100,11 +107,11 @@ operation, successful foreground-pgrp handling, the `lost+found` rootfs marker a
 case remains opt-in after this bounded closure; it does not claim multiple pending children, a general
 task graph, post-exec parent setpgid, job-control signal delivery or full process-group lookup.
 
-## Manual LTP shell
+## Manual LTP shell basic test
 
-Ordinary `make run APP=user-boot` is the manual syscall-test entry and uses the unpacked sibling LTP
-staging tree by default. It builds a dedicated 320 MiB image, boots `init=/bin/sh`, and leaves test
-selection to the operator. From the BusyBox shell the initial workflow is:
+The canonical rootfs includes the validated sibling LTP staging tree. The interactive shell basic test boots
+`init=/bin/sh`; a developer may copy its TOML into a deliberately manual configuration or use the configured
+stdin steps. From a shell the initial workflow is:
 
 ```sh
 cd /opt/ltp
@@ -115,11 +122,10 @@ This entry establishes only that the LTP tree can be staged, booted, and invoked
 LTP `FAIL`, `BROK`, or `TCONF` results and missing syscall, `/proc`, `/sys`, or `/dev` capabilities do not
 expand the acceptance scope of this image-construction change.
 
-All repository-owned automated user-boot cases in `make test`, stress, and paired difftest explicitly set
-`ROOTFS_LTP_OVERLAY=none`. Their existing 64 MiB or explicitly named images remain independent from the
-sibling LTP repository and do not execute LTP. Focused image checks for this interface must cover the
-default LTP image contents, the disabled lean-rootfs path, and a clear failure for missing or malformed
-LTP staging.
+Migrated basic tests reuse the canonical image and do not execute LTP unless their TOML explicitly selects
+an LTP program. Unmigrated stress and paired-difftest images retain their specialized overlay policy.
+Focused canonical-image checks cover reuse, rebuild on every input class, `FORCE=1`, private-copy isolation,
+and a clear failure for missing or malformed LTP staging.
 
 ## Long-term observation checkpoints
 

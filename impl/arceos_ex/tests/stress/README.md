@@ -255,9 +255,9 @@ contains:
 - `report.md`: compact human-readable summary.
 
 DF-0001 must keep the ordinary non-probe `APP=user-boot` path that executes
-the overlay `/sbin/init` and reaches `user exit status=0`. The plain
-`make run APP=user-boot` default is currently an interactive distro
-`init=/bin/sh` path, so DF-0001 cases must set `QEMU_APPEND=earlycon=sbi`
+the overlay `/sbin/init` and reaches `user exit status=0`. The compatibility
+`make legacy-run APP=user-boot` path is an interactive distro `init=/bin/sh`
+path, so DF-0001 cases must set `QEMU_APPEND=earlycon=sbi`
 explicitly and prepare a dedicated overlay disk in `setup_command`. Probe
 variants can be added later as separate cases, but they must not replace the
 ordinary non-probe path because probes can change timing.

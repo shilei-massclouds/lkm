@@ -11,55 +11,43 @@ Current goals:
 - give non-phase model objects explicit Rust carriers;
 - expose kernel-local Makefile targets used by the repository root Makefile.
 
-Useful commands:
+Stable commands are invoked from the repository root:
 
 ```bash
 make build
-make build APP=smoke
-make build APP=hello
+make build TEST=kernel-smoke-native
 make fmt
 make fmt-check
 make clippy-check
 make run
-make run APP=smoke
-make run APP=hello
-make run APP=user-boot
-make run PROBE=announce
+make run TEST=user-smoke-native
+make run TEST=distro-sh-native
+make disk
 make verify
 make verify REPORT=graph
 make clean
 ```
 
-`make run APP=user-boot` defaults to a manual BusyBox shell with the unpacked
-LTP rootfs staging from the sibling repository at
-`../ltp/build-riscv64-musl-syscalls/rootfs`. It creates the separate 320 MiB
-`build/virtio-blk-ltp.raw` image. In the guest, a small first run is:
+Basic tests are single TOML configurations below `tests/basic/cases`. Their
+runner owns config validation, kernel build, disk policy, scripts, QEMU,
+expectations, structured results and cleanup. `make disk` builds the reusable
+canonical Alpine image with repository fixtures under `/opt/lkm/tests` and the
+sibling LTP staging under `/opt/ltp`. In an interactive guest, a small LTP run is:
 
 ```sh
 cd /opt/ltp
 ./run-syscalls.sh 'getpid*' 'uname*'
 ```
 
-Disable LTP and retain the lean rootfs defaults with:
+Use another unpacked LTP staging tree with:
 
 ```bash
-make run APP=user-boot ROOTFS_LTP_OVERLAY=none
+make disk ROOTFS_LTP_DIR=/path/to/rootfs FORCE=1
 ```
 
-Use another unpacked staging tree with:
-
-```bash
-make run APP=user-boot ROOTFS_LTP_OVERLAY_DIR=/path/to/rootfs FORCE=1
-```
-
-Image targets reuse an existing raw image. After rebuilding LTP, pass
-`FORCE=1` once to refresh `build/virtio-blk-ltp.raw`. A missing staging
-directory or missing/non-executable `opt/ltp/run-syscalls.sh` is an error;
-the build does not fall back to a rootfs without LTP. Repository `make test`,
-stress, and difftest cases explicitly disable this optional integration.
-
-`LOG=trace` remains as a compatibility alias for `PROBE=announce`. Prefer
-`PROBE=announce` for new checkpoint announcement runs.
+The canonical input fingerprint automatically rebuilds after LTP, fixture,
+tarball or builder changes; `FORCE=1` is an explicit rebuild. A missing staging
+directory or missing/non-executable `opt/ltp/run-syscalls.sh` is an error.
 
 From the repository root, `make test` first runs the read-only Rust format gate,
 then the full `-D warnings -D clippy::all` gate, followed by the full validation

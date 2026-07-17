@@ -1,6 +1,8 @@
 ROOT := .
 include $(ROOT)/impl/providers/linux-6.12.mk
 KERNEL ?= arceos_ex
+TEST ?= hello-native
+PYTHON ?= python3
 LOG ?= info
 REPORT ?= text
 VERBOSE ?= 0
@@ -22,6 +24,10 @@ DIFFTEST_RUNS ?= 1
 DIFFTEST_TIMEOUT ?=
 
 KERNEL_DIR := impl/$(KERNEL)
+BASIC_TEST_RUNNER ?= $(KERNEL_DIR)/tests/basic/runner.py
+BASIC_TEST_OUT_ROOT ?= $(KERNEL_DIR)/tests/basic/out
+BASIC_TEST_BEHAVIOR_VARIABLES := APP LOG PROFILE PLIC_PROVIDER PROBE PROBE_FILE STRESS_MEM_BYTES QEMU_APPEND QEMU_SMP QEMU_DEVICES VIRTIO_BLK_IMAGE VIRTIO_BLK_IMAGE_SIZE ROOTFS_OVERLAY ROOTFS_OVERLAY_MAP ROOTFS_FILE_OVERLAY_DIR ROOTFS_LTP_OVERLAY FORCE
+BASIC_TEST_COMMAND_LINE_OVERRIDES := $(strip $(foreach variable,$(BASIC_TEST_BEHAVIOR_VARIABLES),$(if $(filter command line,$(origin $(variable))),$(variable))))
 PYVERI ?= tools/pyveri/bin/pyveri
 STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
@@ -34,10 +40,14 @@ else
 VERIFY_TEXT_ARGS := --strict
 endif
 
-.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run legacy-run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-basic test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
-	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
+	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
+		echo "basic-test behavior must come from TEST=$(TEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+		exit 2; \
+	fi
+	$(PYTHON) $(BASIC_TEST_RUNNER) build "$(TEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
 
 disk:
 	$(MAKE) -C $(KERNEL_DIR) disk FORCE=$(FORCE)
@@ -46,7 +56,15 @@ disk-clean:
 	$(MAKE) -C $(KERNEL_DIR) disk-clean
 
 run:
-	$(MAKE) -C $(KERNEL_DIR) run LOG="$(LOG)" APP=$(APP) PROBE="$(PROBE)" PLIC_PROVIDER="$(PLIC_PROVIDER)" $(PROBE_FILE_ARG)
+	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
+		echo "basic-test behavior must come from TEST=$(TEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+		exit 2; \
+	fi
+	$(PYTHON) $(BASIC_TEST_RUNNER) run "$(TEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
+
+# Compatibility boundary for unmigrated stress/difftest and focused overlays.
+legacy-run:
+	$(MAKE) -C $(KERNEL_DIR) legacy-run
 
 fmt:
 	$(MAKE) -C $(KERNEL_DIR) fmt
@@ -108,6 +126,9 @@ test: fmt-check
 test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
 
+test-basic:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest impl.arceos_ex.tests.basic.test_runner
+
 test-checkpoints:
 	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints tools.checkpoints.tests.test_summarize_linux_checkpoint_mapping tools.checkpoints.tests.test_plan_linux_instrumentation
 	python3 tools/checkpoints/list_checkpoints.py --check
@@ -116,10 +137,10 @@ test-checkpoints:
 	python3 tools/checkpoints/plan_linux_instrumentation.py --check
 
 test-kunit:
-	$(MAKE) -C $(KERNEL_DIR) run APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))"
+	$(MAKE) run TEST=kunit-native
 
 test-smoke:
-	$(MAKE) run APP=$(SMOKE_APP)
+	$(MAKE) run TEST=kernel-smoke-native
 
 test-stress:
 	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_TIMEOUT_ARG)
@@ -143,5 +164,6 @@ clean:
 	rm -rf tools/build
 	@if [ -d tools/out ]; then find tools/out -mindepth 1 \( -path 'tools/out/checkpoints' -o -path 'tools/out/checkpoints/*' \) -prune -o -exec rm -rf {} +; fi
 	@if [ -d impl/arceos_ex/tests/stress/out ]; then find impl/arceos_ex/tests/stress/out -mindepth 1 -maxdepth 1 ! -name '.gitignore' -exec rm -rf {} +; fi
+	@if [ -d impl/arceos_ex/tests/basic/out ]; then find impl/arceos_ex/tests/basic/out -mindepth 1 -maxdepth 1 ! -name '.gitignore' -exec rm -rf {} +; fi
 	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type d \( -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
 	find . \( -path ./.git -o -path ./.venv -o -path ./venv \) -prune -o -type f \( -name '*.pyc' -o -name '*.pyo' \) -exec rm -f {} +

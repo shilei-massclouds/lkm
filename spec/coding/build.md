@@ -14,14 +14,17 @@ The repository top-level `Makefile` is the stable entry for normal work:
 
 ```bash
 make build
+make build TEST=smoke-native
 make checkpoints
 make fmt
 make fmt-check
 make clippy-check
 make coding-spec-check
 make run
+make run TEST=user-smoke-native
 make verify
 make test
+make test-basic
 make test-verify
 make test-checkpoints
 make checkpoints-linux-check
@@ -32,7 +35,14 @@ make difftest
 make clean
 ```
 
-Kernel-specific command bodies belong under the selected kernel directory, currently `impl/arceos_ex/Makefile`. The top-level file should pass explicit parameters such as `KERNEL`, `APP`, `LOG`, `SPEC`, `PROBE`, `PROBE_FILE`, `KUNIT_HANDLERS`, `KUNIT_APP` and `SMOKE_APP`; it should not duplicate the kernel-specific Rust, linker, disk or QEMU command lines.
+Kernel-specific command bodies belong under the selected kernel directory, currently `impl/arceos_ex/Makefile`.
+For basic tests, the top-level file passes only the selected `TEST` and documented host-tool/path overrides;
+APP, provider, probe, profile, disk and QEMU behavior come from that test's TOML. The top-level file should not
+duplicate kernel-specific Rust, linker, disk or QEMU command lines.
+
+`make run TEST=<name>` and `make build TEST=<name>` consume one versioned basic-test TOML as the sole source
+of behavior parameters; the default test name is `hello-native`. Their pipeline and result contract is
+specified by [`../testing/basic-tests.md`](../testing/basic-tests.md).
 
 `make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. Stress, difftest and focused diagnostic reports under the managed `impl/arceos_ex/tests/stress/out/` root are routine test artifacts; cleanup must preserve only that directory's tracked `.gitignore`, and developers must move any report that needs long-term retention elsewhere before cleanup. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, ordinary diagnostic logs outside that managed report root, editor state or other unlisted local files.
 
@@ -41,16 +51,20 @@ Kernel-specific command bodies belong under the selected kernel directory, curre
 Targets must remain composable:
 
 - `generate` creates generated source inputs such as linker scripts from model/codegen inputs.
-- `build` compiles the kernel image and must not mutate runtime disk images.
-- `disk` builds block-device images from documented rootfs inputs.
-- `run` prepares required runtime inputs, builds the selected kernel/payload and starts QEMU.
+- `build TEST=<name>` strictly parses the selected basic-test config and compiles its kernel image; it must
+  not prepare or mutate runtime disk images.
+- `disk` independently builds or validates the canonical rootfs from documented inputs.
+- `run TEST=<name>` owns the complete basic-test pipeline: frozen config, kernel build, disk policy,
+  PreScript, QEMU lifecycle, PostScript, structured result and cleanup. It must not be assembled from a public
+  Make dependency chain that exposes an unchecked QEMU-only target.
 - `verify` runs formal derivation or trace generation. In text report mode it always runs the
   complete strict parse/model/derive/check pipeline. The default output contains the stage
   summaries and counts; `VERBOSE=1` additionally prints the full trace and the individual
   deferred/trimmed records. Only the exact value `1` enables those details, and output verbosity
   must not change the verification scope, failure policy or exit status. `REPORT=graph` retains
   the trace SVG behavior and is independent of `VERBOSE`.
-- `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
+- `test-basic` runs the basic runner/rootfs unit suite without starting real QEMU;
+  `test-verify`, `test-kunit` and `test-smoke` remain independently runnable validation stages.
 - `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping, Linux mapping coverage and the Linux instrumentation plan.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
 - `checkpoints-linux-check` validates the tracked instrumentation plan and the sibling Linux marker names, variants and fingerprints in read-only mode. It must report missing, stale and mismatched markers and must not regenerate artifacts, emit a patch or modify the Linux tree.
@@ -62,17 +76,36 @@ Targets must remain composable:
 - `test` must run `fmt-check`, then the complete `clippy-check` matrix, then `coding-spec-check`, before formal verification, checkpoint checks, builds or runtime stages, and must preserve the remaining validation order and individual entry points.
 - The formal verification stage inside `test` must invoke `verify` exactly once with `VERBOSE=1`,
   emitting the detailed report through the test log. It must not run a second summary-mode verification.
-- `clean` removes generated build and cache artifacts, including all reports below the managed stress output root except its tracked `.gitignore`, while preserving tracked checkpoint review artifacts and user-local state that is not part of routine build cleanup.
+- The basic runner unit stage inside `test` runs after formal verification and delayed-stdin host tests, and
+  before checkpoint drift checks and real QEMU cases.
+- `clean` removes generated build and cache artifacts, including reports below managed basic/stress output
+  roots except tracked `.gitignore` files, while preserving tracked checkpoint review artifacts and user-local
+  state that is not part of routine build cleanup.
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
 
 Checkpoint synchronization is an explicit reviewed workflow: change the mapping or semantic specification, review and update the sibling Linux instrumentation, run `make checkpoints`, then run `make checkpoints-linux-check` before `make difftest`. The read-only `make difftest` entry point must never rewrite source, regenerate tracked checkpoint artifacts or emit/apply a Linux patch.
 
+## Basic-test configuration boundary
+
+APP, provider, probe, profile, disk mode, QEMU behavior, stdin and expectations for `build`/`run` must come
+only from the selected TOML. Passing those values on the root Make command line is an error, not an override.
+Host operational parameters such as Python, QEMU, compiler/tool locations, Linux provider source path,
+rootfs download/cache path and basic-test output root remain explicit documented overrides. PreScript and
+PostScript receive only the fixed environment in the testing specification and their output is never parsed
+as a build/QEMU parameter update.
+
+The runner must reject unknown TOML fields before build, freeze a resolved `manifest.json`, keep QEMU in a
+separate process group, bound stdin waits and the full run, execute PostScript after every started QEMU
+outcome, and always persist `qemu.log` plus schema-versioned `result.json`. Process exit, guest exit status and
+log expectations are independent facts. A basic test passes only when every configured fact and cleanup
+obligation passes.
+
 ## Disk Images
 
-`make disk` is the canonical way to build runtime block-device inputs. It must be reproducible from explicit variables such as:
+`make disk` is the canonical rootfs builder. It must be reproducible from explicit variables such as:
 
-- `VIRTIO_BLK_IMAGE`
+- `CANONICAL_ROOTFS_IMAGE`
 - `VIRTIO_BLK_IMAGE_SIZE`
 - `FS_TYPE`
 - `EXT2_BLOCK_SIZE`
@@ -81,21 +114,31 @@ Checkpoint synchronization is an explicit reviewed workflow: change the mapping 
 - `ROOTFS_STAGING_DIR`
 - tool variables such as `WGET`, `TAR` and `MKFS_EXT2`
 
-By default, `make disk` should create the configured `VIRTIO_BLK_IMAGE` only when that image does not exist. Existing disk images are local runtime state and must not be reformatted by routine `run` or `test` entry points. Regenerating the image requires an explicit clean/delete/rebuild action.
+The canonical image has a recorded input fingerprint covering the Alpine tarball, rootfs configuration and
+builder, repository fixtures, and the configured LTP staging tree. `make disk` reuses the image only while
+that fingerprint is unchanged. Any input change rebuilds it; `FORCE=1` always rebuilds. This differs from
+private and external runtime disks, which are not canonical cache entries.
 
 For ext2 rootfs images, the default source is the Alpine minirootfs tarball identified by `ROOTFS_URL`. The tarball must be cached under the kernel build directory through `ROOTFS_TARBALL`, for example `build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz`. If the cached tarball exists, `make disk` must reuse it instead of downloading it again. The extracted staging tree belongs under `ROOTFS_STAGING_DIR` and is generated runtime input, not source.
 
-When a QEMU configuration includes `virtio-blk`, `make run` must depend on `disk`. `make build` should not create or reformat disk images.
+The canonical staging tree retains Alpine/OpenRC `/etc` and `/sbin/init`. Repository fixtures live below a
+stable non-system path and LTP remains below `/opt/ltp`; a user-mode basic test selects a fixture with an
+absolute `init=` value. The canonical image is normally attached read-only. A writable test gets a temporary
+private copy that is deleted during cleanup. `make build TEST=...` must not invoke this builder.
 
 ## Payload Selection
 
-Payload selection must stay explicit. `APP=smoke`, `APP=hello` or a future `APP=user-hello` must flow through Make variables into compile-time cfg or an equivalent explicit selection mechanism.
+Payload selection must stay explicit. In a basic test, `app = "smoke"`, `app = "hello"` or a future payload
+flows from the frozen TOML into the internal compile-time cfg. Legacy specialized runners may still pass APP
+directly until migrated, but the root basic-test entry rejects that override.
 
 Build scripts must not infer the selected payload from a previous run, a local disk image, or an environment side effect.
 
 ## QEMU Devices
 
-QEMU devices should be data-driven through variables such as `QEMU_DEVICES`, `QEMU_APPEND`, `QEMU_SMP` and `VIRTIO_BLK_IMAGE`.
+Basic-test QEMU devices are structured TOML values resolved into argv without a shell. Full QEMU command
+strings are forbidden in configuration. Legacy specialized runners may remain data-driven through their
+existing variables until migrated.
 
 The default may target QEMU virt and include the devices needed by the current acceptance path, such as `virtio-rng-device` and `virtio-blk-device`. Tests that need a smaller device set should override `QEMU_DEVICES=` or a documented variable rather than editing the Makefile.
 
@@ -186,9 +229,17 @@ depend on manually prepared local disk state.
 Rule ID: `build_must_make_disk_create_image_only_when_missing_by_default` (MUST).
 
 The default make disk behavior must create the configured disk image
-only when the image path is missing. Existing runtime disk images
-are local runtime state and must not be reformatted by default; an
-explicit clean/delete/rebuild step is required to regenerate them.
+only when the image path is missing for legacy non-canonical image
+builders. The canonical image supersedes this rule with an input
+fingerprint: unchanged inputs are idempotent, changed inputs rebuild.
+
+#### Input-sensitive canonical disk
+
+Rule ID: `build_must_rebuild_canonical_disk_when_inputs_change` (MUST).
+
+The canonical image fingerprint covers the Alpine tarball, builder and
+configuration, fixture inputs, and LTP source. A change in any covered
+input or `FORCE=1` rebuilds the image atomically; unchanged inputs reuse it.
 
 #### Downloaded rootfs cache
 
@@ -203,10 +254,10 @@ not download it again.
 
 Rule ID: `build_must_run_depend_on_required_runtime_inputs` (MUST).
 
-make run must depend on runtime inputs it needs, including the disk
-image when QEMU devices include virtio-blk. make build must not
-create or mutate runtime disk images unless the target explicitly
-requires it.
+The frozen basic-test manifest decides whether run prepares no disk,
+validates the canonical image, makes a private copy, invokes a built-in
+generator, or validates an external image. make build TEST=... must not
+create or mutate runtime disk images.
 
 #### Visible model/codegen boundary
 

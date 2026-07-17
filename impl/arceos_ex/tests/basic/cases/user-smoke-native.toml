@@ -1,0 +1,25 @@
+schema_version = 1
+name = "user-smoke-native"
+timeout_seconds = 120
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = []
+profile = "release"
+
+[disk]
+mode = "private-copy"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/opt/lkm/tests/user-smoke"
+rng = true
+exit_policy = "guest-shutdown"
+
+[expect]
+process_exit = 0
+guest_exit_status = 0
+markers = ["user-smoke: begin", "user-smoke: end status=0"]
+forbidden_markers = ["Function not implemented", "arceos_ex panic"]
