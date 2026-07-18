@@ -34,6 +34,7 @@
 
 - [完成项中央索引](roadmap/completed.md)
 - [当前上下文、验证、构建、工具和文档历史](roadmap/current-context.md)
+- [Composite basic-test 独立验收归档](roadmap/composite-basic-test-validation.md)
 - [启动阶段审计与同步/上下文历史](roadmap/boot-audit.md)
 - [阶段范式四层一致性审计](roadmap/phase-paradigm-audit.md)
 - [Deferred / Trimmed 结构化治理审计](roadmap/deferred-trimmed-audit.md)
@@ -68,7 +69,6 @@
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
-| `P1` | 进行中 | validation/stress | stress runner 集合化差分报告 | 将报告升级为成功集合、失败类别集合与跨集合特征汇总；重复序列只计数，完整样本按稳定主键去重。 | [charter](../spec/charter/main.md#nightly压力测试与纵向差分) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |
 | `P2` | 待办 | arceos_ex/checkpoint | 清除 `LOG=trace` 兼容入口 | README、脚本、stress case 与历史命令迁完后删除 alias，把 trace 名称留给 Linux-like trace。 | [checkpoint mapping](../spec/coding/mapping.md) |
 | `P1` | 待办 | CI | 建立 GitHub Actions 快速 CI | 覆盖工具质量、核心推导、trace smoke、顶层 verify 与最小构建，不跑耗时 QEMU 全量任务。 | [构建规格](../spec/coding/build.md) |

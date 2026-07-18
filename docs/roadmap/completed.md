@@ -53,6 +53,7 @@
 | arceos_ex/irq | PLIC 驱动与 UART 外部中断链首轮 | [IRQ / console / TTY 历史](irq-console-tty.md) |
 | arceos_ex/console | serial8250 interrupt-driven console TX | [IRQ / console / TTY 历史](irq-console-tty.md) |
 | validation/stress | stress runner 集合化差分与内存输出首轮 | [当前上下文归档](current-context.md) |
+| validation/stress/difftest | Composite basic-test v2 编排与集合化结果分析验收 | [Composite basic-test 独立验收归档](composite-basic-test-validation.md) |
 | docs | 开发文档与真实进展同步 | [当前上下文归档](current-context.md) |
 | model/arceos_ex | CurrentCPU 与 RawSpinLock 建模收敛 | [阶段范式审计](phase-paradigm-audit.md) |
 | arceos_ex/allocator | KernelHeap/Allocator facade 动态容器前置 | [当前上下文归档](current-context.md) |

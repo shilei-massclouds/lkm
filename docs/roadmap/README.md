@@ -8,6 +8,7 @@
 
 - [完成项中央索引](completed.md)
 - [当前上下文归档](current-context.md)
+- [Composite basic-test 独立验收归档](composite-basic-test-validation.md)
 - [启动阶段审计历史](boot-audit.md)
 - [Linux PLIC Object 复用历史](linux-plic.md)
 - [virtio / block / VFS / Ext2 历史](virtio-block-fs.md)
