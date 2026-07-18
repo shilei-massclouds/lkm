@@ -329,6 +329,9 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
                 pathlib.Path(path).write_text("ran")
             if path := os.environ.get("FAKE_QEMU_PID"):
                 pathlib.Path(path).write_text(str(os.getpid()))
+            if os.environ.get("FAKE_QEMU_CURSOR_QUERY"):
+                sys.stdout.write("\\x1b[6n")
+                sys.stdout.flush()
             mode = os.environ.get("FAKE_QEMU_MODE", "success")
             if mode == "timeout":
                 time.sleep(30)
@@ -622,6 +625,28 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertTrue(result["qemu"]["stdin_steps"][0]["sent"])
 
+    def test_nonterminal_presentation_filters_cursor_query_but_log_keeps_it(self) -> None:
+        self.environment["FAKE_QEMU_CURSOR_QUERY"] = "1"
+        rendered = bytearray()
+        with mock.patch.object(runner, "_console_write", side_effect=rendered.extend):
+            status, output, _ = self.run_case(self.write_case(), "cursor-query")
+
+        self.assertEqual(status, 0)
+        self.assertIn(b"\x1b[6n", (output / "qemu.log").read_bytes())
+        self.assertNotIn(b"\x1b[6n", rendered)
+        self.assertIn(b"SUCCESS", rendered)
+
+    def test_nonterminal_presentation_filters_query_across_read_boundaries(self) -> None:
+        rendered = bytearray()
+        presentation = runner._NonTerminalConsolePresentation()
+        with mock.patch.object(runner, "_console_write", side_effect=rendered.extend):
+            presentation.write(b"prompt \x1b")
+            presentation.write(b"[6")
+            presentation.write(b"n/bin/ls\n")
+            presentation.finish()
+
+        self.assertEqual(rendered, b"prompt /bin/ls\n")
+
     def test_private_copy_is_removed_and_template_is_unchanged(self) -> None:
         path = self.write_case(disk='mode = "private-copy"')
         status, output, result = self.run_case(path, "private")
@@ -734,7 +759,11 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
 
         sender = threading.Thread(target=send_input)
         sender.start()
-        environment = {**self.environment, "FAKE_QEMU_STDIN": "1"}
+        environment = {
+            **self.environment,
+            "FAKE_QEMU_CURSOR_QUERY": "1",
+            "FAKE_QEMU_STDIN": "1",
+        }
         try:
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
                 runner.sys,
@@ -752,6 +781,8 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertTrue(outcome.terminal_restored)
         self.assertTrue(outcome.process_group_reaped)
         self.assertIn("SUCCESS", log_path.read_text())
+        self.assertIn(b"\x1b[6n", log_path.read_bytes())
+        self.assertIn(b"\x1b[6n", output.buffer.getvalue())
         self.assertIn(b"SUCCESS", output.buffer.getvalue())
 
 

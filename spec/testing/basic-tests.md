@@ -82,9 +82,12 @@ PreScript 失败时 QEMU 不得启动。只要 QEMU 阶段已经开始，PostScr
 
 ## QEMU interaction and lifecycle
 
-`none` 和 `scripted` 使用封闭 stdin 或声明的 marker/payload steps。`terminal` 必须使用 PTY：操作者
-输入字节原样转发，guest 输出同时写到当前终端和 `qemu.log`。`make run` 在 kernel build 和 PreScript
-之前检查真实 stdin/stdout TTY；无 TTY 时结构化失败。`build` 和 `manifest` 不要求 TTY。
+`none` 和 `scripted` 使用封闭 stdin 或声明的 marker/payload steps。它们的 `qemu.log` 和 marker
+匹配必须保留完整 guest 字节；但写给宿主展示流时必须跨任意输出分块抑制 guest 的光标位置查询
+`ESC[6n`，防止该查询穿过 `tee` 到达调用终端并把终端响应遗留给调用 shell。runner 不得用读取或
+清空调用者 stdin 的方式补救该响应。`terminal` 必须使用 PTY：操作者输入字节原样转发，guest 输出
+同时写到当前终端和 `qemu.log`，包括由真实交互会话消费的终端查询。`make run` 在 kernel build 和
+PreScript 之前检查真实 stdin/stdout TTY；无 TTY 时结构化失败。`build` 和 `manifest` 不要求 TTY。
 
 runner 以独立进程组启动 QEMU，执行整体 timeout，并实现等待 process exit/guest shutdown 或 marker
 后终止的退出策略。timeout、异常、正常退出和 terminal 中断都必须恢复原终端属性、执行适用的

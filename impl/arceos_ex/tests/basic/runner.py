@@ -51,6 +51,7 @@ ALLOWED_EXIT_POLICIES = {"process-exit", "guest-shutdown", "marker"}
 ALLOWED_PURPOSES = {"acceptance", "diagnostic"}
 ALLOWED_INTERACTIONS = {"none", "scripted", "terminal"}
 ALLOWED_ROOTFS_PROFILES = {"canonical"}
+NON_TERMINAL_PRESENTATION_QUERIES = (b"\x1b[6n",)
 COMPATIBILITY_ALIASES = {
     "hello": "hello-native",
     "smoke": "kernel-smoke-native",
@@ -78,6 +79,32 @@ class QemuOutcome:
     process_group_reaped: bool = True
     stdin_steps: list[dict[str, Any]] | None = None
     terminal_restored: bool | None = None
+
+
+class _NonTerminalConsolePresentation:
+    def __init__(self) -> None:
+        self._pending = b""
+
+    def write(self, chunk: bytes) -> None:
+        data = self._pending + chunk
+        pending_length = 0
+        for query in NON_TERMINAL_PRESENTATION_QUERIES:
+            for length in range(1, len(query)):
+                if data.endswith(query[:length]):
+                    pending_length = max(pending_length, length)
+        if pending_length:
+            data, self._pending = data[:-pending_length], data[-pending_length:]
+        else:
+            self._pending = b""
+        for query in NON_TERMINAL_PRESENTATION_QUERIES:
+            data = data.replace(query, b"")
+        if data:
+            _console_write(data)
+
+    def finish(self) -> None:
+        if self._pending:
+            _console_write(self._pending)
+            self._pending = b""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -655,6 +682,7 @@ def _run_qemu(
         bufsize=0,
     )
     assert process.stdout is not None
+    presentation = _NonTerminalConsolePresentation()
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
     deadline = time.monotonic() + manifest["timeout_seconds"]
@@ -680,7 +708,7 @@ def _run_qemu(
                     captured.extend(chunk)
                     log.write(chunk)
                     log.flush()
-                    _console_write(chunk)
+                    presentation.write(chunk)
 
                 visible = captured.decode(errors="replace")
                 for step in steps:
@@ -708,6 +736,7 @@ def _run_qemu(
             reaped = _terminate_process_group(process) and reaped
             exit_code = process.poll()
     finally:
+        presentation.finish()
         selector.close()
         if process.poll() is None:
             reaped = _terminate_process_group(process) and reaped

@@ -118,6 +118,11 @@ compatibility input. Terminal runs use a PTY, fail before build without a real T
 restore the terminal on every exit path. Process exit, guest exit status and log expectations are independent.
 User-smoke acceptance and manual shell diagnostics have distinct explicit configuration names and cannot be
 selected from one another based on whether a terminal is present.
+For `none` and `scripted` interaction, raw guest output remains authoritative in `qemu.log` and expectation
+matching, while the host presentation stream must remove cursor-position query `ESC[6n` across arbitrary
+read boundaries. This prevents a downstream `tee` from eliciting terminal input that survives the test.
+The runner must not drain caller stdin as cleanup. Terminal interaction retains the unfiltered query because
+its PTY input-forwarding path delivers the terminal response to the guest.
 
 ## Disk Images
 
