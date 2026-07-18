@@ -79,6 +79,7 @@ const SYSCALL_FCHMOD: usize = 52;
 const SYSCALL_FCHOWN: usize = 55;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
+const SYSCALL_PIPE2: usize = 59;
 const SYSCALL_GETDENTS64: usize = 61;
 const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_READ: usize = 63;
@@ -318,6 +319,7 @@ const ELOOP: usize = 40;
 const EMFILE: usize = 24;
 const ENOTDIR: usize = 20;
 const ECHILD: usize = 10;
+const EPIPE: usize = 32;
 const ECONNREFUSED: usize = 111;
 
 #[cfg(app_user_boot)]
@@ -759,6 +761,7 @@ pub struct SyscallTable {
     newfstatat_supported: bool,
     readlinkat_supported: bool,
     dup3_supported: bool,
+    pipe2_supported: bool,
     getrandom_supported: bool,
     getcwd_supported: bool,
     getpid_supported: bool,
@@ -839,6 +842,10 @@ pub struct SyscallTable {
     newfstatat_routes_to_files_struct: bool,
     readlinkat_routes_to_files_struct: bool,
     dup3_routes_to_files_struct: bool,
+    pipe2_routes_to_files_struct: bool,
+    pipe2_flags_zero_first_slice: bool,
+    pipe2_atomic_fd_usercopy_rollback: bool,
+    pipe2_full_linux_model_deferred: bool,
     getrandom_routes_to_hwrng_core: bool,
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
@@ -952,6 +959,7 @@ pub struct SyscallTable {
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
     dup3_observed: AtomicU8,
+    pipe2_observed: AtomicU8,
     getrandom_observed: AtomicU8,
     getcwd_observed: AtomicU8,
     getpid_observed: AtomicU8,
@@ -1010,6 +1018,7 @@ impl SyscallTable {
             newfstatat_supported: false,
             readlinkat_supported: false,
             dup3_supported: false,
+            pipe2_supported: false,
             getrandom_supported: false,
             getcwd_supported: false,
             getpid_supported: false,
@@ -1090,6 +1099,10 @@ impl SyscallTable {
             newfstatat_routes_to_files_struct: false,
             readlinkat_routes_to_files_struct: false,
             dup3_routes_to_files_struct: false,
+            pipe2_routes_to_files_struct: false,
+            pipe2_flags_zero_first_slice: false,
+            pipe2_atomic_fd_usercopy_rollback: false,
+            pipe2_full_linux_model_deferred: false,
             getrandom_routes_to_hwrng_core: false,
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
@@ -1203,6 +1216,7 @@ impl SyscallTable {
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
             dup3_observed: AtomicU8::new(0),
+            pipe2_observed: AtomicU8::new(0),
             getrandom_observed: AtomicU8::new(0),
             getcwd_observed: AtomicU8::new(0),
             getpid_observed: AtomicU8::new(0),
@@ -1307,6 +1321,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn dup3_supported(&self) -> bool {
         self.dup3_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn pipe2_supported(&self) -> bool {
+        self.pipe2_supported
     }
 
     #[allow(dead_code)]
@@ -1637,6 +1656,26 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn dup3_routes_to_files_struct(&self) -> bool {
         self.dup3_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn pipe2_routes_to_files_struct(&self) -> bool {
+        self.pipe2_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn pipe2_flags_zero_first_slice(&self) -> bool {
+        self.pipe2_flags_zero_first_slice
+    }
+
+    #[allow(dead_code)]
+    pub const fn pipe2_atomic_fd_usercopy_rollback(&self) -> bool {
+        self.pipe2_atomic_fd_usercopy_rollback
+    }
+
+    #[allow(dead_code)]
+    pub const fn pipe2_full_linux_model_deferred(&self) -> bool {
+        self.pipe2_full_linux_model_deferred
     }
 
     #[allow(dead_code)]
@@ -2015,6 +2054,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn pipe2_observed(&self) -> bool {
+        self.pipe2_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn getrandom_observed(&self) -> bool {
         self.getrandom_observed.load(Ordering::Acquire) != 0
     }
@@ -2177,6 +2221,7 @@ impl SyscallTable {
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
         self.dup3_supported = true;
+        self.pipe2_supported = true;
         self.getrandom_supported = true;
         self.getcwd_supported = true;
         self.getpid_supported = true;
@@ -2257,6 +2302,10 @@ impl SyscallTable {
         self.newfstatat_routes_to_files_struct = true;
         self.readlinkat_routes_to_files_struct = true;
         self.dup3_routes_to_files_struct = true;
+        self.pipe2_routes_to_files_struct = true;
+        self.pipe2_flags_zero_first_slice = true;
+        self.pipe2_atomic_fd_usercopy_rollback = true;
+        self.pipe2_full_linux_model_deferred = true;
         self.getrandom_routes_to_hwrng_core = true;
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
@@ -2517,6 +2566,21 @@ impl SyscallTable {
         }
 
         syscall_table_dup3(self, frame);
+    }
+
+    pub fn pipe2(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.pipe2_supported
+            || !self.pipe2_routes_to_files_struct
+            || !self.pipe2_flags_zero_first_slice
+            || !self.pipe2_atomic_fd_usercopy_rollback
+            || !self.pipe2_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_pipe2(self, frame);
     }
 
     pub fn fchmod(&self, frame: &mut TrapFrame) {
@@ -3495,6 +3559,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_CONNECT => table.connect(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
+        SYSCALL_PIPE2 => table.pipe2(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
         SYSCALL_LSEEK => table.lseek(frame),
         SYSCALL_READ => table.read(frame),
@@ -3580,6 +3645,7 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::TooManySymlinks => ELOOP,
         FileError::TooManyOpenFiles => EMFILE,
         FileError::NotDirectory => ENOTDIR,
+        FileError::BrokenPipe => EPIPE,
         FileError::NotReady
         | FileError::NotReadable
         | FileError::NotWritable
@@ -4207,6 +4273,39 @@ fn syscall_table_dup3(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.dup3_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, fd);
+}
+
+fn syscall_table_pipe2(table: &SyscallTable, frame: &mut TrapFrame) {
+    let user_pair = frame.reg(10);
+    let flags = frame.reg(11);
+    if flags != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let pair = match crate::context::context()
+        .files_struct
+        .pipe2_fd_pair(flags as u32)
+    {
+        Ok(pair) => pair,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+    let mut pair_bytes = [0u8; 8];
+    pair_bytes[..4].copy_from_slice(&(pair[0] as u32).to_le_bytes());
+    pair_bytes[4..].copy_from_slice(&(pair[1] as u32).to_le_bytes());
+    if !copy_to_user(user_pair, &pair_bytes) {
+        let _ = crate::context::context()
+            .files_struct
+            .rollback_pipe2_usercopy(pair);
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.pipe2_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
 }
 
 fn syscall_table_fchmod(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -5608,7 +5707,7 @@ fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
-    let Ok(written) = crate::context::context_ref()
+    let Ok(written) = crate::context::context()
         .files_struct
         .write_fd(fd, &buffer[..len])
     else {
@@ -5656,7 +5755,7 @@ fn syscall_table_writev(table: &SyscallTable, frame: &mut TrapFrame) {
                 complete_error_syscall(frame, EFAULT);
                 return;
             }
-            let Ok(written) = crate::context::context_ref()
+            let Ok(written) = crate::context::context()
                 .files_struct
                 .write_fd(fd, &buffer[..len])
             else {
@@ -8818,6 +8917,7 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_FCHOWN => "fchown",
         SYSCALL_OPENAT => "openat",
         SYSCALL_CLOSE => "close",
+        SYSCALL_PIPE2 => "pipe2",
         SYSCALL_GETDENTS64 => "getdents64",
         SYSCALL_LSEEK => "lseek",
         SYSCALL_READ => "read",
@@ -9312,6 +9412,8 @@ fn print_ofd_name(ofd: OpenFileDescriptionRef) {
         OpenFileDescriptionRef::Tty0 => "tty0",
         OpenFileDescriptionRef::Pidfd0 => "pidfd0",
         OpenFileDescriptionRef::UnixSocket0 => "unix_socket0",
+        OpenFileDescriptionRef::PipeRead0 => "pipe_read0",
+        OpenFileDescriptionRef::PipeWrite0 => "pipe_write0",
     };
     crate::arch::riscv64::sbi::putstr(name);
 }
@@ -9410,6 +9512,7 @@ fn print_file_error_name(error: FileError) {
         FileError::TooManySymlinks => "TooManySymlinks",
         FileError::TooManyOpenFiles => "TooManyOpenFiles",
         FileError::NotDirectory => "NotDirectory",
+        FileError::BrokenPipe => "BrokenPipe",
     };
     crate::arch::riscv64::sbi::putstr(name);
 }

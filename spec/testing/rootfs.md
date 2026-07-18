@@ -57,7 +57,7 @@ respectively. Each uses a writable
 private copy of the canonical template, boots `init=/bin/sh`, uses a real PTY, has a 3600-second overall
 limit, and forbids the panic marker. A normal `exit` completes execution with verdict inconclusive; cleanup
 must restore the terminal and delete the private image. They are opt-in and never enter default regression
-or formal difftest. This shell identity remains independent of the LTP manual configurations below even when
+or formal difftest. This shell identity remains independent of the LTP scripted acceptance below even when
 their current QEMU behavior is similar.
 
 ## rc.local basic acceptance and paired difftest
@@ -116,20 +116,28 @@ BusyBox init waiting/reaping, not OpenRC behavior. The arceos_ex side captures t
 the bounded checkpoint buffer. Its declared recorder capacity is 524288 bytes, which must retain the complete
 session without overflow rather than truncating the sequence at the comparison boundary.
 
-## Manual LTP shell basic tests
+## LTP syscall basic acceptance
 
-`ltp-shell-manual-native` and `ltp-shell-manual-linux-object` are terminal diagnostic configurations with
-`init=/bin/sh` and a private canonical copy. They are opt-in and never enter default regression or formal
-difftest. A normal terminal session ends with verdict inconclusive. The initial manual workflow is:
+Rule IDs (MUST):
 
-```sh
-cd /opt/ltp
-./run-syscalls.sh 'getpid*' 'uname*'
-```
+- `arceos_ex_must_ltp_uname_be_dual_provider_scripted_acceptance`
+- `arceos_ex_must_ltp_uname_list_exact_entries_before_execution`
+- `arceos_ex_must_ltp_uname_require_three_passes`
 
-This establishes only that the installed LTP tree can be booted and invoked. Individual FAIL/BROK/TCONF or
-missing `/proc`/`sys`/device capabilities do not expand acceptance scope. Build/manifest may validate either
-provider without a TTY; `run` requires a real terminal.
+`ltp` and `ltp-lo` are scripted acceptance identities for the native and linux-object providers,
+respectively. The retired `ltp-shell-manual-native` and `ltp-shell-manual-linux-object` names have no
+compatibility entry. Both use `init=/bin/sh`, a writable private copy of the canonical template and guest
+shutdown, and both enter the default root `make test` gate.
+
+After the first shell prompt, the scripted payload changes to `/opt/ltp` and must first run
+`./run-syscalls.sh --list -- 'uname*'`. A list failure exits immediately with its original status. The list
+must contain exactly one entry each for `uname01`, `uname02` and `uname04`, with their matching commands, and
+no other selected entry. Only after that list succeeds may the payload run
+`./run-syscalls.sh -- 'uname*'`; the shell exits with that run's original status. Acceptance requires the
+exact final line `Summary: TOTAL=3 PASS=3 FAIL=0 BROK=0 WARN=0 CONF=0`, guest status 0, and no unsupported
+syscall, ENOSYS/Function-not-implemented, panic or LTP non-pass marker. This scope does not turn missing
+`/proc`/`sys`/device capabilities into success and does not claim support for any syscall outside the three
+selected uname entries.
 
 ## Composite and observation policy
 

@@ -24,8 +24,10 @@
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
 3. ordinary shell、nightly stress 和 Linux paired difftest 保持长期回归；失败样本按稳定序列和
    source-scoped 事实分类。
-4. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
-5. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
+4. LTP 首个自动 syscall acceptance 固定为 native/linux-object 两侧的 `uname*` 三项；`pipe2(59)`
+   有界首片已实现，两侧新的首个边界同为 command substitution 的 child-context `clone(220)`。
+5. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
+6. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
    [`objects/README.md`](../spec/coding/objects/README.md)、
    [`arceos_ex-implementation.md`](../spec/coding/arceos_ex-implementation.md) 与
    [`testing/rootfs.md`](../spec/testing/rootfs.md) 承载。
@@ -53,6 +55,7 @@
 | `P0` | 长期回归 | linux/checkpoint/stress | Linux exact-mapped runtime 插桩与横向差分 | 维护 exact marker 与默认 rc.local hard scope；继续处理 `range`/`unmapped` mapping，并在需要时规格化先纵向、后横向的 multi-run 语义。 | [charter](../spec/charter/main.md#linux-runtime-checkpoint-插桩与横向差分)；[测试规格](../spec/testing/rootfs.md#rclocal-and-paired-difftest) |
 | `P0` | 当前 | model/coding/arceos_ex/vfs | VFS pathname walk / rootfs path read 补强 | 推进 slow symlink、通用 nofollow、magic link、RCU walk、权限、mount namespace、fd table 和 errno 边界；保持当前 read-only fast-symlink 骨架。 | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P0` | 进行中 | build/rootfs/user/validation | 发行版 rootfs smoke 与 overlay 分层 | 保持 overlay fixture 与 bare distro cases 分层；继续以真实 BusyBox init/发行版路径收敛 native init 验收，不用测试专用内核 API。 | [镜像构造](../spec/coding/projects/rootfs-image.md)；[测试规格](../spec/testing/rootfs.md) |
+| `P0` | 进行中 | validation/user/syscall/files | LTP uname 自动验收扩展 | 维护 `ltp`/`ltp-lo` 的 list-before-run 与严格 3/3 判据；`pipe2(59)` flags=0、单有界 pipe 和 fd-snapshot 数据保留首片已实现。两侧现同样停在 script line 30 的 `clone(220) stage=child_context_unsupported`，后续先补该边界规格/诊断；完整 pipe flags/等待/refcount、多 pipe、uname ELF/VFS 与 personality 仍依新证据推进。 | [测试规格](../spec/testing/rootfs.md#ltp-syscall-basic-acceptance)；[user boot coding](../spec/coding/objects/user-boot.md#files-and-syscall-dispatch) |
 | `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | `exec_sync.001`–`exec_sync.003` | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
 | `P1` | 待办 | model/coding/arceos_ex/trap/mm | per-task VMAP trap 栈与 IRQ hardirq 栈 | `process_prepare.011`、`irq_time.007` | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
 | `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | `kthreadd.001`、`sched_init.004`、`schedule_handoff.001`–`.003` | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |

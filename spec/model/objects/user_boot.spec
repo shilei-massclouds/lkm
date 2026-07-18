@@ -199,6 +199,7 @@ predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
 predicate syscall_table_dup3_supported<T>(table: T) -> bool;
+predicate syscall_table_pipe2_supported<T>(table: T) -> bool;
 predicate syscall_table_fchown_supported<T>(table: T) -> bool;
 predicate syscall_table_fchmod_supported<T>(table: T) -> bool;
 predicate syscall_table_fcntl_supported<T>(table: T) -> bool;
@@ -270,6 +271,10 @@ predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_dup3_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_pipe2_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_pipe2_flags_zero_first_slice<T>(table: T) -> bool;
+predicate syscall_pipe2_atomic_fd_and_usercopy_rollback<T>(table: T) -> bool;
+predicate syscall_pipe2_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_fchown_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fchmod_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_fchown_fchmod_fd_local_first_slice<T>(table: T) -> bool;
@@ -429,6 +434,7 @@ predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
 predicate syscall_table_dup3_observed<T>(table: T) -> bool;
+predicate syscall_table_pipe2_observed<T>(table: T) -> bool;
 predicate syscall_table_fchown_observed<T>(table: T) -> bool;
 predicate syscall_table_fchmod_observed<T>(table: T) -> bool;
 predicate syscall_table_fcntl_observed<T>(table: T) -> bool;
@@ -1076,6 +1082,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
                     syscall_table_dup3_supported(self);
+                    syscall_table_pipe2_supported(self);
                     syscall_table_fchown_supported(self);
                     syscall_table_fchmod_supported(self);
                     syscall_table_fcntl_supported(self);
@@ -1135,6 +1142,9 @@ object SyscallTable: ResourceObject {
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_fchown_fchmod_fd_local_first_slice(self);
                     syscall_fchown_fchmod_full_linux_model_deferred(self);
+                    syscall_pipe2_flags_zero_first_slice(self);
+                    syscall_pipe2_atomic_fd_and_usercopy_rollback(self);
+                    syscall_pipe2_full_linux_model_deferred(self);
                     /*
                      * Current BusyBox init login evidence has moved past post-auth
                      * fchown(55)/fchmod(52) and classifies
@@ -1716,6 +1726,37 @@ object SyscallTable: ResourceObject {
                     files_struct_dup3_routes_to_table(FilesStruct, FileDescriptorTable);
                     fd_table_fd_duplicated(FileDescriptorTable, FdRef::Stdin, FdRef::Stdout);
                     syscall_table_dup3_observed(self);
+                }
+            }
+
+            on Action::Pipe2 {
+                /*
+                 * Linux asm-generic/RISC-V exposes pipe2 as __NR_pipe2=59.
+                 * This bounded slice accepts only flags == 0, routes pair
+                 * allocation through FilesStruct, copies two 32-bit fds to
+                 * user memory, and rolls both descriptors back on EFAULT or
+                 * capacity failure. O_CLOEXEC/O_NONBLOCK and full pipe wait,
+                 * refcount and signal semantics stay deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
+                }
+
+                drives {
+                    FilesStruct.Action::CreatePipe2;
+                }
+
+                ensures {
+                    syscall_pipe2_routes_to_files_struct(self, FilesStruct);
+                    syscall_pipe2_flags_zero_first_slice(self);
+                    syscall_pipe2_atomic_fd_and_usercopy_rollback(self);
+                    syscall_pipe2_full_linux_model_deferred(self);
+                    files_struct_pipe_fd_pair_installed_atomically(FilesStruct);
+                    files_struct_pipe_snapshot_preserves_child_data(FilesStruct);
+                    syscall_table_pipe2_observed(self);
                 }
             }
 

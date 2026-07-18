@@ -111,7 +111,8 @@ builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP �
 提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/BusyBox init login 双 provider acceptance 进入默认回归；
 `user-smoke-{native,linux-object}` 是非交互自动验收；`shell`（native）与 `shell-lo`（linux-object）是使用 canonical
 私有可写副本、`init=/bin/sh` 和真实 PTY 的人工诊断，正常退出 verdict 为 inconclusive。两者身份不因
-调用上下文切换，shell 与独立的 LTP terminal diagnostic 都仅显式运行。
+调用上下文切换。`ltp`（native）与 `ltp-lo`（linux-object）则是 scripted acceptance：先精确列出
+`uname01/02/04`，再执行同一集合并要求 3/3 PASS；两项均进入默认回归。
 
 ## Provider 机制
 

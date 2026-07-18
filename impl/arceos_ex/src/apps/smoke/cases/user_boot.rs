@@ -34,6 +34,7 @@ const USER_SMOKE_INIT_PATH_NUL: &[u8] = b"/opt/lkm/tests/user-smoke\0";
 const USER_PLAIN_FORK_FLAGS: usize = 0x11;
 const USER_WAIT4_WNOHANG: usize = 1;
 const USER_EFAULT_RETURN: usize = usize::MAX - 13;
+const USER_EINVAL_RETURN: usize = usize::MAX - 21;
 const USER_ECHILD_RETURN: usize = usize::MAX - 9;
 const USER_TEST_WAIT4_WUNTRACED: usize = 2;
 const USER_TEST_O_RDWR: u32 = 0o2;
@@ -773,6 +774,14 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.syscall_table.dup3_supported() && ctx.syscall_table.dup3_routes_to_files_struct(),
         );
         assertions.assert(
+            "pipe2 syscall first slice",
+            ctx.syscall_table.pipe2_supported()
+                && ctx.syscall_table.pipe2_routes_to_files_struct()
+                && ctx.syscall_table.pipe2_flags_zero_first_slice()
+                && ctx.syscall_table.pipe2_atomic_fd_usercopy_rollback()
+                && ctx.syscall_table.pipe2_full_linux_model_deferred(),
+        );
+        assertions.assert(
             "files struct setup",
             ctx.files_struct.setup(&ctx.kernel_init_task).is_ok(),
         );
@@ -1139,6 +1148,176 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.files_struct
                 .restore_parent_fd_snapshot(&dup3_snapshot)
                 .is_ok(),
+        );
+        let pipe_baseline_open = ctx.files_struct.fd_table_open_count();
+        assertions.assert(
+            "pipe2 invalid flags rollback",
+            matches!(
+                ctx.files_struct.pipe2_fd_pair(USER_TEST_O_CLOEXEC),
+                Err(FileError::InvalidArgument)
+            ) && ctx.files_struct.fd_table_open_count() == pipe_baseline_open
+                && !ctx.files_struct.pipe_read_end_open()
+                && !ctx.files_struct.pipe_write_end_open(),
+        );
+        let rollback_pair = match ctx.files_struct.pipe2_fd_pair(0) {
+            Ok(pair) => pair,
+            Err(_) => {
+                assertions.assert("pipe2 efault rollback allocate", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "pipe2 efault rollback",
+            rollback_pair == [4, 5]
+                && ctx
+                    .files_struct
+                    .rollback_pipe2_usercopy(rollback_pair)
+                    .is_ok()
+                && ctx.files_struct.fd_table_open_count() == pipe_baseline_open
+                && ctx.files_struct.pipe_buffer_len() == 0
+                && !ctx.files_struct.pipe_read_end_open()
+                && !ctx.files_struct.pipe_write_end_open()
+                && ctx.files_struct.pipe_usercopy_rollback_observed(),
+        );
+        let emfile_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                assertions.assert("pipe2 emfile snapshot", false);
+                return;
+            }
+        };
+        while ctx.files_struct.fd_table_open_count() + 1 < ctx.files_struct.fd_table_capacity() {
+            if ctx.files_struct.fcntl_dupfd_fd(1, 0, false).is_err() {
+                assertions.assert("pipe2 emfile fill", false);
+                return;
+            }
+        }
+        let before_emfile = ctx.files_struct.fd_table_open_count();
+        let pipe_emfile = ctx.files_struct.pipe2_fd_pair(0);
+        assertions.assert(
+            "pipe2 emfile atomic rollback",
+            matches!(pipe_emfile, Err(FileError::TooManyOpenFiles))
+                && ctx.files_struct.fd_table_open_count() == before_emfile
+                && !ctx.files_struct.pipe_read_end_open()
+                && !ctx.files_struct.pipe_write_end_open(),
+        );
+        assertions.assert(
+            "pipe2 emfile restore",
+            ctx.files_struct
+                .restore_parent_fd_snapshot(&emfile_snapshot)
+                .is_ok()
+                && ctx.files_struct.fd_table_open_count() == pipe_baseline_open,
+        );
+        let pipe_pair = match ctx.files_struct.pipe2_fd_pair(0) {
+            Ok(pair) => pair,
+            Err(_) => {
+                assertions.assert("pipe2 pair allocate", false);
+                return;
+            }
+        };
+        let pipe_read_diag = ctx.files_struct.fd_table_entry_diagnostic(pipe_pair[0]);
+        let pipe_write_diag = ctx.files_struct.fd_table_entry_diagnostic(pipe_pair[1]);
+        let mut pipe_roundtrip = [0u8; 4];
+        let pipe_written = ctx.files_struct.write_fd(pipe_pair[1], b"pipe");
+        let pipe_read = ctx.files_struct.read_fd(pipe_pair[0], &mut pipe_roundtrip);
+        assertions.assert(
+            "pipe2 fd pair direction roundtrip",
+            pipe_pair == [4, 5]
+                && pipe_read_diag
+                    .map(|entry| {
+                        entry.ofd == OpenFileDescriptionRef::PipeRead0
+                            && entry.readable
+                            && !entry.writable
+                    })
+                    .unwrap_or(false)
+                && pipe_write_diag
+                    .map(|entry| {
+                        entry.ofd == OpenFileDescriptionRef::PipeWrite0
+                            && !entry.readable
+                            && entry.writable
+                    })
+                    .unwrap_or(false)
+                && matches!(
+                    ctx.files_struct.write_fd(pipe_pair[0], b"x"),
+                    Err(FileError::NotWritable)
+                )
+                && matches!(
+                    ctx.files_struct.read_fd(pipe_pair[1], &mut pipe_roundtrip),
+                    Err(FileError::NotReadable)
+                )
+                && pipe_written == Ok(4)
+                && pipe_read == Ok(4)
+                && pipe_roundtrip == *b"pipe"
+                && ctx.files_struct.pipe_pair_installed(),
+        );
+        let pipe_parent_snapshot = match ctx.files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                assertions.assert("pipe2 snapshot save", false);
+                return;
+            }
+        };
+        let child_pipe_handoff = ctx.files_struct.dup3_fd(pipe_pair[1], 1, false).is_ok()
+            && ctx.files_struct.close_fd(pipe_pair[0]).is_ok()
+            && ctx.files_struct.close_fd(pipe_pair[1]).is_ok()
+            && ctx.files_struct.write_fd(1, b"/\n") == Ok(2)
+            && ctx.files_struct.close_fd(1).is_ok()
+            && ctx.files_struct.pipe_buffer_len() == 2;
+        let parent_pipe_restored = ctx
+            .files_struct
+            .restore_parent_fd_snapshot(&pipe_parent_snapshot)
+            .is_ok();
+        let parent_writer_closed = ctx.files_struct.close_fd(pipe_pair[1]).is_ok();
+        let parent_pipe_ends_restored =
+            ctx.files_struct.pipe_read_end_open() && !ctx.files_struct.pipe_write_end_open();
+        let mut snapshot_pipe_data = [0u8; 2];
+        let snapshot_pipe_read = ctx
+            .files_struct
+            .read_fd(pipe_pair[0], &mut snapshot_pipe_data);
+        let snapshot_pipe_eof = ctx
+            .files_struct
+            .read_fd(pipe_pair[0], &mut snapshot_pipe_data);
+        let parent_reader_closed = ctx.files_struct.close_fd(pipe_pair[0]).is_ok();
+        assertions.assert(
+            "pipe2 child dup close writes shared data",
+            child_pipe_handoff,
+        );
+        assertions.assert(
+            "pipe2 parent snapshot restores ends",
+            parent_pipe_restored && parent_writer_closed && parent_pipe_ends_restored,
+        );
+        assertions.assert(
+            "pipe2 parent reads shared data then eof",
+            snapshot_pipe_read == Ok(2)
+                && snapshot_pipe_data == *b"/\n"
+                && snapshot_pipe_eof == Ok(0)
+                && parent_reader_closed
+                && ctx.files_struct.pipe_buffer_len() == 0
+                && !ctx.files_struct.pipe_read_end_open()
+                && !ctx.files_struct.pipe_write_end_open(),
+        );
+        let pipe_syscall_open_baseline = ctx.files_struct.fd_table_open_count();
+        let mut pipe_efault_frame = TrapFrame::zeroed();
+        pipe_efault_frame.set_reg(10, 0);
+        pipe_efault_frame.set_reg(11, 0);
+        pipe_efault_frame.set_reg(17, 59);
+        ctx.syscall_table.pipe2(&mut pipe_efault_frame);
+        assertions.assert(
+            "pipe2 syscall efault rolls back pair",
+            pipe_efault_frame.reg(10) == USER_EFAULT_RETURN
+                && ctx.files_struct.fd_table_open_count() == pipe_syscall_open_baseline
+                && !ctx.files_struct.pipe_read_end_open()
+                && !ctx.files_struct.pipe_write_end_open(),
+        );
+        let mut pipe_einval_frame = TrapFrame::zeroed();
+        pipe_einval_frame.set_reg(10, 0);
+        pipe_einval_frame.set_reg(11, USER_TEST_O_CLOEXEC as usize);
+        pipe_einval_frame.set_reg(17, 59);
+        ctx.syscall_table.pipe2(&mut pipe_einval_frame);
+        assertions.assert(
+            "pipe2 syscall rejects nonzero flags",
+            pipe_einval_frame.reg(10) == USER_EINVAL_RETURN
+                && ctx.files_struct.fd_table_open_count() == pipe_syscall_open_baseline,
         );
         assertions.assert("null close fd", ctx.files_struct.close_fd(null_fd).is_ok());
         assertions.assert(

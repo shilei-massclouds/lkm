@@ -233,6 +233,13 @@ class BasicRunnerConfigTests(unittest.TestCase):
             self.assertFalse((cases / f"{removed_name}.toml").exists())
             self.assertNotIn(removed_name, runner.COMPATIBILITY_ALIASES)
             self.assertNotIn(removed_name, runner.RETIRED_TEST_NAMES)
+        for removed_name in (
+            "ltp-shell-manual-native",
+            "ltp-shell-manual-linux-object",
+        ):
+            self.assertFalse((cases / f"{removed_name}.toml").exists())
+            self.assertNotIn(removed_name, runner.COMPATIBILITY_ALIASES)
+            self.assertNotIn(removed_name, runner.RETIRED_TEST_NAMES)
 
     def test_shell_cases_are_distinct_dual_provider_terminal_diagnostics(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
@@ -268,6 +275,47 @@ class BasicRunnerConfigTests(unittest.TestCase):
                 self.assertEqual(smoke["qemu"]["interaction"], "none")
                 self.assertNotEqual(smoke["name"], shell["name"])
 
+    def test_ltp_cases_are_distinct_dual_provider_scripted_acceptance(self) -> None:
+        repo_root = Path(__file__).resolve().parents[4]
+        cases = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases"
+        expected_names = {"native": "ltp", "linux-object": "ltp-lo"}
+        for provider, name in expected_names.items():
+            with self.subTest(name=name):
+                config = runner.load_config(cases / f"{name}.toml", repo_root)
+                self.assertEqual(config["purpose"], "acceptance")
+                self.assertEqual(config["kernel"]["app"], "user-boot")
+                self.assertEqual(config["kernel"]["provider"], provider)
+                self.assertEqual(config["disk"], {"mode": "private-copy", "profile": "canonical"})
+                self.assertEqual(config["qemu"]["kernel_cmdline"], "earlycon=sbi init=/bin/sh")
+                self.assertEqual(config["qemu"]["exit_policy"], "guest-shutdown")
+                self.assertEqual(config["qemu"]["interaction"], "scripted")
+                payload = "".join(
+                    step["payload"] for step in config["qemu"]["stdin_steps"]
+                )
+                self.assertLess(
+                    payload.index("--list -- 'uname*'"),
+                    payload.index("./run-syscalls.sh -- 'uname*'"),
+                )
+                self.assertIn("|| exit $?", payload)
+                self.assertIn('exit "$status"', payload)
+                self.assertEqual(
+                    [step["ready_marker"] for step in config["qemu"]["stdin_steps"]],
+                    ["~ #", "/opt/ltp #", "uname04\tuname04", "Summary: TOTAL="],
+                )
+                counts = {
+                    item["marker"]: item["exactly"]
+                    for item in config["expect"]["marker_counts"]
+                }
+                self.assertEqual(counts["uname01\tuname01"], 1)
+                self.assertEqual(counts["uname02\tuname02"], 1)
+                self.assertEqual(counts["uname04\tuname04"], 1)
+                self.assertEqual(
+                    counts["Summary: TOTAL=3 PASS=3 FAIL=0 BROK=0 WARN=0 CONF=0"],
+                    1,
+                )
+                self.assertEqual(config["expect"]["guest_exit_status"], 0)
+                self.assertIn("unsupported syscall", config["expect"]["forbidden_markers"])
+
     def test_default_automation_pins_user_smoke_and_df0001_to_explicit_test_names(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
         summary = (repo_root / "tools" / "test_summary.sh").read_text()
@@ -276,6 +324,8 @@ class BasicRunnerConfigTests(unittest.TestCase):
         for terminal_name in ("shell", "shell-lo"):
             self.assertNotIn(f'TEST="{terminal_name}"', summary)
             self.assertNotIn(f'APP="{terminal_name}"', summary)
+        self.assertIn('run TEST="ltp"', summary)
+        self.assertIn('run TEST="ltp-lo"', summary)
 
         df0001_path = (
             repo_root

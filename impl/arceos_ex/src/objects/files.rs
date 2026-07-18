@@ -16,6 +16,7 @@ pub const STDERR_FD: usize = 2;
 pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
+pub const PIPE_BUFFER_SIZE: usize = 4096;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
 // Consumed by the user-boot stdin fixture configuration.
@@ -74,6 +75,7 @@ pub enum FileBackendKind {
     RegularFile,
     BlockDevice,
     UnixSocket,
+    Pipe,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -114,6 +116,7 @@ pub enum FileError {
     TooManySymlinks,
     TooManyOpenFiles,
     NotDirectory,
+    BrokenPipe,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -124,6 +127,62 @@ enum FilesystemFdKind {
 }
 
 pub type FileResult<T> = Result<T, FileError>;
+
+struct PipeBuffer {
+    bytes: [u8; PIPE_BUFFER_SIZE],
+    read_offset: usize,
+    len: usize,
+}
+
+impl PipeBuffer {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; PIPE_BUFFER_SIZE],
+            read_offset: 0,
+            len: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.read_offset = 0;
+        self.len = 0;
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    fn write(&mut self, input: &[u8]) -> FileResult<usize> {
+        if input.is_empty() {
+            return Ok(0);
+        }
+        if self.read_offset != 0 && self.read_offset + self.len == PIPE_BUFFER_SIZE {
+            self.bytes
+                .copy_within(self.read_offset..self.read_offset + self.len, 0);
+            self.read_offset = 0;
+        }
+        let write_offset = self.read_offset + self.len;
+        let available = PIPE_BUFFER_SIZE.saturating_sub(write_offset);
+        if available == 0 {
+            return Err(FileError::NotReady);
+        }
+        let written = core::cmp::min(input.len(), available);
+        self.bytes[write_offset..write_offset + written].copy_from_slice(&input[..written]);
+        self.len += written;
+        Ok(written)
+    }
+
+    fn read(&mut self, output: &mut [u8]) -> usize {
+        let read = core::cmp::min(output.len(), self.len);
+        output[..read].copy_from_slice(&self.bytes[self.read_offset..self.read_offset + read]);
+        self.read_offset += read;
+        self.len -= read;
+        if self.len == 0 {
+            self.read_offset = 0;
+        }
+        read
+    }
+}
 
 pub fn is_tty_path(path: &[u8]) -> bool {
     if path == DEV_TTY_PATH {
@@ -255,6 +314,26 @@ impl FileDescriptorEntry {
         }
     }
 
+    const fn pipe_end(ofd: OpenFileDescriptionRef, readable: bool, writable: bool) -> Self {
+        Self {
+            ofd,
+            readable,
+            writable,
+            flags: if writable {
+                FILE_O_WRONLY
+            } else {
+                FILE_O_RDONLY
+            },
+            close_on_exec: false,
+            pid: 0,
+            owner_valid: false,
+            owner_uid: 0,
+            owner_gid: 0,
+            mode_override_valid: false,
+            mode_override: 0,
+        }
+    }
+
     fn record_owner(&mut self, uid: usize, gid: usize) {
         self.owner_valid = true;
         self.owner_uid = uid;
@@ -285,6 +364,8 @@ pub enum OpenFileDescriptionRef {
     Tty0,
     Pidfd0,
     UnixSocket0,
+    PipeRead0,
+    PipeWrite0,
 }
 
 // The complete fd entry view is consumed by smoke and optional syscall diagnostics.
@@ -341,6 +422,8 @@ pub struct FilesStructSnapshot {
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
     socket0_fd: usize,
+    pipe_read_end_open: bool,
+    pipe_write_end_open: bool,
 }
 
 impl FilesStructSnapshot {
@@ -359,6 +442,8 @@ impl FilesStructSnapshot {
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
             socket0_fd: usize::MAX,
+            pipe_read_end_open: false,
+            pipe_write_end_open: false,
         }
     }
 }
@@ -403,6 +488,13 @@ impl FileStat {
         Self {
             size,
             mode: 0o140777,
+        }
+    }
+
+    const fn fifo(size: usize) -> Self {
+        Self {
+            size,
+            mode: 0o010600,
         }
     }
 
@@ -1353,6 +1445,39 @@ impl FileDescriptorTable {
         Err(FileError::TooManyOpenFiles)
     }
 
+    fn install_pipe_pair(&mut self) -> FileResult<[usize; 2]> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(FileError::NotReady);
+        }
+
+        let mut pair = [usize::MAX; 2];
+        let mut candidate = 0usize;
+        let mut found = 0usize;
+        while candidate < FILE_FD_COUNT && found < pair.len() {
+            if self.entries[candidate].is_none() {
+                pair[found] = candidate;
+                found += 1;
+            }
+            candidate += 1;
+        }
+        if found != pair.len() {
+            return Err(FileError::TooManyOpenFiles);
+        }
+
+        self.entries[pair[0]] = Some(FileDescriptorEntry::pipe_end(
+            OpenFileDescriptionRef::PipeRead0,
+            true,
+            false,
+        ));
+        self.entries[pair[1]] = Some(FileDescriptorEntry::pipe_end(
+            OpenFileDescriptionRef::PipeWrite0,
+            false,
+            true,
+        ));
+        self.fd_installed.fetch_add(2, Ordering::AcqRel);
+        Ok(pair)
+    }
+
     fn first_fd_for_ofd(&self, ofd: OpenFileDescriptionRef) -> Option<usize> {
         let mut fd = 0usize;
         while fd < FILE_FD_COUNT {
@@ -1364,6 +1489,10 @@ impl FileDescriptorTable {
             fd += 1;
         }
         None
+    }
+
+    fn pipe_end_open(&self, ofd: OpenFileDescriptionRef) -> bool {
+        self.first_fd_for_ofd(ofd).is_some()
     }
 
     fn get_fd_flags(&self, fd: usize) -> FileResult<u32> {
@@ -1513,6 +1642,7 @@ pub struct FilesStruct {
     pidfd_child_pid: usize,
     pidfd_exit_status: usize,
     socket0_fd: usize,
+    pipe0_buffer: PipeBuffer,
     tty_termios: [u8; TERMIOS_SIZE],
     allocated: bool,
     owned_by_kernel_init_task: bool,
@@ -1570,6 +1700,11 @@ pub struct FilesStruct {
     close_on_exec_remaining_open: AtomicUsize,
     parent_fd_snapshot_saved: AtomicUsize,
     parent_fd_snapshot_restored: AtomicUsize,
+    parent_fd_snapshot_live: AtomicUsize,
+    parent_pipe_read_snapshot_live: AtomicUsize,
+    parent_pipe_write_snapshot_live: AtomicUsize,
+    pipe_pairs_installed: AtomicUsize,
+    pipe_usercopy_rollbacks: AtomicUsize,
     tty_termios_mutation_observed: AtomicUsize,
 }
 
@@ -1606,6 +1741,7 @@ impl FilesStruct {
             pidfd_child_pid: 0,
             pidfd_exit_status: 0,
             socket0_fd: usize::MAX,
+            pipe0_buffer: PipeBuffer::new(),
             tty_termios: [0; TERMIOS_SIZE],
             allocated: false,
             owned_by_kernel_init_task: false,
@@ -1663,6 +1799,11 @@ impl FilesStruct {
             close_on_exec_remaining_open: AtomicUsize::new(0),
             parent_fd_snapshot_saved: AtomicUsize::new(0),
             parent_fd_snapshot_restored: AtomicUsize::new(0),
+            parent_fd_snapshot_live: AtomicUsize::new(0),
+            parent_pipe_read_snapshot_live: AtomicUsize::new(0),
+            parent_pipe_write_snapshot_live: AtomicUsize::new(0),
+            pipe_pairs_installed: AtomicUsize::new(0),
+            pipe_usercopy_rollbacks: AtomicUsize::new(0),
             tty_termios_mutation_observed: AtomicUsize::new(0),
         }
     }
@@ -1890,6 +2031,38 @@ impl FilesStruct {
     pub fn parent_fd_snapshot_restored(&self) -> bool {
         self.parent_fd_snapshot_restored.load(Ordering::Acquire) != 0
             && self.fd_table.parent_snapshot_restored()
+    }
+
+    pub fn pipe_pair_installed(&self) -> bool {
+        self.pipe_pairs_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn pipe_usercopy_rollback_observed(&self) -> bool {
+        self.pipe_usercopy_rollbacks.load(Ordering::Acquire) != 0
+    }
+
+    pub const fn pipe_buffer_len(&self) -> usize {
+        self.pipe0_buffer.len()
+    }
+
+    pub fn pipe_read_end_open(&self) -> bool {
+        self.fd_table
+            .pipe_end_open(OpenFileDescriptionRef::PipeRead0)
+    }
+
+    pub fn pipe_write_end_open(&self) -> bool {
+        self.fd_table
+            .pipe_end_open(OpenFileDescriptionRef::PipeWrite0)
+    }
+
+    fn pipe_reader_available(&self) -> bool {
+        self.pipe_read_end_open()
+            || self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
+    }
+
+    fn pipe_writer_available(&self) -> bool {
+        self.pipe_write_end_open()
+            || self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
     }
 
     pub const fn pidfd_fd(&self) -> usize {
@@ -2538,6 +2711,44 @@ impl FilesStruct {
         Ok(())
     }
 
+    pub fn pipe2_fd_pair(&mut self, flags: u32) -> FileResult<[usize; 2]> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+        if flags != 0 {
+            return Err(FileError::InvalidArgument);
+        }
+        if self.pipe_reader_available() || self.pipe_writer_available() {
+            return Err(FileError::TooManyOpenFiles);
+        }
+
+        let pair = self.fd_table.install_pipe_pair()?;
+        self.pipe0_buffer.reset();
+        self.pipe_pairs_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(pair)
+    }
+
+    pub fn rollback_pipe2_usercopy(&mut self, pair: [usize; 2]) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+        let read_entry = self.fd_table.lookup(pair[0])?;
+        let write_entry = self.fd_table.lookup(pair[1])?;
+        if read_entry.ofd != OpenFileDescriptionRef::PipeRead0
+            || write_entry.ofd != OpenFileDescriptionRef::PipeWrite0
+        {
+            return Err(FileError::InvalidArgument);
+        }
+
+        let read_entry = self.fd_table.close(pair[0])?;
+        self.finish_closed_entry(pair[0], read_entry);
+        let write_entry = self.fd_table.close(pair[1])?;
+        self.finish_closed_entry(pair[1], write_entry);
+        self.pipe0_buffer.reset();
+        self.pipe_usercopy_rollbacks.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
     pub fn read_fd(&mut self, fd: usize, buffer: &mut [u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -2594,6 +2805,15 @@ impl FilesStruct {
             }
             OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::Unsupported),
+            OpenFileDescriptionRef::PipeRead0 => {
+                let read = self.pipe0_buffer.read(buffer);
+                if read != 0 || !self.pipe_writer_available() {
+                    Ok(read)
+                } else {
+                    Err(FileError::NotReady)
+                }
+            }
+            OpenFileDescriptionRef::PipeWrite0 => Err(FileError::NotReadable),
             OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {
                 Err(FileError::NotReadable)
             }
@@ -2633,6 +2853,12 @@ impl FilesStruct {
                 OpenFileDescriptionRef::Null => {
                     ready |= FILE_POLLIN | FILE_POLLRDNORM;
                 }
+                OpenFileDescriptionRef::PipeRead0 => {
+                    if self.pipe0_buffer.len() != 0 || !self.pipe_writer_available() {
+                        ready |= FILE_POLLIN | FILE_POLLRDNORM;
+                    }
+                }
+                OpenFileDescriptionRef::PipeWrite0 => {}
                 OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::Unsupported),
                 OpenFileDescriptionRef::Stdout | OpenFileDescriptionRef::Stderr => {}
             }
@@ -2650,7 +2876,13 @@ impl FilesStruct {
                 OpenFileDescriptionRef::Stdin
                 | OpenFileDescriptionRef::Regular0
                 | OpenFileDescriptionRef::Null
-                | OpenFileDescriptionRef::Pidfd0 => {}
+                | OpenFileDescriptionRef::Pidfd0
+                | OpenFileDescriptionRef::PipeRead0 => {}
+                OpenFileDescriptionRef::PipeWrite0 => {
+                    if self.pipe_reader_available() && self.pipe0_buffer.len() < PIPE_BUFFER_SIZE {
+                        ready |= FILE_POLLOUT | FILE_POLLWRNORM;
+                    }
+                }
                 OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::Unsupported),
             }
             if entry.ofd == OpenFileDescriptionRef::Null {
@@ -2759,6 +2991,15 @@ impl FilesStruct {
                     .fetch_add(1, Ordering::AcqRel);
             }
         }
+        if matches!(
+            entry.ofd,
+            OpenFileDescriptionRef::PipeRead0 | OpenFileDescriptionRef::PipeWrite0
+        ) && !self.pipe_read_end_open()
+            && !self.pipe_write_end_open()
+            && self.parent_fd_snapshot_live.load(Ordering::Acquire) == 0
+        {
+            self.pipe0_buffer.reset();
+        }
         if matches!(fd, STDIN_FD | STDOUT_FD | STDERR_FD) {
             self.stdio_fd_closed.fetch_add(1, Ordering::AcqRel);
         }
@@ -2833,7 +3074,18 @@ impl FilesStruct {
             pidfd_child_pid: self.pidfd_child_pid,
             pidfd_exit_status: self.pidfd_exit_status,
             socket0_fd: self.socket0_fd,
+            pipe_read_end_open: self.pipe_read_end_open(),
+            pipe_write_end_open: self.pipe_write_end_open(),
         };
+        self.parent_fd_snapshot_live.fetch_add(1, Ordering::AcqRel);
+        if snapshot.pipe_read_end_open {
+            self.parent_pipe_read_snapshot_live
+                .fetch_add(1, Ordering::AcqRel);
+        }
+        if snapshot.pipe_write_end_open {
+            self.parent_pipe_write_snapshot_live
+                .fetch_add(1, Ordering::AcqRel);
+        }
         self.parent_fd_snapshot_saved.fetch_add(1, Ordering::AcqRel);
         Ok(snapshot)
     }
@@ -2856,6 +3108,21 @@ impl FilesStruct {
         self.pidfd_child_pid = snapshot.pidfd_child_pid;
         self.pidfd_exit_status = snapshot.pidfd_exit_status;
         self.socket0_fd = snapshot.socket0_fd;
+        if snapshot.pipe_read_end_open
+            && self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
+        {
+            self.parent_pipe_read_snapshot_live
+                .fetch_sub(1, Ordering::AcqRel);
+        }
+        if snapshot.pipe_write_end_open
+            && self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
+        {
+            self.parent_pipe_write_snapshot_live
+                .fetch_sub(1, Ordering::AcqRel);
+        }
+        if self.parent_fd_snapshot_live.load(Ordering::Acquire) != 0 {
+            self.parent_fd_snapshot_live.fetch_sub(1, Ordering::AcqRel);
+        }
         self.parent_fd_snapshot_restored
             .fetch_add(1, Ordering::AcqRel);
         Ok(())
@@ -2987,6 +3254,9 @@ impl FilesStruct {
             }
             OpenFileDescriptionRef::Pidfd0 => return Err(FileError::NotTty),
             OpenFileDescriptionRef::UnixSocket0 => return Err(FileError::NotTty),
+            OpenFileDescriptionRef::PipeRead0 | OpenFileDescriptionRef::PipeWrite0 => {
+                return Err(FileError::NotTty);
+            }
         };
         if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
             return Err(FileError::NotTty);
@@ -3175,6 +3445,9 @@ impl FilesStruct {
                 FileStat::new(0, VfsInodeKind::DeviceNode)
             }
             OpenFileDescriptionRef::UnixSocket0 => FileStat::socket(0),
+            OpenFileDescriptionRef::PipeRead0 | OpenFileDescriptionRef::PipeWrite0 => {
+                FileStat::fifo(self.pipe0_buffer.len())
+            }
             OpenFileDescriptionRef::Stdin
             | OpenFileDescriptionRef::Stdout
             | OpenFileDescriptionRef::Stderr
@@ -3188,7 +3461,7 @@ impl FilesStruct {
         Ok(stat)
     }
 
-    pub fn write_fd(&self, fd: usize, bytes: &[u8]) -> FileResult<usize> {
+    pub fn write_fd(&mut self, fd: usize, bytes: &[u8]) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
         }
@@ -3214,6 +3487,13 @@ impl FilesStruct {
             OpenFileDescriptionRef::Tty0 => self.tty0.write(&self.tty0_backend, bytes),
             OpenFileDescriptionRef::Pidfd0 => Err(FileError::NotWritable),
             OpenFileDescriptionRef::UnixSocket0 => Err(FileError::Unsupported),
+            OpenFileDescriptionRef::PipeRead0 => Err(FileError::NotWritable),
+            OpenFileDescriptionRef::PipeWrite0 => {
+                if !self.pipe_reader_available() {
+                    return Err(FileError::BrokenPipe);
+                }
+                self.pipe0_buffer.write(bytes)
+            }
         }
     }
 

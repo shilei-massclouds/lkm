@@ -1,0 +1,39 @@
+schema_version = 2
+name = "ltp-lo"
+purpose = "acceptance"
+timeout_seconds = 180
+
+[kernel]
+app = "user-boot"
+provider = "linux-object"
+probe = []
+profile = "release"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/bin/sh"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "cd /opt/ltp || exit $?\n" },
+  { ready_marker = "/opt/ltp #", payload = "./run-syscalls.sh --list -- 'uname*' || exit $?\n" },
+  { ready_marker = "uname04\tuname04", payload = "./run-syscalls.sh -- 'uname*'\n" },
+  { ready_marker = "Summary: TOTAL=", payload = "status=$?\nexit \"$status\"\n" },
+]
+
+[expect]
+process_exit = 0
+guest_exit_status = 0
+forbidden_markers = ["unsupported syscall", "Function not implemented", "ENOSYS", "TFAIL", "TBROK", "TWARN", "TCONF", "arceos_ex panic"]
+marker_counts = [
+  { marker = "uname01\tuname01", exactly = 1 },
+  { marker = "uname02\tuname02", exactly = 1 },
+  { marker = "uname04\tuname04", exactly = 1 },
+  { marker = "Summary: TOTAL=3 PASS=3 FAIL=0 BROK=0 WARN=0 CONF=0", exactly = 1 },
+]

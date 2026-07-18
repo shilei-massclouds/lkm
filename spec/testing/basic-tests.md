@@ -17,6 +17,8 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 - `user-smoke-native` 和 `user-smoke-linux-object` 是自动 user-mode acceptance；`shell` 和
   `shell-lo` 是 opt-in terminal diagnostic。测试身份只由显式 test name 决定，runner 不得
   根据 TTY、调用者或命令上下文在 smoke 与 shell 之间隐式切换。
+- `ltp` 和 `ltp-lo` 是自动 LTP syscall acceptance，分别固定使用 native 与 linux-object
+  provider。旧 `ltp-shell-manual-*` 名称退役且不得保留兼容映射或别名 TOML。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
   因而 `make disk` 等价于 `make disk ROOTFS=canonical`。未知 profile 必须立即失败。
 

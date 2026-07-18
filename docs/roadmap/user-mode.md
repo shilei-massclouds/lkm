@@ -12,9 +12,24 @@
 
 1. **Payload / exec 对象边界**。`PayloadPhase` 已确认为 `Kernel` 生命周期末尾阶段；`UserBootPayload`、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame`、`SyscallException` / `SyscallTable`、`FilesStruct` 和 `UserInitProcess` 的模型、coding 与实现事实已经首轮收口。`SyscallException` 沿用 `ExceptionStream`，不建立独立 `SyscallDispatcher`；`UserInitProcess` 表示 PID 1 的 `KernelInitTask` 经 exec/user entry 后获得用户态身份，不创建第二个 task。
 2. **用户 ELF 与地址空间**。`ElfObject` 支持主程序和 interpreter 两种 role，`UserAddressSpace` 在同一低地址用户区映射主 ELF、musl interpreter、用户栈和阶段性 heap/mmap arena；ELF segment backing 和 low-half leaf PTE 按页粒度覆盖，已支持 GNU_RELRO 所需的页粒度 `mprotect`。
-3. **U-mode 与 syscall 首片**。RISC-V trap return 已用 `within UserModeTrapReturnContext { ... }` 表达不可返回交接；用户态 trap 入口通过 `sscratch` 切回内核 trap 栈，user ecall 进入 `SyscallException -> SyscallTable`。boot CPU `UserInitProcess` 的 VMAP kernel trap stack 已补 kernel-context early overflow bit-test、寄存器保持、静态 overflow-stack 完整 frame 和 SBI terminal diagnostic；per-task/per-CPU 泛化与 IRQ hardirq stack switch 后续展开。当前 syscall 覆盖 `write/writev`、read-only `openat/read/close/newfstatat`、`brk/mmap/mprotect/munmap`、`set_tid_address` 和 `exit/exit_group`。
+3. **U-mode 与 syscall 首片**。RISC-V trap return 已用 `within UserModeTrapReturnContext { ... }` 表达不可返回交接；用户态 trap 入口通过 `sscratch` 切回内核 trap 栈，user ecall 进入 `SyscallException -> SyscallTable`。boot CPU `UserInitProcess` 的 VMAP kernel trap stack 已补 kernel-context early overflow bit-test、寄存器保持、静态 overflow-stack 完整 frame 和 SBI terminal diagnostic；per-task/per-CPU 泛化与 IRQ hardirq stack switch 后续展开。当前 syscall 覆盖 `write/writev`、read-only `openat/read/close/newfstatat`、有界 `pipe2(flags=0)`、`brk/mmap/mprotect/munmap`、`set_tid_address` 和 `exit/exit_group`。
 4. **rootfs 与文件读取支撑**。VFS path walk 已从 `FsStruct.root` 出发解析绝对路径，rootfs 已切到 ext2，Ext2/VFS/BufferHead 路径已支持 regular file 多 direct-block 和 single-indirect read，因此能读取 Alpine rootfs 中约 600KiB 的 musl loader。
 5. **缺陷回归证据**。DF-0001 原始 `/sbin/init` 间歇读取失败已通过 virtio-blk 同步请求生命周期修复并归档；后续普通和 `stress-mem` user-boot 回归均未再复现 `read user ELF failed`。DF-0002 近期失败已定位为 PLIC/UART probe 观察约束过强或相邻诊断缺口，继续由 stress 回归覆盖。
+
+LTP 自动验收首轮取证在 native 与 linux-object 两侧得到相同边界：
+`run-syscalls.sh --list -- 'uname*'` 尚未枚举测试，就在第 30 行用于解析安装目录的 BusyBox
+command substitution 触发 RISC-V syscall 59，并因 `pipe2` 返回 ENOSYS 报
+`can't create pipe: Function not implemented`。因此当前片只规格化 flags=0、最低两个 fd、失败原子
+回滚、单有界 pipe、dup/close/EOF 和 observed-child 写入数据跨 fd snapshot/restore 保留；完整 flags、
+阻塞等待、多 pipe、refcount/task graph、信号化 EPIPE，以及后续可能出现的 LTP ELF/VFS 或
+`personality(2)` 边界继续 deferred，不从静态风险直接猜修。
+
+实现后 `kernel-smoke-native` 的 pipe fd pair、方向、round-trip、dup/close、EOF、snapshot handoff、
+EFAULT/EMFILE 回滚和非法 flags 覆盖通过。正式 `make run TEST=ltp` 与 `TEST=ltp-lo` 都已越过 syscall
+59；两侧新的首个运行时边界一致为同一第 30 行 command substitution 中的
+`clone(220) stage=child_context_unsupported`，参数为 `flags=0x11`、`newsp=0`、
+`current_child_continuation=1`，guest status 2。list 尚未输出任何 uname 条目，因此本轮不继续修改
+clone、ELF/VFS 或 personality；两份 result/manifest/qemu.log 保留该红灯和完整 cleanup 事实。
 
 后续高优先级计划按证据和前置依赖排序：
 

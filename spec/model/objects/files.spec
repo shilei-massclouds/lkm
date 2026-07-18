@@ -89,6 +89,17 @@
  * the metadata may be released only when the last alias for that OFD is
  * closed.
  *
+ * pipe2(59) has one bounded first slice for the observed BusyBox command
+ * substitution used by the LTP runner. Only flags == 0 is accepted. The fd
+ * table atomically installs its two lowest free entries as a read end followed
+ * by a write end, or leaves the table unchanged on EMFILE/user-copy rollback.
+ * One fixed-capacity pipe buffer is shared across dup/close and the current
+ * observed-child handoff. Parent fd snapshot restore rolls descriptor entries
+ * back but deliberately does not restore pipe bytes written by the child.
+ * Empty reads return EOF after the last writer closes. Multiple live pipes,
+ * O_CLOEXEC/O_NONBLOCK, general blocking/wakeup, full OFD/task refcounts and
+ * signal-producing EPIPE remain deferred.
+ *
  * fchown(2) and fchmod(2) first slice is intentionally fd-local. It exists to
  * close the observed BusyBox login post-auth tty/stdin adjustment where local
  * RISC-V asm-generic numbers are __NR_fchown=55 and __NR_fchmod=52. A valid
@@ -125,6 +136,7 @@ enum FileBackendKind {
     RegularFile,
     BlockDevice,
     UnixSocket,
+    Pipe,
 }
 
 enum FdRef {
@@ -135,6 +147,8 @@ enum FdRef {
     Null,
     Pidfd0,
     UnixSocket0,
+    PipeRead0,
+    PipeWrite0,
 }
 
 predicate files_struct_allocated<T>(files: T) -> bool;
@@ -152,6 +166,14 @@ predicate files_struct_regular_fd_installed<T>(files: T) -> bool;
 predicate files_struct_null_fd_installed<T>(files: T) -> bool;
 predicate files_struct_unix_stream_socket_fd_installed<T>(files: T) -> bool;
 predicate files_struct_socket_full_linux_model_deferred<T>(files: T) -> bool;
+predicate files_struct_pipe2_single_live_first_slice<T>(files: T) -> bool;
+predicate files_struct_pipe2_flags_zero_bound<T>(files: T) -> bool;
+predicate files_struct_pipe_fd_pair_installed_atomically<T>(files: T) -> bool;
+predicate files_struct_pipe_buffer_bounded<T>(files: T) -> bool;
+predicate files_struct_pipe_direction_checks_bound<T>(files: T) -> bool;
+predicate files_struct_pipe_writer_close_eof_bound<T>(files: T) -> bool;
+predicate files_struct_pipe_snapshot_preserves_child_data<T>(files: T) -> bool;
+predicate files_struct_pipe_full_linux_model_deferred<T>(files: T) -> bool;
 predicate files_struct_null_device_read_eof_observed<T>(files: T) -> bool;
 predicate files_struct_null_device_write_discard_observed<T>(files: T) -> bool;
 predicate files_struct_null_device_fstat_device_node<T>(files: T) -> bool;
@@ -210,6 +232,8 @@ predicate fd_table_parent_snapshot_saved<T>(table: T) -> bool;
 predicate fd_table_parent_snapshot_restored<T>(table: T) -> bool;
 predicate fd_table_pidfd_entry_installed<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_pidfd_entry_closed<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_pipe_pair_lowest_free_installed<T>(table: T) -> bool;
+predicate fd_table_pipe_pair_failure_atomic<T>(table: T) -> bool;
 
 predicate open_file_description_allocated<T>(ofd: T) -> bool;
 predicate open_file_description_backend_bound<T, B>(ofd: T, backend: B) -> bool;
@@ -268,6 +292,10 @@ object FilesStruct: ResourceObject {
                     files_struct_shared_deferred(self);
                     files_struct_regular_file_slot_ready(self);
                     files_struct_socket_full_linux_model_deferred(self);
+                    files_struct_pipe2_single_live_first_slice(self);
+                    files_struct_pipe2_flags_zero_bound(self);
+                    files_struct_pipe_buffer_bounded(self);
+                    files_struct_pipe_full_linux_model_deferred(self);
                     fd_table_stdio_fds_bound(FileDescriptorTable);
                 }
             }
@@ -284,6 +312,9 @@ object FilesStruct: ResourceObject {
             files_struct_close_on_exec_ready(self);
             files_struct_regular_file_slot_ready(self);
             files_struct_socket_full_linux_model_deferred(self);
+            files_struct_pipe2_single_live_first_slice(self);
+            files_struct_pipe_buffer_bounded(self);
+            files_struct_pipe_full_linux_model_deferred(self);
         }
 
         actions {
@@ -503,6 +534,72 @@ object FilesStruct: ResourceObject {
                 ensures {
                     files_struct_pidfd_readable_after_exit(self, UserChildProcess);
                     user_pidfd_ready(self, UserChildProcess);
+                }
+            }
+
+            on Action::CreatePipe2 {
+                /*
+                 * Linux RISC-V __NR_pipe2=59 writes two int descriptors to
+                 * user memory. This first slice accepts only flags == 0 and
+                 * reserves both lowest free slots before publishing either.
+                 * Copyout failure closes both ends and resets the single
+                 * staged pipe; it must not leak one descriptor.
+                 */
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    files_struct_pipe2_single_live_first_slice(self);
+                    files_struct_pipe2_flags_zero_bound(self);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::InstallPipePair;
+                }
+
+                ensures {
+                    files_struct_pipe_fd_pair_installed_atomically(self);
+                    files_struct_pipe_buffer_bounded(self);
+                    files_struct_pipe_direction_checks_bound(self);
+                    files_struct_pipe_writer_close_eof_bound(self);
+                    files_struct_pipe_snapshot_preserves_child_data(self);
+                    fd_table_pipe_pair_lowest_free_installed(FileDescriptorTable);
+                    fd_table_pipe_pair_failure_atomic(FileDescriptorTable);
+                }
+            }
+
+            on Action::ReadPipeFd {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::PipeRead0, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(FdRef::PipeRead0);
+                }
+
+                ensures {
+                    files_struct_read_fd_routes_to_table(self, FileDescriptorTable);
+                    files_struct_pipe_direction_checks_bound(self);
+                    files_struct_pipe_writer_close_eof_bound(self);
+                }
+            }
+
+            on Action::WritePipeFd {
+                depends_on {
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::PipeWrite0, OpenFileDescription);
+                }
+
+                drives {
+                    FileDescriptorTable.Action::Lookup(FdRef::PipeWrite0);
+                }
+
+                ensures {
+                    files_struct_fd_lookup_routes_to_table(self, FileDescriptorTable);
+                    files_struct_pipe_direction_checks_bound(self);
+                    files_struct_pipe_buffer_bounded(self);
                 }
             }
 
@@ -953,6 +1050,19 @@ object FileDescriptorTable: ResourceObject {
                     fd_table_fd_entries_have_independent_status_flags(self);
                     fd_table_cloexec_bit_set_on_install(self, FdRef::UnixSocket0);
                     fd_table_cloexec_not_reported_by_fgetfl(self, FdRef::UnixSocket0);
+                }
+            }
+
+            on Action::InstallPipePair {
+                depends_on {
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                ensures {
+                    fd_table_pipe_pair_lowest_free_installed(self);
+                    fd_table_pipe_pair_failure_atomic(self);
+                    fd_table_fd_bound(self, FdRef::PipeRead0, OpenFileDescription);
+                    fd_table_fd_bound(self, FdRef::PipeWrite0, OpenFileDescription);
                 }
             }
 

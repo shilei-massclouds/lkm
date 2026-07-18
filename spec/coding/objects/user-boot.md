@@ -59,6 +59,21 @@ Each slice follows the local Linux 6.12 RISC-V syscall ABI and preserves explici
 deferred boundaries. Unsupported socket success paths, complete credentials/namespaces/LSM, general
 task graphs, complete COW/mm, signals, networking and full fd sharing remain deferred.
 
+Linux RISC-V syscall 59 is a bounded `pipe2` first slice routed through `FilesStruct`. It accepts only
+`flags == 0`; any nonzero flag, including `O_CLOEXEC` and `O_NONBLOCK`, returns `EINVAL`. Success atomically
+installs the lowest two free descriptors as a read-only end followed by a write-only end and copies the two
+32-bit fd values to user memory. User-copy failure or insufficient fd capacity leaves neither descriptor
+installed and makes the single staged pipe reusable.
+
+The staged pipe owns one small bounded FIFO buffer. Existing `read`, `write`, `close`, `dup3` and fcntl-dup
+paths operate on the pipe-end fd entries with direction checks. Buffered bytes survive the current observed
+child fd-table snapshot/restore: child close/dup/write mutations are rolled back for the parent fd view, but
+pipe data is shared handoff state and must not be restored from the parent snapshot. Reads return available
+bytes; after the last writer closes, an empty read returns EOF. The first slice supports only one live pipe
+and the observed child-write/parent-read handoff used by BusyBox command substitution. General blocking and
+wakeup, concurrent or multiple live pipes, expandable buffers, full OFD/files/task refcount graphs,
+`O_CLOEXEC`/`O_NONBLOCK`, signals and signal-producing `EPIPE` remain deferred.
+
 ## Clone, wait and exec
 
 The supported `clone(220)` plain-fork shape decodes ABI flags in `SyscallTable` and delegates object

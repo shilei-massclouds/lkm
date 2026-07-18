@@ -32,12 +32,15 @@ Basic tests are single TOML configurations below `tests/basic/cases`. Their
 runner owns config validation, kernel build, disk policy, scripts, QEMU,
 expectations, structured results and cleanup. `make disk` builds the reusable
 canonical Alpine image with repository fixtures under `/opt/lkm/tests` and the
-sibling LTP staging under `/opt/ltp`. In an interactive guest, a small LTP run is:
+sibling LTP staging under `/opt/ltp`. The automated dual-provider LTP entries are:
 
 ```sh
-cd /opt/ltp
-./run-syscalls.sh 'getpid*' 'uname*'
+make run TEST=ltp
+make run TEST=ltp-lo
 ```
+
+Each entry first lists exactly `uname01`, `uname02` and `uname04`, then executes
+the same set and requires all three to pass.
 
 Use another unpacked LTP staging tree with:
 
