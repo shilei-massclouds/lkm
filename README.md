@@ -74,7 +74,8 @@ QEMU。常用配置包括：
 make run
 make run TEST=kernel-smoke-native
 make run TEST=user-smoke-native
-make run TEST=shell-native
+make run TEST=shell
+make run TEST=shell-lo
 make run TEST=requested-init-native
 make run TEST=distro-ls-native
 make run TEST=distro-sh-native
@@ -85,7 +86,7 @@ make build TEST=hello-linux-object
 `make run APP=openrc-login-native` 等价于选择 `TEST=openrc-login-native`。命令行与真实环境变量写法
 遵循同一规则；APP 不是 kernel app 行为覆盖，不能和显式 TEST 同时使用。公开 test name
 `user-boot` 已退役，`TEST=user-boot` 与 `APP=user-boot` 都会在 build 前结构化失败并提示改用
-`shell-native`；TOML 内部的 `kernel.app = "user-boot"` 仍只是 kernel 构建选择。
+`shell`；TOML 内部的 `kernel.app = "user-boot"` 仍只是 kernel 构建选择。
 
 配置位于 `impl/arceos_ex/tests/basic/cases/`。APP、provider、probe、profile、磁盘策略、QEMU
 cmdline/device/stdin 和结果断言都以 TOML 为唯一来源；APP 只能选择整份 TEST 配置，不能覆盖
@@ -107,7 +108,7 @@ rc.local ELF launcher/script 位于 `/opt/lkm/tests/`，经过校验的 sibling 
 builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP 输入指纹；输入变化会自动重建，
 输入不变则复用，`make disk FORCE=1` 强制重建。`make run` 只核对 template manifest，缺失/过期时
 提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/OpenRC 双 provider acceptance 进入默认回归；
-`user-smoke-{native,linux-object}` 是非交互自动验收；`shell-{native,linux-object}` 是使用 canonical
+`user-smoke-{native,linux-object}` 是非交互自动验收；`shell`（native）与 `shell-lo`（linux-object）是使用 canonical
 私有可写副本、`init=/bin/sh` 和真实 PTY 的人工诊断，正常退出 verdict 为 inconclusive。两者身份不因
 调用上下文切换，shell 与独立的 LTP terminal diagnostic 都仅显式运行。
 
@@ -116,6 +117,9 @@ builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP �
 Provider 是构建时选择机制，用于决定内核镜像链接哪一组底层实现对象。当前 `native` 使用仓库内
 实现，`linux-object` 会把 Linux 构建出的 `drivers/irqchip/irq-sifive-plic.o` 作为 linker input。
 基本测试通过名称成对选择 provider，而不是通过 Make 变量覆盖：
+
+未来新增双 provider basic test 时，无后缀基础名固定表示 native，`-lo` 后缀固定表示
+linux-object；现有 `*-native` / `*-linux-object` 名称继续保留，不随本次 shell 改名批量迁移。
 
 常用入口保持不变，只需要通过 make 变量选择 provider：
 

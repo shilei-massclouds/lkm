@@ -22,7 +22,7 @@ make clippy-check
 make coding-spec-check
 make run
 make run TEST=user-smoke-native
-make run TEST=shell-native
+make run TEST=shell
 make verify
 make test
 make test-basic
@@ -49,7 +49,12 @@ complete test-name namespace; its value is passed unchanged to the runner. Expli
 process-environment values follow the same rule. Supplying both selectors is ambiguous and fails, as does
 every other basic-test behavior override. The retired public test name `user-boot` is not a compatibility
 alias: TEST or APP requests using that name must fail structurally before build and direct the caller to
-`shell-native`. The same string remains valid only as the internal `kernel.app` value in selected TOML.
+`shell`. The same string remains valid only as the internal `kernel.app` value in selected TOML.
+
+New basic tests that expose both supported providers use the unsuffixed base name for
+`kernel.provider = "native"` and `<base>-lo` for `kernel.provider = "linux-object"`; `lo` has no other
+provider meaning. Existing `*-native` / `*-linux-object` identities are grandfathered and are not renamed
+solely to adopt this convention.
 
 `make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. Stress, difftest and focused diagnostic reports under the managed `impl/arceos_ex/tests/stress/out/` root are routine test artifacts; cleanup must preserve only that directory's tracked `.gitignore`, and developers must move any report that needs long-term retention elsewhere before cleanup. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, ordinary diagnostic logs outside that managed report root, editor state or other unlisted local files.
 
@@ -89,7 +94,7 @@ Targets must remain composable:
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
 - Dual-provider rc.local and OpenRC login acceptance are default runtime stages. Terminal diagnostic
-  configurations, including `shell-{native,linux-object}` and the separate LTP manual shell, are never
+  configurations, including `shell`, `shell-lo` and the separate LTP manual shell, are never
   default stages. The default user-mode acceptance stages invoke `TEST=user-smoke-native` and
   `TEST=user-smoke-linux-object` explicitly; they must not use APP or retired test-name mappings.
 - `clean` removes generated build and cache artifacts, including reports below managed basic/stress output

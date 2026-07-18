@@ -52,7 +52,8 @@ non-interactive, boot `/opt/lkm/tests/user-smoke`, and enter the default regress
 name. DF-0001 likewise repeats `TEST=user-smoke-native`; it must not depend on a TTY, the APP variable-name
 alias, or a retired test-name mapping.
 
-`shell-native` and `shell-linux-object` are separate terminal diagnostic identities. Each uses a writable
+`shell` and `shell-lo` are separate terminal diagnostic identities for the native and linux-object providers,
+respectively. Each uses a writable
 private copy of the canonical template, boots `init=/bin/sh`, uses a real PTY, has a 3600-second overall
 limit, and forbids the panic marker. A normal `exit` completes execution with verdict inconclusive; cleanup
 must restore the terminal and delete the private image. They are opt-in and never enter default regression

@@ -14,8 +14,8 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 - `TEST` 是唯一正式选择变量。旧 `APP` 只作为 `TEST` 的变量名别名，接受完整且相同的 test name
   namespace；`make run APP=<name>` / `make build APP=<name>` 必须把 name 原样交给 runner。Make 命令行
   和真实进程环境中的显式值采用同一规则。它不能覆盖 TOML 中的任何行为字段。
-- `user-smoke-native` 和 `user-smoke-linux-object` 是自动 user-mode acceptance；`shell-native` 和
-  `shell-linux-object` 是 opt-in terminal diagnostic。测试身份只由显式 test name 决定，runner 不得
+- `user-smoke-native` 和 `user-smoke-linux-object` 是自动 user-mode acceptance；`shell` 和
+  `shell-lo` 是 opt-in terminal diagnostic。测试身份只由显式 test name 决定，runner 不得
   根据 TTY、调用者或命令上下文在 smoke 与 shell 之间隐式切换。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
   因而 `make disk` 等价于 `make disk ROOTFS=canonical`。未知 profile 必须立即失败。
@@ -51,6 +51,11 @@ QEMU 入口。
 未知字段、错误类型、未知 disk/profile/device/exit policy/interaction、name 与文件名不一致、非法脚本
 权限或缺少 mode 所需来源，都必须在 build 或 QEMU 前失败。配置只保存数据值；不得保存 `make ...`、
 完整 QEMU shell 命令或由 runner 执行的任意命令字符串。
+
+未来新增同时提供 native 与 linux-object provider 的 basic test 时，正式 test name 必须使用无 provider
+后缀的基础名表示 `kernel.provider = "native"`，并使用同一基础名加 `-lo` 表示
+`kernel.provider = "linux-object"`；`lo` 在该命名位置固定表示 linux-object。现有
+`*-native` / `*-linux-object` 配置为兼容既有公开接口而保留，本规则不要求批量迁移它们。
 
 v2 disk mode 的含义固定如下：
 
@@ -115,5 +120,5 @@ expectation、cleanup、`execution_status = "completed" | "failed"` 和
 
 公开 test name `user-boot` 已退役，不能再映射到 user smoke 或 shell。`make run/build TEST=user-boot`
 与对应的 `APP=user-boot` 请求必须在 build 前生成 schema v2 结构化配置失败结果，错误明确提示改用
-`shell-native`；`kernel.app = "user-boot"` 仍是 TOML 内部选择 user-mode kernel payload 的合法值，不能
+`shell`；`kernel.app = "user-boot"` 仍是 TOML 内部选择 user-mode kernel payload 的合法值，不能
 把该内部值重新暴露成测试身份。

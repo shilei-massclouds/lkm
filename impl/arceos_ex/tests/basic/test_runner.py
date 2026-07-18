@@ -66,12 +66,14 @@ class BasicMakeSelectionTests(unittest.TestCase):
         return arguments[2]
 
     def test_app_make_argument_aliases_full_test_namespace(self) -> None:
-        for selector in ("APP=shell-native", "TEST=shell-native"):
-            with self.subTest(selector=selector):
-                self.capture.unlink(missing_ok=True)
-                completed = self.run_make(selector)
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertEqual(self.captured_request(), "shell-native")
+        for test_name in ("shell", "shell-lo"):
+            for variable in ("APP", "TEST"):
+                selector = f"{variable}={test_name}"
+                with self.subTest(selector=selector):
+                    self.capture.unlink(missing_ok=True)
+                    completed = self.run_make(selector)
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    self.assertEqual(self.captured_request(), test_name)
 
     def test_app_process_environment_aliases_test(self) -> None:
         completed = self.run_make(environment={"APP": "openrc-login-native"})
@@ -216,6 +218,10 @@ class BasicRunnerConfigTests(unittest.TestCase):
         for alias in runner.COMPATIBILITY_ALIASES:
             self.assertFalse((cases / f"{alias}.toml").exists())
         self.assertFalse((cases / "user-boot.toml").exists())
+        for removed_name in ("shell-native", "shell-linux-object"):
+            self.assertFalse((cases / f"{removed_name}.toml").exists())
+            self.assertNotIn(removed_name, runner.COMPATIBILITY_ALIASES)
+            self.assertNotIn(removed_name, runner.RETIRED_TEST_NAMES)
 
     def test_shell_cases_are_distinct_dual_provider_terminal_diagnostics(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
@@ -223,14 +229,15 @@ class BasicRunnerConfigTests(unittest.TestCase):
         loaded = {
             name: runner.load_config(cases / f"{name}.toml", repo_root)
             for name in (
-                "shell-native",
-                "shell-linux-object",
+                "shell",
+                "shell-lo",
                 "user-smoke-native",
                 "user-smoke-linux-object",
             )
         }
 
-        for provider, name in (("native", "shell-native"), ("linux-object", "shell-linux-object")):
+        shell_names = {"native": "shell", "linux-object": "shell-lo"}
+        for provider, name in shell_names.items():
             with self.subTest(name=name):
                 config = loaded[name]
                 self.assertEqual(config["purpose"], "diagnostic")
@@ -245,7 +252,7 @@ class BasicRunnerConfigTests(unittest.TestCase):
         for provider in ("native", "linux-object"):
             with self.subTest(smoke_provider=provider):
                 smoke = loaded[f"user-smoke-{provider}"]
-                shell = loaded[f"shell-{provider}"]
+                shell = loaded[shell_names[provider]]
                 self.assertEqual(smoke["purpose"], "acceptance")
                 self.assertEqual(smoke["qemu"]["interaction"], "none")
                 self.assertNotEqual(smoke["name"], shell["name"])
@@ -255,8 +262,9 @@ class BasicRunnerConfigTests(unittest.TestCase):
         summary = (repo_root / "tools" / "test_summary.sh").read_text()
         self.assertIn('"$make_cmd" run TEST="user-smoke-$provider"', summary)
         self.assertNotIn("APP=user-boot", summary)
-        self.assertNotIn('TEST="shell-', summary)
-        self.assertNotIn('APP="shell-', summary)
+        for terminal_name in ("shell", "shell-lo"):
+            self.assertNotIn(f'TEST="{terminal_name}"', summary)
+            self.assertNotIn(f'APP="{terminal_name}"', summary)
 
         df0001_path = (
             repo_root
@@ -527,8 +535,38 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
                 self.assertEqual(result["execution_status"], "failed")
                 self.assertEqual(result["verdict"], "inconclusive")
                 self.assertEqual(result["stages"]["kernel-build"]["status"], "skipped")
-                self.assertIn("shell-native", result["errors"][0])
+                self.assertIn("use 'shell'", result["errors"][0])
                 self.assertEqual((output / "qemu.log").read_bytes(), b"")
+
+    def test_removed_shell_names_write_ordinary_schema_v2_config_failures(self) -> None:
+        for command in ("build", "run"):
+            for removed_name in ("shell-native", "shell-linux-object"):
+                with self.subTest(command=command, removed_name=removed_name):
+                    output = self.root / f"removed-{removed_name}-{command}"
+                    status = runner.main(
+                        [
+                            command,
+                            removed_name,
+                            "--repo-root",
+                            str(self.root),
+                            "--cases-dir",
+                            str(self.cases),
+                            "--output-dir",
+                            str(output),
+                        ]
+                    )
+
+                    result = json.loads((output / "result.json").read_text())
+                    self.assertEqual(status, 1)
+                    self.assertEqual(result["schema_version"], 2)
+                    self.assertEqual(result["request"]["test"], removed_name)
+                    self.assertEqual(result["request"]["canonical_test"], removed_name)
+                    self.assertIsNone(result["request"]["compatibility_alias"])
+                    self.assertEqual(result["execution_status"], "failed")
+                    self.assertEqual(result["stages"]["kernel-build"]["status"], "skipped")
+                    self.assertIn(f"{removed_name}.toml", result["errors"][0])
+                    self.assertNotIn("retired", result["errors"][0])
+                    self.assertEqual((output / "qemu.log").read_bytes(), b"")
 
     def test_compatibility_alias_is_recorded_without_duplicate_config(self) -> None:
         path = self.write_case()

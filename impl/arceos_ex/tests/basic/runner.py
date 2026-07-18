@@ -59,7 +59,7 @@ COMPATIBILITY_ALIASES = {
     "kunit-linux-object": "checkpoint-kunit-linux-object",
 }
 RETIRED_TEST_NAMES = {
-    "user-boot": "test name 'user-boot' is retired; use 'shell-native' for an interactive shell",
+    "user-boot": "test name 'user-boot' is retired; use 'shell' for an interactive shell",
 }
 
 
