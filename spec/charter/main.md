@@ -3567,7 +3567,7 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 除 `kunit` 和 `smoke` 外，项目还需要一类面向间歇性缺陷和内部可见性验证的 `stress` / `nightly` 测试。该类测试不应被设计成单次 pass/fail 的简单包装，而应被设计成运行证据归档、事件序列聚类和差分诊断系统。第一轮实现位置固定在 `impl/arceos_ex/tests/stress/`，作为压力测试、重复执行配置、分类规则、分析脚本和结果归档的根目录。
 
-`stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、`APP` / `PROBE` 等参数、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。需要交互输入的发行版 shell case 可以声明 delayed stdin：runner 只能在观察到 case 指定的 ready marker 后写入 case 指定 payload，并必须在 run 记录中保存 marker、payload 长度和是否实际写入；该能力只用于复现真实交互入口，不得用来伪造终端响应或替代内核/TTY 语义。
+`stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、冻结的基本测试身份或专用普通路径、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 兼容入口必须映射到非 probe 的 `user-smoke-native` 冻结配置，不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。默认 stress case 应重复正式基本测试并复用 canonical template，不得在 setup 或每轮运行中构造 legacy rootfs/overlay。需要交互输入的发行版 shell case 应由其基本测试 TOML 声明 scripted stdin：基本 runner 只能在观察到 step 指定的 ready marker 后写入指定 payload，并把是否实际写入记录到结果；stress runner 只重复该基本测试，不得再叠加第二套 delayed stdin。该能力只用于复现真实交互入口，不得用来伪造终端响应或替代内核/TTY 语义。
 
 每次 stress 执行必须记录整体时间统计，用于比较不同观察模式是否显著扰动复现时序。runner 应在 case 开始和结束时记录 UTC wall-clock 时间，并使用单调时钟计算总耗时；summary/report 至少应包含开始时间、结束时间、总耗时、已完成 run 数和按已完成 run 计算的平均单轮耗时。每个独立 run 仍应记录自身开始时间、结束时间和耗时；整体平均值应从这些 run 记录计算，避免只依赖外部日志或人工估算。比较 `stress-mem` 与普通路径时，应优先在构建已就绪的条件下使用同等 run 数、同一 case 和同一超时配置，避免把首次编译或外部准备工作误判为观察模式本身的开销。
 

@@ -52,6 +52,9 @@ ALLOWED_PURPOSES = {"acceptance", "diagnostic"}
 ALLOWED_INTERACTIONS = {"none", "scripted", "terminal"}
 ALLOWED_ROOTFS_PROFILES = {"canonical"}
 COMPATIBILITY_ALIASES = {
+    "hello": "hello-native",
+    "smoke": "kernel-smoke-native",
+    "user-boot": "user-smoke-native",
     "kunit-native": "checkpoint-kunit-native",
     "kunit-linux-object": "checkpoint-kunit-linux-object",
 }

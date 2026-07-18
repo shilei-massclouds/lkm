@@ -5,21 +5,13 @@ timeout_seconds = 120
 working_directory = "."
 setup_command = [
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
-  "ROOTFS_LTP_OVERLAY=none",
-  "ROOTFS_OVERLAY=default",
+  "disk",
+  "ROOTFS=canonical",
 ]
 command = [
   "make",
-  "legacy-run",
+  "run",
   "APP=user-boot",
-  "ROOTFS_LTP_OVERLAY=none",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0001-user-boot.raw",
-  "QEMU_APPEND=earlycon=sbi",
 ]
 classifier = "../classifiers/defects.toml"
 

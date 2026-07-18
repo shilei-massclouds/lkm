@@ -43,6 +43,10 @@ duplicate kernel-specific Rust, linker, disk or QEMU command lines.
 `make run TEST=<name>` and `make build TEST=<name>` consume one versioned basic-test TOML as the sole source
 of behavior parameters; the default test name is `hello-native`. Their pipeline and result contract is
 specified by [`../testing/basic-tests.md`](../testing/basic-tests.md).
+`TEST` is the formal selector. Legacy `APP` is only an alias for the TEST variable name and accepts the same
+complete test-name namespace; its value is passed unchanged to the runner. Explicit Make-command-line and
+process-environment values follow the same rule. Supplying both selectors is ambiguous and fails, as does
+every other basic-test behavior override.
 
 `make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. Stress, difftest and focused diagnostic reports under the managed `impl/arceos_ex/tests/stress/out/` root are routine test artifacts; cleanup must preserve only that directory's tracked `.gitignore`, and developers must move any report that needs long-term retention elsewhere before cleanup. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, ordinary diagnostic logs outside that managed report root, editor state or other unlisted local files.
 
@@ -93,8 +97,9 @@ Checkpoint synchronization is an explicit reviewed workflow: change the mapping 
 
 ## Basic-test configuration boundary
 
-APP, provider, probe, profile, disk mode, QEMU behavior, stdin and expectations for `build`/`run` must come
-only from the selected TOML. Passing those values on the root Make command line is an error, not an override.
+APP behavior, provider, probe, profile, disk mode, QEMU behavior, stdin and expectations for `build`/`run`
+must come only from the selected TOML. The root Make boundary accepts APP only as an alias spelling of the
+TEST selector; passing it together with TEST is an error, and its value never becomes a payload override.
 Host operational parameters such as Python, QEMU, compiler/tool locations, Linux provider source path,
 rootfs download/cache path and basic-test output root remain explicit documented overrides. PreScript and
 PostScript receive only the fixed environment in the testing specification and their output is never parsed
@@ -139,8 +144,9 @@ must not invoke this builder. Missing/stale input manifests fail with the explic
 ## Payload Selection
 
 Payload selection must stay explicit. In a basic test, `app = "smoke"`, `app = "hello"` or a future payload
-flows from the frozen TOML into the internal compile-time cfg. Legacy specialized runners may still pass APP
-directly until migrated, but the root basic-test entry rejects that override.
+flows from the frozen TOML into the internal compile-time cfg. The root APP compatibility spelling selects a
+whole test TOML from the TEST namespace and never passes APP through as a payload override. Legacy specialized runners may
+still pass APP directly until migrated.
 
 Build scripts must not infer the selected payload from a previous run, a local disk image, or an environment side effect.
 

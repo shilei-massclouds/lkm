@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import pty
 import stat
+import subprocess
 import tempfile
 import textwrap
 import threading
@@ -15,6 +16,77 @@ from unittest import mock
 
 from . import rootfs_builder
 from . import runner
+
+
+class BasicMakeSelectionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.capture = self.root / "selection.txt"
+        self.fake_python = self.root / "fake-python"
+        self.fake_python.write_text(
+            "#!/bin/sh\n"
+            'printf "%s\\n" "$@" > "$BASIC_TEST_SELECTION_CAPTURE"\n'
+        )
+        self.fake_python.chmod(self.fake_python.stat().st_mode | stat.S_IXUSR)
+        self.repo_root = Path(__file__).resolve().parents[4]
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def run_make(
+        self,
+        *arguments: str,
+        environment: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        for name in ("APP", "TEST", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+            env.pop(name, None)
+        env["BASIC_TEST_SELECTION_CAPTURE"] = str(self.capture)
+        env.update(environment or {})
+        return subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "build",
+                f"PYTHON={self.fake_python}",
+                *arguments,
+            ],
+            cwd=self.repo_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def captured_request(self) -> str:
+        arguments = self.capture.read_text().splitlines()
+        self.assertEqual(arguments[1], "build")
+        return arguments[2]
+
+    def test_app_make_argument_aliases_full_test_namespace(self) -> None:
+        completed = self.run_make("APP=openrc-login-native")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.captured_request(), "openrc-login-native")
+
+    def test_app_process_environment_aliases_test(self) -> None:
+        completed = self.run_make(environment={"APP": "openrc-login-native"})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.captured_request(), "openrc-login-native")
+
+    def test_test_process_environment_is_formal_selector(self) -> None:
+        completed = self.run_make(environment={"TEST": "openrc-login-native"})
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self.captured_request(), "openrc-login-native")
+
+    def test_explicit_test_and_app_from_mixed_sources_are_rejected(self) -> None:
+        completed = self.run_make(
+            "TEST=user-smoke-native",
+            environment={"APP": "openrc-login-native"},
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("selection is ambiguous", completed.stderr)
+        self.assertFalse(self.capture.exists())
 
 
 class BasicRunnerConfigTests(unittest.TestCase):
@@ -133,6 +205,11 @@ class BasicRunnerConfigTests(unittest.TestCase):
         self.assertTrue(all(config["source_schema_version"] == 2 for config in loaded))
         self.assertFalse((cases / "kunit-native.toml").exists())
         self.assertEqual(runner.COMPATIBILITY_ALIASES["kunit-native"], "checkpoint-kunit-native")
+        self.assertEqual(runner.COMPATIBILITY_ALIASES["hello"], "hello-native")
+        self.assertEqual(runner.COMPATIBILITY_ALIASES["smoke"], "kernel-smoke-native")
+        self.assertEqual(runner.COMPATIBILITY_ALIASES["user-boot"], "user-smoke-native")
+        for alias in runner.COMPATIBILITY_ALIASES:
+            self.assertFalse((cases / f"{alias}.toml").exists())
 
     def test_v2_rejects_unknown_template_profile(self) -> None:
         body = self.base_case(disk='mode = "private-copy"\nprofile = "nearby"')

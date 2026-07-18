@@ -27,8 +27,12 @@ DIFFTEST_TIMEOUT ?=
 KERNEL_DIR := impl/$(KERNEL)
 BASIC_TEST_RUNNER ?= $(KERNEL_DIR)/tests/basic/runner.py
 BASIC_TEST_OUT_ROOT ?= $(KERNEL_DIR)/tests/basic/out
-BASIC_TEST_BEHAVIOR_VARIABLES := APP LOG PROFILE PLIC_PROVIDER PROBE PROBE_FILE STRESS_MEM_BYTES QEMU_APPEND QEMU_SMP QEMU_DEVICES VIRTIO_BLK_IMAGE VIRTIO_BLK_IMAGE_SIZE ROOTFS_OVERLAY ROOTFS_OVERLAY_MAP ROOTFS_FILE_OVERLAY_DIR ROOTFS_LTP_OVERLAY FORCE
+BASIC_TEST_BEHAVIOR_VARIABLES := LOG PROFILE PLIC_PROVIDER PROBE PROBE_FILE STRESS_MEM_BYTES QEMU_APPEND QEMU_SMP QEMU_DEVICES VIRTIO_BLK_IMAGE VIRTIO_BLK_IMAGE_SIZE ROOTFS_OVERLAY ROOTFS_OVERLAY_MAP ROOTFS_FILE_OVERLAY_DIR ROOTFS_LTP_OVERLAY FORCE
 BASIC_TEST_COMMAND_LINE_OVERRIDES := $(strip $(foreach variable,$(BASIC_TEST_BEHAVIOR_VARIABLES),$(if $(filter command line,$(origin $(variable))),$(variable))))
+BASIC_TEST_EXPLICIT_TEST := $(or $(findstring command line,$(origin TEST)),$(findstring environment,$(origin TEST)))
+BASIC_TEST_EXPLICIT_APP := $(or $(findstring command line,$(origin APP)),$(findstring environment,$(origin APP)))
+BASIC_TEST_SELECTION_CONFLICT := $(and $(BASIC_TEST_EXPLICIT_TEST),$(BASIC_TEST_EXPLICIT_APP))
+BASIC_TEST_REQUEST := $(if $(BASIC_TEST_EXPLICIT_APP),$(APP),$(TEST))
 PYVERI ?= tools/pyveri/bin/pyveri
 STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
@@ -44,11 +48,15 @@ endif
 .PHONY: build run legacy-run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-basic test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
-	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
-		echo "basic-test behavior must come from TEST=$(TEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
+		echo "basic-test selection is ambiguous; pass either TEST=$(TEST) or APP=$(APP), not both" >&2; \
 		exit 2; \
 	fi
-	$(PYTHON) $(BASIC_TEST_RUNNER) build "$(TEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
+	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
+		echo "basic-test behavior must come from TEST=$(BASIC_TEST_REQUEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+		exit 2; \
+	fi
+	$(PYTHON) $(BASIC_TEST_RUNNER) build "$(BASIC_TEST_REQUEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
 
 disk:
 	$(MAKE) -C $(KERNEL_DIR) disk ROOTFS="$(ROOTFS)" FORCE=$(FORCE)
@@ -57,11 +65,15 @@ disk-clean:
 	$(MAKE) -C $(KERNEL_DIR) disk-clean ROOTFS="$(ROOTFS)"
 
 run:
-	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
-		echo "basic-test behavior must come from TEST=$(TEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
+		echo "basic-test selection is ambiguous; pass either TEST=$(TEST) or APP=$(APP), not both" >&2; \
 		exit 2; \
 	fi
-	$(PYTHON) $(BASIC_TEST_RUNNER) run "$(TEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
+	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
+		echo "basic-test behavior must come from TEST=$(BASIC_TEST_REQUEST) TOML; remove Make override(s): $(BASIC_TEST_COMMAND_LINE_OVERRIDES)" >&2; \
+		exit 2; \
+	fi
+	$(PYTHON) $(BASIC_TEST_RUNNER) run "$(BASIC_TEST_REQUEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
 
 # Compatibility boundary for unmigrated stress/difftest and focused overlays.
 legacy-run:

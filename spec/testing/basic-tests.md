@@ -11,6 +11,9 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 
 - `make run TEST=<name>` 执行一个完整基本测试；未指定 `TEST` 时使用 `hello-native`。
 - `make build TEST=<name>` 只解析同一份配置并构造 kernel image；不检查 TTY、不准备磁盘、不启动 QEMU。
+- `TEST` 是唯一正式选择变量。旧 `APP` 只作为 `TEST` 的变量名别名，接受完整且相同的 test name
+  namespace；`make run APP=<name>` / `make build APP=<name>` 必须把 name 原样交给 runner。Make 命令行
+  和真实进程环境中的显式值采用同一规则。它不能覆盖 TOML 中的任何行为字段。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
   因而 `make disk` 等价于 `make disk ROOTFS=canonical`。未知 profile 必须立即失败。
 
@@ -19,9 +22,12 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 manifest。`make run` 不构造 rootfs，也不执行 rootfs overlay；template 缺失或 input manifest 过期时，
 必须在 QEMU 前失败并提示先运行 `make disk ROOTFS=canonical`。
 
-根 Make 命令行只允许选择 `TEST` 和覆盖文档列出的宿主工具/路径参数。`APP`、provider、probe、
-profile、磁盘模式、QEMU 内存/SMP/cmdline/device、interaction、stdin、退出策略和期望结果只能来自
-TOML。基本测试不得提供公开的 `justrun` 或其它绕过解析、构建和生命周期检查的 QEMU 入口。
+根 Make 调用只允许用正式 `TEST` 或其 `APP` 变量名别名选择测试，以及覆盖文档列出的宿主工具/路径
+参数。无论来自 Make 命令行还是进程环境，显式同时提供 `TEST` 与 `APP` 都必须因歧义失败；未知
+APP 值与相同的未知 TEST 值走同一结构化配置失败路径。
+provider、probe、profile、磁盘模式、QEMU 内存/SMP/cmdline/device、interaction、stdin、退出策略和
+期望结果只能来自 TOML。基本测试不得提供公开的 `justrun` 或其它绕过解析、构建和生命周期检查的
+QEMU 入口。
 
 ## Versioned TOML
 
@@ -96,6 +102,7 @@ expectation、cleanup、`execution_status = "completed" | "failed"` 和
 - build-only 正常完成为 inconclusive；配置/build/disk/script/QEMU lifecycle/cleanup 失败为 execution failed。
 - completed 且 verdict 为 passed/inconclusive 返回 0；execution failed 或 verdict failed 返回非零。
 
-配置失败、build-only 和 `kunit-*` 兼容别名请求也必须留下明确的结构化记录。正式 checkpoint callback
-profile 名为 `checkpoint-kunit-native`、`checkpoint-kunit-linux-object`；runner 将旧 `kunit-*` 名称映射
-到正式配置，不保留别名 TOML。
+配置失败、build-only 和兼容别名请求也必须留下明确的结构化记录。正式 checkpoint callback profile
+名为 `checkpoint-kunit-native`、`checkpoint-kunit-linux-object`；runner 将旧 `kunit-*` 名称映射到正式
+配置。变量名别名 APP 不改变 test name；旧 test name `hello`、`smoke`、`user-boot` 分别映射到 native
+正式配置。所有 test-name 别名都只存在于 runner 映射中，不保留别名 TOML。

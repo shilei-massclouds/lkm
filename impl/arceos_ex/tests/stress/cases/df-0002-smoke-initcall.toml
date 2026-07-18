@@ -5,18 +5,13 @@ timeout_seconds = 120
 working_directory = "."
 setup_command = [
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall.raw",
-  "ROOTFS_OVERLAY=default",
+  "disk",
+  "ROOTFS=canonical",
 ]
 command = [
   "make",
-  "legacy-run",
+  "run",
   "APP=smoke",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall.raw",
 ]
 classifier = "../classifiers/defects.toml"
 

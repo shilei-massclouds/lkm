@@ -18,6 +18,12 @@ current suite covers:
 - `cases/df-0002-smoke-initcall.toml`
 - `cases/df-0003-distro-sh-ls.toml`
 
+All three default cases call frozen native basic-test entries and reuse the
+canonical rootfs template prepared by `make disk ROOTFS=canonical`. They do not
+construct legacy images or apply rootfs overlays. DF-0001 and DF-0002 retain
+their historical non-probe APP spellings through the root APP-as-TEST variable
+alias; DF-0003 keeps scripted stdin in `distro-sh-native.toml`.
+
 `make stress-test` remains as a compatibility alias. `make test-stress` defaults
 to `STRESS_RUNS=10`, which applies to each case in
 the suite. Use `STRESS_RUNS=N` to override it:
@@ -265,18 +271,15 @@ contains:
   comparisons.
 - `report.md`: compact human-readable summary.
 
-DF-0001 must keep the ordinary non-probe `APP=user-boot` path that executes
-the overlay `/sbin/init` and reaches `user exit status=0`. The compatibility
-`make legacy-run APP=user-boot` path is an interactive distro `init=/bin/sh`
-path, so DF-0001 cases must set `QEMU_APPEND=earlycon=sbi`
-explicitly and prepare a dedicated overlay disk in `setup_command`. Probe
-variants can be added later as separate cases, but they must not replace the
-ordinary non-probe path because probes can change timing.
+DF-0001 must keep the ordinary non-probe `APP=user-boot` spelling. Root Make
+treats APP as a TEST variable alias; the runner's legacy test-name mapping then
+selects the complete frozen `user-smoke-native` test, including canonical
+private-copy disk and explicit init path. Probe variants can be added later as separate cases, but they must
+not replace the ordinary non-probe path because probes can change timing.
 
 DF-0002 must keep the ordinary non-probe `APP=smoke` path for the same reason.
-It also uses a dedicated default-overlay disk prepared in `setup_command`, so
-stress results are not affected by a developer's stale `build/virtio-blk.raw`
-from distro or diagnostic runs.
+It maps to `kernel-smoke-native`; smoke therefore reads the canonical
+`/opt/lkm/tests/user-smoke` fixture instead of a legacy overlay image.
 
 DF-0003 must keep the ordinary non-probe distro shell path and the explicit
 two-command payload `/bin/ls\n/bin/ls\nexit\n`. Both commands must complete without

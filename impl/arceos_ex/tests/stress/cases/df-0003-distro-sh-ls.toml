@@ -5,30 +5,15 @@ timeout_seconds = 120
 working_directory = "."
 setup_command = [
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
-  "ROOTFS_LTP_OVERLAY=none",
-  "ROOTFS_OVERLAY=none",
+  "disk",
+  "ROOTFS=canonical",
 ]
 command = [
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-run",
-  "APP=user-boot",
-  "ROOTFS_LTP_OVERLAY=none",
-  "ROOTFS_OVERLAY=none",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0003-distro-sh-ls.raw",
-  "QEMU_APPEND=earlycon=sbi init=/bin/sh",
+  "run",
+  "TEST=distro-sh-native",
 ]
 classifier = "../classifiers/df-0003-distro-sh-ls.toml"
-
-[delayed_stdin]
-ready_marker = "~ #"
-payload = "/bin/ls\n/bin/ls\nexit\n"
 
 [metadata]
 defect = "DF-0003"

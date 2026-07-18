@@ -80,8 +80,14 @@ make run TEST=distro-sh-native
 make build TEST=hello-linux-object
 ```
 
+`TEST` 是正式选择变量。旧 `APP` 只是它的变量名别名，接受相同的完整 TEST 名空间，例如
+`make run APP=openrc-login-native` 等价于选择 `TEST=openrc-login-native`。命令行与真实环境变量写法
+遵循同一规则；APP 不是 kernel app 行为覆盖，不能和显式 TEST 同时使用。旧 test name
+`user-boot` 仍由 runner 映射到 `user-smoke-native`。
+
 配置位于 `impl/arceos_ex/tests/basic/cases/`。APP、provider、probe、profile、磁盘策略、QEMU
-cmdline/device/stdin 和结果断言都以 TOML 为唯一来源，不能从 Make 命令行覆盖。`QEMU`、编译器、
+cmdline/device/stdin 和结果断言都以 TOML 为唯一来源；APP 只能选择整份 TEST 配置，不能覆盖
+其中字段。`QEMU`、编译器、
 `LINUX_PROVIDER_DIR`、rootfs cache/source 和输出根等宿主参数仍可按文档覆盖。
 
 每次执行在 `impl/arceos_ex/tests/basic/out/` 下保留冻结的 `manifest.json`、完整 `qemu.log` 和
@@ -151,7 +157,7 @@ make run TEST=hello-linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 make test-stress
 ```
 
-`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前覆盖 DF-0001 的非 probe `APP=user-boot` overlay `/sbin/init` 路径、DF-0002 的非 probe `APP=smoke` 路径，以及 DF-0003 的非 PTY `/bin/sh` delayed-input 连续两次 `/bin/ls` 外部命令路径。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
+`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前分别重复 canonical `user-smoke-native`、`kernel-smoke-native` 和非 PTY scripted `distro-sh-native`；前两项保留非 probe 的旧 APP 调用拼写。三个 case 的 setup 都只核对/复用 canonical template，不构造 legacy overlay。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
 
 常用覆盖方式：
 
