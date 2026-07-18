@@ -6,8 +6,11 @@
 仍是对象级实现的权威来源。`spec/testing` 不重新定义模型和编码语义，只规定测试代码如何从这些语义中选择测试目标、生成场景、隔离副作用并选择执行载体。
 
 正式规格入口是 [`main.spec`](main.spec)。当前首先规格化 smoke 测试生成规则，见 [`smoke.spec`](smoke.spec)。
-Rootfs/user fixture、发行版 smoke、OpenRC scripted interaction 和 paired difftest 的权威编排规则见
+Rootfs/user fixture、发行版 smoke、BusyBox-init scripted interaction 和 paired difftest 的权威编排规则见
 [`rootfs.md`](rootfs.md)。
+
+Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报告比较规则见
+[`composite-tests.md`](composite-tests.md)。
 
 单轮 kernel/QEMU 基本测试的配置、七阶段流水线、脚本隔离、退出和结构化结果规则见
 [`basic-tests.md`](basic-tests.md)。

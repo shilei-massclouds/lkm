@@ -17,18 +17,6 @@ contains = ["Function not implemented"]
 description = "A visible unsupported syscall or command path blocked login shell completion."
 
 [[rules]]
-id = "delayed-input-timeout"
-result = "failure"
-contains = ["user-boot delayed input command timed out"]
-description = "Host staged stdin timed out before the login or shell marker sequence completed."
-
-[[rules]]
-id = "delayed-input-missing-marker"
-result = "failure"
-contains = ["user-boot input step marker missing"]
-description = "Host staged stdin could not observe one of the required login or shell markers."
-
-[[rules]]
 id = "user-nonzero-exit"
 result = "failure"
 regex = ["user exit status=(?:-[0-9]+|[1-9][0-9]*)"]
@@ -41,7 +29,7 @@ contains = ["syscall setpgid detail", "reason=pid_not_visible"]
 description = "The login shell could not resolve its pending plain-fork child for parent-side setpgid."
 
 [[rules]]
-id = "openrc-login-focused-success"
+id = "busybox-init-login-focused-success"
 result = "success"
 contains = [
   "Welcome to Alpine!",
@@ -50,4 +38,4 @@ contains = [
   "lost+found",
   "user exit status=0",
 ]
-description = "OpenRC login reached the shell, set the pending child pgrp, ran /bin/ls, observed getgroups, and exited cleanly."
+description = "BusyBox init login reached the shell, set the pending child pgrp, ran /bin/ls, observed getgroups, and exited cleanly."

@@ -105,6 +105,7 @@ run_smoke_case() {
 run_command_case "spec verify" "$tmpdir/verify.log" "$make_cmd" verify REPORT=text VERBOSE=1 SPEC="$spec"
 run_command_case "delayed stdin" "$tmpdir/delayed-stdin.log" env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools.tests.test_delayed_stdin
 run_command_case "basic runner" "$tmpdir/basic-runner.log" "$make_cmd" test-basic
+run_command_case "composite runner" "$tmpdir/composite-runner.log" "$make_cmd" test-composite
 run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkpoints
 
 # The only rootfs construction in the aggregate gate. Every following basic test
@@ -118,7 +119,7 @@ for provider in native $test_plic_providers; do
     run_command_case "distro ls $provider" "$tmpdir/distro-ls-$provider.log" "$make_cmd" run TEST="distro-ls-$provider"
     run_command_case "distro sh $provider" "$tmpdir/distro-sh-$provider.log" "$make_cmd" run TEST="distro-sh-$provider"
     run_command_case "rc.local $provider" "$tmpdir/rc-local-$provider.log" "$make_cmd" run TEST="rc-local-$provider"
-    run_command_case "OpenRC login $provider" "$tmpdir/openrc-login-$provider.log" "$make_cmd" run TEST="openrc-login-$provider"
+    run_command_case "BusyBox init login $provider" "$tmpdir/busybox-init-login-$provider.log" "$make_cmd" run TEST="busybox-init-login-$provider"
     run_kunit_case "KUnit $provider" "checkpoint-kunit-$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "kernel-smoke-$provider" "$tmpdir/smoke-$provider.log"
 done

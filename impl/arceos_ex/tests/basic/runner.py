@@ -34,6 +34,12 @@ SCHEMA_VERSION = 2
 RESULT_SCHEMA_VERSION = 2
 TEST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 GUEST_EXIT_RE = re.compile(r"user exit status=(-?\d+)")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+STRESS_MEM_HEADER_RE = re.compile(
+    r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
+    r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data="
+)
+STRESS_MEM_PROMPT_ECHO_RE = re.compile(r"(?:~|/) # [^\r\n]*(?:\r?\n)?")
 STAGES = (
     "config",
     "kernel-build",
@@ -47,7 +53,9 @@ ALLOWED_PROVIDERS = {"native", "linux-object"}
 ALLOWED_PROFILES = {"release", "trace"}
 ALLOWED_APPS = {"hello", "smoke", "user-boot"}
 ALLOWED_DISK_MODES = {"none", "template-readonly", "private-copy", "generated", "external"}
-ALLOWED_EXIT_POLICIES = {"process-exit", "guest-shutdown", "marker"}
+ALLOWED_KERNEL_TARGETS = {"arceos_ex", "linux"}
+ALLOWED_STRESS_MEM_BYTES = {32768, 65536, 131072, 262144, 524288}
+ALLOWED_EXIT_POLICIES = {"process-exit", "guest-shutdown", "marker", "stress-mem"}
 ALLOWED_PURPOSES = {"acceptance", "diagnostic"}
 ALLOWED_INTERACTIONS = {"none", "scripted", "terminal"}
 ALLOWED_ROOTFS_PROFILES = {"canonical"}
@@ -76,6 +84,8 @@ class QemuOutcome:
     exit_code: int | None = None
     timed_out: bool = False
     terminated_after_marker: bool = False
+    terminated_after_stress_mem: bool = False
+    stress_mem: dict[str, Any] | None = None
     process_group_reaped: bool = True
     stdin_steps: list[dict[str, Any]] | None = None
     terminal_restored: bool | None = None
@@ -224,33 +234,62 @@ def load_config(path: Path, repo_root: Path) -> dict[str, Any]:
     timeout = _positive_integer(raw, "timeout_seconds", "top level")
 
     kernel_raw = _required_table(raw, "kernel", "top level")
-    _keys(kernel_raw, {"app", "provider", "probe", "probe_file", "profile", "stress_mem_bytes", "extra_rustflags"}, "kernel")
-    app = _string(kernel_raw, "app", "kernel")
-    if app not in ALLOWED_APPS:
-        raise ConfigError(f"kernel.app must be one of {sorted(ALLOWED_APPS)}")
-    provider = _string(kernel_raw, "provider", "kernel")
-    if provider not in ALLOWED_PROVIDERS:
-        raise ConfigError(f"kernel.provider must be one of {sorted(ALLOWED_PROVIDERS)}")
-    profile = _string(kernel_raw, "profile", "kernel")
-    if profile not in ALLOWED_PROFILES:
-        raise ConfigError(f"kernel.profile must be one of {sorted(ALLOWED_PROFILES)}")
-    probe = _string_list(kernel_raw.get("probe", []), "kernel.probe")
-    probe_file = _optional_repo_path(kernel_raw, "probe_file", repo_root, "kernel")
-    stress_mem_bytes = kernel_raw.get("stress_mem_bytes")
-    if stress_mem_bytes is not None and (not _is_integer(stress_mem_bytes) or stress_mem_bytes <= 0):
-        raise ConfigError("kernel.stress_mem_bytes must be a positive integer")
-    extra_rustflags = _string_list(kernel_raw.get("extra_rustflags", []), "kernel.extra_rustflags")
+    if version == 1 and "target" in kernel_raw:
+        raise ConfigError("kernel.target is not valid in schema v1")
+    target = kernel_raw.get("target", "arceos_ex")
+    if not isinstance(target, str) or target not in ALLOWED_KERNEL_TARGETS:
+        raise ConfigError(f"kernel.target must be one of {sorted(ALLOWED_KERNEL_TARGETS)}")
+    if target == "linux":
+        _keys(kernel_raw, {"target"}, "kernel target linux")
+        kernel = {"target": target}
+    else:
+        _keys(kernel_raw, {"target", "app", "provider", "probe", "probe_file", "profile", "stress_mem_bytes", "extra_rustflags"}, "kernel target arceos_ex")
+        app = _string(kernel_raw, "app", "kernel")
+        if app not in ALLOWED_APPS:
+            raise ConfigError(f"kernel.app must be one of {sorted(ALLOWED_APPS)}")
+        provider = _string(kernel_raw, "provider", "kernel")
+        if provider not in ALLOWED_PROVIDERS:
+            raise ConfigError(f"kernel.provider must be one of {sorted(ALLOWED_PROVIDERS)}")
+        profile = _string(kernel_raw, "profile", "kernel")
+        if profile not in ALLOWED_PROFILES:
+            raise ConfigError(f"kernel.profile must be one of {sorted(ALLOWED_PROFILES)}")
+        probe = _string_list(kernel_raw.get("probe", []), "kernel.probe")
+        probe_file = _optional_repo_path(kernel_raw, "probe_file", repo_root, "kernel")
+        stress_mem_bytes = kernel_raw.get("stress_mem_bytes")
+        if stress_mem_bytes is not None and (
+            not _is_integer(stress_mem_bytes) or stress_mem_bytes not in ALLOWED_STRESS_MEM_BYTES
+        ):
+            raise ConfigError(
+                f"kernel.stress_mem_bytes must be one of {sorted(ALLOWED_STRESS_MEM_BYTES)}"
+            )
+        extra_rustflags = _string_list(kernel_raw.get("extra_rustflags", []), "kernel.extra_rustflags")
+        kernel = {
+            "target": target,
+            "app": app,
+            "provider": provider,
+            "probe": probe,
+            "probe_file": str(probe_file) if probe_file else None,
+            "profile": profile,
+            "stress_mem_bytes": stress_mem_bytes,
+            "extra_rustflags": extra_rustflags,
+        }
 
     disk_raw = _required_table(raw, "disk", "top level")
     _keys(disk_raw, {"mode", "profile", "path", "readonly", "generator", "size"}, "disk")
     disk = _parse_disk(disk_raw, repo_root, version, compatibility_mappings)
 
     qemu_raw = _required_table(raw, "qemu", "top level")
-    _keys(qemu_raw, {"memory_mb", "smp", "kernel_cmdline", "rng", "exit_policy", "exit_marker", "interaction", "stdin_steps"}, "qemu")
+    _keys(qemu_raw, {"memory_mb", "smp", "kernel_cmdline", "rng", "user_network", "host_forwards", "exit_policy", "exit_marker", "interaction", "stdin_steps"}, "qemu")
     memory_mb = _positive_integer(qemu_raw, "memory_mb", "qemu")
     smp = _positive_integer(qemu_raw, "smp", "qemu")
     kernel_cmdline = _string(qemu_raw, "kernel_cmdline", "qemu")
     rng = _boolean(qemu_raw, "rng", "qemu")
+    user_network = qemu_raw.get("user_network", False)
+    if not isinstance(user_network, bool):
+        raise ConfigError("qemu.user_network must be a boolean")
+    host_forwards = _host_forwards(qemu_raw.get("host_forwards", []))
+    if host_forwards and not user_network:
+        raise ConfigError("qemu.host_forwards require qemu.user_network = true")
     exit_policy = _string(qemu_raw, "exit_policy", "qemu")
     if exit_policy not in ALLOWED_EXIT_POLICIES:
         raise ConfigError(f"qemu.exit_policy must be one of {sorted(ALLOWED_EXIT_POLICIES)}")
@@ -299,21 +338,15 @@ def load_config(path: Path, repo_root: Path) -> dict[str, Any]:
         "purpose": purpose,
         "timeout_seconds": timeout,
         "scripts": scripts,
-        "kernel": {
-            "app": app,
-            "provider": provider,
-            "probe": probe,
-            "probe_file": str(probe_file) if probe_file else None,
-            "profile": profile,
-            "stress_mem_bytes": stress_mem_bytes,
-            "extra_rustflags": extra_rustflags,
-        },
+        "kernel": kernel,
         "disk": disk,
         "qemu": {
             "memory_mb": memory_mb,
             "smp": smp,
             "kernel_cmdline": kernel_cmdline,
             "rng": rng,
+            "user_network": user_network,
+            "host_forwards": host_forwards,
             "exit_policy": exit_policy,
             "exit_marker": exit_marker,
             "interaction": interaction,
@@ -331,15 +364,15 @@ def load_config(path: Path, repo_root: Path) -> dict[str, Any]:
 
 def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, artifact_dir: Path) -> dict[str, Any]:
     kernel_dir = repo_root / "impl" / "arceos_ex"
-    probes = set(config["kernel"]["probe"])
-    probe_file = config["kernel"]["probe_file"]
+    probes = set(config["kernel"].get("probe", []))
+    probe_file = config["kernel"].get("probe_file")
     if probe_file:
         for line in Path(probe_file).read_text().splitlines():
             content = line.partition("#")[0].strip()
             if content:
                 probes.update(content.replace(",", " ").split())
     sorted_probes = sorted(probes)
-    kernel_image = kernel_image_path(kernel_dir, config["kernel"], sorted_probes)
+    kernel_image = kernel_image_path(repo_root, kernel_dir, config["kernel"], sorted_probes)
     canonical = _canonical_image(repo_root)
     disk = dict(config["disk"])
     disk["canonical_path"] = str(canonical)
@@ -351,7 +384,7 @@ def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, 
         disk["runtime_path"] = disk["path"]
     else:
         disk["runtime_path"] = None
-    build_command = kernel_build_command(kernel_dir, config["kernel"])
+    build_command = kernel_build_command(repo_root, kernel_dir, config["kernel"])
     qemu_command = qemu_command_for(config, kernel_image, disk)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -371,7 +404,9 @@ def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, 
     }
 
 
-def kernel_image_path(kernel_dir: Path, kernel: dict[str, Any], probes: list[str]) -> Path:
+def kernel_image_path(repo_root: Path, kernel_dir: Path, kernel: dict[str, Any], probes: list[str]) -> Path:
+    if kernel["target"] == "linux":
+        return (_linux_provider_dir(repo_root) / "arch" / "riscv" / "boot" / "Image").resolve()
     suffix = ""
     if kernel["provider"] != "native":
         suffix += f"/plic-{kernel['provider']}"
@@ -384,7 +419,19 @@ def kernel_image_path(kernel_dir: Path, kernel: dict[str, Any], probes: list[str
     return (kernel_dir / relative).resolve()
 
 
-def kernel_build_command(kernel_dir: Path, kernel: dict[str, Any]) -> list[str]:
+def kernel_build_command(repo_root: Path, kernel_dir: Path, kernel: dict[str, Any]) -> list[str]:
+    if kernel["target"] == "linux":
+        return [
+            *_tool_command("MAKE", "make"),
+            "-C",
+            str(_linux_provider_dir(repo_root)),
+            "ARCH=riscv",
+            f"CROSS_COMPILE={os.environ.get('LINUX_CROSS_COMPILE', 'riscv64-linux-gnu-')}",
+            "KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS",
+            "-j",
+            str(max(1, os.cpu_count() or 1)),
+            "Image",
+        ]
     command = [
         *_tool_command("MAKE", "make"),
         "-C",
@@ -409,8 +456,6 @@ def qemu_command_for(config: dict[str, Any], kernel_image: Path, disk: dict[str,
         *_tool_command("QEMU", "qemu-system-riscv64"),
         "-machine",
         "virt",
-        "-cpu",
-        "rv64",
         "-m",
         f"{qemu['memory_mb']}M",
         "-smp",
@@ -419,8 +464,20 @@ def qemu_command_for(config: dict[str, Any], kernel_image: Path, disk: dict[str,
         "-serial",
         "mon:stdio",
     ]
+    if config["kernel"]["target"] == "arceos_ex":
+        command[3:3] = ["-cpu", "rv64"]
+    else:
+        command.extend(["-bios", "default"])
     if qemu["rng"]:
         command.extend(["-object", "rng-random,id=rng0,filename=/dev/urandom", "-device", "virtio-rng-device,rng=rng0"])
+    if qemu["user_network"]:
+        netdev = "user,id=net0"
+        for forward in qemu["host_forwards"]:
+            netdev += (
+                f",hostfwd={forward['protocol']}:{forward['host_address']}:"
+                f"{forward['host_port']}-:{forward['guest_port']}"
+            )
+        command.extend(["-device", "virtio-net-device,netdev=net0", "-netdev", netdev])
     runtime_path = disk.get("runtime_path")
     if runtime_path:
         readonly = disk["mode"] == "template-readonly" or (disk["mode"] == "external" and disk["readonly"])
@@ -559,6 +616,8 @@ def run_pipeline(
             "exit_code": qemu_outcome.exit_code,
             "timed_out": qemu_outcome.timed_out,
             "terminated_after_marker": qemu_outcome.terminated_after_marker,
+            "terminated_after_stress_mem": qemu_outcome.terminated_after_stress_mem,
+            "stress_mem": qemu_outcome.stress_mem,
             "interaction": manifest["qemu"]["interaction"] if manifest else None,
             "stdin_steps": qemu_outcome.stdin_steps or [],
         }
@@ -586,6 +645,7 @@ def run_pipeline(
 
 def evaluate_expectations(expect: dict[str, Any], qemu_log: Path, outcome: QemuOutcome) -> dict[str, Any]:
     text = qemu_log.read_text(errors="replace")
+    observed_text, _ = _observed_text(text)
     checks: list[dict[str, Any]] = []
     configured_process_exit = expect["process_exit"]
     if configured_process_exit is not None:
@@ -596,7 +656,7 @@ def evaluate_expectations(expect: dict[str, Any], qemu_log: Path, outcome: QemuO
             "passed": outcome.exit_code == configured_process_exit,
         })
     configured_guest_exit = expect["guest_exit_status"]
-    matches = GUEST_EXIT_RE.findall(text)
+    matches = GUEST_EXIT_RE.findall(observed_text)
     actual_guest_exit = int(matches[-1]) if matches else None
     if configured_guest_exit is not None:
         checks.append({
@@ -606,13 +666,13 @@ def evaluate_expectations(expect: dict[str, Any], qemu_log: Path, outcome: QemuO
             "passed": actual_guest_exit == configured_guest_exit,
         })
     for marker in expect["markers"]:
-        count = text.count(marker)
+        count = observed_text.count(marker)
         checks.append({"kind": "marker", "marker": marker, "actual": count, "expected": ">=1", "passed": count >= 1})
     for marker in expect["forbidden_markers"]:
-        count = text.count(marker)
+        count = observed_text.count(marker)
         checks.append({"kind": "forbidden_marker", "marker": marker, "actual": count, "expected": 0, "passed": count == 0})
     for marker_count in expect["marker_counts"]:
-        count = text.count(marker_count["marker"])
+        count = observed_text.count(marker_count["marker"])
         if marker_count["exactly"] is not None:
             passed = count == marker_count["exactly"]
             expected: Any = marker_count["exactly"]
@@ -689,6 +749,8 @@ def _run_qemu(
     captured = bytearray()
     timed_out = False
     terminated_after_marker = False
+    terminated_after_stress_mem = False
+    stress_mem: dict[str, Any] | None = None
     reaped = True
     pipe_open = True
     try:
@@ -726,6 +788,12 @@ def _run_qemu(
                     if marker in visible:
                         terminated_after_marker = True
                         reaped = _terminate_process_group(process)
+                if manifest["qemu"]["exit_policy"] == "stress-mem" and not terminated_after_stress_mem:
+                    parsed = _parse_stress_mem(visible)
+                    if parsed is not None:
+                        _, stress_mem = parsed
+                        terminated_after_stress_mem = True
+                        reaped = _terminate_process_group(process)
                 if process.poll() is not None and not pipe_open:
                     break
             if process.poll() is None:
@@ -750,11 +818,15 @@ def _run_qemu(
     outcome.exit_code = exit_code
     outcome.timed_out = timed_out
     outcome.terminated_after_marker = terminated_after_marker
+    outcome.terminated_after_stress_mem = terminated_after_stress_mem
+    outcome.stress_mem = stress_mem
     outcome.process_group_reaped = reaped
     outcome.stdin_steps = public_steps
     for step in public_steps:
         if not step["sent"]:
             raise RuntimeError(f"QEMU exited before stdin marker: {step['ready_marker']!r}")
+    if manifest["qemu"]["exit_policy"] == "stress-mem" and stress_mem is None:
+        raise RuntimeError("QEMU exited before a complete stress_mem record")
 
 
 def _run_qemu_terminal(
@@ -821,6 +893,12 @@ def _run_qemu_terminal(
                     if marker in captured.decode(errors="replace"):
                         terminated_after_marker = True
                         reaped = _terminate_process_group(process)
+                if manifest["qemu"]["exit_policy"] == "stress-mem" and not outcome.terminated_after_stress_mem:
+                    parsed = _parse_stress_mem(captured.decode(errors="replace"))
+                    if parsed is not None:
+                        _, outcome.stress_mem = parsed
+                        outcome.terminated_after_stress_mem = True
+                        reaped = _terminate_process_group(process)
                 if process.poll() is not None and not output_open:
                     break
             if process.poll() is None:
@@ -835,6 +913,8 @@ def _run_qemu_terminal(
         outcome.terminated_after_marker = terminated_after_marker
         outcome.process_group_reaped = reaped
         outcome.stdin_steps = []
+        if manifest["qemu"]["exit_policy"] == "stress-mem" and outcome.stress_mem is None:
+            raise RuntimeError("QEMU exited before a complete stress_mem record")
     finally:
         if process is not None and process.poll() is None:
             outcome.process_group_reaped = _terminate_process_group(process)
@@ -981,6 +1061,78 @@ def _stdin_steps(raw: Any) -> list[dict[str, str]]:
     return result
 
 
+def _host_forwards(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise ConfigError("qemu.host_forwards must be an array of tables")
+    result: list[dict[str, Any]] = []
+    for index, forward in enumerate(raw):
+        context = f"qemu.host_forwards[{index}]"
+        _table(forward, context)
+        _keys(forward, {"protocol", "host_address", "host_port", "guest_port"}, context)
+        protocol = _string(forward, "protocol", context)
+        if protocol not in {"tcp", "udp"}:
+            raise ConfigError(f"{context}.protocol must be 'tcp' or 'udp'")
+        host_address = forward.get("host_address", "")
+        if not isinstance(host_address, str):
+            raise ConfigError(f"{context}.host_address must be a string")
+        host_port = _positive_integer(forward, "host_port", context)
+        guest_port = _positive_integer(forward, "guest_port", context)
+        if host_port > 65535 or guest_port > 65535:
+            raise ConfigError(f"{context} ports must be <= 65535")
+        result.append({
+            "protocol": protocol,
+            "host_address": host_address,
+            "host_port": host_port,
+            "guest_port": guest_port,
+        })
+    return result
+
+
+def _observed_text(stdout: str) -> tuple[str, dict[str, Any] | None]:
+    parsed = _parse_stress_mem(stdout)
+    if parsed is None:
+        return stdout, None
+    decoded, metadata = parsed
+    return stdout + "\n" + decoded, metadata
+
+
+def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
+    normalized = ANSI_RE.sub("", stdout)
+    for match in reversed(list(STRESS_MEM_HEADER_RE.finditer(normalized))):
+        expected_bytes = int(match.group("bytes"))
+        data_segment = STRESS_MEM_PROMPT_ECHO_RE.sub("", normalized[match.end() :])
+        hex_data = _take_hex_payload(data_segment, expected_bytes * 2)
+        if hex_data is None:
+            continue
+        try:
+            decoded = bytes.fromhex(hex_data).decode("utf-8", errors="replace")
+        except ValueError:
+            continue
+        return decoded, {
+            "bytes": expected_bytes,
+            "total": int(match.group("total")),
+            "overflow": match.group("overflow") == "1",
+            "dropped": int(match.group("dropped")),
+        }
+    return None
+
+
+def _take_hex_payload(data_segment: str, expected_hex_len: int) -> str | None:
+    if expected_hex_len == 0:
+        return ""
+    chars: list[str] = []
+    for char in data_segment:
+        if char in "0123456789abcdef":
+            chars.append(char)
+            if len(chars) == expected_hex_len:
+                return "".join(chars)
+            continue
+        if char.isspace():
+            continue
+        return None
+    return None
+
+
 def _marker_counts(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         raise ConfigError("expect.marker_counts must be an array of tables")
@@ -1038,6 +1190,14 @@ def _canonical_image(repo_root: Path) -> Path:
         path = Path(configured)
         return path.resolve() if path.is_absolute() else (repo_root / path).resolve()
     return (repo_root / "impl" / "arceos_ex" / "build" / "rootfs" / "canonical.raw").resolve()
+
+
+def _linux_provider_dir(repo_root: Path) -> Path:
+    configured = os.environ.get("LINUX_PROVIDER_DIR")
+    if configured:
+        path = Path(configured)
+        return path.resolve() if path.is_absolute() else (repo_root / path).resolve()
+    return (repo_root.parent / "linux-6.12").resolve()
 
 
 def _tool_command(variable: str, default: str) -> list[str]:

@@ -331,13 +331,26 @@ def _validate_ltp(ltp_dir: Path) -> None:
 
 
 def _validate_config(config_dir: Path) -> None:
-    for name in ("passwd.entry", "shadow.entry", "rc-local.sh"):
+    for name in ("inittab", "passwd.entry", "shadow.entry", "rc-local.sh"):
         path = config_dir / name
         if not path.is_file():
             raise ValueError(f"canonical configuration is missing: {path}")
 
+    inittab = (config_dir / "inittab").read_text()
+    if "/sbin/openrc" in inittab:
+        raise ValueError("canonical inittab must not reference /sbin/openrc")
+    for marker in ("tty1::respawn:", "ttyS0::respawn:"):
+        if marker not in inittab:
+            raise ValueError(f"canonical inittab is missing required entry: {marker}")
+
 
 def _configure_canonical(staging: Path, config_dir: Path, destination: Path) -> None:
+    configured_inittab = (config_dir / "inittab").read_text()
+    inittab = staging / "etc" / "inittab"
+    inittab.write_text(configured_inittab)
+    if inittab.read_text() != configured_inittab:
+        raise ValueError("canonical inittab installation did not preserve configured content")
+
     passwd = staging / "etc" / "passwd"
     shadow = staging / "etc" / "shadow"
     _merge_account_entry(passwd, (config_dir / "passwd.entry").read_text().strip())

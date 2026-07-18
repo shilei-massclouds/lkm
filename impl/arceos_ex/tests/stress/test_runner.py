@@ -1,1031 +1,406 @@
-#!/usr/bin/env python3
-"""Unit tests for the stress runner."""
-
 from __future__ import annotations
 
-from contextlib import redirect_stdout
 from datetime import datetime, timezone
-from io import StringIO
 import json
-import sys
-import tempfile
 from pathlib import Path
+import tempfile
+import textwrap
+import tomllib
 import unittest
 from unittest import mock
 
-import runner
+from . import runner
 
 
-def _mapping_row(name: str, kind: str) -> dict[str, str]:
+def stress_record(text: str) -> str:
+    encoded = text.encode().hex()
+    return (
+        f"stress_mem: v=1 encoding=hex bytes={len(text.encode())} "
+        f"total={len(text.encode())} overflow=0 dropped=0 data={encoded}\n"
+    )
+
+
+def basic_execution(
+    test: str,
+    artifact_dir: Path,
+    text: str,
+    *,
+    completed: bool = True,
+    expectations: bool | None = True,
+    command_exit: int = 0,
+) -> dict[str, object]:
     return {
-        "checkpoint_name": name,
-        "mapping_kind": kind,
+        "command_exit_code": command_exit,
+        "duration_seconds": 0.01,
+        "artifact_dir": str(artifact_dir),
+        "result_path": str(artifact_dir / "result.json"),
+        "qemu_log_path": str(artifact_dir / "qemu.log"),
+        "qemu_log": stress_record(text),
+        "result": {
+            "schema_version": 2,
+            "test": test,
+            "execution_status": "completed" if completed else "failed",
+            "verdict": "inconclusive",
+            "expectations": None if expectations is None else {"passed": expectations},
+            "errors": [] if completed else ["failed"],
+            "qemu": {"timed_out": False},
+            "cleanup": {"private_disk_removed": True, "process_group_reaped": True},
+        },
     }
 
 
-class StressRunnerTests(unittest.TestCase):
-    def test_default_selection_uses_standard_suite(self) -> None:
-        selected = runner._selected_case_paths([])
-        self.assertEqual(
-            [path.name for path in selected],
-            [
-                "df-0001-user-boot.toml",
-                "df-0002-smoke-initcall.toml",
-                "df-0003-distro-sh-ls.toml",
-            ],
-        )
+def stress_case(name: str = "demo") -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "name": name,
+        "description": "demo",
+        "mode": "stress",
+        "runs": 1,
+        "metadata": {},
+        "case_path": Path(f"/tmp/{name}.toml"),
+        "case_sha256": "case",
+        "config_fingerprint": "config",
+        "test": "user-smoke-native",
+        "basic": {"test": "user-smoke-native", "config_sha256": "basic"},
+        "classifier_path": Path("/tmp/classifier.toml"),
+        "classifier_sha256": "classifier",
+        "rules": [
+            {"id": "panic", "result": "failure", "contains": ["panic"], "regex": []},
+            {"id": "success", "result": "success", "contains": ["user exit status=0"], "regex": []},
+        ],
+    }
 
-    def test_explicit_selection_replaces_default_suite(self) -> None:
-        selected = runner._selected_case_paths(
-            [Path("impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml")]
-        )
-        self.assertEqual(len(selected), 1)
-        self.assertEqual(selected[0].name, "df-0002-smoke-initcall.toml")
 
-    def test_case_failed_reads_failure_total(self) -> None:
-        self.assertFalse(runner._case_failed({"summary": {"totals": {"failure": 0}}}))
-        self.assertTrue(runner._case_failed({"summary": {"totals": {"failure": 1}}}))
+def difftest_case(name: str = "paired") -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "name": name,
+        "description": "paired",
+        "mode": "difftest",
+        "runs": 1,
+        "metadata": {},
+        "case_path": Path(f"/tmp/{name}.toml"),
+        "case_sha256": "case",
+        "config_fingerprint": "config",
+        "left_test": "left-basic",
+        "left_label": "left",
+        "right_test": "right-basic",
+        "right_label": "right",
+        "left_basic": {"test": "left-basic", "config_sha256": "left"},
+        "right_basic": {"test": "right-basic", "config_sha256": "right"},
+        "checkpoint_scope": ["A", "B"],
+        "checkpoint_scope_max_counts": {},
+        "checkpoint_coverage": None,
+    }
 
-    def test_main_prints_single_case_success_summary_and_returns_zero(self) -> None:
-        result = runner._case_result(
-            "single-case",
-            Path("/tmp/single-case.toml"),
-            Path("/tmp/single-case-report"),
-            {"totals": {"success": 1, "failure": 0}},
-        )
-        stdout = StringIO()
 
-        with (
-            mock.patch.object(runner, "_resolve_repo_root", return_value=Path("/tmp/repo")),
-            mock.patch.object(runner, "_run_case", return_value=result),
-            redirect_stdout(stdout),
-        ):
-            status = runner.main(["/tmp/single-case.toml"])
+class CompositeConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo_root = Path(__file__).resolve().parents[4]
 
+    def test_default_and_explicit_selection(self) -> None:
+        self.assertEqual(runner._selected_case_paths([]), [path.resolve() for path in runner.DEFAULT_SUITE])
+        path = Path("impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml")
+        self.assertEqual(runner._selected_case_paths([path]), [path.resolve()])
+
+    def test_all_checked_in_cases_are_v2_basic_references_without_commands(self) -> None:
+        cases_dir = self.repo_root / "impl/arceos_ex/tests/stress/cases"
+        forbidden = {
+            "command", "setup_command", "working_directory", "env", "delayed_stdin",
+            "private_disk", "build_command", "timeout_seconds", "default_runs", "paired",
+        }
+        loaded = []
+        for path in sorted(cases_dir.glob("*.toml")):
+            raw = tomllib.loads(path.read_text())
+            self.assertEqual(raw["schema_version"], 2, path)
+            self.assertFalse(forbidden.intersection(raw), path)
+            self.assertNotIn("legacy-run", path.read_text())
+            self.assertNotIn("qemu-system", path.read_text())
+            self.assertNotIn("openrc", path.name.lower())
+            loaded.append(runner._load_case(path, self.repo_root))
+        self.assertEqual(len(loaded), 9)
+        self.assertTrue(all(case["mode"] in {"stress", "difftest"} for case in loaded))
+
+    def test_schema_v1_and_arbitrary_command_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "bad.toml"
+            path.write_text('schema_version = 1\nname = "bad"\nmode = "stress"\n')
+            with self.assertRaisesRegex(runner.CompositeConfigError, "schema v2"):
+                runner._load_case(path, self.repo_root)
+            path.write_text(textwrap.dedent("""
+                schema_version = 2
+                name = "bad"
+                description = "bad"
+                mode = "stress"
+                test = "user-smoke-native"
+                runs = 0
+                classifier = "missing.toml"
+                command = ["true"]
+            """))
+            with self.assertRaisesRegex(runner.CompositeConfigError, "forbidden or unknown.*command"):
+                runner._load_case(path, self.repo_root)
+
+    def test_runs_zero_validates_every_checked_in_reference_without_disk(self) -> None:
+        cases = sorted((self.repo_root / "impl/arceos_ex/tests/stress/cases").glob("*.toml"))
+        with mock.patch.object(runner, "_prepare_canonical_disk") as disk:
+            status = runner.main([*(str(path) for path in cases), "--runs", "0", "--out-dir", "/tmp/lkm-composite-unit-dry"])
         self.assertEqual(status, 0)
-        self.assertIn("stress suite summary:", stdout.getvalue())
-        self.assertIn(
-            "single-case: success=1 failure=0 "
-            "report=/tmp/single-case-report/report.md",
-            stdout.getvalue(),
-        )
+        disk.assert_not_called()
 
-    def test_main_prints_single_case_failure_summary_and_returns_nonzero(self) -> None:
-        result = runner._case_result(
-            "single-case",
-            Path("/tmp/single-case.toml"),
-            Path("/tmp/single-case-report"),
-            {"totals": {"success": 0, "failure": 1}},
-        )
-        stdout = StringIO()
-
+    def test_nonzero_suite_prepares_disk_exactly_once(self) -> None:
+        first = stress_case("one")
+        second = stress_case("two")
+        result = {"summary": {"totals": {"success": 1, "failure": 0}}}
         with (
-            mock.patch.object(runner, "_resolve_repo_root", return_value=Path("/tmp/repo")),
-            mock.patch.object(runner, "_run_case", return_value=result),
-            redirect_stdout(stdout),
+            mock.patch.object(runner, "_selected_case_paths", return_value=[Path("one"), Path("two")]),
+            mock.patch.object(runner, "_load_case", side_effect=[first, second]),
+            mock.patch.object(runner, "_prepare_canonical_disk") as disk,
+            mock.patch.object(runner, "_run_case", side_effect=[result, result]),
+            mock.patch.object(runner, "_print_suite_summary"),
         ):
-            status = runner.main(["/tmp/single-case.toml"])
+            status = runner.main(["--runs", "1"])
+        self.assertEqual(status, 0)
+        disk.assert_called_once()
 
-        self.assertNotEqual(status, 0)
-        self.assertIn("stress suite summary:", stdout.getvalue())
-        self.assertIn(
-            "single-case: success=0 failure=1 "
-            "report=/tmp/single-case-report/report.md",
-            stdout.getvalue(),
-        )
 
-    def test_extracts_user_boot_success_events(self) -> None:
-        events = runner._extract_events("noise\nuser hello\nuser exit status=0\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["user_output:UserHello", "user_exit:UserExitStatus:status=0"],
-        )
+class BasicOrchestrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        (self.root / "Makefile").write_text("all:\n")
 
-    def test_extracts_distro_shell_ls_events(self) -> None:
-        events = runner._extract_events(
-            "etc         lost+found  opt\n"
-            "user exit status=0\n"
-        )
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            [
-                "user_output:DistroLsRootListing",
-                "user_exit:UserExitStatus:status=0",
-            ],
-        )
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
 
-    def test_extracts_legacy_wait4_handoff_event(self) -> None:
-        events = runner._extract_events("wait4 child handoff sepc=0x1\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["boundary:Wait4ChildHandoff"],
-        )
+    def test_stress_repeats_one_basic_at_fixed_nested_paths(self) -> None:
+        calls: list[tuple[str, Path]] = []
 
-    def test_extracts_smoke_success_event(self) -> None:
-        events = runner._extract_events("result: \x1b[32mok\x1b[0m. passed=78 failed=0 total=78\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["smoke_result:SmokeResult:passed=78:failed=0:total=78"],
-        )
+        def execute(test: str, artifact: Path, repo_root: Path) -> dict[str, object]:
+            calls.append((test, artifact))
+            return basic_execution(test, artifact, "user exit status=0\n")
 
-    def test_extracts_checkpoint_announce_event(self) -> None:
-        events = runner._extract_events("checkpoint: EarlyVm.Ready task=boot_idle\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["checkpoint:EarlyVm.Ready"],
-        )
-        self.assertEqual(events[0]["source"], "announce")
-        self.assertEqual(events[0]["task"], "boot_idle")
+        case = stress_case()
+        with mock.patch.object(runner, "_execute_basic", side_effect=execute):
+            result = runner._run_case(case=case, repo_root=self.root, out_root=self.root / "out", runs=2, baseline=None)
+        self.assertEqual(result["summary"]["totals"], {"success": 2, "failure": 0})
+        self.assertEqual([test for test, _ in calls], ["user-smoke-native", "user-smoke-native"])
+        self.assertTrue(str(calls[0][1]).endswith("runs/run-0001/basic"))
+        self.assertTrue(str(calls[1][1]).endswith("runs/run-0002/basic"))
 
-    def test_extracts_legacy_trace_checkpoint_event(self) -> None:
-        events = runner._extract_events("trace: EarlyVm.Ready task=boot_idle\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["checkpoint:EarlyVm.Ready"],
-        )
-        self.assertEqual(events[0]["source"], "legacy-trace")
+    def test_difftest_runs_left_then_right_and_propagates_basic_failure(self) -> None:
+        calls: list[tuple[str, Path]] = []
 
-    def test_extracts_legacy_boot_started_early_byte_checkpoint_event(self) -> None:
-        events = runner._extract_events("BAV9\n")
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            [
-                "checkpoint:BootPhase.Started",
-                "checkpoint:EntryPreludePhase.Started",
-                "checkpoint:EventStream.Prepared",
-                "checkpoint:ExceptionStream.Prepared",
-            ],
-        )
-        self.assertEqual(events[0]["source"], "early-byte")
+        def execute(test: str, artifact: Path, repo_root: Path) -> dict[str, object]:
+            calls.append((test, artifact))
+            text = "checkpoint: A\ncheckpoint: B\n"
+            return basic_execution(test, artifact, text, expectations=test != "left-basic")
 
-    def test_extracts_new_head_without_boot_started_early_byte(self) -> None:
-        events = runner._extract_events("RAIKOZHTS\n")
-        tokens = [runner._event_token(event) for event in events]
-        self.assertEqual(
-            tokens[:2],
-            [
-                "checkpoint:Kernel.Started",
-                "checkpoint:EntryPreludePhase.Started",
-            ],
-        )
-        self.assertNotIn("checkpoint:BootPhase.Started", tokens)
-
-    def test_extracts_ready_check_failed_event(self) -> None:
-        events = runner._extract_events(
-            "ready_check_failed phase=InitcallPhase "
-            "check=initcall_phase_ready "
-            "first_failed=platform_bus.ns16550a_probe_called\n"
-        )
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            [
-                "ready_check_failed:ReadyCheckFailed:phase=InitcallPhase:"
-                "check=initcall_phase_ready:first_failed=platform_bus.ns16550a_probe_called"
-            ],
-        )
-
-    def test_extracts_failure_diagnostic_event(self) -> None:
-        events = runner._extract_events(
-            "failure_diagnostic phase=InitcallPhase "
-            "step=InitcallBoundary.setup object=TtyXmitFifoProbe "
-            "check=tty_xmit_fifo_probe.no_overflow_observed "
-            "first_failed=tty_xmit_fifo_probe.no_overflow_observed\n"
-        )
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            [
-                "failure_diagnostic:FailureDiagnostic:phase=InitcallPhase:"
-                "step=InitcallBoundary.setup:object=TtyXmitFifoProbe:"
-                "check=tty_xmit_fifo_probe.no_overflow_observed:"
-                "first_failed=tty_xmit_fifo_probe.no_overflow_observed"
-            ],
-        )
-
-    def test_extracts_df0001_failure_event(self) -> None:
-        events = runner._extract_events("read user ELF failed\n")
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["kind"], "symptom")
-        self.assertEqual(events[0]["name"], "ReadUserElfFailed")
-
-    def test_uses_stress_mem_text_when_present(self) -> None:
-        text = "result: \x1b[32mok\x1b[0m. passed=2 failed=0 total=2\n"
-        size = len(text.encode())
-        line = (
-            f"stress_mem: v=1 encoding=hex bytes={size} total={size} "
-            f"overflow=0 dropped=0 data={text.encode().hex()}\n"
-        )
-        observed, stress_mem = runner._observed_text("host noise\n" + line)
-        self.assertEqual(observed, text)
-        self.assertIsNotNone(stress_mem)
-        events = runner._extract_events(observed)
-        self.assertEqual(
-            [runner._event_token(event) for event in events],
-            ["smoke_result:SmokeResult:passed=2:failed=0:total=2"],
-        )
-
-    def test_uses_stress_mem_text_with_early_byte_prefix(self) -> None:
-        text = "checkpoint: EntryPreludePhase.Ready\n"
-        size = len(text.encode())
-        line = (
-            f"RAIKOZHTSstress_mem: v=1 encoding=hex bytes={size} total={size} "
-            f"overflow=0 dropped=0 data={text.encode().hex()}\n"
-        )
-        observed, stress_mem = runner._observed_text(line)
-
-        self.assertEqual(observed, "RAIKOZHTS\n" + text)
-        self.assertIsNotNone(stress_mem)
-        events = runner._extract_events(observed)
-        self.assertEqual(
-            runner._event_token(events[0]),
-            "checkpoint:Kernel.Started",
-        )
-        self.assertEqual(
-            runner._event_token(events[1]),
-            "checkpoint:EntryPreludePhase.Started",
-        )
-
-    def test_uses_stress_mem_text_with_interleaved_prompt_echo(self) -> None:
-        text = (
-            "checkpoint: EntryPreludePhase.Started\n"
-            "checkpoint: PayloadPhase.Ready\n"
-        )
-        size = len(text.encode())
-        encoded = text.encode().hex()
-        split = len("checkpoint: EntryPrelude".encode().hex())
-        line = (
-            f"stress_mem: v=1 encoding=hex bytes={size} total={size} "
-            f"overflow=0 dropped=0 data={encoded[:split]}~ # exit\n"
-            f"{encoded[split:]}\n"
-            "[    1.548514] ---[ end Kernel panic ]---\n"
-        )
-        observed, stress_mem = runner._observed_text(line)
-
-        self.assertEqual(observed, text)
-        self.assertIsNotNone(stress_mem)
-
-    def test_failure_rules_take_precedence_over_success_rules(self) -> None:
-        rules = [
-            {
-                "id": "df-0001-read-user-elf-failed",
-                "result": "failure",
-                "contains": ["read user ELF failed"],
-            },
-            {
-                "id": "user-boot-success",
-                "result": "success",
-                "contains": ["user exit status=0"],
-            },
-        ]
-        result = runner._classify(
-            "user exit status=0\nread user ELF failed\n",
-            returncode=0,
-            timed_out=False,
-            rules=rules,
-        )
+        case = difftest_case()
+        with mock.patch.object(runner, "_execute_basic", side_effect=execute):
+            result = runner._execute_difftest_run(case, "run-0001", self.root / "run-0001", self.root)
+        self.assertEqual([test for test, _ in calls], ["left-basic", "right-basic"])
+        self.assertTrue(str(calls[0][1]).endswith("run-0001/left"))
+        self.assertTrue(str(calls[1][1]).endswith("run-0001/right"))
         self.assertEqual(result["result"], "failure")
-        self.assertEqual(result["id"], "df-0001-read-user-elf-failed")
+        self.assertFalse(result["left"]["gate_passed"])
+        self.assertTrue(result["right"]["gate_passed"])
+        self.assertTrue(result["paired_diff"]["passed"])
 
-    def test_classify_smoke_success_after_ansi_stripping(self) -> None:
-        rules = [
-            {
-                "id": "smoke-success",
-                "result": "success",
-                "contains": ["result: ok. passed=", " failed=0 total="],
-            },
-        ]
-        result = runner._classify(
-            "result: \x1b[32mok\x1b[0m. passed=54 failed=0 total=54\n",
-            returncode=0,
-            timed_out=False,
-            rules=rules,
-        )
+    def test_difftest_passes_only_after_both_basic_gates_and_diff(self) -> None:
+        def execute(test: str, artifact: Path, repo_root: Path) -> dict[str, object]:
+            return basic_execution(test, artifact, "checkpoint: A\ncheckpoint: B\n")
+
+        with mock.patch.object(runner, "_execute_basic", side_effect=execute):
+            result = runner._execute_difftest_run(difftest_case(), "run-0001", self.root / "run", self.root)
         self.assertEqual(result["result"], "success")
-        self.assertEqual(result["id"], "smoke-success")
+        self.assertTrue(result["paired_diff"]["passed"])
 
-    def test_delayed_stdin_writes_after_marker(self) -> None:
-        script = (
-            "import sys\n"
-            "print('/ #', flush=True)\n"
-            "line = sys.stdin.readline()\n"
-            "print('got=' + line.strip(), flush=True)\n"
-        )
-        stdout, returncode, timed_out, stdin_result = runner._run_command_capture(
-            [sys.executable, "-c", script],
-            Path.cwd(),
-            {},
-            5,
-            runner.DelayedStdin(ready_marker="/ #", payload="ls\n"),
-        )
-        self.assertEqual(returncode, 0)
-        self.assertFalse(timed_out)
-        self.assertTrue(stdin_result["stdin_sent"])
-        self.assertEqual(stdin_result["stdin_payload_bytes"], 3)
-        self.assertIn("got=ls", stdout)
+    def test_difftest_runs_right_when_left_runner_does_not_produce_a_result(self) -> None:
+        calls: list[str] = []
 
-    def test_capture_without_delayed_stdin_uses_devnull(self) -> None:
-        real_popen = runner.subprocess.Popen
-        with mock.patch.object(runner.subprocess, "Popen", wraps=real_popen) as popen:
-            stdout, returncode, timed_out, stdin_result = runner._run_command_capture(
-                [sys.executable, "-c", "print('done')"],
-                Path.cwd(),
-                {},
-                5,
-                None,
+        def execute(test: str, artifact: Path, repo_root: Path) -> dict[str, object]:
+            calls.append(test)
+            if test == "left-basic":
+                raise RuntimeError("missing left result")
+            return basic_execution(test, artifact, "checkpoint: A\ncheckpoint: B\n")
+
+        with mock.patch.object(runner, "_execute_basic", side_effect=execute):
+            result = runner._execute_difftest_run(
+                difftest_case(), "run-0001", self.root / "run", self.root
             )
+        self.assertEqual(calls, ["left-basic", "right-basic"])
+        self.assertEqual(result["result"], "failure")
+        self.assertEqual(result["left"]["execution_status"], "failed")
+        self.assertIn("missing left result", result["left"]["errors"])
+        self.assertTrue(result["right"]["gate_passed"])
 
-        self.assertEqual(popen.call_args.kwargs["stdin"], runner.subprocess.DEVNULL)
-        self.assertEqual(returncode, 0)
-        self.assertFalse(timed_out)
-        self.assertEqual(stdin_result, {})
-        self.assertIn("done", stdout)
+    def test_stress_basic_expectation_failure_overrides_success_classifier(self) -> None:
+        case = stress_case()
+        execution = basic_execution("user-smoke-native", self.root / "basic", "user exit status=0\n", expectations=False)
+        with mock.patch.object(runner, "_execute_basic", return_value=execution):
+            result = runner._execute_stress_run(case, "run-0001", self.root / "run", self.root)
+        self.assertEqual(result["result"], "failure")
+        self.assertEqual(result["class_id"], "nonzero-exit")
 
-    def test_setup_command_reports_progress_when_stdout_is_captured(self) -> None:
-        script = "import time; print('building', flush=True); time.sleep(0.05)"
-        terminal = StringIO()
 
-        with tempfile.TemporaryDirectory() as tmp:
-            output_dir = Path(tmp) / "case"
-            output_dir.mkdir()
-            with (
-                mock.patch.object(runner, "SETUP_PROGRESS_INTERVAL_SECONDS", 0.01),
-                redirect_stdout(terminal),
-            ):
-                runner._run_setup_command(
-                    [sys.executable, "-c", script],
-                    Path.cwd(),
-                    Path.cwd(),
-                    2,
-                    output_dir,
-                    label="linux-build",
-                )
-
-            log_path = output_dir / "linux-build" / "stdout.log"
-            result = json.loads((output_dir / "linux-build" / "result.json").read_text())
-            log_text = log_path.read_text()
-
-        progress = terminal.getvalue()
-        self.assertIn("[stress] linux-build start timeout=2s", progress)
-        self.assertIn("[stress] linux-build running elapsed=", progress)
-        self.assertIn(
-            "[stress] linux-build finish returncode=0 timed_out=false",
-            progress,
-        )
-        self.assertIn(f"log={log_path}", progress)
-        self.assertEqual(log_text, "building\n")
-        self.assertEqual(result["returncode"], 0)
-        self.assertFalse(result["timed_out"])
-        self.assertGreater(result["duration_seconds"], 0)
-
-    def test_delayed_stdin_config_is_optional(self) -> None:
-        self.assertIsNone(runner._delayed_stdin({}))
-        config = runner._delayed_stdin(
-            {"delayed_stdin": {"ready_marker": "ready", "payload": "input\n"}}
-        )
-        self.assertIsNotNone(config)
-        assert config is not None
-        self.assertEqual(config.ready_marker, "ready")
-        self.assertEqual(config.payload, "input\n")
-
-    def test_capture_until_stress_mem_terminates_process(self) -> None:
-        text = "checkpoint: EntryPreludePhase.Ready\n"
-        line = (
-            "stress_mem: v=1 encoding=hex "
-            f"bytes={len(text.encode())} total={len(text.encode())} "
-            f"overflow=0 dropped=0 data={text.encode().hex()}"
-        )
-        script = (
-            "import sys, time\n"
-            f"print({line!r}, flush=True)\n"
-            "time.sleep(30)\n"
-        )
-        real_popen = runner.subprocess.Popen
-        with mock.patch.object(runner.subprocess, "Popen", wraps=real_popen) as popen:
-            stdout, _returncode, timed_out, capture = (
-                runner._run_command_capture_until_stress_mem(
-                    [sys.executable, "-c", script],
-                    Path.cwd(),
-                    {},
-                    5,
-                )
-            )
-
-        self.assertEqual(popen.call_args.kwargs["stdin"], runner.subprocess.DEVNULL)
-        self.assertFalse(timed_out)
-        self.assertTrue(capture["terminated_after_stress_mem"])
-        self.assertIn("stress_mem: v=1", stdout)
-
-    def test_capture_until_stress_mem_waits_for_complete_hex_data(self) -> None:
-        text = "checkpoint: A\ncheckpoint: B\n"
-        encoded = text.encode().hex()
-        split = len("checkpoint: A\n".encode().hex())
-        prefix = (
-            "stress_mem: v=1 encoding=hex "
-            f"bytes={len(text.encode())} total={len(text.encode())} "
-            "overflow=0 dropped=0 data="
-        )
-        script = (
-            "import sys, time\n"
-            f"sys.stdout.write({(prefix + encoded[:split])!r})\n"
-            "sys.stdout.flush()\n"
-            "time.sleep(0.2)\n"
-            f"print({encoded[split:]!r}, flush=True)\n"
-            "time.sleep(30)\n"
-        )
-        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
-            [sys.executable, "-c", script],
-            Path.cwd(),
-            {},
-            5,
-        )
-        observed, stress_mem = runner._observed_text(stdout)
-
-        self.assertFalse(timed_out)
-        self.assertTrue(capture["terminated_after_stress_mem"])
+class EventAndDiffTests(unittest.TestCase):
+    def test_complete_stress_record_is_decoded_but_partial_is_not(self) -> None:
+        text = "checkpoint: SyscallTable.Wait4\n"
+        record = stress_record(text)
+        observed, metadata = runner._observed_text(record)
         self.assertEqual(observed, text)
-        self.assertIsNotNone(stress_mem)
+        self.assertEqual(metadata["bytes"], len(text.encode()))
+        partial = record[:-3]
+        observed, metadata = runner._observed_text(partial)
+        self.assertEqual(observed, partial)
+        self.assertIsNone(metadata)
 
-    def test_capture_until_stress_mem_supports_delayed_stdin(self) -> None:
-        script = (
-            "import sys, time\n"
-            "print('/ #', flush=True)\n"
-            "line = sys.stdin.readline().strip()\n"
-            "text = f'checkpoint: {line}\\n'\n"
-            "encoded = text.encode().hex()\n"
-            "print(\n"
-            "    f'stress_mem: v=1 encoding=hex bytes={len(text.encode())} '\n"
-            "    f'total={len(text.encode())} overflow=0 dropped=0 data={encoded}',\n"
-            "    flush=True,\n"
-            ")\n"
-            "time.sleep(30)\n"
+    def test_extracts_checkpoint_user_exit_and_smoke_events(self) -> None:
+        events = runner._extract_events(
+            "checkpoint: PayloadPhase.Online\nuser exit status=0\nresult: ok. passed=2 failed=0 total=2\n"
         )
-        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
-            [sys.executable, "-c", script],
-            Path.cwd(),
-            {},
-            5,
-            runner.DelayedStdin(ready_marker="/ #", payload="PayloadPhase.Online\n"),
-        )
-        observed, stress_mem = runner._observed_text(stdout)
+        self.assertEqual([event["name"] for event in events], ["PayloadPhase.Online", "UserExitStatus", "SmokeResult"])
 
-        self.assertFalse(timed_out)
-        self.assertTrue(capture["terminated_after_stress_mem"])
-        self.assertTrue(capture["stdin_sent"])
-        self.assertEqual(capture["stdin_payload_bytes"], len("PayloadPhase.Online\n".encode()))
-        self.assertEqual(observed, "checkpoint: PayloadPhase.Online\n")
-        self.assertIsNotNone(stress_mem)
+    def test_failure_classifier_precedes_success(self) -> None:
+        rules = [
+            {"id": "failure", "result": "failure", "contains": ["bad"], "regex": []},
+            {"id": "success", "result": "success", "contains": ["ok"], "regex": []},
+        ]
+        self.assertEqual(runner._classify("ok bad", 0, False, rules)["id"], "failure")
 
-    def test_capture_until_stress_mem_tolerates_interleaved_prompt_echo(self) -> None:
-        text = "checkpoint: PayloadPhase.Ready\n"
-        encoded = text.encode().hex()
-        split = len("checkpoint: Payload".encode().hex())
-        prefix = (
-            "stress_mem: v=1 encoding=hex "
-            f"bytes={len(text.encode())} total={len(text.encode())} "
-            "overflow=0 dropped=0 data="
+    def test_checkpoint_diff_reports_counts_and_first_divergence(self) -> None:
+        left = runner._extract_events("checkpoint: A\ncheckpoint: A\ncheckpoint: B\n")
+        right = runner._extract_events("checkpoint: A\ncheckpoint: B\n")
+        limited = runner._paired_checkpoint_diff(
+            left, right, ["A", "B"], checkpoint_scope_max_counts={"A": 1}
         )
-        script = (
-            "import sys, time\n"
-            f"sys.stdout.write({(prefix + encoded[:split] + '~ # exit\n' + encoded[split:])!r})\n"
-            "sys.stdout.flush()\n"
-            "time.sleep(30)\n"
+        self.assertTrue(limited["passed"])
+        self.assertEqual(limited["observed_but_not_compared"]["left"][0]["excluded_reason"], "scope_count_limit")
+        divergent = runner._paired_checkpoint_diff(
+            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
+            runner._extract_events("checkpoint: B\ncheckpoint: A\n"),
+            ["A", "B"],
         )
-        stdout, _returncode, timed_out, capture = runner._run_command_capture_until_stress_mem(
-            [sys.executable, "-c", script],
-            Path.cwd(),
-            {},
-            5,
-        )
-        observed, stress_mem = runner._observed_text(stdout)
+        self.assertFalse(divergent["passed"])
+        self.assertEqual(divergent["first_divergence"], {"index": 0, "left": "A", "right": "B"})
 
-        self.assertFalse(timed_out)
-        self.assertTrue(capture["terminated_after_stress_mem"])
-        self.assertEqual(observed, text)
-        self.assertIsNotNone(stress_mem)
-
-    def test_paired_config_parses_linux_build_command(self) -> None:
-        case = {
-            "paired": {
-                "checkpoint_scope": ["EntryPreludePhase.Started"],
-                "checkpoint_scope_max_counts": {"UserExec.MainElfReady": 2},
-                "arceos_ex": {"command": ["make", "run"]},
-                "linux": {
-                    "working_directory": "../linux-6.12",
-                    "build_command": [
-                        "make",
-                        "ARCH=riscv",
-                        "CROSS_COMPILE=riscv64-linux-gnu-",
-                        "-j",
-                        "$(nproc)",
-                    ],
-                    "command": ["qemu-system-riscv64"],
-                    "stop_after_stress_mem": True,
-                },
-            }
+    def test_duplicate_sequence_clusters_once(self) -> None:
+        sequences: dict[tuple[str, str, str], dict[str, object]] = {}
+        run = {
+            "result": "success", "class_id": "ok", "sequence_hash": "abc",
+            "sequence_tokens": ["checkpoint:A"], "run_id": "run-0001",
         }
-        config = runner._paired_config(case, Path("case.toml"), Path.cwd(), Path.cwd())
-        self.assertEqual(config["checkpoint_scope"], ["EntryPreludePhase.Started"])
-        self.assertEqual(config["checkpoint_scope_max_counts"], {"UserExec.MainElfReady": 2})
-        self.assertIn("ARCH=riscv", config["linux"]["build_command"])
-        self.assertTrue(config["linux"]["stop_after_stress_mem"])
+        runner._record_sequence(sequences, run)
+        runner._record_sequence(sequences, {**run, "run_id": "run-0002"})
+        self.assertEqual(len(sequences), 1)
+        self.assertEqual(next(iter(sequences.values()))["count"], 2)
 
-    def test_paired_config_resolves_private_disk_from_repo_root(self) -> None:
-        root = Path("/tmp/repo-root")
-        case = {
-            "paired": {
-                "checkpoint_scope": ["EntryPreludePhase.Started"],
-                "arceos_ex": {"command": ["make", "run"]},
-                "linux": {
-                    "command": ["qemu-system-riscv64"],
-                    "private_disk": {
-                        "template": "build/rootfs/canonical.raw",
-                        "path": "build/private/linux.raw",
-                    },
-                },
-            }
+
+class BaselineTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        (self.root / "runs/run-0001").mkdir(parents=True)
+        (self.root / "sequences/success/ok").mkdir(parents=True)
+        self.case = stress_case()
+        manifest = {
+            "schema_version": 2,
+            "case": "demo",
+            "mode": "stress",
+            "test": "user-smoke-native",
+            "config_fingerprint": "config",
+            "classifier_sha256": "classifier",
         }
+        summary = {
+            "schema_version": 2,
+            "case": "demo",
+            "completed_runs": 1,
+            "totals": {"success": 1, "failure": 0},
+            "classes": [{"result": "success", "class_id": "ok"}],
+            "sequences": [{"result": "success", "class_id": "ok", "sequence_hash": "old"}],
+        }
+        (self.root / "manifest.json").write_text(json.dumps(manifest))
+        (self.root / "summary.json").write_text(json.dumps(summary))
+        (self.root / "runs/run-0001/result.json").write_text(json.dumps({"sequence_tokens": ["A", "B"]}))
+        (self.root / "sequences/success/ok/old.json").write_text("{}")
 
-        config = runner._paired_config(case, Path("case.toml"), root, root)
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
 
-        self.assertEqual(
-            config["linux"]["private_disk"],
-            {
-                "template": root / "build/rootfs/canonical.raw",
-                "path": root / "build/private/linux.raw",
-            },
+    def test_compatible_baseline_is_hashed_and_differences_are_nonblocking(self) -> None:
+        runner._validate_baseline(self.root, self.case)
+        frozen = runner._baseline_manifest(self.root)
+        self.assertEqual(frozen["path"], str(self.root.resolve()))
+        self.assertEqual(len(frozen["content_sha256"]), 64)
+        self.assertIn("runs/run-0001/result.json", [item["path"] for item in frozen["files"]])
+        current = {
+            "schema_version": 2,
+            "completed_runs": 1,
+            "totals": {"success": 0, "failure": 1},
+            "classes": [{"result": "failure", "class_id": "new"}],
+            "sequences": [{"result": "failure", "class_id": "new", "sequence_hash": "new"}],
+        }
+        comparison = runner._compare_baseline(
+            self.root, self.case, current, [{"sequence_tokens": ["A", "C"]}]
         )
+        self.assertEqual(comparison["failure_rate_delta"], 1.0)
+        self.assertFalse(comparison["affects_exit_status"])
+        self.assertEqual(comparison["recent_sequence_first_divergence"]["index"], 1)
 
-    def test_paired_side_private_disk_is_copied_and_removed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            template = root / "canonical.raw"
-            private = root / "private.raw"
-            template.write_bytes(b"canonical")
-            run_dir = root / "run"
-            seen: list[bytes] = []
+    def test_v1_or_identity_mismatch_baseline_is_rejected(self) -> None:
+        manifest_path = self.root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["schema_version"] = 1
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.CompositeConfigError, "schema v2"):
+            runner._validate_baseline(self.root, self.case)
 
-            def capture(*_args: object) -> tuple[str, int, bool, dict[str, object]]:
-                seen.append(private.read_bytes())
-                private.write_bytes(b"guest mutation")
-                return "", 0, False, {}
 
-            with mock.patch.object(runner, "_run_command_capture", side_effect=capture):
-                result = runner._execute_paired_side(
-                    side_id="linux",
-                    config={
-                        "command": ["qemu-system-riscv64"],
-                        "workdir": root,
-                        "private_disk": {"template": template, "path": private},
-                    },
-                    run_dir=run_dir,
-                    timeout=1,
-                )
-
-            self.assertEqual(seen, [b"canonical"])
-            self.assertFalse(private.exists())
-            self.assertTrue(result["private_disk_removed"])
-            self.assertEqual(template.read_bytes(), b"canonical")
-
-    def test_paired_side_private_disk_is_removed_after_capture_exception(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            template = root / "canonical.raw"
-            private = root / "private.raw"
-            template.write_bytes(b"canonical")
-
-            with (
-                mock.patch.object(runner, "_run_command_capture", side_effect=RuntimeError("boom")),
-                self.assertRaisesRegex(RuntimeError, "boom"),
-            ):
-                runner._execute_paired_side(
-                    side_id="linux",
-                    config={
-                        "command": ["qemu-system-riscv64"],
-                        "workdir": root,
-                        "private_disk": {"template": template, "path": private},
-                    },
-                    run_dir=root / "run",
-                    timeout=1,
-                )
-
-            self.assertFalse(private.exists())
-
-    def test_rc_local_difftest_config_preserves_dotted_checkpoint_count_keys(self) -> None:
-        arceos_ex_root = Path(__file__).resolve().parents[2]
-        repo_root = arceos_ex_root.parents[1]
-        case_path = arceos_ex_root / "tests/stress/cases/rc-local-difftest.toml"
-        case = runner._load_toml(case_path)
-
-        config = runner._paired_config(case, case_path, repo_root, repo_root)
-
-        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.MainElfReady"], 3)
-        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.TrapFrameReady"], 3)
-        coverage = config["checkpoint_coverage"]["audit"]
-        self.assertEqual(coverage["required_total"], 103)
-        self.assertEqual(coverage["in_scope"], 58)
-        self.assertEqual(coverage["accounted_outside_scope"], 45)
-        self.assertEqual(coverage["unaccounted"], 0)
-
-    def test_paired_config_parses_checkpoint_coverage_with_dotted_keys(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            mapping_path = root / "mapping.json"
-            mapping_path.write_text(
-                json.dumps(
-                    [
-                        _mapping_row("A", "exact"),
-                        _mapping_row("B.Outside", "exact"),
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            case_path = root / "case.toml"
-            case_path.write_text(
-                """
-[paired]
-checkpoint_scope = ["A"]
-
-[paired.checkpoint_coverage]
-mapping_path = "mapping.json"
-required_mapping_kinds = ["exact"]
-mode = "explicit-accounting"
-
-[paired.checkpoint_coverage.accounted_outside_scope]
-"B.Outside" = "pending"
-
-[paired.arceos_ex]
-command = ["make", "run"]
-
-[paired.linux]
-command = ["qemu-system-riscv64"]
-""",
-                encoding="utf-8",
-            )
-
-            config = runner._paired_config(
-                runner._load_toml(case_path),
-                case_path,
-                root,
-                root,
-            )
-
-        coverage = config["checkpoint_coverage"]["audit"]
-        self.assertEqual(coverage["required_total"], 2)
-        self.assertEqual(coverage["in_scope"], 1)
-        self.assertEqual(coverage["accounted_outside_scope"], 1)
-        self.assertEqual(coverage["unaccounted"], 0)
-        self.assertEqual(
-            coverage["accounted_outside_scope_checkpoints"],
-            [{"name": "B.Outside", "reason": "pending"}],
-        )
-
-    def test_checkpoint_coverage_audit_fails_with_unaccounted_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            mapping_path = Path(tmp) / "mapping.json"
-            mapping_path.write_text(
-                json.dumps(
-                    [
-                        _mapping_row("A", "exact"),
-                        _mapping_row("B", "exact"),
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(runner.CheckpointCoverageError) as caught:
+class CoverageTests(unittest.TestCase):
+    def test_coverage_requires_explicit_accounting(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            mapping = Path(temporary) / "mapping.json"
+            mapping.write_text(json.dumps([
+                {"checkpoint_name": "A", "mapping_kind": "exact"},
+                {"checkpoint_name": "B", "mapping_kind": "exact"},
+                {"checkpoint_name": "C", "mapping_kind": "range"},
+            ]))
+            with self.assertRaises(runner.CheckpointCoverageError):
                 runner._audit_checkpoint_coverage(
-                    mapping_path=mapping_path,
+                    mapping_path=mapping,
                     required_mapping_kinds=["exact"],
                     checkpoint_scope=["A"],
                     accounted_outside_scope={},
                     mode="explicit-accounting",
                 )
-
-        self.assertIn("B", caught.exception.message)
-        self.assertEqual(caught.exception.audit["unaccounted"], 1)
-        self.assertEqual(caught.exception.audit["unaccounted_checkpoints"], ["B"])
-
-    def test_checkpoint_coverage_audit_ignores_range_and_unmapped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            mapping_path = Path(tmp) / "mapping.json"
-            mapping_path.write_text(
-                json.dumps(
-                    [
-                        _mapping_row("A", "exact"),
-                        _mapping_row("B", "range"),
-                        _mapping_row("C", "unmapped"),
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            coverage = runner._audit_checkpoint_coverage(
-                mapping_path=mapping_path,
+            audit = runner._audit_checkpoint_coverage(
+                mapping_path=mapping,
                 required_mapping_kinds=["exact"],
                 checkpoint_scope=["A"],
-                accounted_outside_scope={},
+                accounted_outside_scope={"B": "outside hard scope"},
                 mode="explicit-accounting",
             )
+            self.assertEqual(audit["unaccounted"], 0)
+            self.assertEqual(audit["required_total"], 2)
 
-        self.assertEqual(coverage["required_total"], 1)
-        self.assertEqual(coverage["in_scope"], 1)
-        self.assertEqual(coverage["accounted_outside_scope"], 0)
-        self.assertEqual(coverage["unaccounted"], 0)
 
-    def test_paired_stress_mem_parses_both_sides(self) -> None:
-        arceos_text = "AV9\ncheckpoint: TrampolineVm.Online\n"
-        linux_text = (
-            "checkpoint: EntryPreludePhase.Started\n"
-            "checkpoint: EventStream.Prepared\n"
-            "checkpoint: ExceptionStream.Prepared\n"
-            "checkpoint: TrampolineVm.Online\n"
-        )
-        arceos_line = (
-            "stress_mem: v=1 encoding=hex "
-            f"bytes={len(arceos_text.encode())} total={len(arceos_text.encode())} "
-            f"overflow=0 dropped=0 data={arceos_text.encode().hex()}"
-        )
-        linux_line = (
-            "stress_mem: v=1 encoding=hex "
-            f"bytes={len(linux_text.encode())} total={len(linux_text.encode())} "
-            f"overflow=0 dropped=0 data={linux_text.encode().hex()}"
-        )
-        arceos_observed, _ = runner._observed_text(arceos_line)
-        linux_observed, _ = runner._observed_text(linux_line)
-        diff = runner._paired_checkpoint_diff(
-            runner._extract_events(arceos_observed),
-            runner._extract_events(linux_observed),
-            [
-                "EntryPreludePhase.Started",
-                "EventStream.Prepared",
-                "ExceptionStream.Prepared",
-                "TrampolineVm.Online",
-            ],
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        self.assertTrue(diff["passed"])
-
-    def test_paired_checkpoint_diff_ignores_left_extra_outside_scope(self) -> None:
-        left = runner._extract_events(
-            "checkpoint: EntryPreludePhase.Started\n"
-            "checkpoint: Internal.Only\n"
-            "checkpoint: EntryPreludePhase.Ready\n"
-        )
-        right = runner._extract_events(
-            "checkpoint: EntryPreludePhase.Started\n"
-            "checkpoint: EntryPreludePhase.Ready\n"
-        )
-        diff = runner._paired_checkpoint_diff(
-            left,
-            right,
-            ["EntryPreludePhase.Started", "EntryPreludePhase.Ready"],
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        self.assertTrue(diff["passed"])
-        observed = diff["observed_but_not_compared"]
-        self.assertEqual(observed["arceos_ex"][0]["name"], "Internal.Only")
-        self.assertEqual(observed["arceos_ex"][0]["excluded_reason"], "outside_checkpoint_scope")
-        self.assertEqual(observed["linux"], [])
-
-    def test_paired_checkpoint_diff_counts_duplicate_outside_scope_events(self) -> None:
-        left = runner._extract_events(
-            "checkpoint: A\n"
-            "checkpoint: SyscallTable.Read\n"
-            "checkpoint: SyscallTable.Read\n"
-        )
-        right = runner._extract_events(
-            "checkpoint: A\n"
-            "checkpoint: SyscallTable.Write\n"
-        )
-        diff = runner._paired_checkpoint_diff(
-            left,
-            right,
-            ["A"],
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-
-        self.assertTrue(diff["passed"])
-        self.assertEqual(
-            diff["observed_but_not_compared"]["arceos_ex"],
-            [
-                {
-                    "name": "SyscallTable.Read",
-                    "count": 2,
-                    "first_line": 2,
-                    "excluded_reason": "outside_checkpoint_scope",
-                }
-            ],
-        )
-        self.assertEqual(diff["observed_but_not_compared"]["linux"][0]["count"], 1)
-
-    def test_paired_checkpoint_diff_limits_scoped_checkpoint_counts(self) -> None:
-        left = runner._extract_events(
-            "checkpoint: A\n"
-            "checkpoint: UserExec.MainElfReady\n"
-            "checkpoint: UserExec.MainElfReady\n"
-        )
-        right = runner._extract_events(
-            "checkpoint: A\n"
-            "checkpoint: UserExec.MainElfReady\n"
-            "checkpoint: UserExec.MainElfReady\n"
-            "checkpoint: UserExec.MainElfReady\n"
-        )
-        diff = runner._paired_checkpoint_diff(
-            left,
-            right,
-            ["A", "UserExec.MainElfReady", "UserExec.MainElfReady"],
-            checkpoint_scope_max_counts={"UserExec.MainElfReady": 2},
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-
-        self.assertTrue(diff["passed"])
-        observed = diff["observed_but_not_compared"]
-        self.assertEqual(observed["linux"][0]["name"], "UserExec.MainElfReady")
-        self.assertEqual(observed["linux"][0]["excluded_reason"], "scope_count_limit")
-
-    def test_report_lists_observed_but_not_compared_checkpoints(self) -> None:
-        diff = runner._paired_checkpoint_diff(
-            runner._extract_events("checkpoint: A\ncheckpoint: SyscallTable.Read\n"),
-            runner._extract_events("checkpoint: A\n"),
-            ["A"],
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            report = Path(tmp) / "report.md"
-            runner._write_report(
-                report,
-                "case",
-                {
-                    "dry_run": False,
-                    "requested_runs": 1,
-                    "completed_runs": 1,
-                    "started_at": "now",
-                    "ended_at": "later",
-                    "total_seconds": 1.0,
-                    "average_run_seconds": 1.0,
-                    "totals": {"success": 1, "failure": 0},
-                    "classes": [],
-                    "failure_vs_success": [],
-                    "paired_checkpoint_diff": [diff],
-                },
-            )
-            text = report.read_text(encoding="utf-8")
-
-        self.assertIn("observed_but_not_compared", text)
-        self.assertIn("SyscallTable.Read x1 (outside_checkpoint_scope)", text)
-
-    def test_paired_checkpoint_diff_reports_missing_extra_and_order(self) -> None:
-        scope = ["A", "B"]
-        missing = runner._paired_checkpoint_diff(
-            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
-            runner._extract_events("checkpoint: A\n"),
-            scope,
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        self.assertFalse(missing["passed"])
-        self.assertEqual(missing["missing_from_linux"], ["B"])
-
-        extra = runner._paired_checkpoint_diff(
-            runner._extract_events("checkpoint: A\n"),
-            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
-            scope,
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        self.assertFalse(extra["passed"])
-        self.assertEqual(extra["extra_in_linux"], ["B"])
-
-        order = runner._paired_checkpoint_diff(
-            runner._extract_events("checkpoint: A\ncheckpoint: B\n"),
-            runner._extract_events("checkpoint: B\ncheckpoint: A\n"),
-            scope,
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        self.assertFalse(order["passed"])
-        self.assertTrue(order["order_mismatch"])
-        self.assertEqual(order["first_divergence"]["index"], 0)
-
-    def test_records_duplicate_sequence_once(self) -> None:
-        events = runner._extract_events("user hello\nuser exit status=0\n")
-        tokens = [runner._event_token(event) for event in events]
-        run = {
-            "result": "success",
-            "class_id": "user-boot-success",
-            "sequence_hash": runner._sequence_hash(tokens),
-            "run_id": "run-0001",
-            "sequence_tokens": tokens,
-            "events_data": events,
+class SummaryTests(unittest.TestCase):
+    def test_summary_reports_failure_success_analysis_and_zero_run_average(self) -> None:
+        now = datetime.now(timezone.utc)
+        empty = runner._build_summary("demo", 0, [], {}, dry_run=True, started=now, ended=now, duration_seconds=0)
+        self.assertIsNone(empty["average_run_seconds"])
+        self.assertEqual(empty["totals"], {"success": 0, "failure": 0})
+        sequences = {
+            ("success", "ok", "s"): {"tokens": ["A", "B"], "sequence_hash": "s", "count": 1, "first_run": "run-0001", "last_run": "run-0001"},
+            ("failure", "bad", "f"): {"tokens": ["A", "C"], "sequence_hash": "f", "count": 1, "first_run": "run-0002", "last_run": "run-0002"},
         }
-        sequences = {}
-        runner._record_sequence(sequences, run)
-        runner._record_sequence(sequences, {**run, "run_id": "run-0002"})
-        self.assertEqual(len(sequences), 1)
-        entry = next(iter(sequences.values()))
-        self.assertEqual(entry["count"], 2)
-        self.assertEqual(entry["first_run"], "run-0001")
-        self.assertEqual(entry["run_ids"], ["run-0001", "run-0002"])
-
-    def test_duplicate_stress_mem_sequence_saves_first_artifacts_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            events = runner._extract_events("result: ok. passed=1 failed=0 total=1\n")
-            tokens = [runner._event_token(event) for event in events]
-            sequence_hash = runner._sequence_hash(tokens)
-
-            base = {
-                "result": "success",
-                "class_id": "smoke-success",
-                "sequence_hash": sequence_hash,
-                "sequence_tokens": tokens,
-                "events_data": events,
-                "captured_stdout": "stress_mem: ...\n",
-                "stress_mem_text": "result: ok. passed=1 failed=0 total=1\n",
-            }
-            first = {
-                **base,
-                "run_id": "run-0001",
-                "events_saved": False,
-                "stdout_saved": False,
-                "_events_candidate": str(root / "run-0001" / "events.first-seen.jsonl"),
-                "_stdout_candidate": str(root / "run-0001" / "stdout.first-seen.log"),
-            }
-            second = {
-                **base,
-                "run_id": "run-0002",
-                "events_saved": False,
-                "stdout_saved": False,
-                "_events_candidate": str(root / "run-0002" / "events.first-seen.jsonl"),
-                "_stdout_candidate": str(root / "run-0002" / "stdout.first-seen.log"),
-            }
-            (root / "run-0001").mkdir()
-            (root / "run-0002").mkdir()
-
-            sequences = {}
-            runner._record_sequence(sequences, first)
-            runner._record_sequence(sequences, second)
-
-            self.assertTrue(first["events_saved"])
-            self.assertTrue(first["stdout_saved"])
-            self.assertFalse(second["events_saved"])
-            self.assertFalse(second["stdout_saved"])
-            self.assertTrue((root / "run-0001" / "events.first-seen.jsonl").exists())
-            self.assertTrue((root / "run-0001" / "stdout.first-seen.log").exists())
-            self.assertFalse((root / "run-0002" / "events.first-seen.jsonl").exists())
-            self.assertFalse((root / "run-0002" / "stdout.first-seen.log").exists())
-
-    def test_summary_reports_total_and_average_time(self) -> None:
-        summary = runner._build_summary(
-            "case",
-            2,
-            [
-                {
-                    "result": "success",
-                    "class_id": "ok",
-                    "duration_seconds": 1.2,
-                },
-                {
-                    "result": "failure",
-                    "class_id": "bad",
-                    "duration_seconds": 1.8,
-                },
-            ],
-            {},
-            dry_run=False,
-            started=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
-            ended=datetime(2026, 6, 27, 1, 2, 6, tzinfo=timezone.utc),
-            duration_seconds=3.01,
-        )
-
-        self.assertEqual(summary["started_at"], "2026-06-27T01:02:03+00:00")
-        self.assertEqual(summary["ended_at"], "2026-06-27T01:02:06+00:00")
-        self.assertEqual(summary["total_seconds"], 3.01)
-        self.assertEqual(summary["average_run_seconds"], 1.5)
-        self.assertEqual(summary["completed_runs"], 2)
-
-    def test_summary_average_time_is_none_without_runs(self) -> None:
-        summary = runner._build_summary(
-            "case",
-            0,
-            [],
-            {},
-            dry_run=True,
-            started=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
-            ended=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
-            duration_seconds=0.0,
-        )
-
-        self.assertIsNone(summary["average_run_seconds"])
-        self.assertEqual(summary["total_seconds"], 0.0)
-
-    def test_report_scalar_formats_none_as_null(self) -> None:
-        self.assertEqual(runner._report_scalar(None), "null")
-        self.assertEqual(runner._report_scalar(1.25), "1.25")
+        runs = [
+            {"result": "success", "class_id": "ok", "duration_seconds": 1.0},
+            {"result": "failure", "class_id": "bad", "duration_seconds": 3.0},
+        ]
+        summary = runner._build_summary("demo", 2, runs, sequences, dry_run=False, started=now, ended=now, duration_seconds=4)
+        self.assertEqual(summary["average_run_seconds"], 2.0)
+        self.assertEqual(summary["failure_vs_success"][0]["common_prefix_length"], 1)
 
 
 if __name__ == "__main__":

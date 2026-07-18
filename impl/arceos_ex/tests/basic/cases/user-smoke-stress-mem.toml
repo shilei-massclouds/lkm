@@ -1,0 +1,28 @@
+schema_version = 2
+name = "user-smoke-stress-mem"
+purpose = "acceptance"
+timeout_seconds = 120
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = ["stress-mem"]
+profile = "release"
+stress_mem_bytes = 65536
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/opt/lkm/tests/user-smoke"
+rng = true
+exit_policy = "stress-mem"
+interaction = "none"
+
+[expect]
+guest_exit_status = 0
+markers = ["user-smoke: begin", "user-smoke: end status=0"]
+forbidden_markers = ["Function not implemented", "overflow=1", "arceos_ex panic"]

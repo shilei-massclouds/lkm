@@ -64,7 +64,7 @@
  * close(0/1/2) the vacated stdio slot may be reused by the next TTY open.
  * Each fd entry keeps independent status flags and close-on-exec state, while
  * all entries share the same staged backend. This is only for staged
- * BusyBox/OpenRC probing; it is not devtmpfs, VT allocation, /dev/console,
+ * BusyBox-init probing; it is not devtmpfs, VT allocation, /dev/console,
  * major/minor lookup or a multiple-TTY driver registry.
  *
  * Plain fork/vfork child execution currently reuses the same runtime
@@ -364,7 +364,7 @@ object FilesStruct: ResourceObject {
             on Action::OpenNullPath {
                 /*
                  * /dev/null is a staged built-in character-device alias for
-                 * OpenRC/getty stdio redirection. It allocates only an fd
+                 * BusyBox init/getty stdio redirection. It allocates only an fd
                  * table entry pointing at the Null OFD/backend, preserves
                  * status flags and close-on-exec, and does not create devtmpfs,
                  * device-number, permission, LSM or generic char-device

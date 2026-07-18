@@ -25,12 +25,16 @@ Rule IDs (MUST):
 - `arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user`
 - `arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile`
 - `arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode`
-- `arceos_ex_must_canonical_keep_distribution_init_and_inittab`
+- `arceos_ex_must_canonical_keep_distribution_busybox_init`
+- `arceos_ex_must_canonical_install_deterministic_inittab`
 - `arceos_ex_must_canonical_merge_stable_test_account`
 
-Canonical is a normal Alpine/OpenRC rootfs. Construction preserves the tarball's `/sbin/init`, complete
-`/etc/inittab`, and ordinary `/etc`; it keeps `root:*` locked and idempotently merges the stable non-root
-`test/test` account and password hash. No rc.local-specific inittab exists.
+Canonical is an Alpine minirootfs with the distribution BusyBox `/sbin/init` and ordinary `/etc`. Construction
+must replace the minirootfs inittab (whose OpenRC commands reference a package not present in minirootfs) with
+a checked-in deterministic BusyBox-init profile. The profile contains no `/sbin/openrc` reference, starts the
+minimum numeric-TTY and serial gettys needed by arceos_ex and reference Linux QEMU, and retains a reboot action.
+Construction keeps `root:*` locked and idempotently merges the stable non-root `test/test` account and password
+hash. No rc.local-specific inittab exists.
 
 Repository programs live below `impl/arceos_ex/tests/user/`, build through that directory's Makefile, and are
 installed below `/opt/lkm/tests`. Current fixtures include user-smoke, init-hello, nolibc probes and the static
@@ -39,7 +43,7 @@ argv/envp and only invokes that script through `/bin/sh`; failure prints a stabl
 Any fixture failure aborts construction rather than reusing stale output.
 
 Legacy arbitrary target-map/file-overlay mechanisms may remain only while other specialized stress assets
-consume them. rc.local/OpenRC basic, focused stress and default paired difftest must not use those mechanisms;
+consume them. rc.local/BusyBox-init basic, focused stress and paired difftest must not use those mechanisms;
 their obsolete `/etc` overlays are deleted.
 
 ## Input-sensitive template lifecycle

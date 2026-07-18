@@ -1,18 +1,9 @@
+schema_version = 2
 name = "df-0001-user-boot"
-description = "Repeat the canonical user-smoke-native acceptance path to reproduce DF-0001."
-default_runs = 30
-timeout_seconds = 120
-working_directory = "."
-setup_command = [
-  "make",
-  "disk",
-  "ROOTFS=canonical",
-]
-command = [
-  "make",
-  "run",
-  "TEST=user-smoke-native",
-]
+description = "Repeat the canonical user-smoke-native basic test to reproduce DF-0001."
+mode = "stress"
+test = "user-smoke-native"
+runs = 30
 classifier = "../classifiers/defects.toml"
 
 [metadata]

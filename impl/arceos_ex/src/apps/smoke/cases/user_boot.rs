@@ -28,7 +28,7 @@ use crate::{
     },
 };
 
-const USER_OPENRC_VFORK_FLAGS: usize = 0x4111;
+const USER_BUSYBOX_INIT_VFORK_FLAGS: usize = 0x4111;
 const USER_SMOKE_INIT_PATH: &[u8] = b"/opt/lkm/tests/user-smoke";
 const USER_SMOKE_INIT_PATH_NUL: &[u8] = b"/opt/lkm/tests/user-smoke\0";
 const USER_PLAIN_FORK_FLAGS: usize = 0x11;
@@ -1860,7 +1860,7 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
     let mut parent_frame = TrapFrame::zeroed();
     parent_frame.sepc = 0x4000 + index * 4;
     parent_frame.set_reg(2, USER_STACK_TOP - 0x100 - index * 16);
-    parent_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+    parent_frame.set_reg(10, USER_BUSYBOX_INIT_VFORK_FLAGS);
     parent_frame.set_reg(11, USER_STACK_TOP - 0x200 - index * 16);
     parent_frame.set_reg(17, 220);
 
@@ -1876,7 +1876,7 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &parent_frame,
-            USER_OPENRC_VFORK_FLAGS,
+            USER_BUSYBOX_INIT_VFORK_FLAGS,
             USER_STACK_TOP - 0x200 - index * 16,
             usize::MAX,
             false,
@@ -1965,7 +1965,7 @@ fn exercise_nested_vfork_child_slot(assertions: &mut SmokeAssertions) {
         let mut nested_frame = TrapFrame::zeroed();
         nested_frame.sepc = 0x6000;
         nested_frame.set_reg(2, USER_STACK_TOP - 0x480);
-        nested_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+        nested_frame.set_reg(10, USER_BUSYBOX_INIT_VFORK_FLAGS);
         nested_frame.set_reg(11, USER_STACK_TOP - 0x580);
         nested_frame.set_reg(17, 220);
 
@@ -1981,7 +1981,7 @@ fn exercise_nested_vfork_child_slot(assertions: &mut SmokeAssertions) {
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &nested_frame,
-                USER_OPENRC_VFORK_FLAGS,
+                USER_BUSYBOX_INIT_VFORK_FLAGS,
                 USER_STACK_TOP - 0x580,
                 true,
                 true,
@@ -2360,7 +2360,7 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
     let mut parent_frame = TrapFrame::zeroed();
     parent_frame.sepc = 0x7000 + index * 4;
     parent_frame.set_reg(2, USER_STACK_TOP - 0x300 - index * 16);
-    parent_frame.set_reg(10, USER_OPENRC_VFORK_FLAGS);
+    parent_frame.set_reg(10, USER_BUSYBOX_INIT_VFORK_FLAGS);
     parent_frame.set_reg(11, USER_STACK_TOP - 0x400 - index * 16);
     parent_frame.set_reg(17, 220);
 
@@ -2376,7 +2376,7 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
             &parent_frame,
-            USER_OPENRC_VFORK_FLAGS,
+            USER_BUSYBOX_INIT_VFORK_FLAGS,
             USER_STACK_TOP - 0x400 - index * 16,
             usize::MAX,
             false,

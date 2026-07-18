@@ -64,14 +64,14 @@ task graphs, complete COW/mm, signals, networking and full fd sharing remain def
 The supported `clone(220)` plain-fork shape decodes ABI flags in `SyscallTable` and delegates object
 creation to `TaskCreationCore.CopyUserProcess`. The current implementation deliberately uses one
 observed child slot: parent state and writable pages are saved for handoff, the child receives `a0=0`,
-and wait/exit restores the parent view before status copyout. Nested OpenRC/login slices reuse only the
+and wait/exit restores the parent view before status copyout. Nested BusyBox-init/login slices reuse only the
 explicitly modeled continuation records; this is not a claim of a general runnable task graph or COW.
 For a PID1-originated plain fork, successful wait status copyout completes reaping: the exited internal
 `UserChild` task is removed from the runqueue, its slot becomes `Prepared`, and the next sequential fork
 reuses that task ref with a monotonically increasing user-visible pid. This path does not use the vfork
 completed-record archive.
 
-For the observed OpenRC login-shell plain fork, `UserInitProcess` additionally owns one pending
+For the observed BusyBox init login-shell plain fork, `UserInitProcess` additionally owns one pending
 grandchild identity from clone return until the shell's wait4 handoff. It records the grandchild pid and
 the shell parent's inherited process group/session without creating another runnable task. While that
 identity is parent-visible and has not entered the handoff/exec continuation, the shell parent may issue

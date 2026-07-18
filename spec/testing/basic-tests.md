@@ -2,8 +2,8 @@
 
 本文档规定“基本测试”的执行拓扑和稳定接口。一个基本测试必须只解析一份冻结配置、构造一个
 kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 kernel checkpoint callback、用户程序、
-发行版命令、rc.local、OpenRC login 或人工诊断；是否需要输入不改变基本测试身份。stress 通过重复
-调用基本测试或专用普通路径形成复合测试，paired difftest 通过两个非交互/脚本输入 side 形成复合测试。
+发行版命令、rc.local、BusyBox init/login 或人工诊断；是否需要输入不改变基本测试身份。stress 只通过
+重复调用一个基本测试形成复合测试，paired difftest 只通过严格顺序执行两个基本测试形成复合测试。
 
 ## Stable interface and stages
 
@@ -39,11 +39,15 @@ QEMU 入口。
 
 - 顶层：`schema_version`、`name`、`purpose = "acceptance" | "diagnostic"`、
   `timeout_seconds`，以及可选且必须显式声明的 `pre_script`、`post_script`。
-- `kernel`：`app`、`provider`、`probe`、`profile`，以及可选的 `probe_file`、
-  `stress_mem_bytes`、`extra_rustflags`。
+- `kernel` 是严格 union。未声明 `target` 或 `target = "arceos_ex"` 时允许 `app`、`provider`、
+  `probe`、`profile`，以及可选的 `probe_file`、`stress_mem_bytes`、`extra_rustflags`；
+  `stress_mem_bytes` 只允许 recorder 实现已声明的 `32768`、`65536`、`131072`、`262144`
+  或 `524288`，未知容量必须在构建前失败；
+  `target = "linux"` 时禁止这些 arceos_ex 字段，并通过 `LINUX_PROVIDER_DIR` 构建启用
+  `CONFIG_LKM_CHECKPOINTS` 的 `arch/riscv/boot/Image`。
 - `disk`：`mode`，template mode 的 `profile`，以及其它 mode 规定的 `path`、`readonly`、
   `generator` 或 `size`。
-- `qemu`：`memory_mb`、`smp`、`kernel_cmdline`、结构化 device 开关、`exit_policy`、
+- `qemu`：`memory_mb`、`smp`、`kernel_cmdline`、结构化 device/network/host-forward、`exit_policy`、
   `interaction = "none" | "scripted" | "terminal"`、可选 marker 退出值和 `stdin_steps`。
 - `expect`：可选的 host `process_exit`、guest `guest_exit_status`、必要/禁止 marker，及必要 marker
   的最小/精确计数。acceptance 必须至少声明一个 observable fact；diagnostic 可以只记录会话结果。
@@ -51,6 +55,15 @@ QEMU 入口。
 未知字段、错误类型、未知 disk/profile/device/exit policy/interaction、name 与文件名不一致、非法脚本
 权限或缺少 mode 所需来源，都必须在 build 或 QEMU 前失败。配置只保存数据值；不得保存 `make ...`、
 完整 QEMU shell 命令或由 runner 执行的任意命令字符串。
+
+正式 test name 中 `-linux` 固定表示参考 Linux kernel target；`-linux-object` 继续只表示
+arceos_ex 的 Linux-object provider，二者不得互相别名或推断。新增 composite 专用 identity 包括
+`user-smoke-stress-mem`、`kernel-smoke-stress-mem`、`distro-sh-checkpoints{,-linux}`、
+`busybox-init-checkpoints{,-linux}` 和 `rc-local-linux`。BusyBox init/login acceptance identity 为
+`busybox-init-login-native` 与 `busybox-init-login-linux-object`；不得保留误称 OpenRC 的 test name。
+`distro-sh-checkpoints` 与 `distro-sh-checkpoints-linux` 必须使用同一 scripted payload：连续两次
+`/bin/ls`，再执行 `/sbin/poweroff -f`。不得用一侧 shell builtin `exit`、另一侧额外 exec
+的方式构造可观测 checkpoint 数量差异。
 
 未来新增同时提供 native 与 linux-object provider 的 basic test 时，正式 test name 必须使用无 provider
 后缀的基础名表示 `kernel.provider = "native"`，并使用同一基础名加 `-lo` 表示
@@ -94,8 +107,11 @@ PreScript 失败时 QEMU 不得启动。只要 QEMU 阶段已经开始，PostScr
 同时写到当前终端和 `qemu.log`，包括由真实交互会话消费的终端查询。`make run` 在 kernel build 和
 PreScript 之前检查真实 stdin/stdout TTY；无 TTY 时结构化失败。`build` 和 `manifest` 不要求 TTY。
 
-runner 以独立进程组启动 QEMU，执行整体 timeout，并实现等待 process exit/guest shutdown 或 marker
-后终止的退出策略。timeout、异常、正常退出和 terminal 中断都必须恢复原终端属性、执行适用的
+runner 以独立进程组启动 QEMU，执行整体 timeout，并实现等待 process exit/guest shutdown、marker
+或完整合法 `stress_mem` record 后终止的退出策略。`stress_mem` 只有在 header、声明长度和完整 hex
+payload 均可解析时才算到达；partial record 不得提前终止。expectation 的观察面是完整
+`qemu.log` 与已解码 `stress_mem` payload 的联合：不得因为存在 record 就丢弃串口上的登录、shell
+或其他 guest 证据，checkpoint 也不得仅作为未解码 hex 存在。timeout、异常、正常退出和 terminal 中断都必须恢复原终端属性、执行适用的
 PostScript、回收完整进程组并删除私有磁盘。不能把 QEMU 或 raw terminal 留给调用者。
 
 host process exit 与 guest exit 是独立事实。guest exit status 从稳定的 `user exit status=N` 日志提取；

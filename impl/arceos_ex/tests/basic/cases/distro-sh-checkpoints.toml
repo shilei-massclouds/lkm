@@ -1,0 +1,33 @@
+schema_version = 2
+name = "distro-sh-checkpoints"
+purpose = "diagnostic"
+timeout_seconds = 180
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = ["announce", "stress-mem"]
+profile = "release"
+stress_mem_bytes = 262144
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi init=/bin/sh"
+rng = true
+exit_policy = "stress-mem"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "~ #", payload = "/bin/ls\n/bin/ls\n/sbin/poweroff -f\n" },
+]
+
+[expect]
+markers = ["PayloadPhase.Online"]
+forbidden_markers = ["Function not implemented", "overflow=1", "arceos_ex panic"]
+marker_counts = [
+  { marker = "lost+found", at_least = 2 },
+]

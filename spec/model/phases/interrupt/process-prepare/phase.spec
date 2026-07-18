@@ -366,14 +366,14 @@ object TaskCreationCore: TaskObject {
              * shared creation contract，但输入从 rest_init 内核线程 entry
              * 切换为当前 UserInitProcess 的 trap frame、mm/files/fs/signal
              * 可见状态。当前覆盖 BusyBox /bin/sh 触发的 plain fork
-             * 以及 OpenRC 顺序/单层 nested CLONE_VM|CLONE_VFORK child。
+             * 以及 BusyBox init 顺序/单层 nested CLONE_VM|CLONE_VFORK child。
              * 后者仍只有一个 internal UserChild execution slot；每次
              * bounded child exit 后由 UserChildProcess 归档 completed-child
              * record，释放 active slot，再允许下一次 CopyUserProcess。
              * 若当前 UserChild 已是 getty/login continuation，则只允许
              * observed login post-auth nested vfork takeover：新 user-visible
              * pid 复用同一 execution slot，不创建第二个 runnable task ref。
-             * 后续 OpenRC login shell 中 /bin/ls 触发的 plain fork 也是
+             * 后续 BusyBox init login shell 中 /bin/ls 触发的 plain fork 也是
              * current-child continuation，但不是 CopyUserProcess runnable
              * task 创建路径；本片在 UserChildProcess 内规格化为
              * observed child plain fork：保存 shell parent 和 grandchild

@@ -1,18 +1,9 @@
+schema_version = 2
 name = "df-0003-distro-sh-ls"
-description = "Repeat two sequential external commands on the non-PTY distro /bin/sh delayed-input path for DF-0003."
-default_runs = 30
-timeout_seconds = 120
-working_directory = "."
-setup_command = [
-  "make",
-  "disk",
-  "ROOTFS=canonical",
-]
-command = [
-  "make",
-  "run",
-  "TEST=distro-sh-native",
-]
+description = "Repeat the canonical distro-sh-native basic test for DF-0003."
+mode = "stress"
+test = "distro-sh-native"
+runs = 30
 classifier = "../classifiers/df-0003-distro-sh-ls.toml"
 
 [metadata]

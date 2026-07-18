@@ -83,7 +83,7 @@ make build TEST=hello-linux-object
 ```
 
 `TEST` 是正式选择变量。旧 `APP` 只是它的变量名别名，接受相同的完整 TEST 名空间，例如
-`make run APP=openrc-login-native` 等价于选择 `TEST=openrc-login-native`。命令行与真实环境变量写法
+`make run APP=busybox-init-login-native` 等价于选择 `TEST=busybox-init-login-native`。命令行与真实环境变量写法
 遵循同一规则；APP 不是 kernel app 行为覆盖，不能和显式 TEST 同时使用。公开 test name
 `user-boot` 已退役，`TEST=user-boot` 与 `APP=user-boot` 都会在 build 前结构化失败并提示改用
 `shell`；TOML 内部的 `kernel.app = "user-boot"` 仍只是 kernel 构建选择。
@@ -101,13 +101,14 @@ QEMU 返回 0 本身不代表 guest 测试通过。
 ### Canonical rootfs
 
 `make disk` 等价于 `make disk ROOTFS=canonical`，独立构造
-`impl/arceos_ex/build/rootfs/canonical.raw`；未知 profile 会失败。该镜像保留正常 Alpine/OpenRC
-的 `/etc/inittab` 和 `/sbin/init`、锁定 root，并内置稳定的 `test/test` 非 root 账户。仓库 fixture、
+`impl/arceos_ex/build/rootfs/canonical.raw`；未知 profile 会失败。该镜像使用确定的 BusyBox
+`/sbin/init` 配置，以仓库内 `/etc/inittab` 启动 tty1/ttyS0 getty，不引用 minirootfs 中未安装的 OpenRC；
+镜像锁定 root，并内置稳定的 `test/test` 非 root 账户。仓库 fixture、
 rc.local ELF launcher/script 位于 `/opt/lkm/tests/`，经过校验的 sibling LTP staging 位于 `/opt/ltp`。
 
 builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP 输入指纹；输入变化会自动重建，
 输入不变则复用，`make disk FORCE=1` 强制重建。`make run` 只核对 template manifest，缺失/过期时
-提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/OpenRC 双 provider acceptance 进入默认回归；
+提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/BusyBox init login 双 provider acceptance 进入默认回归；
 `user-smoke-{native,linux-object}` 是非交互自动验收；`shell`（native）与 `shell-lo`（linux-object）是使用 canonical
 私有可写副本、`init=/bin/sh` 和真实 PTY 的人工诊断，正常退出 verdict 为 inconclusive。两者身份不因
 调用上下文切换，shell 与独立的 LTP terminal diagnostic 都仅显式运行。
@@ -165,13 +166,15 @@ make run TEST=hello-linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 make test-stress
 ```
 
-`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前分别重复 canonical `user-smoke-native`、`kernel-smoke-native` 和非 PTY scripted `distro-sh-native`；DF-0001 显式使用 `TEST=user-smoke-native`，DF-0002 仍保留非 probe 的旧 `APP=smoke` 调用拼写。三个 case 的 setup 都只核对/复用 canonical template，不构造 legacy overlay。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
+`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定
+`STRESS_CASES` 时分别循环 `user-smoke-native`、`kernel-smoke-native` 和 `distro-sh-native`。
+Composite runner 不执行 command/setup/QEMU；每轮只在固定子目录调用一次 basic test，再读取其
+`result.json` 与 `qemu.log`。非零 runs 的整个入口只先运行一次 `make disk`；超时只由 basic TOML 决定。
 
 常用覆盖方式：
 
 ```sh
 make test-stress STRESS_RUNS=30
-make test-stress STRESS_TIMEOUT=60
 ```
 
 只检查配置和输出目录生成、不执行 QEMU：
@@ -189,6 +192,10 @@ make test-stress \
 ```
 
 每次压力测试会在 `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` 下保存原始日志、结构化事件、去重后的事件序列、分类统计和 `report.md`。重复序列只保存第一次代表样本，后续 run 通过计数和 run id 归档。
+
+单 case 可传入 `STRESS_BASELINE=<report-dir>` 对比 schema-v2 历史报告；历史失败率、分类/序列增删与
+最近序列首个分歧只作分析信息，不额外改变当前调用的退出状态。差分测试也只顺序执行左右两个
+basic test，两侧独立完成且 expectations 通过后才比较 checkpoint 序列。
 
 ## 维护方式
 

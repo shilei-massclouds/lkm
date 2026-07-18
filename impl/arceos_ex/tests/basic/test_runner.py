@@ -76,19 +76,19 @@ class BasicMakeSelectionTests(unittest.TestCase):
                     self.assertEqual(self.captured_request(), test_name)
 
     def test_app_process_environment_aliases_test(self) -> None:
-        completed = self.run_make(environment={"APP": "openrc-login-native"})
+        completed = self.run_make(environment={"APP": "busybox-init-login-native"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(self.captured_request(), "openrc-login-native")
+        self.assertEqual(self.captured_request(), "busybox-init-login-native")
 
     def test_test_process_environment_is_formal_selector(self) -> None:
-        completed = self.run_make(environment={"TEST": "openrc-login-native"})
+        completed = self.run_make(environment={"TEST": "busybox-init-login-native"})
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(self.captured_request(), "openrc-login-native")
+        self.assertEqual(self.captured_request(), "busybox-init-login-native")
 
     def test_explicit_test_and_app_from_mixed_sources_are_rejected(self) -> None:
         completed = self.run_make(
             "TEST=user-smoke-native",
-            environment={"APP": "openrc-login-native"},
+            environment={"APP": "busybox-init-login-native"},
         )
         self.assertEqual(completed.returncode, 2)
         self.assertIn("selection is ambiguous", completed.stderr)
@@ -153,6 +153,17 @@ class BasicRunnerConfigTests(unittest.TestCase):
     def test_mode_specific_disk_fields_are_rejected(self) -> None:
         path = self.write_case(self.base_case(disk='mode = "none"\npath = "disk.raw"'))
         with self.assertRaisesRegex(runner.ConfigError, "disk mode none"):
+            runner.load_config(path, self.root)
+
+    def test_stress_mem_capacity_is_validated_before_build(self) -> None:
+        body = self.base_case().replace(
+            'profile = "release"',
+            'profile = "release"\nstress_mem_bytes = 524288',
+        )
+        path = self.write_case(body)
+        self.assertEqual(runner.load_config(path, self.root)["kernel"]["stress_mem_bytes"], 524288)
+        path.write_text(body.replace("524288", "524289"))
+        with self.assertRaisesRegex(runner.ConfigError, "stress_mem_bytes must be one of"):
             runner.load_config(path, self.root)
 
     def test_manifest_derives_structured_build_disk_and_qemu_arguments(self) -> None:
@@ -276,7 +287,10 @@ class BasicRunnerConfigTests(unittest.TestCase):
             / "df-0001-user-boot.toml"
         )
         df0001 = tomllib.loads(df0001_path.read_text())
-        self.assertEqual(df0001["command"], ["make", "run", "TEST=user-smoke-native"])
+        self.assertEqual(df0001["schema_version"], 2)
+        self.assertEqual(df0001["mode"], "stress")
+        self.assertEqual(df0001["test"], "user-smoke-native")
+        self.assertNotIn("command", df0001)
 
     def test_v2_rejects_unknown_template_profile(self) -> None:
         body = self.base_case(disk='mode = "private-copy"\nprofile = "nearby"')
@@ -286,6 +300,102 @@ class BasicRunnerConfigTests(unittest.TestCase):
         path = self.write_case(body)
         with self.assertRaisesRegex(runner.ConfigError, "disk.profile"):
             runner.load_config(path, self.root)
+
+    def linux_case(self, *, kernel_extra: str = "", qemu_extra: str = "") -> str:
+        return f"""
+            schema_version = 2
+            name = "demo"
+            purpose = "diagnostic"
+            timeout_seconds = 2
+
+            [kernel]
+            target = "linux"
+            {kernel_extra}
+
+            [disk]
+            mode = "external"
+            path = "disk.raw"
+            readonly = false
+
+            [qemu]
+            memory_mb = 128
+            smp = 2
+            kernel_cmdline = "earlycon=sbi root=/dev/vda rw console=ttyS0"
+            rng = false
+            exit_policy = "stress-mem"
+            interaction = "none"
+            {qemu_extra}
+
+            [expect]
+            markers = ["SyscallTable.Wait4"]
+        """
+
+    def test_linux_kernel_target_is_a_strict_union(self) -> None:
+        path = self.write_case(self.linux_case())
+        config = runner.load_config(path, self.root)
+        self.assertEqual(config["kernel"], {"target": "linux"})
+
+        path.write_text(textwrap.dedent(self.linux_case(kernel_extra='app = "user-boot"')))
+        with self.assertRaisesRegex(runner.ConfigError, "kernel target linux"):
+            runner.load_config(path, self.root)
+
+    def test_linux_manifest_builds_checkpoint_image_and_structured_network(self) -> None:
+        linux = self.root / "linux"
+        (linux / "arch" / "riscv" / "boot").mkdir(parents=True)
+        path = self.write_case(
+            self.linux_case(
+                qemu_extra=(
+                    "user_network = true\n"
+                    "host_forwards = [{ protocol = \"tcp\", host_port = 5555, guest_port = 5555 }]"
+                )
+            )
+        )
+        with mock.patch.dict(os.environ, {"LINUX_PROVIDER_DIR": str(linux)}, clear=False):
+            config = runner.load_config(path, self.root)
+            manifest = runner.freeze_manifest(config, path, self.root, self.root / "artifacts")
+        self.assertEqual(manifest["kernel"]["image"], str((linux / "arch/riscv/boot/Image").resolve()))
+        self.assertIn("KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS", manifest["build_command"])
+        self.assertIn("Image", manifest["build_command"])
+        command = manifest["qemu"]["command"]
+        self.assertIn("-bios", command)
+        self.assertIn("virtio-net-device,netdev=net0", command)
+        self.assertIn("hostfwd=tcp::5555-:5555", " ".join(command))
+
+    def test_host_forward_requires_user_network(self) -> None:
+        path = self.write_case(
+            self.linux_case(
+                qemu_extra=(
+                    "host_forwards = [{ protocol = \"tcp\", host_port = 5555, guest_port = 5555 }]"
+                )
+            )
+        )
+        with self.assertRaisesRegex(runner.ConfigError, "require qemu.user_network"):
+            runner.load_config(path, self.root)
+
+    def test_stress_mem_parser_requires_complete_declared_hex_payload(self) -> None:
+        text = "checkpoint: SyscallTable.Wait4\n"
+        encoded = text.encode().hex()
+        header = (
+            f"stress_mem: v=1 encoding=hex bytes={len(text.encode())} "
+            f"total={len(text.encode())} overflow=0 dropped=0 data="
+        )
+        self.assertIsNone(runner._parse_stress_mem(header + encoded[:-2]))
+        parsed = runner._parse_stress_mem(header + encoded + "\n")
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed[0], text)
+        self.assertEqual(parsed[1]["bytes"], len(text.encode()))
+
+    def test_stress_mem_observation_keeps_serial_and_decoded_payload(self) -> None:
+        payload = "checkpoint: SyscallTable.Wait4\n"
+        record = (
+            f"stress_mem: v=1 encoding=hex bytes={len(payload.encode())} "
+            f"total={len(payload.encode())} overflow=0 dropped=0 data={payload.encode().hex()}\n"
+        )
+        observed, metadata = runner._observed_text("login:\n" + record)
+        self.assertIn("login:", observed)
+        self.assertIn("checkpoint: SyscallTable.Wait4", observed)
+        self.assertIsNotNone(metadata)
 
 
 class BasicRunnerLifecycleTests(unittest.TestCase):
@@ -345,6 +455,15 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
                 time.sleep(30)
             elif mode == "marker":
                 print("STOP", flush=True)
+                time.sleep(30)
+            elif mode == "stress-mem":
+                text = "checkpoint: SyscallTable.Wait4\\n"
+                encoded = text.encode().hex()
+                print(
+                    f"stress_mem: v=1 encoding=hex bytes={len(text.encode())} "
+                    f"total={len(text.encode())} overflow=0 dropped=0 data={encoded}",
+                    flush=True,
+                )
                 time.sleep(30)
             else:
                 if os.environ.get("FAKE_QEMU_STDIN"):
@@ -656,6 +775,18 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertTrue(result["qemu"]["terminated_after_marker"])
 
+    def test_stress_mem_exit_policy_terminates_only_after_complete_record(self) -> None:
+        self.environment["FAKE_QEMU_MODE"] = "stress-mem"
+        path = self.write_case(
+            qemu='exit_policy = "stress-mem"',
+            expect='markers = ["SyscallTable.Wait4"]',
+        )
+        status, _, result = self.run_case(path, "stress-mem")
+        self.assertEqual(status, 0)
+        self.assertTrue(result["qemu"]["terminated_after_stress_mem"])
+        self.assertGreater(result["qemu"]["stress_mem"]["bytes"], 0)
+        self.assertTrue(result["expectations"]["passed"])
+
     def test_stdin_step_is_sent_after_ready_marker(self) -> None:
         self.environment["FAKE_QEMU_STDIN"] = "1"
         path = self.write_case(stdin='stdin_steps = [{ ready_marker = "READY", payload = "go\\n" }]')
@@ -859,7 +990,7 @@ class CanonicalRootfsTests(unittest.TestCase):
             self.assertTrue(rootfs_builder.should_rebuild(image, metadata, "changed", False))
             self.assertTrue(rootfs_builder.should_rebuild(image, metadata, "same", True))
 
-    def test_canonical_configuration_preserves_inittab_locks_root_and_merges_test(self) -> None:
+    def test_canonical_configuration_installs_busybox_inittab_locks_root_and_merges_test(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             staging = root / "staging"
@@ -868,16 +999,22 @@ class CanonicalRootfsTests(unittest.TestCase):
             (staging / "etc").mkdir(parents=True)
             destination.mkdir(parents=True)
             config.mkdir()
-            (staging / "etc" / "inittab").write_text("::sysinit:/sbin/openrc sysinit\n")
+            (staging / "etc" / "inittab").write_text("distribution input\n")
             (staging / "etc" / "passwd").write_text("root:x:0:0:root:/root:/bin/sh\n")
             (staging / "etc" / "shadow").write_text("root:*::0:::::\n")
             (config / "passwd.entry").write_text("test:hash:1000:100:test:/:/bin/sh\n")
             (config / "shadow.entry").write_text("test:hash:0:::::\n")
             (config / "rc-local.sh").write_text("#!/bin/sh\nexit 0\n")
+            configured_inittab = (
+                "tty1::respawn:/bin/sh -c getty-tty1-and-poweroff\n"
+                "ttyS0::respawn:/bin/sh -c getty-ttyS0-and-poweroff\n"
+            )
+            (config / "inittab").write_text(configured_inittab)
 
             rootfs_builder._configure_canonical(staging, config, destination)
 
-            self.assertEqual((staging / "etc" / "inittab").read_text(), "::sysinit:/sbin/openrc sysinit\n")
+            self.assertEqual((staging / "etc" / "inittab").read_text(), configured_inittab)
+            self.assertNotIn("/sbin/openrc", (staging / "etc" / "inittab").read_text())
             self.assertIn("root:*:", (staging / "etc" / "shadow").read_text())
             self.assertEqual(sum(line.startswith("test:") for line in (staging / "etc" / "passwd").read_text().splitlines()), 1)
             self.assertEqual(sum(line.startswith("test:") for line in (staging / "etc" / "shadow").read_text().splitlines()), 1)
@@ -899,7 +1036,7 @@ class CanonicalRootfsTests(unittest.TestCase):
             fixture.write_text("one")
             config = root / "config"
             config.mkdir()
-            for name in ("passwd.entry", "shadow.entry", "rc-local.sh"):
+            for name in ("inittab", "passwd.entry", "shadow.entry", "rc-local.sh"):
                 (config / name).write_text(name)
             image = root / "canonical.raw"
             image.write_bytes(b"image")

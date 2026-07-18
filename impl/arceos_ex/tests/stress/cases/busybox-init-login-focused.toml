@@ -1,0 +1,15 @@
+schema_version = 2
+name = "busybox-init-login-focused"
+description = "Repeat the canonical busybox-init-login-native basic acceptance test as an opt-in focused stress case."
+mode = "stress"
+test = "busybox-init-login-native"
+runs = 1
+classifier = "../classifiers/busybox-init-login-focused.toml"
+
+[metadata]
+observation_mode = "busybox-init-login-focused"
+ordinary_path_required = false
+opt_in_only = true
+rootfs_profile = "canonical"
+payload = "busybox-init-login-native basic acceptance"
+scope_note = "Focused opt-in diagnostic case; not part of the default make test gate or default stress suite."

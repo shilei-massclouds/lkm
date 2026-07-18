@@ -1,11 +1,11 @@
 schema_version = 2
-name = "openrc-login-native"
+name = "busybox-init-login-linux-object"
 purpose = "acceptance"
 timeout_seconds = 180
 
 [kernel]
 app = "user-boot"
-provider = "native"
+provider = "linux-object"
 probe = ["user-syscall-trace", "user-syscall-error"]
 profile = "release"
 
@@ -37,4 +37,4 @@ markers = [
   "syscall trace nr=29 name=ioctl ret=0",
   "lost+found",
 ]
-forbidden_markers = ["reason=pid_not_visible", "Function not implemented", "arceos_ex panic"]
+forbidden_markers = ["can't run '/sbin/openrc'", "reason=pid_not_visible", "Function not implemented", "arceos_ex panic"]

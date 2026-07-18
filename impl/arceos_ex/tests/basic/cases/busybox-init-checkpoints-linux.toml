@@ -1,0 +1,32 @@
+schema_version = 2
+name = "busybox-init-checkpoints-linux"
+purpose = "diagnostic"
+timeout_seconds = 360
+
+[kernel]
+target = "linux"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi root=/dev/vda rw console=ttyS0"
+rng = false
+user_network = true
+host_forwards = [
+  { protocol = "tcp", host_port = 5555, guest_port = 5555 },
+]
+exit_policy = "stress-mem"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "login:", payload = "test\n" },
+  { ready_marker = "Password:", payload = "test\n" },
+  { ready_marker = "~$", payload = "/bin/ls\nexit\n" },
+]
+
+[expect]
+markers = ["SyscallTable.Wait4", "login:", "~$", "lost+found"]
+forbidden_markers = ["can't run '/sbin/openrc'", "overflow=1", "Kernel panic"]

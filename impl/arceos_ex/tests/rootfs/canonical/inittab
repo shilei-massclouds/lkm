@@ -1,0 +1,10 @@
+# Deterministic BusyBox init profile for LKM basic tests.
+
+# arceos_ex currently exposes numeric /dev/ttyN devices.  The PID 1-owned
+# wrapper shuts the guest down only after a successful login session exits.
+tty1::respawn:/bin/sh -c "/sbin/getty -L 38400 tty1 vt100 && /sbin/poweroff -f"
+
+# Reference Linux QEMU exposes the host console through ttyS0.
+ttyS0::respawn:/bin/sh -c "/sbin/getty -L 115200 ttyS0 vt100 && /sbin/poweroff -f"
+
+::ctrlaltdel:/sbin/reboot

@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""Repeat stress cases and cluster observed event sequences."""
+"""Orchestrate basic tests for stress classification and checkpoint difftest."""
 
 from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
-import selectors
-import signal
-import shutil
 import subprocess
 import sys
 import time
@@ -22,15 +19,18 @@ import tomllib
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STRESS_DIR = Path(__file__).resolve().parent
 DEFAULT_SUITE = (
     STRESS_DIR / "cases" / "df-0001-user-boot.toml",
     STRESS_DIR / "cases" / "df-0002-smoke-initcall.toml",
     STRESS_DIR / "cases" / "df-0003-distro-sh-ls.toml",
 )
-DEFAULT_OUT_ROOT = Path(__file__).resolve().parent / "out"
-SETUP_PROGRESS_INTERVAL_SECONDS = 30.0
+DEFAULT_OUT_ROOT = STRESS_DIR / "out"
+BASIC_DIR = STRESS_DIR.parent / "basic"
+BASIC_RUNNER = BASIC_DIR / "runner.py"
+BASIC_CASES = BASIC_DIR / "cases"
+TEST_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 CHECKPOINT_RE = re.compile(
     r"^(?P<prefix>checkpoint|trace): (?P<name>[^ ]+)(?: task=(?P<task>[^ ]+))?"
@@ -52,10 +52,6 @@ SMOKE_RESULT_RE = re.compile(
     r"passed=(?P<passed>\d+) failed=(?P<failed>\d+) total=(?P<total>\d+)"
 )
 USER_EXIT_RE = re.compile(r"user exit status=(?P<status>-?\d+)")
-STRESS_MEM_RE = re.compile(
-    r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
-    r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data=(?P<data>[0-9a-f]*)$"
-)
 STRESS_MEM_HEADER_RE = re.compile(
     r"stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
     r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data="
@@ -85,851 +81,635 @@ EARLY_CHECKPOINT_BYTES = {
 }
 
 
-@dataclass(frozen=True)
-class DelayedStdin:
-    ready_marker: str
-    payload: str
+class CompositeConfigError(Exception):
+    pass
 
 
-class CheckpointCoverageError(Exception):
+class CheckpointCoverageError(CompositeConfigError):
     def __init__(self, message: str, audit: dict[str, Any]) -> None:
         super().__init__(message)
-        self.message = message
         self.audit = audit
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    repo_root = _resolve_repo_root(args.repo_root)
-    case_paths = _selected_case_paths(args.cases)
-    out_root = args.out_dir.resolve() if args.out_dir else DEFAULT_OUT_ROOT
-
-    results = [
-        _run_case(
-            case_path=case_path,
-            repo_root=repo_root,
-            out_root=out_root,
-            runs_override=args.runs,
-            timeout_override=args.timeout,
-            dry_run=args.dry_run,
-        )
-        for case_path in case_paths
-    ]
+    args = _build_parser().parse_args(argv)
+    try:
+        if args.runs is not None and args.runs < 0:
+            raise CompositeConfigError("--runs must be non-negative")
+        repo_root = _resolve_repo_root(args.repo_root)
+        paths = _selected_case_paths(args.cases)
+        cases = [_load_case(path, repo_root) for path in paths]
+        if args.baseline is not None:
+            if len(cases) != 1 or cases[0]["mode"] != "stress":
+                raise CompositeConfigError("--baseline requires exactly one stress case")
+            _validate_baseline(args.baseline, cases[0])
+        effective_runs = [0 if args.dry_run else _case_runs(case, args.runs) for case in cases]
+        if any(runs > 0 for runs in effective_runs):
+            _prepare_canonical_disk(repo_root)
+        out_root = args.out_dir.resolve() if args.out_dir else DEFAULT_OUT_ROOT
+        results = [
+            _run_case(
+                case=case,
+                repo_root=repo_root,
+                out_root=out_root,
+                runs=runs,
+                baseline=args.baseline if case["mode"] == "stress" else None,
+            )
+            for case, runs in zip(cases, effective_runs)
+        ]
+    except CompositeConfigError as error:
+        print(f"composite test configuration error: {error}", file=sys.stderr)
+        return 2
+    except RuntimeError as error:
+        print(f"composite test failed: {error}", file=sys.stderr)
+        return 1
     _print_suite_summary(results)
     return 1 if any(_case_failed(result) for result in results) else 0
 
 
-def _run_case(
-    *,
-    case_path: Path,
-    repo_root: Path,
-    out_root: Path,
-    runs_override: int | None,
-    timeout_override: int | None,
-    dry_run: bool,
-) -> dict[str, Any]:
-    case = _load_toml(case_path)
-    mode = _optional_string(case, "mode")
-    if mode is not None:
-        if mode == "paired_checkpoint_diff":
-            return _run_paired_case(
-                case=case,
-                case_path=case_path,
-                repo_root=repo_root,
-                out_root=out_root,
-                runs_override=runs_override,
-                timeout_override=timeout_override,
-                dry_run=dry_run,
-            )
-        raise SystemExit(f"unknown stress case mode: {mode}")
-
-    classifier_path = _resolve_case_path(case_path, _string(case, "classifier"))
-    classifier = _load_toml(classifier_path)
-    runs = runs_override if runs_override is not None else _integer(case, "default_runs")
-    timeout = timeout_override if timeout_override is not None else _integer(case, "timeout_seconds")
-    if runs < 0:
-        raise SystemExit("--runs must be non-negative")
-    if timeout <= 0:
-        raise SystemExit("--timeout must be positive")
-
-    case_name = _string(case, "name")
-    output_dir = _unique_output_dir(out_root / _run_dir_name(case_name))
-    output_dir.mkdir(parents=True, exist_ok=False)
-
-    command = _string_list(case, "command")
-    delayed_stdin = _delayed_stdin(case)
-    workdir = _resolve_workdir(repo_root, case.get("working_directory", "."))
-    rules = _classifier_rules(classifier)
-    manifest = _manifest(
-        case,
-        case_path,
-        classifier_path,
-        command,
-        delayed_stdin,
-        runs,
-        timeout,
-        repo_root,
-        workdir,
-    )
-    _write_json(output_dir / "manifest.json", manifest)
-
-    sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
-    run_results: list[dict[str, Any]] = []
-    suite_started = datetime.now(timezone.utc)
-    suite_start_monotonic = time.monotonic()
-
-    if runs == 0 or dry_run:
-        suite_ended = datetime.now(timezone.utc)
-        suite_duration = time.monotonic() - suite_start_monotonic
-        summary = _build_summary(
-            case_name,
-            runs,
-            run_results,
-            sequences,
-            dry_run=True,
-            started=suite_started,
-            ended=suite_ended,
-            duration_seconds=suite_duration,
-        )
-        _write_json(output_dir / "summary.json", summary)
-        _write_report(output_dir / "report.md", case_name, summary)
-        print(f"stress dry-run wrote {output_dir}")
-        return _case_result(case_name, case_path, output_dir, summary)
-
-    setup_command = _optional_string_list(case, "setup_command")
-    if setup_command:
-        _run_setup_command(setup_command, repo_root, workdir, timeout, output_dir)
-
-    for run_index in range(1, runs + 1):
-        run_id = f"run-{run_index:04d}"
-        run_dir = output_dir / "runs" / run_id
-        run_dir.mkdir(parents=True)
-        print(f"[stress] {case_name} {run_id}/{runs}")
-        run_result = _execute_one_run(
-            run_id=run_id,
-            run_dir=run_dir,
-            command=command,
-            repo_root=repo_root,
-            workdir=workdir,
-            timeout=timeout,
-            delayed_stdin=delayed_stdin,
-            env_updates=_string_map(case.get("env", {}), "env"),
-            rules=rules,
-        )
-        _record_sequence(sequences, run_result)
-        _write_run_metadata(run_dir, run_result, repo_root)
-        run_results.append(_persisted_run_result(run_result))
-
-    _write_sequences(output_dir, sequences)
-    suite_ended = datetime.now(timezone.utc)
-    suite_duration = time.monotonic() - suite_start_monotonic
-    summary = _build_summary(
-        case_name,
-        runs,
-        run_results,
-        sequences,
-        dry_run=False,
-        started=suite_started,
-        ended=suite_ended,
-        duration_seconds=suite_duration,
-    )
-    _write_json(output_dir / "summary.json", summary)
-    _write_report(output_dir / "report.md", case_name, summary)
-    print(f"stress report: {output_dir / 'report.md'}")
-    return _case_result(case_name, case_path, output_dir, summary)
-
-
-def _run_paired_case(
-    *,
-    case: dict[str, Any],
-    case_path: Path,
-    repo_root: Path,
-    out_root: Path,
-    runs_override: int | None,
-    timeout_override: int | None,
-    dry_run: bool,
-) -> dict[str, Any]:
-    runs = runs_override if runs_override is not None else _integer(case, "default_runs")
-    timeout = timeout_override if timeout_override is not None else _integer(case, "timeout_seconds")
-    if runs < 0:
-        raise SystemExit("--runs must be non-negative")
-    if timeout <= 0:
-        raise SystemExit("--timeout must be positive")
-
-    case_name = _string(case, "name")
-    output_dir = _unique_output_dir(out_root / _run_dir_name(case_name))
-    output_dir.mkdir(parents=True, exist_ok=False)
-    base_workdir = _resolve_workdir(repo_root, case.get("working_directory", "."))
-    try:
-        paired = _paired_config(case, case_path, repo_root, base_workdir)
-    except CheckpointCoverageError as error:
-        _write_json(output_dir / "checkpoint_coverage_error.json", error.audit)
-        print(error.message, file=sys.stderr)
-        raise SystemExit(error.message) from error
-    manifest = _paired_manifest(case, case_path, runs, timeout, repo_root, base_workdir, paired)
-    _write_json(output_dir / "manifest.json", manifest)
-    checkpoint_coverage = paired.get("checkpoint_coverage")
-
-    sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
-    run_results: list[dict[str, Any]] = []
-    suite_started = datetime.now(timezone.utc)
-    suite_start_monotonic = time.monotonic()
-
-    if runs == 0 or dry_run:
-        suite_ended = datetime.now(timezone.utc)
-        suite_duration = time.monotonic() - suite_start_monotonic
-        summary = _build_summary(
-            case_name,
-            runs,
-            run_results,
-            sequences,
-            dry_run=True,
-            started=suite_started,
-            ended=suite_ended,
-            duration_seconds=suite_duration,
-        )
-        summary["paired_checkpoint_diff"] = []
-        if checkpoint_coverage is not None:
-            summary["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
-        _write_json(output_dir / "summary.json", summary)
-        _write_report(output_dir / "report.md", case_name, summary)
-        print(f"stress dry-run wrote {output_dir}")
-        return _case_result(case_name, case_path, output_dir, summary)
-
-    setup_command = _optional_string_list(case, "setup_command")
-    if setup_command:
-        _run_setup_command(setup_command, repo_root, base_workdir, timeout, output_dir)
-
-    linux_build = paired["linux"].get("build_command")
-    if isinstance(linux_build, list) and linux_build:
-        _run_setup_command(
-            _expand_command_placeholders(_as_string_list(linux_build, "paired.linux.build_command")),
-            repo_root,
-            paired["linux"]["workdir"],
-            timeout,
-            output_dir,
-            label="linux-build",
-        )
-
-    for run_index in range(1, runs + 1):
-        run_id = f"run-{run_index:04d}"
-        run_dir = output_dir / "runs" / run_id
-        run_dir.mkdir(parents=True)
-        print(f"[stress] {case_name} {run_id}/{runs}")
-        started = datetime.now(timezone.utc)
-        start_monotonic = time.monotonic()
-        arceos = _execute_paired_side(
-            side_id="arceos_ex",
-            config=paired["arceos_ex"],
-            run_dir=run_dir,
-            timeout=timeout,
-        )
-        linux = _execute_paired_side(
-            side_id="linux",
-            config=paired["linux"],
-            run_dir=run_dir,
-            timeout=timeout,
-        )
-        ended = datetime.now(timezone.utc)
-        duration = time.monotonic() - start_monotonic
-        diff = _paired_checkpoint_diff(
-            arceos["events_data"],
-            linux["events_data"],
-            paired["checkpoint_scope"],
-            checkpoint_scope_max_counts=paired["checkpoint_scope_max_counts"],
-            left_label="arceos_ex",
-            right_label="linux",
-        )
-        if checkpoint_coverage is not None:
-            diff["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
-        side_failed = arceos["timed_out"] or linux["timed_out"] or linux["stress_mem"] is None
-        passed = diff["passed"] and not side_failed
-        sequence_tokens = [
-            *(f"arceos_ex:{token}" for token in arceos["sequence_tokens"]),
-            *(f"linux:{token}" for token in linux["sequence_tokens"]),
-        ]
-        result = {
-            "schema_version": SCHEMA_VERSION,
-            "run_id": run_id,
-            "started_at": started.isoformat(),
-            "ended_at": ended.isoformat(),
-            "duration_seconds": round(duration, 3),
-            "result": "success" if passed else "failure",
-            "class_id": "paired-checkpoint-diff-ok" if passed else "paired-checkpoint-diff",
-            "class_description": (
-                "declared checkpoint intersection matched"
-                if passed
-                else "declared checkpoint intersection differed"
-            ),
-            "sequence_hash": _sequence_hash(sequence_tokens),
-            "event_count": len(sequence_tokens),
-            "arceos_ex": _persisted_side_result(arceos),
-            "linux": _persisted_side_result(linux),
-            "paired_diff": diff,
-        }
-        run = {
-            **result,
-            "events_data": _paired_events_for_sequence(arceos, linux, diff),
-            "sequence_tokens": sequence_tokens,
-        }
-        _write_json(run_dir / "paired_diff.json", diff)
-        _record_sequence(sequences, run)
-        _write_run_metadata(run_dir, run, repo_root)
-        run_results.append(_persisted_run_result(run))
-
-    _write_sequences(output_dir, sequences)
-    suite_ended = datetime.now(timezone.utc)
-    suite_duration = time.monotonic() - suite_start_monotonic
-    summary = _build_summary(
-        case_name,
-        runs,
-        run_results,
-        sequences,
-        dry_run=False,
-        started=suite_started,
-        ended=suite_ended,
-        duration_seconds=suite_duration,
-    )
-    summary["paired_checkpoint_diff"] = [run["paired_diff"] for run in run_results]
-    if checkpoint_coverage is not None:
-        summary["checkpoint_coverage"] = _checkpoint_coverage_report(checkpoint_coverage)
-    _write_json(output_dir / "summary.json", summary)
-    _write_report(output_dir / "report.md", case_name, summary)
-    print(f"stress report: {output_dir / 'report.md'}")
-    return _case_result(case_name, case_path, output_dir, summary)
-
-
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run arceos_ex stress cases.")
-    parser.add_argument(
-        "cases",
-        nargs="*",
-        type=Path,
-        help="stress case TOML(s); default: standard DF-0001 + DF-0002 + DF-0003 suite",
-    )
-    parser.add_argument("--repo-root", type=Path, help="repository root, auto-detected by default")
-    parser.add_argument("--runs", type=int, help="override case default_runs")
-    parser.add_argument("--timeout", type=int, help="override case timeout_seconds")
-    parser.add_argument("--out-dir", type=Path, help="output root, default: tests/stress/out")
-    parser.add_argument("--dry-run", action="store_true", help="validate config and write an empty report")
-    parser.add_argument(
-        "--fail-on-failure",
-        action="store_true",
-        help="compatibility no-op; failures already return non-zero",
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("cases", nargs="*", type=Path)
+    parser.add_argument("--repo-root", type=Path)
+    parser.add_argument("--runs", type=int)
+    parser.add_argument("--out-dir", type=Path)
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--dry-run", action="store_true", help="compatibility alias for --runs 0")
     return parser
 
 
 def _selected_case_paths(cases: list[Path]) -> list[Path]:
-    if cases:
-        return [case.resolve() for case in cases]
-    return [case.resolve() for case in DEFAULT_SUITE]
+    return [path.resolve() for path in cases] if cases else [path.resolve() for path in DEFAULT_SUITE]
 
 
-def _case_result(
-    case_name: str, case_path: Path, output_dir: Path, summary: dict[str, Any]
-) -> dict[str, Any]:
+def _load_case(path: Path, repo_root: Path) -> dict[str, Any]:
+    raw = _load_toml(path)
+    version = raw.get("schema_version")
+    if version != SCHEMA_VERSION:
+        raise CompositeConfigError(
+            f"{path}: unsupported schema_version {version!r}; composite cases require schema v2"
+        )
+    mode = raw.get("mode")
+    if mode == "stress":
+        allowed = {
+            "schema_version", "name", "description", "mode", "test", "runs",
+            "classifier", "metadata",
+        }
+    elif mode == "difftest":
+        allowed = {
+            "schema_version", "name", "description", "mode", "runs",
+            "left_test", "left_label", "right_test", "right_label",
+            "checkpoint_scope", "checkpoint_scope_max_counts", "checkpoint_coverage",
+            "metadata",
+        }
+    else:
+        raise CompositeConfigError(f"{path}: mode must be 'stress' or 'difftest'")
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise CompositeConfigError(f"{path}: forbidden or unknown field(s): {', '.join(unknown)}")
+    name = _required_string(raw, "name", str(path))
+    if path.stem != name or not TEST_NAME_RE.fullmatch(name):
+        raise CompositeConfigError(f"{path}: name must be a valid test name matching the filename")
+    description = raw.get("description", "")
+    if not isinstance(description, str):
+        raise CompositeConfigError(f"{path}: description must be a string")
+    runs = raw.get("runs")
+    if not isinstance(runs, int) or isinstance(runs, bool) or runs < 0:
+        raise CompositeConfigError(f"{path}: runs must be a non-negative integer")
+    metadata = raw.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise CompositeConfigError(f"{path}: metadata must be a table")
+    config: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "name": name,
+        "description": description,
+        "mode": mode,
+        "runs": runs,
+        "metadata": metadata,
+        "case_path": path.resolve(),
+        "case_sha256": _sha256_file(path),
+    }
+    if mode == "stress":
+        test = _required_string(raw, "test", str(path))
+        classifier_path = _resolve_case_path(path, _required_string(raw, "classifier", str(path)))
+        classifier = _load_toml(classifier_path)
+        config.update(
+            test=test,
+            basic=_validate_basic(test, repo_root),
+            classifier_path=classifier_path,
+            classifier_sha256=_sha256_file(classifier_path),
+            rules=_classifier_rules(classifier),
+        )
+    else:
+        scope = _string_list(raw.get("checkpoint_scope"), "checkpoint_scope")
+        if not scope:
+            raise CompositeConfigError(f"{path}: checkpoint_scope must not be empty")
+        left_test = _required_string(raw, "left_test", str(path))
+        right_test = _required_string(raw, "right_test", str(path))
+        left_label = _required_string(raw, "left_label", str(path))
+        right_label = _required_string(raw, "right_label", str(path))
+        if left_label == right_label:
+            raise CompositeConfigError(f"{path}: left_label and right_label must differ")
+        max_counts = _positive_integer_map(
+            raw.get("checkpoint_scope_max_counts"), "checkpoint_scope_max_counts"
+        )
+        if any(name not in set(scope) for name in max_counts):
+            raise CompositeConfigError(f"{path}: checkpoint count limit names must be in scope")
+        coverage = _checkpoint_coverage_config(raw.get("checkpoint_coverage"), repo_root, scope)
+        config.update(
+            left_test=left_test,
+            left_label=left_label,
+            right_test=right_test,
+            right_label=right_label,
+            left_basic=_validate_basic(left_test, repo_root),
+            right_basic=_validate_basic(right_test, repo_root),
+            checkpoint_scope=scope,
+            checkpoint_scope_max_counts=max_counts,
+            checkpoint_coverage=coverage,
+        )
+    config["config_fingerprint"] = _config_fingerprint(config)
+    return config
+
+
+def _validate_basic(test: str, repo_root: Path) -> dict[str, Any]:
+    if not TEST_NAME_RE.fullmatch(test):
+        raise CompositeConfigError(f"invalid basic test name: {test!r}")
+    path = (repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases" / f"{test}.toml").resolve()
+    if not path.is_file():
+        raise CompositeConfigError(f"referenced basic test does not exist: {test}")
+    try:
+        module = _basic_runner_module()
+        loaded = module.load_config(path, repo_root)
+    except Exception as error:
+        raise CompositeConfigError(f"invalid referenced basic test {test}: {error}") from error
+    if loaded.get("source_schema_version") != 2 or loaded.get("name") != test:
+        raise CompositeConfigError(f"referenced basic test must be canonical schema v2: {test}")
     return {
-        "case_name": case_name,
-        "case_path": str(case_path),
-        "output_dir": str(output_dir),
-        "report_path": str(output_dir / "report.md"),
-        "summary": summary,
+        "test": test,
+        "config_path": str(path),
+        "config_sha256": _sha256_file(path),
+        "purpose": loaded["purpose"],
+        "kernel_target": loaded["kernel"]["target"],
     }
 
 
-def _case_failed(result: dict[str, Any]) -> bool:
-    summary = result["summary"]
-    return int(summary["totals"]["failure"]) > 0
+_BASIC_RUNNER_MODULE: Any | None = None
 
 
-def _print_suite_summary(results: list[dict[str, Any]]) -> None:
-    print("")
-    print("stress suite summary:")
-    for result in results:
-        totals = result["summary"]["totals"]
-        print(
-            "  "
-            f"{result['case_name']}: "
-            f"success={totals['success']} "
-            f"failure={totals['failure']} "
-            f"report={result['report_path']}"
-        )
+def _basic_runner_module() -> Any:
+    global _BASIC_RUNNER_MODULE
+    if _BASIC_RUNNER_MODULE is not None:
+        return _BASIC_RUNNER_MODULE
+    sys.path.insert(0, str(BASIC_DIR))
+    spec = importlib.util.spec_from_file_location("lkm_basic_runner", BASIC_RUNNER)
+    if spec is None or spec.loader is None:
+        raise CompositeConfigError(f"cannot load basic runner: {BASIC_RUNNER}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    _BASIC_RUNNER_MODULE = module
+    return module
 
 
-def _execute_one_run(
+def _case_runs(case: dict[str, Any], override: int | None) -> int:
+    return int(case["runs"] if override is None else override)
+
+
+def _prepare_canonical_disk(repo_root: Path) -> None:
+    print("[composite] preparing canonical disk", flush=True)
+    completed = subprocess.run(["make", "disk"], cwd=repo_root, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(f"canonical make disk exited with status {completed.returncode}")
+
+
+def _run_case(
     *,
-    run_id: str,
-    run_dir: Path,
-    command: list[str],
+    case: dict[str, Any],
     repo_root: Path,
-    workdir: Path,
-    timeout: int,
-    delayed_stdin: DelayedStdin | None,
-    env_updates: dict[str, str],
-    rules: list[dict[str, Any]],
+    out_root: Path,
+    runs: int,
+    baseline: Path | None,
+) -> dict[str, Any]:
+    output_dir = _unique_output_dir(out_root / _run_dir_name(case["name"]))
+    output_dir.mkdir(parents=True, exist_ok=False)
+    baseline_manifest = _baseline_manifest(baseline) if baseline is not None else None
+    manifest = _manifest(case, runs, repo_root, baseline_manifest)
+    _write_json(output_dir / "manifest.json", manifest)
+    started = datetime.now(timezone.utc)
+    start_monotonic = time.monotonic()
+    sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
+    run_results: list[dict[str, Any]] = []
+    for index in range(1, runs + 1):
+        run_id = f"run-{index:04d}"
+        run_dir = output_dir / "runs" / run_id
+        run_dir.mkdir(parents=True)
+        print(f"[composite] {case['name']} {run_id}/{runs}", flush=True)
+        if case["mode"] == "stress":
+            run = _execute_stress_run(case, run_id, run_dir, repo_root)
+        else:
+            run = _execute_difftest_run(case, run_id, run_dir, repo_root)
+        _record_sequence(sequences, run)
+        _write_json(run_dir / "result.json", _persisted_run_result(run))
+        _write_json(run_dir / "events.json", run["events_data"])
+        run_results.append(_persisted_run_result(run))
+    _write_sequences(output_dir, sequences)
+    ended = datetime.now(timezone.utc)
+    summary = _build_summary(
+        case["name"], runs, run_results, sequences,
+        dry_run=runs == 0, started=started, ended=ended,
+        duration_seconds=time.monotonic() - start_monotonic,
+    )
+    summary["mode"] = case["mode"]
+    if case["mode"] == "difftest":
+        summary["paired_checkpoint_diff"] = [run["paired_diff"] for run in run_results]
+        if case["checkpoint_coverage"] is not None:
+            summary["checkpoint_coverage"] = _checkpoint_coverage_report(case["checkpoint_coverage"])
+    if baseline is not None:
+        summary["historical_baseline"] = _compare_baseline(baseline, case, summary, run_results)
+    _write_json(output_dir / "summary.json", summary)
+    _write_report(output_dir / "report.md", case["name"], summary)
+    print(f"composite report: {output_dir / 'report.md'}", flush=True)
+    return _case_result(case["name"], case["case_path"], output_dir, summary)
+
+
+def _execute_basic(test: str, artifact_dir: Path, repo_root: Path) -> dict[str, Any]:
+    command = [
+        sys.executable, str(repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "runner.py"),
+        "run", test, "--repo-root", str(repo_root), "--output-dir", str(artifact_dir),
+    ]
+    started = time.monotonic()
+    completed = subprocess.run(command, cwd=repo_root, check=False)
+    duration = time.monotonic() - started
+    result_path = artifact_dir / "result.json"
+    log_path = artifact_dir / "qemu.log"
+    if not result_path.is_file() or not log_path.is_file():
+        raise RuntimeError(f"basic test {test} did not produce result.json and qemu.log in {artifact_dir}")
+    try:
+        result = json.loads(result_path.read_text())
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"basic test {test} produced invalid result.json: {error}") from error
+    if result.get("schema_version") != 2 or result.get("test") != test:
+        raise RuntimeError(f"basic test {test} produced an incompatible result")
+    return {
+        "command_exit_code": completed.returncode,
+        "duration_seconds": duration,
+        "artifact_dir": str(artifact_dir),
+        "result_path": str(result_path),
+        "qemu_log_path": str(log_path),
+        "result": result,
+        "qemu_log": log_path.read_text(errors="replace"),
+    }
+
+
+def _basic_gate(execution: dict[str, Any]) -> tuple[bool, str | None]:
+    result = execution["result"]
+    if execution["command_exit_code"] != 0:
+        return False, "basic-command-failed"
+    if result.get("execution_status") != "completed":
+        return False, "basic-execution-failed"
+    expectations = result.get("expectations")
+    if not isinstance(expectations, dict) or expectations.get("passed") is not True:
+        return False, "basic-expectations-failed"
+    return True, None
+
+
+def _execute_basic_side(test: str, artifact_dir: Path, repo_root: Path) -> dict[str, Any]:
+    try:
+        return _execute_basic(test, artifact_dir, repo_root)
+    except Exception as error:
+        log_path = artifact_dir / "qemu.log"
+        return {
+            "command_exit_code": 1,
+            "duration_seconds": 0.0,
+            "artifact_dir": str(artifact_dir),
+            "result_path": str(artifact_dir / "result.json"),
+            "qemu_log_path": str(log_path),
+            "qemu_log": log_path.read_text(errors="replace") if log_path.is_file() else "",
+            "result": {
+                "schema_version": 2,
+                "test": test,
+                "execution_status": "failed",
+                "verdict": "inconclusive",
+                "expectations": None,
+                "errors": [str(error)],
+                "qemu": None,
+                "cleanup": None,
+            },
+        }
+
+
+def _execute_stress_run(
+    case: dict[str, Any], run_id: str, run_dir: Path, repo_root: Path
 ) -> dict[str, Any]:
     started = datetime.now(timezone.utc)
     start_monotonic = time.monotonic()
-    env = os.environ.copy()
-    env.update(env_updates)
-    stdout, returncode, timed_out, stdin_result = _run_command_capture(
-        command, workdir, env, timeout, delayed_stdin
+    execution = _execute_basic(case["test"], run_dir / "basic", repo_root)
+    observed, stress_mem = _observed_text(execution["qemu_log"])
+    events = _extract_events(observed)
+    tokens = [_event_token(event) for event in events]
+    gate_passed, gate_failure = _basic_gate(execution)
+    classification = _classify(
+        observed,
+        execution["command_exit_code"] if gate_passed else 1,
+        bool(execution["result"].get("qemu", {}).get("timed_out")),
+        case["rules"],
     )
+    if not gate_passed and classification["result"] == "success":
+        classification = {
+            "id": gate_failure or "basic-failed",
+            "result": "failure",
+            "description": "referenced basic test did not satisfy its standalone gate",
+        }
     ended = datetime.now(timezone.utc)
-    duration = time.monotonic() - start_monotonic
-
-    observed_text, stress_mem = _observed_text(stdout)
-    events = _extract_events(observed_text)
-    sequence_tokens = [_event_token(event) for event in events]
-    sequence_hash = _sequence_hash(sequence_tokens)
-    classification = _classify(observed_text, returncode, timed_out, rules)
-    result = {
+    return {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
-        "command": command,
-        "working_directory": str(workdir),
         "started_at": started.isoformat(),
         "ended_at": ended.isoformat(),
-        "duration_seconds": round(duration, 3),
-        "returncode": returncode,
-        "timed_out": timed_out,
-        **stdin_result,
+        "duration_seconds": round(time.monotonic() - start_monotonic, 3),
         "result": classification["result"],
         "class_id": classification["id"],
-        "class_description": classification.get("description", ""),
-        "sequence_hash": sequence_hash,
+        "class_description": classification["description"],
+        "sequence_hash": _sequence_hash(tokens),
+        "sequence_tokens": tokens,
         "event_count": len(events),
-    }
-    if stress_mem is None:
-        result["events"] = str(run_dir / "events.jsonl")
-        result["events_saved"] = True
-        (run_dir / "stdout.log").write_text(stdout, encoding="utf-8", errors="replace")
-        (run_dir / "stderr.log").write_text(
-            "stderr was merged into stdout.log to preserve event order.\n",
-            encoding="utf-8",
-        )
-        result["stdout"] = str(run_dir / "stdout.log")
-        result["stdout_saved"] = True
-        _write_jsonl(run_dir / "events.jsonl", events)
-    else:
-        result["events_saved"] = False
-        result["stdout_saved"] = False
-        result["stress_mem"] = stress_mem
-    run = {
-        **result,
+        "stress_mem": stress_mem,
+        "basic": _persisted_basic(execution),
         "events_data": events,
-        "sequence_tokens": sequence_tokens,
-        "_run_dir": str(run_dir),
     }
-    if stress_mem is not None:
-        run["captured_stdout"] = stdout
-        run["stress_mem_text"] = observed_text
-        run["_stdout_candidate"] = str(run_dir / "stdout.first-seen.log")
-        run["_events_candidate"] = str(run_dir / "events.first-seen.jsonl")
-    return run
 
 
-def _run_setup_command(
-    command: list[str],
-    repo_root: Path,
-    workdir: Path,
-    timeout: int,
-    output_dir: Path,
-    label: str = "setup",
-) -> None:
-    setup_dir = output_dir / _safe_path(label)
-    setup_dir.mkdir(parents=True)
-    log_path = setup_dir / "stdout.log"
-    log_path.touch()
-    print(
-        f"[stress] {label} start timeout={timeout}s log={log_path}",
-        flush=True,
-    )
-    started = time.monotonic()
-    stdout, returncode, timed_out, _ = _run_command_capture(
-        command,
-        workdir,
-        os.environ.copy(),
-        timeout,
-        None,
-        progress_label=label,
-    )
-    duration = time.monotonic() - started
-    log_path.write_text(stdout, encoding="utf-8", errors="replace")
-    _write_json(
-        setup_dir / "result.json",
-        {
-            "schema_version": SCHEMA_VERSION,
-            "command": command,
-            "repo_root": str(repo_root),
-            "working_directory": str(workdir),
-            "returncode": returncode,
-            "timed_out": timed_out,
-            "duration_seconds": round(duration, 3),
-        },
-    )
-    print(
-        f"[stress] {label} finish returncode={returncode} "
-        f"timed_out={str(timed_out).lower()} duration={duration:.3f}s log={log_path}",
-        flush=True,
-    )
-    if timed_out:
-        raise SystemExit(f"{label} command timed out")
-    if returncode != 0:
-        raise SystemExit(f"{label} command failed with return code {returncode}")
-
-
-def _execute_paired_side(
-    *,
-    side_id: str,
-    config: dict[str, Any],
-    run_dir: Path,
-    timeout: int,
+def _execute_difftest_run(
+    case: dict[str, Any], run_id: str, run_dir: Path, repo_root: Path
 ) -> dict[str, Any]:
-    side_dir = run_dir / side_id
-    side_dir.mkdir(parents=True)
-    command = _expand_command_placeholders(_as_string_list(config.get("command"), f"paired.{side_id}.command"))
-    workdir = config["workdir"]
-    env = os.environ.copy()
-    env.update(_string_map(config.get("env", {}), f"paired.{side_id}.env"))
-    delayed_stdin = _delayed_stdin(config)
-    stop_after_stress_mem = bool(config.get("stop_after_stress_mem", False))
-
-    private_disk = config.get("private_disk")
-    private_disk_created = False
-    private_disk_removed: bool | None = None
     started = datetime.now(timezone.utc)
     start_monotonic = time.monotonic()
-    try:
-        if private_disk is not None:
-            template = private_disk["template"]
-            path = private_disk["path"]
-            if not template.is_file():
-                raise SystemExit(f"paired.{side_id}.private_disk template missing: {template}")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.unlink(missing_ok=True)
-            shutil.copy2(template, path)
-            private_disk_created = True
-        if stop_after_stress_mem:
-            stdout, returncode, timed_out, capture_result = _run_command_capture_until_stress_mem(
-                command, workdir, env, timeout, delayed_stdin
-            )
-        else:
-            stdout, returncode, timed_out, capture_result = _run_command_capture(
-                command, workdir, env, timeout, delayed_stdin
-            )
-    finally:
-        if private_disk is not None:
-            path = private_disk["path"]
-            if private_disk_created:
-                path.unlink(missing_ok=True)
-            private_disk_removed = not path.exists()
+    left = _execute_basic_side(case["left_test"], run_dir / "left", repo_root)
+    right = _execute_basic_side(case["right_test"], run_dir / "right", repo_root)
+    left_text, left_stress = _observed_text(left["qemu_log"])
+    right_text, right_stress = _observed_text(right["qemu_log"])
+    left_events = _extract_events(left_text)
+    right_events = _extract_events(right_text)
+    diff = _paired_checkpoint_diff(
+        left_events,
+        right_events,
+        case["checkpoint_scope"],
+        checkpoint_scope_max_counts=case["checkpoint_scope_max_counts"],
+        left_label=case["left_label"],
+        right_label=case["right_label"],
+    )
+    if case["checkpoint_coverage"] is not None:
+        diff["checkpoint_coverage"] = _checkpoint_coverage_report(case["checkpoint_coverage"])
+    left_ok, left_failure = _basic_gate(left)
+    right_ok, right_failure = _basic_gate(right)
+    passed = left_ok and right_ok and diff["passed"]
+    tokens = [
+        *(f"{case['left_label']}:{_event_token(event)}" for event in left_events),
+        *(f"{case['right_label']}:{_event_token(event)}" for event in right_events),
+    ]
     ended = datetime.now(timezone.utc)
-    duration = time.monotonic() - start_monotonic
-
-    observed_text, stress_mem = _observed_text(stdout)
-    events = _extract_events(observed_text)
-    sequence_tokens = [_event_token(event) for event in events]
-    stdout_path = side_dir / "stdout.log"
-    stdout_path.write_text(stdout, encoding="utf-8", errors="replace")
-    decoded_path = side_dir / "stress-mem.txt"
-    decoded_path.write_text(observed_text, encoding="utf-8", errors="replace")
-    events_path = side_dir / "events.jsonl"
-    _write_jsonl(events_path, events)
-
-    result = {
+    return {
         "schema_version": SCHEMA_VERSION,
-        "side": side_id,
-        "command": command,
-        "working_directory": str(workdir),
+        "run_id": run_id,
         "started_at": started.isoformat(),
         "ended_at": ended.isoformat(),
-        "duration_seconds": round(duration, 3),
-        "returncode": returncode,
-        "timed_out": timed_out,
-        "private_disk": _private_disk_summary(private_disk),
-        "private_disk_removed": private_disk_removed,
-        **capture_result,
-        "stress_mem": stress_mem,
-        "events": str(events_path),
-        "stdout": str(stdout_path),
-        "stress_mem_decoded": str(decoded_path),
-        "event_count": len(events),
-        "sequence_hash": _sequence_hash(sequence_tokens),
-        "events_data": events,
-        "sequence_tokens": sequence_tokens,
+        "duration_seconds": round(time.monotonic() - start_monotonic, 3),
+        "result": "success" if passed else "failure",
+        "class_id": "paired-checkpoint-diff-ok" if passed else "paired-checkpoint-diff",
+        "class_description": (
+            "both basic tests completed and the checkpoint scope matched"
+            if passed else "a basic side failed its standalone gate or checkpoint scope differed"
+        ),
+        "sequence_hash": _sequence_hash(tokens),
+        "sequence_tokens": tokens,
+        "event_count": len(tokens),
+        "left": {**_persisted_basic(left), "label": case["left_label"], "gate_passed": left_ok, "gate_failure": left_failure, "stress_mem": left_stress},
+        "right": {**_persisted_basic(right), "label": case["right_label"], "gate_passed": right_ok, "gate_failure": right_failure, "stress_mem": right_stress},
+        "paired_diff": diff,
+        "events_data": {
+            case["left_label"]: left_events,
+            case["right_label"]: right_events,
+        },
     }
-    _write_json(side_dir / "result.json", _persisted_side_result(result))
-    return result
 
 
-def _persisted_side_result(side: dict[str, Any]) -> dict[str, Any]:
+def _persisted_basic(execution: dict[str, Any]) -> dict[str, Any]:
+    result = execution["result"]
+    expectations = result.get("expectations")
     return {
-        key: value
-        for key, value in side.items()
-        if key not in {"events_data", "sequence_tokens"}
+        "artifact_dir": execution["artifact_dir"],
+        "result_path": execution["result_path"],
+        "qemu_log_path": execution["qemu_log_path"],
+        "command_exit_code": execution["command_exit_code"],
+        "duration_seconds": round(execution["duration_seconds"], 3),
+        "test": result.get("test"),
+        "execution_status": result.get("execution_status"),
+        "verdict": result.get("verdict"),
+        "expectations_passed": expectations.get("passed") if isinstance(expectations, dict) else None,
+        "errors": result.get("errors", []),
+        "qemu": result.get("qemu"),
+        "cleanup": result.get("cleanup"),
     }
 
 
-def _paired_events_for_sequence(
-    arceos: dict[str, Any],
-    linux: dict[str, Any],
-    diff: dict[str, Any],
-) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for side_id, side in (("arceos_ex", arceos), ("linux", linux)):
-        for event in side["events_data"]:
-            events.append(
-                {
-                    "i": len(events),
-                    "line": event.get("line", 0),
-                    "kind": f"{side_id}_{event.get('kind', 'unknown')}",
-                    "name": event.get("name", "unknown"),
-                    "raw": event.get("raw", ""),
-                }
-            )
-    if not diff["passed"]:
-        events.append(
-            {
-                "i": len(events),
-                "line": 0,
-                "kind": "paired_diff",
-                "name": "PairedCheckpointDiffMismatch",
-                "raw": json.dumps(diff, ensure_ascii=True, sort_keys=True),
-            }
-        )
-    return events
-
-
-def _run_command_capture(
-    command: list[str],
-    workdir: Path,
-    env: dict[str, str],
-    timeout: int,
-    delayed_stdin: DelayedStdin | None,
-    *,
-    progress_label: str | None = None,
-) -> tuple[str, int | None, bool, dict[str, Any]]:
-    if delayed_stdin is not None:
-        return _run_command_capture_with_delayed_stdin(
-            command, workdir, env, timeout, delayed_stdin
-        )
-
-    process = subprocess.Popen(
-        command,
-        cwd=workdir,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
-    deadline = time.monotonic() + timeout
-    while True:
-        remaining = max(0.001, deadline - time.monotonic())
-        wait_time = (
-            remaining
-            if progress_label is None
-            else min(SETUP_PROGRESS_INTERVAL_SECONDS, remaining)
-        )
-        try:
-            stdout, _ = process.communicate(timeout=wait_time)
-            return stdout, process.returncode, False, {}
-        except subprocess.TimeoutExpired:
-            now = time.monotonic()
-            if now < deadline:
-                if progress_label is not None:
-                    elapsed = timeout - max(0.0, deadline - now)
-                    print(
-                        f"[stress] {progress_label} running "
-                        f"elapsed={elapsed:.1f}s timeout={timeout}s",
-                        flush=True,
-                    )
-                continue
-            _kill_process_group(process)
-            stdout, _ = process.communicate()
-            return stdout, process.returncode, True, {}
-
-
-def _run_command_capture_until_stress_mem(
-    command: list[str],
-    workdir: Path,
-    env: dict[str, str],
-    timeout: int,
-    delayed_stdin: DelayedStdin | None = None,
-) -> tuple[str, int | None, bool, dict[str, Any]]:
-    marker = delayed_stdin.ready_marker.encode() if delayed_stdin is not None else None
-    payload = delayed_stdin.payload.encode() if delayed_stdin is not None else None
-    process = subprocess.Popen(
-        command,
-        cwd=workdir,
-        env=env,
-        stdin=subprocess.PIPE if delayed_stdin is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    assert process.stdout is not None
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    stdout_parts: list[bytes] = []
-    tail = b""
-    deadline = time.monotonic() + timeout
-    timed_out = False
-    terminated_after_stress_mem = False
-    stdin_sent = False
-
-    while True:
-        now = time.monotonic()
-        if now >= deadline:
-            timed_out = True
-            _kill_process_group(process)
-            break
-        if process.poll() is not None:
-            break
-
-        wait_time = min(0.25, max(0.0, deadline - now))
-        events = selector.select(wait_time)
-        if not events:
-            continue
-        for key, _ in events:
-            chunk = os.read(key.fd, 4096)
-            if not chunk:
-                continue
-            stdout_parts.append(chunk)
-            tail = (tail + chunk)[-131072:]
-            if marker is not None and payload is not None and not stdin_sent and marker in tail:
-                try:
-                    assert process.stdin is not None
-                    process.stdin.write(payload)
-                    process.stdin.flush()
-                except BrokenPipeError:
-                    pass
-                stdin_sent = True
-            if _parse_stress_mem(tail.decode("utf-8", errors="replace")) is not None:
-                terminated_after_stress_mem = True
-                _kill_process_group(process)
-                break
-        if terminated_after_stress_mem:
-            break
-
-    try:
-        rest, _ = process.communicate(timeout=3)
-    except subprocess.TimeoutExpired:
-        _kill_process_group(process)
-        rest, _ = process.communicate()
-    if rest:
-        stdout_parts.append(rest)
-    selector.close()
-    stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
-    return (
-        stdout,
-        process.returncode,
-        timed_out,
-        {
-            "terminated_after_stress_mem": terminated_after_stress_mem,
-            **(
-                {}
-                if delayed_stdin is None
-                else {
-                    "stdin_ready_marker": delayed_stdin.ready_marker,
-                    "stdin_payload_bytes": len(payload or b""),
-                    "stdin_sent": stdin_sent,
-                }
-            ),
+def _manifest(
+    case: dict[str, Any], runs: int, repo_root: Path, baseline: dict[str, Any] | None
+) -> dict[str, Any]:
+    manifest: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "case": case["name"],
+        "mode": case["mode"],
+        "description": case["description"],
+        "case_path": str(case["case_path"]),
+        "case_sha256": case["case_sha256"],
+        "config_fingerprint": case["config_fingerprint"],
+        "requested_runs": runs,
+        "repo_root": str(repo_root),
+        "metadata": case["metadata"],
+        "git": {
+            "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
+            "status_short": _git_output(repo_root, ["status", "--short"]),
         },
-    )
+    }
+    if case["mode"] == "stress":
+        manifest.update(
+            test=case["test"],
+            basic=case["basic"],
+            classifier_path=str(case["classifier_path"]),
+            classifier_sha256=case["classifier_sha256"],
+        )
+        if baseline is not None:
+            manifest["historical_baseline"] = baseline
+    else:
+        manifest["left"] = {"label": case["left_label"], **case["left_basic"]}
+        manifest["right"] = {"label": case["right_label"], **case["right_basic"]}
+        manifest["checkpoint_scope"] = case["checkpoint_scope"]
+        manifest["checkpoint_scope_max_counts"] = case["checkpoint_scope_max_counts"]
+        if case["checkpoint_coverage"] is not None:
+            manifest["checkpoint_coverage"] = _checkpoint_coverage_report(case["checkpoint_coverage"])
+    return manifest
 
 
-def _run_command_capture_with_delayed_stdin(
-    command: list[str],
-    workdir: Path,
-    env: dict[str, str],
-    timeout: int,
-    delayed_stdin: DelayedStdin,
-) -> tuple[str, int | None, bool, dict[str, Any]]:
-    marker = delayed_stdin.ready_marker.encode()
-    payload = delayed_stdin.payload.encode()
-    process = subprocess.Popen(
-        command,
-        cwd=workdir,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    assert process.stdout is not None
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    stdout_parts: list[bytes] = []
-    tail = b""
-    stdin_sent = False
-    stdout_eof = False
-    deadline = time.monotonic() + timeout
-    timed_out = False
+def _config_fingerprint(case: dict[str, Any]) -> str:
+    if case["mode"] == "stress":
+        value = {
+            "mode": "stress",
+            "case": case["name"],
+            "test": case["basic"]["config_sha256"],
+            "classifier": case["classifier_sha256"],
+            "metadata": case["metadata"],
+        }
+    else:
+        value = {
+            "mode": "difftest",
+            "case": case["name"],
+            "left": case["left_basic"]["config_sha256"],
+            "right": case["right_basic"]["config_sha256"],
+            "scope": case["checkpoint_scope"],
+            "max_counts": case["checkpoint_scope_max_counts"],
+            "metadata": case["metadata"],
+        }
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-    while True:
-        now = time.monotonic()
-        if now >= deadline:
-            timed_out = True
-            _kill_process_group(process)
-            break
-        if stdout_eof and process.poll() is not None:
-            break
 
-        wait_time = min(0.25, max(0.0, deadline - now))
-        events = selector.select(wait_time)
-        if not events:
-            continue
-        for key, _ in events:
-            chunk = os.read(key.fd, 4096)
-            if not chunk:
-                stdout_eof = True
-                continue
-            stdout_parts.append(chunk)
-            tail = (tail + chunk)[-4096:]
-            if not stdin_sent and marker in tail:
-                try:
-                    assert process.stdin is not None
-                    process.stdin.write(payload)
-                    process.stdin.flush()
-                except BrokenPipeError:
-                    pass
-                stdin_sent = True
-
+def _validate_baseline(path: Path, case: dict[str, Any]) -> None:
+    directory = path.resolve()
     try:
-        rest, _ = process.communicate(timeout=3)
-    except subprocess.TimeoutExpired:
-        _kill_process_group(process)
-        rest, _ = process.communicate()
-    if rest:
-        stdout_parts.append(rest)
-    selector.close()
-    stdout = b"".join(stdout_parts).decode("utf-8", errors="replace")
-    return (
-        stdout,
-        process.returncode,
-        timed_out,
-        {
-            "stdin_ready_marker": delayed_stdin.ready_marker,
-            "stdin_payload_bytes": len(payload),
-            "stdin_sent": stdin_sent,
-        },
-    )
+        manifest = json.loads((directory / "manifest.json").read_text())
+        summary = json.loads((directory / "summary.json").read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise CompositeConfigError(f"invalid stress baseline {directory}: {error}") from error
+    if manifest.get("schema_version") != 2 or summary.get("schema_version") != 2:
+        raise CompositeConfigError("stress baseline must use report schema v2")
+    checks = {
+        "case": case["name"],
+        "mode": "stress",
+        "test": case["test"],
+        "config_fingerprint": case["config_fingerprint"],
+        "classifier_sha256": case["classifier_sha256"],
+    }
+    for key, expected in checks.items():
+        if manifest.get(key) != expected:
+            raise CompositeConfigError(f"stress baseline {key} mismatch")
 
 
-def _kill_process_group(process: subprocess.Popen[str]) -> None:
-    if hasattr(os, "killpg"):
+def _baseline_manifest(path: Path) -> dict[str, Any]:
+    directory = path.resolve()
+    files = [directory / "manifest.json", directory / "summary.json"]
+    files.extend(sorted((directory / "runs").glob("run-*/result.json")))
+    files.extend(sorted((directory / "sequences").glob("**/*.json")))
+    hashes = [
+        {"path": str(file.relative_to(directory)), "sha256": _sha256_file(file)}
+        for file in files if file.is_file()
+    ]
+    aggregate = hashlib.sha256(
+        "".join(f"{item['path']}\0{item['sha256']}\n" for item in hashes).encode()
+    ).hexdigest()
+    return {"path": str(directory), "content_sha256": aggregate, "files": hashes}
+
+
+def _compare_baseline(
+    path: Path,
+    case: dict[str, Any],
+    current: dict[str, Any],
+    current_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    _validate_baseline(path, case)
+    directory = path.resolve()
+    baseline = json.loads((directory / "summary.json").read_text())
+    baseline_runs = _load_run_results(directory)
+    baseline_classes = {(item["result"], item["class_id"]) for item in baseline.get("classes", [])}
+    current_classes = {(item["result"], item["class_id"]) for item in current.get("classes", [])}
+    baseline_sequences = {
+        (item["result"], item["class_id"], item["sequence_hash"])
+        for item in baseline.get("sequences", [])
+    }
+    current_sequences = {
+        (item["result"], item["class_id"], item["sequence_hash"])
+        for item in current.get("sequences", [])
+    }
+    baseline_rate = _failure_rate(baseline)
+    current_rate = _failure_rate(current)
+    recent_divergence = None
+    if baseline_runs and current_runs:
+        recent_divergence = _first_divergence(
+            list(baseline_runs[-1].get("sequence_tokens", [])),
+            list(current_runs[-1].get("sequence_tokens", [])),
+        )
+    return {
+        "path": str(directory),
+        "baseline_failure_rate": baseline_rate,
+        "current_failure_rate": current_rate,
+        "failure_rate_delta": round(current_rate - baseline_rate, 6),
+        "classes_added": _tuple_rows(current_classes - baseline_classes, ("result", "class_id")),
+        "classes_removed": _tuple_rows(baseline_classes - current_classes, ("result", "class_id")),
+        "sequences_added": _tuple_rows(current_sequences - baseline_sequences, ("result", "class_id", "sequence_hash")),
+        "sequences_removed": _tuple_rows(baseline_sequences - current_sequences, ("result", "class_id", "sequence_hash")),
+        "recent_sequence_first_divergence": recent_divergence,
+        "affects_exit_status": False,
+    }
+
+
+def _failure_rate(summary: dict[str, Any]) -> float:
+    total = int(summary.get("completed_runs", 0))
+    failures = int(summary.get("totals", {}).get("failure", 0))
+    return round(failures / total, 6) if total else 0.0
+
+
+def _load_run_results(directory: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in sorted((directory / "runs").glob("run-*/result.json")):
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-            return
-        except ProcessLookupError:
-            return
-    process.kill()
+            value = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def _tuple_rows(values: set[tuple[Any, ...]], names: tuple[str, ...]) -> list[dict[str, Any]]:
+    return [dict(zip(names, value)) for value in sorted(values)]
+
+
+def _observed_text(stdout: str) -> tuple[str, dict[str, Any] | None]:
+    parsed = _parse_stress_mem(stdout)
+    return (stdout, None) if parsed is None else parsed
+
+
+def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
+    normalized = ANSI_RE.sub("", stdout)
+    for match in reversed(list(STRESS_MEM_HEADER_RE.finditer(normalized))):
+        expected_bytes = int(match.group("bytes"))
+        data_segment = STRESS_MEM_PROMPT_ECHO_RE.sub("", normalized[match.end():])
+        hex_data = _take_hex_payload(data_segment, expected_bytes * 2)
+        if hex_data is None:
+            continue
+        try:
+            decoded = bytes.fromhex(hex_data).decode("utf-8", errors="replace")
+        except ValueError:
+            continue
+        return decoded, {
+            "bytes": expected_bytes,
+            "total": int(match.group("total")),
+            "overflow": match.group("overflow") == "1",
+            "dropped": int(match.group("dropped")),
+        }
+    return None
+
+
+def _take_hex_payload(data_segment: str, expected_hex_len: int) -> str | None:
+    if expected_hex_len == 0:
+        return ""
+    chars: list[str] = []
+    for char in data_segment:
+        if char in "0123456789abcdef":
+            chars.append(char)
+            if len(chars) == expected_hex_len:
+                return "".join(chars)
+        elif not char.isspace():
+            return None
+    return None
 
 
 def _extract_events(text: str) -> list[dict[str, Any]]:
@@ -938,9 +718,9 @@ def _extract_events(text: str) -> list[dict[str, Any]]:
         line = _normalize_line(raw_line)
         if not line:
             continue
-        early_events = _early_byte_events_from_line(line, line_no, len(events))
-        if early_events:
-            events.extend(early_events)
+        early = _early_byte_events_from_line(line, line_no, len(events))
+        if early:
+            events.extend(early)
             continue
         event = _event_from_line(line, line_no)
         if event is not None:
@@ -951,168 +731,41 @@ def _extract_events(text: str) -> list[dict[str, Any]]:
     return events
 
 
-def _observed_text(stdout: str) -> tuple[str, dict[str, Any] | None]:
-    parsed = _parse_stress_mem(stdout)
-    if parsed is None:
-        return stdout, None
-    text, metadata = parsed
-    return text, metadata
-
-
-def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
-    for raw_line in reversed(stdout.splitlines()):
-        line = _normalize_line(raw_line)
-        match = STRESS_MEM_RE.search(line)
-        if not match:
-            continue
-        expected_bytes = int(match.group("bytes"))
-        hex_data = match.group("data")
-        if len(hex_data) != expected_bytes * 2:
-            continue
-        data = bytes.fromhex(hex_data)
-        text = data.decode("utf-8", errors="replace")
-        early_prefix = _stress_mem_early_prefix(line[: match.start()])
-        if early_prefix:
-            text = early_prefix + "\n" + text
-        return text, {
-            "bytes": expected_bytes,
-            "total": int(match.group("total")),
-            "overflow": match.group("overflow") == "1",
-            "dropped": int(match.group("dropped")),
-        }
-    parsed = _parse_stress_mem_stream(stdout)
-    if parsed is not None:
-        return parsed
-    return None
-
-
-def _parse_stress_mem_stream(stdout: str) -> tuple[str, dict[str, Any]] | None:
-    normalized = ANSI_RE.sub("", stdout)
-    matches = list(STRESS_MEM_HEADER_RE.finditer(normalized))
-    for match in reversed(matches):
-        expected_bytes = int(match.group("bytes"))
-        expected_hex_len = expected_bytes * 2
-        data_segment = STRESS_MEM_PROMPT_ECHO_RE.sub("", normalized[match.end() :])
-        hex_data = _take_hex_payload(data_segment, expected_hex_len)
-        if hex_data is None:
-            continue
-        data = bytes.fromhex(hex_data)
-        text = data.decode("utf-8", errors="replace")
-        line_start = normalized.rfind("\n", 0, match.start()) + 1
-        early_prefix = _stress_mem_early_prefix(normalized[line_start : match.start()].strip())
-        if early_prefix:
-            text = early_prefix + "\n" + text
-        return text, {
-            "bytes": expected_bytes,
-            "total": int(match.group("total")),
-            "overflow": match.group("overflow") == "1",
-            "dropped": int(match.group("dropped")),
-        }
-    return None
-
-
-def _take_hex_payload(data_segment: str, expected_hex_len: int) -> str | None:
-    chars: list[str] = []
-    for char in data_segment:
-        if char in "0123456789abcdef":
-            chars.append(char)
-            if len(chars) == expected_hex_len:
-                return "".join(chars)
-            continue
-        if char.isspace():
-            continue
-        return None
-    return None
-
-
-def _stress_mem_early_prefix(prefix: str) -> str:
-    allowed = set(EARLY_CHECKPOINT_BYTES) | {"?"}
-    index = len(prefix)
-    while index > 0 and prefix[index - 1] in allowed:
-        index -= 1
-    return prefix[index:]
-
-
 def _normalize_line(line: str) -> str:
     return ANSI_RE.sub("", line).strip()
 
 
 def _normalize_text(text: str) -> str:
-    return "\n".join(
-        line for raw_line in text.splitlines() if (line := _normalize_line(raw_line))
-    )
+    return "\n".join(line for raw in text.splitlines() if (line := _normalize_line(raw)))
 
 
 def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
     if match := CHECKPOINT_RE.match(line):
-        event = {
+        event: dict[str, Any] = {
             "line": line_no,
             "kind": "checkpoint",
             "name": match.group("name"),
-            "source": (
-                "announce" if match.group("prefix") == "checkpoint" else "legacy-trace"
-            ),
+            "source": "announce" if match.group("prefix") == "checkpoint" else "legacy-trace",
             "raw": line,
         }
         if match.group("task"):
             event["task"] = match.group("task")
         return event
     if match := READY_CHECK_FAILED_RE.match(line):
-        return {
-            "line": line_no,
-            "kind": "ready_check_failed",
-            "name": "ReadyCheckFailed",
-            "phase": match.group("phase"),
-            "check": match.group("check"),
-            "first_failed": match.group("first_failed"),
-            "raw": line,
-        }
+        return {"line": line_no, "kind": "ready_check_failed", "name": "ReadyCheckFailed", **match.groupdict(), "raw": line}
     if match := FAILURE_DIAGNOSTIC_RE.match(line):
-        return {
-            "line": line_no,
-            "kind": "failure_diagnostic",
-            "name": "FailureDiagnostic",
-            "phase": match.group("phase"),
-            "step": match.group("step"),
-            "object": match.group("object"),
-            "check": match.group("check"),
-            "first_failed": match.group("first_failed"),
-            "raw": line,
-        }
+        return {"line": line_no, "kind": "failure_diagnostic", "name": "FailureDiagnostic", **match.groupdict(), "raw": line}
     if match := PHASE_ERROR_RE.search(line):
-        return {
-            "line": line_no,
-            "kind": "phase_error",
-            "name": "PhaseEventError",
-            "error": match.group("error"),
-            "event": match.group("event"),
-            "actual": match.group("actual"),
-            "expected": match.group("expected"),
-            "target": match.group("target"),
-            "raw": line,
-        }
-    if line.startswith("# checkpoint fail: "):
-        return {
-            "line": line_no,
-            "kind": "checkpoint_failure",
-            "name": line.removeprefix("# checkpoint fail: "),
-            "raw": line,
-        }
-    if line.startswith("# checkpoint stop: "):
-        return {
-            "line": line_no,
-            "kind": "checkpoint_stop",
-            "name": line.removeprefix("# checkpoint stop: "),
-            "raw": line,
-        }
-    if "read user ELF failed" in line:
-        return {"line": line_no, "kind": "symptom", "name": "ReadUserElfFailed", "raw": line}
-    if "arceos_ex initcall event failed" in line:
-        return {"line": line_no, "kind": "symptom", "name": "InitcallEventFailed", "raw": line}
-    if "arceos_ex panic" in line:
-        return {"line": line_no, "kind": "symptom", "name": "KernelPanic", "raw": line}
-    if "memory allocation of" in line:
-        return {"line": line_no, "kind": "symptom", "name": "AllocationError", "raw": line}
+        return {"line": line_no, "kind": "phase_error", "name": "PhaseEventError", **match.groupdict(), "raw": line}
+    symptoms = (
+        ("read user ELF failed", "ReadUserElfFailed"),
+        ("arceos_ex initcall event failed", "InitcallEventFailed"),
+        ("arceos_ex panic", "KernelPanic"),
+        ("memory allocation of", "AllocationError"),
+    )
+    for needle, name in symptoms:
+        if needle in line:
+            return {"line": line_no, "kind": "symptom", "name": name, "raw": line}
     if line.startswith("wait4 child handoff"):
         return {"line": line_no, "kind": "boundary", "name": "Wait4ChildHandoff", "raw": line}
     if "lost+found" in line:
@@ -1120,190 +773,105 @@ def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
     if "user hello" in line:
         return {"line": line_no, "kind": "user_output", "name": "UserHello", "raw": line}
     if match := USER_EXIT_RE.search(line):
-        return {
-            "line": line_no,
-            "kind": "user_exit",
-            "name": "UserExitStatus",
-            "status": match.group("status"),
-            "raw": line,
-        }
+        return {"line": line_no, "kind": "user_exit", "name": "UserExitStatus", "status": match.group("status"), "raw": line}
     if match := SMOKE_RESULT_RE.search(line):
-        return {
-            "line": line_no,
-            "kind": "smoke_result",
-            "name": "SmokeResult",
-            "passed": match.group("passed"),
-            "failed": match.group("failed"),
-            "total": match.group("total"),
-            "raw": line,
-        }
+        return {"line": line_no, "kind": "smoke_result", "name": "SmokeResult", **match.groupdict(), "raw": line}
     return None
 
 
-def _early_byte_events_from_line(
-    line: str,
-    line_no: int,
-    start_index: int,
-) -> list[dict[str, Any]]:
+def _early_byte_events_from_line(line: str, line_no: int, start: int) -> list[dict[str, Any]]:
     if any(char not in EARLY_CHECKPOINT_BYTES and char != "?" for char in line):
         return []
     if not any(char in EARLY_CHECKPOINT_BYTES for char in line):
         return []
-
-    events: list[dict[str, Any]] = []
-    for char in line:
-        name = EARLY_CHECKPOINT_BYTES.get(char)
-        if name is None:
-            continue
-        events.append(
-            {
-                "i": start_index + len(events),
-                "line": line_no,
-                "kind": "checkpoint",
-                "name": name,
-                "source": "early-byte",
-                "raw": char,
-            }
-        )
-    return events
+    return [
+        {"i": start + index, "line": line_no, "kind": "checkpoint", "name": EARLY_CHECKPOINT_BYTES[char], "source": "early-byte", "raw": char}
+        for index, char in enumerate(char for char in line if char in EARLY_CHECKPOINT_BYTES)
+    ]
 
 
 def _event_token(event: dict[str, Any]) -> str:
     kind = str(event.get("kind", "unknown"))
     name = str(event.get("name", "unknown"))
-    if kind == "ready_check_failed":
-        return (
-            f"{kind}:{name}:phase={event.get('phase')}:check={event.get('check')}:"
-            f"first_failed={event.get('first_failed')}"
-        )
-    if kind == "failure_diagnostic":
-        return (
-            f"{kind}:{name}:phase={event.get('phase')}:step={event.get('step')}:"
-            f"object={event.get('object')}:check={event.get('check')}:"
-            f"first_failed={event.get('first_failed')}"
-        )
-    if kind == "phase_error":
-        return (
-            f"{kind}:{name}:error={event.get('error')}:event={event.get('event')}:"
-            f"actual={event.get('actual')}:expected={event.get('expected')}:target={event.get('target')}"
-        )
+    if kind in {"ready_check_failed", "failure_diagnostic", "phase_error"}:
+        details = ":".join(f"{key}={event[key]}" for key in sorted(event) if key not in {"i", "line", "kind", "name", "raw"})
+        return f"{kind}:{name}:{details}"
     if kind == "user_exit":
         return f"{kind}:{name}:status={event.get('status')}"
     if kind == "smoke_result":
-        return (
-            f"{kind}:{name}:passed={event.get('passed')}:failed={event.get('failed')}:"
-            f"total={event.get('total')}"
-        )
+        return f"{kind}:{name}:passed={event.get('passed')}:failed={event.get('failed')}:total={event.get('total')}"
     return f"{kind}:{name}"
 
 
-def _classify(
-    text: str, returncode: int | None, timed_out: bool, rules: list[dict[str, Any]]
-) -> dict[str, str]:
+def _classifier_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
+    unknown = sorted(set(data) - {"rules"})
+    if unknown:
+        raise CompositeConfigError(f"unknown classifier field(s): {', '.join(unknown)}")
+    raw = data.get("rules")
+    if not isinstance(raw, list) or not raw:
+        raise CompositeConfigError("classifier requires one or more [[rules]]")
+    rules: list[dict[str, Any]] = []
+    for index, rule in enumerate(raw):
+        if not isinstance(rule, dict):
+            raise CompositeConfigError(f"classifier rule {index} must be a table")
+        unknown_rule = sorted(set(rule) - {"id", "result", "contains", "regex", "description"})
+        if unknown_rule:
+            raise CompositeConfigError(f"classifier rule {index} unknown field(s): {', '.join(unknown_rule)}")
+        rule_id = _required_string(rule, "id", f"classifier rule {index}")
+        result = _required_string(rule, "result", f"classifier rule {index}")
+        if result not in {"success", "failure"}:
+            raise CompositeConfigError(f"classifier rule {rule_id} result must be success or failure")
+        contains = _string_list(rule.get("contains", []), f"classifier rule {rule_id}.contains")
+        regex = _string_list(rule.get("regex", []), f"classifier rule {rule_id}.regex")
+        for expression in regex:
+            try:
+                re.compile(expression)
+            except re.error as error:
+                raise CompositeConfigError(f"classifier rule {rule_id} invalid regex: {error}") from error
+        rules.append({**rule, "id": rule_id, "result": result, "contains": contains, "regex": regex})
+    return rules
+
+
+def _classify(text: str, returncode: int | None, timed_out: bool, rules: list[dict[str, Any]]) -> dict[str, str]:
     if timed_out:
-        return {"id": "timeout", "result": "failure", "description": "command timed out"}
-    normalized_text = _normalize_text(text)
+        return {"id": "timeout", "result": "failure", "description": "basic test timed out"}
+    normalized = _normalize_text(text)
     for rule in rules:
-        if rule["result"] != "failure":
-            continue
-        if _rule_matches(rule, normalized_text):
-            return {
-                "id": str(rule["id"]),
-                "result": str(rule["result"]),
-                "description": str(rule.get("description", "")),
-            }
+        if rule["result"] == "failure" and _rule_matches(rule, normalized):
+            return {"id": rule["id"], "result": "failure", "description": str(rule.get("description", ""))}
     if returncode not in (0, None):
-        return {
-            "id": "nonzero-exit",
-            "result": "failure",
-            "description": f"command returned {returncode}",
-        }
+        return {"id": "nonzero-exit", "result": "failure", "description": f"basic test returned {returncode}"}
     for rule in rules:
-        if rule["result"] != "success":
-            continue
-        if _rule_matches(rule, normalized_text):
-            return {
-                "id": str(rule["id"]),
-                "result": str(rule["result"]),
-                "description": str(rule.get("description", "")),
-            }
-    return {
-        "id": "unknown-failure",
-        "result": "failure",
-        "description": "no success rule matched",
-    }
+        if rule["result"] == "success" and _rule_matches(rule, normalized):
+            return {"id": rule["id"], "result": "success", "description": str(rule.get("description", ""))}
+    return {"id": "unknown-failure", "result": "failure", "description": "no success rule matched"}
 
 
 def _rule_matches(rule: dict[str, Any], text: str) -> bool:
-    contains = _as_string_list(rule.get("contains", []), "contains")
-    regex = _as_string_list(rule.get("regex", []), "regex")
-    return all(item in text for item in contains) and all(re.search(item, text) for item in regex)
+    return all(item in text for item in rule["contains"]) and all(re.search(item, text) for item in rule["regex"])
 
 
 def _record_sequence(sequences: dict[tuple[str, str, str], dict[str, Any]], run: dict[str, Any]) -> None:
     key = (str(run["result"]), str(run["class_id"]), str(run["sequence_hash"]))
     entry = sequences.get(key)
     if entry is None:
-        _write_first_seen_artifacts(run)
-        entry = {
+        sequences[key] = {
             "schema_version": SCHEMA_VERSION,
-            "result": run["result"],
-            "class_id": run["class_id"],
-            "sequence_hash": run["sequence_hash"],
+            "result": key[0],
+            "class_id": key[1],
+            "sequence_hash": key[2],
+            "count": 1,
             "first_run": run["run_id"],
-            "count": 0,
-            "run_ids": [],
-            "tokens": run["sequence_tokens"],
-            "events": run["events_data"],
-            "features": _sequence_features(run["sequence_tokens"]),
+            "last_run": run["run_id"],
+            "tokens": list(run["sequence_tokens"]),
         }
-        sequences[key] = entry
-    entry["count"] += 1
-    entry["run_ids"].append(run["run_id"])
-
-
-def _write_first_seen_artifacts(run: dict[str, Any]) -> None:
-    events_path = run.get("_events_candidate")
-    events_data = run.get("events_data")
-    if isinstance(events_path, str) and isinstance(events_data, list):
-        _write_jsonl(Path(events_path), events_data)
-        run["events"] = events_path
-        run["events_saved"] = True
-
-    stdout_path = run.get("_stdout_candidate")
-    captured_stdout = run.get("captured_stdout")
-    if isinstance(stdout_path, str) and isinstance(captured_stdout, str):
-        Path(stdout_path).write_text(captured_stdout, encoding="utf-8", errors="replace")
-        run["stdout"] = stdout_path
-        run["stdout_saved"] = True
-    stress_mem_text = run.get("stress_mem_text")
-    if isinstance(stdout_path, str) and isinstance(stress_mem_text, str):
-        decoded_path = Path(stdout_path).with_suffix(".stress-mem.txt")
-        decoded_path.write_text(
-            stress_mem_text,
-            encoding="utf-8",
-            errors="replace",
-        )
-        run["stress_mem_decoded"] = str(decoded_path)
-
-
-def _write_run_metadata(run_dir: Path, run: dict[str, Any], repo_root: Path) -> None:
-    result = _persisted_run_result(run)
-    _write_json(run_dir / "result.json", result)
-    _write_json(run_dir / "meta.json", {**result, "repo_root": str(repo_root)})
+    else:
+        entry["count"] += 1
+        entry["last_run"] = run["run_id"]
 
 
 def _persisted_run_result(run: dict[str, Any]) -> dict[str, Any]:
-    internal_keys = {
-        "events_data",
-        "sequence_tokens",
-        "captured_stdout",
-        "stress_mem_text",
-        "_run_dir",
-        "_stdout_candidate",
-        "_events_candidate",
-    }
-    return {key: value for key, value in run.items() if key not in internal_keys}
+    return {key: value for key, value in run.items() if key != "events_data"}
 
 
 def _write_sequences(output_dir: Path, sequences: dict[tuple[str, str, str], dict[str, Any]]) -> None:
@@ -1327,125 +895,69 @@ def _build_summary(
     totals = Counter(str(run["result"]) for run in run_results)
     class_counts = Counter((str(run["result"]), str(run["class_id"])) for run in run_results)
     sequence_counts = Counter((result, class_id) for result, class_id, _ in sequences)
-    class_features = _class_features(sequences)
-    comparisons = _failure_success_comparisons(sequences)
-    completed_runs = len(run_results)
-    average_run_seconds = (
-        round(sum(float(run["duration_seconds"]) for run in run_results) / completed_runs, 3)
-        if completed_runs
-        else None
-    )
+    completed = len(run_results)
     return {
         "schema_version": SCHEMA_VERSION,
         "case": case_name,
         "dry_run": dry_run,
         "requested_runs": requested_runs,
-        "completed_runs": completed_runs,
+        "completed_runs": completed,
         "started_at": started.isoformat(),
         "ended_at": ended.isoformat(),
         "total_seconds": round(duration_seconds, 3),
-        "average_run_seconds": average_run_seconds,
-        "totals": {
-            "success": totals.get("success", 0),
-            "failure": totals.get("failure", 0),
-        },
+        "average_run_seconds": round(sum(float(run["duration_seconds"]) for run in run_results) / completed, 3) if completed else None,
+        "totals": {"success": totals.get("success", 0), "failure": totals.get("failure", 0)},
         "classes": [
-            {
-                "result": result,
-                "class_id": class_id,
-                "runs": count,
-                "sequences": sequence_counts.get((result, class_id), 0),
-                "features": class_features.get(f"{result}/{class_id}", {}),
-            }
+            {"result": result, "class_id": class_id, "runs": count, "sequences": sequence_counts.get((result, class_id), 0), "features": _class_features(sequences).get(f"{result}/{class_id}", {})}
             for (result, class_id), count in sorted(class_counts.items())
         ],
         "sequences": [
-            {
-                "result": result,
-                "class_id": class_id,
-                "sequence_hash": sequence_hash,
-                "count": entry["count"],
-                "first_run": entry["first_run"],
-            }
+            {"result": result, "class_id": class_id, "sequence_hash": sequence_hash, "count": entry["count"], "first_run": entry["first_run"], "last_run": entry["last_run"]}
             for (result, class_id, sequence_hash), entry in sorted(sequences.items())
         ],
-        "failure_vs_success": comparisons,
-    }
-
-
-def _sequence_features(tokens: list[str]) -> dict[str, Any]:
-    return {
-        "event_count": len(tokens),
-        "first_event": tokens[0] if tokens else None,
-        "last_event": tokens[-1] if tokens else None,
-        "unique_events": sorted(set(tokens)),
+        "failure_vs_success": _failure_success_comparisons(sequences),
     }
 
 
 def _class_features(sequences: dict[tuple[str, str, str], dict[str, Any]]) -> dict[str, Any]:
-    by_class: dict[tuple[str, str], list[list[str]]] = {}
+    grouped: dict[tuple[str, str], list[list[str]]] = {}
     for (result, class_id, _), entry in sequences.items():
-        by_class.setdefault((result, class_id), []).append(list(entry["tokens"]))
+        grouped.setdefault((result, class_id), []).append(list(entry["tokens"]))
     features: dict[str, Any] = {}
-    for (result, class_id), token_lists in sorted(by_class.items()):
-        sets = [set(tokens) for tokens in token_lists]
-        union = set().union(*sets) if sets else set()
-        intersection = set.intersection(*sets) if sets else set()
+    for (result, class_id), rows in grouped.items():
+        sets = [set(row) for row in rows]
         features[f"{result}/{class_id}"] = {
-            "common_prefix": _common_prefix(token_lists),
-            "always_events": sorted(intersection),
-            "event_union": sorted(union),
-            "representative_sequence_count": len(token_lists),
+            "common_prefix": _common_prefix(rows),
+            "always_events": sorted(set.intersection(*sets) if sets else set()),
+            "event_union": sorted(set.union(*sets) if sets else set()),
+            "representative_sequence_count": len(rows),
         }
     return features
 
 
-def _failure_success_comparisons(
-    sequences: dict[tuple[str, str, str], dict[str, Any]]
-) -> list[dict[str, Any]]:
-    success_entries = [
-        entry for (result, _, _), entry in sequences.items() if result == "success"
-    ]
+def _failure_success_comparisons(sequences: dict[tuple[str, str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    successes = [entry for (result, _, _), entry in sequences.items() if result == "success"]
     comparisons: list[dict[str, Any]] = []
     for (result, class_id, sequence_hash), entry in sorted(sequences.items()):
         if result != "failure":
             continue
-        if not success_entries:
-            comparisons.append(
-                {
-                    "failure_class": class_id,
-                    "failure_sequence": sequence_hash,
-                    "status": "no_success_baseline",
-                }
-            )
+        if not successes:
+            comparisons.append({"failure_class": class_id, "failure_sequence": sequence_hash, "status": "no_success_baseline"})
             continue
-        best = max(
-            success_entries,
-            key=lambda success: _common_prefix_len(entry["tokens"], success["tokens"]),
-        )
-        prefix_len = _common_prefix_len(entry["tokens"], best["tokens"])
-        comparisons.append(
-            {
-                "failure_class": class_id,
-                "failure_sequence": sequence_hash,
-                "closest_success_sequence": best["sequence_hash"],
-                "common_prefix_length": prefix_len,
-                "failure_event_at_divergence": _token_at(entry["tokens"], prefix_len),
-                "success_event_at_divergence": _token_at(best["tokens"], prefix_len),
-            }
-        )
+        best = max(successes, key=lambda item: _common_prefix_len(entry["tokens"], item["tokens"]))
+        index = _common_prefix_len(entry["tokens"], best["tokens"])
+        comparisons.append({
+            "failure_class": class_id,
+            "failure_sequence": sequence_hash,
+            "closest_success_sequence": best["sequence_hash"],
+            "common_prefix_length": index,
+            "failure_event_at_divergence": _token_at(entry["tokens"], index),
+            "success_event_at_divergence": _token_at(best["tokens"], index),
+        })
     return comparisons
 
 
-def _checkpoint_sequence(events: list[dict[str, Any]], scope: list[str]) -> list[str]:
-    return _checkpoint_sequence_limited(events, scope, {})
-
-
-def _checkpoint_sequence_limited(
-    events: list[dict[str, Any]],
-    scope: list[str],
-    max_counts: dict[str, int],
-) -> list[str]:
+def _checkpoint_sequence_limited(events: list[dict[str, Any]], scope: list[str], max_counts: dict[str, int]) -> list[str]:
     scope_set = set(scope)
     counts: Counter[str] = Counter()
     sequence: list[str] = []
@@ -1463,17 +975,7 @@ def _checkpoint_sequence_limited(
     return sequence
 
 
-def _checkpoint_observed_but_not_compared(
-    events: list[dict[str, Any]], scope: list[str]
-) -> list[dict[str, Any]]:
-    return _checkpoint_observed_but_not_compared_limited(events, scope, {})
-
-
-def _checkpoint_observed_but_not_compared_limited(
-    events: list[dict[str, Any]],
-    scope: list[str],
-    max_counts: dict[str, int],
-) -> list[dict[str, Any]]:
+def _checkpoint_observed_but_not_compared_limited(events: list[dict[str, Any]], scope: list[str], max_counts: dict[str, int]) -> list[dict[str, Any]]:
     scope_set = set(scope)
     counts: Counter[str] = Counter()
     observed: dict[str, dict[str, Any]] = {}
@@ -1481,22 +983,14 @@ def _checkpoint_observed_but_not_compared_limited(
         if event.get("kind") != "checkpoint":
             continue
         name = str(event.get("name"))
-        excluded_reason = "outside_checkpoint_scope"
+        reason = "outside_checkpoint_scope"
         if name in scope_set:
             counts[name] += 1
             limit = max_counts.get(name)
             if limit is None or counts[name] <= limit:
                 continue
-            excluded_reason = "scope_count_limit"
-        entry = observed.setdefault(
-            name,
-            {
-                "name": name,
-                "count": 0,
-                "first_line": event.get("line", 0),
-                "excluded_reason": excluded_reason,
-            },
-        )
+            reason = "scope_count_limit"
+        entry = observed.setdefault(name, {"name": name, "count": 0, "first_line": event.get("line", 0), "excluded_reason": reason})
         entry["count"] += 1
     return list(observed.values())
 
@@ -1519,11 +1013,7 @@ def _first_divergence(left: list[str], right: list[str]) -> dict[str, Any] | Non
     if len(left) == len(right):
         return None
     index = min(len(left), len(right))
-    return {
-        "index": index,
-        "left": _token_at(left, index),
-        "right": _token_at(right, index),
-    }
+    return {"index": index, "left": _token_at(left, index), "right": _token_at(right, index)}
 
 
 def _paired_checkpoint_diff(
@@ -1536,730 +1026,296 @@ def _paired_checkpoint_diff(
     right_label: str = "right",
 ) -> dict[str, Any]:
     max_counts = checkpoint_scope_max_counts or {}
-    left_sequence = _checkpoint_sequence_limited(left_events, checkpoint_scope, max_counts)
-    right_sequence = _checkpoint_sequence_limited(right_events, checkpoint_scope, max_counts)
-    missing_from_left = _ordered_missing(checkpoint_scope, left_sequence)
-    missing_from_right = _ordered_missing(checkpoint_scope, right_sequence)
-    extra_in_left = _ordered_missing(left_sequence, right_sequence)
-    extra_in_right = _ordered_missing(right_sequence, left_sequence)
-    first_divergence = _first_divergence(left_sequence, right_sequence)
-    order_mismatch = (
-        first_divergence is not None
-        and not missing_from_left
-        and not missing_from_right
-        and not extra_in_left
-        and not extra_in_right
-    )
-    passed = (
-        not missing_from_left
-        and not missing_from_right
-        and not extra_in_left
-        and not extra_in_right
-        and first_divergence is None
-    )
+    left = _checkpoint_sequence_limited(left_events, checkpoint_scope, max_counts)
+    right = _checkpoint_sequence_limited(right_events, checkpoint_scope, max_counts)
+    missing_left = _ordered_missing(checkpoint_scope, left)
+    missing_right = _ordered_missing(checkpoint_scope, right)
+    extra_left = _ordered_missing(left, right)
+    extra_right = _ordered_missing(right, left)
+    divergence = _first_divergence(left, right)
+    passed = not missing_left and not missing_right and not extra_left and not extra_right and divergence is None
     return {
         "left_label": left_label,
         "right_label": right_label,
         "checkpoint_scope": checkpoint_scope,
         "checkpoint_scope_max_counts": max_counts,
-        "left_sequence": left_sequence,
-        "right_sequence": right_sequence,
-        f"missing_from_{left_label}": missing_from_left,
-        f"missing_from_{right_label}": missing_from_right,
-        f"extra_in_{left_label}": extra_in_left,
-        f"extra_in_{right_label}": extra_in_right,
+        "left_sequence": left,
+        "right_sequence": right,
+        f"missing_from_{left_label}": missing_left,
+        f"missing_from_{right_label}": missing_right,
+        f"extra_in_{left_label}": extra_left,
+        f"extra_in_{right_label}": extra_right,
         "observed_but_not_compared": {
-            left_label: _checkpoint_observed_but_not_compared_limited(
-                left_events, checkpoint_scope, max_counts
-            ),
-            right_label: _checkpoint_observed_but_not_compared_limited(
-                right_events, checkpoint_scope, max_counts
-            ),
+            left_label: _checkpoint_observed_but_not_compared_limited(left_events, checkpoint_scope, max_counts),
+            right_label: _checkpoint_observed_but_not_compared_limited(right_events, checkpoint_scope, max_counts),
         },
-        "order_mismatch": order_mismatch,
-        "first_divergence": first_divergence,
+        "order_mismatch": divergence is not None and not missing_left and not missing_right and not extra_left and not extra_right,
+        "first_divergence": divergence,
         "passed": passed,
     }
 
 
-def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
-    lines = [
-        f"# Stress Report: {case_name}",
-        "",
-        f"- dry_run: {summary['dry_run']}",
-        f"- requested_runs: {summary['requested_runs']}",
-        f"- completed_runs: {summary['completed_runs']}",
-        f"- started_at: {summary['started_at']}",
-        f"- ended_at: {summary['ended_at']}",
-        f"- total_seconds: {summary['total_seconds']}",
-        f"- average_run_seconds: {_report_scalar(summary['average_run_seconds'])}",
-        f"- success: {summary['totals']['success']}",
-        f"- failure: {summary['totals']['failure']}",
-        "",
-        "## Classes",
-        "",
-        "| result | class | runs | sequences |",
-        "| --- | --- | ---: | ---: |",
-    ]
-    for item in summary["classes"]:
-        lines.append(
-            f"| {item['result']} | {item['class_id']} | {item['runs']} | {item['sequences']} |"
-        )
-    if not summary["classes"]:
-        lines.append("| none | none | 0 | 0 |")
-    lines.extend(["", "## Failure Vs Success", ""])
-    if not summary["failure_vs_success"]:
-        lines.append("No failure sequences to compare.")
-    else:
-        for item in summary["failure_vs_success"]:
-            if item.get("status") == "no_success_baseline":
-                lines.append(
-                    f"- {item['failure_class']} {item['failure_sequence']}: no success baseline."
-                )
-                continue
-            lines.append(
-                "- "
-                f"{item['failure_class']} {item['failure_sequence']} diverges after "
-                f"{item['common_prefix_length']} events; "
-                f"failure={item['failure_event_at_divergence']} "
-                f"success={item['success_event_at_divergence']}."
-            )
-    paired_diffs = summary.get("paired_checkpoint_diff")
-    if isinstance(paired_diffs, list):
-        lines.extend(["", "## Paired Checkpoint Diff", ""])
-        if not paired_diffs:
-            lines.append("No paired runs completed.")
-        for index, diff in enumerate(paired_diffs, 1):
-            status = "passed" if diff.get("passed") else "failed"
-            lines.append(f"- run {index}: {status}")
-            lines.append(
-                f"  - {diff.get('left_label')}: "
-                f"{', '.join(diff.get('left_sequence', [])) or 'none'}"
-            )
-            lines.append(
-                f"  - {diff.get('right_label')}: "
-                f"{', '.join(diff.get('right_sequence', [])) or 'none'}"
-            )
-            if diff.get("first_divergence") is not None:
-                lines.append(f"  - first_divergence: {diff['first_divergence']}")
-            observed = diff.get("observed_but_not_compared")
-            if isinstance(observed, dict):
-                for side_label, items in observed.items():
-                    if not isinstance(items, list) or not items:
-                        continue
-                    rendered = ", ".join(
-                        f"{item.get('name')} x{item.get('count')} "
-                        f"({item.get('excluded_reason')})"
-                        for item in items
-                        if isinstance(item, dict)
-                    )
-                    if rendered:
-                        lines.append(
-                            f"  - {side_label} observed_but_not_compared: {rendered}"
-                        )
-            coverage = diff.get("checkpoint_coverage")
-            if isinstance(coverage, dict):
-                lines.append(
-                    "  - checkpoint_coverage: "
-                    f"required_total={coverage.get('required_total')} "
-                    f"in_scope={coverage.get('in_scope')} "
-                    f"accounted_outside_scope={coverage.get('accounted_outside_scope')} "
-                    f"unaccounted={coverage.get('unaccounted')}"
-                )
-    coverage = summary.get("checkpoint_coverage")
-    if isinstance(coverage, dict):
-        lines.extend(["", "## Checkpoint Coverage Audit", ""])
-        lines.append(f"- mapping_path: {coverage.get('mapping_path')}")
-        lines.append(
-            f"- required_mapping_kinds: {', '.join(coverage.get('required_mapping_kinds', []))}"
-        )
-        lines.append(f"- mode: {coverage.get('mode')}")
-        lines.append(f"- required_total: {coverage.get('required_total')}")
-        lines.append(f"- in_scope: {coverage.get('in_scope')}")
-        lines.append(
-            f"- accounted_outside_scope: {coverage.get('accounted_outside_scope')}"
-        )
-        lines.append(f"- unaccounted: {coverage.get('unaccounted')}")
-        unaccounted = coverage.get("unaccounted_checkpoints")
-        if isinstance(unaccounted, list) and unaccounted:
-            lines.append(f"- unaccounted_checkpoints: {', '.join(map(str, unaccounted))}")
-        else:
-            lines.append("- unaccounted_checkpoints: none")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _report_scalar(value: object) -> str:
-    if value is None:
-        return "null"
-    return str(value)
-
-
-def _manifest(
-    case: dict[str, Any],
-    case_path: Path,
-    classifier_path: Path,
-    command: list[str],
-    delayed_stdin: DelayedStdin | None,
-    runs: int,
-    timeout: int,
-    repo_root: Path,
-    workdir: Path,
-) -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "case": _string(case, "name"),
-        "description": str(case.get("description", "")),
-        "case_path": str(case_path),
-        "classifier_path": str(classifier_path),
-        "command": command,
-        "delayed_stdin": (
-            None
-            if delayed_stdin is None
-            else {
-                "ready_marker": delayed_stdin.ready_marker,
-                "payload": delayed_stdin.payload,
-                "payload_bytes": len(delayed_stdin.payload.encode()),
-            }
-        ),
-        "requested_runs": runs,
-        "timeout_seconds": timeout,
-        "repo_root": str(repo_root),
-        "working_directory": str(workdir),
-        "metadata": case.get("metadata", {}),
-        "git": {
-            "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
-            "status_short": _git_output(repo_root, ["status", "--short"]),
-        },
-    }
-
-
-def _paired_manifest(
-    case: dict[str, Any],
-    case_path: Path,
-    runs: int,
-    timeout: int,
-    repo_root: Path,
-    workdir: Path,
-    paired: dict[str, Any],
-) -> dict[str, Any]:
-    paired_entry = {
-        "schema_version": SCHEMA_VERSION,
-        "case": _string(case, "name"),
-        "mode": "paired_checkpoint_diff",
-        "description": str(case.get("description", "")),
-        "case_path": str(case_path),
-        "requested_runs": runs,
-        "timeout_seconds": timeout,
-        "repo_root": str(repo_root),
-        "working_directory": str(workdir),
-        "metadata": case.get("metadata", {}),
-        "paired": {
-            "checkpoint_scope": paired["checkpoint_scope"],
-            "checkpoint_scope_max_counts": paired["checkpoint_scope_max_counts"],
-            "arceos_ex": {
-                "command": paired["arceos_ex"]["command"],
-                "working_directory": str(paired["arceos_ex"]["workdir"]),
-                "private_disk": _private_disk_summary(paired["arceos_ex"].get("private_disk")),
-                "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["arceos_ex"])),
-            },
-            "linux": {
-                "build_command": paired["linux"].get("build_command"),
-                "command": paired["linux"]["command"],
-                "working_directory": str(paired["linux"]["workdir"]),
-                "private_disk": _private_disk_summary(paired["linux"].get("private_disk")),
-                "stop_after_stress_mem": paired["linux"].get("stop_after_stress_mem", False),
-                "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["linux"])),
-            },
-        },
-        "git": {
-            "head": _git_output(repo_root, ["rev-parse", "--short", "HEAD"]),
-            "status_short": _git_output(repo_root, ["status", "--short"]),
-        },
-    }
-    if paired.get("checkpoint_coverage") is not None:
-        paired_entry["paired"]["checkpoint_coverage"] = _checkpoint_coverage_report(
-            paired["checkpoint_coverage"]
-        )
-    return paired_entry
-
-
-def _delayed_stdin_summary(delayed_stdin: DelayedStdin | None) -> dict[str, Any] | None:
-    if delayed_stdin is None:
-        return None
-    return {
-        "ready_marker": delayed_stdin.ready_marker,
-        "payload": delayed_stdin.payload,
-        "payload_bytes": len(delayed_stdin.payload.encode()),
-    }
-
-
-def _paired_config(
-    case: dict[str, Any],
-    case_path: Path,
-    repo_root: Path,
-    base_workdir: Path,
-) -> dict[str, Any]:
-    raw = case.get("paired")
-    if not isinstance(raw, dict):
-        raise SystemExit("paired_checkpoint_diff cases require a [paired] table")
-    scope = _as_string_list(raw.get("checkpoint_scope"), "paired.checkpoint_scope")
-    if not scope:
-        raise SystemExit("paired.checkpoint_scope must not be empty")
-    max_counts = _optional_integer_map(
-        raw.get("checkpoint_scope_max_counts"),
-        "paired.checkpoint_scope_max_counts",
-    )
-    checkpoint_coverage = _checkpoint_coverage_config(raw, repo_root, scope)
-    arceos = _paired_side_config(raw, "arceos_ex", case_path, repo_root, base_workdir)
-    linux = _paired_side_config(raw, "linux", case_path, repo_root, base_workdir)
-    config = {
-        "checkpoint_scope": scope,
-        "checkpoint_scope_max_counts": max_counts,
-        "arceos_ex": arceos,
-        "linux": linux,
-    }
-    if checkpoint_coverage is not None:
-        config["checkpoint_coverage"] = checkpoint_coverage
-    return config
-
-
-def _checkpoint_coverage_config(
-    paired: dict[str, Any],
-    repo_root: Path,
-    checkpoint_scope: list[str],
-) -> dict[str, Any] | None:
-    raw = paired.get("checkpoint_coverage")
+def _checkpoint_coverage_config(raw: object, repo_root: Path, scope: list[str]) -> dict[str, Any] | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise SystemExit("expected table field: paired.checkpoint_coverage")
-    mapping_path = _resolve_repo_path(
-        repo_root,
-        _string(raw, "mapping_path"),
-    )
-    required_mapping_kinds = _as_string_list(
-        raw.get("required_mapping_kinds"),
-        "paired.checkpoint_coverage.required_mapping_kinds",
-    )
-    if not required_mapping_kinds:
-        raise SystemExit("paired.checkpoint_coverage.required_mapping_kinds must not be empty")
-    mode = _string(raw, "mode")
-    if mode != "explicit-accounting":
-        raise SystemExit(f"unsupported paired.checkpoint_coverage.mode: {mode}")
-    accounted_outside_scope = _non_empty_string_map(
-        raw.get("accounted_outside_scope", {}),
-        "paired.checkpoint_coverage.accounted_outside_scope",
-    )
+        raise CompositeConfigError("checkpoint_coverage must be a table")
+    allowed = {"mapping_path", "required_mapping_kinds", "mode", "accounted_outside_scope"}
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise CompositeConfigError(f"checkpoint_coverage unknown field(s): {', '.join(unknown)}")
+    mapping_path = _resolve_repo_path(repo_root, _required_string(raw, "mapping_path", "checkpoint_coverage"))
+    kinds = _string_list(raw.get("required_mapping_kinds"), "checkpoint_coverage.required_mapping_kinds")
+    mode = _required_string(raw, "mode", "checkpoint_coverage")
+    if not kinds or mode != "explicit-accounting":
+        raise CompositeConfigError("checkpoint_coverage requires mapping kinds and explicit-accounting mode")
+    accounted = _non_empty_string_map(raw.get("accounted_outside_scope", {}), "checkpoint_coverage.accounted_outside_scope")
     audit = _audit_checkpoint_coverage(
         mapping_path=mapping_path,
-        required_mapping_kinds=required_mapping_kinds,
-        checkpoint_scope=checkpoint_scope,
-        accounted_outside_scope=accounted_outside_scope,
+        required_mapping_kinds=kinds,
+        checkpoint_scope=scope,
+        accounted_outside_scope=accounted,
         mode=mode,
     )
-    return {
-        "mapping_path": mapping_path,
-        "required_mapping_kinds": required_mapping_kinds,
-        "mode": mode,
-        "accounted_outside_scope": accounted_outside_scope,
-        "audit": audit,
-    }
+    return {"mapping_path": mapping_path, "required_mapping_kinds": kinds, "mode": mode, "accounted_outside_scope": accounted, "audit": audit}
 
 
 def _audit_checkpoint_coverage(
-    *,
-    mapping_path: Path,
-    required_mapping_kinds: list[str],
-    checkpoint_scope: list[str],
-    accounted_outside_scope: dict[str, str],
-    mode: str,
+    *, mapping_path: Path, required_mapping_kinds: list[str], checkpoint_scope: list[str],
+    accounted_outside_scope: dict[str, str], mode: str,
 ) -> dict[str, Any]:
-    required_kind_set = set(required_mapping_kinds)
-    mapping = _load_checkpoint_mapping(mapping_path)
-    required_checkpoints: list[str] = []
-    seen_required: set[str] = set()
-    for row_number, row in enumerate(mapping, 1):
-        kind = _mapping_row_string(row, row_number, "mapping_kind")
-        if kind not in required_kind_set:
-            continue
-        name = _mapping_row_string(row, row_number, "checkpoint_name")
-        if name in seen_required:
-            raise SystemExit(f"duplicate required checkpoint mapping name: {name}")
-        seen_required.add(name)
-        required_checkpoints.append(name)
-
+    rows = _load_checkpoint_mapping(mapping_path)
+    required: list[str] = []
+    for number, row in enumerate(rows, 1):
+        if _mapping_row_string(row, number, "mapping_kind") in set(required_mapping_kinds):
+            name = _mapping_row_string(row, number, "checkpoint_name")
+            if name in required:
+                raise CompositeConfigError(f"duplicate required checkpoint mapping name: {name}")
+            required.append(name)
     scope_set = set(checkpoint_scope)
-    required_set = set(required_checkpoints)
-    outside_scope = [name for name in required_checkpoints if name not in scope_set]
-    accounted_names = [
-        name for name in required_checkpoints if name in accounted_outside_scope and name not in scope_set
-    ]
-    unaccounted = [name for name in outside_scope if name not in accounted_outside_scope]
-    accounting_for_unknown = sorted(
-        name for name in accounted_outside_scope if name not in required_set
-    )
-    accounting_for_in_scope = sorted(
-        name for name in accounted_outside_scope if name in scope_set
-    )
+    required_set = set(required)
+    unaccounted = [name for name in required if name not in scope_set and name not in accounted_outside_scope]
+    unknown = sorted(name for name in accounted_outside_scope if name not in required_set)
+    in_scope = sorted(name for name in accounted_outside_scope if name in scope_set)
+    accounted = [name for name in required if name in accounted_outside_scope and name not in scope_set]
     audit = {
-        "mapping_path": str(mapping_path),
-        "required_mapping_kinds": list(required_mapping_kinds),
-        "mode": mode,
-        "required_total": len(required_checkpoints),
-        "in_scope": sum(1 for name in required_checkpoints if name in scope_set),
-        "accounted_outside_scope": len(accounted_names),
-        "unaccounted": len(unaccounted),
-        "required_checkpoints": required_checkpoints,
-        "in_scope_checkpoints": [
-            name for name in required_checkpoints if name in scope_set
-        ],
-        "accounted_outside_scope_checkpoints": [
-            {"name": name, "reason": accounted_outside_scope[name]}
-            for name in accounted_names
-        ],
+        "mapping_path": str(mapping_path), "required_mapping_kinds": required_mapping_kinds, "mode": mode,
+        "required_total": len(required), "in_scope": sum(name in scope_set for name in required),
+        "accounted_outside_scope": len(accounted), "unaccounted": len(unaccounted),
+        "required_checkpoints": required,
+        "in_scope_checkpoints": [name for name in required if name in scope_set],
+        "accounted_outside_scope_checkpoints": [{"name": name, "reason": accounted_outside_scope[name]} for name in accounted],
         "unaccounted_checkpoints": unaccounted,
-        "invalid_accounting": {
-            "unknown_or_not_required": accounting_for_unknown,
-            "already_in_scope": accounting_for_in_scope,
-        },
+        "invalid_accounting": {"unknown_or_not_required": unknown, "already_in_scope": in_scope},
     }
-    if unaccounted or accounting_for_unknown or accounting_for_in_scope:
-        problems: list[str] = []
-        if unaccounted:
-            problems.append(
-                "unaccounted required checkpoints: " + ", ".join(unaccounted)
-            )
-        if accounting_for_unknown:
-            problems.append(
-                "accounted checkpoints are not required mappings: "
-                + ", ".join(accounting_for_unknown)
-            )
-        if accounting_for_in_scope:
-            problems.append(
-                "accounted checkpoints are already in checkpoint_scope: "
-                + ", ".join(accounting_for_in_scope)
-            )
-        raise CheckpointCoverageError(
-            "checkpoint coverage audit failed; " + "; ".join(problems),
-            audit,
-        )
+    if unaccounted or unknown or in_scope:
+        raise CheckpointCoverageError("checkpoint coverage audit failed", audit)
     return audit
 
 
 def _load_checkpoint_mapping(path: Path) -> list[dict[str, Any]]:
     try:
-        with path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except FileNotFoundError as error:
-        raise SystemExit(f"checkpoint coverage mapping not found: {path}") from error
-    except json.JSONDecodeError as error:
-        raise SystemExit(f"checkpoint coverage mapping is not valid JSON: {path}") from error
-    if not isinstance(data, list):
-        raise SystemExit(f"checkpoint coverage mapping must be a JSON array: {path}")
-    rows: list[dict[str, Any]] = []
-    for row_number, row in enumerate(data, 1):
-        if not isinstance(row, dict):
-            raise SystemExit(f"checkpoint coverage mapping row {row_number} must be an object")
-        rows.append(row)
-    return rows
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise CompositeConfigError(f"invalid checkpoint coverage mapping {path}: {error}") from error
+    if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+        raise CompositeConfigError(f"checkpoint coverage mapping must be an array of objects: {path}")
+    return data
 
 
-def _mapping_row_string(row: dict[str, Any], row_number: int, key: str) -> str:
+def _mapping_row_string(row: dict[str, Any], number: int, key: str) -> str:
     value = row.get(key)
     if not isinstance(value, str) or not value:
-        raise SystemExit(f"checkpoint coverage mapping row {row_number} missing string {key}")
+        raise CompositeConfigError(f"checkpoint coverage mapping row {number} missing string {key}")
     return value
 
 
 def _checkpoint_coverage_report(config: dict[str, Any]) -> dict[str, Any]:
     audit = config["audit"]
-    return {
-        "mapping_path": audit["mapping_path"],
-        "required_mapping_kinds": list(audit["required_mapping_kinds"]),
-        "mode": audit["mode"],
-        "required_total": audit["required_total"],
-        "in_scope": audit["in_scope"],
-        "accounted_outside_scope": audit["accounted_outside_scope"],
-        "unaccounted": audit["unaccounted"],
-        "unaccounted_checkpoints": list(audit["unaccounted_checkpoints"]),
-    }
+    return {key: audit[key] for key in (
+        "mapping_path", "required_mapping_kinds", "mode", "required_total", "in_scope",
+        "accounted_outside_scope", "unaccounted", "unaccounted_checkpoints",
+    )}
 
 
-def _paired_side_config(
-    paired: dict[str, Any],
-    side_id: str,
-    case_path: Path,
-    repo_root: Path,
-    base_workdir: Path,
-) -> dict[str, Any]:
-    raw = paired.get(side_id)
-    if not isinstance(raw, dict):
-        raise SystemExit(f"paired_checkpoint_diff cases require [paired.{side_id}]")
-    workdir = _resolve_workdir(repo_root, raw.get("working_directory", str(base_workdir)))
-    command = _as_string_list(raw.get("command"), f"paired.{side_id}.command")
-    config = {
-        **raw,
-        "command": command,
-        "workdir": workdir,
-        "case_dir": case_path.parent,
-    }
-    if "build_command" in raw:
-        config["build_command"] = _as_string_list(
-            raw.get("build_command"),
-            f"paired.{side_id}.build_command",
-        )
-    if "private_disk" in raw:
-        config["private_disk"] = _private_disk_config(
-            raw.get("private_disk"),
-            side_id,
-            repo_root,
-        )
-    return config
+def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
+    lines = [
+        f"# Composite Report: {case_name}", "",
+        f"- mode: {summary.get('mode')}",
+        f"- dry_run: {summary['dry_run']}",
+        f"- requested_runs: {summary['requested_runs']}",
+        f"- completed_runs: {summary['completed_runs']}",
+        f"- success: {summary['totals']['success']}",
+        f"- failure: {summary['totals']['failure']}", "", "## Classes", "",
+        "| result | class | runs | sequences |", "| --- | --- | ---: | ---: |",
+    ]
+    lines.extend(
+        f"| {item['result']} | {item['class_id']} | {item['runs']} | {item['sequences']} |"
+        for item in summary["classes"]
+    )
+    if not summary["classes"]:
+        lines.append("| none | none | 0 | 0 |")
+    lines.extend(["", "## Failure Vs Success", ""])
+    lines.extend(f"- {item}" for item in summary["failure_vs_success"])
+    if not summary["failure_vs_success"]:
+        lines.append("No failure sequences to compare.")
+    if "paired_checkpoint_diff" in summary:
+        lines.extend(["", "## Paired Checkpoint Diff", ""])
+        for index, diff in enumerate(summary["paired_checkpoint_diff"], 1):
+            lines.append(f"- run {index}: {'passed' if diff['passed'] else 'failed'}")
+            lines.append(f"  - first_divergence: {diff['first_divergence']}")
+    if "historical_baseline" in summary:
+        baseline = summary["historical_baseline"]
+        lines.extend(["", "## Historical Baseline", ""])
+        lines.append(f"- path: {baseline['path']}")
+        lines.append(f"- failure_rate_delta: {baseline['failure_rate_delta']}")
+        lines.append(f"- classes_added: {baseline['classes_added']}")
+        lines.append(f"- classes_removed: {baseline['classes_removed']}")
+        lines.append(f"- sequences_added: {baseline['sequences_added']}")
+        lines.append(f"- sequences_removed: {baseline['sequences_removed']}")
+        lines.append(f"- recent_sequence_first_divergence: {baseline['recent_sequence_first_divergence']}")
+    path.write_text("\n".join(lines) + "\n")
 
 
-def _private_disk_config(value: object, side_id: str, repo_root: Path) -> dict[str, Path]:
-    if not isinstance(value, dict):
-        raise SystemExit(f"expected table field: paired.{side_id}.private_disk")
-    unknown = sorted(set(value) - {"template", "path"})
-    if unknown:
-        raise SystemExit(
-            f"unknown paired.{side_id}.private_disk field(s): {', '.join(unknown)}"
-        )
-    template = _resolve_repo_path(repo_root, _string(value, "template"))
-    path = _resolve_repo_path(repo_root, _string(value, "path"))
-    if template == path:
-        raise SystemExit(f"paired.{side_id}.private_disk path must differ from template")
-    return {"template": template, "path": path}
+def _case_result(case_name: str, case_path: Path, output_dir: Path, summary: dict[str, Any]) -> dict[str, Any]:
+    return {"case_name": case_name, "case_path": str(case_path), "output_dir": str(output_dir), "report_path": str(output_dir / "report.md"), "summary": summary}
 
 
-def _private_disk_summary(value: object) -> dict[str, str] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise SystemExit("internal private disk configuration is not a table")
-    return {
-        "template": str(value["template"]),
-        "path": str(value["path"]),
-    }
+def _case_failed(result: dict[str, Any]) -> bool:
+    return int(result["summary"]["totals"]["failure"]) > 0
+
+
+def _print_suite_summary(results: list[dict[str, Any]]) -> None:
+    print("\nstress suite summary:", flush=True)
+    for result in results:
+        totals = result["summary"]["totals"]
+        print(f"  {result['case_name']}: success={totals['success']} failure={totals['failure']} report={result['report_path']}", flush=True)
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
-    with path.open("rb") as fh:
-        data = tomllib.load(fh)
-    if not isinstance(data, dict):
-        raise SystemExit(f"TOML root must be a table: {path}")
-    return data
+    try:
+        value = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise CompositeConfigError(f"cannot parse {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise CompositeConfigError(f"{path}: top level must be a table")
+    return value
 
 
-def _classifier_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_rules = data.get("rules", [])
-    if not isinstance(raw_rules, list):
-        raise SystemExit("classifier rules must be a list")
-    rules = []
-    for item in raw_rules:
-        if not isinstance(item, dict):
-            raise SystemExit("classifier rule must be a table")
-        rule_id = _string(item, "id")
-        result = _string(item, "result")
-        if result not in ("success", "failure"):
-            raise SystemExit(f"classifier rule {rule_id} has invalid result: {result}")
-        rules.append(item)
-    return rules
+def _required_string(data: dict[str, Any], key: str, context: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise CompositeConfigError(f"{context}: {key} must be a non-empty string")
+    return value
 
 
-def _delayed_stdin(case: dict[str, Any]) -> DelayedStdin | None:
-    raw = case.get("delayed_stdin")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise SystemExit("expected table field: delayed_stdin")
-    return DelayedStdin(
-        ready_marker=_string(raw, "ready_marker"),
-        payload=_string(raw, "payload"),
-    )
+def _string_list(value: object, name: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+        raise CompositeConfigError(f"{name} must be an array of non-empty strings")
+    return list(value)
+
+
+def _positive_integer_map(value: object, name: str) -> dict[str, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise CompositeConfigError(f"{name} must be a table")
+    if any(not isinstance(key, str) or not key or not isinstance(item, int) or isinstance(item, bool) or item <= 0 for key, item in value.items()):
+        raise CompositeConfigError(f"{name} entries must be positive integers")
+    return dict(value)
+
+
+def _non_empty_string_map(value: object, name: str) -> dict[str, str]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) or not key or not isinstance(item, str) or not item for key, item in value.items()):
+        raise CompositeConfigError(f"{name} entries must be non-empty strings")
+    return dict(value)
 
 
 def _resolve_repo_root(value: Path | None) -> Path:
-    if value is not None:
-        return value.resolve()
-    current = Path(__file__).resolve()
-    for parent in [current, *current.parents]:
-        if (parent / ".git").exists():
-            return parent
-    raise SystemExit("could not auto-detect repository root")
+    root = value.resolve() if value else Path(__file__).resolve().parents[4]
+    if not (root / "Makefile").is_file():
+        raise CompositeConfigError(f"repository root not found: {root}")
+    return root
 
 
 def _resolve_case_path(case_path: Path, value: str) -> Path:
     path = Path(value)
-    if not path.is_absolute():
-        path = case_path.parent / path
-    return path.resolve()
+    resolved = path.resolve() if path.is_absolute() else (case_path.parent / path).resolve()
+    if not resolved.is_file():
+        raise CompositeConfigError(f"referenced file not found: {resolved}")
+    return resolved
 
 
 def _resolve_repo_path(repo_root: Path, value: str) -> Path:
     path = Path(value)
-    if not path.is_absolute():
-        path = repo_root / path
-    return path.resolve()
-
-
-def _resolve_workdir(repo_root: Path, value: object) -> Path:
-    text = str(value)
-    path = Path(text)
-    if not path.is_absolute():
-        path = repo_root / path
-    return path.resolve()
+    resolved = path.resolve() if path.is_absolute() else (repo_root / path).resolve()
+    if not resolved.is_file():
+        raise CompositeConfigError(f"referenced repository file not found: {resolved}")
+    return resolved
 
 
 def _run_dir_name(case_name: str) -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}-{_safe_path(case_name)}"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    return f"{stamp}-{case_name}"
 
 
 def _unique_output_dir(base: Path) -> Path:
     if not base.exists():
         return base
-    for index in range(2, 1000):
-        candidate = base.with_name(f"{base.name}-{index}")
+    for suffix in range(1, 1000):
+        candidate = base.with_name(f"{base.name}-{suffix}")
         if not candidate.exists():
             return candidate
-    raise SystemExit(f"could not allocate unique output directory under {base.parent}")
+    raise RuntimeError(f"could not allocate output directory: {base}")
 
 
 def _sequence_hash(tokens: list[str]) -> str:
-    payload = json.dumps(tokens, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256("\n".join(tokens).encode()).hexdigest()[:16]
 
 
-def _common_prefix(items: list[list[str]]) -> list[str]:
-    if not items:
+def _common_prefix(rows: list[list[str]]) -> list[str]:
+    if not rows:
         return []
-    prefix = list(items[0])
-    for tokens in items[1:]:
-        count = _common_prefix_len(prefix, tokens)
-        prefix = prefix[:count]
-    return prefix
+    result = list(rows[0])
+    for row in rows[1:]:
+        result = result[:_common_prefix_len(result, row)]
+    return result
 
 
 def _common_prefix_len(left: list[str], right: list[str]) -> int:
-    count = 0
-    for left_item, right_item in zip(left, right):
-        if left_item != right_item:
-            break
-        count += 1
-    return count
+    index = 0
+    while index < len(left) and index < len(right) and left[index] == right[index]:
+        index += 1
+    return index
 
 
 def _token_at(tokens: list[str], index: int) -> str | None:
-    if index < len(tokens):
-        return tokens[index]
-    return None
+    return tokens[index] if index < len(tokens) else None
 
 
 def _safe_path(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-") or "unnamed"
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _git_output(repo_root: Path, args: list[str]) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
+    try:
+        completed = subprocess.run(["git", *args], cwd=repo_root, check=False, capture_output=True, text=True)
+    except OSError:
         return ""
-    return completed.stdout.strip()
+    return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
-
-
-def _string(data: dict[str, Any], key: str) -> str:
-    value = data.get(key)
-    if not isinstance(value, str) or not value:
-        raise SystemExit(f"expected non-empty string field: {key}")
-    return value
-
-
-def _optional_string(data: dict[str, Any], key: str) -> str | None:
-    if key not in data:
-        return None
-    value = data.get(key)
-    if not isinstance(value, str) or not value:
-        raise SystemExit(f"expected non-empty string field: {key}")
-    return value
-
-
-def _integer(data: dict[str, Any], key: str) -> int:
-    value = data.get(key)
-    if not isinstance(value, int):
-        raise SystemExit(f"expected integer field: {key}")
-    return value
-
-
-def _string_list(data: dict[str, Any], key: str) -> list[str]:
-    return _as_string_list(data.get(key), key)
-
-
-def _optional_string_list(data: dict[str, Any], key: str) -> list[str] | None:
-    if key not in data:
-        return None
-    return _as_string_list(data.get(key), key)
-
-
-def _as_string_list(value: object, name: str) -> list[str]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise SystemExit(f"expected string list field: {name}")
-    return list(value)
-
-
-def _string_map(value: object, name: str) -> dict[str, str]:
-    if not isinstance(value, dict):
-        raise SystemExit(f"expected table field: {name}")
-    result: dict[str, str] = {}
-    for key, item in value.items():
-        if not isinstance(key, str) or not isinstance(item, str):
-            raise SystemExit(f"expected string map entries in field: {name}")
-        result[key] = item
-    return result
-
-
-def _non_empty_string_map(value: object, name: str) -> dict[str, str]:
-    result = _string_map(value, name)
-    for key, item in result.items():
-        if not key or not item:
-            raise SystemExit(f"expected non-empty string map entries in field: {name}")
-    return result
-
-
-def _optional_integer_map(value: object, name: str) -> dict[str, int]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise SystemExit(f"expected table field: {name}")
-    result: dict[str, int] = {}
-    for key, item in value.items():
-        if not isinstance(key, str) or not isinstance(item, int) or item <= 0:
-            raise SystemExit(f"expected positive integer map entries in field: {name}")
-        result[key] = item
-    return result
-
-
-def _expand_command_placeholders(command: list[str]) -> list[str]:
-    nproc = str(os.cpu_count() or 1)
-    return [item.replace("$(nproc)", nproc) for item in command]
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

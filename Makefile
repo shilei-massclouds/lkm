@@ -19,10 +19,9 @@ SMOKE_APP ?= smoke
 TEST_PLIC_PROVIDERS ?= $(strip $(foreach provider,$(PROVIDER_NAMES),$(if $(filter plic,$(PROVIDER_$(provider)_KIND)),$(provider))))
 STRESS_RUNS ?= 10
 STRESS_CASES ?=
-STRESS_TIMEOUT ?=
+STRESS_BASELINE ?=
 DIFFTEST_CASE ?= impl/arceos_ex/tests/stress/cases/rc-local-difftest.toml
 DIFFTEST_RUNS ?= 1
-DIFFTEST_TIMEOUT ?=
 
 KERNEL_DIR := impl/$(KERNEL)
 BASIC_TEST_RUNNER ?= $(KERNEL_DIR)/tests/basic/runner.py
@@ -36,8 +35,7 @@ BASIC_TEST_REQUEST := $(if $(BASIC_TEST_EXPLICIT_APP),$(APP),$(TEST))
 PYVERI ?= tools/pyveri/bin/pyveri
 STRESS_RUNNER ?= impl/arceos_ex/tests/stress/runner.py
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
-STRESS_TIMEOUT_ARG := $(if $(STRESS_TIMEOUT),--timeout $(STRESS_TIMEOUT),)
-DIFFTEST_TIMEOUT_ARG := $(if $(DIFFTEST_TIMEOUT),--timeout $(DIFFTEST_TIMEOUT),)
+STRESS_BASELINE_ARG := $(if $(STRESS_BASELINE),--baseline "$(STRESS_BASELINE)",)
 
 ifeq ($(VERBOSE),1)
 VERIFY_TEXT_ARGS := --derive --strict
@@ -45,7 +43,7 @@ else
 VERIFY_TEXT_ARGS := --strict
 endif
 
-.PHONY: build run legacy-run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-basic test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-basic test-composite test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
@@ -74,10 +72,6 @@ run:
 		exit 2; \
 	fi
 	$(PYTHON) $(BASIC_TEST_RUNNER) run "$(BASIC_TEST_REQUEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
-
-# Compatibility boundary for unmigrated stress/difftest and focused overlays.
-legacy-run:
-	$(MAKE) -C $(KERNEL_DIR) legacy-run
 
 fmt:
 	$(MAKE) -C $(KERNEL_DIR) fmt
@@ -142,6 +136,9 @@ test-verify:
 test-basic:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest impl.arceos_ex.tests.basic.test_runner
 
+test-composite:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest impl.arceos_ex.tests.stress.test_runner
+
 test-checkpoints:
 	python3 -m unittest tools.checkpoints.tests.test_list_checkpoints tools.checkpoints.tests.test_map_linux_checkpoints tools.checkpoints.tests.test_summarize_linux_checkpoint_mapping tools.checkpoints.tests.test_plan_linux_instrumentation
 	python3 tools/checkpoints/list_checkpoints.py --check
@@ -156,7 +153,7 @@ test-smoke:
 	$(MAKE) run TEST=kernel-smoke-native
 
 test-stress:
-	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_TIMEOUT_ARG)
+	$(STRESS_RUNNER) $(STRESS_CASES) --runs $(STRESS_RUNS) $(STRESS_BASELINE_ARG)
 
 stress-test: test-stress
 
@@ -170,7 +167,7 @@ difftest-preflight:
 	@$(MAKE) checkpoints-linux-check
 
 difftest: difftest-preflight
-	$(STRESS_RUNNER) $(DIFFTEST_CASE) --runs $(DIFFTEST_RUNS) $(DIFFTEST_TIMEOUT_ARG)
+	$(STRESS_RUNNER) $(DIFFTEST_CASE) --runs $(DIFFTEST_RUNS)
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean

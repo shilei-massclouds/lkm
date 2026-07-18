@@ -1,0 +1,27 @@
+schema_version = 2
+name = "rc-local-linux"
+purpose = "diagnostic"
+timeout_seconds = 360
+
+[kernel]
+target = "linux"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/opt/lkm/tests/rc-local-init"
+rng = false
+user_network = true
+host_forwards = [
+  { protocol = "tcp", host_port = 5555, guest_port = 5555 },
+]
+exit_policy = "stress-mem"
+interaction = "none"
+
+[expect]
+markers = ["lkm-rc-local: begin", "lost+found", "lkm-rc-local: end status=0", "SyscallTable.Wait4"]
+forbidden_markers = ["lkm-rc-local-init: execve failed", "overflow=1", "Kernel panic"]

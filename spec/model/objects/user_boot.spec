@@ -365,7 +365,7 @@ predicate syscall_clone_vfork_next_child_accepted<T, C>(table: T, child: C) -> b
 predicate syscall_clone_wake_up_new_task_shape<T, S>(table: T, scheduler: S) -> bool;
 predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
-predicate syscall_execve_observed_openrc_getty_args_bound<T>(table: T) -> bool;
+predicate syscall_execve_observed_busybox_init_getty_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
 predicate syscall_execve_current_pid1_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
@@ -1136,7 +1136,7 @@ object SyscallTable: ResourceObject {
                     syscall_fchown_fchmod_fd_local_first_slice(self);
                     syscall_fchown_fchmod_full_linux_model_deferred(self);
                     /*
-                     * Current OpenRC login evidence has moved past post-auth
+                     * Current BusyBox init login evidence has moved past post-auth
                      * fchown(55)/fchmod(52) and classifies
                      * socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0) as the
                      * direct login failure boundary. Linux 6.12 differential
@@ -1173,7 +1173,7 @@ object SyscallTable: ResourceObject {
                      * length/family, non-AF_UNIX, abstract, non-UnixSocket0
                      * and non-pathname shapes still return ENOSYS with the
                      * stable connect diagnostic. The focused diagnostic run
-                     * classifies the early OpenRC 110-byte sockaddr calls as
+                     * classifies the early BusyBox-init 110-byte sockaddr calls as
                      * pathname sockets under /run/utmps, while the post-auth
                      * fchown/fchmod boundary was a 24-byte pathname sockaddr
                      * for /var/run/nscd/socket; both satisfy the AF_UNIX
@@ -1457,7 +1457,7 @@ object SyscallTable: ResourceObject {
                  * current->fs pwd with set_fs_pwd().
                  *
                  * This first slice is intentionally narrower: it covers the
-                 * observed BusyBox/OpenRC chdir("/") path after native init has
+                 * observed BusyBox-init chdir("/") path after native init has
                  * opened and closed "/", reuses the existing AT_FDCWD/rooted
                  * VfsCore path walk and requires the resolved target to be a
                  * directory through FsStruct.Action::Chdir. Permission checks,
@@ -1722,7 +1722,7 @@ object SyscallTable: ResourceObject {
             on Action::Fchown {
                 /*
                  * Linux asm-generic/RISC-V exposes fchown as __NR_fchown=55.
-                 * The current OpenRC login focused run observes BusyBox login
+                 * The current BusyBox init login focused run observes BusyBox login
                  * calling fchown(fd=0, uid=1000, gid=100) after password
                  * authentication. This first slice only validates the fd via
                  * FilesStruct/FileDescriptorTable, records fd-local owner
@@ -1756,7 +1756,7 @@ object SyscallTable: ResourceObject {
             on Action::Fchmod {
                 /*
                  * Linux asm-generic/RISC-V exposes fchmod as __NR_fchmod=52.
-                 * The current OpenRC login focused run observes BusyBox login
+                 * The current BusyBox init login focused run observes BusyBox login
                  * calling fchmod(fd=0, mode=0600) immediately after fchown.
                  * This first slice only validates the fd through the fd table,
                  * records a fd-local mode override, and lets fstat on that fd
@@ -1833,7 +1833,7 @@ object SyscallTable: ResourceObject {
                  * UserInitProcess controlling-tty foreground-pgrp state, and
                  * the observed getty TIOCGSID/TIOCSCTTY controlling-tty first
                  * slice. TIOCSPGRP accepts PID1 pgrp, the current visible
-                 * child pgrp, and the OpenRC login shell's inherited
+                 * child pgrp, and the BusyBox init login shell's inherited
                  * same-session child pgrp after observed /bin/ls completion;
                  * unknown pgrp stays ESRCH and cross-session pgrp stays EPERM.
                  * /dev/null validates as an fd but is not a TTY; TTY
@@ -2232,7 +2232,7 @@ object SyscallTable: ResourceObject {
                  * current supplementary group count when gidsetsize is 0,
                  * returns EINVAL when the supplied buffer is smaller than the
                  * current group count, and copies gid_t entries to userspace
-                 * otherwise. The current OpenRC login-shell evidence reaches
+                 * otherwise. The current BusyBox init login-shell evidence reaches
                  * getgroups(32, <user gid_t *>) after login has dropped to
                  * uid=1000/gid=100 and after setgroups(1, {100}) populated the
                  * bounded UserInitProcess supplementary group view. This first
@@ -2317,13 +2317,13 @@ object SyscallTable: ResourceObject {
                  * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
                  * new credentials for current. The current first slice keeps a
                  * bounded PID1 credential view on UserInitProcess. Following
-                 * focused OpenRC evidence, it treats euid==0 as the temporary
+                 * focused BusyBox-init evidence, it treats euid==0 as the temporary
                  * CAP_SETUID proxy and accepts 32-bit uid targets, syncing
                  * uid/euid/suid/fsuid. Namespaces, full capability checks, LSM
                  * hooks, user accounting and credential COW/RCU are explicit
                  * deferred facts; saved-id/capability regain after dropping to
                  * uid 1000 is not modeled in this slice. The post-slice
-                 * OpenRC focused rerun confirms setuid(146, uid=1000) returns
+                 * BusyBox-init focused rerun confirms setuid(146, uid=1000) returns
                  * 0 and records the next fatal boundary as login shell
                  * execve(221) returning EFAULT; that execve boundary is
                  * deferred to a later slice.
@@ -2380,7 +2380,7 @@ object SyscallTable: ResourceObject {
                  * kernel/groups.c::SYSCALL_DEFINE2(setgroups). Linux checks
                  * may_setgroups(), bounds gidsetsize by NGROUPS_MAX, copies a
                  * gid_t list from userspace, sorts it and commits a new group
-                 * info through current credentials. The current OpenRC login
+                 * info through current credentials. The current BusyBox init login
                  * evidence reaches setgroups(gidsetsize=1, grouplist=<user
                  * gid_t *>) immediately after the /var/run/nscd/socket
                  * connect(203) ENOENT fallback. This first slice keeps only a
@@ -2509,7 +2509,7 @@ object SyscallTable: ResourceObject {
                  * NULL uinfo does not require siginfo_t copyout. A NULL uts
                  * is an infinite wait rather than an immediate EAGAIN.
                  *
-                 * The current OpenRC evidence reaches
+                 * The current BusyBox-init evidence reaches
                  * rt_sigtimedwait(uthese, NULL, NULL, 8) after setsid(157).
                  * This first slice copies and records the wait mask, supports
                  * the Linux sigset bit rule 1 << (sig - 1), and recognizes
@@ -2765,13 +2765,13 @@ object SyscallTable: ResourceObject {
                  * removed from the runqueue and its execution slot returns to
                  * Prepared. A later sequential plain fork allocates the next
                  * user-visible pid and reuses that internal task ref.
-                 * The later OpenRC login shell /bin/ls focused baseline has
+                 * The later BusyBox init login shell /bin/ls focused baseline has
                  * the same plain-fork flags, but current_child=1 and the
                  * single active UserChild slot is still the shell
                  * continuation. The login shell is a nested vfork child.
                  * Canonical rc-local instead self-execs its launcher into a
                  * PID 1 shell and uses the ordinary sequential plain-fork
-                 * slot above. This slice supports only the OpenRC-observed
+                 * slot above. This slice supports only the BusyBox-init-observed
                  * observed child plain-fork shape: flags must be SIGCHLD
                  * only, newsp must be zero, the parent must be the current
                  * vfork child continuation, and the child must not already be
@@ -2792,7 +2792,7 @@ object SyscallTable: ResourceObject {
                  * exit facts are cleared before the shell may create the next
                  * sequential observed child.
                  *
-                 * The OpenRC native /sbin/init boundary observes
+                 * The native BusyBox /sbin/init boundary observes
                  * clone_flags=0x4111 and diagnostics decode
                  * flags_without_csignal=0x4100: SIGCHLD plus CLONE_VM and
                  * CLONE_VFORK, not CLONE_PIDFD.  Linux 6.12 legacy clone
@@ -2893,7 +2893,7 @@ object SyscallTable: ResourceObject {
                  * be mapped.  Empty strings, address overflow, unreadable
                  * bytes or reaching USER_PATH_MAX without NUL remain copy
                  * failures.  The bounded argv copy is intentionally small but
-                 * covers the observed OpenRC getty shape
+                 * covers the observed BusyBox-init getty shape
                  * argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is only
                  * observed/deferred and is not copied into the new stack in
                  * this slice.  Non-execve path syscall C-string copies keep
@@ -2958,7 +2958,7 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_execve_linux_6_12_do_execveat_common_bound(self);
                     syscall_execve_observed_shell_ls_args_bound(self);
-                    syscall_execve_observed_openrc_getty_args_bound(self);
+                    syscall_execve_observed_busybox_init_getty_args_bound(self);
                     syscall_execve_current_pid1_first_slice(self, UserInitProcess);
                     syscall_execve_child_continuation_first_slice(self, UserChildProcess);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
@@ -3008,7 +3008,7 @@ object SyscallTable: ResourceObject {
                  * Status copyout failure returns EFAULT and must not reap or
                  * release the record.  Consuming SIGCHLD through
                  * rt_sigtimedwait is not reaping and cannot release a record.
-                 * The native OpenRC /sbin/init path reaches
+                 * The native BusyBox /sbin/init path reaches
                  * wait4(-1, NULL, WNOHANG, NULL) after setsid and
                  * rt_sigtimedwait. For that observed nonblocking shape, the
                  * first slice follows __do_wait(): if an eligible child exists
@@ -3016,7 +3016,7 @@ object SyscallTable: ResourceObject {
                  * eligible child exists, return ECHILD. This does not create a
                  * synthetic child, does not block, and does not consume signal
                  * or scheduler wait state.
-                 * The OpenRC login shell observed child plain-fork shape is
+                 * The BusyBox init login shell observed child plain-fork shape is
                  * eligible only after clone has recorded the grandchild pid
                  * and the shell parent reaches wait4.  That wait4 is the
                  * handoff point: save the shell wait frame, address-space,
@@ -3213,7 +3213,7 @@ object UserChildProcess: ResourceObject {
 
         on Action::VforkChildExit {
             /*
-             * Bounded OpenRC vfork completion: child exit restores the saved
+             * Bounded BusyBox-init vfork completion: child exit restores the saved
              * parent clone frame and makes parent clone(220) return the
              * user-visible child pid, then archives a completed-child record
              * with raw status, wait status and reaped=false. SIGCHLD pending/
@@ -3245,7 +3245,7 @@ object UserChildProcess: ResourceObject {
 
         on Action::NestedVforkChildHandoff {
             /*
-             * Observed OpenRC login reaches BusyBox login post-auth while the
+             * Observed BusyBox init login reaches BusyBox login post-auth while the
              * existing UserChild execution slot is still the getty/login child
              * continuation.  A single bounded nested CLONE_VM|CLONE_VFORK|
              * SIGCHLD handoff may reuse the same internal UserChild task ref:
@@ -3272,7 +3272,7 @@ object UserChildProcess: ResourceObject {
 
         on Action::ObservedChildPlainFork {
             /*
-             * The observed OpenRC login shell /bin/ls reaches plain
+             * The observed BusyBox init login shell /bin/ls reaches plain
              * clone(SIGCHLD) from an already active vfork child continuation.
              * The shell parent stays in the same
              * internal UserChild slot and clone returns the allocated
@@ -3654,7 +3654,7 @@ object UserInitProcess: ResourceObject {
                 /*
                  * setpgid keeps Linux pid/pgid zero normalization. In
                  * addition to putting the visible child in its own pgrp, the
-                 * OpenRC login shell slice accepts setpgid(0,
+                 * BusyBox init login shell slice accepts setpgid(0,
                  * inherited_child_pgrp) as a same-session join/no-op. This
                  * covers the bounded shell job-control restore after staged
                  * /bin/ls. One pending observed grandchild is also visible

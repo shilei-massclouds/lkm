@@ -162,7 +162,7 @@ root 读取 dynamic musl ELF 与 interpreter，建立 auxv/address space/trap fr
 FilesStruct/fd/OFD/backend 调度当前 syscall slice。BusyBox shell 外部命令路径使用单 observed-child
 handoff；exec replacement address space 放在 Context-owned staging，避免 4KiB trap stack 上的大对象。
 
-现有 focused 证据已经越过 clone/wait/exec 主线、OpenRC login 认证、基础 credential drop 和登录 shell
+现有 focused 证据已经越过 clone/wait/exec 主线、BusyBox init login 认证、基础 credential drop 和登录 shell
 内一次 `/bin/ls` child，并闭合单 pending grandchild 在 handoff/exec 前的父侧 setpgid 与后续 TIOCSPGRP。
 完整 task graph、多 pending child、post-exec parent setpgid、COW/mm、signals、networking、完整 exec
 rollback/reclamation 等仍是 deferred 行为。
@@ -194,7 +194,7 @@ failure diagnostics 使用稳定 phase/step/object/check/first-failed 字段并�
 ## 构建与测试证据
 
 rootfs 构造规则见 [`projects/rootfs-image.md`](projects/rootfs-image.md)，测试编排见
-[`../testing/rootfs.md`](../testing/rootfs.md)。正式 `canonical` builder 独立完成 Alpine/OpenRC、稳定 test
+[`../testing/rootfs.md`](../testing/rootfs.md)。正式 `canonical` builder 独立完成 Alpine/BusyBox init、稳定 test
 账户、fixture、rc.local launcher/script 和 LTP template；basic runner 只核对 manifest 或创建私有副本。
 
 smoke 负责 payload/端到端可观察行为；checkpoint KUnit basic callback profile 负责真实 checkpoint 时刻的只读事实；stress runner

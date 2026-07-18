@@ -26,6 +26,7 @@ make run TEST=shell
 make verify
 make test
 make test-basic
+make test-composite
 make test-verify
 make test-checkpoints
 make checkpoints-linux-check
@@ -93,7 +94,7 @@ Targets must remain composable:
   before checkpoint drift checks and real QEMU cases.
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
-- Dual-provider rc.local and OpenRC login acceptance are default runtime stages. Terminal diagnostic
+- Dual-provider rc.local and BusyBox-init login acceptance are default runtime stages. Terminal diagnostic
   configurations, including `shell`, `shell-lo` and the separate LTP manual shell, are never
   default stages. The default user-mode acceptance stages invoke `TEST=user-smoke-native` and
   `TEST=user-smoke-linux-object` explicitly; they must not use APP or retired test-name mappings.
@@ -151,8 +152,10 @@ is published atomically and failure preserves the previous template.
 
 For ext2 rootfs images, the default source is the Alpine minirootfs tarball identified by `ROOTFS_URL`. The tarball must be cached under the kernel build directory through `ROOTFS_TARBALL`, for example `build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz`. If the cached tarball exists, `make disk` must reuse it instead of downloading it again. The extracted staging tree belongs under `ROOTFS_STAGING_DIR` and is generated runtime input, not source.
 
-The canonical staging tree retains Alpine/OpenRC `/etc/inittab` and `/sbin/init`, keeps root locked, and merges
-the stable non-root `test/test` account. Repository fixtures live below `/opt/lkm/tests`, including the static
+The canonical staging tree retains Alpine BusyBox `/sbin/init`, replaces `/etc/inittab` with the checked-in
+deterministic BusyBox-init profile, keeps root locked, and merges the stable non-root `test/test` account.
+The installed inittab must not reference an absent OpenRC package and construction must validate the exact
+configured content before mkfs. Repository fixtures live below `/opt/lkm/tests`, including the static
 rc.local launcher/script, and LTP remains below `/opt/ltp`. A basic test either attaches the current template
 read-only or makes a temporary private copy deleted during cleanup. `make build TEST=...` and the basic runner
 must not invoke this builder. Missing/stale input manifests fail with the explicit
@@ -416,20 +419,17 @@ requirement also applies when exactly one case is selected. Preflight, setup or
 configuration failures that occur before a case result is produced must retain
 their specific diagnostics and must not fabricate a result summary.
 
-#### Visible stress/difftest setup progress
+#### Composite preparation and delegated progress
 
-Rule ID: `build_must_report_long_running_stress_difftest_setup_progress` (MUST).
+Rule ID: `build_must_delegate_composite_lifecycle_progress` (MUST).
 
-Before a stress or difftest setup command, including a paired Linux build,
-starts, the runner must immediately print and flush a stage line that identifies
-the stage, its timeout and the retained output-log path. While that command is
-still running, the runner must print and flush an elapsed-time heartbeat at
-least once every 30 seconds. It must print and flush a finish line with the
-return code, timeout result, duration and retained output-log path before
-returning or raising the stage-specific failure. These progress diagnostics
-must remain visible when runner stdout is redirected or captured. The command's
-raw output remains captured in the stage log rather than being live-forwarded
-into the guest event stream.
+For non-zero runs, a stress or difftest invocation must visibly run one canonical
+`make disk` after every selected composite/basic configuration validates and
+before the first basic test. It must not run per-case setup commands or a paired
+Linux build. Build, QEMU, stdin, timeout and cleanup progress belongs to each
+delegated basic runner and its fixed nested artifact directory; the composite
+runner must not capture or reimplement that lifecycle. Runs equal to zero perform
+validation only and must not prepare a disk.
 
 #### Generated output hygiene
 

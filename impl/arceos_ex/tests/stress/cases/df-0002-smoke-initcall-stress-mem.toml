@@ -1,25 +1,9 @@
+schema_version = 2
 name = "df-0002-smoke-initcall-stress-mem"
-description = "Repeat smoke with unified in-guest memory capture for DF-0002 timing checks."
-default_runs = 30
-timeout_seconds = 120
-working_directory = "."
-setup_command = [
-  "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall-stress-mem.raw",
-  "ROOTFS_OVERLAY=default",
-]
-command = [
-  "make",
-  "legacy-run",
-  "APP=smoke",
-  "PROBE=stress-mem",
-  "STRESS_MEM_BYTES=65536",
-  "VIRTIO_BLK_IMAGE=build/stress-df-0002-smoke-initcall-stress-mem.raw",
-]
+description = "Repeat the canonical kernel-smoke-stress-mem basic test for DF-0002 timing checks."
+mode = "stress"
+test = "kernel-smoke-stress-mem"
+runs = 30
 classifier = "../classifiers/defects.toml"
 
 [metadata]

@@ -1,16 +1,12 @@
+schema_version = 2
 name = "rc-local-difftest"
 description = "Run the default Linux/arceos_ex paired checkpoint diff for the canonical rc-local launcher, comparing the stable checkpoint prefix through the shell and /bin/ls execs."
-mode = "paired_checkpoint_diff"
-default_runs = 1
-timeout_seconds = 360
-working_directory = "."
-setup_command = [
-  "make",
-  "disk",
-  "ROOTFS=canonical",
-]
-
-[paired]
+mode = "difftest"
+runs = 1
+left_test = "rc-local-native"
+left_label = "arceos_ex"
+right_test = "rc-local-linux"
+right_label = "linux"
 checkpoint_scope = [
   "EventStream.Prepared",
   "ExceptionStream.Prepared",
@@ -82,19 +78,19 @@ checkpoint_scope = [
   "UserExec.TrapFrameReady",
 ]
 
-[paired.checkpoint_scope_max_counts]
+[checkpoint_scope_max_counts]
 "UserExec.MainElfReady" = 3
 "UserExec.InterpreterReady" = 3
 "UserExec.ContextReplaced" = 3
 "UserExec.SatpReady" = 3
 "UserExec.TrapFrameReady" = 3
 
-[paired.checkpoint_coverage]
+[checkpoint_coverage]
 mapping_path = "tools/out/checkpoints/linux_checkpoint_mapping.json"
 required_mapping_kinds = ["exact"]
 mode = "explicit-accounting"
 
-[paired.checkpoint_coverage.accounted_outside_scope]
+[checkpoint_coverage.accounted_outside_scope]
 "UserBoot.InterpreterReady" = "canonical_rc_local_launcher_is_static_and_has_no_pt_interp"
 "Kernel.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EntryPreludePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
@@ -140,54 +136,6 @@ mode = "explicit-accounting"
 "SyscallTable.Wait4" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "UserChild.ParentWaitResumed" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "SyscallTable.Exit" = "outside_stable_rc_local_hard_scope_pending_expansion"
-
-[paired.arceos_ex]
-working_directory = "."
-command = [
-  "make",
-  "run",
-  "TEST=rc-local-native",
-]
-
-[paired.linux]
-working_directory = "../linux-6.12"
-build_command = [
-  "make",
-  "ARCH=riscv",
-  "CROSS_COMPILE=riscv64-linux-gnu-",
-  "KCPPFLAGS=-DCONFIG_LKM_CHECKPOINTS",
-  "-j",
-  "$(nproc)",
-]
-command = [
-  "qemu-system-riscv64",
-  "-m",
-  "128M",
-  "-smp",
-  "2",
-  "-machine",
-  "virt",
-  "-bios",
-  "default",
-  "-kernel",
-  "./arch/riscv/boot/Image",
-  "-device",
-  "virtio-blk-device,drive=disk0",
-  "-drive",
-  "id=disk0,if=none,format=raw,file=../lkm/impl/arceos_ex/build/stress-rc-local-difftest-linux.raw",
-  "-device",
-  "virtio-net-device,netdev=net0",
-  "-netdev",
-  "user,id=net0,hostfwd=tcp::5555-:5555",
-  "-nographic",
-  "-append",
-  "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/opt/lkm/tests/rc-local-init",
-]
-stop_after_stress_mem = true
-
-[paired.linux.private_disk]
-template = "impl/arceos_ex/build/rootfs/canonical.raw"
-path = "impl/arceos_ex/build/stress-rc-local-difftest-linux.raw"
 
 [metadata]
 observation_mode = "canonical-rc-local-paired-checkpoint-diff"

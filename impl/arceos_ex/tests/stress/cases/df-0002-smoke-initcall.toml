@@ -1,18 +1,9 @@
+schema_version = 2
 name = "df-0002-smoke-initcall"
-description = "Repeat the ordinary smoke path to reproduce DF-0002."
-default_runs = 30
-timeout_seconds = 120
-working_directory = "."
-setup_command = [
-  "make",
-  "disk",
-  "ROOTFS=canonical",
-]
-command = [
-  "make",
-  "run",
-  "APP=smoke",
-]
+description = "Repeat the canonical kernel-smoke-native basic test to reproduce DF-0002."
+mode = "stress"
+test = "kernel-smoke-native"
+runs = 30
 classifier = "../classifiers/defects.toml"
 
 [metadata]

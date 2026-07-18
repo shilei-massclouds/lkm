@@ -1,6 +1,6 @@
 # Rootfs and user-mode acceptance testing
 
-本文件是 rootfs/user fixture、发行版 smoke、OpenRC 输入编排和 checkpoint difftest 的权威测试规格。
+本文件是 rootfs/user fixture、发行版 smoke、BusyBox init 输入编排和 checkpoint difftest 的权威测试规格。
 镜像构造见 [`../coding/projects/rootfs-image.md`](../coding/projects/rootfs-image.md)；基本测试生命周期见
 [`basic-tests.md`](basic-tests.md)；对象行为见 `spec/coding/objects/` 对应文档。
 
@@ -86,23 +86,35 @@ Because the launcher is static, `UserBoot.InterpreterReady` is explicitly outsid
 Every required exact checkpoint is either in scope or explicitly accounted outside it; reports retain
 `required_total`, `in_scope`, `accounted_outside_scope` and `unaccounted` counts.
 
-## OpenRC login basic acceptance
+## BusyBox init login basic acceptance
 
 Rule IDs (MUST):
 
 - `arceos_ex_must_canonical_rootfs_include_locked_root_and_test_account`
-- `arceos_ex_must_openrc_login_be_dual_provider_basic_acceptance`
+- `arceos_ex_must_busybox_init_login_be_dual_provider_basic_acceptance`
 
-The canonical image retains the distribution `/sbin/init` and `/etc/inittab`, keeps root locked, and includes
-the stable non-root `test/test` account. No test-stage account overlay is permitted. `openrc-login-native` and
-`openrc-login-linux-object` explicitly boot `init=/sbin/init` from a private canonical copy. Scripted input
+The canonical image retains the distribution BusyBox `/sbin/init`, replaces the minirootfs inittab with the
+checked-in deterministic BusyBox-init profile, keeps root locked, and includes the stable non-root `test/test`
+account. The profile must not reference `/sbin/openrc`; it runs one numeric-TTY getty for arceos_ex and one
+serial getty for reference Linux QEMU. No test-stage account overlay is permitted.
+`busybox-init-login-native` and `busybox-init-login-linux-object` explicitly boot `init=/sbin/init` from a
+private canonical copy. Scripted input
 waits in order for `login:`, `Password:` and the non-root shell prompt before sending fixed `/bin/ls`/`exit`.
 
-Acceptance requires the Alpine/OpenRC greeting, login/password/prompt steps, non-root credential observation,
+Acceptance requires the Alpine greeting, login/password/prompt steps, non-root credential observation,
 successful pending-child `setpgid`, foreground-pgrp handling, `lost+found`, guest exit 0, and no panic,
-unsupported or `reason=pid_not_visible` marker. Both providers enter default `make test`. The focused stress
+unsupported, init child exec failure or `reason=pid_not_visible` marker. Both providers enter default `make test`. The focused stress
 case repeats this basic-test entry; it does not build an account overlay. This bounded closure does not claim a
 general task graph, multiple pending children, post-exec parent setpgid, job-control signals or full pgrp lookup.
+
+`busybox-init-checkpoints` and `busybox-init-checkpoints-linux` are standalone diagnostic basic tests for the
+same `/sbin/init` profile. Each side must independently complete, satisfy its expectations, emit a complete
+non-overflowing `stress_mem` record containing `SyscallTable.Wait4`, and clean up its private image before the
+paired case may compare them. The hard scope ends at the first stable `SyscallTable.Wait4`; it represents
+BusyBox init waiting/reaping, not OpenRC behavior. The arceos_ex side captures the checkpoint stream with
+`announce,stress-mem`; syscall trace/error probes are outside this differential observation and must not consume
+the bounded checkpoint buffer. Its declared recorder capacity is 524288 bytes, which must retain the complete
+session without overflow rather than truncating the sequence at the comparison boundary.
 
 ## Manual LTP shell basic tests
 
@@ -123,8 +135,10 @@ provider without a TTY; `run` requires a real terminal.
 
 Current composite tests are stress repetition and automatic paired difftest. Checkpoint KUnit is a basic
 checkpoint-callback profile, not a composite test. A formal paired side always has closed stdin or structured
-delayed stdin; terminal interaction is forbidden. Historical wording “manual paired” is normalized to
-“opt-in paired”.
+delayed stdin; terminal interaction is forbidden. Each paired side is first a complete standalone basic-test
+execution with its own manifest, result, QEMU log and cleanup. Difftest must not build a side, construct its
+disk, own its QEMU process or compare checkpoints when either side did not complete with usable expectations.
+Historical wording “manual paired” is normalized to “opt-in paired”.
 
 Long-term checkpoints follow model/coding contracts and cover payload/VFS/Ext2 reads, block submit/wait,
 completion source and structured errors. Non-interactive capture uses DEVNULL unless structured input is
