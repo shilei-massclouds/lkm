@@ -74,6 +74,7 @@ QEMU。常用配置包括：
 make run
 make run TEST=kernel-smoke-native
 make run TEST=user-smoke-native
+make run TEST=shell-native
 make run TEST=requested-init-native
 make run TEST=distro-ls-native
 make run TEST=distro-sh-native
@@ -82,8 +83,9 @@ make build TEST=hello-linux-object
 
 `TEST` 是正式选择变量。旧 `APP` 只是它的变量名别名，接受相同的完整 TEST 名空间，例如
 `make run APP=openrc-login-native` 等价于选择 `TEST=openrc-login-native`。命令行与真实环境变量写法
-遵循同一规则；APP 不是 kernel app 行为覆盖，不能和显式 TEST 同时使用。旧 test name
-`user-boot` 仍由 runner 映射到 `user-smoke-native`。
+遵循同一规则；APP 不是 kernel app 行为覆盖，不能和显式 TEST 同时使用。公开 test name
+`user-boot` 已退役，`TEST=user-boot` 与 `APP=user-boot` 都会在 build 前结构化失败并提示改用
+`shell-native`；TOML 内部的 `kernel.app = "user-boot"` 仍只是 kernel 构建选择。
 
 配置位于 `impl/arceos_ex/tests/basic/cases/`。APP、provider、probe、profile、磁盘策略、QEMU
 cmdline/device/stdin 和结果断言都以 TOML 为唯一来源；APP 只能选择整份 TEST 配置，不能覆盖
@@ -105,7 +107,9 @@ rc.local ELF launcher/script 位于 `/opt/lkm/tests/`，经过校验的 sibling 
 builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP 输入指纹；输入变化会自动重建，
 输入不变则复用，`make disk FORCE=1` 强制重建。`make run` 只核对 template manifest，缺失/过期时
 提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/OpenRC 双 provider acceptance 进入默认回归；
-LTP terminal diagnostic 仅显式运行。
+`user-smoke-{native,linux-object}` 是非交互自动验收；`shell-{native,linux-object}` 是使用 canonical
+私有可写副本、`init=/bin/sh` 和真实 PTY 的人工诊断，正常退出 verdict 为 inconclusive。两者身份不因
+调用上下文切换，shell 与独立的 LTP terminal diagnostic 都仅显式运行。
 
 ## Provider 机制
 
@@ -157,7 +161,7 @@ make run TEST=hello-linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 make test-stress
 ```
 
-`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前分别重复 canonical `user-smoke-native`、`kernel-smoke-native` 和非 PTY scripted `distro-sh-native`；前两项保留非 probe 的旧 APP 调用拼写。三个 case 的 setup 都只核对/复用 canonical template，不构造 legacy overlay。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
+`make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定 `STRESS_CASES` 时会运行默认压力测试套件，当前分别重复 canonical `user-smoke-native`、`kernel-smoke-native` 和非 PTY scripted `distro-sh-native`；DF-0001 显式使用 `TEST=user-smoke-native`，DF-0002 仍保留非 probe 的旧 `APP=smoke` 调用拼写。三个 case 的 setup 都只核对/复用 canonical template，不构造 legacy overlay。`STRESS_TIMEOUT` 默认不传给 runner，由各 case 的 `timeout_seconds` 生效；当前 case 默认是 120 秒。`PD-*` paired differential case 不进入默认套件，需要显式指定。
 
 常用覆盖方式：
 

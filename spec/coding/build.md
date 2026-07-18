@@ -22,6 +22,7 @@ make clippy-check
 make coding-spec-check
 make run
 make run TEST=user-smoke-native
+make run TEST=shell-native
 make verify
 make test
 make test-basic
@@ -46,7 +47,9 @@ specified by [`../testing/basic-tests.md`](../testing/basic-tests.md).
 `TEST` is the formal selector. Legacy `APP` is only an alias for the TEST variable name and accepts the same
 complete test-name namespace; its value is passed unchanged to the runner. Explicit Make-command-line and
 process-environment values follow the same rule. Supplying both selectors is ambiguous and fails, as does
-every other basic-test behavior override.
+every other basic-test behavior override. The retired public test name `user-boot` is not a compatibility
+alias: TEST or APP requests using that name must fail structurally before build and direct the caller to
+`shell-native`. The same string remains valid only as the internal `kernel.app` value in selected TOML.
 
 `make clean` is the repository-level cleanup entry point. It must delegate kernel-specific cleanup to the selected kernel directory and may also remove routine repository-level build, code-generation and test-cache artifacts such as `tools/build/`, non-checkpoint `tools/out/` contents, Python bytecode files, Python `__pycache__/` directories and common Python tool caches. Stress, difftest and focused diagnostic reports under the managed `impl/arceos_ex/tests/stress/out/` root are routine test artifacts; cleanup must preserve only that directory's tracked `.gitignore`, and developers must move any report that needs long-term retention elsewhere before cleanup. It must not remove tracked checkpoint review artifacts under `tools/out/checkpoints/`, user-local environments such as `.venv/` or `venv/`, ordinary diagnostic logs outside that managed report root, editor state or other unlisted local files.
 
@@ -86,7 +89,9 @@ Targets must remain composable:
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
 - Dual-provider rc.local and OpenRC login acceptance are default runtime stages. Terminal diagnostic
-  configurations, including the LTP manual shell, are never default stages.
+  configurations, including `shell-{native,linux-object}` and the separate LTP manual shell, are never
+  default stages. The default user-mode acceptance stages invoke `TEST=user-smoke-native` and
+  `TEST=user-smoke-linux-object` explicitly; they must not use APP or retired test-name mappings.
 - `clean` removes generated build and cache artifacts, including reports below managed basic/stress output
   roots except tracked `.gitignore` files, while preserving tracked checkpoint review artifacts and user-local
   state that is not part of routine build cleanup.
@@ -111,6 +116,8 @@ outcome, and always persist `qemu.log` plus schema-versioned `result.json`. Sche
 disk-profile and execution/verdict semantics are authoritative in the testing specification; v1 is read-only
 compatibility input. Terminal runs use a PTY, fail before build without a real TTY, tee output to the log and
 restore the terminal on every exit path. Process exit, guest exit status and log expectations are independent.
+User-smoke acceptance and manual shell diagnostics have distinct explicit configuration names and cannot be
+selected from one another based on whether a terminal is present.
 
 ## Disk Images
 

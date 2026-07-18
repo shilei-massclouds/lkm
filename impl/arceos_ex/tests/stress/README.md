@@ -21,8 +21,9 @@ current suite covers:
 All three default cases call frozen native basic-test entries and reuse the
 canonical rootfs template prepared by `make disk ROOTFS=canonical`. They do not
 construct legacy images or apply rootfs overlays. DF-0001 and DF-0002 retain
-their historical non-probe APP spellings through the root APP-as-TEST variable
-alias; DF-0003 keeps scripted stdin in `distro-sh-native.toml`.
+their historical non-probe behavior; DF-0001 now pins
+`TEST=user-smoke-native`, while DF-0002 retains its `APP=smoke` variable-name
+alias spelling. DF-0003 keeps scripted stdin in `distro-sh-native.toml`.
 
 `make stress-test` remains as a compatibility alias. `make test-stress` defaults
 to `STRESS_RUNS=10`, which applies to each case in
@@ -271,10 +272,10 @@ contains:
   comparisons.
 - `report.md`: compact human-readable summary.
 
-DF-0001 must keep the ordinary non-probe `APP=user-boot` spelling. Root Make
-treats APP as a TEST variable alias; the runner's legacy test-name mapping then
-selects the complete frozen `user-smoke-native` test, including canonical
-private-copy disk and explicit init path. Probe variants can be added later as separate cases, but they must
+DF-0001 must explicitly repeat the ordinary non-probe
+`TEST=user-smoke-native` acceptance, including its canonical private-copy disk
+and explicit init path. It must not depend on a TTY, the APP variable-name
+alias, or the retired `user-boot` test name. Probe variants can be added later as separate cases, but they must
 not replace the ordinary non-probe path because probes can change timing.
 
 DF-0002 must keep the ordinary non-probe `APP=smoke` path for the same reason.

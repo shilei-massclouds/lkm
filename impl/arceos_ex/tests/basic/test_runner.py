@@ -11,6 +11,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import tomllib
 import unittest
 from unittest import mock
 
@@ -65,9 +66,12 @@ class BasicMakeSelectionTests(unittest.TestCase):
         return arguments[2]
 
     def test_app_make_argument_aliases_full_test_namespace(self) -> None:
-        completed = self.run_make("APP=openrc-login-native")
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(self.captured_request(), "openrc-login-native")
+        for selector in ("APP=shell-native", "TEST=shell-native"):
+            with self.subTest(selector=selector):
+                self.capture.unlink(missing_ok=True)
+                completed = self.run_make(selector)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(self.captured_request(), "shell-native")
 
     def test_app_process_environment_aliases_test(self) -> None:
         completed = self.run_make(environment={"APP": "openrc-login-native"})
@@ -207,9 +211,64 @@ class BasicRunnerConfigTests(unittest.TestCase):
         self.assertEqual(runner.COMPATIBILITY_ALIASES["kunit-native"], "checkpoint-kunit-native")
         self.assertEqual(runner.COMPATIBILITY_ALIASES["hello"], "hello-native")
         self.assertEqual(runner.COMPATIBILITY_ALIASES["smoke"], "kernel-smoke-native")
-        self.assertEqual(runner.COMPATIBILITY_ALIASES["user-boot"], "user-smoke-native")
+        self.assertNotIn("user-boot", runner.COMPATIBILITY_ALIASES)
+        self.assertIn("user-boot", runner.RETIRED_TEST_NAMES)
         for alias in runner.COMPATIBILITY_ALIASES:
             self.assertFalse((cases / f"{alias}.toml").exists())
+        self.assertFalse((cases / "user-boot.toml").exists())
+
+    def test_shell_cases_are_distinct_dual_provider_terminal_diagnostics(self) -> None:
+        repo_root = Path(__file__).resolve().parents[4]
+        cases = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases"
+        loaded = {
+            name: runner.load_config(cases / f"{name}.toml", repo_root)
+            for name in (
+                "shell-native",
+                "shell-linux-object",
+                "user-smoke-native",
+                "user-smoke-linux-object",
+            )
+        }
+
+        for provider, name in (("native", "shell-native"), ("linux-object", "shell-linux-object")):
+            with self.subTest(name=name):
+                config = loaded[name]
+                self.assertEqual(config["purpose"], "diagnostic")
+                self.assertEqual(config["timeout_seconds"], 3600)
+                self.assertEqual(config["kernel"]["app"], "user-boot")
+                self.assertEqual(config["kernel"]["provider"], provider)
+                self.assertEqual(config["disk"], {"mode": "private-copy", "profile": "canonical"})
+                self.assertEqual(config["qemu"]["kernel_cmdline"], "earlycon=sbi init=/bin/sh")
+                self.assertEqual(config["qemu"]["interaction"], "terminal")
+                self.assertIn("arceos_ex panic", config["expect"]["forbidden_markers"])
+
+        for provider in ("native", "linux-object"):
+            with self.subTest(smoke_provider=provider):
+                smoke = loaded[f"user-smoke-{provider}"]
+                shell = loaded[f"shell-{provider}"]
+                self.assertEqual(smoke["purpose"], "acceptance")
+                self.assertEqual(smoke["qemu"]["interaction"], "none")
+                self.assertNotEqual(smoke["name"], shell["name"])
+
+    def test_default_automation_pins_user_smoke_and_df0001_to_explicit_test_names(self) -> None:
+        repo_root = Path(__file__).resolve().parents[4]
+        summary = (repo_root / "tools" / "test_summary.sh").read_text()
+        self.assertIn('"$make_cmd" run TEST="user-smoke-$provider"', summary)
+        self.assertNotIn("APP=user-boot", summary)
+        self.assertNotIn('TEST="shell-', summary)
+        self.assertNotIn('APP="shell-', summary)
+
+        df0001_path = (
+            repo_root
+            / "impl"
+            / "arceos_ex"
+            / "tests"
+            / "stress"
+            / "cases"
+            / "df-0001-user-boot.toml"
+        )
+        df0001 = tomllib.loads(df0001_path.read_text())
+        self.assertEqual(df0001["command"], ["make", "run", "TEST=user-smoke-native"])
 
     def test_v2_rejects_unknown_template_profile(self) -> None:
         body = self.base_case(disk='mode = "private-copy"\nprofile = "nearby"')
@@ -438,6 +497,35 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertEqual(result["stages"]["config"]["status"], "failed")
         self.assertEqual(result["execution_status"], "failed")
         self.assertEqual((output / "qemu.log").read_bytes(), b"")
+
+    def test_retired_user_boot_writes_directional_schema_v2_failure(self) -> None:
+        for command in ("build", "run"):
+            with self.subTest(command=command):
+                output = self.root / f"retired-user-boot-{command}"
+                status = runner.main(
+                    [
+                        command,
+                        "user-boot",
+                        "--repo-root",
+                        str(self.root),
+                        "--cases-dir",
+                        str(self.cases),
+                        "--output-dir",
+                        str(output),
+                    ]
+                )
+
+                result = json.loads((output / "result.json").read_text())
+                self.assertEqual(status, 1)
+                self.assertEqual(result["schema_version"], 2)
+                self.assertEqual(result["request"]["test"], "user-boot")
+                self.assertEqual(result["request"]["canonical_test"], "user-boot")
+                self.assertIsNone(result["request"]["compatibility_alias"])
+                self.assertEqual(result["execution_status"], "failed")
+                self.assertEqual(result["verdict"], "inconclusive")
+                self.assertEqual(result["stages"]["kernel-build"]["status"], "skipped")
+                self.assertIn("shell-native", result["errors"][0])
+                self.assertEqual((output / "qemu.log").read_bytes(), b"")
 
     def test_compatibility_alias_is_recorded_without_duplicate_config(self) -> None:
         path = self.write_case()

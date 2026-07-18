@@ -14,6 +14,9 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 - `TEST` 是唯一正式选择变量。旧 `APP` 只作为 `TEST` 的变量名别名，接受完整且相同的 test name
   namespace；`make run APP=<name>` / `make build APP=<name>` 必须把 name 原样交给 runner。Make 命令行
   和真实进程环境中的显式值采用同一规则。它不能覆盖 TOML 中的任何行为字段。
+- `user-smoke-native` 和 `user-smoke-linux-object` 是自动 user-mode acceptance；`shell-native` 和
+  `shell-linux-object` 是 opt-in terminal diagnostic。测试身份只由显式 test name 决定，runner 不得
+  根据 TTY、调用者或命令上下文在 smoke 与 shell 之间隐式切换。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
   因而 `make disk` 等价于 `make disk ROOTFS=canonical`。未知 profile 必须立即失败。
 
@@ -104,5 +107,10 @@ expectation、cleanup、`execution_status = "completed" | "failed"` 和
 
 配置失败、build-only 和兼容别名请求也必须留下明确的结构化记录。正式 checkpoint callback profile
 名为 `checkpoint-kunit-native`、`checkpoint-kunit-linux-object`；runner 将旧 `kunit-*` 名称映射到正式
-配置。变量名别名 APP 不改变 test name；旧 test name `hello`、`smoke`、`user-boot` 分别映射到 native
-正式配置。所有 test-name 别名都只存在于 runner 映射中，不保留别名 TOML。
+配置。变量名别名 APP 不改变 test name；旧 test name `hello`、`smoke` 分别映射到 native 正式配置。
+所有 test-name 别名都只存在于 runner 映射中，不保留别名 TOML。
+
+公开 test name `user-boot` 已退役，不能再映射到 user smoke 或 shell。`make run/build TEST=user-boot`
+与对应的 `APP=user-boot` 请求必须在 build 前生成 schema v2 结构化配置失败结果，错误明确提示改用
+`shell-native`；`kernel.app = "user-boot"` 仍是 TOML 内部选择 user-mode kernel payload 的合法值，不能
+把该内部值重新暴露成测试身份。

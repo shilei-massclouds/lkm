@@ -54,9 +54,11 @@ ALLOWED_ROOTFS_PROFILES = {"canonical"}
 COMPATIBILITY_ALIASES = {
     "hello": "hello-native",
     "smoke": "kernel-smoke-native",
-    "user-boot": "user-smoke-native",
     "kunit-native": "checkpoint-kunit-native",
     "kunit-linux-object": "checkpoint-kunit-linux-object",
+}
+RETIRED_TEST_NAMES = {
+    "user-boot": "test name 'user-boot' is retired; use 'shell-native' for an interactive shell",
 }
 
 
@@ -84,6 +86,20 @@ def main(argv: list[str] | None = None) -> int:
     requested_test = args.test
     canonical_test = COMPATIBILITY_ALIASES.get(requested_test, requested_test)
     compatibility_alias = requested_test if canonical_test != requested_test else None
+    retired_error = RETIRED_TEST_NAMES.get(requested_test)
+    if retired_error is not None:
+        error = ConfigError(retired_error)
+        print(f"basic test configuration error: {error}", file=sys.stderr)
+        if args.command in {"build", "run"}:
+            return _record_early_config_failure(
+                args=args,
+                repo_root=repo_root,
+                requested_test=requested_test,
+                canonical_test=canonical_test,
+                compatibility_alias=compatibility_alias,
+                error=error,
+            )
+        return 1
     try:
         config_path = resolve_case(canonical_test, args.cases_dir, repo_root)
     except ConfigError as error:
