@@ -1,19 +1,13 @@
 name = "rc-local-difftest"
-description = "Run the default Linux/arceos_ex paired checkpoint diff for direct BusyBox inittab rc.local, comparing the stable checkpoint prefix through the rc.local shell and /bin/ls execs."
+description = "Run the default Linux/arceos_ex paired checkpoint diff for the canonical rc-local launcher, comparing the stable checkpoint prefix through the shell and /bin/ls execs."
 mode = "paired_checkpoint_diff"
 default_runs = 1
 timeout_seconds = 360
 working_directory = "."
 setup_command = [
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-rc-local-difftest.raw",
-  "ROOTFS_LTP_OVERLAY=none",
-  "ROOTFS_OVERLAY=none",
-  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/rc-local",
+  "disk",
+  "ROOTFS=canonical",
 ]
 
 [paired]
@@ -69,9 +63,13 @@ checkpoint_scope = [
   "PayloadPhase.Ready",
   "PayloadPhase.Online",
   "UserBoot.MainElfReady",
-  "UserBoot.InterpreterReady",
   "UserBoot.AddressSpaceSetupStart",
   "UserAddressSpace.Ready",
+  "UserExec.MainElfReady",
+  "UserExec.InterpreterReady",
+  "UserExec.ContextReplaced",
+  "UserExec.SatpReady",
+  "UserExec.TrapFrameReady",
   "UserExec.MainElfReady",
   "UserExec.InterpreterReady",
   "UserExec.ContextReplaced",
@@ -85,11 +83,11 @@ checkpoint_scope = [
 ]
 
 [paired.checkpoint_scope_max_counts]
-"UserExec.MainElfReady" = 2
-"UserExec.InterpreterReady" = 2
-"UserExec.ContextReplaced" = 2
-"UserExec.SatpReady" = 2
-"UserExec.TrapFrameReady" = 2
+"UserExec.MainElfReady" = 3
+"UserExec.InterpreterReady" = 3
+"UserExec.ContextReplaced" = 3
+"UserExec.SatpReady" = 3
+"UserExec.TrapFrameReady" = 3
 
 [paired.checkpoint_coverage]
 mapping_path = "tools/out/checkpoints/linux_checkpoint_mapping.json"
@@ -97,6 +95,7 @@ required_mapping_kinds = ["exact"]
 mode = "explicit-accounting"
 
 [paired.checkpoint_coverage.accounted_outside_scope]
+"UserBoot.InterpreterReady" = "canonical_rc_local_launcher_is_static_and_has_no_pt_interp"
 "Kernel.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EntryPreludePhase.Started" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EntryPreludePhase.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
@@ -145,30 +144,9 @@ mode = "explicit-accounting"
 [paired.arceos_ex]
 working_directory = "."
 command = [
-  "python3",
-  "tools/delayed_stdin.py",
-  "--timeout",
-  "180s",
-  "--success-marker",
-  "lkm-rc-local: begin",
-  "--success-marker",
-  "lost+found",
-  "--success-marker",
-  "lkm-rc-local: end status=0",
-  "--",
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-run",
-  "APP=user-boot",
-  "ROOTFS_LTP_OVERLAY=none",
-  "PROBE=announce,stress-mem",
-  "STRESS_MEM_BYTES=131072",
-  "QEMU_SMP=2",
-  "ROOTFS_OVERLAY=none",
-  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/rc-local",
-  "VIRTIO_BLK_IMAGE=build/stress-rc-local-difftest.raw",
-  "QEMU_APPEND=earlycon=sbi",
+  "run",
+  "TEST=rc-local-native",
 ]
 
 [paired.linux]
@@ -196,20 +174,24 @@ command = [
   "-device",
   "virtio-blk-device,drive=disk0",
   "-drive",
-  "id=disk0,if=none,format=raw,file=../lkm/impl/arceos_ex/build/stress-rc-local-difftest.raw",
+  "id=disk0,if=none,format=raw,file=../lkm/impl/arceos_ex/build/stress-rc-local-difftest-linux.raw",
   "-device",
   "virtio-net-device,netdev=net0",
   "-netdev",
   "user,id=net0,hostfwd=tcp::5555-:5555",
   "-nographic",
   "-append",
-  "earlycon=sbi root=/dev/vda rw console=ttyS0",
+  "earlycon=sbi root=/dev/vda rw console=ttyS0 init=/opt/lkm/tests/rc-local-init",
 ]
 stop_after_stress_mem = true
 
+[paired.linux.private_disk]
+template = "impl/arceos_ex/build/rootfs/canonical.raw"
+path = "impl/arceos_ex/build/stress-rc-local-difftest-linux.raw"
+
 [metadata]
-observation_mode = "rc-local-paired-checkpoint-diff"
-baseline_role = "default-linux-rc-local-direct-inittab"
+observation_mode = "canonical-rc-local-paired-checkpoint-diff"
+baseline_role = "default-canonical-rc-local-launcher"
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
-payload = "BusyBox inittab /bin/sh /etc/rc.local; rc.local runs /bin/ls /"
-scope_note = "Default difftest baseline for rc.local support. Linux poweroff after the success marker exists only to dump checkpoint stress_mem; UserExec checkpoint comparison is limited to the rc.local shell and /bin/ls execs."
+payload = "canonical /opt/lkm/tests/rc-local-init -> /bin/sh rc-local.sh -> /bin/ls and poweroff"
+scope_note = "Default canonical rc-local baseline confirmed by a real paired run. Both sides use private canonical copies and the same explicit init launcher; the static launcher has no UserBoot.InterpreterReady, while three matched UserExec groups cover launcher-to-shell, /bin/ls, and poweroff."

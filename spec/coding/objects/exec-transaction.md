@@ -11,7 +11,8 @@ usercopy code. The default mirrors Linux 6.12: `MAX_ARG_STRINGS=0x7fffffff`,
 `MAX_ARG_STRLEN=32*PAGE_SIZE`, `_STK_LIM=RLIMIT_STACK=8 MiB`, and `ARG_MAX=128 KiB`. The effective default
 string budget uses the `bprm_stack_limits()` calculation and is 2 MiB, less
 `(max(argc, 1) + envc) * sizeof(void *)`. The terminating NUL counts toward both the per-string and aggregate
-limits. Runtime `SyscallTable.Execve` performs gate and complete usercopy before `begin`; boot builds the same
+limits. Runtime `SyscallTable.Execve` permits the current PID 1 process or the observed child continuation,
+then performs complete usercopy before `begin`; boot builds the same
 value with `argv[0]`, `HOME=/`, and `TERM=linux`.
 
 The staging `UserStack` follows the independent [`UserStack`](user-stack.md) contract: sparse physical pages,
@@ -53,6 +54,8 @@ parent snapshot has the same SATP as the retired image, commit transfers the ret
 `UserStack` ownership to that snapshot instead of freeing parent pages. Child exit releases the replacement
 child image (including page tables and stack backing), restores both parent objects, and only then resumes the
 parent. A transaction may reset only after either release or this explicit ownership transfer succeeds.
+For PID 1 self-exec there is no saved parent owner: commit preserves PID/process identity and releases the
+retired address space/stack after switching to the replacement image.
 
 Checkpoint ownership stays owner-scoped. The transaction dispatches the existing stable `UserBoot.*` or
 `UserExec.*` sequence without renaming, reordering or double-emitting checkpoints. Observation fields live

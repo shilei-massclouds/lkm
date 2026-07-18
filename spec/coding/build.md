@@ -53,7 +53,8 @@ Targets must remain composable:
 - `generate` creates generated source inputs such as linker scripts from model/codegen inputs.
 - `build TEST=<name>` strictly parses the selected basic-test config and compiles its kernel image; it must
   not prepare or mutate runtime disk images.
-- `disk` independently builds or validates the canonical rootfs from documented inputs.
+- `disk ROOTFS=<profile>` independently builds or validates a read-only rootfs template from documented
+  inputs. `ROOTFS` defaults to `canonical`, currently the only registered profile; unknown profiles fail.
 - `run TEST=<name>` owns the complete basic-test pipeline: frozen config, kernel build, disk policy,
   PreScript, QEMU lifecycle, PostScript, structured result and cleanup. It must not be assembled from a public
   Make dependency chain that exposes an unchecked QEMU-only target.
@@ -78,6 +79,10 @@ Targets must remain composable:
   emitting the detailed report through the test log. It must not run a second summary-mode verification.
 - The basic runner unit stage inside `test` runs after formal verification and delayed-stdin host tests, and
   before checkpoint drift checks and real QEMU cases.
+- After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
+  exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
+- Dual-provider rc.local and OpenRC login acceptance are default runtime stages. Terminal diagnostic
+  configurations, including the LTP manual shell, are never default stages.
 - `clean` removes generated build and cache artifacts, including reports below managed basic/stress output
   roots except tracked `.gitignore` files, while preserving tracked checkpoint review artifacts and user-local
   state that is not part of routine build cleanup.
@@ -97,13 +102,15 @@ as a build/QEMU parameter update.
 
 The runner must reject unknown TOML fields before build, freeze a resolved `manifest.json`, keep QEMU in a
 separate process group, bound stdin waits and the full run, execute PostScript after every started QEMU
-outcome, and always persist `qemu.log` plus schema-versioned `result.json`. Process exit, guest exit status and
-log expectations are independent facts. A basic test passes only when every configured fact and cleanup
-obligation passes.
+outcome, and always persist `qemu.log` plus schema-versioned `result.json`. Schema v2 purpose, interaction,
+disk-profile and execution/verdict semantics are authoritative in the testing specification; v1 is read-only
+compatibility input. Terminal runs use a PTY, fail before build without a real TTY, tee output to the log and
+restore the terminal on every exit path. Process exit, guest exit status and log expectations are independent.
 
 ## Disk Images
 
-`make disk` is the canonical rootfs builder. It must be reproducible from explicit variables such as:
+`make disk ROOTFS=canonical` is the canonical rootfs builder. `make disk` is exactly equivalent. It must be
+reproducible from explicit variables such as:
 
 - `CANONICAL_ROOTFS_IMAGE`
 - `VIRTIO_BLK_IMAGE_SIZE`
@@ -114,17 +121,20 @@ obligation passes.
 - `ROOTFS_STAGING_DIR`
 - tool variables such as `WGET`, `TAR` and `MKFS_EXT2`
 
-The canonical image has a recorded input fingerprint covering the Alpine tarball, rootfs configuration and
-builder, repository fixtures, and the configured LTP staging tree. `make disk` reuses the image only while
-that fingerprint is unchanged. Any input change rebuilds it; `FORCE=1` always rebuilds. This differs from
-private and external runtime disks, which are not canonical cache entries.
+Each profile maps to one complete builder; there is no test-time constructor or overlay composition. The
+canonical image has a recorded input fingerprint covering the Alpine tarball, canonical configuration and
+builder, repository fixtures, tools and configured LTP staging tree. The builder reuses image+manifest only
+while the fingerprint is current. Any input change rebuilds it; `FORCE=1` always rebuilds. Successful output
+is published atomically and failure preserves the previous template.
 
 For ext2 rootfs images, the default source is the Alpine minirootfs tarball identified by `ROOTFS_URL`. The tarball must be cached under the kernel build directory through `ROOTFS_TARBALL`, for example `build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz`. If the cached tarball exists, `make disk` must reuse it instead of downloading it again. The extracted staging tree belongs under `ROOTFS_STAGING_DIR` and is generated runtime input, not source.
 
-The canonical staging tree retains Alpine/OpenRC `/etc` and `/sbin/init`. Repository fixtures live below a
-stable non-system path and LTP remains below `/opt/ltp`; a user-mode basic test selects a fixture with an
-absolute `init=` value. The canonical image is normally attached read-only. A writable test gets a temporary
-private copy that is deleted during cleanup. `make build TEST=...` must not invoke this builder.
+The canonical staging tree retains Alpine/OpenRC `/etc/inittab` and `/sbin/init`, keeps root locked, and merges
+the stable non-root `test/test` account. Repository fixtures live below `/opt/lkm/tests`, including the static
+rc.local launcher/script, and LTP remains below `/opt/ltp`. A basic test either attaches the current template
+read-only or makes a temporary private copy deleted during cleanup. `make build TEST=...` and the basic runner
+must not invoke this builder. Missing/stale input manifests fail with the explicit
+`make disk ROOTFS=canonical` remediation.
 
 ## Payload Selection
 
@@ -255,9 +265,9 @@ not download it again.
 Rule ID: `build_must_run_depend_on_required_runtime_inputs` (MUST).
 
 The frozen basic-test manifest decides whether run prepares no disk,
-validates the canonical image, makes a private copy, invokes a built-in
-generator, or validates an external image. make build TEST=... must not
-create or mutate runtime disk images.
+validates a current canonical template, makes a private copy, invokes a built-in
+generator, or validates an external image. Template validation must not invoke
+the builder. make build TEST=... must not create or mutate runtime disk images.
 
 #### Visible model/codegen boundary
 

@@ -8,15 +8,14 @@ kunit_app=$4
 kunit_handlers=$5
 smoke_app=$6
 test_plic_providers=${7:-}
-default_overlay_map="tests/user/rootfs-overlay.map"
-openrc_login_overlay_dir="tests/rootfs-overlays/openrc-login"
-rc_local_overlay_dir="tests/rootfs-overlays/rc-local"
-input_timeout=${USER_BOOT_INPUT_TIMEOUT:-120s}
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
 status=0
+summary_total=0
+summary_pass=0
+summary_fail=0
 summary_rows=""
 
 record_row() {
@@ -25,14 +24,7 @@ record_row() {
     local pass=$3
     local fail=$4
 
-    summary_rows="${summary_rows}$(printf '  %-18s total=%s pass=%s fail=%s' "$name" "$total" "$pass" "$fail")"$'\n'
-}
-
-add_summary() {
-    local total=$1
-    local pass=$2
-    local fail=$3
-
+    summary_rows="${summary_rows}$(printf '  %-24s total=%s pass=%s fail=%s' "$name" "$total" "$pass" "$fail")"$'\n'
     summary_total=$((summary_total + total))
     summary_pass=$((summary_pass + pass))
     summary_fail=$((summary_fail + fail))
@@ -47,333 +39,30 @@ run_with_log() {
     return "$rc"
 }
 
-run_with_delayed_input_log() {
-    local log=$1
-    local input=$2
-    local ready_marker=$3
-    shift 3
-    local rc
-
-    : > "$log"
-    set +e
-    python3 tools/delayed_stdin.py \
-        --timeout "$input_timeout" \
-        --ready-marker "$ready_marker" \
-        --payload "$input" \
-        -- "$@" > "$log"
-    rc=$?
-    cat "$log"
-    return "$rc"
-}
-
-run_with_delayed_input_steps_log() {
-    local log=$1
-    shift
-    local rc
-
-    : > "$log"
-    set +e
-    python3 tools/delayed_stdin.py \
-        --timeout "$input_timeout" \
-        "$@" > "$log"
-    rc=$?
-    cat "$log"
-    return "$rc"
-}
-
-run_with_success_markers_log() {
-    local log=$1
-    local success_markers=$2
-    shift 2
-    local args=()
-    local marker
-    local rc
-
-    while IFS= read -r marker; do
-        if [ -z "$marker" ]; then
-            continue
-        fi
-        args+=(--success-marker "$marker")
-    done <<< "$success_markers"
-
-    : > "$log"
-    set +e
-    python3 tools/delayed_stdin.py \
-        --timeout "$input_timeout" \
-        "${args[@]}" \
-        -- "$@" > "$log"
-    rc=$?
-    cat "$log"
-    return "$rc"
-}
-
 run_command_case() {
     local name=$1
     local log=$2
     shift 2
-
-    run_with_log "$log" "$@"
-    local rc=$?
-    local total=1
     local pass=0
     local fail=1
-    if [ "$rc" -eq 0 ]; then
+
+    if run_with_log "$log" "$@"; then
         pass=1
         fail=0
     else
         status=1
     fi
-    record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
-}
-
-run_user_boot_case() {
-    local name=$1
-    local log=$2
-    shift 2
-
-    run_with_log "$log" "$@"
-    local rc=$?
-    local exit_status
-    local total=1
-    local pass=0
-    local fail=1
-    exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
-    if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
-        pass=1
-        fail=0
-    else
-        status=1
-        if [ -z "$exit_status" ]; then
-            printf 'user-boot exit status missing in %s\n' "$name"
-        else
-            printf 'user-boot exit status for %s: %s\n' "$name" "$exit_status"
-        fi
-    fi
-    record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
-}
-
-run_user_boot_input_case() {
-    local name=$1
-    local log=$2
-    local input=$3
-    local expected_markers=$4
-    local ready_marker=$5
-    local expected_marker_count=$6
-    shift 6
-    local marker
-    local marker_count
-    local markers_ok=1
-
-    run_with_delayed_input_log "$log" "$input" "$ready_marker" "$@"
-    local rc=$?
-    local exit_status
-    local total=1
-    local pass=0
-    local fail=1
-    exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
-    if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
-        while IFS= read -r marker; do
-            if [ -z "$marker" ]; then
-                continue
-            fi
-            marker_count=$(grep -Fc "$marker" "$log")
-            if [ "$marker_count" -lt "$expected_marker_count" ]; then
-                markers_ok=0
-                status=1
-                printf 'user-boot expected marker count for %s: %s actual=%s expected=%s\n' \
-                    "$name" "$marker" "$marker_count" "$expected_marker_count"
-            fi
-        done <<< "$expected_markers"
-        if [ "$markers_ok" -eq 1 ]; then
-            pass=1
-            fail=0
-        fi
-    else
-        status=1
-        if [ -z "$exit_status" ]; then
-            printf 'user-boot exit status missing in %s\n' "$name"
-        else
-            printf 'user-boot exit status for %s: %s\n' "$name" "$exit_status"
-        fi
-    fi
-    record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
-}
-
-run_user_boot_input_steps_case() {
-    local name=$1
-    local log=$2
-    local expected_markers=$3
-    shift 3
-    local marker
-    local markers_ok=1
-
-    run_with_delayed_input_steps_log "$log" "$@"
-    local rc=$?
-    local exit_status
-    local total=1
-    local pass=0
-    local fail=1
-    exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
-    if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
-        while IFS= read -r marker; do
-            if [ -z "$marker" ]; then
-                continue
-            fi
-            if ! grep -Fq "$marker" "$log"; then
-                markers_ok=0
-                status=1
-                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
-            fi
-        done <<< "$expected_markers"
-        if [ "$markers_ok" -eq 1 ]; then
-            pass=1
-            fail=0
-        fi
-    else
-        status=1
-        if [ -z "$exit_status" ]; then
-            printf 'user-boot exit status missing in %s\n' "$name"
-        else
-            printf 'user-boot exit status for %s: %s\n' "$name" "$exit_status"
-        fi
-    fi
-    record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
-}
-
-run_user_boot_marker_only_case() {
-    local name=$1
-    local log=$2
-    local expected_markers=$3
-    shift 3
-    local marker
-    local markers_ok=1
-
-    run_with_success_markers_log "$log" "$expected_markers" "$@"
-    local rc=$?
-    local total=1
-    local pass=0
-    local fail=1
-    if [ "$rc" -eq 0 ]; then
-        while IFS= read -r marker; do
-            if [ -z "$marker" ]; then
-                continue
-            fi
-            if ! grep -Fq "$marker" "$log"; then
-                markers_ok=0
-                status=1
-                printf 'user-boot expected marker missing for %s: %s\n' "$name" "$marker"
-            fi
-        done <<< "$expected_markers"
-        if [ "$markers_ok" -eq 1 ]; then
-            pass=1
-            fail=0
-        fi
-    else
-        status=1
-        printf 'user-boot marker-only command failed for %s\n' "$name"
-    fi
-    record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
-}
-
-run_user_boot_overlay_case() {
-    local name=$1
-    local provider=$2
-    local overlay_map=$3
-    local log=$4
-    local image=$5
-
-    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
-}
-
-run_user_boot_overlay_append_case() {
-    local name=$1
-    local provider=$2
-    local overlay_map=$3
-    local append=$4
-    local log=$5
-    local image=$6
-
-    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY_MAP="$overlay_map" \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
-}
-
-run_user_boot_no_overlay_append_case() {
-    local name=$1
-    local provider=$2
-    local append=$3
-    local log=$4
-    local image=$5
-
-    run_user_boot_case "$name" "$log" "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
-}
-
-run_user_boot_no_overlay_input_append_case() {
-    local name=$1
-    local provider=$2
-    local append=$3
-    local input=$4
-    local expected_marker=$5
-    local ready_marker=$6
-    local log=$7
-    local image=$8
-
-    run_user_boot_input_case "$name" "$log" "$input" "$expected_marker" "$ready_marker" 2 "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot \
-        PLIC_PROVIDER="$provider" ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="$append"
-}
-
-run_user_boot_openrc_login_case() {
-    local name=$1
-    local provider=$2
-    local log=$3
-    local image=$4
-    local login_input=$'test\n'
-    local password_input=$'test\n'
-    local shell_input=$'/bin/ls\nexit\n'
-
-    run_user_boot_input_steps_case "$name" "$log" $'lost+found' \
-        --input-step "login:" "$login_input" \
-        --input-step "Password:" "$password_input" \
-        --input-step '$ ' "$shell_input" \
-        -- "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$openrc_login_overlay_dir" \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
-}
-
-run_user_boot_rc_local_case() {
-    local name=$1
-    local provider=$2
-    local log=$3
-    local image=$4
-    local expected_markers=$'lkm-rc-local: begin\nlost+found\nlkm-rc-local: end status=0'
-
-    run_user_boot_marker_only_case "$name" "$log" "$expected_markers" \
-        "$make_cmd" -C "$kernel_dir" legacy-run APP=user-boot PLIC_PROVIDER="$provider" \
-        ROOTFS_LTP_OVERLAY=none ROOTFS_OVERLAY=none ROOTFS_FILE_OVERLAY_DIR="$rc_local_overlay_dir" \
-        VIRTIO_BLK_IMAGE="$image" FORCE=1 QEMU_APPEND="earlycon=sbi"
+    record_row "$name" 1 "$pass" "$fail"
 }
 
 run_kunit_case() {
     local name=$1
     local test_name=$2
     local log=$3
+    local rc total fail cases pass
 
     run_with_log "$log" "$make_cmd" run TEST="$test_name"
-    local rc=$?
-    local total
-    local fail
-    local cases
-    local pass
+    rc=$?
     total=$(sed -n 's/.*1\.\.\([0-9][0-9]*\).*/\1/p' "$log" | awk 'BEGIN { max = 0 } { if ($1 > max) max = $1 } END { print max }')
     fail=$(sed -n 's/.*not ok [0-9][0-9]* .*/x/p' "$log" | wc -l)
     cases=$(awk '/^  (not )?ok [0-9]+ / { count++ } END { print count + 0 }' "$log")
@@ -385,27 +74,19 @@ run_kunit_case() {
         fail=$((fail + 1))
     fi
     pass=$((total - fail))
-    if [ "$pass" -lt 0 ]; then
-        pass=0
-    fi
-    if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then
-        status=1
-    fi
+    if [ "$pass" -lt 0 ]; then pass=0; fi
+    if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then status=1; fi
     record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
 }
 
 run_smoke_case() {
     local name=$1
     local test_name=$2
     local log=$3
+    local rc counts pass fail total
 
     run_with_log "$log" "$make_cmd" run TEST="$test_name"
-    local rc=$?
-    local counts
-    local pass
-    local fail
-    local total
+    rc=$?
     counts=$(sed -n 's/.*passed=\([0-9][0-9]*\) failed=\([0-9][0-9]*\) total=\([0-9][0-9]*\).*/\1 \2 \3/p' "$log" | tail -n 1)
     if [ -n "$counts" ]; then
         set -- $counts
@@ -417,72 +98,34 @@ run_smoke_case() {
         pass=0
         fail=1
     fi
-    if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then
-        status=1
-    fi
+    if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then status=1; fi
     record_row "$name" "$total" "$pass" "$fail"
-    add_summary "$total" "$pass" "$fail"
 }
 
-run_with_log "$tmpdir/verify.log" "$make_cmd" verify REPORT=text VERBOSE=1 SPEC="$spec"
-verify_rc=$?
-if [ "$verify_rc" -eq 0 ]; then
-    verify_total=1
-    verify_pass=1
-    verify_fail=0
-else
-    verify_total=1
-    verify_pass=0
-    verify_fail=1
-fi
-if [ "$verify_rc" -ne 0 ]; then
-    status=1
-fi
-
-summary_total=0
-summary_pass=0
-summary_fail=0
-
-requested_init_overlay_map="$tmpdir/init-bin-ls-overlay.map"
-cat > "$requested_init_overlay_map" <<'EOF'
-# target      test        toolchain  link
-/bin/ls       user_smoke  musl       dynamic
-EOF
-distro_sh_input=$'/bin/ls\n/bin/ls\nexit\n'
-
-record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
-add_summary "$verify_total" "$verify_pass" "$verify_fail"
+run_command_case "spec verify" "$tmpdir/verify.log" "$make_cmd" verify REPORT=text VERBOSE=1 SPEC="$spec"
 run_command_case "delayed stdin" "$tmpdir/delayed-stdin.log" env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools.tests.test_delayed_stdin
 run_command_case "basic runner" "$tmpdir/basic-runner.log" "$make_cmd" test-basic
 run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkpoints
-run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run TEST=hello-native
-run_user_boot_case "run user native" "$tmpdir/run-user-native.log" "$make_cmd" run TEST=user-smoke-native
-run_user_boot_case "run requested native" "$tmpdir/run-requested-native.log" "$make_cmd" run TEST=requested-init-native
-run_user_boot_case "run distro ls native" "$tmpdir/run-distro-ls-native.log" "$make_cmd" run TEST=distro-ls-native
-run_user_boot_case "run distro sh native" "$tmpdir/run-distro-sh-native.log" "$make_cmd" run TEST=distro-sh-native
-if [ "${TEST_OPENRC_LOGIN:-0}" = "1" ]; then
-    run_user_boot_openrc_login_case "run openrc login" native \
-        "$tmpdir/run-openrc-login-native.log" "$tmpdir/user-native-openrc-login.raw"
-fi
-if [ "${TEST_RC_LOCAL:-0}" = "1" ]; then
-    run_user_boot_rc_local_case "run rc.local" native \
-        "$tmpdir/run-rc-local-native.log" "$tmpdir/user-native-rc-local.raw"
-fi
-run_kunit_case "KUnit native" kunit-native "$tmpdir/kunit-native.log"
-run_smoke_case "app smoke native" kernel-smoke-native "$tmpdir/smoke-native.log"
 
-for provider in $test_plic_providers; do
-    run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run TEST="hello-$provider"
-    run_user_boot_case "run user $provider" "$tmpdir/run-user-$provider.log" "$make_cmd" run TEST="user-smoke-$provider"
-    run_user_boot_case "run requested $provider" "$tmpdir/run-requested-$provider.log" "$make_cmd" run TEST="requested-init-$provider"
-    run_user_boot_case "run distro ls $provider" "$tmpdir/run-distro-ls-$provider.log" "$make_cmd" run TEST="distro-ls-$provider"
-    run_user_boot_case "run distro sh $provider" "$tmpdir/run-distro-sh-$provider.log" "$make_cmd" run TEST="distro-sh-$provider"
-    run_kunit_case "KUnit $provider" "kunit-$provider" "$tmpdir/kunit-$provider.log"
+# The only rootfs construction in the aggregate gate. Every following basic test
+# verifies and reuses this template without invoking a builder.
+run_command_case "rootfs canonical" "$tmpdir/rootfs-canonical.log" "$make_cmd" disk ROOTFS=canonical
+
+for provider in native $test_plic_providers; do
+    run_command_case "hello $provider" "$tmpdir/hello-$provider.log" "$make_cmd" run TEST="hello-$provider"
+    run_command_case "user $provider" "$tmpdir/user-$provider.log" "$make_cmd" run TEST="user-smoke-$provider"
+    run_command_case "requested $provider" "$tmpdir/requested-$provider.log" "$make_cmd" run TEST="requested-init-$provider"
+    run_command_case "distro ls $provider" "$tmpdir/distro-ls-$provider.log" "$make_cmd" run TEST="distro-ls-$provider"
+    run_command_case "distro sh $provider" "$tmpdir/distro-sh-$provider.log" "$make_cmd" run TEST="distro-sh-$provider"
+    run_command_case "rc.local $provider" "$tmpdir/rc-local-$provider.log" "$make_cmd" run TEST="rc-local-$provider"
+    run_command_case "OpenRC login $provider" "$tmpdir/openrc-login-$provider.log" "$make_cmd" run TEST="openrc-login-$provider"
+    run_kunit_case "KUnit $provider" "checkpoint-kunit-$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "kernel-smoke-$provider" "$tmpdir/smoke-$provider.log"
 done
+
 printf '\nTest summary:\n'
 printf '%s' "$summary_rows"
-printf '  %-18s total=%s pass=%s fail=%s\n' "overall" "$summary_total" "$summary_pass" "$summary_fail"
+printf '  %-24s total=%s pass=%s fail=%s\n' "overall" "$summary_total" "$summary_pass" "$summary_fail"
 
 if [ "$status" -ne 0 ]; then
     trap - EXIT

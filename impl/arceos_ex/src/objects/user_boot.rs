@@ -3975,7 +3975,7 @@ impl UserChildProcess {
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
-            || options != USER_WAIT4_WUNTRACED
+            || (options != 0 && options != USER_WAIT4_WUNTRACED)
             || rusage != 0
         {
             return None;

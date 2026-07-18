@@ -83,10 +83,11 @@ make test-stress \
 ```
 
 OpenRC login shell closure is kept as an explicit focused diagnostic case. It
-uses the checked-in account overlay, staged login/password/shell input, and the
+repeats the `openrc-login-native` basic-test entry, including its canonical
+private disk, staged login/password/shell input, and the
 `user-syscall-trace,user-syscall-error` probes. Success includes the stable
 `target=pending_child` parent-side setpgid fact as well as the shell/rootfs markers. It is not part of the default
-stress suite and must be selected manually:
+stress suite and must be selected explicitly:
 
 ```sh
 make test-stress \
@@ -101,7 +102,8 @@ make difftest
 ```
 
 `make difftest` defaults to one real paired run of
-`cases/rc-local-difftest.toml`, the direct inittab rc.local paired diff. Use
+`cases/rc-local-difftest.toml`. Both sides use private copies of the canonical
+template and boot `init=/opt/lkm/tests/rc-local-init`. Use
 `DIFFTEST_RUNS=0` for a fast
 configuration check without executing QEMU:
 
@@ -123,8 +125,8 @@ run `make checkpoints-linux-check`, then run `make difftest`. Keep the two
 repositories as independent review and commit units.
 
 The default rc.local case carries an exact checkpoint coverage audit. The
-current accounting is `required_total=103`, `in_scope=59`,
-`accounted_outside_scope=44`, and `unaccounted=0`: every exact-mapped
+current accounting is `required_total=103`, `in_scope=58`,
+`accounted_outside_scope=45`, and `unaccounted=0`: every exact-mapped
 checkpoint is either in the default rc.local hard scope or explicitly accounted
 outside that scope. This means the default hard scope is fully accounted; it
 does not mean all 103 exact checkpoints are compared by the default case.
@@ -186,11 +188,13 @@ Completed stages:
 Baseline difftest cases:
 
 - `rc-local-difftest.toml`: default `make difftest` paired differential test
-  for direct BusyBox inittab rc.local support. It compares the stable
-  checkpoint prefix through the rc.local shell and `/bin/ls` execs. Its exact
+  for the canonical rc-local launcher. It compares the stable
+  checkpoint prefix through the rc.local shell and `/bin/ls` execs. The static
+  launcher has no `UserBoot.InterpreterReady`; three matched `UserExec.*`
+  groups cover launcher-to-shell, `/bin/ls`, and `poweroff`. Its exact
   checkpoint coverage audit currently reports `required_total=103`,
-  `in_scope=59`, `accounted_outside_scope=44`, and `unaccounted=0`; the 59
-  in-scope checkpoints are the hard comparison set, while the other 44 exact
+  `in_scope=58`, `accounted_outside_scope=45`, and `unaccounted=0`; the 58
+  in-scope checkpoints are the hard comparison set, while the other 45 exact
   checkpoints are intentionally accounted outside the default rc.local hard
   scope.
 - `linux-exact-baseline-difftest.toml`: long-term baseline differential test
@@ -211,7 +215,7 @@ Baseline difftest cases:
   path or in a different entry-vs-C ordering. The Linux-only
   `Kernel.Started` C-entry marker is likewise observed coverage, not a
   baseline hard gate.
-- `openrc-native-init-difftest.toml`: focused manual paired differential test
+- `openrc-native-init-difftest.toml`: focused opt-in paired differential test
   for native Alpine `/sbin/init` / OpenRC with no `init=/bin/sh` override. It
   is intentionally separate from the long-term `/bin/sh -> /bin/ls` baseline
   so OpenRC-specific signal/wait/process lifecycle gaps can be localized
@@ -223,8 +227,8 @@ Baseline difftest cases:
 Focused opt-in stress cases:
 
 - `openrc-login-focused.toml`: opt-in stress/focused diagnostic for the
-  OpenRC getty/login shell path. It uses
-  `tests/rootfs-overlays/openrc-login`, waits for `login:`, `Password:`, and
+  OpenRC getty/login shell path. It repeats `openrc-login-native`, which waits
+  for `login:`, `Password:`, and
   the BusyBox shell prompt before sending `/bin/ls\nexit\n`, and classifies
   success only when the Alpine greeting, getgroups trace, rootfs listing
   marker, and `user exit status=0` are all present. This case is not in the
@@ -242,6 +246,13 @@ arceos_ex. Preserve the report and summarize the first divergence, missing or
 extra scoped checkpoints, and observed coverage. Only runner/reporting defects
 or incorrect Linux checkpoint instrumentation should be fixed as part of these
 paired cases.
+
+A paired side may declare `[paired.<side>.private_disk]` with `template` and
+`path`, both resolved from the repository root. The runner copies the frozen
+template immediately before that side starts and removes the private path on
+normal exit, timeout, or exception. The template is never modified. Formal
+paired configurations use closed stdin or the runner's structured
+`delayed_stdin`; terminal interaction is not a paired mode.
 
 Each case output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
 contains:

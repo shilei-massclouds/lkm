@@ -367,6 +367,7 @@ predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> boo
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_openrc_getty_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
+predicate syscall_execve_current_pid1_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
 predicate syscall_execve_context_staging_address_space_bound<T, A>(table: T, space: A) -> bool;
@@ -383,6 +384,7 @@ predicate syscall_wait4_linux_6_12_kernel_wait4_bound<T>(table: T) -> bool;
 predicate syscall_wait4_observed_shell_args_bound<T>(table: T) -> bool;
 predicate syscall_wait4_pid_minus_one_all_children_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_options_wuntraced_first_slice<T>(table: T) -> bool;
+predicate syscall_wait4_options_zero_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_wnohang_no_waitable_child_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_completed_child_record_reap_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_parent_wait_chldexit_boundary<T>(table: T) -> bool;
@@ -391,6 +393,8 @@ predicate syscall_wait4_child_exit_status_copyout_first_slice<T>(table: T) -> bo
 predicate syscall_wait4_observed_child_reap_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_no_child_echild_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_blocking_sleep_deferred<T>(table: T) -> bool;
+predicate syscall_sync_rootfs_barrier_first_slice<T>(table: T) -> bool;
+predicate syscall_reboot_poweroff_magic_first_slice<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate syscall_exit_group_pid1_shutdown_child_wait4_split<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
@@ -1217,6 +1221,18 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_wnohang_no_waitable_child_first_slice(self);
                     syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
+                    /*
+                     * canonical rc-local ends with BusyBox poweroff -f. Its
+                     * observed Linux ABI sequence is sync(81), followed by
+                     * reboot(142) with LINUX_REBOOT_MAGIC1,
+                     * LINUX_REBOOT_MAGIC2 and LINUX_REBOOT_CMD_POWER_OFF.
+                     * The current in-memory rootfs has no delayed writeback,
+                     * so sync is a successful barrier. Reboot accepts only
+                     * that exact power-off command; other combinations remain
+                     * rejected.
+                     */
+                    syscall_sync_rootfs_barrier_first_slice(self);
+                    syscall_reboot_poweroff_magic_first_slice(self);
                     syscall_exit_records_status(self);
                     syscall_exit_group_pid1_shutdown_child_wait4_split(self);
                     syscall_setsid_process_group_leader_eperm_first_slice(self);
@@ -1314,6 +1330,8 @@ object SyscallTable: ResourceObject {
             syscall_wait4_observed_child_reap_first_slice(self);
             syscall_wait4_no_child_echild_first_slice(self);
             syscall_wait4_blocking_sleep_deferred(self);
+            syscall_sync_rootfs_barrier_first_slice(self);
+            syscall_reboot_poweroff_magic_first_slice(self);
             syscall_exit_records_status(self);
             syscall_exit_group_pid1_shutdown_child_wait4_split(self);
             syscall_setsid_process_group_leader_eperm_first_slice(self);
@@ -2747,12 +2765,13 @@ object SyscallTable: ResourceObject {
                  * removed from the runqueue and its execution slot returns to
                  * Prepared. A later sequential plain fork allocates the next
                  * user-visible pid and reuses that internal task ref.
-                 * The later OpenRC login shell and rc.local direct-inittab
-                 * /bin/ls focused baselines have the same plain-fork flags,
-                 * but current_child=1 and the single active UserChild slot is
-                 * still the shell continuation.  The login shell is a nested
-                 * vfork child, while the direct rc.local sysinit shell is a
-                 * non-nested vfork child.  This slice supports only that
+                 * The later OpenRC login shell /bin/ls focused baseline has
+                 * the same plain-fork flags, but current_child=1 and the
+                 * single active UserChild slot is still the shell
+                 * continuation. The login shell is a nested vfork child.
+                 * Canonical rc-local instead self-execs its launcher into a
+                 * PID 1 shell and uses the ordinary sequential plain-fork
+                 * slot above. This slice supports only the OpenRC-observed
                  * observed child plain-fork shape: flags must be SIGCHLD
                  * only, newsp must be zero, the parent must be the current
                  * vfork child continuation, and the child must not already be
@@ -2865,7 +2884,8 @@ object SyscallTable: ResourceObject {
                  * continuation issues execve("/bin/ls", argv={"ls", NULL},
                  * envp={"SHLVL=1", "PWD=/", NULL}) and then tries
                  * "/usr/bin/ls" if the first attempt returns ENOSYS.  This
-                 * first slice accepts the child-continuation path, copies the
+                 * first slice accepts either the current PID 1 user process or
+                 * the child-continuation path, and copies the
                  * filename and a bounded argv vector.  Filename and argv
                  * strings use an execve-only bounded C-string copy: each byte
                  * up to the first NUL must be individually readable, but the
@@ -2901,7 +2921,10 @@ object SyscallTable: ResourceObject {
                  * checkpoint order is ContextReplaced, SatpReady, then
                  * TrapFrameReady; live satp switch and final return-frame
                  * diagnostics remain later return-path boundaries.  The
-                 * current first slice runs the fixed-table close-on-exec scan;
+                 * current PID 1 slice covers an ordinary init launcher replacing
+                 * itself with `/bin/sh`; it preserves PID/process identity and
+                 * releases the retired image because no parent snapshot owns it.
+                 * The current first slice runs the fixed-table close-on-exec scan;
                  * when this is a child continuation, the saved parent fd
                  * snapshot is the rollback boundary that prevents child
                  * close-on-exec from closing the parent's fd entries. It does
@@ -2936,6 +2959,7 @@ object SyscallTable: ResourceObject {
                     syscall_execve_linux_6_12_do_execveat_common_bound(self);
                     syscall_execve_observed_shell_ls_args_bound(self);
                     syscall_execve_observed_openrc_getty_args_bound(self);
+                    syscall_execve_current_pid1_first_slice(self, UserInitProcess);
                     syscall_execve_child_continuation_first_slice(self, UserChildProcess);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
@@ -2959,6 +2983,9 @@ object SyscallTable: ResourceObject {
                  * kernel/exit.c::kernel_wait4()/do_wait(). For the observed
                  * BusyBox /bin/sh "ls" parent path, pid is -1, status is a
                  * user pointer, options is WUNTRACED, and rusage is NULL.
+                 * The non-interactive PID 1 rc.local shell uses the same
+                 * SIGCHLD child handoff with options=0; Linux adds WEXITED
+                 * internally for both shapes.
                  * kernel_wait4() adds WEXITED internally. Because the cloned
                  * child exists but has not produced a waitable exit/stop/
                  * continue event, do_wait() reaches the interruptible
@@ -3015,6 +3042,7 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_observed_shell_args_bound(self);
                     syscall_wait4_pid_minus_one_all_children_first_slice(self);
                     syscall_wait4_options_wuntraced_first_slice(self);
+                    syscall_wait4_options_zero_first_slice(self);
                     syscall_wait4_wnohang_no_waitable_child_first_slice(self);
                     syscall_wait4_completed_child_record_reap_first_slice(self);
                     syscall_wait4_parent_wait_chldexit_boundary(self);
@@ -3048,6 +3076,27 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_exit_records_status(self);
                     syscall_table_exit_observed(self);
+                }
+            }
+
+            on Action::Sync {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    RootFS.state == State::Online;
+                }
+
+                ensures {
+                    syscall_sync_rootfs_barrier_first_slice(self);
+                }
+            }
+
+            on Action::RebootPowerOff {
+                depends_on {
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    syscall_reboot_poweroff_magic_first_slice(self);
                 }
             }
 
@@ -3223,9 +3272,9 @@ object UserChildProcess: ResourceObject {
 
         on Action::ObservedChildPlainFork {
             /*
-             * Observed OpenRC login shell and rc.local direct-inittab shell
-             * /bin/ls both reach plain clone(SIGCHLD) from an already active
-             * vfork child continuation.  The shell parent stays in the same
+             * The observed OpenRC login shell /bin/ls reaches plain
+             * clone(SIGCHLD) from an already active vfork child continuation.
+             * The shell parent stays in the same
              * internal UserChild slot and clone returns the allocated
              * grandchild pid to that shell.  The grandchild is only an observed child
              * continuation saved in the slot until the shell reaches wait4.

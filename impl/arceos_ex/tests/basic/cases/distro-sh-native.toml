@@ -1,5 +1,6 @@
-schema_version = 1
+schema_version = 2
 name = "distro-sh-native"
+purpose = "acceptance"
 timeout_seconds = 120
 
 [kernel]
@@ -9,7 +10,8 @@ probe = []
 profile = "release"
 
 [disk]
-mode = "canonical-readonly"
+mode = "template-readonly"
+profile = "canonical"
 
 [qemu]
 memory_mb = 128
@@ -17,6 +19,7 @@ smp = 8
 kernel_cmdline = "earlycon=sbi init=/bin/sh"
 rng = true
 exit_policy = "guest-shutdown"
+interaction = "scripted"
 stdin_steps = [
   { ready_marker = "~ #", payload = "/bin/ls\n/bin/ls\nexit\n" },
 ]

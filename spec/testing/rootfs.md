@@ -1,11 +1,8 @@
 # Rootfs and user-mode acceptance testing
 
 本文件是 rootfs/user fixture、发行版 smoke、OpenRC 输入编排和 checkpoint difftest 的权威测试规格。
-镜像构造见 [`../coding/projects/rootfs-image.md`](../coding/projects/rootfs-image.md)；对象行为见
-[`../coding/objects/user-boot.md`](../coding/objects/user-boot.md)、
-[`../coding/objects/vfs.md`](../coding/objects/vfs.md) 和
-[`../coding/objects/ext2.md`](../coding/objects/ext2.md)。本文件保留从旧
-`ArceosExBlockIoCodingMust` 分组迁入的稳定 rule ID 和 MUST 层级。
+镜像构造见 [`../coding/projects/rootfs-image.md`](../coding/projects/rootfs-image.md)；基本测试生命周期见
+[`basic-tests.md`](basic-tests.md)；对象行为见 `spec/coding/objects/` 对应文档。
 
 ## User fixture output and analysis
 
@@ -20,27 +17,16 @@ Rule IDs (MUST):
 - `arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12`
 
 Staged syscall subtests print an explicit success marker after each validated path. The user-smoke wrapper
-uses the `user-smoke:` prefix, begin/end markers, `status=N` and blank-line case separation; the host still
-determines success from `user exit status=N`. Directory probing uses the RISC-V ABI for
-`openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY)`, `getdents64(61)`, record validation and close.
-The fixture also performs one explicit `ecall` with sentinels in all callee-saved integer registers and
-requires both the syscall result and every sentinel to survive the ordinary user trap round trip.
+uses the `user-smoke:` prefix, begin/end/status markers and blank-line case separation; the host also checks
+`user exit status=N`. Directory probing uses the RISC-V ABI for openat/getdents64 validation and close. The
+fixture performs an explicit `ecall` with sentinels in all callee-saved integer registers and requires both
+the syscall result and sentinels to survive the ordinary user trap round trip.
 
-The libc-linked stack smoke reads auxv through `getauxval()` and requires the independent exec filename to
-match that fixture invocation's startup `argv[0]`. Basic-test and object-smoke invocations use the canonical
-`/opt/lkm/tests/user-smoke` path; legacy specialized overlays may still install the same binary at another
-case-local path. The fixture also requires common RISC-V HWCAP, real/effective UID/GID, and a nonzero 16-byte
-`AT_RANDOM` block matching the running process. It keeps the compiler stack-protector path and the 256 KiB
-demand-growth plus cross-page usercopy probes. Object smoke separately covers ASLR endpoints/alignment/
-layout, deterministic seed selection, independence of ASLR seed and `AT_RANDOM`, filename differing from
-`argv[0]`, every supported auxv key/value and final `AT_NULL`, 16-byte SP alignment, exact-24/short/
-unavailable entropy rollback, and stack fault/snapshot behavior under randomized tops.
-
-Distribution-command analysis first uses existing local tools (`file`, `readelf`, `objdump`, headers and
-read-only sysroot inspection) and keeps temporary notes out of the default build/image/test path. BusyBox
-whole-binary symbols are conservative candidates, not an applet trace. Any promoted syscall/VFS slice is
-checked against the local Linux 6.12 RISC-V syscall table and relevant fs implementation, with locking,
-RCU, permission, namespace, LSM and errno omissions recorded as trimmed/deferred before implementation.
+The libc-linked smoke requires its auxv/argv/HWCAP/credential/random/stack probes. Object smoke separately
+covers the modeled ASLR, auxv, stack alignment, entropy rollback and stack fault/snapshot boundaries.
+Distribution-command analysis uses existing static host tools first. BusyBox whole-binary symbols are only
+conservative candidates; promoted syscall/VFS behavior is checked against local Linux 6.12 and records
+locking/RCU/permission/namespace/LSM/errno omissions before implementation.
 
 ## Basic user and distro smoke
 
@@ -51,98 +37,82 @@ Rule IDs (MUST):
 - `arceos_ex_must_test_harness_cover_no_overlay_bin_sh_with_host_input`
 - `arceos_ex_must_keep_shell_external_commands_and_native_init_diagnostic_until_specified`
 
-The basic user-smoke TOML uses a private copy of the canonical disk and
-`init=/opt/lkm/tests/user-smoke`; it never replaces `/sbin/init`. A separate requested-init case selects
-`/opt/lkm/tests/init-hello`. Distribution cases attach the canonical disk read-only: one runs
-`init=/bin/ls`, and one waits for the BusyBox prompt before sending bounded host-side `/bin/ls`, `/bin/ls`
-and `exit`. The latter requires both external commands to complete, a stable rootfs marker from each
-listing, no `Function not implemented`, and `user exit status=0`.
-Host input belongs to delayed-stdin orchestration and is not kernel-side ready data. These ordinary shell
-and native-init diagnostics remain until their replacement behavior is separately specified.
+The user-smoke basic TOML uses a private canonical copy and `init=/opt/lkm/tests/user-smoke`; requested-init
+selects `/opt/lkm/tests/init-hello`. Distribution cases attach canonical read-only: one runs `init=/bin/ls`,
+and one uses scripted interaction to send `/bin/ls`, `/bin/ls`, `exit` after the BusyBox prompt. The latter
+requires both listings, no visible unsupported/panic marker and guest exit 0. Host input is orchestration,
+not kernel-side ready data.
 
-Kernel object smoke must read and stage its real user ELF from `/opt/lkm/tests/user-smoke` and exercise it as
-a requested absolute init candidate. It may continue to assert that the production default-init fallback
-order is bound, but it must not require canonical `/sbin/init` to be replaced by the fixture or claim that the
-selected candidate was the default fallback.
+Kernel object smoke reads the real `/opt/lkm/tests/user-smoke` ELF. It may assert fallback ordering but cannot
+claim `/sbin/init` was replaced. DF-0003 repeats the two-command shell configuration. The exact paired shell
+baseline sends the same structured delayed input to both sides and retains the complete announce stream.
 
-DF-0003 uses that exact two-command delayed-input payload for 30-run ordinary-path stress. The
-Linux/arceos_ex exact paired shell baseline sends the same payload to both sides and compares the stable
-exact checkpoint sequence. Its arceos_ex `stress-mem` capture uses 256 KiB so the complete two-command
-announce stream is retained without overflow; a truncated one-command prefix is not an acceptable paired
-baseline. Object smoke must additionally complete one observed child fork/wait/exit/
-parent-restore round, create a second child from the same shell continuation, and assert increasing pids,
-preserved shell identity/runqueue visibility and cleared first-round snapshot/wait/exit facts.
-
-## rc.local and paired difftest
+## rc.local basic acceptance and paired difftest
 
 Rule IDs (MUST):
 
-- `arceos_ex_must_rc_local_test_use_inittab_direct_marker_only`
+- `arceos_ex_must_rc_local_use_canonical_elf_launcher`
+- `arceos_ex_must_rc_local_be_dual_provider_basic_acceptance`
 - `arceos_ex_must_rc_local_difftest_be_default_case`
 - `arceos_ex_must_rc_local_difftest_report_hard_scope_coverage_counts`
 
-The first rc.local slice is a focused diagnostic, not a default `make test` gate. It uses
-`ROOTFS_OVERLAY=none` and a checked-in file overlay that changes only `/etc/inittab` and `/etc/rc.local`.
-BusyBox init directly executes `/bin/sh /etc/rc.local`; success is the ordered script markers, including
-the rootfs listing marker, rather than a claim about the OpenRC service graph or full PID1 lifecycle.
+Canonical `/opt/lkm/tests/rc-local-init` is a static ELF launcher. With fixed argv/envp it only execs
+`/bin/sh /opt/lkm/tests/rc-local.sh`; exec failure prints a stable diagnostic and exits nonzero. The script
+runs `/bin/ls /` and emits ordered `lkm-rc-local: begin`, rootfs listing and `end status=0` markers. It does
+not replace or edit `/etc`.
 
-This direct-inittab case is the default paired difftest. The former delayed `/bin/sh` case remains selectable
-through `DIFFTEST_CASE`. `checkpoint_scope` is only the hard comparison set: every required exact checkpoint
-is either in scope or has explicit outside-scope accounting. Reports separate hard-scope comparison from
-`required_total`, `in_scope`, `accounted_outside_scope` and `unaccounted` coverage counts.
+`rc-local-native` and `rc-local-linux-object` are automatic acceptance tests with
+`init=/opt/lkm/tests/rc-local-init`. They require the script markers, clean guest outcome, and absence of panic,
+visible unsupported or launcher-failure markers. Both enter default `make test`.
 
-## OpenRC login input orchestration
+The same launcher path is the default paired difftest. Linux and arceos_ex each consume a private copy of
+the canonical template; neither side constructs an overlay or changes inittab. The checkpoint hard scope is
+based on the observed paired run through launcher -> shell -> `/bin/ls`, not the deleted direct-inittab path.
+Because the launcher is static, `UserBoot.InterpreterReady` is explicitly outside hard scope; three matched
+`UserExec.*` groups cover launcher-to-shell, `/bin/ls`, and `poweroff`.
+Every required exact checkpoint is either in scope or explicitly accounted outside it; reports retain
+`required_total`, `in_scope`, `accounted_outside_scope` and `unaccounted` counts.
 
-Rule ID: `arceos_ex_must_openrc_login_test_use_explicit_account_overlay` (MUST).
+## OpenRC login basic acceptance
 
-OpenRC getty/login acceptance uses `ROOTFS_OVERLAY=none` plus an explicit account-only file overlay; it
-does not change the locked-root semantics of the bare image or bypass authentication. The host waits for
-`login:`, optionally `Password:`, then the shell prompt before sending `/bin/ls` and `exit`. It requires a
-stable rootfs marker and `user exit status=0`. The focused case remains opt-in through `STRESS_CASES` until
-explicitly selected; it is not part of default `make test` or test-stress.
+Rule IDs (MUST):
 
-The job-control acceptance requires an explicit trace fact classifying the shell parent's successful
-`setpgid(child_pid, child_pid)` target as the pending child, no `reason=pid_not_visible` rejection for that
-operation, successful foreground-pgrp handling, the `lost+found` rootfs marker and clean user exit. The
-case remains opt-in after this bounded closure; it does not claim multiple pending children, a general
-task graph, post-exec parent setpgid, job-control signal delivery or full process-group lookup.
+- `arceos_ex_must_canonical_rootfs_include_locked_root_and_test_account`
+- `arceos_ex_must_openrc_login_be_dual_provider_basic_acceptance`
 
-## Manual LTP shell basic test
+The canonical image retains the distribution `/sbin/init` and `/etc/inittab`, keeps root locked, and includes
+the stable non-root `test/test` account. No test-stage account overlay is permitted. `openrc-login-native` and
+`openrc-login-linux-object` explicitly boot `init=/sbin/init` from a private canonical copy. Scripted input
+waits in order for `login:`, `Password:` and the non-root shell prompt before sending fixed `/bin/ls`/`exit`.
 
-The canonical rootfs includes the validated sibling LTP staging tree. The interactive shell basic test boots
-`init=/bin/sh`; a developer may copy its TOML into a deliberately manual configuration or use the configured
-stdin steps. From a shell the initial workflow is:
+Acceptance requires the Alpine/OpenRC greeting, login/password/prompt steps, non-root credential observation,
+successful pending-child `setpgid`, foreground-pgrp handling, `lost+found`, guest exit 0, and no panic,
+unsupported or `reason=pid_not_visible` marker. Both providers enter default `make test`. The focused stress
+case repeats this basic-test entry; it does not build an account overlay. This bounded closure does not claim a
+general task graph, multiple pending children, post-exec parent setpgid, job-control signals or full pgrp lookup.
+
+## Manual LTP shell basic tests
+
+`ltp-shell-manual-native` and `ltp-shell-manual-linux-object` are terminal diagnostic configurations with
+`init=/bin/sh` and a private canonical copy. They are opt-in and never enter default regression or formal
+difftest. A normal terminal session ends with verdict inconclusive. The initial manual workflow is:
 
 ```sh
 cd /opt/ltp
 ./run-syscalls.sh 'getpid*' 'uname*'
 ```
 
-This entry establishes only that the LTP tree can be staged, booted, and invoked manually. Individual
-LTP `FAIL`, `BROK`, or `TCONF` results and missing syscall, `/proc`, `/sys`, or `/dev` capabilities do not
-expand the acceptance scope of this image-construction change.
+This establishes only that the installed LTP tree can be booted and invoked. Individual FAIL/BROK/TCONF or
+missing `/proc`/`sys`/device capabilities do not expand acceptance scope. Build/manifest may validate either
+provider without a TTY; `run` requires a real terminal.
 
-Migrated basic tests reuse the canonical image and do not execute LTP unless their TOML explicitly selects
-an LTP program. Unmigrated stress and paired-difftest images retain their specialized overlay policy.
-Focused canonical-image checks cover reuse, rebuild on every input class, `FORCE=1`, private-copy isolation,
-and a clear failure for missing or malformed LTP staging.
+## Composite and observation policy
 
-## Long-term observation checkpoints
+Current composite tests are stress repetition and automatic paired difftest. Checkpoint KUnit is a basic
+checkpoint-callback profile, not a composite test. A formal paired side always has closed stdin or structured
+delayed stdin; terminal interaction is forbidden. Historical wording “manual paired” is normalized to
+“opt-in paired”.
 
-Rule IDs (MUST):
-
-- `arceos_ex_must_long_term_checkpoints_follow_model_coding_contracts`
-- `arceos_ex_must_payload_vfs_ext2_read_emit_observation_checkpoints`
-- `arceos_ex_must_block_io_task_wait_checkpoints_cover_submit_wait_and_timeout`
-- `arceos_ex_must_block_io_irq_completion_checkpoints_cover_begin_end_failure`
-- `arceos_ex_must_block_io_completion_source_distinguish_irq_and_task_poll`
-- `arceos_ex_must_read_path_error_classification_checkpoint_be_structured`
-
-Nightly/stress and Linux-like comparison checkpoints are specified by model/coding before implementation.
-The stable set covers payload image read, VFS path resolution, Ext2 lookup/read, block task submit/wait and
-virtio-blk completion source. Failures/timeouts use structured classes and request identity so repeated
-sequences can be grouped; IRQ and task-poll completion remain distinguishable.
-
-Non-interactive runner capture uses a closed/`DEVNULL` stdin unless a case explicitly declares
-`delayed_stdin`. Default observation stays lightweight; heavy consumers are opt-in, and handlers only read
-object/provider facts and write through their sink.
+Long-term checkpoints follow model/coding contracts and cover payload/VFS/Ext2 reads, block submit/wait,
+completion source and structured errors. Non-interactive capture uses DEVNULL unless structured input is
+declared; checkpoint handlers only read production facts and write their sink.

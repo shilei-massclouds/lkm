@@ -6,7 +6,7 @@
 仍是对象级实现的权威来源。`spec/testing` 不重新定义模型和编码语义，只规定测试代码如何从这些语义中选择测试目标、生成场景、隔离副作用并选择执行载体。
 
 正式规格入口是 [`main.spec`](main.spec)。当前首先规格化 smoke 测试生成规则，见 [`smoke.spec`](smoke.spec)。
-Rootfs/user fixture、发行版 smoke、OpenRC delayed stdin 和 paired difftest 的权威编排规则见
+Rootfs/user fixture、发行版 smoke、OpenRC scripted interaction 和 paired difftest 的权威编排规则见
 [`rootfs.md`](rootfs.md)。
 
 单轮 kernel/QEMU 基本测试的配置、七阶段流水线、脚本隔离、退出和结构化结果规则见
@@ -26,7 +26,10 @@ Rootfs/user fixture、发行版 smoke、OpenRC delayed stdin 和 paired difftest
 
 测试用例不得为了测试便利改变既有功能 API 的签名、语义、可见性或错误语义。若现有功能 API 与正式规格不一致，应作为规格/实现修正处理，而不是作为测试适配处理。
 
-checkpoint/KUnit handler 默认是只读 observer。它只能读取真实 checkpoint 时刻已经存在的对象 facts、counter、trace 或 sink 输出，不得为了测试便利调用 driver/probe/ring/IRQ action，不得 reset/snapshot/restore 普通对象状态，不得伪造 completion 或设备事件，也不得要求被测对象新增测试专用后门。
+checkpoint/KUnit 是基本测试中的 checkpoint callback profile，不是复合测试。handler 默认是只读
+observer；它只能读取真实 checkpoint 时刻已经存在的对象 facts、counter、trace 或 sink 输出，不得为了
+测试便利调用 driver/probe/ring/IRQ action，不得 reset/snapshot/restore 普通对象状态，不得伪造
+completion 或设备事件，也不得要求被测对象新增测试专用后门。
 
 checkpoint/KUnit handler 原型必须是只读 `Context` 加受限 `Sink`，即等价于 `fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome`。不得恢复 `Write` handler、`&mut Context` 参数，或任何能修改普通 context 对象的等价入口。
 

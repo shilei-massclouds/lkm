@@ -1,5 +1,5 @@
 name = "openrc-native-init-difftest"
-description = "Run a focused Linux/arceos_ex paired checkpoint diff for native Alpine OpenRC /sbin/init, preserving the shell baseline as a separate case."
+description = "Run a focused opt-in Linux/arceos_ex paired checkpoint diff for native Alpine OpenRC /sbin/init, preserving the shell baseline as a separate case."
 mode = "paired_checkpoint_diff"
 default_runs = 1
 timeout_seconds = 180
@@ -130,4 +130,4 @@ observation_mode = "openrc-native-init-paired-checkpoint-diff"
 baseline_role = "focused-linux-openrc-native-init"
 excluded_checkpoint_mapping_kinds = ["range", "unmapped"]
 payload = "native Alpine /sbin/init OpenRC"
-scope_note = "Focused manual/pressure differential case for the native OpenRC path; it is not part of the default make test gate."
+scope_note = "Focused opt-in/pressure differential case for the native OpenRC path; it is not part of the default make test gate."

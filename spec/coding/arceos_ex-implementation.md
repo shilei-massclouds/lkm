@@ -185,17 +185,19 @@ facts；普通 payload 只通过 printk 或 files/TTY 前端产生输出。
 
 `impl/arceos_ex/src/checkpoint/mod.rs` 是 checkpoint enum/name/early-byte 的实现源。工具产物位于
 `tools/out/checkpoints/`，覆盖 inventory、Linux source mapping、coverage review 和 exact-marker plan。
-当前默认 paired difftest 是 direct-inittab rc.local case；historical shell baseline 仍可显式选择。
+当前默认 paired difftest 使用 canonical rootfs 副本和
+`init=/opt/lkm/tests/rc-local-init`；historical shell baseline 仍可显式选择。正式 paired side 只允许
+closed stdin 或结构化 delayed stdin，不使用 terminal。
 failure diagnostics 使用稳定 phase/step/object/check/first-failed 字段并保留原 EventError 行，便于 stress
 分类，而不改变成功事件序列。
 
 ## 构建与测试证据
 
 rootfs 构造规则见 [`projects/rootfs-image.md`](projects/rootfs-image.md)，测试编排见
-[`../testing/rootfs.md`](../testing/rootfs.md)。当前 Makefile 支持 Alpine minirootfs、compiled fixture map、
-static file overlay、case-local disk、显式 rebuild 和 QEMU command line passthrough。
+[`../testing/rootfs.md`](../testing/rootfs.md)。正式 `canonical` builder 独立完成 Alpine/OpenRC、稳定 test
+账户、fixture、rc.local launcher/script 和 LTP template；basic runner 只核对 manifest 或创建私有副本。
 
-smoke 负责 payload/端到端可观察行为；checkpoint KUnit 负责真实 checkpoint 时刻的只读事实；stress runner
+smoke 负责 payload/端到端可观察行为；checkpoint KUnit basic callback profile 负责真实 checkpoint 时刻的只读事实；stress runner
 负责 ordinary-path 重复执行、序列分类和代表样本归档。具体门禁集合和 clean-build/Clippy 矩阵由
 [`build.md`](build.md) 维护。
 

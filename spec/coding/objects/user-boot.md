@@ -85,10 +85,23 @@ frame/status and exit facts. A later sequential observed plain fork may reuse th
 receive the next pid. This is distinct from vfork active-slot reuse, which releases a completed execution
 slot to `Prepared`.
 
-Child `execve(221)` copies filename/argv/envp through `SyscallTable`, then invokes the same Context-owned
-transaction used by boot. The transaction owns staging rollback, repeated slot reset, bounded CLOEXEC,
-old-mm reclamation and point-of-no-return. Credential/signal/LSM and the complete Linux lock protocol remain
-deferred.
+The PID 1 parent wait handoff accepts both observed BusyBox forms:
+`wait4(-1, status, WUNTRACED, NULL)` from the interactive shell and
+`wait4(-1, status, 0, NULL)` from a non-interactive rc.local shell. Both use the same saved parent
+frame/address-space/stack ownership and child-exit restore path; options=0 is not rejected merely because it
+omits stop reporting.
+
+The canonical rc-local shutdown path supports the observed BusyBox `sync(2)` then `reboot(2)` sequence.
+`sync` is a successful barrier for the current in-memory rootfs. `reboot` reaches SBI shutdown only for
+Linux `MAGIC1`, `MAGIC2`, and `CMD_POWER_OFF`; invalid magic or other commands are rejected and never power
+off the guest.
+
+Runtime `execve(221)` accepts the current PID 1 process as well as the observed child continuation, copies
+filename/argv/envp through `SyscallTable`, then invokes the same Context-owned transaction used by boot. PID 1
+self-exec preserves its process identity, installs the new return frame and releases retired image backing;
+the child path retains the parent snapshot ownership exception. The transaction owns staging rollback,
+repeated slot reset, bounded CLOEXEC, old-mm reclamation and point-of-no-return. Credential/signal/LSM and the
+complete Linux lock protocol remain deferred.
 
 ## Test and observation boundary
 

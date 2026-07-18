@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import selectors
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -596,16 +597,35 @@ def _execute_paired_side(
     delayed_stdin = _delayed_stdin(config)
     stop_after_stress_mem = bool(config.get("stop_after_stress_mem", False))
 
+    private_disk = config.get("private_disk")
+    private_disk_created = False
+    private_disk_removed: bool | None = None
     started = datetime.now(timezone.utc)
     start_monotonic = time.monotonic()
-    if stop_after_stress_mem:
-        stdout, returncode, timed_out, capture_result = _run_command_capture_until_stress_mem(
-            command, workdir, env, timeout, delayed_stdin
-        )
-    else:
-        stdout, returncode, timed_out, capture_result = _run_command_capture(
-            command, workdir, env, timeout, delayed_stdin
-        )
+    try:
+        if private_disk is not None:
+            template = private_disk["template"]
+            path = private_disk["path"]
+            if not template.is_file():
+                raise SystemExit(f"paired.{side_id}.private_disk template missing: {template}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.unlink(missing_ok=True)
+            shutil.copy2(template, path)
+            private_disk_created = True
+        if stop_after_stress_mem:
+            stdout, returncode, timed_out, capture_result = _run_command_capture_until_stress_mem(
+                command, workdir, env, timeout, delayed_stdin
+            )
+        else:
+            stdout, returncode, timed_out, capture_result = _run_command_capture(
+                command, workdir, env, timeout, delayed_stdin
+            )
+    finally:
+        if private_disk is not None:
+            path = private_disk["path"]
+            if private_disk_created:
+                path.unlink(missing_ok=True)
+            private_disk_removed = not path.exists()
     ended = datetime.now(timezone.utc)
     duration = time.monotonic() - start_monotonic
 
@@ -629,6 +649,8 @@ def _execute_paired_side(
         "duration_seconds": round(duration, 3),
         "returncode": returncode,
         "timed_out": timed_out,
+        "private_disk": _private_disk_summary(private_disk),
+        "private_disk_removed": private_disk_removed,
         **capture_result,
         "stress_mem": stress_mem,
         "events": str(events_path),
@@ -1737,12 +1759,14 @@ def _paired_manifest(
             "arceos_ex": {
                 "command": paired["arceos_ex"]["command"],
                 "working_directory": str(paired["arceos_ex"]["workdir"]),
+                "private_disk": _private_disk_summary(paired["arceos_ex"].get("private_disk")),
                 "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["arceos_ex"])),
             },
             "linux": {
                 "build_command": paired["linux"].get("build_command"),
                 "command": paired["linux"]["command"],
                 "working_directory": str(paired["linux"]["workdir"]),
+                "private_disk": _private_disk_summary(paired["linux"].get("private_disk")),
                 "stop_after_stress_mem": paired["linux"].get("stop_after_stress_mem", False),
                 "delayed_stdin": _delayed_stdin_summary(_delayed_stdin(paired["linux"])),
             },
@@ -1984,7 +2008,39 @@ def _paired_side_config(
             raw.get("build_command"),
             f"paired.{side_id}.build_command",
         )
+    if "private_disk" in raw:
+        config["private_disk"] = _private_disk_config(
+            raw.get("private_disk"),
+            side_id,
+            repo_root,
+        )
     return config
+
+
+def _private_disk_config(value: object, side_id: str, repo_root: Path) -> dict[str, Path]:
+    if not isinstance(value, dict):
+        raise SystemExit(f"expected table field: paired.{side_id}.private_disk")
+    unknown = sorted(set(value) - {"template", "path"})
+    if unknown:
+        raise SystemExit(
+            f"unknown paired.{side_id}.private_disk field(s): {', '.join(unknown)}"
+        )
+    template = _resolve_repo_path(repo_root, _string(value, "template"))
+    path = _resolve_repo_path(repo_root, _string(value, "path"))
+    if template == path:
+        raise SystemExit(f"paired.{side_id}.private_disk path must differ from template")
+    return {"template": template, "path": path}
+
+
+def _private_disk_summary(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise SystemExit("internal private disk configuration is not a table")
+    return {
+        "template": str(value["template"]),
+        "path": str(value["path"]),
+    }
 
 
 def _load_toml(path: Path) -> dict[str, Any]:

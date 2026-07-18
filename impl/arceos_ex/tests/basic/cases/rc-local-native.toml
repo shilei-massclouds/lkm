@@ -1,0 +1,28 @@
+schema_version = 2
+name = "rc-local-native"
+purpose = "acceptance"
+timeout_seconds = 180
+
+[kernel]
+app = "user-boot"
+provider = "native"
+probe = ["announce", "stress-mem"]
+profile = "release"
+stress_mem_bytes = 262144
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 2
+kernel_cmdline = "earlycon=sbi init=/opt/lkm/tests/rc-local-init"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "none"
+
+[expect]
+process_exit = 0
+markers = ["lkm-rc-local: begin", "lost+found", "lkm-rc-local: end status=0"]
+forbidden_markers = ["lkm-rc-local-init: execve failed", "unsupported syscall", "Function not implemented", "overflow=1", "arceos_ex panic"]

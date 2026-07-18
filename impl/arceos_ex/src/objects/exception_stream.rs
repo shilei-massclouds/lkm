@@ -88,6 +88,7 @@ const SYSCALL_PPOLL: usize = 73;
 const SYSCALL_READLINKAT: usize = 78;
 const SYSCALL_NEWFSTATAT: usize = 79;
 const SYSCALL_FSTAT: usize = 80;
+const SYSCALL_SYNC: usize = 81;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
@@ -96,6 +97,7 @@ const SYSCALL_CLOCK_GETTIME: usize = 113;
 const SYSCALL_RT_SIGACTION: usize = 134;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
 const SYSCALL_RT_SIGTIMEDWAIT: usize = 137;
+const SYSCALL_REBOOT: usize = 142;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
 const SYSCALL_GETRESUID: usize = 148;
@@ -127,6 +129,9 @@ const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_WAIT4: usize = 260;
 const SYSCALL_GETRANDOM: usize = 278;
+const LINUX_REBOOT_MAGIC1: usize = 0xfee1_dead;
+const LINUX_REBOOT_MAGIC2: usize = 0x2812_1969;
+const LINUX_REBOOT_CMD_POWER_OFF: usize = 0x4321_fedc;
 const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
@@ -796,6 +801,8 @@ pub struct SyscallTable {
     clone_supported: bool,
     execve_supported: bool,
     wait4_supported: bool,
+    sync_supported: bool,
+    reboot_poweroff_supported: bool,
     exit_supported: bool,
     exit_group_supported: bool,
     write_usercopy_ready: bool,
@@ -930,6 +937,8 @@ pub struct SyscallTable {
     wait4_observed_child_reap_first_slice: bool,
     wait4_no_child_echild_first_slice: bool,
     wait4_blocking_sleep_deferred: bool,
+    sync_rootfs_barrier_first_slice: bool,
+    reboot_poweroff_magic_first_slice: bool,
     exit_records_status: bool,
     exit_group_pid1_shutdown_child_wait4_split: bool,
     write_observed: AtomicU8,
@@ -1043,6 +1052,8 @@ impl SyscallTable {
             clone_supported: false,
             execve_supported: false,
             wait4_supported: false,
+            sync_supported: false,
+            reboot_poweroff_supported: false,
             exit_supported: false,
             exit_group_supported: false,
             write_usercopy_ready: false,
@@ -1177,6 +1188,8 @@ impl SyscallTable {
             wait4_observed_child_reap_first_slice: false,
             wait4_no_child_echild_first_slice: false,
             wait4_blocking_sleep_deferred: false,
+            sync_rootfs_barrier_first_slice: false,
+            reboot_poweroff_magic_first_slice: false,
             exit_records_status: false,
             exit_group_pid1_shutdown_child_wait4_split: false,
             write_observed: AtomicU8::new(0),
@@ -2206,6 +2219,8 @@ impl SyscallTable {
         self.clone_supported = true;
         self.execve_supported = true;
         self.wait4_supported = true;
+        self.sync_supported = true;
+        self.reboot_poweroff_supported = true;
         self.exit_supported = true;
         self.exit_group_supported = true;
         self.write_usercopy_ready = true;
@@ -2340,6 +2355,8 @@ impl SyscallTable {
         self.wait4_observed_child_reap_first_slice = true;
         self.wait4_no_child_echild_first_slice = true;
         self.wait4_blocking_sleep_deferred = true;
+        self.sync_rootfs_barrier_first_slice = true;
+        self.reboot_poweroff_magic_first_slice = true;
         self.exit_records_status = true;
         self.exit_group_pid1_shutdown_child_wait4_split = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
@@ -3068,6 +3085,38 @@ impl SyscallTable {
         syscall_table_wait4(self, frame);
     }
 
+    pub fn sync(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.sync_supported
+            || !self.sync_rootfs_barrier_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        complete_successful_syscall(frame, 0);
+    }
+
+    pub fn reboot(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.reboot_poweroff_supported
+            || !self.reboot_poweroff_magic_first_slice
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        if frame.reg(10) != LINUX_REBOOT_MAGIC1
+            || frame.reg(11) != LINUX_REBOOT_MAGIC2
+            || frame.reg(12) != LINUX_REBOOT_CMD_POWER_OFF
+        {
+            complete_error_syscall(frame, EINVAL);
+            return;
+        }
+
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
+
     pub fn exit(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.exit_supported
@@ -3455,12 +3504,14 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_READLINKAT => table.readlinkat(frame),
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
+        SYSCALL_SYNC => table.sync(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
         SYSCALL_NANOSLEEP => table.nanosleep(frame),
         SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
         SYSCALL_RT_SIGACTION => table.rt_sigaction(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
         SYSCALL_RT_SIGTIMEDWAIT => table.rt_sigtimedwait(frame),
+        SYSCALL_REBOOT => table.reboot(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
         SYSCALL_GETRESUID => table.getresuid(frame),
@@ -5968,19 +6019,6 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
 #[cfg(app_user_boot)]
 fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
-    if !crate::context::context_ref()
-        .user_child_process
-        .current_child_continuation()
-    {
-        reset_execve_checkpoint_observation();
-        record_execve_failure(
-            EXECVE_FAIL_STAGE_CHILD_CONTINUATION,
-            EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION,
-        );
-        complete_unsupported_syscall(frame);
-        return;
-    }
-
     let mut filename = [0u8; USER_PATH_MAX];
     let Some(filename_len) = copy_execve_cstr(frame.reg(10), &mut filename) else {
         reset_execve_checkpoint_observation();
@@ -6599,7 +6637,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_error_syscall(frame, ECHILD);
         return;
     }
-    if options != USER_WAIT4_WUNTRACED {
+    if options != 0 && options != USER_WAIT4_WUNTRACED {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -8789,12 +8827,14 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_READLINKAT => "readlinkat",
         SYSCALL_NEWFSTATAT => "newfstatat",
         SYSCALL_FSTAT => "fstat",
+        SYSCALL_SYNC => "sync",
         SYSCALL_SET_TID_ADDRESS => "set_tid_address",
         SYSCALL_NANOSLEEP => "nanosleep",
         SYSCALL_CLOCK_GETTIME => "clock_gettime",
         SYSCALL_RT_SIGACTION => "rt_sigaction",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
         SYSCALL_RT_SIGTIMEDWAIT => "rt_sigtimedwait",
+        SYSCALL_REBOOT => "reboot",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",
         SYSCALL_GETRESUID => "getresuid",

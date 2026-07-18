@@ -2,6 +2,7 @@ TARGET := riscv64imac-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
 APP ?= smoke
+ROOTFS ?= canonical
 ROOT := ../..
 include $(ROOT)/impl/providers/linux-6.12.mk
 comma := ,
@@ -80,6 +81,12 @@ ROOTFS_TARBALL ?= build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz
 CANONICAL_ROOTFS_IMAGE ?= build/rootfs/canonical.raw
 CANONICAL_ROOTFS_SIZE ?= 320M
 CANONICAL_ROOTFS_BUILDER ?= tests/basic/rootfs_builder.py
+CANONICAL_ROOTFS_CONFIG_DIR ?= tests/rootfs/canonical
+ROOTFS_PROFILES := canonical
+UNKNOWN_ROOTFS_PROFILE := $(filter-out $(ROOTFS_PROFILES),$(ROOTFS))
+ifneq ($(UNKNOWN_ROOTFS_PROFILE),)
+$(error unknown ROOTFS profile: $(ROOTFS) (expected one of: $(ROOTFS_PROFILES)))
+endif
 ROOTFS_LTP_DIR ?= $(abspath $(ROOT)/../ltp/build-riscv64-musl-syscalls/rootfs)
 PYTHON ?= python3
 ROOTFS_STAGING_DIR ?= build/rootfs-staging
@@ -190,6 +197,7 @@ disk:
 		--tarball "$(abspath $(ROOTFS_TARBALL))" \
 		--url "$(ROOTFS_URL)" \
 		--ltp-dir "$(ROOTFS_LTP_DIR)" \
+		--config-dir "$(abspath $(CANONICAL_ROOTFS_CONFIG_DIR))" \
 		--wget "$(WGET)" \
 		--tar "$(TAR)" \
 		--mkfs-ext2 "$(MKFS_EXT2)" \

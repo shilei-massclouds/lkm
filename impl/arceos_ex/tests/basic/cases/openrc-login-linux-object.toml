@@ -1,0 +1,40 @@
+schema_version = 2
+name = "openrc-login-linux-object"
+purpose = "acceptance"
+timeout_seconds = 180
+
+[kernel]
+app = "user-boot"
+provider = "linux-object"
+probe = ["user-syscall-trace", "user-syscall-error"]
+profile = "release"
+
+[disk]
+mode = "private-copy"
+profile = "canonical"
+
+[qemu]
+memory_mb = 128
+smp = 8
+kernel_cmdline = "earlycon=sbi init=/sbin/init"
+rng = true
+exit_policy = "guest-shutdown"
+interaction = "scripted"
+stdin_steps = [
+  { ready_marker = "login:", payload = "test\n" },
+  { ready_marker = "Password:", payload = "test\n" },
+  { ready_marker = "~$", payload = "/bin/ls\nexit\n" },
+]
+
+[expect]
+process_exit = 0
+guest_exit_status = 0
+markers = [
+  "Welcome to Alpine!",
+  "~$",
+  "syscall trace nr=158 name=getgroups ret=1",
+  "syscall setpgid detail target=pending_child",
+  "syscall trace nr=29 name=ioctl ret=0",
+  "lost+found",
+]
+forbidden_markers = ["reason=pid_not_visible", "Function not implemented", "arceos_ex panic"]

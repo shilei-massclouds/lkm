@@ -2,6 +2,7 @@ ROOT := .
 include $(ROOT)/impl/providers/linux-6.12.mk
 KERNEL ?= arceos_ex
 TEST ?= hello-native
+ROOTFS ?= canonical
 PYTHON ?= python3
 LOG ?= info
 REPORT ?= text
@@ -50,10 +51,10 @@ build:
 	$(PYTHON) $(BASIC_TEST_RUNNER) build "$(TEST)" --out-root "$(BASIC_TEST_OUT_ROOT)"
 
 disk:
-	$(MAKE) -C $(KERNEL_DIR) disk FORCE=$(FORCE)
+	$(MAKE) -C $(KERNEL_DIR) disk ROOTFS="$(ROOTFS)" FORCE=$(FORCE)
 
 disk-clean:
-	$(MAKE) -C $(KERNEL_DIR) disk-clean
+	$(MAKE) -C $(KERNEL_DIR) disk-clean ROOTFS="$(ROOTFS)"
 
 run:
 	@if [ -n "$(BASIC_TEST_COMMAND_LINE_OVERRIDES)" ]; then \
@@ -137,7 +138,7 @@ test-checkpoints:
 	python3 tools/checkpoints/plan_linux_instrumentation.py --check
 
 test-kunit:
-	$(MAKE) run TEST=kunit-native
+	$(MAKE) run TEST=checkpoint-kunit-native
 
 test-smoke:
 	$(MAKE) run TEST=kernel-smoke-native

@@ -528,6 +528,87 @@ class StressRunnerTests(unittest.TestCase):
         self.assertIn("ARCH=riscv", config["linux"]["build_command"])
         self.assertTrue(config["linux"]["stop_after_stress_mem"])
 
+    def test_paired_config_resolves_private_disk_from_repo_root(self) -> None:
+        root = Path("/tmp/repo-root")
+        case = {
+            "paired": {
+                "checkpoint_scope": ["EntryPreludePhase.Started"],
+                "arceos_ex": {"command": ["make", "run"]},
+                "linux": {
+                    "command": ["qemu-system-riscv64"],
+                    "private_disk": {
+                        "template": "build/rootfs/canonical.raw",
+                        "path": "build/private/linux.raw",
+                    },
+                },
+            }
+        }
+
+        config = runner._paired_config(case, Path("case.toml"), root, root)
+
+        self.assertEqual(
+            config["linux"]["private_disk"],
+            {
+                "template": root / "build/rootfs/canonical.raw",
+                "path": root / "build/private/linux.raw",
+            },
+        )
+
+    def test_paired_side_private_disk_is_copied_and_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template = root / "canonical.raw"
+            private = root / "private.raw"
+            template.write_bytes(b"canonical")
+            run_dir = root / "run"
+            seen: list[bytes] = []
+
+            def capture(*_args: object) -> tuple[str, int, bool, dict[str, object]]:
+                seen.append(private.read_bytes())
+                private.write_bytes(b"guest mutation")
+                return "", 0, False, {}
+
+            with mock.patch.object(runner, "_run_command_capture", side_effect=capture):
+                result = runner._execute_paired_side(
+                    side_id="linux",
+                    config={
+                        "command": ["qemu-system-riscv64"],
+                        "workdir": root,
+                        "private_disk": {"template": template, "path": private},
+                    },
+                    run_dir=run_dir,
+                    timeout=1,
+                )
+
+            self.assertEqual(seen, [b"canonical"])
+            self.assertFalse(private.exists())
+            self.assertTrue(result["private_disk_removed"])
+            self.assertEqual(template.read_bytes(), b"canonical")
+
+    def test_paired_side_private_disk_is_removed_after_capture_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template = root / "canonical.raw"
+            private = root / "private.raw"
+            template.write_bytes(b"canonical")
+
+            with (
+                mock.patch.object(runner, "_run_command_capture", side_effect=RuntimeError("boom")),
+                self.assertRaisesRegex(RuntimeError, "boom"),
+            ):
+                runner._execute_paired_side(
+                    side_id="linux",
+                    config={
+                        "command": ["qemu-system-riscv64"],
+                        "workdir": root,
+                        "private_disk": {"template": template, "path": private},
+                    },
+                    run_dir=root / "run",
+                    timeout=1,
+                )
+
+            self.assertFalse(private.exists())
+
     def test_rc_local_difftest_config_preserves_dotted_checkpoint_count_keys(self) -> None:
         arceos_ex_root = Path(__file__).resolve().parents[2]
         repo_root = arceos_ex_root.parents[1]
@@ -536,12 +617,12 @@ class StressRunnerTests(unittest.TestCase):
 
         config = runner._paired_config(case, case_path, repo_root, repo_root)
 
-        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.MainElfReady"], 2)
-        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.TrapFrameReady"], 2)
+        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.MainElfReady"], 3)
+        self.assertEqual(config["checkpoint_scope_max_counts"]["UserExec.TrapFrameReady"], 3)
         coverage = config["checkpoint_coverage"]["audit"]
         self.assertEqual(coverage["required_total"], 103)
-        self.assertEqual(coverage["in_scope"], 59)
-        self.assertEqual(coverage["accounted_outside_scope"], 44)
+        self.assertEqual(coverage["in_scope"], 58)
+        self.assertEqual(coverage["accounted_outside_scope"], 45)
         self.assertEqual(coverage["unaccounted"], 0)
 
     def test_paired_config_parses_checkpoint_coverage_with_dotted_keys(self) -> None:

@@ -1,45 +1,12 @@
 name = "openrc-login-focused"
-description = "Run the opt-in OpenRC getty/login shell diagnostic with staged login input and /bin/ls."
+description = "Repeat the canonical openrc-login-native acceptance path as an opt-in focused stress case."
 default_runs = 1
 timeout_seconds = 180
 working_directory = "."
-setup_command = [
-  "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-disk",
-  "FORCE=1",
-  "VIRTIO_BLK_IMAGE=build/stress-openrc-login-focused.raw",
-  "ROOTFS_LTP_OVERLAY=none",
-  "ROOTFS_OVERLAY=none",
-  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/openrc-login",
-]
 command = [
-  "python3",
-  "tools/delayed_stdin.py",
-  "--timeout",
-  "170s",
-  "--input-step",
-  "login:",
-  "test\n",
-  "--input-step",
-  "Password:",
-  "test\n",
-  "--input-step",
-  "~$",
-  "/bin/ls\nexit\n",
-  "--",
   "make",
-  "-C",
-  "impl/arceos_ex",
-  "legacy-run",
-  "APP=user-boot",
-  "ROOTFS_LTP_OVERLAY=none",
-  "PROBE=user-syscall-trace,user-syscall-error",
-  "ROOTFS_OVERLAY=none",
-  "ROOTFS_FILE_OVERLAY_DIR=tests/rootfs-overlays/openrc-login",
-  "VIRTIO_BLK_IMAGE=build/stress-openrc-login-focused.raw",
-  "QEMU_APPEND=earlycon=sbi",
+  "run",
+  "TEST=openrc-login-native",
 ]
 classifier = "../classifiers/openrc-login-focused.toml"
 
@@ -47,6 +14,6 @@ classifier = "../classifiers/openrc-login-focused.toml"
 observation_mode = "openrc-login-focused"
 ordinary_path_required = false
 opt_in_only = true
-account_overlay = "tests/rootfs-overlays/openrc-login"
-payload = "OpenRC getty/login shell /bin/ls"
+rootfs_profile = "canonical"
+payload = "openrc-login-native basic acceptance"
 scope_note = "Focused opt-in diagnostic case; not part of the default make test gate or default stress suite."

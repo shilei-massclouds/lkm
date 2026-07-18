@@ -85,20 +85,21 @@ cmdline/device/stdin 和结果断言都以 TOML 为唯一来源，不能从 Make
 `LINUX_PROVIDER_DIR`、rootfs cache/source 和输出根等宿主参数仍可按文档覆盖。
 
 每次执行在 `impl/arceos_ex/tests/basic/out/` 下保留冻结的 `manifest.json`、完整 `qemu.log` 和
-结构化 `result.json`。流水线负责 timeout、stdin marker、guest exit、QEMU 进程组回收、
-PreScript/PostScript 和私有磁盘清理；QEMU 返回 0 本身不代表 guest 测试通过。
+result schema v2。流水线区分 execution status 与 passed/failed/inconclusive verdict，并负责 timeout、
+none/scripted/terminal interaction、guest exit、PTY/进程组回收、PreScript/PostScript 和私有磁盘清理；
+QEMU 返回 0 本身不代表 guest 测试通过。
 
 ### Canonical rootfs
 
-`make disk` 独立构造 `impl/arceos_ex/build/rootfs/canonical.raw`。该镜像保留正常 Alpine/OpenRC
-的 `/etc` 和 `/sbin/init`，把仓库 fixture 安装到 `/opt/lkm/tests/`，把经过校验的 sibling LTP
-staging 安装到 `/opt/ltp`。用户态基本测试通过 `init=/opt/lkm/tests/<fixture>` 选择 fixture，
-不会覆盖系统 init。
+`make disk` 等价于 `make disk ROOTFS=canonical`，独立构造
+`impl/arceos_ex/build/rootfs/canonical.raw`；未知 profile 会失败。该镜像保留正常 Alpine/OpenRC
+的 `/etc/inittab` 和 `/sbin/init`、锁定 root，并内置稳定的 `test/test` 非 root 账户。仓库 fixture、
+rc.local ELF launcher/script 位于 `/opt/lkm/tests/`，经过校验的 sibling LTP staging 位于 `/opt/ltp`。
 
-builder 记录 Alpine tarball、配置/构造脚本、fixture 和 LTP 输入指纹；输入变化会自动重建，
-输入不变则复用，`make disk FORCE=1` 强制重建。基本测试默认只读挂载 canonical image；确需写盘的
-配置使用运行期私有副本，结束后自动删除。旧 rootfs overlay 仅供尚未迁移的 stress、rc.local、
-OpenRC login 和 paired difftest 专用路径使用。
+builder 记录 Alpine tarball、配置/构造脚本、fixture、工具和 LTP 输入指纹；输入变化会自动重建，
+输入不变则复用，`make disk FORCE=1` 强制重建。`make run` 只核对 template manifest，缺失/过期时
+提示先构造；它绝不构造 rootfs 或覆盖 `/etc`。rc.local/OpenRC 双 provider acceptance 进入默认回归；
+LTP terminal diagnostic 仅显式运行。
 
 ## Provider 机制
 
