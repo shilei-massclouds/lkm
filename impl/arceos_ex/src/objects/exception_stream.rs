@@ -196,6 +196,8 @@ const EXECVE_FAIL_STAGE_ARGV_COPY: usize = 17;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_STAGE_FILENAME_COPY: usize = 18;
 #[cfg(app_user_boot)]
+pub(crate) const EXECVE_FAIL_STAGE_IMAGE_RETENTION: usize = 19;
+#[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NONE: usize = 0;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_NOT_CHILD_CONTINUATION: usize = 1;
@@ -223,6 +225,8 @@ const EXECVE_FAIL_REASON_ARGV_COPY: usize = 11;
 const EXECVE_FAIL_REASON_ARGV_CAPACITY: usize = 12;
 #[cfg(app_user_boot)]
 const EXECVE_FAIL_REASON_FILENAME_COPY: usize = 13;
+#[cfg(app_user_boot)]
+pub(crate) const EXECVE_FAIL_REASON_IMAGE_RETENTION: usize = 14;
 const AT_FDCWD: usize = usize::MAX - 99;
 const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
@@ -6181,14 +6185,6 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
 #[cfg(app_user_boot)]
 fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
-    if crate::context::context_ref()
-        .user_child_process
-        .builtin_grandchild_active()
-    {
-        reset_execve_checkpoint_observation();
-        complete_unsupported_syscall(frame);
-        return;
-    }
     let mut filename = [0u8; USER_PATH_MAX];
     let Some(filename_len) = copy_execve_cstr(frame.reg(10), &mut filename) else {
         reset_execve_checkpoint_observation();
@@ -6934,9 +6930,9 @@ fn complete_observed_child_exit_to_parent_wait(
     status: usize,
 ) -> bool {
     let wait_status = ((status & 0xff) << 8) as u32;
-    let pipe_read_resume = crate::context::context_ref()
-        .user_child_process
-        .builtin_grandchild_parent_resume_is_pipe_read();
+    let child_before_restore = &crate::context::context_ref().user_child_process;
+    let pipe_read_resume = child_before_restore.builtin_grandchild_parent_resume_is_pipe_read();
+    let builtin_restore_expected = child_before_restore.builtin_grandchild_active();
     let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
         let ctx = crate::context::context();
         let Some((parent_frame, status_ptr, child_pid, parent_pid)) = ctx
@@ -6944,11 +6940,19 @@ fn complete_observed_child_exit_to_parent_wait(
             .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
+                (
+                    &mut ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                ),
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 status,
             )
         else {
+            if builtin_restore_expected {
+                print_builtin_grandchild_exec_restore("failed");
+                crate::arch::riscv64::sbi::system_shutdown();
+            }
             return false;
         };
         (
@@ -6959,6 +6963,10 @@ fn complete_observed_child_exit_to_parent_wait(
             ctx.user_address_space.satp_token(),
         )
     };
+
+    if builtin_restore_expected {
+        print_builtin_grandchild_exec_restore("restored");
+    }
 
     crate::arch::riscv64::csr::write_satp(parent_satp);
     crate::arch::riscv64::csr::sfence_vma();
@@ -8564,14 +8572,7 @@ fn print_execve_unsupported_detail(frame: &TrapFrame) {
     crate::arch::riscv64::sbi::putstr(" child_cont=");
     print_bool_digit(child_continuation);
     crate::arch::riscv64::sbi::putstr(" exec_boundary=");
-    if crate::context::context_ref()
-        .user_child_process
-        .builtin_grandchild_active()
-    {
-        crate::arch::riscv64::sbi::putstr("builtin_grandchild_enosys");
-    } else {
-        crate::arch::riscv64::sbi::putstr("general");
-    }
+    crate::arch::riscv64::sbi::putstr("general");
     #[cfg(app_user_boot)]
     {
         let obs = execve_checkpoint_observation();
@@ -8684,6 +8685,9 @@ fn print_execve_fail_stage(stage: usize) {
         EXECVE_FAIL_STAGE_FILENAME_COPY => {
             crate::arch::riscv64::sbi::putstr("filename_copy");
         }
+        EXECVE_FAIL_STAGE_IMAGE_RETENTION => {
+            crate::arch::riscv64::sbi::putstr("image_retention");
+        }
         _ => print_decimal(stage),
     }
 }
@@ -8714,6 +8718,9 @@ fn print_execve_fail_reason(reason: usize) {
         }
         EXECVE_FAIL_REASON_FILENAME_COPY => {
             crate::arch::riscv64::sbi::putstr("filename_copy");
+        }
+        EXECVE_FAIL_REASON_IMAGE_RETENTION => {
+            crate::arch::riscv64::sbi::putstr("image_retention");
         }
         _ => print_decimal(reason),
     }
@@ -9479,6 +9486,65 @@ pub(crate) fn print_execve_close_on_exec_report(report: CloseOnExecReport) {
 #[cfg(not(checkpoint_handler_user_syscall_error))]
 #[allow(dead_code)]
 pub(crate) fn print_execve_close_on_exec_report(_report: CloseOnExecReport) {}
+
+#[cfg(app_user_boot)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn print_builtin_grandchild_exec_retention(
+    owner: &str,
+    exec_ordinal: usize,
+    current_satp: usize,
+    parent_satp: usize,
+    snapshot_saved: bool,
+    snapshot_restored: bool,
+    retired_pages_released: usize,
+) {
+    let obs = execve_checkpoint_observation();
+    crate::arch::riscv64::sbi::putstr("execve builtin_grandchild retention_owner=");
+    crate::arch::riscv64::sbi::putstr(owner);
+    crate::arch::riscv64::sbi::putstr(" exec_ordinal=");
+    print_decimal(exec_ordinal);
+    crate::arch::riscv64::sbi::putstr(" current_satp=0x");
+    print_hex(current_satp);
+    crate::arch::riscv64::sbi::putstr(" parent_satp=0x");
+    print_hex(parent_satp);
+    crate::arch::riscv64::sbi::putstr(" snapshot_saved=");
+    print_bool_digit(snapshot_saved);
+    crate::arch::riscv64::sbi::putstr(" snapshot_restored=");
+    print_bool_digit(snapshot_restored);
+    crate::arch::riscv64::sbi::putstr(" retired_pages_released=");
+    print_decimal(retired_pages_released);
+    crate::arch::riscv64::sbi::putstr(" fail_stage=");
+    print_execve_fail_stage(obs.failure_stage);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+#[cfg(app_user_boot)]
+fn print_builtin_grandchild_exec_restore(status: &str) {
+    let ctx = crate::context::context_ref();
+    let child = &ctx.user_child_process;
+    let obs = execve_checkpoint_observation();
+    crate::arch::riscv64::sbi::putstr("execve builtin_grandchild restore_status=");
+    crate::arch::riscv64::sbi::putstr(status);
+    crate::arch::riscv64::sbi::putstr(" retention_owner=");
+    if child.builtin_grandchild_parent_exec_snapshot_ever_saved() {
+        crate::arch::riscv64::sbi::putstr("builtin_grandchild");
+    } else {
+        crate::arch::riscv64::sbi::putstr("none");
+    }
+    crate::arch::riscv64::sbi::putstr(" exec_ordinal=");
+    print_decimal(child.builtin_grandchild_exec_commit_count());
+    crate::arch::riscv64::sbi::putstr(" current_satp=0x");
+    print_hex(ctx.user_address_space.satp_token());
+    crate::arch::riscv64::sbi::putstr(" parent_satp=0x");
+    print_hex(child.builtin_grandchild_parent_exec_satp());
+    crate::arch::riscv64::sbi::putstr(" snapshot_saved=");
+    print_bool_digit(child.builtin_grandchild_parent_exec_snapshot_saved());
+    crate::arch::riscv64::sbi::putstr(" snapshot_restored=");
+    print_bool_digit(child.builtin_grandchild_parent_exec_snapshot_restored());
+    crate::arch::riscv64::sbi::putstr(" fail_stage=");
+    print_execve_fail_stage(obs.failure_stage);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
 
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_dirfd(dirfd: usize) {

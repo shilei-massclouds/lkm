@@ -145,8 +145,13 @@ The list command's BusyBox command substitution is covered by the bounded two-le
 PID1-originated script child may create one builtin-only grandchild for `cd`/`pwd`, pipe/stdio and exit. Tests
 must cover distinct outer/inner snapshot ownership, blocking parent-read handoff, child-write/parent-read pipe data, two-level wait/exit
 restore, sequential pid monotonicity, illegal clone arguments, a second pending child, deeper nesting,
-builtin-grandchild `cd`/absolute `pwd`, `/dev/null` stderr redirection and exec rejection, the canonical
-33,110-byte runtest list read, and atomic capture rollback. This list-stage support does not weaken the
+builtin-grandchild `cd`/absolute `pwd`, `/dev/null` stderr redirection, and the canonical 33,110-byte runtest list
+read. A separate builtin-grandchild-exec smoke scenario must cover first-exec retention without changing outer PID1
+ownership, two consecutive execs retaining the same script parent while releasing the intermediate image,
+child-view-only close-on-exec, wait4 and pipe-read resume, script exit restoring PID1, and atomic rollback for
+argument/staging/ELF/address-space failures without page or fd-reference leaks. Non-builtin sources, deeper clone,
+and a second pending child remain rejected. Capture and exec failure injection must leave the current executable,
+both snapshot layers, pending identity and fd views unchanged. This list-stage support does not weaken the
 existing strict 3/3 acceptance configuration. If both providers list exactly `uname01`, `uname02`, and
 `uname04` and then fail at the first later execution boundary, the result/manifest/QEMU log are retained as
 the next evidence; that later boundary is not repaired in the same slice. The object-smoke two-level

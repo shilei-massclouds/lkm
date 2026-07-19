@@ -120,8 +120,8 @@ child, a clone from the builtin grandchild, or any deeper/concurrent shape retur
 boundary and does not consume a pid.
 
 That second-level scheduling boundary owns a separate bounded parent-continuation snapshot: script parent trap frame and
-status pointer, fs/fd view, stack bytes, and writable user pages. It does not copy another exec address-space
-or `UserStack` object. The boundary is either the script's wait4 or, as observed in BusyBox command
+status pointer, fs/fd view, stack bytes, and writable user pages. Before an inner exec it does not copy another exec
+address-space or `UserStack` object. The boundary is either the script's wait4 or, as observed in BusyBox command
 substitution, its first blocking read from the empty pipe after closing the parent write end. Handoff restores
 the clone-time child stack/fd view; close/dup/write then operate on
 that live child fd view while pipe bytes remain shared. Grandchild exit restores only the script parent
@@ -130,9 +130,27 @@ retries the restored read, keeps the exited child waitable, and lets the later w
 The outer PID1 wait frame, address-space snapshot, fd snapshot, stack snapshot,
 and writable-page snapshot keep their original ownership until the script itself exits. Allocation, copy,
 or fd-snapshot failure releases every second-level page/reference and leaves no pending identity or consumed
-pid. Runtime `execve` from this builtin-only grandchild returns `ENOSYS` with an explicit diagnostic; the
-existing vfork-origin observed grandchild exec slice is unchanged. General COW/task graphs, multiple pending
-children, deeper nesting, and inner exec remain deferred.
+pid.
+
+Runtime `execve` from the active builtin-only grandchild uses the common bounded exec transaction. Retired-image
+ownership is classified before the point of no return as `None`, `OuterChild`, or `BuiltinGrandchild`, with the
+builtin source checked first. The first inner exec transfers the retired script address space and `UserStack` to
+the builtin continuation. Its binding owns the transaction's preallocated retired address-space and stack slots
+until restore, independently of the outer PID1 snapshot; it must not overwrite that outer address-space or stack
+snapshot. A later exec by
+the same grandchild keeps the original script image unchanged and releases the immediately replaced executable.
+Close-on-exec scans only the live grandchild fd view; the saved script and outer PID1 fd snapshots remain owners of
+their entries until their respective restore boundaries.
+
+Grandchild exit first releases its current exec image, restores the retained script address space and `UserStack`,
+and switches to that SATP. Only then may the existing writable-page, stack-byte, fs/fd, wait4 or pipe-read restore
+sequence run. When no inner exec occurred, that exec-object restore is an explicit no-op fact. The script's later
+exit still restores the original outer PID1 image. Staging, argument, ELF, address-space, entropy, or close-on-exec
+precheck failure before the point of no return preserves the current executable, both parent snapshots, fd
+references, and pending identity. A retention or restore invariant failure after commit is terminal and emits a
+stable diagnostic containing owner, first/subsequent exec count, current/parent SATP, saved/restored state, and the
+last exec failure stage. The existing vfork-origin observed grandchild exec slice is unchanged. General COW/task
+graphs, multiple pending children, deeper nesting, signals, and complete pipe scheduling remain deferred.
 
 The same builtin-only slice permits its observed stderr redirection
 `openat(AT_FDCWD, "/dev/null", O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE, 0666)`. `O_CREAT`/`O_TRUNC` are ignored

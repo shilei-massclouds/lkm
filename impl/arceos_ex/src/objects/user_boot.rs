@@ -2631,6 +2631,28 @@ enum BuiltinGrandchildParentResume {
     PipeRead,
 }
 
+struct BuiltinGrandchildExecStorageBinding {
+    address_space_ptr: usize,
+    stack_ptr: usize,
+    parent_satp: usize,
+    parent_stack_top: usize,
+    bind_count: usize,
+    restore_count: usize,
+}
+
+impl BuiltinGrandchildExecStorageBinding {
+    const fn new() -> Self {
+        Self {
+            address_space_ptr: 0,
+            stack_ptr: 0,
+            parent_satp: 0,
+            parent_stack_top: 0,
+            bind_count: 0,
+            restore_count: 0,
+        }
+    }
+}
+
 struct BuiltinGrandchildContinuation {
     bound: bool,
     child_trap_frame: Option<TrapFrame>,
@@ -2660,6 +2682,13 @@ struct BuiltinGrandchildContinuation {
     parent_writable_page_snapshot_saved: bool,
     parent_writable_page_snapshot_truncated: bool,
     parent_writable_page_snapshot_restored: bool,
+    parent_exec_storage: BuiltinGrandchildExecStorageBinding,
+    parent_exec_address_space_snapshot_saved: bool,
+    parent_exec_stack_snapshot_saved: bool,
+    parent_exec_snapshot_ever_saved: bool,
+    parent_exec_snapshot_restored: bool,
+    parent_exec_retained_satp: usize,
+    exec_commit_count: usize,
 }
 
 impl BuiltinGrandchildContinuation {
@@ -2693,6 +2722,13 @@ impl BuiltinGrandchildContinuation {
             parent_writable_page_snapshot_saved: false,
             parent_writable_page_snapshot_truncated: false,
             parent_writable_page_snapshot_restored: false,
+            parent_exec_storage: BuiltinGrandchildExecStorageBinding::new(),
+            parent_exec_address_space_snapshot_saved: false,
+            parent_exec_stack_snapshot_saved: false,
+            parent_exec_snapshot_ever_saved: false,
+            parent_exec_snapshot_restored: false,
+            parent_exec_retained_satp: 0,
+            exec_commit_count: 0,
         }
     }
 
@@ -2725,6 +2761,13 @@ impl BuiltinGrandchildContinuation {
         self.parent_writable_page_snapshot_saved = false;
         self.parent_writable_page_snapshot_truncated = false;
         self.parent_writable_page_snapshot_restored = false;
+        self.parent_exec_storage = BuiltinGrandchildExecStorageBinding::new();
+        self.parent_exec_address_space_snapshot_saved = false;
+        self.parent_exec_stack_snapshot_saved = false;
+        self.parent_exec_snapshot_ever_saved = false;
+        self.parent_exec_snapshot_restored = false;
+        self.parent_exec_retained_satp = 0;
+        self.exec_commit_count = 0;
     }
 }
 
@@ -3148,6 +3191,108 @@ impl UserChildProcess {
     pub const fn builtin_grandchild_parent_writable_snapshot_restored(&self) -> bool {
         self.builtin_grandchild
             .parent_writable_page_snapshot_restored
+    }
+
+    pub const fn builtin_grandchild_exec_commit_count(&self) -> usize {
+        self.builtin_grandchild.exec_commit_count
+    }
+
+    pub const fn builtin_grandchild_parent_exec_snapshot_saved(&self) -> bool {
+        self.builtin_grandchild
+            .parent_exec_address_space_snapshot_saved
+            && self.builtin_grandchild.parent_exec_stack_snapshot_saved
+    }
+
+    pub const fn builtin_grandchild_parent_exec_snapshot_ever_saved(&self) -> bool {
+        self.builtin_grandchild.parent_exec_snapshot_ever_saved
+    }
+
+    pub const fn builtin_grandchild_parent_exec_snapshot_restored(&self) -> bool {
+        self.builtin_grandchild.parent_exec_snapshot_restored
+    }
+
+    pub const fn builtin_grandchild_parent_exec_satp(&self) -> usize {
+        self.builtin_grandchild.parent_exec_retained_satp
+    }
+
+    pub fn builtin_grandchild_first_exec_retention_required(&self) -> bool {
+        self.builtin_grandchild_active()
+            && self.builtin_grandchild.exec_commit_count == 0
+            && !self.builtin_grandchild.parent_exec_snapshot_ever_saved
+            && !self
+                .builtin_grandchild
+                .parent_exec_address_space_snapshot_saved
+            && !self.builtin_grandchild.parent_exec_stack_snapshot_saved
+            && !self.builtin_grandchild.parent_exec_snapshot_restored
+    }
+
+    pub fn builtin_grandchild_exec_parent_snapshot_live(&self) -> bool {
+        self.builtin_grandchild_active()
+            && self.builtin_grandchild.exec_commit_count != 0
+            && self.builtin_grandchild.parent_exec_snapshot_ever_saved
+            && self
+                .builtin_grandchild
+                .parent_exec_address_space_snapshot_saved
+            && self.builtin_grandchild.parent_exec_stack_snapshot_saved
+            && !self.builtin_grandchild.parent_exec_snapshot_restored
+            && self.builtin_grandchild.parent_exec_retained_satp != 0
+            && self
+                .builtin_grandchild
+                .parent_exec_storage
+                .address_space_ptr
+                != 0
+            && self.builtin_grandchild.parent_exec_storage.stack_ptr != 0
+            && self.builtin_grandchild.parent_exec_storage.bind_count == 1
+            && self.builtin_grandchild.parent_exec_storage.restore_count == 0
+    }
+
+    pub fn can_retain_builtin_grandchild_exec_objects(
+        &self,
+        address_space: &UserAddressSpace,
+        stack: &UserStack,
+    ) -> bool {
+        self.builtin_grandchild_first_exec_retention_required()
+            && address_space.state() == State::Online
+            && address_space.satp_token() != 0
+            && stack.state() == State::Ready
+            && address_space
+                .stack_mapping()
+                .is_some_and(|mapping| mapping.stack_ownership_token() == stack.top())
+    }
+
+    pub fn retain_builtin_grandchild_exec_objects(
+        &mut self,
+        address_space: &UserAddressSpace,
+        stack: &mut UserStack,
+    ) -> bool {
+        if !self.can_retain_builtin_grandchild_exec_objects(address_space, stack) {
+            return false;
+        }
+        self.builtin_grandchild
+            .parent_exec_address_space_snapshot_saved = true;
+        self.builtin_grandchild.parent_exec_stack_snapshot_saved = true;
+        self.builtin_grandchild.parent_exec_snapshot_ever_saved = true;
+        self.builtin_grandchild.parent_exec_snapshot_restored = false;
+        self.builtin_grandchild.parent_exec_retained_satp = address_space.satp_token();
+        self.builtin_grandchild
+            .parent_exec_storage
+            .address_space_ptr = address_space as *const UserAddressSpace as usize;
+        self.builtin_grandchild.parent_exec_storage.stack_ptr = stack as *const UserStack as usize;
+        self.builtin_grandchild.parent_exec_storage.parent_satp = address_space.satp_token();
+        self.builtin_grandchild.parent_exec_storage.parent_stack_top = stack.top();
+        self.builtin_grandchild.parent_exec_storage.bind_count = 1;
+        self.builtin_grandchild.parent_exec_storage.restore_count = 0;
+        self.builtin_grandchild.exec_commit_count = 1;
+        true
+    }
+
+    pub fn mark_builtin_grandchild_subsequent_exec_committed(&mut self) -> bool {
+        if !self.builtin_grandchild_exec_parent_snapshot_live() {
+            return false;
+        }
+        self.builtin_grandchild.exec_commit_count =
+            self.builtin_grandchild.exec_commit_count.saturating_add(1);
+        true
     }
 
     #[cfg(app_smoke)]
@@ -4621,10 +4766,12 @@ impl UserChildProcess {
         &mut self,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
+        retained_exec_objects: (&mut UserAddressSpace, &mut UserStack),
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize, usize)> {
+        let (retained_address_space, retained_stack) = retained_exec_objects;
         if self.builtin_grandchild.bound {
             if self.lifecycle.state() != State::Ready
                 || !self.observed_plain_fork_clone
@@ -4644,6 +4791,16 @@ impl UserChildProcess {
             let parent_frame = self.builtin_grandchild.parent_wait_frame?;
             let child_pid = self.observed_plain_fork_child_pid;
             let parent_pid = self.observed_plain_fork_parent_pid;
+            if !self.restore_builtin_grandchild_exec_objects(
+                address_space,
+                stack,
+                retained_address_space,
+                retained_stack,
+                page_allocator,
+                page_metadata_map,
+            ) {
+                return None;
+            }
             self.child_exit_status = exit_status;
             self.child_exit_status_observed = true;
             return Some((
@@ -4749,6 +4906,71 @@ impl UserChildProcess {
         }
         core::mem::swap(stack, &mut self.parent_exec_stack_snapshot);
         self.parent_exec_stack_snapshot_saved = false;
+        true
+    }
+
+    fn restore_builtin_grandchild_exec_objects(
+        &mut self,
+        address_space: &mut UserAddressSpace,
+        stack: &mut UserStack,
+        retained_address_space: &mut UserAddressSpace,
+        retained_stack: &mut UserStack,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.builtin_grandchild_active()
+            || self.builtin_grandchild.parent_exec_snapshot_restored
+        {
+            return false;
+        }
+        if self.builtin_grandchild.exec_commit_count == 0 {
+            if self.builtin_grandchild.parent_exec_snapshot_ever_saved
+                || self
+                    .builtin_grandchild
+                    .parent_exec_address_space_snapshot_saved
+                || self.builtin_grandchild.parent_exec_stack_snapshot_saved
+            {
+                return false;
+            }
+            self.builtin_grandchild.parent_exec_snapshot_restored = true;
+            return true;
+        }
+        if !self.builtin_grandchild_exec_parent_snapshot_live()
+            || address_space.satp_token() == 0
+            || retained_address_space.satp_token()
+                != self.builtin_grandchild.parent_exec_retained_satp
+            || retained_stack.state() != State::Ready
+            || self
+                .builtin_grandchild
+                .parent_exec_storage
+                .address_space_ptr
+                != retained_address_space as *mut UserAddressSpace as usize
+            || self.builtin_grandchild.parent_exec_storage.stack_ptr
+                != retained_stack as *mut UserStack as usize
+            || self.builtin_grandchild.parent_exec_storage.parent_satp
+                != retained_address_space.satp_token()
+            || self.builtin_grandchild.parent_exec_storage.parent_stack_top != retained_stack.top()
+        {
+            return false;
+        }
+
+        address_space.release_retired_exec_image(page_allocator, page_metadata_map);
+        stack.release_exec_backing(page_allocator, page_metadata_map);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                retained_address_space as *const UserAddressSpace,
+                address_space as *mut UserAddressSpace,
+                1,
+            );
+        }
+        retained_address_space.reset_staging_after_exec_commit();
+        core::mem::swap(stack, retained_stack);
+        retained_stack.reset_staging_after_exec_commit();
+        self.builtin_grandchild
+            .parent_exec_address_space_snapshot_saved = false;
+        self.builtin_grandchild.parent_exec_stack_snapshot_saved = false;
+        self.builtin_grandchild.parent_exec_snapshot_restored = true;
+        self.builtin_grandchild.parent_exec_storage.restore_count = 1;
         true
     }
 
@@ -5037,7 +5259,8 @@ impl UserChildProcess {
         wait_status: usize,
     ) -> bool {
         let continuation_restored = if self.builtin_grandchild.bound {
-            self.builtin_grandchild.parent_stack_snapshot_restored
+            self.builtin_grandchild.parent_exec_snapshot_restored
+                && self.builtin_grandchild.parent_stack_snapshot_restored
                 && self
                     .builtin_grandchild
                     .parent_writable_page_snapshot_restored
@@ -5080,6 +5303,7 @@ impl UserChildProcess {
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
             || !self.child_exit_status_observed
+            || !self.builtin_grandchild.parent_exec_snapshot_restored
             || !self.builtin_grandchild.parent_stack_snapshot_restored
             || !self
                 .builtin_grandchild
@@ -5123,6 +5347,7 @@ impl UserChildProcess {
                 || !self.current_child_continuation()
                 || !self.enqueued
                 || !self.builtin_grandchild.parent_stack_snapshot_restored
+                || !self.builtin_grandchild.parent_exec_snapshot_restored
                 || !self
                     .builtin_grandchild
                     .parent_writable_page_snapshot_restored
@@ -5136,6 +5361,10 @@ impl UserChildProcess {
                 || self.parent_wait_stack_snapshot_restored
                 || !self.parent_wait_writable_page_snapshot_saved
                 || self.parent_wait_writable_page_snapshot_restored
+                || self
+                    .builtin_grandchild
+                    .parent_exec_address_space_snapshot_saved
+                || self.builtin_grandchild.parent_exec_stack_snapshot_saved
             {
                 return false;
             }

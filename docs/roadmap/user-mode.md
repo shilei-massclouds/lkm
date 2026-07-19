@@ -57,6 +57,21 @@ case 仍为预期红灯，但 list 首片已闭合，完整 inner exec 与后续
 固定需要 944 字节。测试随后按 testing spec 拆成独立 builtin-grandchild scenario，并把原有
 child-lifecycle coverage 放到后置独立 scenario；native 与 linux-object 对象 smoke 均恢复为 55/55。
 
+2026-07-19 的下一片把 builtin-grandchild inner exec 纳入 common bounded exec transaction。第一次
+exec 将 script parent 地址空间和 `UserStack` 的所有权绑定到 transaction 的预分配 retired 槽，第二次
+及后续 exec 直接释放当前 executable 而不覆盖该 parent；CLOEXEC 只扫描 child fd view。grandchild
+exit 先释放当前 image、恢复 script SATP/stack，再执行既有 writable-page、stack、fs/fd 与 pipe-read
+或 wait4 continuation restore；script 最终 exit 仍恢复外层 PID1 snapshot。对象 smoke 覆盖首次与
+连续 exec、CLOEXEC、两种 resume、最终外层恢复和 precommit 原子回滚，两 provider 均为 55/55。
+
+正式 native 证据 `20260719T135137.750631Z-ltp-22256` 与 linux-object 证据
+`20260719T135448.428722Z-ltp-lo-22518` 均各精确列出一次 `uname01/02/04`；旧
+`builtin_grandchild_enosys` 不再出现。每个 uname 的运行都记录 `retention_owner=builtin_grandchild
+exec_ordinal=1`，随后 `retention_owner=none exec_ordinal=2 retired_pages_released=874`，退出后恢复
+parent SATP。两侧新的首个稳定边界相同：RISC-V syscall 34 `mkdirat` 尚未实现，导致
+`tst_tmpdir.c:270` 的 `mkdtemp(/tmp/LTP_unaXXXXXX)` 返回 ENOSYS/TBROK。严格 3/3 acceptance 保持不变，
+两份 result/manifest/qemu.log 保留红灯与完整 cleanup；mkdirat 和 uname 后续 syscall 不在该片扩展。
+
 后续高优先级计划按证据和前置依赖排序：
 
 1. **P0：继续保留 DF-0001/DF-0002 stress 回归并分析 source-scoped 失败事实**。短期不再添加缺陷专用 checkpoint；`Serial8250RxBatchLoopbackProbe.setup` 内部稳定 first-failed predicate 已补齐到 source claim/complete delta matched。若再次出现 DF-0002，优先沿既有 `failure_diagnostic` / `ready_check_failed` 中的 source-scoped PLIC/UART IRQ cycle 事实分析，不回退到全局 claim/complete equality。

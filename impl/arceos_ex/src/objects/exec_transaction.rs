@@ -23,6 +23,14 @@ pub enum ExecOwner {
     Runtime,
 }
 
+#[cfg(any(app_smoke, app_user_boot))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RetiredImageRetention {
+    None,
+    OuterChild,
+    BuiltinGrandchild,
+}
+
 #[cfg_attr(not(app_user_boot), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecError {
@@ -196,8 +204,8 @@ pub struct ExecTransaction {
     pub(crate) staging_address_space: UserAddressSpace,
     pub(crate) staging_stack: UserStack,
     pub(crate) staging_trap_frame: UserTrapFrame,
-    retired_address_space: UserAddressSpace,
-    retired_stack: UserStack,
+    pub(crate) retired_address_space: UserAddressSpace,
+    pub(crate) retired_stack: UserStack,
 }
 
 #[allow(dead_code)]
@@ -568,6 +576,283 @@ pub fn smoke_consecutive_exec_randoms_differ(ctx: &mut crate::context::Context) 
         && first != second
 }
 
+#[cfg(app_smoke)]
+pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
+    ctx: &mut crate::context::Context,
+) -> bool {
+    if !ctx.user_child_process.builtin_grandchild_active()
+        || !ctx
+            .user_child_process
+            .builtin_grandchild_first_exec_retention_required()
+    {
+        return false;
+    }
+    let free_pages_before = ctx.page_allocator.buddy_total_free_pages();
+    let current_satp_before = ctx.user_address_space.satp_token();
+    let current_stack_top_before = ctx.user_stack.top();
+    let open_fds_before = ctx.files_struct.fd_table_open_count();
+    let outer_snapshot_before = ctx.user_child_process.parent_address_space_snapshot_saved();
+    let abort_count_before = ctx.exec_transaction.abort_count();
+    if ctx
+        .exec_transaction
+        .begin_slices(
+            ExecOwner::Runtime,
+            b"/bin/sh",
+            &[b"/bin/sh", b"-c", b"uname01"],
+            &[b"HOME=/"],
+            ctx.config.exec_argument_limits(),
+        )
+        .is_err()
+        || ctx
+            .exec_transaction
+            .staging_address_space
+            .preset(
+                ctx.vm.swapper_vm(),
+                &ctx.page_allocator,
+                &ctx.kernel_global_allocator,
+                &ctx.kernel_init_task,
+            )
+            .is_err()
+    {
+        return false;
+    }
+    ctx.exec_transaction.abort(
+        ExecError::InvalidState,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+    );
+    ctx.page_allocator.buddy_total_free_pages() == free_pages_before
+        && ctx.user_address_space.satp_token() == current_satp_before
+        && ctx.user_stack.top() == current_stack_top_before
+        && ctx.files_struct.fd_table_open_count() == open_fds_before
+        && ctx.user_child_process.parent_address_space_snapshot_saved() == outer_snapshot_before
+        && ctx
+            .user_child_process
+            .builtin_grandchild_first_exec_retention_required()
+        && ctx
+            .user_child_process
+            .builtin_grandchild_exec_commit_count()
+            == 0
+        && !ctx
+            .user_child_process
+            .builtin_grandchild_parent_exec_snapshot_ever_saved()
+        && ctx.exec_transaction.abort_count() == abort_count_before + 1
+        && ctx.exec_transaction.last_error() == Some(ExecError::InvalidState)
+}
+
+#[cfg(app_smoke)]
+pub fn smoke_commit_builtin_grandchild_exec_image(
+    ctx: &mut crate::context::Context,
+    main_image: &[u8],
+    interpreter_image: Option<&[u8]>,
+) -> Option<ExecSuccess> {
+    if !ctx.user_child_process.builtin_grandchild_active() {
+        return None;
+    }
+    ctx.exec_transaction
+        .begin_slices(
+            ExecOwner::Runtime,
+            b"/bin/sh",
+            &[b"/bin/sh", b"-c", b"uname01"],
+            &[b"HOME=/", b"TERM=linux"],
+            ctx.config.exec_argument_limits(),
+        )
+        .ok()?;
+
+    let prepared = (|| -> Result<(), ExecError> {
+        ctx.binary_format_registry
+            .prepare_main(main_image, &mut ctx.exec_transaction.staging_elf)
+            .map_err(|_| ExecError::NoExecutableFormat(None))?;
+        let interpreter_ref = if ctx
+            .exec_transaction
+            .staging_elf
+            .interpreter_path()
+            .is_some()
+        {
+            let image = interpreter_image.ok_or(ExecError::NotFound)?;
+            ctx.binary_format_registry
+                .prepare_interpreter(image, &mut ctx.exec_transaction.staging_interpreter)
+                .map_err(|_| ExecError::NoExecutableFormat(None))?;
+            ctx.exec_transaction
+                .staging_elf
+                .bind_runtime_interpreter(&ctx.exec_transaction.staging_interpreter)
+                .map_err(|_| ExecError::InvalidState)?;
+            Some(&ctx.exec_transaction.staging_interpreter)
+        } else {
+            None
+        };
+        ctx.exec_transaction
+            .staging_address_space
+            .preset(
+                ctx.vm.swapper_vm(),
+                &ctx.page_allocator,
+                &ctx.kernel_global_allocator,
+                &ctx.kernel_init_task,
+            )
+            .map_err(|_| ExecError::NoMemory)?;
+        ctx.exec_transaction
+            .staging_stack
+            .setup_with_envp(
+                &ctx.exec_transaction.staging_address_space,
+                &ctx.exec_transaction.staging_elf,
+                interpreter_ref,
+                &[b"/bin/sh", b"-c", b"uname01"],
+                &[b"HOME=/", b"TERM=linux"],
+                ctx.config.user_stack(),
+                b"/bin/sh",
+                &[0x5a; super::user_stack::USER_STACK_RANDOM_BYTES],
+                &[0; super::user_stack::USER_STACK_ASLR_BYTES],
+                UserStackAuxv::new(
+                    ctx.cpu_capabilities.elf_hwcap(),
+                    ctx.user_init_process.uid(),
+                    ctx.user_init_process.euid(),
+                    ctx.user_init_process.gid(),
+                    ctx.user_init_process.egid(),
+                ),
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+            .map_err(|_| ExecError::NoMemory)?;
+        ctx.exec_transaction
+            .staging_address_space
+            .setup(
+                &ctx.exec_transaction.staging_elf,
+                interpreter_ref,
+                &ctx.exec_transaction.staging_stack,
+                main_image,
+                interpreter_image,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+            .map_err(|_| ExecError::NoMemory)?;
+        ctx.exec_transaction
+            .staging_trap_frame
+            .setup(
+                &ctx.exec_transaction.staging_address_space,
+                &ctx.exec_transaction.staging_elf,
+                &ctx.exec_transaction.staging_stack,
+            )
+            .map_err(|_| ExecError::InvalidState)?;
+        ctx.exec_transaction
+            .staging_elf
+            .enable(
+                &ctx.exec_transaction.staging_address_space,
+                &ctx.exec_transaction.staging_stack,
+                &ctx.exec_transaction.staging_trap_frame,
+            )
+            .map_err(|_| ExecError::InvalidState)?;
+        ctx.exec_transaction
+            .staging_address_space
+            .enable(
+                &ctx.exec_transaction.staging_trap_frame,
+                &ctx.exec_transaction.staging_stack,
+                ctx.vm.swapper_vm(),
+                &ctx.kernel_image,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            )
+            .map_err(|_| ExecError::NoMemory)?;
+        ctx.files_struct
+            .precheck_close_on_exec()
+            .map_err(|_| ExecError::InvalidState)
+    })();
+    if let Err(error) = prepared {
+        ctx.exec_transaction
+            .abort(error, &mut ctx.page_allocator, &ctx.page_metadata_map);
+        return None;
+    }
+
+    let retention = match classify_retired_image_retention(ctx, ExecOwner::Runtime) {
+        Ok(retention) => retention,
+        Err(_) => {
+            ctx.exec_transaction.abort(
+                ExecError::InvalidState,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+            );
+            return None;
+        }
+    };
+    let builtin_subsequent_exec = retention == RetiredImageRetention::None
+        && ctx
+            .user_child_process
+            .builtin_grandchild_exec_parent_snapshot_live();
+    ctx.exec_transaction.mark_point_of_no_return().ok()?;
+    let mut directly_released = 0;
+    if builtin_subsequent_exec {
+        directly_released += ctx
+            .user_address_space
+            .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
+        directly_released += ctx
+            .user_stack
+            .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
+    } else {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &ctx.user_address_space,
+                &mut ctx.exec_transaction.retired_address_space,
+                1,
+            );
+        }
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            &ctx.exec_transaction.staging_address_space,
+            &mut ctx.user_address_space,
+            1,
+        );
+    }
+    ctx.exec_transaction
+        .staging_address_space
+        .reset_staging_after_exec_commit();
+    let _ = ctx.files_struct.close_on_exec().ok()?;
+    if !builtin_subsequent_exec {
+        core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.retired_stack);
+    }
+    core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.staging_stack);
+    ctx.exec_transaction
+        .staging_stack
+        .reset_staging_after_exec_commit();
+    ctx.exec_transaction.staging_elf = ElfObject::new();
+    ctx.exec_transaction.staging_interpreter = ElfObject::new();
+    ctx.exec_transaction.staging_trap_frame = UserTrapFrame::new();
+
+    match retention {
+        RetiredImageRetention::BuiltinGrandchild => {
+            if !ctx
+                .user_child_process
+                .retain_builtin_grandchild_exec_objects(
+                    &ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                )
+            {
+                return None;
+            }
+        }
+        RetiredImageRetention::None => {}
+        RetiredImageRetention::OuterChild => return None,
+    }
+    let released = if builtin_subsequent_exec {
+        if !ctx
+            .user_child_process
+            .mark_builtin_grandchild_subsequent_exec_committed()
+        {
+            return None;
+        }
+        directly_released
+    } else {
+        0
+    };
+    ctx.exec_transaction.finish_commit(released);
+    Some(ExecSuccess {
+        image_contains_stdin_fixture: super::elf_object::contains_bytes(
+            main_image,
+            b"user-smoke: begin",
+        ),
+        retired_pages_released: released,
+    })
+}
+
 #[cfg(app_user_boot)]
 fn prepare_and_commit(
     ctx: &mut crate::context::Context,
@@ -904,26 +1189,40 @@ fn commit_prepared(
     use super::exception_stream as observation;
     use crate::checkpoint::Checkpoint;
 
-    let parent_exec_objects_retained = owner == ExecOwner::Runtime
+    let retention = classify_retired_image_retention(ctx, owner).inspect_err(|_| {
+        observe_failure(
+            owner,
+            observation::EXECVE_FAIL_STAGE_IMAGE_RETENTION,
+            observation::EXECVE_FAIL_REASON_IMAGE_RETENTION,
+            0,
+            ctx,
+        );
+    })?;
+    let builtin_subsequent_exec = retention == RetiredImageRetention::None
         && ctx
             .user_child_process
-            .runtime_exec_parent_snapshot_live(&ctx.user_address_space);
-    if parent_exec_objects_retained
-        && !ctx
-            .user_child_process
-            .can_retain_parent_exec_objects(&ctx.user_address_space, &ctx.user_stack)
-    {
-        return Err(ExecError::InvalidState);
-    }
+            .builtin_grandchild_exec_parent_snapshot_live();
     ctx.exec_transaction.mark_point_of_no_return()?;
     let old_satp = crate::arch::riscv64::csr::read_satp();
     let new_satp = ctx.exec_transaction.staging_address_space.satp_token();
+    let mut directly_released = 0;
+    if builtin_subsequent_exec {
+        directly_released += ctx
+            .user_address_space
+            .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
+        directly_released += ctx
+            .user_stack
+            .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
+    } else {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &ctx.user_address_space,
+                &mut ctx.exec_transaction.retired_address_space,
+                1,
+            );
+        }
+    }
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            &ctx.user_address_space,
-            &mut ctx.exec_transaction.retired_address_space,
-            1,
-        );
         core::ptr::copy_nonoverlapping(
             &ctx.exec_transaction.staging_address_space,
             &mut ctx.user_address_space,
@@ -949,7 +1248,9 @@ fn commit_prepared(
         crate::checkpoint::dispatch(Checkpoint::UserExecSatpReady, ctx);
     }
 
-    core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.retired_stack);
+    if !builtin_subsequent_exec {
+        core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.retired_stack);
+    }
     core::mem::swap(&mut ctx.user_stack, &mut ctx.exec_transaction.staging_stack);
     unsafe {
         core::ptr::copy_nonoverlapping(&ctx.exec_transaction.staging_elf, &mut ctx.elf_object, 1);
@@ -971,13 +1272,27 @@ fn commit_prepared(
     ctx.exec_transaction.staging_interpreter = ElfObject::new();
     ctx.exec_transaction.staging_trap_frame = UserTrapFrame::new();
 
-    if parent_exec_objects_retained
-        && !ctx.user_child_process.retain_parent_exec_objects(
-            &ctx.exec_transaction.retired_address_space,
-            &mut ctx.exec_transaction.retired_stack,
-        )
-    {
-        exec_terminal("exec parent mm ownership transfer failed\n");
+    match retention {
+        RetiredImageRetention::BuiltinGrandchild => {
+            if !ctx
+                .user_child_process
+                .retain_builtin_grandchild_exec_objects(
+                    &ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                )
+            {
+                exec_terminal("builtin grandchild exec retention invariant failed\n");
+            }
+        }
+        RetiredImageRetention::OuterChild => {
+            if !ctx.user_child_process.retain_parent_exec_objects(
+                &ctx.exec_transaction.retired_address_space,
+                &mut ctx.exec_transaction.retired_stack,
+            ) {
+                exec_terminal("outer child exec retention invariant failed\n");
+            }
+        }
+        RetiredImageRetention::None => {}
     }
 
     if owner == ExecOwner::Runtime {
@@ -999,25 +1314,56 @@ fn commit_prepared(
         crate::checkpoint::dispatch(Checkpoint::UserExecReturnFrameReady, ctx);
     }
 
-    let released = if parent_exec_objects_retained {
-        ctx.exec_transaction
-            .retired_address_space
-            .reset_staging_after_exec_commit();
-        ctx.exec_transaction
-            .retired_stack
-            .reset_staging_after_exec_commit();
-        0
-    } else {
-        let mut released = ctx
-            .exec_transaction
-            .retired_address_space
-            .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
-        released += ctx
-            .exec_transaction
-            .retired_stack
-            .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
-        released
+    let released = match retention {
+        RetiredImageRetention::BuiltinGrandchild => 0,
+        RetiredImageRetention::OuterChild => {
+            ctx.exec_transaction
+                .retired_address_space
+                .reset_staging_after_exec_commit();
+            ctx.exec_transaction
+                .retired_stack
+                .reset_staging_after_exec_commit();
+            0
+        }
+        RetiredImageRetention::None if builtin_subsequent_exec => directly_released,
+        RetiredImageRetention::None => {
+            let mut released = ctx
+                .exec_transaction
+                .retired_address_space
+                .release_retired_exec_image(&mut ctx.page_allocator, &ctx.page_metadata_map);
+            released += ctx
+                .exec_transaction
+                .retired_stack
+                .release_exec_backing(&mut ctx.page_allocator, &ctx.page_metadata_map);
+            released
+        }
     };
+    if retention == RetiredImageRetention::None
+        && ctx.user_child_process.builtin_grandchild_active()
+        && !ctx
+            .user_child_process
+            .mark_builtin_grandchild_subsequent_exec_committed()
+    {
+        exec_terminal("builtin grandchild subsequent exec ownership invariant failed\n");
+    }
+    if ctx.user_child_process.builtin_grandchild_active() {
+        observation::print_builtin_grandchild_exec_retention(
+            match retention {
+                RetiredImageRetention::None => "none",
+                RetiredImageRetention::OuterChild => "outer_child",
+                RetiredImageRetention::BuiltinGrandchild => "builtin_grandchild",
+            },
+            ctx.user_child_process
+                .builtin_grandchild_exec_commit_count(),
+            ctx.user_address_space.satp_token(),
+            ctx.user_child_process.builtin_grandchild_parent_exec_satp(),
+            ctx.user_child_process
+                .builtin_grandchild_parent_exec_snapshot_saved(),
+            ctx.user_child_process
+                .builtin_grandchild_parent_exec_snapshot_restored(),
+            released,
+        );
+    }
     ctx.exec_transaction.finish_commit(released);
     Ok(ExecSuccess {
         image_contains_stdin_fixture: super::elf_object::contains_bytes(
@@ -1026,6 +1372,53 @@ fn commit_prepared(
         ),
         retired_pages_released: released,
     })
+}
+
+#[cfg(any(app_smoke, app_user_boot))]
+fn classify_retired_image_retention(
+    ctx: &crate::context::Context,
+    owner: ExecOwner,
+) -> Result<RetiredImageRetention, ExecError> {
+    if owner != ExecOwner::Runtime {
+        return Ok(RetiredImageRetention::None);
+    }
+    if ctx.user_child_process.builtin_grandchild_active() {
+        if ctx
+            .user_child_process
+            .builtin_grandchild_first_exec_retention_required()
+        {
+            if ctx
+                .user_child_process
+                .can_retain_builtin_grandchild_exec_objects(
+                    &ctx.user_address_space,
+                    &ctx.user_stack,
+                )
+            {
+                return Ok(RetiredImageRetention::BuiltinGrandchild);
+            }
+            return Err(ExecError::InvalidState);
+        }
+        if ctx
+            .user_child_process
+            .builtin_grandchild_exec_parent_snapshot_live()
+        {
+            return Ok(RetiredImageRetention::None);
+        }
+        return Err(ExecError::InvalidState);
+    }
+    if ctx
+        .user_child_process
+        .runtime_exec_parent_snapshot_live(&ctx.user_address_space)
+    {
+        if ctx
+            .user_child_process
+            .can_retain_parent_exec_objects(&ctx.user_address_space, &ctx.user_stack)
+        {
+            return Ok(RetiredImageRetention::OuterChild);
+        }
+        return Err(ExecError::InvalidState);
+    }
+    Ok(RetiredImageRetention::None)
 }
 
 #[cfg(app_user_boot)]

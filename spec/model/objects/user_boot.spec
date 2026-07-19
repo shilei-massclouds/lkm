@@ -377,7 +377,11 @@ predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> boo
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_busybox_init_getty_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
-predicate syscall_execve_builtin_grandchild_enosys_bound<T, C>(table: T, child: C) -> bool;
+predicate syscall_execve_builtin_grandchild_runtime_exec_bound<T, C>(table: T, child: C) -> bool;
+predicate syscall_execve_retired_image_retention_classified<T, C, A, S>(table: T, child: C, space: A, stack: S) -> bool;
+predicate syscall_execve_builtin_grandchild_first_parent_image_retained<T, C, A, S>(table: T, child: C, space: A, stack: S) -> bool;
+predicate syscall_execve_builtin_grandchild_subsequent_image_released<T, C, A, S>(table: T, child: C, space: A, stack: S) -> bool;
+predicate syscall_execve_builtin_grandchild_failure_atomic<T, C, F>(table: T, child: C, files: F) -> bool;
 predicate syscall_execve_current_pid1_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
@@ -3000,9 +3004,17 @@ object SyscallTable: ResourceObject {
                  * unshare/refcounting, task comm, perf/audit/accounting or
                  * complete old-mm reclamation paths. A command-substitution
                  * grandchild created by an unfinished PID1-originated plain
-                 * fork is a separate builtin-only slice: it has no second
-                 * exec address-space/UserStack object and execve returns
-                 * ENOSYS with a stable builtin-grandchild boundary diagnostic.
+                 * fork is a separate builtin-only runtime-exec slice. Before
+                 * the point of no return retired ownership is classified as
+                 * None, OuterChild or BuiltinGrandchild, checking the builtin
+                 * source first. Its first exec transfers the retired script
+                 * address-space/UserStack to the inner continuation without
+                 * changing the outer PID1 snapshot; subsequent execs release
+                 * only the replaced grandchild executable. CLOEXEC mutates the
+                 * live grandchild fd view. Pre-commit failure changes neither
+                 * executable nor either snapshot layer, fd references or
+                 * pending identity. Retention/restore invariant failure is a
+                 * terminal stable diagnostic rather than a half-saved object.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -3031,7 +3043,11 @@ object SyscallTable: ResourceObject {
                     syscall_execve_observed_busybox_init_getty_args_bound(self);
                     syscall_execve_current_pid1_first_slice(self, UserInitProcess);
                     syscall_execve_child_continuation_first_slice(self, UserChildProcess);
-                    syscall_execve_builtin_grandchild_enosys_bound(self, UserChildProcess);
+                    syscall_execve_builtin_grandchild_runtime_exec_bound(self, UserChildProcess);
+                    syscall_execve_retired_image_retention_classified(self, UserChildProcess, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_first_parent_image_retained(self, UserChildProcess, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_subsequent_image_released(self, UserChildProcess, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_failure_atomic(self, UserChildProcess, FilesStruct);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
                     syscall_execve_context_staging_address_space_bound(self, UserAddressSpace);
@@ -3373,8 +3389,10 @@ object UserChildProcess: ResourceObject {
              * no second UserChildTaskRef is enqueued and no full task graph,
              * COW mm, job-control or generic wait/reap model is introduced.
              * The PID1-plain-fork source owns a distinct bounded child trap/
-             * stack/fd snapshot and later parent-continuation snapshot; the
-             * outer PID1 restore objects remain owned by the outer wait.
+             * stack/fd snapshot and later parent-continuation snapshot. If the
+             * grandchild execs, this inner record additionally owns the first
+             * retired script address-space/UserStack until grandchild exit;
+             * the outer PID1 restore objects remain owned by the outer wait.
              * A second pending child, deeper clone and snapshot capture failure
              * are rejected without consuming a pid or leaking snapshot refs.
              */
@@ -3405,8 +3423,10 @@ object UserChildProcess: ResourceObject {
 
         on Action::ObservedChildParentWaitResumed {
             /*
-             * Completion path for the observed grandchild: child exit restores
-             * the saved current-child parent stack, writable pages, fs/fd view
+             * Completion path for the observed grandchild: child exit first
+             * releases the current grandchild exec image, restores the saved
+             * script address-space/UserStack and switches SATP. It then restores
+             * the saved current-child parent stack bytes, writable pages, fs/fd view
              * (and the legacy vfork-shell address-space when applicable),
              * copies wait status when requested, returns the
              * grandchild pid from shell wait4, and restores the visible

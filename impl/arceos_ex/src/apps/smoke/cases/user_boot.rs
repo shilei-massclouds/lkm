@@ -1613,7 +1613,7 @@ impl BuiltinGrandchildScenario {
 
 impl SmokeScenario for BuiltinGrandchildScenario {
     fn name(&self) -> &'static str {
-        "user_boot.pid1_plain_fork_builtin_grandchild"
+        "user_boot.builtin_grandchild_exec"
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
@@ -2094,6 +2094,16 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             return;
         }
     };
+    let cloexec_fd = match context().files_struct.open_null_path(
+        b"/dev/null",
+        USER_TEST_O_RDWR | USER_TEST_O_LARGEFILE | USER_TEST_O_CLOEXEC,
+    ) {
+        Ok(fd) => fd,
+        Err(_) => {
+            assertions.assert("builtin grandchild cloexec fd", false);
+            return;
+        }
+    };
     let first_grandchild_pid = {
         let mut inner_clone = TrapFrame::zeroed();
         inner_clone.sepc = 0x9020;
@@ -2247,6 +2257,88 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 && !ctx.user_child_process.parent_wait_stack_snapshot_restored(),
         );
     }
+    let script_satp = context().user_address_space.satp_token();
+    let outer_parent_satp_owned = context()
+        .user_child_process
+        .parent_address_space_snapshot_saved();
+    assertions.assert(
+        "builtin grandchild exec precommit failure atomic",
+        crate::objects::exec_transaction::smoke_builtin_grandchild_precommit_failure_is_atomic(
+            context(),
+        ),
+    );
+    let main_len = USER_INIT_READ_LEN.load(Ordering::Acquire);
+    let main_buffer = unsafe { &*core::ptr::addr_of!(USER_INIT_READ_BUFFER) };
+    let interpreter_len = USER_INTERPRETER_READ_LEN.load(Ordering::Acquire);
+    let interpreter_buffer = unsafe { &*core::ptr::addr_of!(USER_INTERPRETER_READ_BUFFER) };
+    if main_len == 0 || main_len > main_buffer.len() || interpreter_len > interpreter_buffer.len() {
+        assertions.assert("builtin grandchild exec staged images", false);
+        return;
+    }
+    let interpreter_image =
+        (interpreter_len != 0).then_some(&interpreter_buffer[..interpreter_len]);
+    let first_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
+        context(),
+        &main_buffer[..main_len],
+        interpreter_image,
+    );
+    let first_exec_closed_child_fd = matches!(
+        context().files_struct.fcntl_getfd_fd(cloexec_fd),
+        Err(FileError::BadFd)
+    );
+    let retained_parent_satp = context()
+        .user_child_process
+        .builtin_grandchild_parent_exec_satp();
+    assertions.assert(
+        "builtin grandchild first exec owns inner parent only",
+        first_exec.is_some_and(|success| success.retired_pages_released == 0)
+            && first_exec_closed_child_fd
+            && retained_parent_satp == script_satp
+            && context().user_address_space.satp_token() != script_satp
+            && context()
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_saved()
+            && context()
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_ever_saved()
+            && !context()
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_restored()
+            && context()
+                .user_child_process
+                .builtin_grandchild_exec_commit_count()
+                == 1
+            && context()
+                .user_child_process
+                .parent_address_space_snapshot_saved()
+                == outer_parent_satp_owned,
+    );
+    let first_exec_satp = context().user_address_space.satp_token();
+    let second_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
+        context(),
+        &main_buffer[..main_len],
+        interpreter_image,
+    );
+    assertions.assert(
+        "builtin grandchild consecutive exec releases intermediate image",
+        second_exec.is_some_and(|success| success.retired_pages_released != 0)
+            && context().user_address_space.satp_token() != first_exec_satp
+            && context()
+                .user_child_process
+                .builtin_grandchild_parent_exec_satp()
+                == retained_parent_satp
+            && context()
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_saved()
+            && context()
+                .user_child_process
+                .builtin_grandchild_exec_commit_count()
+                == 2
+            && context()
+                .user_child_process
+                .parent_address_space_snapshot_saved()
+                == outer_parent_satp_owned,
+    );
     if context().files_struct.close_fd(pipe_pair[0]).is_err()
         || context().files_struct.write_fd(pipe_pair[1], b"/opt/ltp\n") != Ok(9)
         || context().files_struct.close_fd(pipe_pair[1]).is_err()
@@ -2262,6 +2354,10 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
+                (
+                    &mut ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                ),
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,
@@ -2278,6 +2374,16 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     };
     {
         let ctx = context();
+        let inner_exec_objects_restored = ctx.user_address_space.satp_token() == script_satp
+            && ctx
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_ever_saved()
+            && !ctx
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_saved()
+            && ctx
+                .user_child_process
+                .builtin_grandchild_parent_exec_snapshot_restored();
         let _ = ctx
             .user_child_process
             .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
@@ -2306,16 +2412,28 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             || !ctx
                 .user_child_process
                 .mark_builtin_grandchild_exited_to_parent_read()
+            || !inner_exec_objects_restored
         {
             assertions.assert("builtin grandchild restores pipe-read parent", false);
             return;
         }
     }
+    assertions.assert(
+        "builtin grandchild cloexec restores script fd view",
+        context().files_struct.fcntl_getfd_fd(cloexec_fd) == Ok(USER_TEST_FD_CLOEXEC),
+    );
     let mut pipe_data = [0u8; 9];
     let pipe_read = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
     let pipe_eof = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
     if context().files_struct.close_fd(pipe_pair[0]).is_err() {
         assertions.assert("builtin grandchild parent closes pipe reader", false);
+        return;
+    }
+    if context().files_struct.close_fd(cloexec_fd).is_err() {
+        assertions.assert(
+            "builtin grandchild parent closes restored cloexec fd",
+            false,
+        );
         return;
     }
     {
@@ -2348,6 +2466,16 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 && child.parent_wait_stack_snapshot_copied()
                 && child.parent_wait_writable_page_snapshot_saved(),
         );
+    }
+
+    if !exercise_builtin_grandchild_wait4_exec(
+        assertions,
+        outer_child_pid,
+        script_satp,
+        &main_buffer[..main_len],
+        interpreter_image,
+    ) {
+        return;
     }
 
     let invalid_next_pid = context().user_child_process.next_child_pid();
@@ -2478,6 +2606,155 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && outer_parent_frame.sepc == 0x9010
             && context().user_child_process.active_slot_reusable(),
     );
+}
+
+fn exercise_builtin_grandchild_wait4_exec(
+    assertions: &mut SmokeAssertions,
+    outer_child_pid: usize,
+    script_satp: usize,
+    main_image: &[u8],
+    interpreter_image: Option<&[u8]>,
+) -> bool {
+    let wait_grandchild_pid = {
+        let mut wait_clone = TrapFrame::zeroed();
+        wait_clone.sepc = 0x9038;
+        wait_clone.set_reg(2, USER_STACK_TOP - 0xc80);
+        let ctx = context();
+        let Some(pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &wait_clone,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+        ) else {
+            assertions.assert("builtin grandchild wait4 round clone", false);
+            return false;
+        };
+        if !ctx
+            .user_init_process
+            .observe_pending_plain_fork_child_process_group_visible(outer_child_pid, pid)
+        {
+            assertions.assert("builtin grandchild wait4 round identity", false);
+            return false;
+        }
+        pid
+    };
+    let wait_child_frame = {
+        let mut wait_frame = TrapFrame::zeroed();
+        wait_frame.sepc = 0x903c;
+        wait_frame.set_reg(2, USER_STACK_TOP - 0xcc0);
+        let ctx = context();
+        let Some((child_frame, parent_pid, child_pid)) = ctx
+            .user_child_process
+            .wait4_yield_to_observed_child_continuation(
+                &ctx.user_init_process,
+                &ctx.user_address_space,
+                &mut ctx.fs_struct,
+                &mut ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &wait_frame,
+                0,
+                USER_WAIT4_ALL_CHILDREN,
+                0,
+            )
+        else {
+            assertions.assert("builtin grandchild wait4 round handoff", false);
+            return false;
+        };
+        if !ctx
+            .user_init_process
+            .switch_observed_child_process_visible(parent_pid, child_pid)
+        {
+            assertions.assert("builtin grandchild wait4 round visible", false);
+            return false;
+        }
+        child_frame
+    };
+    let wait_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
+        context(),
+        main_image,
+        interpreter_image,
+    );
+    let wait_parent_frame = {
+        let ctx = context();
+        let Some((parent_frame, _, child_pid, parent_pid)) = ctx
+            .user_child_process
+            .child_exit_to_observed_child_parent_wait(
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
+                (
+                    &mut ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                ),
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                0,
+            )
+        else {
+            assertions.assert("builtin grandchild exec exits to wait4 parent", false);
+            return false;
+        };
+        if child_pid != wait_grandchild_pid || parent_pid != outer_child_pid {
+            assertions.assert("builtin grandchild wait4 exit identity", false);
+            return false;
+        }
+        parent_frame
+    };
+    {
+        let ctx = context();
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
+        if !ctx
+            .user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+            || !ctx
+                .user_child_process
+                .restore_parent_wait_writable_page_snapshot(
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+            || !ctx
+                .user_child_process
+                .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
+            || !ctx
+                .user_child_process
+                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            || !ctx
+                .user_init_process
+                .restore_observed_child_parent_process_visible(outer_child_pid, wait_grandchild_pid)
+            || !ctx
+                .user_child_process
+                .mark_observed_child_parent_wait_resumed(true, 0)
+            || !ctx
+                .user_child_process
+                .finish_observed_child_parent_restore()
+        {
+            assertions.assert("builtin grandchild exec restores wait4 parent", false);
+            return false;
+        }
+    }
+    assertions.assert(
+        "builtin grandchild exec wait4 resume preserves outer owner",
+        wait_child_frame.reg(10) == 0
+            && wait_exec.is_some_and(|success| success.retired_pages_released == 0)
+            && wait_parent_frame.sepc == 0x903c
+            && context().user_address_space.satp_token() == script_satp
+            && context()
+                .user_child_process
+                .pid1_plain_fork_child_continuation()
+            && context()
+                .user_child_process
+                .parent_address_space_snapshot_saved(),
+    );
+    true
 }
 
 fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
@@ -2925,6 +3202,10 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             .child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
+                (
+                    &mut ctx.exec_transaction.retired_address_space,
+                    &mut ctx.exec_transaction.retired_stack,
+                ),
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 0,

@@ -51,6 +51,9 @@ fn preset_start() -> EventResult {
     Ok(())
 }
 
+// Keep the initialization temporaries out of the non-returning phase chain. If this
+// helper is inlined into `preset`, its frame remains live through every later phase.
+#[inline(never)]
 fn preset_objects(ctx: &mut Context) -> EventResult {
     with_initcall_diagnostic(
         ctx.cpuset_smp_trimmed.setup(&ctx.runtime_core_boundary),

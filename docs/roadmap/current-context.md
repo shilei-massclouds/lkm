@@ -43,6 +43,21 @@
     `exec_boundary=builtin_grandchild_enosys`。证据保存在
     `20260719T010657.225045Z-ltp-10960` 与 `20260719T011021.698067Z-ltp-lo-11145`；严格 3/3 判据未改，
     完整 inner exec、uname ELF/VFS/personality 与通用 pipe/task graph 继续 deferred。
+15. inner-exec 对象 smoke 扩展曾稳定触发与目标逻辑无关的 kernel-init 栈溢出。HEAD 对照 5/5 通过，
+    当前构建 3/3 在同一 regular-file open 边界失败；QEMU exception trace 的首个异常是
+    `find_child` prologue 在栈底上方仅余 80 字节时发生 store page fault。逐 phase 帧反汇编将进入
+    payload 前的 960 字节净差精确闭合到 `initcall::preset`：其长期帧因 `preset_objects` 内联从
+    288 增至 1296 字节。把初始化临时对象隔离到会返回的 noinline helper 后，长期帧降至 320 字节，
+    native/linux-object object smoke 均恢复 55/55；没有扩大内核栈或修改 VFS 行为。
+16. builtin-grandchild inner exec 首片随后完成。第一次 exec 把 script parent 地址空间/`UserStack`
+    绑定到 transaction retired 槽，第二次 exec 保留原 parent 并释放被替换 executable，CLOEXEC 只
+    改 child fd view，grandchild exit 在 pipe-read 与 wait4 两条路径都先恢复原 SATP，script 最终退出
+    再恢复 PID1。正式 native 证据为 `20260719T135137.750631Z-ltp-22256`，linux-object 为
+    `20260719T135448.428722Z-ltp-lo-22518`：两侧 list 均各精确输出一次 `uname01/02/04`，旧
+    `builtin_grandchild_enosys` 为 0；每个 uname 都记录 first retention、第二次 exec 释放 874 页及
+    exit restore。新的首个稳定边界一致为 syscall 34 `mkdirat`，LTP 在 `tst_tmpdir.c:270` 的
+    `mkdtemp(/tmp/LTP_unaXXXXXX)` 得到 ENOSYS/TBROK。严格 3/3 判据未改，两份 result 均为红灯且记录
+    private disk removed、process group reaped；mkdirat 不在本片继续实现。
 
 ## 已完成里程碑
 
