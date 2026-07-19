@@ -15,7 +15,7 @@ pub const STDOUT_FD: usize = 1;
 pub const STDERR_FD: usize = 2;
 pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
-pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
+pub const REGULAR_FILE_BUFFER_SIZE: usize = 64 * 1024;
 pub const PIPE_BUFFER_SIZE: usize = 4096;
 pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 pub const TERMIOS_SIZE: usize = 36;
@@ -2910,6 +2910,15 @@ impl FilesStruct {
         }
     }
 
+    pub fn fd_is_pipe_read_wait_candidate(&self, fd: usize) -> bool {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return false;
+        }
+        self.fd_table
+            .lookup(fd)
+            .is_ok_and(|entry| entry.readable && entry.ofd == OpenFileDescriptionRef::PipeRead0)
+    }
+
     pub fn getdents64_fd(
         &mut self,
         fd: usize,
@@ -3126,6 +3135,24 @@ impl FilesStruct {
         self.parent_fd_snapshot_restored
             .fetch_add(1, Ordering::AcqRel);
         Ok(())
+    }
+
+    pub fn discard_parent_fd_snapshot(&self, snapshot: &FilesStructSnapshot) {
+        if snapshot.pipe_read_end_open
+            && self.parent_pipe_read_snapshot_live.load(Ordering::Acquire) != 0
+        {
+            self.parent_pipe_read_snapshot_live
+                .fetch_sub(1, Ordering::AcqRel);
+        }
+        if snapshot.pipe_write_end_open
+            && self.parent_pipe_write_snapshot_live.load(Ordering::Acquire) != 0
+        {
+            self.parent_pipe_write_snapshot_live
+                .fetch_sub(1, Ordering::AcqRel);
+        }
+        if self.parent_fd_snapshot_live.load(Ordering::Acquire) != 0 {
+            self.parent_fd_snapshot_live.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 
     pub fn fcntl_getfl_fd(&self, fd: usize) -> FileResult<u32> {

@@ -30,6 +30,19 @@
     syscall 59，并一致停在同一行的 `clone(220) stage=child_context_unsupported`：`flags=0x11`、
     `newsp=0`、`current_child_continuation=1`，guest status 2，list 尚未输出 uname 条目；本轮按范围
     保留该新边界，不继续修改 clone 或后续路径。
+13. 2026-07-19 对该 clone 边界补长期诊断后，根 `make test` 的 native/linux-object 正式 case 均记录
+    `current_child_source=pid1_plain_fork`；外层 PID1 wait frame/address/fd/stack/writable snapshot 五类
+    所有权均为 1，具体拒绝仅为旧实现的 `reject_outer_not_vfork=1`，总计 178/180、仍只两项 LTP
+    红灯。下一片据此只增加单 builtin-only grandchild 的独立内层 continuation snapshot；不覆盖外层
+    所有权、不允许 inner exec、不展开 COW/通用 task graph，并在 list 后首个新边界停止。
+14. 同日二层 plain-fork 首片完成：独立内层 trap/frame/fs/fd/stack/writable snapshot 不覆盖外层 PID1
+    所有权，空 pipe read 或 wait4 可有界 handoff 到 builtin-only grandchild，child exit 后只恢复 script
+    parent 并保留 completed wait identity，后续 script exit 再恢复 PID1。native 与 linux-object 正式
+    case 的 list 均各精确输出一次 `uname01/02/04` 后进入 `=== uname01: uname01`；首个新边界一致为
+    builtin grandchild 的 `execve("/bin/sh", ["/bin/sh", "-c", "uname01"], envp)`，诊断为
+    `exec_boundary=builtin_grandchild_enosys`。证据保存在
+    `20260719T010657.225045Z-ltp-10960` 与 `20260719T011021.698067Z-ltp-lo-11145`；严格 3/3 判据未改，
+    完整 inner exec、uname ELF/VFS/personality 与通用 pipe/task graph 继续 deferred。
 
 ## 已完成里程碑
 

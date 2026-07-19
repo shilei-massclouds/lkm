@@ -123,6 +123,8 @@ Rule IDs (MUST):
 - `arceos_ex_must_ltp_uname_be_dual_provider_scripted_acceptance`
 - `arceos_ex_must_ltp_uname_list_exact_entries_before_execution`
 - `arceos_ex_must_ltp_uname_require_three_passes`
+- `arceos_ex_must_ltp_list_command_substitution_preserve_outer_wait_snapshot`
+- `arceos_ex_must_ltp_list_grandchild_smoke_use_independent_scenario_stack`
 
 `ltp` and `ltp-lo` are scripted acceptance identities for the native and linux-object providers,
 respectively. The retired `ltp-shell-manual-native` and `ltp-shell-manual-linux-object` names have no
@@ -138,6 +140,20 @@ exact final line `Summary: TOTAL=3 PASS=3 FAIL=0 BROK=0 WARN=0 CONF=0`, guest st
 syscall, ENOSYS/Function-not-implemented, panic or LTP non-pass marker. This scope does not turn missing
 `/proc`/`sys`/device capabilities into success and does not claim support for any syscall outside the three
 selected uname entries.
+
+The list command's BusyBox command substitution is covered by the bounded two-level plain-fork slice: the
+PID1-originated script child may create one builtin-only grandchild for `cd`/`pwd`, pipe/stdio and exit. Tests
+must cover distinct outer/inner snapshot ownership, blocking parent-read handoff, child-write/parent-read pipe data, two-level wait/exit
+restore, sequential pid monotonicity, illegal clone arguments, a second pending child, deeper nesting,
+builtin-grandchild `cd`/absolute `pwd`, `/dev/null` stderr redirection and exec rejection, the canonical
+33,110-byte runtest list read, and atomic capture rollback. This list-stage support does not weaken the
+existing strict 3/3 acceptance configuration. If both providers list exactly `uname01`, `uname02`, and
+`uname04` and then fail at the first later execution boundary, the result/manifest/QEMU log are retained as
+the next evidence; that later boundary is not repaired in the same slice. The object-smoke two-level
+plain-fork coverage is a separate smoke scenario, so its bounded snapshot call chain does not inherit the
+large canonical-ELF scenario frame or cross the fixed 16 KiB kernel-init stack boundary. It runs before the
+separate legacy child-lifecycle scenario, whose observed-plain-fork coverage intentionally finishes with a
+second child pending from the current shell continuation rather than an idle reusable top-level slot.
 
 ## Composite and observation policy
 

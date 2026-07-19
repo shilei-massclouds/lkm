@@ -228,6 +228,8 @@ const ACCESS_X_OK: usize = 1;
 const ACCESS_W_OK: usize = 2;
 const ACCESS_R_OK: usize = 4;
 const O_ACCMODE: usize = 0o3;
+const O_CREAT: usize = 0o100;
+const O_TRUNC: usize = 0o1000;
 const O_NONBLOCK: usize = 0o4000;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
@@ -3678,7 +3680,8 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
-    let supported_flags = O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_ACCMODE;
+    let supported_flags =
+        O_NONBLOCK | O_LARGEFILE | O_DIRECTORY | O_CLOEXEC | O_CREAT | O_TRUNC | O_ACCMODE;
     if dirfd != AT_FDCWD || flags & !supported_flags != 0 {
         print_openat_reject_detail(dirfd, path_ptr, flags, supported_flags);
         complete_error_syscall(frame, EINVAL);
@@ -3698,7 +3701,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     } else if is_null_path(&path[..path_len]) {
         ctx.files_struct
             .open_null_path(&path[..path_len], flags as u32)
-    } else if flags & O_NONBLOCK != 0 {
+    } else if flags & (O_CREAT | O_TRUNC | O_NONBLOCK) != 0 {
         Err(FileError::InvalidArgument)
     } else if flags & O_ACCMODE != 0 {
         Err(FileError::PermissionDenied)
@@ -3818,7 +3821,13 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
     };
     let read = match first_read {
         Ok(read) => read,
-        Err(FileError::NotReady) if tty_input_wait_for_fd_read_ready(fd) => {
+        Err(FileError::NotReady) if pipe_read_yield_to_builtin_grandchild(frame, fd) => return,
+        Err(FileError::NotReady)
+            if crate::context::context_ref()
+                .files_struct
+                .fd_is_tty_read_wait_candidate(fd)
+                && tty_input_wait_for_fd_read_ready(fd) =>
+        {
             let ctx = crate::context::context();
             match ctx.files_struct.read_fd(fd, &mut buffer[..len]) {
                 Ok(read) => read,
@@ -3845,6 +3854,50 @@ fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
     crate::checkpoint::dispatch(Checkpoint::SyscallTableRead, crate::context::context_ref());
     print_read_trace_success(frame, fd, requested, len, read);
     complete_successful_syscall(frame, read);
+}
+
+fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bool {
+    if !crate::context::context_ref()
+        .files_struct
+        .fd_is_pipe_read_wait_candidate(fd)
+        || !crate::context::context_ref()
+            .user_child_process
+            .observed_plain_fork_child_pending_wait()
+        || !crate::context::context_ref()
+            .user_child_process
+            .builtin_grandchild_bound()
+    {
+        return false;
+    }
+
+    let (child_frame, parent_pid, child_pid) = {
+        let ctx = crate::context::context();
+        let Some(handoff) = ctx
+            .user_child_process
+            .pipe_read_yield_to_builtin_grandchild_continuation(
+                &ctx.user_init_process,
+                &ctx.user_address_space,
+                &mut ctx.fs_struct,
+                &mut ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                frame,
+            )
+        else {
+            return false;
+        };
+        handoff
+    };
+    if !crate::context::context()
+        .user_init_process
+        .switch_observed_child_process_visible(parent_pid, child_pid)
+    {
+        return false;
+    }
+
+    print_wait4_child_handoff_trace(&child_frame);
+    *frame = child_frame;
+    true
 }
 
 #[derive(Clone, Copy)]
@@ -4519,38 +4572,43 @@ fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
     let user_ptr = frame.reg(10);
     let size = frame.reg(11);
-    const ROOT_CWD: &[u8; 2] = b"/\0";
-
-    if size < ROOT_CWD.len() {
+    if size == 0 {
         complete_error_syscall(frame, ERANGE);
         return;
     }
 
-    {
-        let context = crate::context::context_ref();
-        if context.fs_struct.state() != State::Ready
-            || !context.fs_struct.root_pwd_same()
-            || !context.fs_struct.chroot_dot_done()
-        {
+    let mut cwd = [0u8; USER_COPY_MAX];
+    let cwd_len = match crate::context::context_ref()
+        .fs_struct
+        .current_working_directory(
+            &crate::context::context_ref().vfs_core,
+            &mut cwd[..core::cmp::min(size, USER_COPY_MAX)],
+        ) {
+        Ok(len) => len,
+        Err(super::vfs::VfsError::ShortBuffer) => {
+            complete_error_syscall(frame, ERANGE);
+            return;
+        }
+        Err(_) => {
             complete_unsupported_syscall(frame);
             return;
         }
-    }
-
-    if !copy_to_user(user_ptr, ROOT_CWD) {
+    };
+    if !copy_to_user(user_ptr, &cwd[..cwd_len]) {
         complete_error_syscall(frame, EFAULT);
         return;
     }
-    if !crate::context::context()
-        .user_init_process
-        .observe_getcwd_root_slice()
+    if crate::context::context_ref().fs_struct.root_pwd_same()
+        && !crate::context::context()
+            .user_init_process
+            .observe_getcwd_root_slice()
     {
         complete_unsupported_syscall(frame);
         return;
     }
 
     table.getcwd_observed.store(1, Ordering::Release);
-    complete_successful_syscall(frame, ROOT_CWD.len());
+    complete_successful_syscall(frame, cwd_len);
 }
 
 fn syscall_table_getpid(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -5828,6 +5886,11 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     .user_init_process
                     .observe_pending_plain_fork_child_process_group_visible(parent_pid, child_pid)
                 {
+                    if ctx.user_child_process.builtin_grandchild_bound() {
+                        let _ = ctx
+                            .user_child_process
+                            .rollback_builtin_grandchild_clone(&ctx.files_struct);
+                    }
                     complete_unsupported_clone_syscall(frame, "pending_child_identity");
                     return;
                 }
@@ -6118,6 +6181,14 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
 #[cfg(app_user_boot)]
 fn syscall_table_execve(table: &SyscallTable, frame: &mut TrapFrame) {
+    if crate::context::context_ref()
+        .user_child_process
+        .builtin_grandchild_active()
+    {
+        reset_execve_checkpoint_observation();
+        complete_unsupported_syscall(frame);
+        return;
+    }
     let mut filename = [0u8; USER_PATH_MAX];
     let Some(filename_len) = copy_execve_cstr(frame.reg(10), &mut filename) else {
         reset_execve_checkpoint_observation();
@@ -6650,6 +6721,41 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
 
     if crate::context::context_ref()
         .user_child_process
+        .builtin_grandchild_exit_waitable()
+    {
+        let (child_pid, wait_status) = {
+            let child = &crate::context::context_ref().user_child_process;
+            (
+                child.observed_plain_fork_child_pid(),
+                (child.child_exit_status() & 0xff) << 8,
+            )
+        };
+        let status_copied = stat_addr == 0 || write_user_u32(stat_addr, wait_status as u32);
+        table.wait4_observed.store(1, Ordering::Release);
+        crate::checkpoint::dispatch(Checkpoint::SyscallTableWait4, crate::context::context_ref());
+        if !status_copied {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+        {
+            let ctx = crate::context::context();
+            if !ctx
+                .user_child_process
+                .mark_builtin_grandchild_reaped(wait_status)
+                || !ctx
+                    .user_child_process
+                    .finish_observed_child_parent_restore()
+            {
+                complete_unsupported_syscall(frame);
+                return;
+            }
+        }
+        complete_successful_syscall(frame, child_pid);
+        return;
+    }
+
+    if crate::context::context_ref()
+        .user_child_process
         .observed_plain_fork_child_pending_wait()
     {
         if options & WAIT4_WNOHANG != 0 {
@@ -6669,6 +6775,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
                 .wait4_yield_to_observed_child_continuation(
                     &ctx.user_init_process,
                     &ctx.user_address_space,
+                    &mut ctx.fs_struct,
+                    &mut ctx.files_struct,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                     frame,
@@ -6804,7 +6912,7 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
     print_syscall_trace_exit(frame, status);
-    if complete_observed_child_exit_to_parent_wait(frame, status) {
+    if complete_observed_child_exit_to_parent_wait(table, frame, status) {
         return;
     }
     if complete_child_exit_to_vfork_parent_clone(frame, status) {
@@ -6820,8 +6928,15 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 #[cfg(app_user_boot)]
-fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> bool {
+fn complete_observed_child_exit_to_parent_wait(
+    table: &SyscallTable,
+    frame: &mut TrapFrame,
+    status: usize,
+) -> bool {
     let wait_status = ((status & 0xff) << 8) as u32;
+    let pipe_read_resume = crate::context::context_ref()
+        .user_child_process
+        .builtin_grandchild_parent_resume_is_pipe_read();
     let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
         let ctx = crate::context::context();
         let Some((parent_frame, status_ptr, child_pid, parent_pid)) = ctx
@@ -6882,6 +6997,15 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
         return false;
     }
 
+    let fs_snapshot_restored = {
+        let ctx = crate::context::context();
+        ctx.user_child_process
+            .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
+    };
+    if !fs_snapshot_restored {
+        return false;
+    }
+
     let fd_snapshot_restored = {
         let ctx = crate::context::context();
         ctx.user_child_process
@@ -6899,6 +7023,22 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
         {
             return false;
         }
+    }
+
+    if pipe_read_resume {
+        if !crate::context::context()
+            .user_child_process
+            .mark_builtin_grandchild_exited_to_parent_read()
+        {
+            return false;
+        }
+        *frame = parent_frame;
+        syscall_table_read(table, frame);
+        crate::checkpoint::dispatch(
+            Checkpoint::UserChildParentWaitResumed,
+            crate::context::context_ref(),
+        );
+        return true;
     }
 
     let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
@@ -6936,7 +7076,11 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
             child.parent_wait_writable_page_dirty_count(),
             child.parent_wait_writable_page_stack_dirty_count(),
             child.parent_wait_writable_page_non_stack_dirty_count(),
-            child.parent_wait_writable_page_snapshot_restored(),
+            if child.builtin_grandchild_bound() {
+                child.builtin_grandchild_parent_writable_snapshot_restored()
+            } else {
+                child.parent_wait_writable_page_snapshot_restored()
+            },
             child.parent_wait_first_non_stack_dirty_kind(),
             child.parent_wait_first_non_stack_dirty_mapping_index(),
             child.parent_wait_first_non_stack_dirty_page_index(),
@@ -6993,7 +7137,11 @@ fn complete_observed_child_exit_to_parent_wait(frame: &mut TrapFrame, status: us
 }
 
 #[cfg(not(app_user_boot))]
-fn complete_observed_child_exit_to_parent_wait(_frame: &mut TrapFrame, _status: usize) -> bool {
+fn complete_observed_child_exit_to_parent_wait(
+    _table: &SyscallTable,
+    _frame: &mut TrapFrame,
+    _status: usize,
+) -> bool {
     false
 }
 
@@ -8029,6 +8177,33 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     print_bool_digit(child.current_child_continuation());
     crate::arch::riscv64::sbi::putstr(" current_child_continuation=");
     print_bool_digit(child.current_child_continuation());
+    crate::arch::riscv64::sbi::putstr(" current_child_source=");
+    if child.current_child_continuation() && child.vfork_clone() {
+        crate::arch::riscv64::sbi::putstr("vfork");
+    } else if child.current_child_continuation() {
+        crate::arch::riscv64::sbi::putstr("pid1_plain_fork");
+    } else {
+        crate::arch::riscv64::sbi::putstr("none");
+    }
+    crate::arch::riscv64::sbi::putstr(" outer_pid1_wait_frame_owned=");
+    print_bool_digit(child.parent_wait_frame_saved());
+    crate::arch::riscv64::sbi::putstr(" outer_pid1_address_snapshot_owned=");
+    print_bool_digit(child.parent_address_space_snapshot_saved());
+    crate::arch::riscv64::sbi::putstr(" outer_pid1_fd_snapshot_owned=");
+    print_bool_digit(child.parent_fd_snapshot_saved());
+    crate::arch::riscv64::sbi::putstr(" outer_pid1_stack_snapshot_owned=");
+    print_bool_digit(child.parent_wait_stack_snapshot_copied());
+    crate::arch::riscv64::sbi::putstr(" outer_pid1_writable_snapshot_owned=");
+    print_bool_digit(child.parent_wait_writable_page_snapshot_saved());
+    crate::arch::riscv64::sbi::putstr(" reject_not_current_child=");
+    print_bool_digit(!child.current_child_continuation());
+    crate::arch::riscv64::sbi::putstr(" reject_outer_not_vfork=");
+    print_bool_digit(child.current_child_continuation() && !child.vfork_clone());
+    crate::arch::riscv64::sbi::putstr(" reject_pending_grandchild=");
+    print_bool_digit(
+        child.observed_plain_fork_child_active()
+            || (child.observed_plain_fork_clone() && !child.observed_plain_fork_parent_restored()),
+    );
     crate::arch::riscv64::sbi::putstr(" child_pid=");
     print_decimal(child.pid());
     crate::arch::riscv64::sbi::putstr(" child_parent_pid=");
@@ -8388,6 +8563,15 @@ fn print_execve_unsupported_detail(frame: &TrapFrame) {
     print_hex(envp_ptr);
     crate::arch::riscv64::sbi::putstr(" child_cont=");
     print_bool_digit(child_continuation);
+    crate::arch::riscv64::sbi::putstr(" exec_boundary=");
+    if crate::context::context_ref()
+        .user_child_process
+        .builtin_grandchild_active()
+    {
+        crate::arch::riscv64::sbi::putstr("builtin_grandchild_enosys");
+    } else {
+        crate::arch::riscv64::sbi::putstr("general");
+    }
     #[cfg(app_user_boot)]
     {
         let obs = execve_checkpoint_observation();

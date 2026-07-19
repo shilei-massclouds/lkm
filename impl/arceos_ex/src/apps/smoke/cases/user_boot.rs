@@ -136,6 +136,8 @@ fn stage_interpreter_image() -> bool {
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
     suite.scenario(&mut UserBootElfScenario::new());
+    suite.scenario(&mut BuiltinGrandchildScenario::new());
+    suite.scenario(&mut ChildLifecycleScenario::new());
     suite.result()
 }
 
@@ -1596,6 +1598,65 @@ impl SmokeScenario for UserBootElfScenario {
             "rt_sigtimedwait wake frame returns sigchld",
             resumed_signal == Some(USER_CLONE_SIGCHLD) && resumed_wait_frame.sepc == 0x2000,
         );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct BuiltinGrandchildScenario;
+
+impl BuiltinGrandchildScenario {
+    const fn new() -> Self {
+        Self
+    }
+}
+
+impl SmokeScenario for BuiltinGrandchildScenario {
+    fn name(&self) -> &'static str {
+        "user_boot.pid1_plain_fork_builtin_grandchild"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        let ctx = context();
+        assertions.assert(
+            "builtin grandchild independent scenario prerequisites",
+            ctx.user_init_process.state() == State::Online
+                && ctx.user_address_space.state() == State::Online
+                && ctx.user_trap_frame.state() == State::Ready
+                && ctx.fs_struct.state() == State::Ready
+                && ctx.files_struct.state() == State::Ready
+                && ctx.user_child_process.active_slot_reusable(),
+        );
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        exercise_pid1_plain_fork_builtin_grandchild(assertions);
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct ChildLifecycleScenario;
+
+impl ChildLifecycleScenario {
+    const fn new() -> Self {
+        Self
+    }
+}
+
+impl SmokeScenario for ChildLifecycleScenario {
+    fn name(&self) -> &'static str {
+        "user_boot.child_lifecycle"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        assertions.assert(
+            "child lifecycle starts from reusable slot",
+            context().user_child_process.active_slot_reusable(),
+        );
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
         exercise_completed_child_record_reuse(assertions);
         exercise_nested_vfork_child_slot(assertions);
         exercise_observed_child_plain_fork(assertions);
@@ -1933,6 +1994,490 @@ fn exercise_stack_argument_bounds(
                     + USER_PAGE_SIZE,
     );
     getty_stack.release_exec_backing(page_allocator, page_metadata_map);
+}
+
+fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions) {
+    let mut clone_frame = TrapFrame::zeroed();
+    clone_frame.sepc = 0x9000;
+    clone_frame.set_reg(2, USER_STACK_TOP - 0x900);
+    clone_frame.set_reg(10, USER_PLAIN_FORK_FLAGS);
+    clone_frame.set_reg(11, 0);
+    clone_frame.set_reg(17, 220);
+
+    if !copy_user_process_for_current_slot(false) {
+        assertions.assert("pid1 plain fork copy gate", false);
+        return;
+    }
+    let outer_child_pid = {
+        let ctx = context();
+        let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_parent(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &clone_frame,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+            true,
+            true,
+            true,
+            true,
+        ) else {
+            assertions.assert("pid1 plain fork child copy", false);
+            return;
+        };
+        let Some(runqueue_ref) = ctx
+            .scheduler
+            .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
+            .ok()
+        else {
+            assertions.assert("pid1 plain fork runqueue select", false);
+            return;
+        };
+        if ctx
+            .scheduler
+            .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+            .is_err()
+            || !ctx.user_child_process.mark_enqueued()
+            || !ctx
+                .user_init_process
+                .observe_child_process_group_visible(child_pid)
+        {
+            assertions.assert("pid1 plain fork enqueue and identity", false);
+            return;
+        }
+        child_pid
+    };
+
+    let outer_child_frame = {
+        let mut wait_frame = TrapFrame::zeroed();
+        wait_frame.sepc = 0x9010;
+        wait_frame.set_reg(2, USER_STACK_TOP - 0xa00);
+        let ctx = context();
+        let Some(child_frame) = ctx.user_child_process.wait4_yield_to_child_continuation(
+            &ctx.user_init_process,
+            &ctx.user_address_space,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            &wait_frame,
+            0,
+            USER_WAIT4_ALL_CHILDREN,
+            0,
+            0,
+        ) else {
+            assertions.assert("pid1 plain fork outer wait handoff", false);
+            return;
+        };
+        child_frame
+    };
+    {
+        let child = &context().user_child_process;
+        assertions.assert(
+            "pid1 plain fork owns outer continuation",
+            outer_child_frame.reg(10) == 0
+                && child.pid1_plain_fork_child_continuation()
+                && child.parent_wait_frame_saved()
+                && child.parent_address_space_snapshot_saved()
+                && child.parent_fd_snapshot_saved()
+                && child.parent_wait_stack_snapshot_copied()
+                && child.parent_wait_writable_page_snapshot_saved(),
+        );
+    }
+
+    let pipe_pair = match context().files_struct.pipe2_fd_pair(0) {
+        Ok(pair) => pair,
+        Err(_) => {
+            assertions.assert("builtin grandchild pipe pair", false);
+            return;
+        }
+    };
+    let first_grandchild_pid = {
+        let mut inner_clone = TrapFrame::zeroed();
+        inner_clone.sepc = 0x9020;
+        inner_clone.set_reg(2, USER_STACK_TOP - 0xb00);
+        let ctx = context();
+        let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &inner_clone,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+        ) else {
+            assertions.assert("builtin grandchild clone", false);
+            return;
+        };
+        if !ctx
+            .user_init_process
+            .observe_pending_plain_fork_child_process_group_visible(outer_child_pid, child_pid)
+        {
+            assertions.assert("builtin grandchild pending identity", false);
+            return;
+        }
+        let next_pid = ctx.user_child_process.next_child_pid();
+        let second_pending_rejected = ctx
+            .user_child_process
+            .copy_plain_fork_from_current_child(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &ctx.page_metadata_map,
+                &inner_clone,
+                USER_PLAIN_FORK_FLAGS,
+                0,
+            )
+            .is_none();
+        assertions.assert(
+            "builtin grandchild rejects second pending child",
+            second_pending_rejected && ctx.user_child_process.next_child_pid() == next_pid,
+        );
+        child_pid
+    };
+    if context().files_struct.close_fd(pipe_pair[1]).is_err() {
+        assertions.assert("builtin grandchild parent closes pipe writer", false);
+        return;
+    }
+
+    let mut parent_read_frame = TrapFrame::zeroed();
+    parent_read_frame.sepc = 0x9030;
+    parent_read_frame.set_reg(2, USER_STACK_TOP - 0xc00);
+    parent_read_frame.set_reg(10, pipe_pair[0]);
+    let free_before_capture_failure = context().page_allocator.buddy_total_free_pages();
+    context()
+        .user_child_process
+        .smoke_fail_next_builtin_grandchild_wait_capture();
+    let failed_handoff = {
+        let ctx = context();
+        ctx.user_child_process
+            .pipe_read_yield_to_builtin_grandchild_continuation(
+                &ctx.user_init_process,
+                &ctx.user_address_space,
+                &mut ctx.fs_struct,
+                &mut ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &parent_read_frame,
+            )
+            .is_none()
+    };
+    {
+        let ctx = context();
+        assertions.assert(
+            "builtin grandchild wait capture failure rolls back",
+            failed_handoff
+                && ctx.page_allocator.buddy_total_free_pages() == free_before_capture_failure
+                && ctx
+                    .user_child_process
+                    .observed_plain_fork_child_pending_wait()
+                && !ctx
+                    .user_child_process
+                    .builtin_grandchild_parent_wait_frame_saved()
+                && !ctx
+                    .user_child_process
+                    .builtin_grandchild_parent_fd_snapshot_saved()
+                && !ctx
+                    .user_child_process
+                    .builtin_grandchild_parent_writable_snapshot_saved(),
+        );
+    }
+
+    let (inner_child_frame, inner_parent_pid, inner_child_pid) = {
+        let ctx = context();
+        let Some(handoff) = ctx
+            .user_child_process
+            .pipe_read_yield_to_builtin_grandchild_continuation(
+                &ctx.user_init_process,
+                &ctx.user_address_space,
+                &mut ctx.fs_struct,
+                &mut ctx.files_struct,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &parent_read_frame,
+            )
+        else {
+            assertions.assert("builtin grandchild pipe-read handoff", false);
+            return;
+        };
+        handoff
+    };
+    if !context()
+        .user_init_process
+        .switch_observed_child_process_visible(inner_parent_pid, inner_child_pid)
+    {
+        assertions.assert("builtin grandchild visible handoff", false);
+        return;
+    }
+    {
+        let ctx = context();
+        let next_pid = ctx.user_child_process.next_child_pid();
+        let deeper_clone_rejected = ctx
+            .user_child_process
+            .copy_plain_fork_from_current_child(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &ctx.page_metadata_map,
+                &inner_child_frame,
+                USER_PLAIN_FORK_FLAGS,
+                0,
+            )
+            .is_none();
+        assertions.assert(
+            "builtin grandchild handoff and depth bound",
+            inner_child_frame.reg(10) == 0
+                && inner_parent_pid == outer_child_pid
+                && inner_child_pid == first_grandchild_pid
+                && ctx.user_child_process.builtin_grandchild_active()
+                && deeper_clone_rejected
+                && ctx.user_child_process.next_child_pid() == next_pid
+                && ctx.user_child_process.parent_wait_frame_saved()
+                && !ctx.user_child_process.parent_wait_stack_snapshot_restored(),
+        );
+    }
+    if context().files_struct.close_fd(pipe_pair[0]).is_err()
+        || context().files_struct.write_fd(pipe_pair[1], b"/opt/ltp\n") != Ok(9)
+        || context().files_struct.close_fd(pipe_pair[1]).is_err()
+    {
+        assertions.assert("builtin grandchild child pipe write", false);
+        return;
+    }
+
+    let restored_parent_frame = {
+        let ctx = context();
+        let Some((parent_frame, _, child_pid, parent_pid)) = ctx
+            .user_child_process
+            .child_exit_to_observed_child_parent_wait(
+                &mut ctx.user_address_space,
+                &mut ctx.user_stack,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                0,
+            )
+        else {
+            assertions.assert("builtin grandchild exits to pipe-read parent", false);
+            return;
+        };
+        if child_pid != first_grandchild_pid || parent_pid != outer_child_pid {
+            assertions.assert("builtin grandchild exit identity", false);
+            return;
+        }
+        parent_frame
+    };
+    {
+        let ctx = context();
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
+        if !ctx
+            .user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+            || !ctx
+                .user_child_process
+                .restore_parent_wait_writable_page_snapshot(
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+            || !ctx
+                .user_child_process
+                .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
+            || !ctx
+                .user_child_process
+                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            || !ctx
+                .user_init_process
+                .restore_observed_child_parent_process_visible(
+                    outer_child_pid,
+                    first_grandchild_pid,
+                )
+            || !ctx
+                .user_child_process
+                .mark_builtin_grandchild_exited_to_parent_read()
+        {
+            assertions.assert("builtin grandchild restores pipe-read parent", false);
+            return;
+        }
+    }
+    let mut pipe_data = [0u8; 9];
+    let pipe_read = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
+    let pipe_eof = context().files_struct.read_fd(pipe_pair[0], &mut pipe_data);
+    if context().files_struct.close_fd(pipe_pair[0]).is_err() {
+        assertions.assert("builtin grandchild parent closes pipe reader", false);
+        return;
+    }
+    {
+        let ctx = context();
+        let wait_status = (ctx.user_child_process.child_exit_status() & 0xff) << 8;
+        if !ctx
+            .user_child_process
+            .mark_builtin_grandchild_reaped(wait_status)
+            || !ctx
+                .user_child_process
+                .finish_observed_child_parent_restore()
+        {
+            assertions.assert("builtin grandchild completed wait reap", false);
+            return;
+        }
+    }
+    {
+        let child = &context().user_child_process;
+        assertions.assert(
+            "builtin grandchild pipe data and outer ownership",
+            restored_parent_frame.sepc == 0x9030
+                && pipe_read == Ok(9)
+                && pipe_data == *b"/opt/ltp\n"
+                && pipe_eof == Ok(0)
+                && !child.builtin_grandchild_bound()
+                && child.pid1_plain_fork_child_continuation()
+                && child.parent_wait_frame_saved()
+                && child.parent_address_space_snapshot_saved()
+                && child.parent_fd_snapshot_saved()
+                && child.parent_wait_stack_snapshot_copied()
+                && child.parent_wait_writable_page_snapshot_saved(),
+        );
+    }
+
+    let invalid_next_pid = context().user_child_process.next_child_pid();
+    let mut invalid_clone = TrapFrame::zeroed();
+    invalid_clone.sepc = 0x9040;
+    invalid_clone.set_reg(2, USER_STACK_TOP - 0xd00);
+    let invalid_flags_rejected = {
+        let ctx = context();
+        ctx.user_child_process
+            .copy_plain_fork_from_current_child(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &ctx.page_metadata_map,
+                &invalid_clone,
+                0,
+                0,
+            )
+            .is_none()
+    };
+    let invalid_newsp_rejected = {
+        let ctx = context();
+        ctx.user_child_process
+            .copy_plain_fork_from_current_child(
+                &ctx.user_init_process,
+                &ctx.user_clone_deferred_boundaries,
+                &ctx.user_address_space,
+                &ctx.user_trap_frame,
+                &ctx.fs_struct,
+                &ctx.files_struct,
+                &ctx.page_metadata_map,
+                &invalid_clone,
+                USER_PLAIN_FORK_FLAGS,
+                USER_STACK_TOP - 0xe00,
+            )
+            .is_none()
+    };
+    assertions.assert(
+        "builtin grandchild rejects invalid clone arguments",
+        invalid_flags_rejected
+            && invalid_newsp_rejected
+            && context().user_child_process.next_child_pid() == invalid_next_pid,
+    );
+
+    let rollback_pid = {
+        let ctx = context();
+        ctx.user_child_process.copy_plain_fork_from_current_child(
+            &ctx.user_init_process,
+            &ctx.user_clone_deferred_boundaries,
+            &ctx.user_address_space,
+            &ctx.user_trap_frame,
+            &ctx.fs_struct,
+            &ctx.files_struct,
+            &ctx.page_metadata_map,
+            &invalid_clone,
+            USER_PLAIN_FORK_FLAGS,
+            0,
+        )
+    };
+    let rollback_ok = context()
+        .user_child_process
+        .rollback_builtin_grandchild_clone(&context().files_struct);
+    assertions.assert(
+        "builtin grandchild clone rollback preserves pid and outer owner",
+        rollback_pid == Some(invalid_next_pid)
+            && rollback_ok
+            && context().user_child_process.next_child_pid() == invalid_next_pid
+            && !context().user_child_process.builtin_grandchild_bound()
+            && context()
+                .user_child_process
+                .pid1_plain_fork_child_continuation(),
+    );
+
+    let (outer_parent_frame, outer_exit_pid) = {
+        let ctx = context();
+        let Some((parent_frame, _, child_pid)) = ctx.user_child_process.child_exit_to_parent_wait(
+            &mut ctx.user_address_space,
+            &mut ctx.user_stack,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            0,
+        ) else {
+            assertions.assert("pid1 plain child exits to outer parent", false);
+            return;
+        };
+        (parent_frame, child_pid)
+    };
+    {
+        let ctx = context();
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map);
+        let _ = ctx
+            .user_child_process
+            .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map);
+        if !ctx
+            .user_child_process
+            .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
+            || !ctx
+                .user_child_process
+                .restore_parent_wait_writable_page_snapshot(
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+            || !ctx
+                .user_child_process
+                .restore_parent_fd_snapshot(&mut ctx.files_struct)
+            || !ctx.user_child_process.mark_parent_wait_resumed(true)
+            || ctx
+                .scheduler
+                .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+                .is_err()
+            || !ctx
+                .user_child_process
+                .mark_plain_fork_reaped_slot_reusable()
+        {
+            assertions.assert("pid1 plain child restores outer parent", false);
+            return;
+        }
+    }
+    assertions.assert(
+        "pid1 plain child two-level completion",
+        outer_exit_pid == outer_child_pid
+            && outer_parent_frame.sepc == 0x9010
+            && context().user_child_process.active_slot_reusable(),
+    );
 }
 
 fn exercise_completed_child_record_reuse(assertions: &mut SmokeAssertions) {
@@ -2335,6 +2880,8 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             .wait4_yield_to_observed_child_continuation(
                 &ctx.user_init_process,
                 &ctx.user_address_space,
+                &mut ctx.fs_struct,
+                &mut ctx.files_struct,
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
                 &wait_frame,

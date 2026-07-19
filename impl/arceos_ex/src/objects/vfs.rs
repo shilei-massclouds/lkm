@@ -159,6 +159,16 @@ pub struct FsStruct {
     chroot_dot_done: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct FsStructSnapshot {
+    root_dentry: Option<DentryRef>,
+    pwd_dentry: Option<DentryRef>,
+    initial_root_bound: bool,
+    root_pwd_same: bool,
+    pwd_chdir_to_real_root: bool,
+    chroot_dot_done: bool,
+}
+
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 impl FsStruct {
     pub const fn new() -> Self {
@@ -199,6 +209,58 @@ impl FsStruct {
 
     pub const fn chroot_dot_done(&self) -> bool {
         self.chroot_dot_done
+    }
+
+    pub fn current_working_directory(
+        &self,
+        vfs: &VfsCore,
+        output: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        if self.lifecycle.state() != State::Ready || output.is_empty() {
+            return Err(VfsError::ShortBuffer);
+        }
+        let pwd = self.pwd_dentry.ok_or(VfsError::InvalidRef)?;
+        let (path, path_len) = vfs.absolute_path_for_dentry(pwd)?;
+        let copied_len = path_len.checked_add(1).ok_or(VfsError::ShortBuffer)?;
+        if copied_len > output.len() {
+            return Err(VfsError::ShortBuffer);
+        }
+        output[..path_len].copy_from_slice(&path[..path_len]);
+        output[path_len] = 0;
+        Ok(copied_len)
+    }
+
+    pub fn save_snapshot(&self) -> Result<FsStructSnapshot, VfsError> {
+        if self.lifecycle.state() != State::Ready
+            || self.root_dentry.is_none()
+            || self.pwd_dentry.is_none()
+        {
+            return Err(VfsError::InvalidRef);
+        }
+        Ok(FsStructSnapshot {
+            root_dentry: self.root_dentry,
+            pwd_dentry: self.pwd_dentry,
+            initial_root_bound: self.initial_root_bound,
+            root_pwd_same: self.root_pwd_same,
+            pwd_chdir_to_real_root: self.pwd_chdir_to_real_root,
+            chroot_dot_done: self.chroot_dot_done,
+        })
+    }
+
+    pub fn restore_snapshot(&mut self, snapshot: &FsStructSnapshot) -> Result<(), VfsError> {
+        if self.lifecycle.state() != State::Ready
+            || snapshot.root_dentry.is_none()
+            || snapshot.pwd_dentry.is_none()
+        {
+            return Err(VfsError::InvalidRef);
+        }
+        self.root_dentry = snapshot.root_dentry;
+        self.pwd_dentry = snapshot.pwd_dentry;
+        self.initial_root_bound = snapshot.initial_root_bound;
+        self.root_pwd_same = snapshot.root_pwd_same;
+        self.pwd_chdir_to_real_root = snapshot.pwd_chdir_to_real_root;
+        self.chroot_dot_done = snapshot.chroot_dot_done;
+        Ok(())
     }
 
     pub fn setup(&mut self, vfs: &VfsCore) -> EventResult {

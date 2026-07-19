@@ -31,6 +31,32 @@ EFAULT/EMFILE 回滚和非法 flags 覆盖通过。正式 `make run TEST=ltp` �
 `current_child_continuation=1`，guest status 2。list 尚未输出任何 uname 条目，因此本轮不继续修改
 clone、ELF/VFS 或 personality；两份 result/manifest/qemu.log 保留该红灯和完整 cleanup 事实。
 
+2026-07-19 扩展 clone 失败诊断并由根 `make test` 在两种 provider 重现：两侧均记录
+`current_child_source=pid1_plain_fork`，外层 PID1 wait frame/address/fd/stack/writable snapshot 所有权
+全部为 1，且唯一命中的具体拒绝条件是 `reject_outer_not_vfork=1`，其余 178/180 门禁通过。当前片
+因此规格化为单 builtin-only grandchild：独立保存内层 child 与 script-parent continuation，保持外层
+PID1 snapshot 所有权，inner exec 明确 `ENOSYS`；list 后的新首个执行边界作为下一轮证据。
+实现首轮由 syscall trace 进一步观察到 BusyBox parent 在 wait4 前先关闭 pipe 写端并阻塞读取空 pipe；
+旧 TTY 自旋等待无法调度 child。当前规格因此把该首个阻塞 pipe read 与 wait4 都作为有界 handoff，
+child exit 恢复并重试 parent read，随后 wait4 只 reap 已完成 grandchild，不扩展通用 pipe 调度。
+
+该有界二层 plain-fork 片完成后，native 的
+`20260719T010657.225045Z-ltp-10960` 与 linux-object 的
+`20260719T011021.698067Z-ltp-lo-11145` 都在 list 阶段各精确输出一次
+`uname01\tuname01`、`uname02\tuname02`、`uname04\tuname04`，随后真实进入
+`=== uname01: uname01`。两侧第一个新执行边界相同：builtin grandchild 请求
+`execve("/bin/sh", ["/bin/sh", "-c", "uname01"], envp)`，实现以
+`exec_boundary=builtin_grandchild_enosys` 明确拒绝。严格 3/3 acceptance 保持不变，因此两份正式
+case 仍为预期红灯，但 list 首片已闭合，完整 inner exec 与后续 uname ELF/VFS/personality 只按该新
+边界进入下一片；两份 result 均记录 private disk removed 和 process group reaped。
+
+新增对象 smoke 初次复跑没有用探针猜修：QEMU GDB 在稳定停机后确认唯一运行 hart 递归 fault 于
+`formal_event_entry`，原始调用链为 canonical-ELF scenario -> builtin-grandchild helper ->
+`copy_plain_fork_from_parent` -> `save_parent_fd_snapshot`。目标函数入口真实
+`sp=0xffffffc8006082c0`，距 16 KiB kernel-init 栈底 `0xffffffc800608000` 仅 704 字节，而函数 prologue
+固定需要 944 字节。测试随后按 testing spec 拆成独立 builtin-grandchild scenario，并把原有
+child-lifecycle coverage 放到后置独立 scenario；native 与 linux-object 对象 smoke 均恢复为 55/55。
+
 后续高优先级计划按证据和前置依赖排序：
 
 1. **P0：继续保留 DF-0001/DF-0002 stress 回归并分析 source-scoped 失败事实**。短期不再添加缺陷专用 checkpoint；`Serial8250RxBatchLoopbackProbe.setup` 内部稳定 first-failed predicate 已补齐到 source claim/complete delta matched。若再次出现 DF-0002，优先沿既有 `failure_diagnostic` / `ready_check_failed` 中的 source-scoped PLIC/UART IRQ cycle 事实分析，不回退到全局 claim/complete equality。

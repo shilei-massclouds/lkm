@@ -59,6 +59,11 @@ Each slice follows the local Linux 6.12 RISC-V syscall ABI and preserves explici
 deferred boundaries. Unsupported socket success paths, complete credentials/namespaces/LSM, general
 task graphs, complete COW/mm, signals, networking and full fd sharing remain deferred.
 
+The single read-only regular-file staging buffer is bounded at 64 KiB. This covers the canonical
+`/opt/ltp/runtest/syscalls` input (33,110 bytes) used by list-before-run while retaining the existing one-open
+regular OFD model. Larger files still fail at the bounded staging boundary; page cache, streaming VFS reads,
+multiple simultaneous regular files and writable files remain deferred.
+
 Linux RISC-V syscall 59 is a bounded `pipe2` first slice routed through `FilesStruct`. It accepts only
 `flags == 0`; any nonzero flag, including `O_CLOEXEC` and `O_NONBLOCK`, returns `EINVAL`. Success atomically
 installs the lowest two free descriptors as a read-only end followed by a write-only end and copies the two
@@ -105,6 +110,39 @@ The PID 1 parent wait handoff accepts both observed BusyBox forms:
 `wait4(-1, status, 0, NULL)` from a non-interactive rc.local shell. Both use the same saved parent
 frame/address-space/stack ownership and child-exit restore path; options=0 is not rejected merely because it
 omits stop reporting.
+
+The LTP list-stage command substitution adds one narrower second-level shape. It accepts only
+`flags == SIGCHLD`, `newsp == 0`, and a current script continuation that came from an unfinished
+PID1-originated plain fork. The single internal `UserChild` slot may own at most one pending builtin-only
+grandchild. Clone returns a monotonically allocated pid to the script and records a distinct child trap/
+stack/fd view; the grandchild receives zero from clone only when the script reaches wait4. A second pending
+child, a clone from the builtin grandchild, or any deeper/concurrent shape returns the existing unsupported
+boundary and does not consume a pid.
+
+That second-level scheduling boundary owns a separate bounded parent-continuation snapshot: script parent trap frame and
+status pointer, fs/fd view, stack bytes, and writable user pages. It does not copy another exec address-space
+or `UserStack` object. The boundary is either the script's wait4 or, as observed in BusyBox command
+substitution, its first blocking read from the empty pipe after closing the parent write end. Handoff restores
+the clone-time child stack/fd view; close/dup/write then operate on
+that live child fd view while pipe bytes remain shared. Grandchild exit restores only the script parent
+continuation and fs/fd view. A wait4-origin handoff completes that wait directly; a pipe-read-origin handoff
+retries the restored read, keeps the exited child waitable, and lets the later wait4 copy status and reap it.
+The outer PID1 wait frame, address-space snapshot, fd snapshot, stack snapshot,
+and writable-page snapshot keep their original ownership until the script itself exits. Allocation, copy,
+or fd-snapshot failure releases every second-level page/reference and leaves no pending identity or consumed
+pid. Runtime `execve` from this builtin-only grandchild returns `ENOSYS` with an explicit diagnostic; the
+existing vfork-origin observed grandchild exec slice is unchanged. General COW/task graphs, multiple pending
+children, deeper nesting, and inner exec remain deferred.
+
+The same builtin-only slice permits its observed stderr redirection
+`openat(AT_FDCWD, "/dev/null", O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE, 0666)`. `O_CREAT`/`O_TRUNC` are ignored
+only for the built-in null device, whose writes are discarded; they remain invalid for TTY, regular-file and
+directory paths, so this does not add a general writable VFS/open-create slice.
+
+Builtin `pwd` uses the inherited/restorable `FsStruct.pwd` dentry and the existing bounded dentry parent
+chain to serialize a NUL-terminated absolute path such as `/opt/ltp`. The syscall still returns the byte
+count including NUL, `ERANGE` for a short buffer and `EFAULT` for failed copyout. Mount crossings,
+disconnected dentries, concurrent cwd updates and namespace-aware `d_path()` remain deferred.
 
 The canonical rc-local shutdown path supports the observed BusyBox `sync(2)` then `reboot(2)` sequence.
 `sync` is a successful barrier for the current in-memory rootfs. `reboot` reaches SBI shutdown only for

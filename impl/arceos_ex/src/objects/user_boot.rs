@@ -35,7 +35,7 @@ use super::{
     static_page_tables,
     swapper_vm::SwapperVm,
     task::TaskEntry,
-    vfs::FsStruct,
+    vfs::{FsStruct, FsStructSnapshot},
 };
 
 pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
@@ -2624,6 +2624,110 @@ pub struct UserInitProcess {
     getcwd_observed: bool,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum BuiltinGrandchildParentResume {
+    None,
+    Wait4,
+    PipeRead,
+}
+
+struct BuiltinGrandchildContinuation {
+    bound: bool,
+    child_trap_frame: Option<TrapFrame>,
+    child_stack_snapshot: [u8; USER_STACK_SIZE],
+    child_stack_snapshot_len: usize,
+    child_stack_snapshot_copied: bool,
+    child_stack_snapshot_restored: bool,
+    child_fd_snapshot: FilesStructSnapshot,
+    child_fd_snapshot_saved: bool,
+    child_fd_snapshot_restored: bool,
+    parent_wait_frame: Option<TrapFrame>,
+    parent_wait_status_ptr: usize,
+    parent_resume: BuiltinGrandchildParentResume,
+    exited_waitable: bool,
+    parent_fs_snapshot: Option<FsStructSnapshot>,
+    parent_fs_snapshot_restored: bool,
+    parent_fd_snapshot: FilesStructSnapshot,
+    parent_fd_snapshot_saved: bool,
+    parent_fd_snapshot_restored: bool,
+    parent_stack_snapshot: [u8; USER_STACK_SIZE],
+    parent_stack_snapshot_len: usize,
+    parent_stack_snapshot_copied: bool,
+    parent_stack_snapshot_restored: bool,
+    parent_writable_page_snapshot_pages: [Option<PageRef>; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    parent_writable_page_checksums: [usize; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+    parent_writable_page_count: usize,
+    parent_writable_page_snapshot_saved: bool,
+    parent_writable_page_snapshot_truncated: bool,
+    parent_writable_page_snapshot_restored: bool,
+}
+
+impl BuiltinGrandchildContinuation {
+    const fn new() -> Self {
+        Self {
+            bound: false,
+            child_trap_frame: None,
+            child_stack_snapshot: [0; USER_STACK_SIZE],
+            child_stack_snapshot_len: 0,
+            child_stack_snapshot_copied: false,
+            child_stack_snapshot_restored: false,
+            child_fd_snapshot: FilesStructSnapshot::empty(),
+            child_fd_snapshot_saved: false,
+            child_fd_snapshot_restored: false,
+            parent_wait_frame: None,
+            parent_wait_status_ptr: 0,
+            parent_resume: BuiltinGrandchildParentResume::None,
+            exited_waitable: false,
+            parent_fs_snapshot: None,
+            parent_fs_snapshot_restored: false,
+            parent_fd_snapshot: FilesStructSnapshot::empty(),
+            parent_fd_snapshot_saved: false,
+            parent_fd_snapshot_restored: false,
+            parent_stack_snapshot: [0; USER_STACK_SIZE],
+            parent_stack_snapshot_len: 0,
+            parent_stack_snapshot_copied: false,
+            parent_stack_snapshot_restored: false,
+            parent_writable_page_snapshot_pages: [None; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+            parent_writable_page_checksums: [0; USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX],
+            parent_writable_page_count: 0,
+            parent_writable_page_snapshot_saved: false,
+            parent_writable_page_snapshot_truncated: false,
+            parent_writable_page_snapshot_restored: false,
+        }
+    }
+
+    fn reset_empty(&mut self) {
+        self.bound = false;
+        self.child_trap_frame = None;
+        self.child_stack_snapshot.fill(0);
+        self.child_stack_snapshot_len = 0;
+        self.child_stack_snapshot_copied = false;
+        self.child_stack_snapshot_restored = false;
+        self.child_fd_snapshot = FilesStructSnapshot::empty();
+        self.child_fd_snapshot_saved = false;
+        self.child_fd_snapshot_restored = false;
+        self.parent_wait_frame = None;
+        self.parent_wait_status_ptr = 0;
+        self.parent_resume = BuiltinGrandchildParentResume::None;
+        self.exited_waitable = false;
+        self.parent_fs_snapshot = None;
+        self.parent_fs_snapshot_restored = false;
+        self.parent_fd_snapshot = FilesStructSnapshot::empty();
+        self.parent_fd_snapshot_saved = false;
+        self.parent_fd_snapshot_restored = false;
+        self.parent_stack_snapshot.fill(0);
+        self.parent_stack_snapshot_len = 0;
+        self.parent_stack_snapshot_copied = false;
+        self.parent_stack_snapshot_restored = false;
+        self.parent_writable_page_snapshot_pages.fill(None);
+        self.parent_writable_page_checksums.fill(0);
+        self.parent_writable_page_count = 0;
+        self.parent_writable_page_snapshot_saved = false;
+        self.parent_writable_page_snapshot_truncated = false;
+        self.parent_writable_page_snapshot_restored = false;
+    }
+}
+
 pub struct UserChildProcess {
     lifecycle: Lifecycle,
     prepared: bool,
@@ -2717,6 +2821,9 @@ pub struct UserChildProcess {
     observed_plain_fork_child_pid: usize,
     observed_plain_fork_child_active: bool,
     observed_plain_fork_parent_restored: bool,
+    builtin_grandchild: BuiltinGrandchildContinuation,
+    #[cfg(app_smoke)]
+    fail_next_builtin_grandchild_wait_capture: bool,
     next_child_pid: usize,
     completed_child_records: [UserCompletedChildRecord; USER_COMPLETED_CHILD_RECORD_CAPACITY],
     completed_child_record_count: usize,
@@ -2833,6 +2940,9 @@ impl UserChildProcess {
             observed_plain_fork_child_pid: 0,
             observed_plain_fork_child_active: false,
             observed_plain_fork_parent_restored: false,
+            builtin_grandchild: BuiltinGrandchildContinuation::new(),
+            #[cfg(app_smoke)]
+            fail_next_builtin_grandchild_wait_capture: false,
             next_child_pid: USER_CHILD_PID,
             completed_child_records: [UserCompletedChildRecord::empty();
                 USER_COMPLETED_CHILD_RECORD_CAPACITY],
@@ -2929,7 +3039,13 @@ impl UserChildProcess {
     }
 
     pub fn child_trap_frame_reg(&self, index: usize) -> Option<usize> {
-        self.child_trap_frame.map(|frame| frame.reg(index))
+        if self.builtin_grandchild.bound {
+            self.builtin_grandchild
+                .child_trap_frame
+                .map(|frame| frame.reg(index))
+        } else {
+            self.child_trap_frame.map(|frame| frame.reg(index))
+        }
     }
 
     pub fn child_trap_frame_sepc(&self) -> Option<usize> {
@@ -2982,6 +3098,77 @@ impl UserChildProcess {
 
     pub const fn observed_plain_fork_parent_restored(&self) -> bool {
         self.observed_plain_fork_parent_restored
+    }
+
+    pub const fn builtin_grandchild_bound(&self) -> bool {
+        self.builtin_grandchild.bound
+    }
+
+    pub const fn builtin_grandchild_active(&self) -> bool {
+        self.builtin_grandchild.bound && self.observed_plain_fork_child_active
+    }
+
+    pub const fn builtin_grandchild_parent_resume_is_pipe_read(&self) -> bool {
+        matches!(
+            self.builtin_grandchild.parent_resume,
+            BuiltinGrandchildParentResume::PipeRead
+        )
+    }
+
+    pub const fn builtin_grandchild_exit_waitable(&self) -> bool {
+        self.builtin_grandchild.bound
+            && self.builtin_grandchild.exited_waitable
+            && self.observed_plain_fork_clone
+            && !self.observed_plain_fork_child_active
+            && self.observed_plain_fork_parent_restored
+            && self.child_exit_status_observed
+    }
+
+    pub const fn builtin_grandchild_parent_wait_frame_saved(&self) -> bool {
+        self.builtin_grandchild.parent_wait_frame.is_some()
+    }
+
+    pub const fn builtin_grandchild_parent_fd_snapshot_saved(&self) -> bool {
+        self.builtin_grandchild.parent_fd_snapshot_saved
+    }
+
+    pub const fn builtin_grandchild_parent_fd_snapshot_restored(&self) -> bool {
+        self.builtin_grandchild.parent_fd_snapshot_restored
+    }
+
+    pub const fn builtin_grandchild_parent_stack_snapshot_copied(&self) -> bool {
+        self.builtin_grandchild.parent_stack_snapshot_copied
+            && self.builtin_grandchild.parent_stack_snapshot_len != 0
+    }
+
+    pub const fn builtin_grandchild_parent_writable_snapshot_saved(&self) -> bool {
+        self.builtin_grandchild.parent_writable_page_snapshot_saved
+    }
+
+    pub const fn builtin_grandchild_parent_writable_snapshot_restored(&self) -> bool {
+        self.builtin_grandchild
+            .parent_writable_page_snapshot_restored
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_fail_next_builtin_grandchild_wait_capture(&mut self) {
+        self.fail_next_builtin_grandchild_wait_capture = true;
+    }
+
+    pub fn pid1_plain_fork_child_continuation(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.current_child_continuation()
+            && !self.vfork_clone()
+            && self.pid != 0
+            && self.parent_pid == super::rest_init::KERNEL_INIT_PID
+            && self.parent_wait_frame.is_some()
+            && self.parent_address_space_snapshot_saved
+            && self.parent_fd_snapshot_saved
+            && !self.parent_fd_snapshot_restored
+            && self.parent_wait_stack_snapshot_copied
+            && !self.parent_wait_stack_snapshot_restored
+            && self.parent_wait_writable_page_snapshot_saved
+            && !self.parent_wait_writable_page_snapshot_restored
     }
 
     pub fn observed_plain_fork_child_pending_wait(&self) -> bool {
@@ -3844,9 +4031,10 @@ impl UserChildProcess {
         clone_flags: usize,
         newsp: usize,
     ) -> Option<usize> {
+        let builtin_grandchild_source = self.pid1_plain_fork_child_continuation();
         if self.lifecycle.state() != State::Ready
             || !self.current_child_continuation()
-            || !self.vfork_clone()
+            || (!self.vfork_clone() && !builtin_grandchild_source)
             || self.observed_plain_fork_child_active
             || (self.observed_plain_fork_clone && !self.observed_plain_fork_parent_restored)
             || self.pid == 0
@@ -3878,43 +4066,60 @@ impl UserChildProcess {
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
         child_frame.sepc = child_frame.sepc.wrapping_add(4);
-        let stack_snapshot_len = copy_user_stack_snapshot(
-            address_space,
-            page_metadata_map,
-            &mut self.user_stack_snapshot,
-        )?;
-        let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
+        if builtin_grandchild_source {
+            self.builtin_grandchild.reset_empty();
+            let stack_snapshot_len = copy_user_stack_snapshot(
+                address_space,
+                page_metadata_map,
+                &mut self.builtin_grandchild.child_stack_snapshot,
+            )?;
+            let child_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
+            self.builtin_grandchild.bound = true;
+            self.builtin_grandchild.child_trap_frame = Some(child_frame);
+            self.builtin_grandchild.child_stack_snapshot_len = stack_snapshot_len;
+            self.builtin_grandchild.child_stack_snapshot_copied = true;
+            self.builtin_grandchild.child_stack_snapshot_restored = false;
+            self.builtin_grandchild.child_fd_snapshot = child_fd_snapshot;
+            self.builtin_grandchild.child_fd_snapshot_saved = true;
+            self.builtin_grandchild.child_fd_snapshot_restored = false;
+        } else {
+            let stack_snapshot_len = copy_user_stack_snapshot(
+                address_space,
+                page_metadata_map,
+                &mut self.user_stack_snapshot,
+            )?;
+            let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
 
-        self.exit_signal = boundaries.exit_signal(clone_flags);
-        self.parent_fd_snapshot = parent_fd_snapshot;
-        self.parent_fd_snapshot_saved = true;
-        self.parent_fd_snapshot_restored = false;
-        self.user_address_space_snapshot = true;
-        self.user_stack_snapshot_len = stack_snapshot_len;
-        self.user_stack_snapshot_copied = true;
-        self.user_stack_snapshot_restored = false;
-        self.trap_frame_copied = true;
-        self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
-        self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
-        self.child_trap_frame = Some(child_frame);
-        self.parent_wait_frame = None;
-        self.parent_wait_status_ptr = 0;
-        self.parent_wait_stack_snapshot_len = 0;
-        self.parent_wait_stack_snapshot_copied = false;
-        self.parent_wait_stack_snapshot_restored = false;
-        self.parent_wait_stack_window_start = 0;
-        self.parent_wait_stack_window_len = 0;
-        self.parent_wait_stack_window_saved = false;
-        self.parent_wait_stack_window_compared = false;
-        self.parent_wait_stack_window_diff_count = 0;
-        self.parent_wait_stack_window_first_diff_addr = 0;
-        self.parent_wait_stack_window_before_byte = 0;
-        self.parent_wait_stack_window_after_byte = 0;
+            self.exit_signal = boundaries.exit_signal(clone_flags);
+            self.parent_fd_snapshot = parent_fd_snapshot;
+            self.parent_fd_snapshot_saved = true;
+            self.parent_fd_snapshot_restored = false;
+            self.user_address_space_snapshot = true;
+            self.user_stack_snapshot_len = stack_snapshot_len;
+            self.user_stack_snapshot_copied = true;
+            self.user_stack_snapshot_restored = false;
+            self.trap_frame_copied = true;
+            self.trap_frame_child_return_zero = child_frame.reg(10) == 0;
+            self.tls_inherited = boundaries.tls_inherited_without_clone_settls(clone_flags);
+            self.child_trap_frame = Some(child_frame);
+            self.parent_wait_frame = None;
+            self.parent_wait_status_ptr = 0;
+            self.parent_wait_stack_snapshot_len = 0;
+            self.parent_wait_stack_snapshot_copied = false;
+            self.parent_wait_stack_snapshot_restored = false;
+            self.parent_wait_stack_window_start = 0;
+            self.parent_wait_stack_window_len = 0;
+            self.parent_wait_stack_window_saved = false;
+            self.parent_wait_stack_window_compared = false;
+            self.parent_wait_stack_window_diff_count = 0;
+            self.parent_wait_stack_window_first_diff_addr = 0;
+            self.parent_wait_stack_window_before_byte = 0;
+            self.parent_wait_stack_window_after_byte = 0;
+            self.parent_clone_return = child_pid;
+        }
         self.child_exit_status = 0;
         self.child_exit_status_observed = false;
         self.wait4_status_copied = false;
-        self.wait4_parent_wait_observed = false;
-        self.parent_clone_return = child_pid;
         self.observed_plain_fork_clone = true;
         self.observed_plain_fork_parent_pid = parent_pid;
         self.observed_plain_fork_parent_parent_pid = parent_parent_pid;
@@ -3924,6 +4129,30 @@ impl UserChildProcess {
         self.observed_plain_fork_parent_restored = false;
         self.next_child_pid = child_pid.saturating_add(1);
         Some(child_pid)
+    }
+
+    pub fn rollback_builtin_grandchild_clone(&mut self, files_struct: &FilesStruct) -> bool {
+        if !self.builtin_grandchild.bound
+            || !self.observed_plain_fork_clone
+            || self.observed_plain_fork_child_active
+            || self.observed_plain_fork_parent_restored
+            || !self.builtin_grandchild.child_fd_snapshot_saved
+            || self.builtin_grandchild.child_fd_snapshot_restored
+        {
+            return false;
+        }
+
+        files_struct.discard_parent_fd_snapshot(&self.builtin_grandchild.child_fd_snapshot);
+        let child_pid = self.observed_plain_fork_child_pid;
+        if self.next_child_pid == child_pid.saturating_add(1) {
+            self.next_child_pid = child_pid;
+        }
+        self.builtin_grandchild.reset_empty();
+        self.clear_observed_plain_fork_state();
+        self.child_exit_status = 0;
+        self.child_exit_status_observed = false;
+        self.wait4_status_copied = false;
+        true
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
@@ -4052,6 +4281,8 @@ impl UserChildProcess {
         &mut self,
         parent: &UserInitProcess,
         address_space: &UserAddressSpace,
+        fs_struct: &mut FsStruct,
+        files_struct: &mut FilesStruct,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         parent_wait_frame: &TrapFrame,
@@ -4059,6 +4290,20 @@ impl UserChildProcess {
         upid: usize,
         rusage: usize,
     ) -> Option<(TrapFrame, usize, usize)> {
+        if self.builtin_grandchild.bound {
+            return self.wait4_yield_to_builtin_grandchild_continuation(
+                parent,
+                address_space,
+                fs_struct,
+                files_struct,
+                page_allocator,
+                page_metadata_map,
+                parent_wait_frame,
+                stat_addr,
+                upid,
+                rusage,
+            );
+        }
         if !self.observed_plain_fork_child_pending_wait()
             || parent.state() != State::Online
             || address_space.state() != State::Online
@@ -4156,6 +4401,190 @@ impl UserChildProcess {
         Some((child_frame, parent_pid, child_pid))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn pipe_read_yield_to_builtin_grandchild_continuation(
+        &mut self,
+        parent: &UserInitProcess,
+        address_space: &UserAddressSpace,
+        fs_struct: &mut FsStruct,
+        files_struct: &mut FilesStruct,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        parent_read_frame: &TrapFrame,
+    ) -> Option<(TrapFrame, usize, usize)> {
+        let handoff = self.wait4_yield_to_builtin_grandchild_continuation(
+            parent,
+            address_space,
+            fs_struct,
+            files_struct,
+            page_allocator,
+            page_metadata_map,
+            parent_read_frame,
+            0,
+            USER_WAIT4_ALL_CHILDREN,
+            0,
+        )?;
+        self.builtin_grandchild.parent_resume = BuiltinGrandchildParentResume::PipeRead;
+        Some(handoff)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn wait4_yield_to_builtin_grandchild_continuation(
+        &mut self,
+        parent: &UserInitProcess,
+        address_space: &UserAddressSpace,
+        fs_struct: &mut FsStruct,
+        files_struct: &mut FilesStruct,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        parent_wait_frame: &TrapFrame,
+        stat_addr: usize,
+        upid: usize,
+        rusage: usize,
+    ) -> Option<(TrapFrame, usize, usize)> {
+        if !self.observed_plain_fork_child_pending_wait()
+            || !self.pid1_plain_fork_child_continuation()
+            || parent.state() != State::Online
+            || address_space.state() != State::Online
+            || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
+            || !parent.pid1_preserved()
+            || upid != USER_WAIT4_ALL_CHILDREN
+            || rusage != 0
+            || !self.builtin_grandchild.child_stack_snapshot_copied
+            || self.builtin_grandchild.child_stack_snapshot_len == 0
+            || !self.builtin_grandchild.child_fd_snapshot_saved
+            || self.builtin_grandchild.child_fd_snapshot_restored
+            || self.builtin_grandchild.child_trap_frame.is_none()
+            || self.builtin_grandchild.parent_wait_frame.is_some()
+            || self.builtin_grandchild.parent_fd_snapshot_saved
+            || self.builtin_grandchild.parent_writable_page_snapshot_saved
+        {
+            return None;
+        }
+
+        let parent_stack_snapshot_len = copy_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &mut self.builtin_grandchild.parent_stack_snapshot,
+        )?;
+        let (writable_page_count, writable_page_truncated) = capture_writable_page_snapshot(
+            address_space,
+            page_allocator,
+            page_metadata_map,
+            &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+            &mut self.builtin_grandchild.parent_writable_page_checksums,
+        )?;
+        #[cfg(app_smoke)]
+        let inject_capture_failure =
+            core::mem::take(&mut self.fail_next_builtin_grandchild_wait_capture);
+        #[cfg(not(app_smoke))]
+        let inject_capture_failure = false;
+        if inject_capture_failure || writable_page_truncated || writable_page_count == 0 {
+            release_writable_page_snapshot_pages(
+                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            return None;
+        }
+
+        let parent_fs_snapshot = match fs_struct.save_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                release_writable_page_snapshot_pages(
+                    &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                    writable_page_count,
+                    page_allocator,
+                    page_metadata_map,
+                );
+                return None;
+            }
+        };
+        let parent_fd_snapshot = match files_struct.save_parent_fd_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                release_writable_page_snapshot_pages(
+                    &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                    writable_page_count,
+                    page_allocator,
+                    page_metadata_map,
+                );
+                return None;
+            }
+        };
+        if !restore_user_stack_snapshot(
+            address_space,
+            page_metadata_map,
+            &self.builtin_grandchild.child_stack_snapshot,
+            self.builtin_grandchild.child_stack_snapshot_len,
+        ) {
+            let _ = restore_user_stack_snapshot(
+                address_space,
+                page_metadata_map,
+                &self.builtin_grandchild.parent_stack_snapshot,
+                parent_stack_snapshot_len,
+            );
+            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+            release_writable_page_snapshot_pages(
+                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            return None;
+        }
+        if files_struct
+            .restore_parent_fd_snapshot(&self.builtin_grandchild.child_fd_snapshot)
+            .is_err()
+        {
+            let _ = restore_user_stack_snapshot(
+                address_space,
+                page_metadata_map,
+                &self.builtin_grandchild.parent_stack_snapshot,
+                parent_stack_snapshot_len,
+            );
+            files_struct.discard_parent_fd_snapshot(&parent_fd_snapshot);
+            release_writable_page_snapshot_pages(
+                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            return None;
+        }
+
+        self.builtin_grandchild.parent_wait_frame = Some(*parent_wait_frame);
+        self.builtin_grandchild.parent_wait_status_ptr = stat_addr;
+        self.builtin_grandchild.parent_resume = BuiltinGrandchildParentResume::Wait4;
+        self.builtin_grandchild.parent_fs_snapshot = Some(parent_fs_snapshot);
+        self.builtin_grandchild.parent_fs_snapshot_restored = false;
+        self.builtin_grandchild.parent_fd_snapshot = parent_fd_snapshot;
+        self.builtin_grandchild.parent_fd_snapshot_saved = true;
+        self.builtin_grandchild.parent_fd_snapshot_restored = false;
+        self.builtin_grandchild.parent_stack_snapshot_len = parent_stack_snapshot_len;
+        self.builtin_grandchild.parent_stack_snapshot_copied = true;
+        self.builtin_grandchild.parent_stack_snapshot_restored = false;
+        self.builtin_grandchild.parent_writable_page_count = writable_page_count;
+        self.builtin_grandchild.parent_writable_page_snapshot_saved = true;
+        self.builtin_grandchild
+            .parent_writable_page_snapshot_truncated = false;
+        self.builtin_grandchild
+            .parent_writable_page_snapshot_restored = false;
+        self.builtin_grandchild.child_stack_snapshot_restored = true;
+        self.builtin_grandchild.child_fd_snapshot_restored = true;
+
+        let child_frame = self.builtin_grandchild.child_trap_frame?;
+        let parent_pid = self.observed_plain_fork_parent_pid;
+        let child_pid = self.observed_plain_fork_child_pid;
+        self.observed_plain_fork_child_active = true;
+        self.pid = child_pid;
+        self.parent_pid = parent_pid;
+        self.tgid = child_pid;
+        Some((child_frame, parent_pid, child_pid))
+    }
+
     pub fn child_exit_to_parent_wait(
         &mut self,
         address_space: &mut UserAddressSpace,
@@ -4196,6 +4625,34 @@ impl UserChildProcess {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize, usize)> {
+        if self.builtin_grandchild.bound {
+            if self.lifecycle.state() != State::Ready
+                || !self.observed_plain_fork_clone
+                || !self.observed_plain_fork_child_active
+                || self.observed_plain_fork_parent_restored
+                || self.pid == 0
+                || self.pid != self.observed_plain_fork_child_pid
+                || self.parent_pid != self.observed_plain_fork_parent_pid
+                || !self.builtin_grandchild.child_stack_snapshot_restored
+                || !self.builtin_grandchild.child_fd_snapshot_restored
+                || !self.builtin_grandchild.parent_stack_snapshot_copied
+                || !self.builtin_grandchild.parent_writable_page_snapshot_saved
+                || !self.builtin_grandchild.parent_fd_snapshot_saved
+            {
+                return None;
+            }
+            let parent_frame = self.builtin_grandchild.parent_wait_frame?;
+            let child_pid = self.observed_plain_fork_child_pid;
+            let parent_pid = self.observed_plain_fork_parent_pid;
+            self.child_exit_status = exit_status;
+            self.child_exit_status_observed = true;
+            return Some((
+                parent_frame,
+                self.builtin_grandchild.parent_wait_status_ptr,
+                child_pid,
+                parent_pid,
+            ));
+        }
         if self.lifecycle.state() != State::Ready
             || !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
@@ -4300,6 +4757,9 @@ impl UserChildProcess {
         address_space: &UserAddressSpace,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
+        if self.builtin_grandchild_active() {
+            return false;
+        }
         if !self.parent_wait_stack_window_saved
             || self.parent_wait_stack_window_len == 0
             || self.parent_wait_stack_window_len > USER_PARENT_WAIT_STACK_PROBE_LEN
@@ -4359,6 +4819,33 @@ impl UserChildProcess {
         address_space: &UserAddressSpace,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
+        if self.builtin_grandchild_active() {
+            if !self.builtin_grandchild.parent_writable_page_snapshot_saved
+                || self.builtin_grandchild.parent_writable_page_count == 0
+            {
+                return false;
+            }
+            let Some(diff) = compare_writable_page_checksums(
+                address_space,
+                page_metadata_map,
+                &self.builtin_grandchild.parent_writable_page_checksums,
+                self.builtin_grandchild.parent_writable_page_count,
+            ) else {
+                return false;
+            };
+            self.parent_wait_writable_page_compared = true;
+            self.parent_wait_writable_page_dirty_count = diff.dirty_count;
+            self.parent_wait_writable_page_stack_dirty_count = diff.stack_dirty_count;
+            self.parent_wait_writable_page_non_stack_dirty_count = diff.non_stack_dirty_count;
+            self.parent_wait_first_non_stack_dirty_kind = diff.first_non_stack_kind;
+            self.parent_wait_first_non_stack_dirty_mapping_index =
+                diff.first_non_stack_mapping_index;
+            self.parent_wait_first_non_stack_dirty_page_index = diff.first_non_stack_page_index;
+            self.parent_wait_first_non_stack_dirty_addr = diff.first_non_stack_addr;
+            self.parent_wait_first_non_stack_dirty_before_checksum = diff.first_non_stack_before;
+            self.parent_wait_first_non_stack_dirty_after_checksum = diff.first_non_stack_after;
+            return true;
+        }
         if !self.parent_wait_writable_page_snapshot_saved
             || self.parent_wait_writable_page_count == 0
             || self.parent_wait_writable_page_count > USER_PARENT_WAIT_DIRTY_PAGE_PROBE_MAX
@@ -4392,6 +4879,24 @@ impl UserChildProcess {
         address_space: &UserAddressSpace,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
+        if self.builtin_grandchild_active() {
+            if !self.builtin_grandchild.parent_stack_snapshot_copied
+                || self.builtin_grandchild.parent_stack_snapshot_len == 0
+                || self.builtin_grandchild.parent_stack_snapshot_restored
+            {
+                return false;
+            }
+            if !restore_user_stack_snapshot(
+                address_space,
+                page_metadata_map,
+                &self.builtin_grandchild.parent_stack_snapshot,
+                self.builtin_grandchild.parent_stack_snapshot_len,
+            ) {
+                return false;
+            }
+            self.builtin_grandchild.parent_stack_snapshot_restored = true;
+            return true;
+        }
         if !self.parent_wait_stack_snapshot_copied
             || self.parent_wait_stack_snapshot_len == 0
             || self.parent_wait_stack_snapshot_restored
@@ -4416,6 +4921,36 @@ impl UserChildProcess {
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
+        if self.builtin_grandchild_active() {
+            if !self.builtin_grandchild.parent_writable_page_snapshot_saved
+                || self.builtin_grandchild.parent_writable_page_count == 0
+                || self
+                    .builtin_grandchild
+                    .parent_writable_page_snapshot_truncated
+                || self
+                    .builtin_grandchild
+                    .parent_writable_page_snapshot_restored
+            {
+                return false;
+            }
+            if !restore_writable_page_snapshot(
+                address_space,
+                page_metadata_map,
+                &self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                self.builtin_grandchild.parent_writable_page_count,
+            ) {
+                return false;
+            }
+            release_writable_page_snapshot_pages(
+                &mut self.builtin_grandchild.parent_writable_page_snapshot_pages,
+                self.builtin_grandchild.parent_writable_page_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            self.builtin_grandchild
+                .parent_writable_page_snapshot_restored = true;
+            return true;
+        }
         if !self.parent_wait_writable_page_snapshot_copied()
             || self.parent_wait_writable_page_snapshot_restored
         {
@@ -4440,6 +4975,18 @@ impl UserChildProcess {
     }
 
     pub fn restore_parent_fd_snapshot(&mut self, files_struct: &mut FilesStruct) -> bool {
+        if self.builtin_grandchild_active() {
+            if !self.builtin_grandchild.parent_fd_snapshot_saved
+                || self.builtin_grandchild.parent_fd_snapshot_restored
+                || files_struct
+                    .restore_parent_fd_snapshot(&self.builtin_grandchild.parent_fd_snapshot)
+                    .is_err()
+            {
+                return false;
+            }
+            self.builtin_grandchild.parent_fd_snapshot_restored = true;
+            return true;
+        }
         if !self.parent_fd_snapshot_saved || self.parent_fd_snapshot_restored {
             return false;
         }
@@ -4450,6 +4997,23 @@ impl UserChildProcess {
             return false;
         }
         self.parent_fd_snapshot_restored = true;
+        true
+    }
+
+    pub fn restore_observed_child_parent_fs_snapshot(&mut self, fs_struct: &mut FsStruct) -> bool {
+        if !self.builtin_grandchild_active() {
+            return true;
+        }
+        if self.builtin_grandchild.parent_fs_snapshot_restored {
+            return false;
+        }
+        let Some(snapshot) = self.builtin_grandchild.parent_fs_snapshot.as_ref() else {
+            return false;
+        };
+        if fs_struct.restore_snapshot(snapshot).is_err() {
+            return false;
+        }
+        self.builtin_grandchild.parent_fs_snapshot_restored = true;
         true
     }
 
@@ -4472,13 +5036,25 @@ impl UserChildProcess {
         status_copied: bool,
         wait_status: usize,
     ) -> bool {
+        let continuation_restored = if self.builtin_grandchild.bound {
+            self.builtin_grandchild.parent_stack_snapshot_restored
+                && self
+                    .builtin_grandchild
+                    .parent_writable_page_snapshot_restored
+                && self.builtin_grandchild.parent_fd_snapshot_restored
+                && self.builtin_grandchild.parent_fs_snapshot_restored
+        } else {
+            self.parent_wait_stack_snapshot_restored
+                && self.parent_wait_writable_page_snapshot_restored
+                && self.parent_fd_snapshot_restored
+        };
         if !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
             || !self.child_exit_status_observed
-            || !self.parent_wait_stack_snapshot_restored
-            || !self.parent_wait_writable_page_snapshot_restored
-            || !self.parent_fd_snapshot_restored
+            || !continuation_restored
+            || (self.builtin_grandchild.bound
+                && self.builtin_grandchild.parent_resume != BuiltinGrandchildParentResume::Wait4)
         {
             return false;
         }
@@ -4497,7 +5073,90 @@ impl UserChildProcess {
         true
     }
 
+    pub fn mark_builtin_grandchild_exited_to_parent_read(&mut self) -> bool {
+        if !self.builtin_grandchild.bound
+            || self.builtin_grandchild.parent_resume != BuiltinGrandchildParentResume::PipeRead
+            || !self.observed_plain_fork_clone
+            || !self.observed_plain_fork_child_active
+            || self.observed_plain_fork_parent_restored
+            || !self.child_exit_status_observed
+            || !self.builtin_grandchild.parent_stack_snapshot_restored
+            || !self
+                .builtin_grandchild
+                .parent_writable_page_snapshot_restored
+            || !self.builtin_grandchild.parent_fd_snapshot_restored
+            || !self.builtin_grandchild.parent_fs_snapshot_restored
+        {
+            return false;
+        }
+
+        self.observed_plain_fork_child_active = false;
+        self.observed_plain_fork_parent_restored = true;
+        self.builtin_grandchild.exited_waitable = true;
+        self.pid = self.observed_plain_fork_parent_pid;
+        self.parent_pid = self.observed_plain_fork_parent_parent_pid;
+        self.tgid = self.observed_plain_fork_parent_tgid;
+        true
+    }
+
+    pub fn mark_builtin_grandchild_reaped(&mut self, wait_status: usize) -> bool {
+        if !self.builtin_grandchild_exit_waitable() {
+            return false;
+        }
+        let child_pid = self.observed_plain_fork_child_pid;
+        self.wait4_status_copied = true;
+        self.last_reaped_child_pid = child_pid;
+        self.last_reaped_child_wait_status = wait_status;
+        self.last_released_child_pid = child_pid;
+        self.last_released_child_wait_status = wait_status;
+        self.builtin_grandchild.exited_waitable = false;
+        true
+    }
+
     pub fn finish_observed_child_parent_restore(&mut self) -> bool {
+        if self.builtin_grandchild.bound {
+            if self.lifecycle.state() != State::Ready
+                || !self.observed_plain_fork_clone
+                || self.observed_plain_fork_child_active
+                || !self.observed_plain_fork_parent_restored
+                || self.pid != self.observed_plain_fork_parent_pid
+                || !self.current_child_continuation()
+                || !self.enqueued
+                || !self.builtin_grandchild.parent_stack_snapshot_restored
+                || !self
+                    .builtin_grandchild
+                    .parent_writable_page_snapshot_restored
+                || !self.builtin_grandchild.parent_fd_snapshot_restored
+                || !self.builtin_grandchild.parent_fs_snapshot_restored
+                || !self.parent_fd_snapshot_saved
+                || self.parent_fd_snapshot_restored
+                || self.parent_wait_frame.is_none()
+                || !self.parent_address_space_snapshot_saved
+                || !self.parent_wait_stack_snapshot_copied
+                || self.parent_wait_stack_snapshot_restored
+                || !self.parent_wait_writable_page_snapshot_saved
+                || self.parent_wait_writable_page_snapshot_restored
+            {
+                return false;
+            }
+
+            self.builtin_grandchild.reset_empty();
+            self.child_exit_status = 0;
+            self.child_exit_status_observed = false;
+            self.wait4_status_copied = false;
+            self.parent_wait_writable_page_compared = false;
+            self.parent_wait_writable_page_dirty_count = 0;
+            self.parent_wait_writable_page_stack_dirty_count = 0;
+            self.parent_wait_writable_page_non_stack_dirty_count = 0;
+            self.parent_wait_first_non_stack_dirty_kind = 0;
+            self.parent_wait_first_non_stack_dirty_mapping_index = 0;
+            self.parent_wait_first_non_stack_dirty_page_index = 0;
+            self.parent_wait_first_non_stack_dirty_addr = 0;
+            self.parent_wait_first_non_stack_dirty_before_checksum = 0;
+            self.parent_wait_first_non_stack_dirty_after_checksum = 0;
+            self.clear_observed_plain_fork_state();
+            return true;
+        }
         if self.lifecycle.state() != State::Ready
             || !self.observed_plain_fork_clone
             || self.observed_plain_fork_child_active
@@ -4754,6 +5413,7 @@ impl UserChildProcess {
         self.child_continuation_taken = false;
         self.vfork_next_child_accepted = false;
         self.clear_observed_plain_fork_state();
+        self.builtin_grandchild.reset_empty();
         self.active_slot_reusable = true;
         self.active_slot_reuse_count += 1;
         true
@@ -4841,9 +5501,35 @@ fn capture_writable_page_snapshot(
                 if count == output.len() {
                     return Some((count, true));
                 }
-                output[count] = checksum_mapping_page(mapping, page_metadata_map, page_index)?;
-                let source_page = mapping.backing_page(page_index)?;
-                let source_linear = page_metadata_map.page_address(source_page)?;
+                let Some(checksum) = checksum_mapping_page(mapping, page_metadata_map, page_index)
+                else {
+                    release_writable_page_snapshot_pages(
+                        snapshot_pages,
+                        count,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                    return None;
+                };
+                output[count] = checksum;
+                let Some(source_page) = mapping.backing_page(page_index) else {
+                    release_writable_page_snapshot_pages(
+                        snapshot_pages,
+                        count,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                    return None;
+                };
+                let Some(source_linear) = page_metadata_map.page_address(source_page) else {
+                    release_writable_page_snapshot_pages(
+                        snapshot_pages,
+                        count,
+                        page_allocator,
+                        page_metadata_map,
+                    );
+                    return None;
+                };
                 let Some(snapshot_page) =
                     page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
                 else {

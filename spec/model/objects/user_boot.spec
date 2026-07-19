@@ -115,6 +115,8 @@ predicate user_clone_plain_fork_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_vm_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_pidfd_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_bounded_sequential_plain_fork_bound<T>(boundaries: T) -> bool;
+predicate user_clone_pid1_plain_fork_child_builtin_grandchild_bound<T>(boundaries: T) -> bool;
+predicate user_clone_builtin_grandchild_single_depth_bound<T>(boundaries: T) -> bool;
 predicate user_clone_bounded_sequential_vfork_records_bound<T>(boundaries: T) -> bool;
 predicate user_clone_single_active_child_slot_bound<T>(boundaries: T) -> bool;
 predicate user_clone_completed_child_record_capacity_bound<T>(boundaries: T) -> bool;
@@ -244,6 +246,9 @@ predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_openat_builtin_grandchild_dev_null_redirect_bound<T, F>(table: T, files: F) -> bool;
+predicate syscall_getcwd_builtin_grandchild_absolute_pwd_bound<T, F, V>(table: T, fs: F, vfs: V) -> bool;
+predicate files_struct_ltp_runtest_syscalls_read_capacity_bound<T>(files: T) -> bool;
 predicate syscall_chdir_routes_to_fs_struct<T, F>(table: T, fs: F) -> bool;
 predicate syscall_chdir_linux_6_12_path_walk_bound<T>(table: T) -> bool;
 predicate syscall_chdir_root_first_slice<T>(table: T) -> bool;
@@ -372,6 +377,7 @@ predicate syscall_execve_linux_6_12_do_execveat_common_bound<T>(table: T) -> boo
 predicate syscall_execve_observed_shell_ls_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_observed_busybox_init_getty_args_bound<T>(table: T) -> bool;
 predicate syscall_execve_child_continuation_first_slice<T, C>(table: T, child: C) -> bool;
+predicate syscall_execve_builtin_grandchild_enosys_bound<T, C>(table: T, child: C) -> bool;
 predicate syscall_execve_current_pid1_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
@@ -398,6 +404,8 @@ predicate syscall_wait4_child_exit_status_copyout_first_slice<T>(table: T) -> bo
 predicate syscall_wait4_observed_child_reap_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_no_child_echild_first_slice<T>(table: T) -> bool;
 predicate syscall_wait4_blocking_sleep_deferred<T>(table: T) -> bool;
+predicate syscall_read_builtin_grandchild_pipe_block_handoff<T, C>(table: T, child: C) -> bool;
+predicate syscall_wait4_builtin_grandchild_completed_reap<T, C>(table: T, child: C) -> bool;
 predicate syscall_sync_rootfs_barrier_first_slice<T>(table: T) -> bool;
 predicate syscall_reboot_poweroff_magic_first_slice<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
@@ -549,6 +557,10 @@ predicate user_child_process_observed_child_plain_fork_parent_saved<T>(process: 
 predicate user_child_process_observed_child_plain_fork_child_pid_bound<T>(process: T) -> bool;
 predicate user_child_process_observed_child_plain_fork_no_second_task<T>(process: T) -> bool;
 predicate user_child_process_observed_child_plain_fork_parent_restored<T>(process: T) -> bool;
+predicate user_child_process_builtin_grandchild_parent_continuation_snapshot_bound<T, A, F>(process: T, space: A, files: F) -> bool;
+predicate user_child_process_outer_pid1_snapshot_ownership_preserved<T, A, F>(process: T, space: A, files: F) -> bool;
+predicate user_child_process_builtin_grandchild_pipe_data_shared<T, F>(process: T, files: F) -> bool;
+predicate user_child_process_builtin_grandchild_snapshot_failure_atomic<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_observed_child_transient_state_cleared<T>(process: T) -> bool;
 predicate user_child_process_observed_shell_continuation_reusable<T>(process: T) -> bool;
 predicate user_child_process_observed_shell_runqueue_preserved<T, R>(process: T, runqueue: R) -> bool;
@@ -673,6 +685,8 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_vfork_vm_first_slice_bound(self);
                     user_clone_vfork_pidfd_first_slice_bound(self);
                     user_clone_bounded_sequential_plain_fork_bound(self);
+                    user_clone_pid1_plain_fork_child_builtin_grandchild_bound(self);
+                    user_clone_builtin_grandchild_single_depth_bound(self);
                     user_clone_bounded_sequential_vfork_records_bound(self);
                     user_clone_single_active_child_slot_bound(self);
                     user_clone_completed_child_record_capacity_bound(self);
@@ -827,6 +841,8 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_vfork_vm_first_slice_bound(self);
             user_clone_vfork_pidfd_first_slice_bound(self);
             user_clone_bounded_sequential_plain_fork_bound(self);
+            user_clone_pid1_plain_fork_child_builtin_grandchild_bound(self);
+            user_clone_builtin_grandchild_single_depth_bound(self);
             user_clone_bounded_sequential_vfork_records_bound(self);
             user_clone_single_active_child_slot_bound(self);
             user_clone_completed_child_record_capacity_bound(self);
@@ -1421,7 +1437,10 @@ object SyscallTable: ResourceObject {
                  * ordinary filesystem write-permission rejection: O_RDONLY,
                  * O_WRONLY and O_RDWR with O_LARGEFILE/O_CLOEXEC/O_NONBLOCK
                  * install a Null OFD in the lowest free fd slot and preserve
-                 * status flags plus close-on-exec. If
+                 * status flags plus close-on-exec. The LTP builtin-grandchild
+                 * stderr redirect additionally accepts exactly the observed
+                 * O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE shape for /dev/null;
+                 * create/truncate remain rejected for every other path. If
                  * O_DIRECTORY is present and the resolved non-TTY target is
                  * not a directory, including /dev/null, the syscall must fail
                  * with ENOTDIR. O_NONBLOCK is consumed only by accepted TTY and
@@ -1448,6 +1467,8 @@ object SyscallTable: ResourceObject {
 
                 ensures {
                     syscall_openat_routes_to_files_struct(self, FilesStruct);
+                    syscall_openat_builtin_grandchild_dev_null_redirect_bound(self, FilesStruct);
+                    files_struct_ltp_runtest_syscalls_read_capacity_bound(FilesStruct);
                     files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
                     files_struct_regular_fd_installed(FilesStruct) ||
                         files_struct_directory_fd_installed(FilesStruct) ||
@@ -2330,14 +2351,17 @@ object SyscallTable: ResourceObject {
                  * Linux 6.12 fs/d_path.c::sys_getcwd() snapshots
                  * current->fs root/pwd, builds a NUL-terminated path, returns
                  * the copied byte count including NUL, and returns ERANGE when
-                 * the user buffer is too small. The current slice only covers
-                 * the boot UserInitProcess whose inherited FsStruct root and
-                 * pwd both point to the ext2 root, so getcwd returns "/\0".
+                 * the user buffer is too small. In addition to the boot root
+                 * path, the builtin command-substitution child serializes its
+                 * current absolute pwd from the existing dentry parent chain;
+                 * this covers `/opt/ltp` after bounded cd/pwd without adding
+                 * mount-namespace or concurrent fs_struct semantics.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
                     UserInitProcess.state == State::Online;
                     FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
                     syscall_getcwd_usercopy_ready(self);
                 }
 
@@ -2349,6 +2373,7 @@ object SyscallTable: ResourceObject {
                     syscall_getcwd_routes_to_user_init_process(self, UserInitProcess);
                     user_init_process_root_cwd_first_slice(UserInitProcess, FsStruct);
                     syscall_getcwd_returns_root_with_nul(self);
+                    syscall_getcwd_builtin_grandchild_absolute_pwd_bound(self, FsStruct, VfsCore);
                     syscall_table_getcwd_observed(self);
                 }
             }
@@ -2973,7 +2998,11 @@ object SyscallTable: ResourceObject {
                  * argument/env stack limits, the full point-of-no-return
                  * rollback, credentials, signal table, files
                  * unshare/refcounting, task comm, perf/audit/accounting or
-                 * complete old-mm reclamation paths.
+                 * complete old-mm reclamation paths. A command-substitution
+                 * grandchild created by an unfinished PID1-originated plain
+                 * fork is a separate builtin-only slice: it has no second
+                 * exec address-space/UserStack object and execve returns
+                 * ENOSYS with a stable builtin-grandchild boundary diagnostic.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
@@ -3002,6 +3031,7 @@ object SyscallTable: ResourceObject {
                     syscall_execve_observed_busybox_init_getty_args_bound(self);
                     syscall_execve_current_pid1_first_slice(self, UserInitProcess);
                     syscall_execve_child_continuation_first_slice(self, UserChildProcess);
+                    syscall_execve_builtin_grandchild_enosys_bound(self, UserChildProcess);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
                     syscall_execve_context_staging_address_space_bound(self, UserAddressSpace);
@@ -3057,16 +3087,28 @@ object SyscallTable: ResourceObject {
                  * eligible child exists, return ECHILD. This does not create a
                  * synthetic child, does not block, and does not consume signal
                  * or scheduler wait state.
-                 * The BusyBox init login shell observed child plain-fork shape is
-                 * eligible only after clone has recorded the grandchild pid
-                 * and the shell parent reaches wait4.  That wait4 is the
-                 * handoff point: save the shell wait frame, address-space,
-                 * stack and writable-page snapshots, restore the fork-time
-                 * grandchild stack snapshot, consume its pending identity
+                 * The BusyBox init login shell observed child plain-fork shape
+                 * and the LTP list-stage command substitution are eligible only
+                 * after clone has recorded the grandchild pid and the current
+                 * child parent reaches wait4. For a PID1-originated plain-fork
+                 * script child, a second-level wait4 or the first blocking
+                 * parent read on its command-substitution pipe is the handoff point:
+                 * save a distinct bounded parent frame/status, fd/fs view,
+                 * stack and writable-page snapshot, restore the fork-time
+                 * builtin grandchild stack/fd view, consume its pending identity
                  * (including a parent-updated pgrp), and switch the single internal
-                 * slot to the grandchild trap frame.  The grandchild exit path
-                 * must then restore the shell parent view and copy out the
-                 * wait status before returning the grandchild pid; this is not
+                 * slot to the grandchild trap frame. This continuation never
+                 * overwrites the outer PID1 wait frame/address-space/fd/stack/
+                 * writable-page ownership. Capture failure rolls back all
+                 * second-level pages, fd snapshot references and pending state.
+                 * The grandchild exit path must restore only the current child
+                 * parent view. A wait4-origin handoff copies status and returns
+                 * the grandchild pid immediately. A pipe-read-origin handoff
+                 * retries the restored parent read against shared pipe bytes,
+                 * leaves one completed grandchild waitable, and the later wait4
+                 * copies status/reaps it. The script's final exit restores PID1.
+                 * Only one pending builtin grandchild is allowed; concurrent
+                 * children and deeper nesting remain rejected. This is not
                  * a general wait queue, zombie list or runnable task graph.
                  * It still does not model full wait queues, zombie lists,
                  * pid hashes, resource aggregation or release_task().
@@ -3104,6 +3146,8 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_observed_child_reap_first_slice(self);
                     syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
+                    syscall_read_builtin_grandchild_pipe_block_handoff(self, UserChildProcess);
+                    syscall_wait4_builtin_grandchild_completed_reap(self, UserChildProcess);
                     user_child_process_completed_record_reaped(UserChildProcess);
                     syscall_table_wait4_observed(self);
                 }
@@ -3313,8 +3357,11 @@ object UserChildProcess: ResourceObject {
 
         on Action::ObservedChildPlainFork {
             /*
-             * The observed BusyBox init login shell /bin/ls reaches plain
-             * clone(SIGCHLD) from an already active vfork child continuation.
+             * The observed BusyBox init login shell /bin/ls and the LTP list
+             * command substitution reach plain clone(SIGCHLD) from an already
+             * active child continuation. The new LTP shape is accepted only
+             * when that current child came from an unfinished PID1 plain fork;
+             * flags must be SIGCHLD-only and newsp must be zero.
              * The shell parent stays in the same
              * internal UserChild slot and clone returns the allocated
              * grandchild pid to that shell.  The grandchild is only an observed child
@@ -3325,6 +3372,11 @@ object UserChildProcess: ResourceObject {
              * setpgid(child_pid, child_pid) operation before handoff;
              * no second UserChildTaskRef is enqueued and no full task graph,
              * COW mm, job-control or generic wait/reap model is introduced.
+             * The PID1-plain-fork source owns a distinct bounded child trap/
+             * stack/fd snapshot and later parent-continuation snapshot; the
+             * outer PID1 restore objects remain owned by the outer wait.
+             * A second pending child, deeper clone and snapshot capture failure
+             * are rejected without consuming a pid or leaking snapshot refs.
              */
             depends_on {
                 UserChildProcess.state == State::Ready;
@@ -3341,6 +3393,10 @@ object UserChildProcess: ResourceObject {
                 user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
                 user_child_process_single_active_slot(self);
                 user_child_process_observed_child_plain_fork_no_second_task(self);
+                user_child_process_builtin_grandchild_parent_continuation_snapshot_bound(self, UserAddressSpace, FilesStruct);
+                user_child_process_outer_pid1_snapshot_ownership_preserved(self, UserAddressSpace, FilesStruct);
+                user_child_process_builtin_grandchild_pipe_data_shared(self, FilesStruct);
+                user_child_process_builtin_grandchild_snapshot_failure_atomic(self, FilesStruct);
                 user_child_process_next_child_pid_bound(self);
                 user_init_process_pending_plain_fork_child_parent_visible(UserInitProcess, self);
                 user_init_process_pending_plain_fork_child_inherits_pgrp_session(UserInitProcess, self);
@@ -3350,8 +3406,9 @@ object UserChildProcess: ResourceObject {
         on Action::ObservedChildParentWaitResumed {
             /*
              * Completion path for the observed grandchild: child exit restores
-             * the saved shell parent address-space, stack, writable pages and
-             * fd snapshot, copies wait status when requested, returns the
+             * the saved current-child parent stack, writable pages, fs/fd view
+             * (and the legacy vfork-shell address-space when applicable),
+             * copies wait status when requested, returns the
              * grandchild pid from shell wait4, and restores the visible
              * current child pid to the login shell parent. The restore must
              * be visible-pid-only: the shell's inherited pgrp, session id and
@@ -3359,7 +3416,10 @@ object UserChildProcess: ResourceObject {
              * overwritten by the grandchild pid. The shell remains Ready and
              * scheduled in the same internal slot. The just-completed
              * grandchild's saved frame/snapshot/wait/exit facts are cleared so
-             * a second sequential observed child can reuse the shell slot.
+             * a second sequential observed child can reuse the shell slot. For
+             * the builtin-only LTP shape, clearing the inner round cannot clear
+             * the outer PID1 continuation; the script's later exit owns that
+             * outer restoration.
              */
             depends_on {
                 UserChildProcess.state == State::Ready;
@@ -3378,6 +3438,7 @@ object UserChildProcess: ResourceObject {
                 user_init_process_observed_child_visible_pid_only_restore(UserInitProcess, self);
                 user_init_process_pending_plain_fork_child_cleared_on_parent_restore(UserInitProcess, self);
                 user_child_process_observed_child_plain_fork_parent_restored(self);
+                user_child_process_outer_pid1_snapshot_ownership_preserved(self, UserAddressSpace, FilesStruct);
                 user_child_process_observed_child_transient_state_cleared(self);
                 user_child_process_observed_shell_continuation_reusable(self);
                 user_child_process_observed_shell_runqueue_preserved(self, Scheduler);
