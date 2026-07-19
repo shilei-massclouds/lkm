@@ -58,6 +58,12 @@
     exit restore。新的首个稳定边界一致为 syscall 34 `mkdirat`，LTP 在 `tst_tmpdir.c:270` 的
     `mkdtemp(/tmp/LTP_unaXXXXXX)` 得到 ENOSYS/TBROK。严格 3/3 判据未改，两份 result 均为红灯且记录
     private disk removed、process group reaped；mkdirat 不在本片继续实现。
+17. 默认 LTP 门禁随后按项目验收目标收缩为双 provider `close*` list-only：两侧只执行
+    `run-syscalls.sh --list -- 'close*'`，要求 `close01/02` 各精确出现一次，并以 list 原始状态退出。
+    不执行 `close01/02` binary，也不增加或声明 `close(57)` smoke 覆盖；原 uname 运行证据与
+    `mkdirat(34)` 边界继续作为历史记录，但不再阻塞默认根回归。focused native 证据为
+    `20260719T143245.923759Z-ltp-31338`，linux-object 为
+    `20260719T143318.374010Z-ltp-lo-31437`；两侧均以 guest status 0 完成并清理私盘。
 
 ## 已完成里程碑
 

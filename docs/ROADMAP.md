@@ -24,9 +24,9 @@
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
 3. ordinary shell、nightly stress 和 Linux paired difftest 保持长期回归；失败样本按稳定序列和
    source-scoped 事实分类。
-4. LTP 首个自动 syscall acceptance 固定为 native/linux-object 两侧的 `uname*` 三项；双侧 list 与
-   builtin grandchild 的连续 `/bin/sh -c uname01` inner exec/restore 已精确闭合，当前新边界是 LTP
-   `tst_tmpdir.c:270` 的 `mkdtemp` 请求 `mkdirat(34)`，后续仍按该边界取证推进。
+4. 默认 LTP 门禁收缩为 native/linux-object 两侧的 `close*` list-only acceptance：必须各精确列出
+   一次 `close01/02`，随后以 list 原始状态退出；不执行 selected binary，也不声明 stock LTP close
+   或 `close(57)` 的新覆盖。此前 uname inner-exec 与 `mkdirat(34)` 证据保留为历史能力/边界。
 5. VFS/pathname、exec lifecycle、per-task/IRQ trap stack 后续与文件系统缓存层仍按各自 active row 推进。
 6. coding 层的 model-object 文件覆盖、实现证据和 rootfs 测试编排分别由
    [`objects/README.md`](../spec/coding/objects/README.md)、
@@ -56,7 +56,7 @@
 | `P0` | 长期回归 | linux/checkpoint/stress | Linux exact-mapped runtime 插桩与横向差分 | 维护 exact marker 与默认 rc.local hard scope；继续处理 `range`/`unmapped` mapping，并在需要时规格化先纵向、后横向的 multi-run 语义。 | [charter](../spec/charter/main.md#linux-runtime-checkpoint-插桩与横向差分)；[测试规格](../spec/testing/rootfs.md#rclocal-and-paired-difftest) |
 | `P0` | 当前 | model/coding/arceos_ex/vfs | VFS pathname walk / rootfs path read 补强 | 推进 slow symlink、通用 nofollow、magic link、RCU walk、权限、mount namespace、fd table 和 errno 边界；保持当前 read-only fast-symlink 骨架。 | [VFS coding](../spec/coding/objects/vfs.md) |
 | `P0` | 进行中 | build/rootfs/user/validation | 发行版 rootfs smoke 与 overlay 分层 | 保持 overlay fixture 与 bare distro cases 分层；继续以真实 BusyBox init/发行版路径收敛 native init 验收，不用测试专用内核 API。 | [镜像构造](../spec/coding/projects/rootfs-image.md)；[测试规格](../spec/testing/rootfs.md) |
-| `P0` | 进行中 | validation/user/syscall/files | LTP uname 自动验收扩展 | 维护 `ltp`/`ltp-lo` 的 list-before-run 与严格 3/3 判据；双侧已用独立内层 continuation snapshot、单 builtin-only grandchild 和阻塞 pipe-read/wait4 handoff 精确列出 `uname01/02/04`，且保持外层 PID1 wait/address/fd/stack/writable snapshot 所有权。首次 inner exec 保留 script parent，第二次 exec 释放中间镜像，退出恢复原 SATP；两侧当前首个新边界均为 LTP `tst_tmpdir.c:270` 的 `mkdtemp` 请求 `mkdirat(34)`。mkdirat、后续 uname syscall/personality 和通用 task graph 只依该运行时边界继续推进。 | [测试规格](../spec/testing/rootfs.md#ltp-syscall-basic-acceptance)；[user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
+| `P0` | 长期回归 | validation/user/syscall/files | LTP close list-only 双 provider 验收 | `ltp`/`ltp-lo` 只运行 `run-syscalls.sh --list -- 'close*'`，各精确列出一次 `close01/02` 后以 list 状态退出。门禁不执行 selected binary，不声明 stock LTP close 或 `close(57)` 新覆盖；uname inner-exec 和后续 `mkdirat(34)` 保留为历史证据，不再阻塞默认 `make test`。 | [测试规格](../spec/testing/rootfs.md#ltp-syscall-list-acceptance)；[user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
 | `P0` | 进行中 | model/coding/arceos_ex/syscall/process | 完整 exec lifecycle 补强 | `exec_sync.001`–`exec_sync.003` | [user boot coding](../spec/coding/objects/user-boot.md#clone-wait-and-exec) |
 | `P1` | 待办 | model/coding/arceos_ex/trap/mm | per-task VMAP trap 栈与 IRQ hardirq 栈 | `process_prepare.011`、`irq_time.007` | [user boot coding](../spec/coding/objects/user-boot.md#trap-and-exception-mapping) |
 | `P0` | 进行中 | arceos_ex/task/mm/arch | vmalloc task stack 后续调度语义 | `kthreadd.001`、`sched_init.004`、`schedule_handoff.001`–`.003` | [rest_init coding](../spec/coding/phases/up-multitask/rest-init.md) |

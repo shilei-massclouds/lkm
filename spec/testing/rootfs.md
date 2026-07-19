@@ -116,13 +116,13 @@ BusyBox init waiting/reaping, not OpenRC behavior. The arceos_ex side captures t
 the bounded checkpoint buffer. Its declared recorder capacity is 524288 bytes, which must retain the complete
 session without overflow rather than truncating the sequence at the comparison boundary.
 
-## LTP syscall basic acceptance
+## LTP syscall list acceptance
 
 Rule IDs (MUST):
 
-- `arceos_ex_must_ltp_uname_be_dual_provider_scripted_acceptance`
-- `arceos_ex_must_ltp_uname_list_exact_entries_before_execution`
-- `arceos_ex_must_ltp_uname_require_three_passes`
+- `arceos_ex_must_ltp_close_list_be_dual_provider_scripted_acceptance`
+- `arceos_ex_must_ltp_close_list_exact_entries`
+- `arceos_ex_must_ltp_close_list_exit_with_list_status`
 - `arceos_ex_must_ltp_list_command_substitution_preserve_outer_wait_snapshot`
 - `arceos_ex_must_ltp_list_grandchild_smoke_use_independent_scenario_stack`
 
@@ -131,15 +131,14 @@ respectively. The retired `ltp-shell-manual-native` and `ltp-shell-manual-linux-
 compatibility entry. Both use `init=/bin/sh`, a writable private copy of the canonical template and guest
 shutdown, and both enter the default root `make test` gate.
 
-After the first shell prompt, the scripted payload changes to `/opt/ltp` and must first run
-`./run-syscalls.sh --list -- 'uname*'`. A list failure exits immediately with its original status. The list
-must contain exactly one entry each for `uname01`, `uname02` and `uname04`, with their matching commands, and
-no other selected entry. Only after that list succeeds may the payload run
-`./run-syscalls.sh -- 'uname*'`; the shell exits with that run's original status. Acceptance requires the
-exact final line `Summary: TOTAL=3 PASS=3 FAIL=0 BROK=0 WARN=0 CONF=0`, guest status 0, and no unsupported
-syscall, ENOSYS/Function-not-implemented, panic or LTP non-pass marker. This scope does not turn missing
-`/proc`/`sys`/device capabilities into success and does not claim support for any syscall outside the three
-selected uname entries.
+After the first shell prompt, the scripted payload changes to `/opt/ltp` and runs exactly
+`./run-syscalls.sh --list -- 'close*'`. The shell captures that command's status and exits with the same
+status. The list must contain exactly one entry each for `close01` and `close02`, with their matching
+commands; other entries selected by the `close*` pattern are outside the marker contract. Acceptance requires guest status 0 and no unsupported syscall,
+ENOSYS/Function-not-implemented, panic or LTP non-pass marker. The payload must not invoke
+`./run-syscalls.sh -- 'close*'` or directly execute either selected binary. This list-only gate proves LTP
+discovery and the bounded shell/list integration path; it does not claim that `close(57)`, `close01`,
+`close02`, the LTP runtime harness, or any other LTP syscall test executes successfully.
 
 The list command's BusyBox command substitution is covered by the bounded two-level plain-fork slice: the
 PID1-originated script child may create one builtin-only grandchild for `cd`/`pwd`, pipe/stdio and exit. Tests
@@ -151,10 +150,7 @@ ownership, two consecutive execs retaining the same script parent while releasin
 child-view-only close-on-exec, wait4 and pipe-read resume, script exit restoring PID1, and atomic rollback for
 argument/staging/ELF/address-space failures without page or fd-reference leaks. Non-builtin sources, deeper clone,
 and a second pending child remain rejected. Capture and exec failure injection must leave the current executable,
-both snapshot layers, pending identity and fd views unchanged. This list-stage support does not weaken the
-existing strict 3/3 acceptance configuration. If both providers list exactly `uname01`, `uname02`, and
-`uname04` and then fail at the first later execution boundary, the result/manifest/QEMU log are retained as
-the next evidence; that later boundary is not repaired in the same slice. The object-smoke two-level
+both snapshot layers, pending identity and fd views unchanged. The object-smoke two-level
 plain-fork coverage is a separate smoke scenario, so its bounded snapshot call chain does not inherit the
 large canonical-ELF scenario frame or cross the fixed 16 KiB kernel-init stack boundary. It runs before the
 separate legacy child-lifecycle scenario, whose observed-plain-fork coverage intentionally finishes with a

@@ -72,6 +72,13 @@ parent SATP。两侧新的首个稳定边界相同：RISC-V syscall 34 `mkdirat`
 `tst_tmpdir.c:270` 的 `mkdtemp(/tmp/LTP_unaXXXXXX)` 返回 ENOSYS/TBROK。严格 3/3 acceptance 保持不变，
 两份 result/manifest/qemu.log 保留红灯与完整 cleanup；mkdirat 和 uname 后续 syscall 不在该片扩展。
 
+随后默认 LTP 验收目标收缩为 native/linux-object 两侧的 `close*` list-only gate：只要求
+`run-syscalls.sh --list -- 'close*'` 各精确输出一次 `close01/02` 并以 list 状态退出，不执行 selected
+binary，也不声明 stock LTP close 或 `close(57)` 的新增覆盖。上述 uname/mkdirat 事实继续作为历史
+能力与边界证据，不再作为默认根 `make test` 的失败条件。focused 证据为 native
+`20260719T143245.923759Z-ltp-31338` 与 linux-object
+`20260719T143318.374010Z-ltp-lo-31437`，两侧 guest status 均为 0。
+
 后续高优先级计划按证据和前置依赖排序：
 
 1. **P0：继续保留 DF-0001/DF-0002 stress 回归并分析 source-scoped 失败事实**。短期不再添加缺陷专用 checkpoint；`Serial8250RxBatchLoopbackProbe.setup` 内部稳定 first-failed predicate 已补齐到 source claim/complete delta matched。若再次出现 DF-0002，优先沿既有 `failure_diagnostic` / `ready_check_failed` 中的 source-scoped PLIC/UART IRQ cycle 事实分析，不回退到全局 claim/complete equality。

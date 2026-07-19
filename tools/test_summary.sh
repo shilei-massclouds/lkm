@@ -124,8 +124,8 @@ for provider in native $test_plic_providers; do
     run_smoke_case "app smoke $provider" "kernel-smoke-$provider" "$tmpdir/smoke-$provider.log"
 done
 
-run_command_case "LTP uname native" "$tmpdir/ltp.log" "$make_cmd" run TEST="ltp"
-run_command_case "LTP uname linux-object" "$tmpdir/ltp-lo.log" "$make_cmd" run TEST="ltp-lo"
+run_command_case "LTP close list native" "$tmpdir/ltp.log" "$make_cmd" run TEST="ltp"
+run_command_case "LTP close list linux-object" "$tmpdir/ltp-lo.log" "$make_cmd" run TEST="ltp-lo"
 
 printf '\nTest summary:\n'
 printf '%s' "$summary_rows"

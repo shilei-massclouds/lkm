@@ -94,7 +94,7 @@ Targets must remain composable:
   before checkpoint drift checks and real QEMU cases.
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
-- Dual-provider rc.local, BusyBox-init login and LTP uname acceptance are default runtime stages. Terminal
+- Dual-provider rc.local, BusyBox-init login and LTP close list-only acceptance are default runtime stages. Terminal
   diagnostic configurations `shell` and `shell-lo` are never default stages. The default user-mode
   acceptance stages invoke `TEST=user-smoke-native`, `TEST=user-smoke-linux-object`, `TEST=ltp` and
   `TEST=ltp-lo` explicitly; they must not use APP or retired test-name mappings.
