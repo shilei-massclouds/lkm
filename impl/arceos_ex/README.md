@@ -21,7 +21,8 @@ make fmt-check
 make clippy-check
 make run
 make run TEST=user-smoke-native
-make run TEST=distro-sh-native
+make run TEST=scripted-shell
+make run TEST=scripted-shell-lo
 make disk
 make verify
 make verify REPORT=graph

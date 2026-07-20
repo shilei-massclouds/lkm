@@ -240,8 +240,17 @@ class BasicRunnerConfigTests(unittest.TestCase):
             self.assertFalse((cases / f"{removed_name}.toml").exists())
             self.assertNotIn(removed_name, runner.COMPATIBILITY_ALIASES)
             self.assertNotIn(removed_name, runner.RETIRED_TEST_NAMES)
+        for removed_name in (
+            "distro-sh-native",
+            "distro-sh-linux-object",
+            "script-shell",
+            "script-shell-lo",
+        ):
+            self.assertFalse((cases / f"{removed_name}.toml").exists())
+            self.assertNotIn(removed_name, runner.COMPATIBILITY_ALIASES)
+            self.assertNotIn(removed_name, runner.RETIRED_TEST_NAMES)
 
-    def test_shell_cases_are_distinct_dual_provider_terminal_diagnostics(self) -> None:
+    def test_terminal_shell_cases_have_scripted_dual_provider_counterparts(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
         cases = repo_root / "impl" / "arceos_ex" / "tests" / "basic" / "cases"
         loaded = {
@@ -249,31 +258,129 @@ class BasicRunnerConfigTests(unittest.TestCase):
             for name in (
                 "shell",
                 "shell-lo",
-                "user-smoke-native",
-                "user-smoke-linux-object",
+                "scripted-shell",
+                "scripted-shell-lo",
             )
         }
 
-        shell_names = {"native": "shell", "linux-object": "shell-lo"}
-        for provider, name in shell_names.items():
-            with self.subTest(name=name):
-                config = loaded[name]
-                self.assertEqual(config["purpose"], "diagnostic")
-                self.assertEqual(config["timeout_seconds"], 3600)
-                self.assertEqual(config["kernel"]["app"], "user-boot")
-                self.assertEqual(config["kernel"]["provider"], provider)
-                self.assertEqual(config["disk"], {"mode": "private-copy", "profile": "canonical"})
-                self.assertEqual(config["qemu"]["kernel_cmdline"], "earlycon=sbi init=/bin/sh")
-                self.assertEqual(config["qemu"]["interaction"], "terminal")
-                self.assertIn("arceos_ex panic", config["expect"]["forbidden_markers"])
+        counterpart_names = {
+            "native": ("shell", "scripted-shell"),
+            "linux-object": ("shell-lo", "scripted-shell-lo"),
+        }
+        shared_qemu_fields = (
+            "memory_mb",
+            "smp",
+            "kernel_cmdline",
+            "rng",
+            "exit_policy",
+        )
+        for provider, (terminal_name, scripted_name) in counterpart_names.items():
+            with self.subTest(provider=provider):
+                terminal = loaded[terminal_name]
+                scripted = loaded[scripted_name]
 
-        for provider in ("native", "linux-object"):
-            with self.subTest(smoke_provider=provider):
-                smoke = loaded[f"user-smoke-{provider}"]
-                shell = loaded[shell_names[provider]]
-                self.assertEqual(smoke["purpose"], "acceptance")
-                self.assertEqual(smoke["qemu"]["interaction"], "none")
-                self.assertNotEqual(smoke["name"], shell["name"])
+                self.assertEqual(terminal["kernel"], scripted["kernel"])
+                self.assertEqual(terminal["kernel"]["app"], "user-boot")
+                self.assertEqual(terminal["kernel"]["provider"], provider)
+                self.assertEqual(terminal["kernel"]["profile"], "release")
+                self.assertEqual(terminal["disk"]["profile"], "canonical")
+                self.assertEqual(scripted["disk"]["profile"], "canonical")
+                self.assertEqual(
+                    {field: terminal["qemu"][field] for field in shared_qemu_fields},
+                    {field: scripted["qemu"][field] for field in shared_qemu_fields},
+                )
+                self.assertEqual(terminal["qemu"]["memory_mb"], 128)
+                self.assertEqual(terminal["qemu"]["smp"], 8)
+                self.assertEqual(
+                    terminal["qemu"]["kernel_cmdline"],
+                    "earlycon=sbi init=/bin/sh",
+                )
+                self.assertTrue(terminal["qemu"]["rng"])
+                self.assertEqual(terminal["qemu"]["exit_policy"], "guest-shutdown")
+
+                self.assertEqual(terminal["purpose"], "diagnostic")
+                self.assertEqual(terminal["timeout_seconds"], 3600)
+                self.assertEqual(
+                    terminal["disk"],
+                    {"mode": "private-copy", "profile": "canonical"},
+                )
+                self.assertEqual(terminal["qemu"]["interaction"], "terminal")
+                self.assertEqual(terminal["qemu"]["stdin_steps"], [])
+                self.assertIn(
+                    "arceos_ex panic", terminal["expect"]["forbidden_markers"]
+                )
+
+                self.assertEqual(scripted["purpose"], "acceptance")
+                self.assertEqual(scripted["timeout_seconds"], 120)
+                self.assertEqual(
+                    scripted["disk"],
+                    {"mode": "template-readonly", "profile": "canonical"},
+                )
+                self.assertEqual(scripted["qemu"]["interaction"], "scripted")
+                self.assertEqual(
+                    scripted["qemu"]["stdin_steps"],
+                    [
+                        {
+                            "ready_marker": "~ #",
+                            "payload": 'echo "OK"\nls\nls /lib\nls /\nexit\n',
+                        }
+                    ],
+                )
+                self.assertEqual(scripted["expect"]["guest_exit_status"], 0)
+                self.assertEqual(
+                    scripted["expect"]["marker_counts"],
+                    [
+                        {"marker": "\nOK\n", "at_least": None, "exactly": 1},
+                        {
+                            "marker": "ld-musl-riscv64.so.1",
+                            "at_least": None,
+                            "exactly": 1,
+                        },
+                        {"marker": "lost+found", "at_least": None, "exactly": 2},
+                    ],
+                )
+                self.assertEqual(
+                    scripted["expect"]["forbidden_markers"],
+                    ["Function not implemented", "arceos_ex panic"],
+                )
+
+    def test_scripted_shell_ok_assertion_requires_a_standalone_output_line(self) -> None:
+        qemu_log = self.root / "qemu.log"
+        expected = {
+            "process_exit": 0,
+            "guest_exit_status": 0,
+            "markers": [],
+            "forbidden_markers": ["Function not implemented", "arceos_ex panic"],
+            "marker_counts": [
+                {"marker": "\nOK\n", "at_least": None, "exactly": 1},
+                {
+                    "marker": "ld-musl-riscv64.so.1",
+                    "at_least": None,
+                    "exactly": 1,
+                },
+                {"marker": "lost+found", "at_least": None, "exactly": 2},
+            ],
+        }
+        outcome = runner.QemuOutcome(exit_code=0)
+        echoed_only = (
+            '~ # echo "OK"\n'
+            "~ # ls\nlost+found\n"
+            "~ # ls /lib\nld-musl-riscv64.so.1\n"
+            "~ # ls /\nlost+found\n"
+            "~ # exit\nuser exit status=0\n"
+        )
+        qemu_log.write_text(echoed_only)
+        result = runner.evaluate_expectations(expected, qemu_log, outcome)
+        self.assertFalse(result["passed"])
+        ok_check = next(
+            check
+            for check in result["checks"]
+            if check.get("marker") == "\nOK\n"
+        )
+        self.assertEqual(ok_check["actual"], 0)
+
+        qemu_log.write_text(echoed_only.replace('~ # echo "OK"\n', '~ # echo "OK"\nOK\n'))
+        self.assertTrue(runner.evaluate_expectations(expected, qemu_log, outcome)["passed"])
 
     def test_ltp_close_list_cases_are_distinct_dual_provider_scripted_acceptance(self) -> None:
         repo_root = Path(__file__).resolve().parents[4]
@@ -319,6 +426,13 @@ class BasicRunnerConfigTests(unittest.TestCase):
         for terminal_name in ("shell", "shell-lo"):
             self.assertNotIn(f'TEST="{terminal_name}"', summary)
             self.assertNotIn(f'APP="{terminal_name}"', summary)
+        self.assertIn('run_command_case "scripted shell $provider"', summary)
+        self.assertIn('native) scripted_shell_test=scripted-shell', summary)
+        self.assertIn('linux-object) scripted_shell_test=scripted-shell-lo', summary)
+        self.assertIn('"$tmpdir/scripted-shell-$provider.log"', summary)
+        self.assertIn('run TEST="$scripted_shell_test"', summary)
+        self.assertNotIn('distro-sh-$provider', summary)
+        self.assertNotIn('run_command_case "distro sh $provider"', summary)
         self.assertIn('run TEST="ltp"', summary)
         self.assertIn('run TEST="ltp-lo"', summary)
 

@@ -39,26 +39,36 @@ Rule IDs (MUST):
 
 The user-smoke basic TOML uses a private canonical copy and `init=/opt/lkm/tests/user-smoke`; requested-init
 selects `/opt/lkm/tests/init-hello`. Distribution cases attach canonical read-only: one runs `init=/bin/ls`,
-and one uses scripted interaction to send `/bin/ls`, `/bin/ls`, `exit` after the BusyBox prompt. The latter
-requires both listings, no visible unsupported/panic marker and guest exit 0. Host input is orchestration,
-not kernel-side ready data.
+and one uses scripted interaction to send `echo "OK"`, `ls`, `ls /lib`, `ls /`, `exit` after the BusyBox
+prompt. The latter requires one standalone `OK` output line, one `ld-musl-riscv64.so.1`, two `lost+found`
+occurrences, no visible unsupported/panic marker and guest exit 0. The standalone-line check must not accept
+the echoed `echo "OK"` command. Host input is orchestration, not kernel-side ready data.
 
 Kernel object smoke reads the real `/opt/lkm/tests/user-smoke` ELF. It may assert fallback ordering but cannot
-claim `/sbin/init` was replaced. DF-0003 repeats the two-command shell configuration. The exact paired shell
-baseline sends the same structured delayed input to both sides and retains the complete announce stream.
+claim `/sbin/init` was replaced. The historically named DF-0003 case repeats `scripted-shell` and its complete
+five-line command sequence. The exact paired shell baseline remains independent: it sends the existing
+structured delayed input to both sides and retains the complete announce stream.
 
 `user-smoke-native` and `user-smoke-linux-object` are the only user-smoke acceptance identities. They remain
 non-interactive, boot `/opt/lkm/tests/user-smoke`, and enter the default regression gate explicitly by TEST
 name. DF-0001 likewise repeats `TEST=user-smoke-native`; it must not depend on a TTY, the APP variable-name
 alias, or a retired test-name mapping.
 
-`shell` and `shell-lo` are separate terminal diagnostic identities for the native and linux-object providers,
-respectively. Each uses a writable
-private copy of the canonical template, boots `init=/bin/sh`, uses a real PTY, has a 3600-second overall
-limit, and forbids the panic marker. A normal `exit` completes execution with verdict inconclusive; cleanup
-must restore the terminal and delete the private image. They are opt-in and never enter default regression
-or formal difftest. This shell identity remains independent of the LTP scripted acceptance below even when
-their current QEMU behavior is similar.
+`scripted-shell` and `scripted-shell-lo` are the default scripted shell acceptance identities. They use the
+native and linux-object providers, respectively, attach the canonical template read-only, wait for `~ #`,
+send exactly `echo "OK"\nls\nls /lib\nls /\nexit\n`, and apply a 120-second limit. Both enter default
+`make test`. The removed public spellings `script-shell`, `script-shell-lo`, `distro-sh-native` and
+`distro-sh-linux-object` are unknown tests; they have no alias, retired-name mapping or alias TOML.
+
+`shell` and `shell-lo` are their provider-matched terminal diagnostic counterparts. In each pair, the
+user-boot app, provider, release profile, canonical template initial contents, 128 MiB memory, eight vCPUs,
+`earlycon=sbi init=/bin/sh`, RNG device and guest-shutdown policy are the same. The terminal identity instead
+uses a writable private copy, a real PTY with no scripted stdin steps, and a 3600-second limit. A normal
+`exit` completes execution with verdict inconclusive; cleanup must restore the terminal and delete the
+private image. Terminal identities are opt-in and never enter default regression or formal difftest. The
+scripted result proves only its fixed command loop in the shared startup environment; it does not prove that
+the pipe and PTY transports, or arbitrary terminal input, are behaviorally equivalent. These shell identities
+remain independent of the LTP scripted acceptance below.
 
 ## rc.local basic acceptance and paired difftest
 

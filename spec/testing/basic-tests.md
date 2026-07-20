@@ -17,6 +17,12 @@ kernel image，并拥有一次完整 QEMU 生命周期。测试内容可以是 k
 - `user-smoke-native` 和 `user-smoke-linux-object` 是自动 user-mode acceptance；`shell` 和
   `shell-lo` 是 opt-in terminal diagnostic。测试身份只由显式 test name 决定，runner 不得
   根据 TTY、调用者或命令上下文在 smoke 与 shell 之间隐式切换。
+- `scripted-shell` 和 `scripted-shell-lo` 是上述两个 terminal identity 的自动 scripted counterpart，
+  分别固定使用 native 与 linux-object provider，并作为 acceptance 进入默认门禁。旧
+  `script-shell` / `script-shell-lo` 与更早的 `distro-sh-native` / `distro-sh-linux-object` 名称直接
+  移除，不得增加 compatibility alias、retired-name 映射或别名 TOML。counterpart 是显式 identity
+  对应关系，不得据此复制 QEMU case，
+  或把 scripted pipe 与人工 PTY transport 声明为等价。
 - `ltp` 和 `ltp-lo` 是自动 LTP syscall acceptance，分别固定使用 native 与 linux-object
   provider。旧 `ltp-shell-manual-*` 名称退役且不得保留兼容映射或别名 TOML。
 - `make disk ROOTFS=<profile>` 独立构造只读 rootfs template；`ROOTFS` 默认且当前只允许 `canonical`，
@@ -66,6 +72,20 @@ arceos_ex 的 Linux-object provider，二者不得互相别名或推断。新增
 `distro-sh-checkpoints` 与 `distro-sh-checkpoints-linux` 必须使用同一 scripted payload：连续两次
 `/bin/ls`，再执行 `/sbin/poweroff -f`。不得用一侧 shell builtin `exit`、另一侧额外 exec
 的方式构造可观测 checkpoint 数量差异。
+
+自动与人工 shell identity 按 provider 固定对应：`scripted-shell` 对应 `shell`，`scripted-shell-lo`
+对应 `shell-lo`。每一对都必须使用 `kernel.app = "user-boot"`、相同
+provider、release profile、canonical rootfs template 的相同初始内容、128 MiB、8 个 vCPU、
+`earlycon=sbi init=/bin/sh`、virtio RNG 和 `guest-shutdown` exit policy。人工 identity 使用
+`private-copy`、`interaction = "terminal"`、空 `stdin_steps`、3600 秒和 diagnostic purpose，允许
+操作者在私有可写副本上任意输入，且保持 opt-in。自动 identity 使用 `template-readonly`、
+`interaction = "scripted"`、120 秒和 acceptance purpose；在 `~ #` 后必须恰好发送
+`echo "OK"\nls\nls /lib\nls /\nexit\n`，要求 guest status 0，独立的 `OK` 输出行恰好出现一次、
+`ld-musl-riscv64.so.1` 恰好出现一次、`lost+found` 恰好出现两次，并继续禁止 visible unsupported
+与 panic marker。`OK` 判据必须带行边界，不得把回显的 `echo "OK"` 命令当作成功证据。自动 identity
+按上述命令顺序分别验证 shell builtin、PATH 中的发行版 `ls`、`/lib` 内容和显式 root listing，
+并进入默认门禁。
+自动证据只覆盖该固定命令闭环与上述共享启动环境，不扩张为 pipe/PTY 或任意人工会话的行为等价性。
 
 未来新增同时提供 native 与 linux-object provider 的 basic test 时，正式 test name 必须使用无 provider
 后缀的基础名表示 `kernel.provider = "native"`，并使用同一基础名加 `-lo` 表示

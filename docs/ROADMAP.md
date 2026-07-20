@@ -22,7 +22,9 @@
 1. 缺陷处理继续遵循证据驱动：先复现并定位 checkpoint/diagnostic 边界，再更新规格与实现。
 2. BusyBox init getty/login shell 的 bounded pending-child `setpgid` / `TIOCSPGRP` 验收已闭环并归档；
    focused case 保持 opt-in，后续扩大任务图或 job-control 语义必须由新的可复现证据触发。
-3. ordinary shell、nightly stress 和 Linux paired difftest 保持长期回归；失败样本按稳定序列和
+3. native/linux-object 的自动 scripted shell 已通过 `scripted-shell` / `scripted-shell-lo` identity 进入默认门禁；
+   `shell` / `shell-lo` 人工 PTY 诊断保持 opt-in。两者共享启动环境，但自动命令闭环不声明与任意
+   PTY 会话等价。nightly stress 和 Linux paired difftest 继续长期回归，失败样本按稳定序列和
    source-scoped 事实分类。
 4. 默认 LTP 门禁收缩为 native/linux-object 两侧的 `close*` list-only acceptance：必须各精确列出
    一次 `close01/02`，随后以 list 原始状态退出；不执行 selected binary，也不声明 stock LTP close

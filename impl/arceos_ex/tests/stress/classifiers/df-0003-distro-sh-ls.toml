@@ -19,6 +19,8 @@ description = "BusyBox reported an unsupported syscall or command path."
 [[rules]]
 id = "distro-sh-ls-success"
 result = "success"
-contains = ["lost+found", "user exit status=0"]
-regex = ["(?s)lost\\+found.*lost\\+found"]
-description = "Distro /bin/sh ran two sequential /bin/ls commands through fork/wait4/execve and exited cleanly."
+contains = ["ld-musl-riscv64.so.1", "lost+found", "user exit status=0"]
+regex = [
+  '(?s)~ # echo "OK"\nOK\n~ # ls\n.*?lost\+found.*?~ # ls /lib\n.*?ld-musl-riscv64\.so\.1.*?~ # ls /\n.*?lost\+found.*?~ # exit\n.*?user exit status=0',
+]
+description = "The scripted shell completed echo, cwd listing, /lib listing, root listing and clean exit in order."

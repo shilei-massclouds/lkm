@@ -41,7 +41,7 @@ make build TEST=user-smoke-native
 make run
 make run TEST=kernel-smoke-native
 make run TEST=user-smoke-native
-make run TEST=distro-sh-native
+make run TEST=scripted-shell
 make disk
 make verify
 make verify REPORT=graph

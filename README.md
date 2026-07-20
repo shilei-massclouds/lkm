@@ -78,7 +78,8 @@ make run TEST=shell
 make run TEST=shell-lo
 make run TEST=requested-init-native
 make run TEST=distro-ls-native
-make run TEST=distro-sh-native
+make run TEST=scripted-shell
+make run TEST=scripted-shell-lo
 make build TEST=hello-linux-object
 ```
 
@@ -168,7 +169,7 @@ make test-stress
 ```
 
 `make stress-test` 保留为兼容别名。默认 `STRESS_RUNS=10`，应用到套件里的每个 case。不指定
-`STRESS_CASES` 时分别循环 `user-smoke-native`、`kernel-smoke-native` 和 `distro-sh-native`。
+`STRESS_CASES` 时分别循环 `user-smoke-native`、`kernel-smoke-native` 和 `scripted-shell`。
 Composite runner 不执行 command/setup/QEMU；每轮只在固定子目录调用一次 basic test，再读取其
 `result.json` 与 `qemu.log`。非零 runs 的整个入口只先运行一次 `make disk`；超时只由 basic TOML 决定。
 

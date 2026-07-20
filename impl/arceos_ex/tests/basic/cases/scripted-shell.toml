@@ -1,11 +1,11 @@
 schema_version = 2
-name = "distro-sh-linux-object"
+name = "scripted-shell"
 purpose = "acceptance"
 timeout_seconds = 120
 
 [kernel]
 app = "user-boot"
-provider = "linux-object"
+provider = "native"
 probe = []
 profile = "release"
 
@@ -21,7 +21,7 @@ rng = true
 exit_policy = "guest-shutdown"
 interaction = "scripted"
 stdin_steps = [
-  { ready_marker = "~ #", payload = "/bin/ls\n/bin/ls\nexit\n" },
+  { ready_marker = "~ #", payload = "echo \"OK\"\nls\nls /lib\nls /\nexit\n" },
 ]
 
 [expect]
@@ -29,5 +29,7 @@ process_exit = 0
 guest_exit_status = 0
 forbidden_markers = ["Function not implemented", "arceos_ex panic"]
 marker_counts = [
-  { marker = "lost+found", at_least = 2 },
+  { marker = "\nOK\n", exactly = 1 },
+  { marker = "ld-musl-riscv64.so.1", exactly = 1 },
+  { marker = "lost+found", exactly = 2 },
 ]

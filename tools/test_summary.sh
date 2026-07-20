@@ -113,11 +113,19 @@ run_command_case "checkpoints" "$tmpdir/checkpoints.log" "$make_cmd" test-checkp
 run_command_case "rootfs canonical" "$tmpdir/rootfs-canonical.log" "$make_cmd" disk ROOTFS=canonical
 
 for provider in native $test_plic_providers; do
+    case "$provider" in
+        native) scripted_shell_test=scripted-shell ;;
+        linux-object) scripted_shell_test=scripted-shell-lo ;;
+        *)
+            printf 'unsupported scripted shell provider: %s\n' "$provider" >&2
+            exit 2
+            ;;
+    esac
     run_command_case "hello $provider" "$tmpdir/hello-$provider.log" "$make_cmd" run TEST="hello-$provider"
     run_command_case "user $provider" "$tmpdir/user-$provider.log" "$make_cmd" run TEST="user-smoke-$provider"
     run_command_case "requested $provider" "$tmpdir/requested-$provider.log" "$make_cmd" run TEST="requested-init-$provider"
     run_command_case "distro ls $provider" "$tmpdir/distro-ls-$provider.log" "$make_cmd" run TEST="distro-ls-$provider"
-    run_command_case "distro sh $provider" "$tmpdir/distro-sh-$provider.log" "$make_cmd" run TEST="distro-sh-$provider"
+    run_command_case "scripted shell $provider" "$tmpdir/scripted-shell-$provider.log" "$make_cmd" run TEST="$scripted_shell_test"
     run_command_case "rc.local $provider" "$tmpdir/rc-local-$provider.log" "$make_cmd" run TEST="rc-local-$provider"
     run_command_case "BusyBox init login $provider" "$tmpdir/busybox-init-login-$provider.log" "$make_cmd" run TEST="busybox-init-login-$provider"
     run_kunit_case "KUnit $provider" "checkpoint-kunit-$provider" "$tmpdir/kunit-$provider.log"

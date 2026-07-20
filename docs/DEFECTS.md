@@ -17,12 +17,18 @@
 - 非 PTY delayed-input 路径前后表现不一致，但 50 次 DF-0003 stress 未再复现失败；当前按已进入默认门禁的概率性/时序敏感候选保留回归。
 - `make test` 首次升级外部命令门禁时，bash delayed-input harness 会在逐字转发 guest 输出到当前终端的路径上复现截断：日志到达 `wait4 child handoff` 并开始目录输出，但缺失 `lost+found` 和 `user exit status=0`，且 prompt 后可见 `ESC[6n` 交织；同一输入在 DF-0003 Python runner 的非 live-forwarding drain 下 50/50 成功。当前定位为 host harness 输出 drain/终端交织问题：默认 timeout 对齐 DF-0003 为 120s 量级，输出先 drain 到 log 再回放，成功仍以完整 marker 判定。
 - 修复把 PID1 plain child 与 observed shell grandchild 分成两个生命周期：前者 status copyout 成功后出队并回到 Prepared，下一 child 使用递增 pid 复用 internal task ref；后者仍由 Ready/enqueued 的 `UserChild` 承载 shell，只清理该轮 grandchild snapshot/wait/exit facts。对象 smoke 已验证同一 observed shell 顺序创建第二 child 时 shell pid/parent/tgid 和 runqueue 可见性保持、child pid 递增。
-- 定位和回归应使用显式目标输入 `/bin/ls\n/bin/ls\nexit\n`，不得通过更换为其它输入命令形态、伪造 ANSI cursor-status response 或新增测试专用 kernel API 试修。
+- 当前回归由历史命名的 `df-0003-distro-sh-ls` case 重复 `TEST=scripted-shell`，显式目标输入为
+  `echo "OK"\nls\nls /lib\nls /\nexit\n`；不得通过更换为其它输入命令形态、伪造 ANSI cursor-status
+  response 或新增测试专用 kernel API 试修。
 
 后续回归建议：
 
-- 保留 DF-0003 stress case，多轮执行 `ROOTFS_OVERLAY=none QEMU_APPEND='earlycon=sbi init=/bin/sh'`，等待 BusyBox prompt `/ #` 后写入 `/bin/ls\n/bin/ls\nexit\n`。
-- 成功分类必须同时观察到 rootfs 目录标志 `lost+found` 和 `user exit status=0`；fork/wait4/execve 边界由 checkpoint/KUnit facts 覆盖。timeout、panic、非零退出、缺少上述 marker 均归为失败样本。
+- 保留 `df-0003-distro-sh-ls` stress identity 作为历史缺陷名；多轮执行 `scripted-shell`，等待 BusyBox
+  prompt 后按顺序写入 `echo "OK"\nls\nls /lib\nls /\nexit\n`。
+- 成功分类必须观察到完整命令顺序、独立 `OK` 输出、`ld-musl-riscv64.so.1`、两次 `lost+found`
+  和 `user exit status=0`；basic acceptance 负责精确计数并禁止 unsupported/panic marker，classifier
+  不得仅因命令回显包含 `OK` 就判成功。fork/wait4/execve 边界由 checkpoint/KUnit facts 覆盖。
+  timeout、panic、非零退出或缺少上述任一证据均归为失败样本。
 - 若 stress 捕获失败样本，先比较成功/失败事件序列并定位最后完整 syscall/output/exit 边界，再决定是否补 `user-syscall-trace`、`user-read-trace` 或新的长期 checkpoint；不得从外部截断症状直接猜修。
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败

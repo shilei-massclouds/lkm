@@ -94,10 +94,15 @@ Targets must remain composable:
   before checkpoint drift checks and real QEMU cases.
 - After all host-only gates and before the first QEMU case, `test` invokes `make disk ROOTFS=canonical`
   exactly once. All basic runtime cases validate and reuse that template; no case calls its constructor.
-- Dual-provider rc.local, BusyBox-init login and LTP close list-only acceptance are default runtime stages. Terminal
-  diagnostic configurations `shell` and `shell-lo` are never default stages. The default user-mode
-  acceptance stages invoke `TEST=user-smoke-native`, `TEST=user-smoke-linux-object`, `TEST=ltp` and
-  `TEST=ltp-lo` explicitly; they must not use APP or retired test-name mappings.
+- Dual-provider distro ls, scripted shell, rc.local, BusyBox-init login and LTP close list-only acceptance are
+  default runtime stages. The scripted shell stages use the public identities `scripted-shell` and
+  `scripted-shell-lo`; they are the automated counterparts of `shell` and `shell-lo` and do not add a second
+  QEMU case per provider. The summary keeps the display label `scripted shell` while explicitly mapping
+  native to `scripted-shell` and linux-object to `scripted-shell-lo`; it must not synthesize a `distro-sh-$provider`
+  test name. Terminal diagnostic configurations `shell` and `shell-lo` are never default stages. All default
+  user-mode acceptance stages invoke their explicit `TEST` names; they must not use APP, compatibility aliases
+  or retired test-name mappings. The removed `script-shell`, `script-shell-lo`, `distro-sh-native` and
+  `distro-sh-linux-object` names must fail as unknown tests.
 - `clean` removes generated build and cache artifacts, including reports below managed basic/stress output
   roots except tracked `.gitignore` files, while preserving tracked checkpoint review artifacts and user-local
   state that is not part of routine build cleanup.
@@ -124,6 +129,10 @@ compatibility input. Terminal runs use a PTY, fail before build without a real T
 restore the terminal on every exit path. Process exit, guest exit status and log expectations are independent.
 User-smoke acceptance and manual shell diagnostics have distinct explicit configuration names and cannot be
 selected from one another based on whether a terminal is present.
+Per provider, the scripted shell and terminal shell identities must retain the shared startup fields and
+intentional disk/interaction/timeout/purpose differences specified by the testing contract. Build or test
+selection must not infer one identity from TTY availability. Scripted command-loop evidence does not claim
+PTY transport equivalence.
 For `none` and `scripted` interaction, raw guest output remains authoritative in `qemu.log` and expectation
 matching, while the host presentation stream must remove cursor-position query `ESC[6n` across arbitrary
 read boundaries. This prevents a downstream `tee` from eliciting terminal input that survives the test.

@@ -13,7 +13,7 @@ make test-stress
 ```
 
 The default suite repeats `user-smoke-native`, `kernel-smoke-native`, and
-`distro-sh-native`. `STRESS_RUNS=N` overrides the configured run count for each
+`scripted-shell`. `STRESS_RUNS=N` overrides the configured run count for each
 selected case. `STRESS_RUNS=0` validates every selected composite TOML,
 classifier, and referenced basic TOML without building a disk or running QEMU.
 

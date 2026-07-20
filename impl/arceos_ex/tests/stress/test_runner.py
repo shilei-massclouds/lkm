@@ -147,6 +147,41 @@ class CompositeConfigTests(unittest.TestCase):
         self.assertEqual(status, 0)
         disk.assert_not_called()
 
+    def test_df0003_keeps_historical_case_name_but_uses_scripted_shell_contract(self) -> None:
+        path = (
+            self.repo_root
+            / "impl"
+            / "arceos_ex"
+            / "tests"
+            / "stress"
+            / "cases"
+            / "df-0003-distro-sh-ls.toml"
+        )
+        case = runner._load_case(path, self.repo_root)
+        self.assertEqual(case["name"], "df-0003-distro-sh-ls")
+        self.assertEqual(case["test"], "scripted-shell")
+        success = next(rule for rule in case["rules"] if rule["result"] == "success")
+        self.assertEqual(success["id"], "distro-sh-ls-success")
+        self.assertEqual(
+            success["contains"],
+            ["ld-musl-riscv64.so.1", "lost+found", "user exit status=0"],
+        )
+        complete_output = (
+            '~ # echo "OK"\nOK\n'
+            "~ # ls\nlost+found\n"
+            "~ # ls /lib\nld-musl-riscv64.so.1\n"
+            "~ # ls /\nlost+found\n"
+            "~ # exit\nuser exit status=0"
+        )
+        self.assertEqual(
+            runner._classify(complete_output, 0, False, case["rules"])["id"],
+            "distro-sh-ls-success",
+        )
+        self.assertEqual(
+            runner._classify(complete_output.replace("OK\n", "", 1), 0, False, case["rules"])["id"],
+            "unknown-failure",
+        )
+
     def test_nonzero_suite_prepares_disk_exactly_once(self) -> None:
         first = stress_case("one")
         second = stress_case("two")
