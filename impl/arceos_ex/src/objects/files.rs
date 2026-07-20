@@ -1322,6 +1322,23 @@ impl FileDescriptorTable {
         Ok(entry)
     }
 
+    fn lowest_free_fd_from(&self, min_fd: usize) -> Option<usize> {
+        let mut candidate = min_fd;
+        while candidate < FILE_FD_COUNT {
+            if self.entries[candidate].is_none() {
+                return Some(candidate);
+            }
+            candidate += 1;
+        }
+        None
+    }
+
+    fn install_new_fd_entry(&mut self, fd: usize, entry: FileDescriptorEntry) -> usize {
+        self.entries[fd] = Some(entry);
+        self.fd_installed.fetch_add(1, Ordering::AcqRel);
+        fd
+    }
+
     fn install_regular(
         &mut self,
         ofd: &OpenFileDescription,
@@ -1336,13 +1353,10 @@ impl FileDescriptorTable {
             return Err(FileError::AlreadyOpen);
         }
 
-        self.entries[FdRef::Regular0.index()] = Some(FileDescriptorEntry::regular(
-            OpenFileDescriptionRef::Regular0,
-            flags,
-            close_on_exec,
-        ));
-        self.fd_installed.fetch_add(1, Ordering::AcqRel);
-        Ok(REGULAR0_FD)
+        Ok(self.install_new_fd_entry(
+            REGULAR0_FD,
+            FileDescriptorEntry::regular(OpenFileDescriptionRef::Regular0, flags, close_on_exec),
+        ))
     }
 
     fn install_opened(
@@ -1361,22 +1375,13 @@ impl FileDescriptorTable {
             return Err(FileError::NotReady);
         }
 
-        let mut candidate = 0usize;
-        while candidate < FILE_FD_COUNT {
-            if self.entries[candidate].is_none() {
-                self.entries[candidate] = Some(FileDescriptorEntry::opened(
-                    ofd_ref,
-                    readable,
-                    writable,
-                    flags,
-                    close_on_exec,
-                ));
-                self.fd_installed.fetch_add(1, Ordering::AcqRel);
-                return Ok(candidate);
-            }
-            candidate += 1;
-        }
-        Err(FileError::TooManyOpenFiles)
+        let fd = self
+            .lowest_free_fd_from(0)
+            .ok_or(FileError::TooManyOpenFiles)?;
+        Ok(self.install_new_fd_entry(
+            fd,
+            FileDescriptorEntry::opened(ofd_ref, readable, writable, flags, close_on_exec),
+        ))
     }
 
     fn dup_fd(&mut self, fd: usize, min_fd: usize, close_on_exec: bool) -> FileResult<usize> {
@@ -1388,18 +1393,12 @@ impl FileDescriptorTable {
         }
 
         let source = self.lookup(fd)?;
-        let mut candidate = min_fd;
-        while candidate < FILE_FD_COUNT {
-            if self.entries[candidate].is_none() {
-                let mut duplicate = source;
-                duplicate.close_on_exec = close_on_exec;
-                self.entries[candidate] = Some(duplicate);
-                self.fd_installed.fetch_add(1, Ordering::AcqRel);
-                return Ok(candidate);
-            }
-            candidate += 1;
-        }
-        Err(FileError::TooManyOpenFiles)
+        let newfd = self
+            .lowest_free_fd_from(min_fd)
+            .ok_or(FileError::TooManyOpenFiles)?;
+        let mut duplicate = source;
+        duplicate.close_on_exec = close_on_exec;
+        Ok(self.install_new_fd_entry(newfd, duplicate))
     }
 
     fn dup3_fd(
@@ -1433,16 +1432,10 @@ impl FileDescriptorTable {
             return Err(FileError::NotReady);
         }
 
-        let mut candidate = REGULAR0_FD;
-        while candidate < FILE_FD_COUNT {
-            if self.entries[candidate].is_none() {
-                self.entries[candidate] = Some(FileDescriptorEntry::pidfd(child_pid));
-                self.fd_installed.fetch_add(1, Ordering::AcqRel);
-                return Ok(candidate);
-            }
-            candidate += 1;
-        }
-        Err(FileError::TooManyOpenFiles)
+        let fd = self
+            .lowest_free_fd_from(REGULAR0_FD)
+            .ok_or(FileError::TooManyOpenFiles)?;
+        Ok(self.install_new_fd_entry(fd, FileDescriptorEntry::pidfd(child_pid)))
     }
 
     fn install_pipe_pair(&mut self) -> FileResult<[usize; 2]> {

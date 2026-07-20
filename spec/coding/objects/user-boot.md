@@ -53,6 +53,16 @@ hardirq stack switching remain explicit follow-up boundaries in the active roadm
 read-only files use the VFS backend. Syscalls validate user memory and dispatch through these objects;
 they do not special-case fixture paths or add test-only kernel APIs.
 
+`FileDescriptorTable` maps successful single-entry creation through the private
+`install_new_fd_entry(fd, entry)` implementation primitive. Callers retain their own lifecycle,
+dependency, fd-range and entry-kind validation; first-free callers select the lowest unused slot at or
+above their existing lower bound through `lowest_free_fd_from(min_fd)` before installing. The install
+primitive writes exactly one previously free entry and advances `fd_installed` exactly once. This is a
+coding mapping shared by the existing model actions, not a new public API or formal action. Targeted
+`dup3` replacement must bypass it because an occupied `newfd` may be replaced and the dup3-specific facts
+are recorded separately. Atomic pipe-pair installation must also remain separate so capacity failure
+cannot expose a partial pair and success advances the installed-entry count by two.
+
 Current production slices include the modeled write/exit, read-only open/read/close/stat, ELF memory
 management, process/credential, TTY, time/random, signal and observed AF_UNIX pathname-error operations.
 Each slice follows the local Linux 6.12 RISC-V syscall ABI and preserves explicitly modeled errno and
