@@ -14,6 +14,13 @@ predicate guidance_agent_must_check_generated_result_against_concrete_requiremen
 predicate guidance_agent_must_not_guess_fix_without_reproducible_localization() -> bool;
 predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bool;
 predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
+predicate guidance_agent_must_read_specs_and_verify_baseline_before_no_feature_refactor() -> bool;
+predicate guidance_agent_may_implement_no_feature_refactor_before_spec_closure() -> bool;
+predicate guidance_agent_must_bound_no_feature_refactor_by_accepted_behavior() -> bool;
+predicate guidance_agent_must_keep_refactor_inconsistency_uncommitted() -> bool;
+predicate guidance_agent_must_close_refactor_layers_in_order() -> bool;
+predicate guidance_agent_must_preserve_test_acceptance_during_refactor() -> bool;
+predicate guidance_agent_must_stop_unclosable_refactor() -> bool;
 predicate guidance_agent_must_use_structured_boundary_inventory() -> bool;
 predicate guidance_agent_must_not_treat_trimmed_as_unimplemented() -> bool;
 predicate guidance_agent_must_close_boundary_with_facts_tests_and_archive() -> bool;
@@ -155,6 +162,62 @@ type RepositoryChangeWorkflow {
          * validating.
          */
         guidance_agent_must_make_checkpoint_artifact_checks_read_only();
+    }
+}
+
+type NoFeatureRefactorRoundWorkflow {
+    invariant {
+        /*
+         * A no-feature refactor round is a narrow implementation-first
+         * exception, not a feature-development shortcut. Before changing the
+         * implementation, the agent must read the applicable existing specs,
+         * record the baseline commit, behavior slice and acceptance tests,
+         * and confirm that the baseline repository-root make test passes.
+         */
+        guidance_agent_must_read_specs_and_verify_baseline_before_no_feature_refactor();
+
+        /*
+         * The implementation may be reorganized before specification closure
+         * only for behavior already accepted by the recorded tests. The round
+         * must not add a capability, widen an interface or specified object
+         * boundary, change Linux differential semantics, or create a new
+         * semantic promise. Stable system semantics are identified by their
+         * meaning, not by requiring multiple implementation instances.
+         */
+        guidance_agent_may_implement_no_feature_refactor_before_spec_closure();
+        guidance_agent_must_bound_no_feature_refactor_by_accepted_behavior();
+
+        /*
+         * Temporary implementation/specification inconsistency may exist only
+         * in the uncommitted worktree. It must not be committed, carried into
+         * another round or presented as a completed result.
+         */
+        guidance_agent_must_keep_refactor_inconsistency_uncommitted();
+
+        /*
+         * Once the implementation diff is available, it and reproducible test
+         * observations are the evidence for closure. Every applicable layer
+         * must be reviewed, with needed changes closed in this order: charter,
+         * formal model, coding mapping, then testing. A reviewed layer changes
+         * only when its semantics, mapping or acceptance contract changed.
+         */
+        guidance_agent_must_close_refactor_layers_in_order();
+
+        /*
+         * Tests may be reorganized with the refactor, but deleting, weakening
+         * or rewriting an assertion requires an explanation and preservation
+         * of the original scenario's observable acceptance purpose. Test
+         * weakening is not a specification-closure mechanism.
+         */
+        guidance_agent_must_preserve_test_acceptance_during_refactor();
+
+        /*
+         * If the implementation cannot be reconciled with a reasonable
+         * specification, the round stops and reports the conflict. The agent
+         * must not guess another implementation change or hide the conflict by
+         * weakening tests.
+         */
+        guidance_agent_must_stop_unclosable_refactor();
     }
 }
 
