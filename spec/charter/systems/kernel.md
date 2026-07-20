@@ -1,35 +1,120 @@
 # 内核系统
 
-内核系统（简称内核）指代计算机中的一次内核运行实例，它负责管理物理资源并在此之上建立应用运行环境。
+> [model] MUST：内核系统模型正式命名是Kernel。
 
-> [model] MUST：内核正式命名是Kernel。
+## 系统功能
 
-内核采用被动响应模式，在没有信号触发时不自行改变状态，也不自发向外发送信号。内核收到信号后
+内核系统（简称内核）的核心功能是运行用户应用，具体包括三层：
+
+1. 基础：对硬件平台资源进行统一管理和抽象；
+2. 机制：以任务为核心调度单元和资源分配单元；
+3. 目的：为用户应用提供运行环境。
+
+内核是被动响应模式，在没有信号触发时不自行改变状态，也不自发向外发送信号。内核收到信号后
 执行相应的迁移或动作，并可以在响应过程中继续同步或异步发送信号；响应完毕后重回静默状态。
 由于外部信号可能并发到来，内核对不同信号的响应过程可能重叠，所以内核需要建立同步/互斥机制
 进行必要的内部协调与状态保护。
+
+> GAP: 外部信号的并发交付、响应重叠、排序和失败语义尚未在 formal semantics 与当前 model 中闭合。
 
 被动响应和信号触发是内核以及各级子系统的统一模式，主要是降低整个计算机系统的工作能耗，并用
 一套因果关系简化系统建模。任务、CPU flow、调度和应用执行也是启动信号或运行时信号引起的后续
 响应链，不再引入主动模式作为另一种推进机制。
 
-## 边界与交互
+## 系统边界
 
-内核有三条边界：面向OpenSBI的启动边界，面向中断源的中断边界和面向硬件平台的硬件边界。
+内核有两条边界：
 
-内核是被动系统，只直接响应两种以 `Kernel` 为目标的外部信号：OpenSBI发出的启动信号，中断源
-发出的中断信号。
+1. 引导边界：内核的引导入口。
+2. 中断边界：中断信号入口。
+
+> GAP: 当前只列出两个输入边界，尚未覆盖下文硬件访问信号和 SBI-call 穿越的输出边界。
 
 <img src="../pic/内核边界.svg" alt="内核边界" style="zoom:50%;" />
 
-1. 启动边界：OpenSBI在引导末尾向内核发出启动信号，交接系统控制权，内核启动。启动信号引起内核内部的一系列连锁信号，推动内核的生命周期状态前进，并且触发首个应用启动。
-2. 中断边界：中断控制器代表各中断源向内核发出中断信号，内核响应中断。
-3. 硬件边界：硬件寄存器/MMIO界面。内核**不主动**访问硬件，内核对硬件的访问来源于启动信号的余波或者来源于中断信号。
-4. 应用边界：应用是内核的组成部分，因此应用边界**不是**内核的边界，它只是内核内部的子系统边界。
+## 关联系统
 
-异常、syscall、调度、任务切换等信号的目标是内核内部子系统，属于 `Kernel` 内部信号。内部信号
+内核与三个系统协作：
+
+1. OpenSBI：在计算机启动链上，是内核的上一级引导系统，在加载内核映像之后，向内核发出startup信号完成引导；在内核运行过程中，OpenSBI作为服务提供者，接收内核发出的sbi-call信号并响应。相对内核，它既是信号源也是信号目标。
+2. 中断控制器Interrupt Controller：中断控制器代表各种中断源，随时可能向内核发出中断信号。中断控制器只作为信号源。
+3. 硬件平台：硬件平台是计算机裸机系统，是对CPU、各类设备的集成。硬件平台只作为信号目标。注意：中断控制器也属于硬件平台的构成部分。在配置路径上，内核向中断控制器发出配置信号，中断控制器只是作为硬件平台中的普通设备；在上面讨论的中断路径上，中断控制器向内核发出中断信号。
+
+> GAP: 中断控制器“只作为信号源”与配置路径上作为信号目标的描述冲突，并且它作为硬件平台子系统时的分析层级尚未明确。
+
+注意，应用是内核的内部组成部分，不是与内核平级的关联系统。
+
+## 信号
+
+内核作为信号目标系统可以接收的信号：
+
+1. 引导信号：如前所述，OpenSBI向内核发出引导信号startup，把引导控制权移交到内核。内核对应处理该信号的迁移过程是Kernel.OnPreset。
+2. 中断信号：如前所述，中断控制器向内核发出中断信号irq，内核对应处理该信号的动作是Kernel.OnIrq。
+
+> GAP: Kernel.OnPreset 与 Kernel.OnIrq 的 Signal-to-Transition/Action 绑定尚未在正式 Signal DSL 和当前 model 中定义。
+
+内核可能发出的信号：
+
+1. 硬件访问信号：包括针对硬件平台各类设备的一系列信号类型，如针对Cpu寄存器gpr/csr的访问信号，针对各类设备的io/mmio访问信号。
+2. Sbi-call服务调用信号：面向OpenSBI服务的调用。
+
+> GAP: 硬件访问信号和 SBI-call 的目标系统、同步方式、附加信息及当前 model 映射尚未定义。
+
+注意：异常、syscall、调度、任务切换等信号的目标是内核内部子系统，所以属于 `Kernel` 内部信号。内部信号
 只触发其明确的目标子系统，不沿系统层级自动向上冒泡，因此不能直接触发 `Kernel` 自身的迁移或
-动作。上图只描述 `Kernel` 层面的外部信号，没有展开这些内部信号和子系统边界。
+动作。
+
+## 状态机
+
+### 生命周期范式
+
+生命周期符合[阶段范式](../phase-paradigm.md)。内核启动信号触发 `Kernel.Transition::Preset` 响应过程。
+
+> [model] MUST：以 `Kernel` 为目标的启动信号触发 `Kernel.Transition::Preset`；`Signal` 与
+> `Transition` 是不同概念。
+
+### 状态与迁移
+
+* Base：内核处于等待状态，等待引导信号startup触发它启动，引导信号是Preset信号的别名。
+
+  > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
+
+* OnPreset：内核收到引导信号startup，识别引导初始化任务BootInitTask并执行早期初始化。BootInitTask本质上是内核对于引导信号的反应过程的抽象。
+
+  > GAP: BootInitTask 在当前 model 中是根任务对象，不是 Kernel 引导响应过程本身，其对象身份和执行 owner 尚未对齐。
+
+  > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
+  > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
+  > `EntryPreludePhase.Transition::Preset`。
+
+* Prepared：内核此时不响应中断，只有唯一的引导初始化任务BootInitTask处于就绪状态。
+
+  > GAP: 当前 model 在 Kernel.Prepared 时已使 BootInitTask 到达 Online，并由 EntryPreludePhase 建立多个其它对象；这里的“就绪”尚需定义为任务运行态事实或与 lifecycle 对齐。
+
+* OnSetup：内核收到Setup信号，BootInitTask正式启动并代表内核完成中期初始化。
+
+  > GAP: 当前 model 的 Kernel.Setup 只驱动 BootPhase 和 InterruptPhase，BootInitTask 已在 Kernel.Preset 内到达 Online，“正式启动”时点尚未对齐。
+
+  > [model] MUST：先向 `BootPhase` 同步发送 Preset 启动信号并等待其到达 `Online`，再向
+  > `InterruptPhase` 同步发送 Preset 启动信号并等待其到达 `Online`；当前 model 兼容写法为
+  > 按此顺序驱动两个阶段的 `Transition::Preset`。
+
+* Ready：内核已经初步具备响应中断信号的能力，等待Enable信号以触发多任务启动。
+
+* OnEnable：内核收到Enable信号，加载并切换到首个用户应用中运行。
+
+  > GAP: 当前 model 的 Kernel.Enable 还顺序驱动 UP 多任务、SMP/runtime 和 selected payload，且 payload 可为内核态 Hello/Smoke，不保证切换到用户应用。
+
+  > [model] MUST：依次向 `UpMultitaskPhase`、`SmpRuntimePhase` 和 `PayloadPhase` 同步发送 Preset
+  > 启动信号并等待各阶段完成；当前 model 兼容写法为依次驱动各阶段的 `Transition::Preset`。
+
+* Online：内核处于正常服务状态，支持应用运行。
+
+## 动作
+
+* OnIrq：内核响应中断信号。
+
+  > GAP: Kernel.OnIrq 尚未在 spec/model/systems/kernel.spec 定义为 Online 状态内 action，也未映射到现有 RiscvIntc、PLIC 和 IRQ 子系统处理链。
 
 ## 功能构成
 
@@ -41,45 +126,6 @@
 先确定它们是新的聚合系统对象，还是由现有 Task、Scheduler、InterruptPhase、EventStream、
 InterruptStream 和 IRQ 对象改造形成；在决定前，不把任一现有 phase 或 stream 直接等同于这两个
 子系统。
-
-## 生命周期
-
-### 范式
-
-符合[阶段范式](../phase-paradigm.md)。内核启动信号触发 `Kernel.Transition::Preset` 响应过程。
-
-> [model] MUST：以 `Kernel` 为目标的启动信号触发 `Kernel.Transition::Preset`；`Signal` 与
-> `Transition` 是不同概念。
-
-### 状态与迁移
-
-* Base：内核映像驻留在内存/闪存中，尚未启动，等待启动信号。
-
-  > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
-
-* Preset：内核通过入口前导期过程。
-
-  > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
-  > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
-  > `EntryPreludePhase.Transition::Preset`。
-
-* Prepared：入口前导期已经完成；BootPhase 尚未启动，中断尚未开启。
-
-* Setup：内核按顺序通过引导期和中断期过程。
-
-  > [model] MUST：先向 `BootPhase` 同步发送 Preset 启动信号并等待其到达 `Online`，再向
-  > `InterruptPhase` 同步发送 Preset 启动信号并等待其到达 `Online`；当前 model 兼容写法为
-  > 按此顺序驱动两个阶段的 `Transition::Preset`。
-
-* Ready：入口前导期、引导期和中断期均已完成，中断已经开启，内核具备了支持多任务的能力，
-  但是还没有真正启动多任务。
-
-* Enable：内核通过单核多任务期、多核运行期和应用交接期阶段。
-
-  > [model] MUST：依次向 `UpMultitaskPhase`、`SmpRuntimePhase` 和 `PayloadPhase` 同步发送 Preset
-  > 启动信号并等待各阶段完成；当前 model 兼容写法为依次驱动各阶段的 `Transition::Preset`。
-
-* Online：内核处于正常服务状态，支持应用运行。
 
 ## 引用
 

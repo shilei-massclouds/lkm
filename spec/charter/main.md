@@ -11,8 +11,9 @@
 
 > `spec/charter/main.md` 将逐步收缩为总览。
 
-1. [内核系统](systems/kernel.md)：内核的一次运行实例，基于内存已经加载的内核映像，获得上级BootLoader移交的控制权后开始启动，为应用提供运行环境。
-2. [对象级章程入口](objects/README.md)：对象设计意图的专题入口；正式 model object 文件到 coding 的完整覆盖见
+1. [系统分析与建模流程](system-analysis-and-modeling-process.md)：分析与建立各级系统模型的通用流程。
+2. [内核系统](systems/kernel.md)：内核的一次运行实例，基于内存已经加载的内核映像，获得上级BootLoader移交的控制权后开始启动，为应用提供运行环境。
+3. [对象级章程入口](objects/README.md)：对象设计意图的专题入口；正式 model object 文件到 coding 的完整覆盖见
    [`../coding/objects/README.md`](../coding/objects/README.md)。
 
 ## 定位
