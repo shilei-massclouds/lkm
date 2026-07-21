@@ -1,16 +1,16 @@
 # TaskFlow
 
 `TaskFlow` 是 Task 当前执行 continuation 的独立生命周期载体。每个 Flow 恰有一个 owner Task，
-而 Task 与 Flow 的 identity、lifecycle state 和 teardown 事实分别保存。exec 或 boot idle handoff
-只替换 active Flow，不替换 Task；fork/clone 则创建新的 Task 和新的初始 Flow。
+而 Task 与 Flow 的 identity、lifecycle state 和 teardown 事实分别保存。exec 只替换 active Flow，
+不替换 Task；fork/clone 则创建新的 Task 和新的初始 Flow。启动编排属于 `BootInitFlow`
+PhaseObject，不建立 boot-init TaskFlow。
 
 Task carrier、TaskRef、类型级 lifecycle 及 Task teardown 前置条件见 [`Task`](task.md)。
 
 ## 静态与动态 Flow 实例
 
-- `RootStream` 承载 `BootTask` 的 boot init Flow。它当前仍是 `BootInitFlowType` 的临时具名实例；
-  其重命名以及全仓 Stream -> Flow 迁移不属于本轮。
-- `BootIdleFlow` 是同一 `BootTask` 的 idle continuation；handoff 不建立第二个 Task carrier。
+- `BootIdleFlow` 是 `BootTask` 的首个 TaskFlow。`BootInitFlow.Enable` 在不可逆切换前完成完整预检，
+  直接建立其 owner/active binding；这不是从旧 TaskFlow 的 handoff，也不建立第二个 Task carrier。
 - `KernelInitFlow` 承载 `KernelInitTask` 的 `kernel_init()`、pre-SMP、initcall 和 exec 前内核
   continuation。
 - `KthreaddFlow` 承载 `KthreaddTask` 的服务循环。
@@ -45,10 +45,12 @@ Cleanup。Flow `Disable` 必须清除 active binding，`Cleanup` 只允许从 Of
 Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 Disable Task，存在未
 Destroyed Flow 时不得 Cleanup Task。
 
-## Handoff 与 exec replacement
+## 首个 binding 与 exec replacement
 
-boot idle handoff 保持 `BootTask` 身份，顺序为旧 `RootStream` 停止、提交 active binding 到
-`BootIdleFlow`，再进入 idle continuation。实现可以保留 scheduler-owned 的 idle metadata、锁或
+boot idle 首个 binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在首次真实调度切换前直接提交
+owner 和 active binding，并到达 Ready；`BootInitFlow.Online` 随后在真实 BootTask→KernelInitTask
+switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时，`BootIdleFlow` continuation 才
+驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以保留 scheduler-owned 的 idle metadata、锁或
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。
 
 successful exec 同样保持 owner Task identity，并使用固定顺序：
@@ -70,6 +72,5 @@ owner/generation/lifecycle 不变量失败属于终止错误，不允许通过�
 
 ## 当前能力边界
 
-本轮不引入循环、并发调度、通用垃圾回收或 Signal 新语法。`RootStream` 命名以及全仓
-Stream -> Flow 迁移仍保持 deferred；Flow teardown 继续只由显式 `Disable/Cleanup`、非零 generation
-和正式 owner/binding 事实决定。
+本轮不引入循环、并发调度、通用垃圾回收或 Signal 新语法。Flow teardown 继续只由显式
+`Disable/Cleanup`、非零 generation 和正式 owner/binding 事实决定。

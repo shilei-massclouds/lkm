@@ -129,10 +129,14 @@ class ListCheckpointsTests(unittest.TestCase):
         by_name = {record.name: record for record in records}
 
         self.assertIn("Kernel.Started", by_name)
+        self.assertIn("BootTask.Online", by_name)
+        self.assertIn("BootInitFlow.Started", by_name)
         self.assertIn("BootPhase.Started", by_name)
         self.assertIn("EntryPreludePhase.Started", by_name)
         self.assertIn("PayloadPhase.Online", by_name)
         self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
+        self.assertEqual(by_name["BootTask.Online"].early_byte, "T")
+        self.assertEqual(by_name["BootInitFlow.Started"].early_byte, "O")
         self.assertEqual(by_name["BootPhase.Started"].early_byte, "B")
         self.assertEqual(
             by_name["EntryPreludePhase.Started"].early_byte,
@@ -151,7 +155,7 @@ class ListCheckpointsTests(unittest.TestCase):
             "LocalIrqEnablePhase",
             "IrqOpenPreparePhase",
             "ProcessPreparePhase",
-            "UpMultitaskPhase",
+            "BootInitFlow",
             "BootInitRestInitPhase",
             "BootInitScheduleHandoffPhase",
             "BootIdleEntryPhase",
@@ -171,95 +175,98 @@ class ListCheckpointsTests(unittest.TestCase):
                 self.assertIn(f"{phase}.{boundary}", by_name)
 
         stable_interrupt_ids = {
-            "InterruptPhaseStarted": 6,
-            "InterruptPhaseReady": 7,
-            "IrqTimeInitPhaseStarted": 174,
-            "IrqTimeInitPhaseReady": 175,
-            "IrqTimeInitPhaseOnline": 176,
-            "LocalIrqEnablePhaseStarted": 211,
-            "LocalIrqEnablePhaseReady": 212,
-            "IrqOpenPreparePhaseStarted": 214,
-            "IrqOpenPreparePhaseReady": 215,
-            "ProcessPreparePhaseStarted": 233,
-            "ProcessPreparePhaseReady": 234,
+            "InterruptPhaseStarted": 8,
+            "InterruptPhaseReady": 9,
+            "IrqTimeInitPhaseStarted": 173,
+            "IrqTimeInitPhaseReady": 174,
+            "IrqTimeInitPhaseOnline": 175,
+            "LocalIrqEnablePhaseStarted": 210,
+            "LocalIrqEnablePhaseReady": 211,
+            "IrqOpenPreparePhaseStarted": 213,
+            "IrqOpenPreparePhaseReady": 214,
+            "ProcessPreparePhaseStarted": 232,
+            "ProcessPreparePhaseReady": 233,
         }
-        stable_up_multitask_ids = {
-            "UpMultitaskPhaseStarted": 268,
-            "UpMultitaskPhaseReady": 269,
-            "BootInitRestInitPhaseReady": 270,
-            "BootInitScheduleHandoffPhaseReady": 271,
-            "BootIdleEntryPhaseReady": 272,
+        boot_init_ids = {
+            "BootTaskOnline": 1,
+            "BootInitFlowStarted": 2,
+            "BootInitFlowPrepared": 267,
+            "BootInitFlowReady": 268,
+            "BootInitRestInitPhaseReady": 269,
+            "BootInitScheduleHandoffPhaseReady": 270,
+            "BootIdleEntryPhaseReady": 271,
+            "BootInitFlowOnline": 449,
         }
         stable_smp_runtime_ids = {
-            "PreSmpInitPhaseStarted": 294,
-            "PreSmpInitPhaseReady": 295,
-            "SmpRuntimePhaseStarted": 303,
-            "SmpRuntimePhaseReady": 304,
-            "SmpBringupPhaseStarted": 305,
-            "SmpBringupPhaseReady": 306,
-            "RuntimeCorePhaseStarted": 340,
-            "RuntimeCorePhaseReady": 341,
-            "InitcallPhaseStarted": 348,
-            "InitcallPhaseReady": 349,
-            "RootfsPhaseStarted": 369,
-            "RootfsPhaseReady": 370,
-            "FinalizePhaseStarted": 379,
-            "FinalizePhaseReady": 380,
+            "PreSmpInitPhaseStarted": 293,
+            "PreSmpInitPhaseReady": 294,
+            "SmpRuntimePhaseStarted": 302,
+            "SmpRuntimePhaseReady": 303,
+            "SmpBringupPhaseStarted": 304,
+            "SmpBringupPhaseReady": 305,
+            "RuntimeCorePhaseStarted": 339,
+            "RuntimeCorePhaseReady": 340,
+            "InitcallPhaseStarted": 347,
+            "InitcallPhaseReady": 348,
+            "RootfsPhaseStarted": 368,
+            "RootfsPhaseReady": 369,
+            "FinalizePhaseStarted": 378,
+            "FinalizePhaseReady": 379,
         }
         stable_ap_phase_ids = {
-            "ApEntryPreludePhaseStarted": 321,
-            "ApEntryPreludeBootDataConsumed": 322,
-            "ApEntryPreludeCurrentStackEstablished": 323,
-            "ApEntryPreludePhaseReady": 324,
-            "ApSmpCallinPhaseStarted": 325,
-            "ApSmpCallinCpuRunningProduced": 326,
-            "ApSmpCallinPhaseReady": 327,
-            "ApOnlineIdlePhaseStarted": 328,
-            "ApOnlineIdleDoneUpProduced": 329,
-            "ApOnlineIdlePhaseReady": 330,
+            "ApEntryPreludePhaseStarted": 320,
+            "ApEntryPreludeBootDataConsumed": 321,
+            "ApEntryPreludeCurrentStackEstablished": 322,
+            "ApEntryPreludePhaseReady": 323,
+            "ApSmpCallinPhaseStarted": 324,
+            "ApSmpCallinCpuRunningProduced": 325,
+            "ApSmpCallinPhaseReady": 326,
+            "ApOnlineIdlePhaseStarted": 327,
+            "ApOnlineIdleDoneUpProduced": 328,
+            "ApOnlineIdlePhaseReady": 329,
         }
         appended_smp_runtime_ids = {
-            "SmpRuntimePhasePrepared": 461,
-            "SmpRuntimePhaseOnline": 462,
-            "PreSmpInitPhasePrepared": 463,
-            "PreSmpInitPhaseOnline": 464,
-            "SmpBringupPhasePrepared": 465,
-            "SmpBringupPhaseOnline": 466,
-            "RuntimeCorePhasePrepared": 467,
-            "RuntimeCorePhaseOnline": 468,
-            "InitcallPhasePrepared": 469,
-            "InitcallPhaseOnline": 470,
-            "RootfsPhasePrepared": 471,
-            "RootfsPhaseOnline": 472,
-            "FinalizePhasePrepared": 473,
-            "FinalizePhaseOnline": 474,
+            "SmpRuntimePhasePrepared": 459,
+            "SmpRuntimePhaseOnline": 460,
+            "PreSmpInitPhasePrepared": 461,
+            "PreSmpInitPhaseOnline": 462,
+            "SmpBringupPhasePrepared": 463,
+            "SmpBringupPhaseOnline": 464,
+            "RuntimeCorePhasePrepared": 465,
+            "RuntimeCorePhaseOnline": 466,
+            "InitcallPhasePrepared": 467,
+            "InitcallPhaseOnline": 468,
+            "RootfsPhasePrepared": 469,
+            "RootfsPhaseOnline": 470,
+            "FinalizePhasePrepared": 471,
+            "FinalizePhaseOnline": 472,
         }
         appended_ap_phase_ids = {
-            "ApEntryPreludePhasePrepared": 475,
-            "ApEntryPreludePhaseOnline": 476,
-            "ApSmpCallinPhasePrepared": 477,
-            "ApSmpCallinPhaseOnline": 478,
-            "ApOnlineIdlePhasePrepared": 479,
-            "ApOnlineIdlePhaseOnline": 480,
+            "ApEntryPreludePhasePrepared": 473,
+            "ApEntryPreludePhaseOnline": 474,
+            "ApSmpCallinPhasePrepared": 475,
+            "ApSmpCallinPhaseOnline": 476,
+            "ApOnlineIdlePhasePrepared": 477,
+            "ApOnlineIdlePhaseOnline": 478,
         }
         stable_payload_ids = {
-            "PayloadPhaseReady": 432,
-            "PayloadPhaseOnline": 433,
+            "PayloadPhaseReady": 431,
+            "PayloadPhaseOnline": 432,
         }
         appended_payload_ids = {
-            "PayloadPhaseStarted": 481,
-            "PayloadPhasePrepared": 482,
+            "PayloadPhaseStarted": 479,
+            "PayloadPhasePrepared": 480,
         }
         appended_user_stack_ids = {
-            "UserStackGrowComplete": 483,
-            "UserStackGrowRejected": 484,
+            "UserStackGrowComplete": 481,
+            "UserStackGrowRejected": 482,
         }
         appended_task_flow_ids = {
-            "KernelInitFlowOffline": 485,
-            "KernelInitFlowDestroyed": 486,
-            "UserAppFlowPrepared": 487,
-            "UserAppFlowReady": 488,
-            "UserAppFlowOnline": 489,
+            "KernelInitFlowOffline": 483,
+            "KernelInitFlowDestroyed": 484,
+            "UserAppFlowPrepared": 485,
+            "UserAppFlowReady": 486,
+            "UserAppFlowOnline": 487,
         }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
@@ -272,9 +279,9 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertEqual(
             {
                 variant: by_variant[variant].index
-                for variant in stable_up_multitask_ids
+                for variant in boot_init_ids
             },
-            stable_up_multitask_ids,
+            boot_init_ids,
         )
         self.assertEqual(
             {
@@ -328,7 +335,7 @@ class ListCheckpointsTests(unittest.TestCase):
             },
             appended_task_flow_ids,
         )
-        self.assertEqual(len(records), 490)
+        self.assertEqual(len(records), 488)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,12 @@
 /*
  * Entry Prelude Phase Specification
  *
- * This Kernel-owned phase covers the current formal model from kernel entry through
+ * This BootInitFlow-owned phase covers the current formal model from kernel entry through
  * the point where EarlyVm is online and the entry-prelude boundary is ready.
  */
 
 /*
- * RootStream 与 BootTask 的定义分别集中在 task_flow.spec 和
- * task.spec；本文件拥有它们进入早期地址空间时所需的 binding 协议，
+ * BootTask 的定义集中在 task.spec；本文件拥有它进入早期地址空间时所需的 binding 协议，
  * 并编排入口前导期中的迁移顺序。
  */
 
@@ -27,7 +26,7 @@ object BootTaskEntryBinding: KernelObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
-                    BootTask.state == State::Base;
+                    BootTask.state == State::Online;
                 }
 
                 may_change {
@@ -45,7 +44,7 @@ object BootTaskEntryBinding: KernelObject {
         }
     }
 
-    /* Prepared 表示物理 tp binding 已完整建立，可提交 BootTask.Prepared。 */
+    /* Prepared 表示物理 tp binding 已完整建立。 */
     state State::Prepared {
         invariant {
             Riscv64.tp == phys_addr(BootTask.storage);
@@ -59,7 +58,7 @@ object BootTaskEntryBinding: KernelObject {
             /* Setup 在 EarlyVm 就绪后切换到同一 carrier 的虚拟地址。 */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootTask.state == State::Prepared;
+                    BootTask.state == State::Online;
                     Vm.state == State::Ready;
                 }
 
@@ -78,7 +77,7 @@ object BootTaskEntryBinding: KernelObject {
         }
     }
 
-    /* Ready 表示虚拟 tp binding 已提交，BootTask 可以进入 Online。 */
+    /* Ready 表示虚拟 tp binding 已提交；BootTask 始终保持 Online。 */
     state State::Ready {
         invariant {
             Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
@@ -2119,7 +2118,7 @@ object Soc: HardwareObject {
  */
 object EntryPreludePhase: PhaseObject {
     initial_state: State::Base;
-    parent: Kernel;
+    parent: BootInitFlow;
 
     /*
      * Base 表示入口前导期刚开始，默认上下文为系统独占。
@@ -2144,17 +2143,19 @@ object EntryPreludePhase: PhaseObject {
                     Config.state == State::Online;
                 }
 
+                may_change {
+                    Riscv64.sstatus;
+                }
+
                 drives {
                     InterruptStream.Transition::Preset;
                     KernelImage.Transition::Preset;
-                    RootStream.Transition::Preset;
                     KernelImage.Transition::Setup;
                     BootCurrentCPU.Transition::Preset;
                     BootCurrentCPU.Transition::Setup;
                     CpuGroup.Transition::Preset;
                     BootCurrentCPU.Transition::Enable;
                     BootTaskEntryBinding.Transition::Preset;
-                    BootTask.Transition::Preset;
                     BootInitStack.Transition::Preset;
                     EventStream.Transition::Preset;
                     ExceptionStream.Transition::Preset;
@@ -2162,9 +2163,14 @@ object EntryPreludePhase: PhaseObject {
                     Vm.Transition::Setup;
                     EventStream.Transition::Setup;
                     BootTaskEntryBinding.Transition::Setup;
-                    BootTask.Transition::Enable;
                     BootInitStack.Transition::Setup;
                     Soc.Transition::Preset;
+                }
+
+                ensures {
+                    kernel_fpu_disabled(Riscv64.sstatus);
+                    kernel_vector_disabled(Riscv64.sstatus);
+                    BootTask.state == State::Online;
                 }
 
                 emits {
@@ -2187,6 +2193,12 @@ object EntryPreludePhase: PhaseObject {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
+                ensures {
+                    kernel_fpu_disabled(Riscv64.sstatus);
+                    kernel_vector_disabled(Riscv64.sstatus);
+                    task_ref_targets(BootTaskRef, BootTask);
+                    task_ref_ready(BootTaskRef);
+                }
             }
         }
     }
@@ -2196,7 +2208,8 @@ object EntryPreludePhase: PhaseObject {
             interrupt_concurrency_closed();
             task_concurrency_closed();
             context_is(SystemExclusive);
-            RootStream.state == State::Prepared;
+            kernel_fpu_disabled(Riscv64.sstatus);
+            kernel_vector_disabled(Riscv64.sstatus);
             InterruptStream.state == State::Prepared;
             EventStream.state == State::Ready;
             ExceptionStream.state == State::Prepared;

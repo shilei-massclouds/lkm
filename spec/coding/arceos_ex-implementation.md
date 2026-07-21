@@ -28,7 +28,7 @@ coding 规则来源，也不覆盖 model、project/system/phase/object/testing �
 尚未恢复 tgoskits/ArceOS crate 兼容、overlay workspace、feature 传递、`axlog` 或 `ax-alloc`
 facade；这些属于 roadmap 中延期的 Composition Phase。
 
-当前实现已经贯通 Boot、Interrupt、UpMultitask、SmpRuntime 与 Payload 的模型阶段树。默认 smoke
+当前实现已经贯通 BootInitFlow、SmpRuntime 与 Payload 的模型阶段树。默认 smoke
 payload 执行对象级用例后通过 SBI 关机；`APP=hello` 观察最终 KernelInitTask payload handoff；
 `APP=user-boot` 观察 ext2/VFS/ELF/user-entry/syscall 路径。
 
@@ -64,7 +64,7 @@ make clean
 
 实现位于 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。当前路径在本地 IRQ 打开之后建立
 ProcessPrepare 的 runtime service facts、VFS 初始 ramfs root、FsStruct/FilesStruct 前置对象和
-UpMultitask handoff；测试读取 checkpoint 时已有的事实，不在 handler 中推进对象。
+BootInitFlow handoff；测试读取 checkpoint 时已有的事实，不在 handler 中推进对象。
 
 ### Completion
 
@@ -76,10 +76,10 @@ instance。
 
 ### rest_init 与首轮 task handoff
 
-权威映射：[`phases/up-multitask/rest-init.md`](phases/up-multitask/rest-init.md)、
+权威映射：[`phases/boot-init/rest-init.md`](phases/boot-init/rest-init.md)、
 [`objects/effective-context.md`](objects/effective-context.md) 和 [`riscv64.md`](riscv64.md)。
 
-实现分布在 `impl/arceos_ex/src/phases/up_multitask/rest_init.rs`、scheduler/task/context 对象与 RISC-V
+实现分布在 `impl/arceos_ex/src/phases/boot_init/rest_init.rs`、scheduler/task/context 对象与 RISC-V
 switch lowering。BootTask 保留静态 boot stack；KernelInitTask/KthreaddTask 使用新分配的 vmalloc
 stack。最终线性启动 handoff 保存 BootTask context、恢复 KernelInitTask stack，由
 `kernel_init_entry()` 继续 SmpRuntime/Payload。BootIdle continuation 进入 `schedule_idle()`，

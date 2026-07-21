@@ -24,9 +24,19 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || ctx.boot_cpu_current_task.current() != TaskRef::KERNEL_INIT
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || !ctx.scheduler.boot_idle_preemption().disabled()
+        || ctx.scheduler.boot_idle_preemption().disabled()
     {
-        printk::write_str("current CPU or idle task control facts invalid\n");
+        printk::write_fmt(format_args!(
+            "current CPU or idle task control facts invalid: cpu_online={} owns_boot_cpu={} registered={} current_slot_ready={} current_is_kernel_init={} current_ref_is_kernel_init={} idle_preemption_ready={} idle_preemption_disabled={}\n",
+            ctx.boot_current_cpu.state() == State::Online,
+            ctx.boot_current_cpu.owns_boot_cpu(),
+            ctx.boot_current_cpu.registered_in_cpu_group(),
+            ctx.boot_cpu_current_task.state() == State::Ready,
+            ctx.boot_cpu_current_task.current_is_kernel_init(),
+            ctx.boot_cpu_current_task.current() == TaskRef::KERNEL_INIT,
+            ctx.scheduler.boot_idle_preemption().state() == State::Ready,
+            ctx.scheduler.boot_idle_preemption().disabled(),
+        ));
         return SmokeResult::Failed;
     }
     if !ctx.boot_cpu_local_interrupt.enabled() {
@@ -129,13 +139,13 @@ pub fn run() -> SmokeResult {
         || !boot_idle_setup_state.switch_ctx_initialized()
         || boot_idle_setup_state.core_saved_count() == 0
         || boot_idle_setup_state.core_restored_count() == 0
-        || ctx.scheduler.idle_schedule_passes() == 0
-        || ctx.scheduler.idle_schedule_returned_passes() != ctx.scheduler.idle_schedule_passes()
+        || ctx.scheduler.idle_schedule_passes() != 0
+        || ctx.scheduler.idle_schedule_returned_passes() != 0
         || ctx.scheduler.idle_schedule_identity_passes() != 0
         || ctx.scheduler.identity_switch_passes() != 0
-        || ctx.scheduler.switch_to_passes() <= ctx.scheduler.idle_schedule_passes()
-        || ctx.boot_cpu_current_task.switch_committed_count()
-            <= ctx.scheduler.idle_schedule_passes()
+        || crate::phases::boot_init::rest_init::boot_idle_entry_is_online()
+        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
+        || ctx.scheduler.kernel_init_stack_switch_returned_count() != 0
         || ctx.boot_cpu_local_interrupt.saved_and_disabled_count() == 0
         || ctx.boot_cpu_local_interrupt.restored_count() == 0
     {

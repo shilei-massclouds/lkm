@@ -1079,6 +1079,7 @@ type SchedulerObject: KernelObject {
                             task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
                             current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                             scheduler_first_schedule_committed(self);
+                            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                         }
                     }
                 }
@@ -1113,6 +1114,7 @@ type SchedulerObject: KernelObject {
                 task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_first_schedule_committed(self);
+                kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             }
         }
 

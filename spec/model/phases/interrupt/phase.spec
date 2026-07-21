@@ -39,7 +39,7 @@ context SingleTaskInterruptStreamContext: Context {
  */
 object InterruptPhase: PhaseObject {
     initial_state: State::Base;
-    parent: Kernel;
+    parent: BootInitFlow;
 
     /*
      * Base 表示中断期阶段对象已经进入模型空间，但尚未推进其子阶段。

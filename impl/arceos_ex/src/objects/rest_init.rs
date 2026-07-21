@@ -1421,7 +1421,6 @@ impl BootIdleFlow {
     pub fn setup(
         &mut self,
         boot_task: &mut BootTask,
-        root_stream: &mut super::root_stream::RootStream,
         scheduler: &Scheduler,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
@@ -1429,24 +1428,24 @@ impl BootIdleFlow {
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.flow.state() != State::Base
-            || root_stream.state() != State::Prepared
-            || !root_stream.active()
-            || root_stream.owner() != boot_task.task_ref()
-            || boot_task.task().active_flow() != root_stream.flow_ref()
+            || boot_task.state() != State::Online
+            || boot_task.task_ref() != TaskRef::BOOT
+            || boot_task.pid() != 0
+            || boot_task.task().active_flow().is_valid()
             || scheduler.state() != State::Online
             || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || kernel_init_task.state() != State::Online
             || !kernel_init_task.waiting_for_kthreadd_done()
             || kthreadd_task.state() != State::Online
             || kthreadd_ready_gate.state() != State::Online
-            || scheduler.schedule_passes() == 0
+            || scheduler.schedule_passes() != 0
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
         {
             return self.failed_setup();
         }
 
-        self.first_schedule_committed = true;
+        self.first_schedule_committed = false;
         self.idle_entry_prepared = false;
         self.cpu_startup_entry_ready = false;
         self.idle_loop_entered = false;
@@ -1484,14 +1483,10 @@ impl BootIdleFlow {
         self.boot_cpu_hotplug_online = false;
         self.secondary_cpus_not_started = true;
         self.kernel_init_task_switch_handoff_ready = true;
-        root_stream.prepare_for_handoff(boot_task)?;
         self.flow
-            .preset(boot_task.task_mut(), root_stream.flow_ref(), None)?;
+            .preset(boot_task.task_mut(), TaskFlowRef::NONE, None)?;
         self.flow.setup(Some(Checkpoint::BootIdleFlowReady))?;
-        boot_task
-            .task_mut()
-            .commit_flow_handoff(root_stream.core(), &mut self.flow)?;
-        root_stream.cleanup_after_handoff(boot_task)
+        boot_task.task_mut().bind_initial_flow(&mut self.flow)
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
@@ -1515,8 +1510,10 @@ impl BootIdleFlow {
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.flow.state() != State::Ready
-            || !self.first_schedule_committed
             || scheduler.state() != State::Online
+            || scheduler.schedule_passes() == 0
+            || scheduler.kernel_init_stack_switch_started_count() != 1
+            || scheduler.kernel_init_stack_switch_returned_count() != 1
             || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
@@ -1524,6 +1521,7 @@ impl BootIdleFlow {
             return self.failed_ready_action();
         }
 
+        self.first_schedule_committed = true;
         self.idle_entry_prepared = true;
         self.cpu_startup_entry_ready = true;
         self.boot_init_handoff_complete = true;
@@ -1735,7 +1733,7 @@ pub(crate) extern "C" fn kernel_init_entry() -> ! {
         "kernel_init entry stack invariant failed\n",
     );
     crate::arch::riscv64::sbi::putstr("kernel_init (pid=1) started\n");
-    crate::systems::kernel::enable_after_up_multitask()
+    crate::systems::kernel::enable_after_boot_init()
 }
 
 pub(crate) extern "C" fn kthreadd_entry() -> ! {

@@ -7,9 +7,9 @@ InterruptPhase 是 Kernel 的第三个直接子阶段，负责在 BootPhase 已�
 ## 边界与职责
 
 - 入口：`Kernel.Setup` 在 `BootPhase.Online` 后驱动 `InterruptPhase.Preset`。
-- 出口：InterruptPhase 到达 Online 后返回 `Kernel.Setup` continuation；由 Kernel 决定是否以及
-  何时驱动 UpMultitaskPhase。
-- 本阶段只拥有下列四个直接子阶段，不拥有 `BootInitRestInitPhase` 或其它 UpMultitask 子阶段。
+- 出口：InterruptPhase 到达 Online 后返回 `BootInitFlow.Setup` continuation；由 BootInitFlow 决定
+  何时进入 Enable。
+- 本阶段只拥有下列四个直接子阶段，不拥有 `BootInitRestInitPhase` 或其它启动叶子阶段。
 
 四个子阶段按固定顺序执行：
 
@@ -38,7 +38,7 @@ Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
 
 InterruptPhase.Preset 依次驱动四个子阶段到 Online 后提交 Prepared；InterruptPhase.Setup 检查
 完整子阶段 Online 集合后提交 Ready；InterruptPhase.Enable 提交 Online 并返回
-`Kernel.Setup` continuation。
+`BootInitFlow.Setup` continuation。
 
 ## 引用
 

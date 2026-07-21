@@ -79,29 +79,28 @@
 
   > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
 
-* OnPreset：内核收到引导信号 startup，由静态 `BootTask` 的 `RootStream` 执行早期初始化。
+* OnPreset：内核收到引导信号 startup，由静态且已经 Online 的 `BootTask` 执行早期初始化。
   `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
 
-  入口协议由 `EntryPreludePhase` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp`
-  绑定到静态 `init_task` 并建立初始抢占关闭事实，再提交 `BootTask.Prepared`；`EarlyVm` 就绪后，
-  binding 把 `tp` 切换为同一 carrier 的虚拟地址，再提交 `BootTask.Online`。该 binding 不是第二个
-  Task、TaskRef 或调度实体，也不改变 PID 0 identity。
+  `BootTask.Online` 在 `_start` 紧随 `Kernel.Started` 观察且只观察一次。随后 `BootInitFlow.Started`
+  启动标准阶段生命周期，并由其 Preset 驱动 `EntryPreludePhase`。入口协议由
+  `EntryPreludePhase` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp` 绑定到静态
+  `init_task` 并建立初始抢占关闭事实；`EarlyVm` 就绪后，binding 把 `tp` 切换为同一 carrier 的
+  虚拟地址。该 binding 不是第二个 Task、TaskRef 或调度实体，也不改变 PID 0 identity。
 
-  `RootStream` 是 boot init Flow ownership 与 active binding 的唯一权威；`BootTask` 只保存静态
-  carrier identity/storage 与 Task lifecycle，不复制 Flow ownership 事实。
+  `BootInitFlow` 是 `BootTask` 的 PhaseObject 子对象，不是 TaskFlow。`BootTask` 的首个 TaskFlow
+  ownership 直到 `BootIdleFlow.Setup` 才建立。
 
-  > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
-  > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
-  > `EntryPreludePhase.Transition::Preset`。
+  > [model] MUST：向 `BootInitFlow` 同步发送 Preset；它在 `SingleTaskContext` 中驱动
+  > `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
 
-* Prepared：内核此时不响应中断，`BootTask` 已 Online，并由其 `RootStream` 继续推进引导阶段。
+* Prepared：内核此时不响应中断，`BootTask` 始终 Online，`BootInitFlow` 已 Prepared。
 
 * OnSetup：内核收到 Setup 信号，已 Online 的 `BootTask` 继续代表内核完成中期初始化；
   该迁移不再次启动或替换 Task。
 
-  > [model] MUST：先向 `BootPhase` 同步发送 Preset 启动信号并等待其到达 `Online`，再向
-  > `InterruptPhase` 同步发送 Preset 启动信号并等待其到达 `Online`；当前 model 兼容写法为
-  > 按此顺序驱动两个阶段的 `Transition::Preset`。
+  > [model] MUST：向 `BootInitFlow` 同步发送 Setup；它先驱动 `BootPhase`，再驱动
+  > `InterruptPhase`，等待两者到达 `Online` 后提交 Ready。
 
 * Ready：内核已经初步具备响应中断信号的能力，等待Enable信号以触发多任务启动。
 
@@ -109,8 +108,10 @@
 
   > GAP: 当前 model 的 Kernel.Enable 还顺序驱动 UP 多任务、SMP/runtime 和 selected payload，且 payload 可为内核态 Hello/Smoke，不保证切换到用户应用。
 
-  > [model] MUST：依次向 `UpMultitaskPhase`、`SmpRuntimePhase` 和 `PayloadPhase` 同步发送 Preset
-  > 启动信号并等待各阶段完成；当前 model 兼容写法为依次驱动各阶段的 `Transition::Preset`。
+  > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它依次驱动
+  > `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，
+  > 并在首次 PID 1 switch commit 紧邻边界到达 Online。真实切换后只能由 KernelInitTask 的实际栈
+  > 入口启动 `SmpRuntimePhase`；其 Online 后再由同一执行线启动 `PayloadPhase`。
 
 * Online：内核处于正常服务状态，支持应用运行。
 

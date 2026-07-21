@@ -10,9 +10,6 @@
 type TaskFlow: FlowObject {
 }
 
-type BootInitFlowType: TaskFlow {
-}
-
 type KernelInitFlowType: TaskFlow {
     lifecycle {
         Transition::Disable {
@@ -191,63 +188,6 @@ predicate boot_task_idle_flow_entered<T: Task, F: BootIdleFlowType>(
     task: T,
     flow: F
 ) -> bool;
-
-/*
- * RootStream retains its legacy name for this model-first slice. It is the
- * BootInitFlowType instance, not a Task carrier.
- */
-object RootStream: BootInitFlowType {
-    initial_state: State::Base;
-    parent: BootTask;
-
-    /*
-     * Base 表示根流只进入模型空间，尚未完成入口前导期的执行约束预置。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 禁止内核态使用 FPU 和 VECTOR，建立根流的早期安全执行条件。
-             */
-            on Transition::Preset -> State::Prepared {
-                /*
-                 * Started is emitted in `_start`; source/dependency adoption occurs at the
-                 * earliest Rust boundary without re-emitting it. Online returns to the
-                 * Kernel.Preset continuation rather than starting a sibling phase.
-                 */
-                depends_on {
-                    Riscv64.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.sstatus;
-                }
-
-                ensures {
-                    kernel_fpu_disabled(Riscv64.sstatus);
-                    kernel_vector_disabled(Riscv64.sstatus);
-                    task_owns_flow(BootTask, RootStream);
-                    task_flow_owner_is(RootStream, BootTask);
-                    task_flow_owner_exclusive(RootStream);
-                    task_active_flow_is(BootTask, RootStream);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示根流已经完成入口前导期要求的体系结构状态预置。
-     */
-    state State::Prepared {
-        invariant {
-            kernel_fpu_disabled(Riscv64.sstatus);
-            kernel_vector_disabled(Riscv64.sstatus);
-            task_owns_flow(BootTask, RootStream);
-            task_flow_owner_is(RootStream, BootTask);
-            task_flow_owner_exclusive(RootStream);
-            task_active_flow_is(BootTask, RootStream);
-        }
-    }
-}
 
 object KernelInitFlow: KernelInitFlowType {
     initial_state: State::Online;
@@ -492,7 +432,7 @@ object BootIdleFlow: BootIdleFlowType {
     state State::Base {
         transitions {
             /*
-             * Setup 对应 rest_init() 尾部的 cpu_startup_entry(CPUHP_ONLINE) 边界。
+             * Setup 在首次不可逆 task switch 前建立 BootTask 的首个 TaskFlow binding。
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
@@ -501,25 +441,16 @@ object BootIdleFlow: BootIdleFlowType {
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;
                     KthreaddReadyGate.state == State::Online;
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
-                    scheduler_first_schedule_committed(Scheduler);
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
                     boot_idle_cpu_startup_entry_ready(BootIdleFlow, BootCPU);
-                    task_owns_flow(BootTask, RootStream);
                     task_owns_flow(BootTask, BootIdleFlow);
                     task_flow_owner_is(BootIdleFlow, BootTask);
                     task_flow_owner_exclusive(BootIdleFlow);
-                    task_flow_handoff(BootTask, RootStream, BootIdleFlow);
-                    task_flow_handoff_old_inactive(BootTask, RootStream);
-                    task_flow_handoff_new_active(BootTask, BootIdleFlow);
-                    task_flow_no_longer_active(RootStream);
                     task_active_flow_is(BootTask, BootIdleFlow);
-                    task_flow_instances_distinct(RootStream, BootIdleFlow);
                     secondary_cpus_not_started(CpuGroup);
                 }
             }
@@ -527,23 +458,16 @@ object BootIdleFlow: BootIdleFlowType {
     }
 
     /*
-     * Ready 表示 BootTask 已完成运行期交接，boot CPU idle runtime 已进入。
+     * Ready 表示 BootTask 的首个 TaskFlow binding 已预先建立；idle entry 尚未执行。
      */
     state State::Ready {
         invariant {
-            scheduler_first_schedule_committed(Scheduler);
             boot_idle_runtime_ready(BootIdleFlow, BootTask);
             boot_idle_cpu_startup_entry_ready(BootIdleFlow, BootCPU);
-            task_owns_flow(BootTask, RootStream);
             task_owns_flow(BootTask, BootIdleFlow);
             task_flow_owner_is(BootIdleFlow, BootTask);
             task_flow_owner_exclusive(BootIdleFlow);
-            task_flow_handoff(BootTask, RootStream, BootIdleFlow);
-            task_flow_handoff_old_inactive(BootTask, RootStream);
-            task_flow_handoff_new_active(BootTask, BootIdleFlow);
-            task_flow_no_longer_active(RootStream);
             task_active_flow_is(BootTask, BootIdleFlow);
-            task_flow_instances_distinct(RootStream, BootIdleFlow);
             secondary_cpus_not_started(CpuGroup);
         }
     }
@@ -553,8 +477,6 @@ object BootIdleFlow: BootIdleFlowType {
 /*
  * Appendix: extracted flow mapping and deferred decisions
  *
- * - RootStream is the current BootInitFlowType instance. Its rename/removal and
- *   the broader Stream -> Flow migration are deferred to the next discussion.
  * - KernelInitFlow spans kernel_init, pre-SMP initialization, initcalls and the
  *   exec handoff. A fresh declared UserAppFlow becomes active after exec
  *   without replacing KernelInitTask.

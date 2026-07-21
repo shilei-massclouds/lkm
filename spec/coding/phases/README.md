@@ -21,10 +21,10 @@ by the repository `coding-spec-check` gate.
 - `interrupt/irq-open-prepare.md`
 - `interrupt/process-prepare.md`
 
-## UpMultitask
+## BootInitFlow
 
-- [`up-multitask.md`](up-multitask.md) — UpMultitaskPhase 父 transition 驱动映射
-- `up-multitask/rest-init.md`
+- [`boot-init.md`](boot-init.md) — BootInitFlow Phase 父 transition 驱动映射
+- `boot-init/rest-init.md`
 
 ## SmpRuntime
 

@@ -10,9 +10,14 @@ core/identity。该路径调整不新增 crate、facade、build feature 或外�
 re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需修改。
 
 2026-07-21 Task 类型级 lifecycle 与 instance 瘦身闭合审查：本轮把普通 Task lifecycle 统一 lower
-到既有 Rust `Task` core，并把 KernelInit/Kthreadd 角色编排收回既有 up-multitask phase module；
+到既有 Rust `Task` core，并把 KernelInit/Kthreadd 角色编排收回既有 boot-init phase module；
 不改变 crate、module、facade、build feature 或组件发布边界。`spec/compose/main.spec` 已复核，
 组合语义无需修改。
+
+2026-07-22 BootTask/BootInitFlow 闭合审查：删除 crate 内临时 boot-init TaskFlow module/Context field，并把
+启动期内部 module 统一为 `phases::boot_init`，用于承载 PhaseObject 生命周期。
+这些都是 `arceos_ex` crate 内私有 lowering 调整，不新增 facade、feature、crate 或兼容 alias；
+`spec/compose/main.spec` 已复核，组合语义无需修改。
 
 `Composition Phase` 位于 `Object Coding Phase` 之后。它不重新定义模型对象、状态、事件、依赖和阶段顺序，而是在对象级编码实现已经满足规格语义的前提下，决定这些对象如何被组合、封装和发布。
 

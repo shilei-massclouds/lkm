@@ -111,4 +111,4 @@ unsafe impl Sync for InitTaskStorage {}
 
 #[unsafe(no_mangle)]
 pub static init_task_storage: InitTaskStorage =
-    InitTaskStorage(UnsafeCell::new(Task::with_ref(TaskRef::BOOT)));
+    InitTaskStorage(UnsafeCell::new(Task::new_boot_online()));

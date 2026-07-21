@@ -16,7 +16,7 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 - active binding 与 handoff predecessor；
 - Disable/Cleanup 完成事实。
 
-`RootStream` 继续作为 boot init Flow 的临时既有实现。`BootIdleFlow` metadata 归
+`BootIdleFlow` 是 BootTask 的首个 TaskFlow，其 metadata 归
 `BootIdleRuntime`/idle continuation；`KernelInitFlow` 和 `KthreaddFlow` 可以和相应 kernel Task
 实现共址，但必须有独立 lifecycle 查询。`KernelInitTask`（PID 1）的用户资源必须命名并组织为该
 Task 的 user state；首次 exec 声明的 `UserAppFlow` 仅持有 application continuation lifecycle，
@@ -43,9 +43,9 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 
 ## Handoff lowering
 
-boot idle handoff 保持 `BootTask` identity。实现顺序必须可观测为旧 `RootStream` inactive、
-`BootIdleFlow` ready/active、current/runqueue 仍指向同一 `BootTask`；不得再发出旧 idle-task family
-checkpoint。
+boot idle handoff 保持 `BootTask` identity。实现顺序必须可观测为 `BootIdleFlow` ready/active、
+current/runqueue 仍指向同一 `BootTask`，随后 `BootInitFlow.Online`，最后才发生真实 PID 1 switch；
+不得引入 boot-init TaskFlow 或发出旧 idle-task family checkpoint。
 
 successful exec 保持 owner Task identity，并按以下顺序提交：
 

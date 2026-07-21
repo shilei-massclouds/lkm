@@ -60,7 +60,7 @@ coding。
 Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删除不可解析的 `main.spec`
 和 `arceos_ex.spec` 后剩余 24 个；Boot 子树批次迁移并删除 3 个 phase 文件，Interrupt 子树
 批次又把 `irq-time-init.spec`、`local-irq-enable.spec`、`irq-open-prepare.spec` 和
-`process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除；UpMultitask 子树又迁移删除
+`process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除；现 BootInitFlow 子树迁移删除
 `rest-init.spec`，SmpRuntime 子树迁移删除 6 个 phase 文件。最后一批审计并迁移通用
 mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后，coding `.spec` 已清零。
 

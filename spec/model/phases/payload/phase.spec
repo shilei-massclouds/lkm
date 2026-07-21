@@ -181,7 +181,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             BootPhase.state == State::Online;
             InterruptPhase.state == State::Online;
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             SmpRuntimePhase.state == State::Online;
             FinalizePhase.state == State::Online;
             FinalizeBoundary.state == State::Ready;
@@ -214,7 +214,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             BootPhase.state == State::Online;
             InterruptPhase.state == State::Online;
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             SmpRuntimePhase.state == State::Online;
             KernelInitTask.state == State::Online;
             ExecSyncBoundaries.state == State::Ready;

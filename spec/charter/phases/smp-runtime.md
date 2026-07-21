@@ -1,7 +1,7 @@
 # 多核运行期阶段
 
-SmpRuntimePhase 是 Kernel.Enable 在真实 KernelInitTask 执行线上驱动的第二个直接阶段。
-它承接 UpMultitaskPhase.Online 后完成的 BootTask -> KernelInitTask 调度/栈切换，从
+SmpRuntimePhase 是 Kernel.Enable 在真实 KernelInitTask 执行线上驱动的后续阶段。
+它承接 BootInitFlow.Online 后完成的 BootTask -> KernelInitTask 调度/栈切换，从
 `kernel_init()` / `kernel_init_freeable()` 继续推进，直到内核初始化收尾完成并可进入
 PayloadPhase。
 
@@ -9,7 +9,8 @@ PayloadPhase。
 
 ## 边界与子阶段
 
-- 入口：UpMultitaskPhase.Online，KernelInitTask 已唯一进入自己的 vmalloc task stack。
+- 入口：BootInitFlow.Online，且 KernelInitTask 已唯一进入自己的 vmalloc task stack。入口代码必须
+  验证实际 SP 后才启动本阶段，不能依赖 BootIdleEntryPhase 已执行。
 - 直接子阶段：PreSmpInitPhase、SmpBringupPhase、RuntimeCorePhase、InitcallPhase、
   RootfsPhase、FinalizePhase，共六个，顺序固定。
 - 出口：SmpRuntimePhase.Online 后返回 Kernel.Enable continuation，再由 Kernel 驱动
@@ -32,7 +33,7 @@ SmpRuntimePhase 和六个直接子阶段均遵循标准
 
 ### Preset：Base -> Prepared
 
-SmpRuntimePhase.Preset 检查 UpMultitaskPhase.Online、KernelInitTask.Online、唯一入口和
+SmpRuntimePhase.Preset 检查 BootInitFlow.Online、KernelInitTask.Online、唯一入口和
 KernelInitTask 栈事实，驱动 PreSmpInitPhase.Preset。PreSmpInitPhase.Online 后，父
 continuation 提交 SmpRuntimePhase.Prepared。
 
@@ -76,4 +77,4 @@ lowering；AP 的具体 TaskRef/FlowRef 和 storage slot 只是实现内部 iden
 
 - [阶段范式](../phase-paradigm.md)
 - [内核阶段](../systems/kernel.md)
-- [UpMultitaskPhase](up-multitask.md)
+- [BootInitFlow](boot-init.md)

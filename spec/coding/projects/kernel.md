@@ -33,8 +33,8 @@ architecture/firmware/platform facts, and build configuration facts.
 
 Rule ID: `kernel_project_coding_does_not_drive_runtime_phases` (MUST).
 
-KernelProject implementation must not drive BootPhase,
-InterruptPhase, UpMultitaskPhase, SmpRuntimePhase or PayloadPhase.
+KernelProject implementation must not drive BootInitFlow, BootPhase,
+InterruptPhase, SmpRuntimePhase or PayloadPhase.
 Those transitions belong to the Kernel system and phase mappings.
 
 #### Checkpoint ownership

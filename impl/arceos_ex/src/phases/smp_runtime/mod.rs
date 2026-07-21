@@ -142,7 +142,7 @@ fn require_mainline(
     target: State,
 ) -> EventResult {
     let actual = crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE);
-    if actual != expected || !crate::phases::up_multitask::is_online() || !mainline_ready(ctx) {
+    if actual != expected || !crate::phases::boot_init::is_online() || !mainline_ready(ctx) {
         return failed_condition(event, actual, expected, target);
     }
     Ok(())

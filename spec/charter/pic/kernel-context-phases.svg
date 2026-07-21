@@ -34,7 +34,7 @@
 
   <rect x="740" y="80" width="220" height="80" rx="14" ry="14" class="phase"/>
   <text x="850" y="104" class="label">单核多任务期</text>
-  <text x="850" y="132" class="small">UP Multitask Phase</text>
+  <text x="850" y="132" class="small">BootInitFlow Enable</text>
 
   <rect x="1000" y="80" width="180" height="80" rx="14" ry="14" class="phase"/>
   <text x="1090" y="104" class="label">多核运行期</text>

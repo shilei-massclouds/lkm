@@ -183,18 +183,26 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 > MUST[model]：内核系统规格，遵循''标准状态和迁移''和“内核系统模型”
 >
-> Preset：接替固件引导计算机系统，驱动入口前导期
+> Preset：接替固件引导计算机系统，驱动 BootInitFlow 的入口前导部分
 >
-> Setup：接续入口前导期，依次推进引导期和中断期
+> Setup：由 BootInitFlow 接续入口前导期，依次推进引导期和中断期
 >
-> Enable：推进单核多任务期、多核运行期和 完成对选中Payload的交接，达到运行状态
+> Enable：完成 BootInitFlow、真实切换到 PID 1，推进多核运行期并完成对选中 Payload 的交接
+
+### 启动执行阶段 BootInitFlow
+
+`BootInitFlow` 是静态 `BootTask` 的 PhaseObject 子对象，使用标准
+`Base -> Prepared -> Ready -> Online` 生命周期。Preset 驱动 `EntryPreludePhase`，Setup 顺序驱动
+`BootPhase` 与 `InterruptPhase`，Enable 顺序驱动 `BootInitRestInitPhase` 与
+`BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` 首个 owner/active binding，并在首次真实 PID 1
+切换的 commit 边界到达 Online。
 
 ### 入口前导期EntryPreludePhase
 
 `EntryPreludePhase` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
-`BootTask.Prepared` → VM setup → 虚拟 `tp` binding → `BootTask.Online`”推进同一静态
-`init_task` carrier，并建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef 或 Flow，
-不改变 PID 0 identity；`RootStream` 仍是 boot init Flow ownership 的唯一权威。
+VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef
+或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 Online；本阶段只
+验证其稳定 storage、PID 0、`TaskRef::BOOT` 和 canonical identity。
 
 ### 引导期BootPhase
 
@@ -236,15 +244,15 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 待补充。
 
+### BootInitFlow Enable
+
+同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 创建具有各自 Task identity
+与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask`，`BootInitScheduleHandoffPhase` 预检并提交首次
+调度事实。`BootIdleFlow` 是 BootTask 的首个 TaskFlow，不是从启动 TaskFlow handoff 得到。
+
 #### BootInitRestInitPhase
 
 待补充。
-
-### 单核多任务期UpMultiTaskPhase
-
-同一 `BootTask` 保持 PID 0 与 Task identity，把 active Flow 从 `RootStream` handoff 到
-`BootIdleFlow`；同时创建具有各自 Task identity 与初始 Flow 的 `KernelInitTask` 和
-`KthreaddTask`。Boot idle 是 continuation 替换，不是引导 Task 转化或复制成另一个 Task。
 
 #### BootInitScheduleHandoffPhase
 
@@ -252,7 +260,7 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 #### BootIdleEntryPhase
 
-待补充。
+它是 `BootIdleFlow` 的子 Phase，只在调度器未来恢复 BootTask 后执行，不属于 BootInitFlow 的完成链。
 
 #### PreSmpInitPhase
 

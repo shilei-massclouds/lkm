@@ -108,7 +108,7 @@ pub fn enable_after_sched_init() -> ! {
             phase_failure(LifecycleEvent::Enable, State::Ready, State::Online)
         };
     crate::phases::shutdown_on_error(result, "arceos_ex boot enable event failed\n");
-    crate::systems::kernel::setup_after_boot()
+    crate::phases::boot_init::setup_after_boot()
 }
 
 pub fn is_online() -> bool {

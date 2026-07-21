@@ -460,86 +460,36 @@ object UserTaskSet: TaskSet {
  */
 
 /*
- * Static init_task carrier. It remains the same Task when sched_init assigns
- * the boot-idle role; RootStream and BootIdleFlow distinguish its behavior.
- * EntryPreludePhase-owned BootTaskEntryBinding owns tp/preemption setup while
- * this override commits carrier identity/storage at the binding milestones.
+ * Static init_task carrier. The image contains it before `_start`, so its
+ * initial and only lifecycle state is Online. EntryPreludePhase-owned
+ * BootTaskEntryBinding owns mutable tp/preemption setup; BootIdleFlow later
+ * becomes this carrier's first TaskFlow.
  */
 object BootTask: Task {
     lifecycle_override: true;
-    initial_state: State::Base;
+    initial_state: State::Online;
     source: static::linux_6_12;
 
     attrs {
         storage: ObjectStorage<BootTask>;
+        pid: Derived<usize, 0>;
+        canonical_ref: Derived<TaskRef, BootTaskRef>;
     }
 
     reference linux_6_12 {
         storage = symbol("init_task");
     }
 
-    /* Base 表示静态根任务 carrier 尚未提交入口 Prepared milestone。 */
-    state State::Base {
-        transitions {
-            /* Preset 在物理 binding 完成后提交静态 carrier identity。 */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootTaskEntryBinding.state == State::Prepared;
-                }
-
-                ensures {
-                    attrs_accessible(self);
-                    valid_object_storage(storage);
-                    valid_task_storage(storage);
-                    task_ref_targets(BootTaskRef, BootTask);
-                    task_ref_ready(BootTaskRef);
-                }
-            }
-        }
-    }
-
     /*
-     * Prepared 表示静态 carrier identity/storage 已在物理 binding milestone 后提交。
-     */
-    state State::Prepared {
-        invariant {
-            attrs_accessible(self);
-            valid_object_storage(storage);
-            valid_task_storage(storage);
-            task_ref_targets(BootTaskRef, BootTask);
-            task_ref_ready(BootTaskRef);
-        }
-
-        transitions {
-            /* Enable 在虚拟 binding 完成后提交 BootTask.Online。 */
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    Vm.state == State::Ready;
-                    BootTaskEntryBinding.state == State::Ready;
-                }
-
-                ensures {
-                    attrs_accessible(self);
-                    valid_object_storage(storage);
-                    valid_task_storage(storage);
-                    task_ref_targets(BootTaskRef, BootTask);
-                    task_ref_ready(BootTaskRef);
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示静态 carrier 已在虚拟 binding milestone 后提交服务状态。
+     * Online 只约束镜像内稳定的静态 PID 0 carrier identity。
+     * pid/canonical_ref 的常量关系由上面的 Derived 属性类型承载；这里
+     * 不把它们重复写成运行期可变状态等式。
      */
     state State::Online {
         invariant {
             attrs_accessible(self);
             valid_object_storage(storage);
             valid_task_storage(storage);
-            BootTaskEntryBinding.state == State::Ready;
-            task_ref_targets(BootTaskRef, BootTask);
-            task_ref_ready(BootTaskRef);
         }
     }
 }

@@ -193,6 +193,29 @@ impl Task {
         }
     }
 
+    /// Boot-only image initializer for the pre-existing PID 0 carrier.
+    ///
+    /// This is deliberately separate from the reusable Task lifecycle: the
+    /// linker-visible init task exists before `_start` and never performs
+    /// Preset/Setup/Enable.
+    pub(crate) const fn new_boot_online() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Online),
+            task_ref: TaskRef::BOOT,
+            entry: TaskEntry::None,
+            pid: 0,
+            kind: TaskKind::None,
+            cpu: TaskCpuState::new(),
+            running: false,
+            runqueue_published: false,
+            affinity_cpu_id: usize::MAX,
+            no_setaffinity: false,
+            switch_ctx: TaskSwitchContext::new(),
+            owned_flows: [TaskFlowRef::NONE; TASK_OWNED_FLOW_CAPACITY],
+            active_flow: TaskFlowRef::NONE,
+        }
+    }
+
     pub const fn state(&self) -> State {
         self.lifecycle.state()
     }
@@ -332,16 +355,6 @@ impl Task {
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
-            State::Online,
-            checkpoint,
-        )
-    }
-
-    pub fn enable_from_prepared(&mut self, checkpoint: Checkpoint) -> EventResult {
-        self.running = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Prepared,
             State::Online,
             checkpoint,
         )
@@ -513,23 +526,6 @@ impl Task {
         if self.active_flow.is_valid()
             || flow.owner() != self.task_ref
             || flow.state() != State::Ready
-            || !self.owns_flow(flow.flow_ref())
-        {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-                self.lifecycle.state(),
-            );
-        }
-        self.active_flow = flow.flow_ref();
-        flow.commit_active_binding(self.task_ref)
-    }
-
-    pub fn bind_initial_prepared_flow(&mut self, flow: &mut TaskFlow) -> EventResult {
-        if self.active_flow.is_valid()
-            || flow.owner() != self.task_ref
-            || flow.state() != State::Prepared
             || !self.owns_flow(flow.flow_ref())
         {
             return failed_condition(

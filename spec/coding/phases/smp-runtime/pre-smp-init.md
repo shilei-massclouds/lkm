@@ -6,7 +6,7 @@ vmalloc task stack 上执行。model 路径为 `spec/model/phases/smp-runtime/pr
 
 ## 生命周期映射
 
-`preset()` 精确检查 Base、UpMultitask Online、KernelInitTask entry/release/dispatch 与栈事实，
+`preset()` 精确检查 Base、BootInitFlow Online、KernelInitTask entry/release/dispatch 与栈事实，
 发出 Started，然后按 model 顺序驱动本阶段全部对象动作并提交 Prepared。`setup()` 只检查对象
 完成事实并提交 Ready；`enable()` 再检查相同 invariant、提交 Online，并且只返回
 `smp_runtime::preset_after_pre_smp_init()`。
@@ -20,7 +20,7 @@ vmalloc task stack 上执行。model 路径为 `spec/model/phases/smp-runtime/pr
 
 #### Entry facts
 
-This phase must run after UpMultitaskPhase.Online from the
+This phase must run after BootInitFlow.Online from the
 KernelInitTask entry on its verified task stack. It must additionally
 consume the KernelInitTask release/dispatch facts and Scheduler
 first-schedule fact, not infer readiness from BootIdleEntryPhase.Ready

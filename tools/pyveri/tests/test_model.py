@@ -47,14 +47,21 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(
             result.model.children["Kernel"],
             [
-                "EntryPreludePhase",
-                "BootPhase",
-                "InterruptPhase",
-                "UpMultitaskPhase",
                 "SmpRuntimePhase",
                 "PayloadPhase",
             ],
         )
+        self.assertEqual(
+            result.model.children["BootInitFlow"],
+            [
+                "EntryPreludePhase",
+                "BootPhase",
+                "InterruptPhase",
+                "BootInitRestInitPhase",
+                "BootInitScheduleHandoffPhase",
+            ],
+        )
+        self.assertEqual(result.model.objects["BootTask"].initial_state, "Online")
         self.assertEqual(
             result.model.objects["BootPhase"].children,
             [
@@ -76,11 +83,13 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("ComputerProject: ProjectObject", text)
         self.assertIn("ComputerProject -> KernelProject [parent]", text)
         self.assertIn("KernelProject -> OpenSBI [parent]", text)
-        self.assertIn("Kernel -> BootPhase [parent]", text)
+        self.assertIn("BootTask -> BootInitFlow [parent]", text)
+        self.assertIn("BootInitFlow -> BootPhase [parent]", text)
         self.assertNotIn("drives", text)
         self.assertIn('"ComputerProject" -> "KernelProject"', dot)
         self.assertIn('"KernelProject" -> "OpenSBI"', dot)
-        self.assertIn('"Kernel" -> "BootPhase"', dot)
+        self.assertIn('"BootTask" -> "BootInitFlow"', dot)
+        self.assertIn('"BootInitFlow" -> "BootPhase"', dot)
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
@@ -114,8 +123,10 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"ComputerProject.Enable" -> "KernelProject.Preset"', dot)
         self.assertIn('"KernelProject.Enable" -> "OpenSBI.Enable"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
-        self.assertIn('"Kernel.Preset" -> "EntryPreludePhase.Preset"', dot)
-        self.assertIn('"Kernel.Setup" -> "BootPhase.Preset"', dot)
+        self.assertIn('"Kernel.Preset" -> "BootInitFlow.Preset"', dot)
+        self.assertIn('"BootInitFlow.Preset" -> "EntryPreludePhase.Preset"', dot)
+        self.assertIn('"Kernel.Setup" -> "BootInitFlow.Setup"', dot)
+        self.assertIn('"BootInitFlow.Setup" -> "BootPhase.Preset"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -135,7 +146,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootPhase: ready (State::Ready)", text)
         self.assertIn("PayloadPhase: ready (State::Ready)", text)
         self.assertIn("PayloadPhase: online (State::Online)", text)
-        self.assertIn("  - RootStream.State::Prepared", text)
+        self.assertIn("  - BootTask.State::Online", text)
+        self.assertIn("BootInitFlow: online (State::Online)", text)
         self.assertIn("  - Soc.State::Prepared", text)
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
@@ -538,12 +550,12 @@ class ModelBuilderTests(unittest.TestCase):
                     lock_ref: TaskMutex;
 
                     entered_by {
-                        TaskMutex.Transition::Lock(BootInitTaskRef);
+                        TaskMutex.Transition::Lock(BootTaskRef);
                         TaskMutex.Transition::Lock(KernelInitTaskRef);
                     }
 
                     exited_by {
-                        TaskMutex.Transition::Unlock(BootInitTaskRef);
+                        TaskMutex.Transition::Unlock(BootTaskRef);
                     }
                 }
 
@@ -592,7 +604,7 @@ class ModelBuilderTests(unittest.TestCase):
                     lock_ref: TaskMutex;
 
                     entered_by {
-                        TaskMutex.Transition::Lock(BootInitTaskRef);
+                        TaskMutex.Transition::Lock(BootTaskRef);
                     }
 
                     exited_by {

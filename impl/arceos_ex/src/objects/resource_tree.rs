@@ -113,7 +113,7 @@ impl ResourceTree {
 
         /*
          * ResourceTreeWriteContext:
-         * ResourceLock.WriteLock(BootInitTaskRef) preserves the ordinary
+         * ResourceLock.WriteLock(BootTaskRef) preserves the ordinary
          * write_lock() boundary even though the surrounding SingleTaskContext
          * already contributes single CPU/task facts.
          */
@@ -141,7 +141,7 @@ impl ResourceTree {
         self.resource_lock_write_guard_used = true;
         /*
          * ResourceTreeWriteContext:
-         * ResourceLock.WriteUnlock(BootInitTaskRef) exits the same modeled
+         * ResourceLock.WriteUnlock(BootTaskRef) exits the same modeled
          * write_lock() boundary.
          */
         resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootTask)?;

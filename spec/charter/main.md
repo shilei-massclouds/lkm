@@ -97,7 +97,7 @@
 | 前置环境 | 内核领域建立之前，由硬件、固件与引导过程所提供的执行条件、资源基础及控制关系的总和。 |
 | 内核领域 | 本规格重点讨论的领域，指内核接管控制权后，用以组织执行流、资源对象与组件关系的对象空间。 |
 | 常规流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示在默认情况下持续推进、首尾衔接、源源不断的执行状态。 |
-| 根流（Root Stream） | 内核接管控制权后建立的第一条、也是引导期内唯一的常规流对象。它是 `BootTask` 的初始 Flow，负责一路执行早期初始化；创建 `kernel_init` 与 `kthreadd` 后，`BootTask` 保持身份并把 active Flow handoff 给 `BootIdleFlow`。 |
+| 启动执行阶段（BootInitFlow） | 静态 `BootTask` 的 PhaseObject 子对象，从内核入口开始编排启动阶段；它不是 TaskFlow。完成 PID 1 首次调度切换前，`BootIdleFlow` 直接成为 `BootTask` 的首个 TaskFlow。 |
 | 事件流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示由事件源触发并导向相应处理路径的离散执行形态。其核心子形态包括中断流与异常流。 |
 | 内核 | 软件执行流中的核心阶段。它从前序引导阶段接收控制权，并继续组织系统初始化、组件装配、运行与退出。 |
 | 组件 | 内核内部参与某一段执行流的功能单元，具有明确职责、边界、输入输出与生命周期。 |
@@ -779,7 +779,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 在阶段内部继续划分子阶段时，应以执行主体的视角作为首要边界原则。子阶段是某个 `Flow` / 任务 / 事件处理流连续执行片段的最小规格粒度，不能跨越任务切换、中断进入/返回、异常进入/返回或其它执行主体交接边界。一个子阶段可以创建、唤醒、释放或调度其它任务，也可以发布其它执行主体后续入口所需的事实；但它不能驱动或声明已经执行了其它任务、异常流或中断流自己的子阶段。跨执行主体的衔接应通过 entry、release、dispatch、completion、scheduler handoff 等可观察事实表达，而不是把两个执行主体的子阶段串成普通 sibling 顺序。
 
-因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务切换、Flow handoff 或调度分叉，则函数前后应按执行 continuation 拆成不同子阶段；例如同一 `BootTask` 的 `RootStream` 片段和 `BootIdleFlow` 片段应在规格上可区分，但不得据此制造第二个 Task。后续异常执行流和中断执行流也采用同一原则：它们拥有自己的子阶段，只能由对应事件流执行，常规任务子阶段只能记录进入这些事件流的边界事实。
+因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务切换、Flow binding 或调度分叉，则函数前后应按执行 continuation 拆成不同子阶段；例如 `BootTask` 的 `BootInitFlow` 启动阶段和其后 `BootIdleFlow` 片段应在规格上可区分，但不得据此制造第二个 Task。后续异常执行流和中断执行流也采用同一原则：它们拥有自己的子阶段，只能由对应事件流执行，常规任务子阶段只能记录进入这些事件流的边界事实。
 
 <p align="center">
   <img src="pic/kernel-context-phases.svg" alt="内核上下文相关阶段划分" width="820">
@@ -812,7 +812,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 1. `可中断上下文`，英文名 `Interruptible Context`：可中断，但没有抢占切换。也就是说，它保持了通向中断流的路径开放，因此可能随时被中断流打断；而由于当前阶段中只有一个 `常规流+`，所以天然保证了不存在多个 `常规流+` 之间的抢占切换。
 2. `系统独占上下文`，英文名 `System Exclusive`：通过关闭中断，确保自己处于系统独占状态；等到自己认为时机适当时，再重新打开中断并返回 `可中断上下文`。
 
-#### 第三阶段：单核多任务期（UP Multitask Phase）
+#### 第三阶段：单核多任务期（BootInitFlow Enable）
 
 对于 `单核多任务期` 而言，中断流的情况与上一阶段相同，因此这里先只讨论 `常规流+`。
 
@@ -992,8 +992,8 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 据此，当前可先识别出十一类本子阶段涉及的核心对象。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导期新建立的对象；它在本子阶段中作为只读资源布局被读取和验证。
 
-1. `根流`，英文名 `Root Stream`：内核引导过程中最早出现的执行流对象，表示当前唯一 `常规流+` 的 `Flow`，用于把前置环境交接下来的唯一执行流显式纳入内核对象体系，并作为后续常规流建立与早期初始化推进的根源流。
-2. `启动根任务`，英文名 `BootTask`：后续建立的流对象父对象，是 `根流` 在内核领域内的具体化对象，后续将主要用于跟踪这一早期执行实体；它对应 Linux 静态 `init_task` / PID 0 / swapper 的启动期身份。
+1. `启动执行阶段`，英文名 `BootInitFlow`：`BootTask` 的 PhaseObject 子对象，用于把前置环境交接下来的唯一启动执行片段显式纳入内核阶段树；它不是 TaskFlow。
+2. `启动根任务`，英文名 `BootTask`：镜像入口前已经存在且 Online 的静态 carrier；它对应 Linux 静态 `init_task` / PID 0 / swapper 的身份。
 3. `启动根栈`，英文名 `BootInitStack`：`启动根任务` 的对应栈，作为 `启动根任务` 的子对象；它对应 Linux 静态 `init_thread_union` / init stack 存储。
 4. `中断流`，英文名 `Interrupt Stream`：当前阶段的中断控制对象。在本子阶段，它还不是一个对外开放、可承担真实处理中断职责的运行流，而首先用于封闭中断进入路径，确保入口前导期在受控条件下继续执行。
 5. `事件流`，英文名 `Event Stream`：`中断流` 的下级子对象，维护中断/异常入口表以及中断和异常分叉前的公共流程。
@@ -1014,7 +1014,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 图 8 用于说明入口前导期涉及对象的分类与相互关系。该阶段主要涉及四类对象：流对象、地址空间对象、硬件对象和阶段对象。
 
-在流对象中，`根流`（`Root Stream`）是内核引导过程中最早出现的执行流。随后建立的 `启动根任务`（`BootTask`）是 `根流` 在内核领域内的具体化对象，未来将主要通过它跟踪这一早期执行实体。因此，在对象层级上，`启动根任务` 是父对象，`根流` 和 `启动根栈`（`BootInitStack`）都是它的子对象。入口后继期还会为 `启动根任务` 补充 `根任务地址空间`（`InitMM`）子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`事件流`（`Event Stream`）是 `中断流`（`Interrupt Stream`）的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
+在阶段对象中，`BootInitFlow` 是内核引导过程中最早出现的启动执行阶段。静态 `BootTask` 是其 parent，并从首个入口 checkpoint 起始终 Online；`BootInitStack` 也是 `BootTask` 子对象。入口后继期还会为 `BootTask` 补充 `InitMM` 子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`EventStream` 是 `InterruptStream` 的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
 
 在地址空间对象中，`虚拟内存空间`（`VM`）的空间内容先拆为两个子对象，分别是内核映像和物理内存空间。其中，`物理内存空间` 是准备期输入对象，表示只读的物理资源布局；入口前导期不建立或修改它，只读取它提供的约束。`VM` 的建立过程还包含三个页表子对象：`跳板虚拟内存空间`（`TrampolineVM`）维护并使用 `静态对象集合.trampoline_pg_dir`，`早期虚拟内存空间`（`EarlyVM`）维护并使用 `静态对象集合.early_pg_dir`，`交换虚拟内存空间`（`SwapperVM`）维护并使用 `静态对象集合.swapper_pg_dir`。入口前导期只触发前两个子对象，`SwapperVM` 对应的完整虚拟内存空间由后续阶段继续建立。
 
@@ -1033,19 +1033,16 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 同一对象存在多条状态检查或执行动作时，应在该对象下使用多级序号分段描述。一级序号表示对象，二级序号表示该对象内部相互对应的一组“初始状态检查、执行动作、结束状态检查”。这里的对象描述顺序优先反映入口前导期中的出现和建立顺序，不等同于对象父子层级。
 
-1. `根流`（`Root Stream`）
+1. `启动执行阶段`（`BootInitFlow`）
 
-   描述：内核引导过程中最早出现的执行流对象，表示当前唯一 `常规流+` 的 `Flow`；在对象层级上，它后续会下降为 `根任务` 的子对象。
-
-   * `preset` - 禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令
-
-     * 初始状态：空。
-     * 执行动作：通过设置 `sstatus`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
-     * 结束状态：验证 `sstatus` 对应位，确保 `FPU` 指令与 `VECTOR` 指令已被禁止。
+   描述：静态 `BootTask` 的 PhaseObject 子对象，从 `_start` 开始按标准阶段生命周期推进。
+   `EntryPreludePhase` 负责通过 `sstatus` 禁止内核态 FPU/VECTOR 使用；该入口约束属于阶段，
+   不建立启动 TaskFlow。
 
 2. `启动根任务`（`BootTask`）
 
-   描述：后续建立的流对象父对象，是 `根流` 在内核领域内的具体化对象，后续将主要用于跟踪这一早期执行实体；它对应 Linux 静态 `init_task` / PID 0 / swapper 的启动期身份。
+   描述：镜像入口前已经存在且 Online 的静态 carrier，对应 Linux 静态 `init_task` / PID 0 /
+   swapper；它是 `BootInitFlow` 与 `BootInitStack` 的父对象。
 
    * `setup` - 建立物理地址阶段的根任务指针
 
@@ -1874,7 +1871,7 @@ flowchart LR
 
 ### 中断期对象建立
 
-从这一小节开始，对应顶层 `InterruptPhase`。本阶段从 `early_irq_init()` 开始，到 `rest_init()` 创建 `kernel_init` 与 `kthreadd`、多任务开始运行之前结束。`InterruptPhase` 的首个子阶段开始时仍关闭中断，并只建立 IRQ/time 控制设施；随后独立的 `LocalIrqEnablePhase` 执行 `local_irq_enable()`。此后 boot CPU 本地中断总入口开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。`rest_init()` 之后将进入 `UP Multitask Phase`。
+从这一小节开始，对应顶层 `InterruptPhase`。本阶段从 `early_irq_init()` 开始，到 `rest_init()` 创建 `kernel_init` 与 `kthreadd`、多任务开始运行之前结束。`InterruptPhase` 的首个子阶段开始时仍关闭中断，并只建立 IRQ/time 控制设施；随后独立的 `LocalIrqEnablePhase` 执行 `local_irq_enable()`。此后 boot CPU 本地中断总入口开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。`rest_init()` 之后将进入 `BootInitFlow Enable`。
 
 #### InterruptPhase 子阶段 1：中断时间准备期（IRQ and Time Init Subphase）
 
@@ -2277,7 +2274,7 @@ flowchart LR
   图 23 进程准备期对象构建时序
 </p>
 
-图 23 按 Linux 6.12 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 4 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `UP Multitask Phase` 的入口标记。
+图 23 按 Linux 6.12 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 4 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `BootInitFlow Enable` 的入口标记。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2298,11 +2295,11 @@ flowchart LR
 - `VfsCore.state == Ready` 且初始 rootfs mount 已建立：`rootfs_fs_type` 默认使用 ramfs backing，root mount、superblock、root dentry/root inode 和当前 root 起点已经可观察
 - `NetNamespace.setup()`、`PageCache.setup()`、`SignalCore.setup()`、`SeqFileCore.setup()`、`Procfs.setup()`、`Nsfs.setup()` 和 `Pidfs.setup()` 均保留 Linux 时序位置但在本子阶段 deferred
 - `X86EfiRuntimeSwitch`、`KernelDebuggerLate`、`Cpuset`、`CgroupCore`、`Taskstats`、`DelayAccounting`、`AcpiSubsystem`、`ArchPostAcpi` 和 `KcsanRuntime` 均按当前配置记录为 trimmed/no-op
-- 下一阶段的起点是 `rest_init()`，它将创建 `kernel_init` 与 `kthreadd`，并把系统推进到 `SYSTEM_SCHEDULING`；这也是从 `InterruptPhase` 转入 `UP Multitask Phase` 的边界
+- 下一阶段的起点是 `rest_init()`，它将创建 `kernel_init` 与 `kthreadd`，并把系统推进到 `SYSTEM_SCHEDULING`；这也是从 `InterruptPhase` 转入 `BootInitFlow Enable` 的边界
 
 ### 单核多任务期对象建立
 
-从这一小节开始，对应顶层 `UP Multitask Phase`。本阶段从 `rest_init()` 开始，到 `kernel_init_freeable()` 中 `smp_init()` 执行前结束。阶段入口仍由上一阶段延续下来的 `BootTask` 执行，但入口动作会创建新的任务对象并打开调度运行状态；阶段末尾仍只有 boot CPU 在运行，secondary CPU 尚未启动，因此尚未进入真正多核并行。
+从这一小节开始，对应顶层 `BootInitFlow Enable`。本阶段从 `rest_init()` 开始，到 `kernel_init_freeable()` 中 `smp_init()` 执行前结束。阶段入口仍由上一阶段延续下来的 `BootTask` 执行，但入口动作会创建新的任务对象并打开调度运行状态；阶段末尾仍只有 boot CPU 在运行，secondary CPU 尚未启动，因此尚未进入真正多核并行。
 
 本阶段的输入事实至少包括：
 
@@ -2318,24 +2315,24 @@ flowchart LR
 - `SystemState.state == Prepared`，且内部属性 `SystemState.value == SYSTEM_BOOTING`
 - secondary CPU 尚未启动
 
-当前 `UP Multitask Phase` 正式展开三个按执行主体划分的子阶段：
-`BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
-`BootIdleEntryPhase`。不再建立 `RestInitPhase` 兼容 wrapper；`UpMultitaskPhase.Online`
-只在这三个具体子阶段分别到达 Online 后发布。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
+当前 `BootInitFlow.Enable` 正式拥有两个 BootTask 启动子阶段：
+`BootInitRestInitPhase` 和 `BootInitScheduleHandoffPhase`。不再建立聚合 wrapper；二者 Online 且
+`BootIdleFlow` 首个 owner/active binding 建立后发布 `BootInitFlow.Online`。需要注意，
+`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
 `KernelInitTask` 驱动的执行线：
 
-- `BootTask` 继续执行 `rest_init()`；在调度交接后保持 Task 身份，并由 `BootIdleFlow`
-  continuation 完成 `cpu_startup_entry(CPUHP_ONLINE)` 与 idle 路径。
+- `BootTask` 的 switch context 被保存；只有调度器未来恢复它时，才由 `BootIdleFlow`
+  continuation 驱动 `BootIdleEntryPhase` 并进入 `cpu_startup_entry(CPUHP_ONLINE)` 与 idle 路径。
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
   然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
   `PreSmpInitPhase`。
 - 因此 `PreSmpInitPhase.Started` 不能由 `BootIdleEntryPhase.Ready` 单独推出；它依赖
-  `UpMultitaskPhase.Online`、PID 1 release/dispatch 和 scheduler first handoff facts。
-- `SmpRuntimePhase` 由真实 `TaskEntry::KernelInit` 入口在校验实际栈指针后，通过
-  Kernel.Enable continuation 启动；BootIdleEntry Online 只返回 UpMultitask 父 continuation。
+  `BootInitFlow.Online`、PID 1 release/dispatch 和 scheduler first handoff facts。
+- `SmpRuntimePhase` 由真实 `TaskEntry::KernelInit` 入口在校验实际栈指针后启动；不得等待或假定
+  `BootIdleEntryPhase` 已执行。
 
 按“子阶段不跨执行主体边界”的原则，`BootInitRestInitPhase` 只能表示
-`BootTask` 的 `RootStream` 视角下执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
+`BootTask` 在 `BootInitFlow` 中执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
 `KernelInitTask` / `KthreaddTask`，发布二者的 entry、release 和 provider facts；但首次调度交接、
 `KernelInitTask` 的 `PreSmpInitPhase`、`KthreaddTask` 的服务循环子阶段，以及调度交接后的
 `BootIdleFlow` idle 子阶段，都应作为对应执行 continuation 的子阶段处理。
@@ -2345,7 +2342,7 @@ flowchart LR
 3. `BootIdleEntryPhase`：由首次调度交接后同一 `BootTask` 的 `BootIdleFlow` continuation 执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
 4. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
 
-##### UP Multitask Phase 分叉修正规则
+##### BootInitFlow Enable 分叉修正规则
 
 `BootInitScheduleHandoffPhase` 和 `PreSmpInitPhase` 的分叉点是 `schedule_preempt_disabled()`
 展开后的 `Scheduler.schedule()` 调度分界，而不是独立生命周期对象或单个
@@ -2355,27 +2352,33 @@ Scheduler action。该分界提交 `Scheduler.first_schedule_committed` 等调�
 没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是由
 preemption guard 边界和调度分界组成的通用 helper。
 
-`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `UpMultitaskPhase.Online`、
+`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `BootInitFlow.Online`、
 `KernelInitTask` release/dispatch facts 和 Scheduler first-schedule fact。它不由
 BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推断父阶段完成。
 
 实现层应拆分 `rest_init`：`BootInitRestInitPhase` 创建 PID 1/kthreadd 并完成
-`kthreadd_done`；`BootInitScheduleHandoffPhase` 退出 boot 初始 preempt-disabled 上下文并调用
-`Scheduler.schedule()`；`BootIdleEntryPhase` 进入 post-schedule boot idle context 并完成
-`BootIdleRuntime`。测试应验证 PID 1 的下一阶段
+`kthreadd_done`；`BootInitScheduleHandoffPhase` 退出 boot 初始 preempt-disabled 上下文，完成首次
+切换的可逆预检和 dispatch 提交；BootInitFlow 建立 BootIdleFlow binding、发布 Online 后才执行
+不可逆真实切换。`BootIdleEntryPhase` 留给未来恢复 BootTask 的返回路径。测试应验证 PID 1 的下一阶段
 启动条件来自 release/dispatch 与 scheduler facts，而不是来自某个 `RestInitPhase` wrapper。
 
-#### UP Multitask Phase 子阶段 1-3：rest_init 三段
+#### BootInitFlow Enable 子阶段：rest_init 与首次切换
 
-`UP Multitask Phase` 的 rest_init 路径拆为 `BootInitRestInitPhase`、
-`BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase`。三者共同覆盖 Linux 6.12
-`rest_init()` 从 `rcu_scheduler_starting()` 到 boot CPU idle 入口的对象级边界，但不再把不同执行主体串成一个最小子阶段。
+`BootInitFlow Enable` 的启动路径拆为 `BootInitRestInitPhase` 和
+`BootInitScheduleHandoffPhase`；`BootIdleEntryPhase` 属于 `BootIdleFlow`，不计入 BootInitFlow
+完成条件。两者覆盖 Linux 6.12 `rest_init()` 从 `rcu_scheduler_starting()` 到首次真实切换 commit
+前的对象级边界，不把不同执行主体串成一个最小子阶段。
 
-这个边界的核心不是继续建立静态基础设施，而是把系统从“单根启动任务执行初始化”推进为“boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，`KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`，而原 `BootTask` 保持身份并由调度器把 active Flow 从 `RootStream` handoff 到 `BootIdleFlow`。因此，本子阶段是 `InterruptPhase` 到 `UP Multitask Phase` 的实际运行语义转换点。
+这个边界的核心不是继续建立静态基础设施，而是把系统从“单一 BootTask 执行初始化”推进为
+“boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，
+`KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，
+`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`；`BootIdleFlow`
+直接成为 `BootTask` 的首个 TaskFlow。因此，本子阶段是 `InterruptPhase` 到真实 PID 1 执行线的
+实际运行语义转换点。
 
 当前先将 rest_init 路径的对象和边界记录如下：
 
-1. `BootInitRestInitPhase`：属于阶段对象，是 `UP Multitask Phase` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Online` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
+1. `BootInitRestInitPhase`：属于阶段对象，是 `BootInitFlow Enable` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Online` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
 2. `RCU 核心对象`（暂名 `RcuCore`）的调度启动动作：覆盖 `rcu_scheduler_starting()`。它不是创建新的 RCU 对象，而是在前序 `RcuCore.Ready` 基础上执行 `RcuCore.setup()`，把 RCU 退出 early boot 模式并记录 scheduler 开始参与 RCU 语义；Linux 当前要求此时仍只有一个 online CPU，且尚未发生普通上下文切换。后续 `rcu_set_runtime_mode()` 可作为 `RcuCore.enable()` 推进到 `Online`；`rcu_end_inkernel_boot()` 不消耗主对象 slot，作为 `RcuCore.end_inkernel_boot()` action 修改内部 `boot_mode` / `inkernel_boot_ended` 子状态。将来若需要细化 RCU 流程，可以增加 `RcuTree`、`RcuSoftirqHook`、`RcuGpWorker` 或 `RcuBootMode` 等下级子对象，主对象 slots 仍然足够。
 3. `内核 init 任务对象`（`KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的稳定 PID 1。它是与 `BootTask` 同属唯一 `Task` 类型的独立实例，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 通过公共 `TaskCreationCore.CopyProcess` 以 `BootTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；`KernelInitFlow` 独立承载 exec 前 continuation，并在 successful exec 时被 fresh `UserAppFlow` 替换，Task 身份不变。`KernelInitTask` 的 lifecycle 语义为：
 
@@ -2395,7 +2398,10 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
    | `KthreaddTask.enable()` | `wake_up_new_task(p)` | 依赖 `KthreaddTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task | 将 `KthreaddTask` 放入调度器可运行集合并推进到 `Online`。它使 kthreadd provider 具备被调度执行并消费 `kthread_create_list` 的机会；后续外部 kthread 创建请求可通过全局 provider 引用唤醒它。 |
 7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，只发布 token/wake 事实；PID 1 继续执行 `kernel_init_freeable()` 的 release fact 由 `KernelInitTask` 的 wait side 观察或消费该 token 后提交。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
-9. `boot idle Flow`（`BootIdleFlow`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。Task carrier 始终是 Linux 静态 `init_task/current` 对应的 `BootTask`；`schedule_preempt_disabled()` 展开为 `BootIdlePreemption.enable_no_resched()`、`Scheduler.schedule()` 和 post-schedule boot idle context。随后旧 `RootStream` 停止，`BootTask` 提交 `RootStream -> BootIdleFlow` active handoff，并由 `BootIdleFlow` 承载 idle lifecycle 和 continuation；不得用 Task disable/enable 模拟身份替换。
+9. `boot idle Flow`（`BootIdleFlow`）：它是 `BootTask` 的首个 TaskFlow。首次真实切换前直接建立
+owner/active binding 并到达 Ready；只有调度器未来恢复 `BootTask` 后，才由其 continuation 覆盖
+`cpu_startup_entry(CPUHP_ONLINE)`。Task carrier 始终是 Linux 静态 `init_task/current` 对应的
+`BootTask`，不得用 Task disable/enable 模拟身份替换。
 
 <p align="center">
   <img src="pic/rest-init-objects.svg" alt="rest_init 期对象分类与相互关系" width="900">
@@ -2405,9 +2411,9 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
   图 24 rest_init 期对象分类与相互关系
 </p>
 
-图 24 用于说明 `UP Multitask Phase` 子阶段 1 的对象分类和依赖关系。左侧是阶段边界和从 `InterruptPhase` 接续而来的输入事实，中间是 `rest_init()` 创建和推进的三个 task 结果：`KernelInitTask`、`KthreaddTask` 与在 `cpu_startup_entry(CPUHP_ONLINE)` 中完成身份确认的 `BootTask`；右侧是本子阶段使用的支撑对象和同步/状态属性。图中 `KthreaddReadyGate` 是显式同步门，`SystemState` 是全局状态推进，`NumaDefaultPolicy` 在当前配置下为 trimmed/no-op。
+图 24 用于说明 `BootInitFlow Enable` 子阶段 1 的对象分类和依赖关系。左侧是阶段边界和从 `InterruptPhase` 接续而来的输入事实，中间是 `rest_init()` 创建和推进的三个 task 结果：`KernelInitTask`、`KthreaddTask` 与在 `cpu_startup_entry(CPUHP_ONLINE)` 中完成身份确认的 `BootTask`；右侧是本子阶段使用的支撑对象和同步/状态属性。图中 `KthreaddReadyGate` 是显式同步门，`SystemState` 是全局状态推进，`NumaDefaultPolicy` 在当前配置下为 trimmed/no-op。
 
-##### UP Multitask Phase 子阶段 1 过程处理清单（初稿）
+##### BootInitFlow Enable 子阶段 1 过程处理清单（初稿）
 
 | Linux 6.12 `rest_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
@@ -2420,7 +2426,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 | `system_state = SYSTEM_SCHEDULING` | formal candidate: `SystemState.setup()` | 把 `SystemState.state` 推进到 `Ready`，并把内部属性 `SystemState.value` 从 `SYSTEM_BOOTING` 更新为 `SYSTEM_SCHEDULING`；表示系统进入调度运行状态，但不等价于 SMP 已启动，也不自动推进 workqueue 到 enabled。 |
 | `complete(&kthreadd_done)` | extension event: `KthreaddReadyGate.complete()` | 对静态 `Completion` 实例执行 `complete()`：通常把扩展状态从 `Pending` 推进到 `Completed`，并唤醒等待中的 `KernelInitTask`。若随后 PID 1 的 `wait()` 消费该令牌，实例扩展状态可回到 `Pending`；因此本阶段不把 `Open` 作为长期结束状态。 |
 | `schedule_preempt_disabled()` | formal pattern: `BootIdlePreemption.enable_no_resched()` + `Scheduler.schedule()` + `BootIdleStartupContext` | 退出继承的禁抢占原子上下文，执行一次调度分界，再进入 post-schedule boot idle 原子上下文；形成第一次实际调度交接，使已入队的新任务具备运行机会。 |
-| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleFlow.Setup` + idle actions | 同一 `BootTask` 保持身份，active Flow 从 `RootStream` handoff 到 `BootIdleFlow` 后进入 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
+| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleEntryPhase` + idle actions | 同一 `BootTask` 保持身份；调度器恢复它后由已 Ready/active 的 `BootIdleFlow` 驱动入口和 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
 
 <p align="center">
   <img src="pic/rest-init-sequence.svg" alt="rest_init 期对象构建时序" width="900">
@@ -2430,14 +2436,17 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
   图 25 rest_init 期对象构建时序
 </p>
 
-图 25 按 Linux 6.12 `rest_init()` 的有效调用顺序展示 `UP Multitask Phase` rest_init 三段的推进过程。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 不属于这三个子阶段，它在 `KthreaddReadyGate.complete()` 释放并经首次 scheduler handoff dispatch 后由 `KernelInitTask` 启动 `SmpRuntimePhase`，并进入其首个子阶段 `PreSmpInitPhase`。
+图 25 按 Linux 6.12 `rest_init()` 的有效调用顺序展示 BootInitFlow Enable、PID 1 入口和未来
+BootTask 恢复分支。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态
+checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 在
+`KthreaddReadyGate.complete()` 释放并经首次 scheduler dispatch 后由 `KernelInitTask` 启动；
+Boot idle 入口不构成其前置条件。
 
 本子阶段的结束状态暂定至少包含：
 
 - `BootInitRestInitPhase.state == Online`
 - `BootInitScheduleHandoffPhase.state == Online`
-- `BootIdleEntryPhase.state == Online`
-- `UpMultitaskPhase.state == Online`
+- `BootInitFlow.state == Online`
 - `RcuCore.state == Ready`，且 `RcuCore.scheduler_active == RCU_SCHEDULER_INIT`
 - `KernelInitTask.state == Online`，且 `KernelInitTask.pid == 1`
 - `KernelInitTask.cpu_affinity == BootCPU`，并记录 `PF_NO_SETAFFINITY`
@@ -2449,7 +2458,8 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 - `SystemState.value == SYSTEM_SCHEDULING`
 - `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 展开的 `Scheduler.schedule()` 已完成第一次实际调度交接
 - `BootTask.state == Online`，且 Task identity、PID 0、CPU 归属和 switch context 均保持
-- `RootStream` 已 inactive，`BootIdleFlow.state == Ready`，并且 `task_active_flow_is(BootTask, BootIdleFlow)`
+- `BootIdleFlow.state == Ready`，并且 `task_active_flow_is(BootTask, BootIdleFlow)`；
+  `BootIdleEntryPhase` 仍可为 Base，直到调度器恢复 BootTask
 - `BootCPU.hotplug_state == CPUHP_ONLINE`
 - `NumaDefaultPolicy` 按当前配置记录为 trimmed/no-op
 - 下一子阶段的主执行任务是 `KernelInitTask`，入口是 `kernel_init_freeable()` 中 `gfp_allowed_mask = __GFP_BITS_MASK`
@@ -2483,7 +2493,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 图 26 用于说明 `SmpRuntimePhase` 首个子阶段的对象分类和依赖关系。左侧是 PID 1 release/dispatch 与 Scheduler first handoff 到 `SMP Runtime Phase` 的阶段边界，中间是由 `KernelInitTask` 在 `smp_init()` 前推进的主线对象，右侧是本阶段引用的 deferred/trimmed 路径和下一阶段入口。图中 `Workqueue.setup()` 只推进到规格层 `Ready`，`smp_prepare_cpus()` 不形成独立对象，而是把 `CpuGroup.CpuTopology` 推进到 `Ready`，记录 `BootCPU` topology，并写入 secondary CPU 子对象的 `present` 属性；secondary CPU 仍没有启动。
 
-##### UP Multitask Phase 子阶段 2 过程处理清单（初稿）
+##### BootInitFlow Enable 子阶段 2 过程处理清单（初稿）
 
 | Linux 6.12 `kernel_init_freeable()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
@@ -2539,7 +2549,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
   图 27 SMP 前初始化期对象构建时序
 </p>
 
-图 27 按 Linux 6.12 `kernel_init_freeable()` 中 `smp_init()` 前的有效调用顺序展示 `UP Multitask Phase` 子阶段 2 的推进过程。绿色节点表示当前主线 formal/action 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径，底部的 `smp_init()` 只作为下一顶层阶段入口标记。
+图 27 按 Linux 6.12 `kernel_init_freeable()` 中 `smp_init()` 前的有效调用顺序展示 `BootInitFlow Enable` 子阶段 2 的推进过程。绿色节点表示当前主线 formal/action 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径，底部的 `smp_init()` 只作为下一顶层阶段入口标记。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2578,7 +2588,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 - `BootInitRestInitPhase.state == Online`
 - `BootInitScheduleHandoffPhase.state == Online`
-- `UpMultitaskPhase.state == Online`
+- `BootInitFlow.state == Online`
 - `BootTask.state == Online`，且 boot CPU idle/scheduler 路径已绑定同一 Task
 - `KernelInitTask.state == Online`，且 PID 1 已解除 `kthreadd_done` 等待
 - `KthreaddTask.state == Online`，表示 `kthreadd` 任务已建立并可由调度器运行

@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 490,
+  "total_checkpoints": 488,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 373
+      "count": 371
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 373
+      "count": 371
     },
     {
       "confidence": "medium",
@@ -124,6 +124,10 @@
       "count": 4
     },
     {
+      "family": "BootInitFlow",
+      "count": 4
+    },
+    {
       "family": "BootInitScheduleHandoffPhase",
       "count": 4
     },
@@ -165,10 +169,6 @@
     },
     {
       "family": "SyscallTable",
-      "count": 4
-    },
-    {
-      "family": "UpMultitaskPhase",
       "count": 4
     },
     {
@@ -233,10 +233,6 @@
     },
     {
       "family": "BootCurrentCPU",
-      "count": 2
-    },
-    {
-      "family": "BootTask",
       "count": 2
     },
     {
@@ -477,6 +473,10 @@
     },
     {
       "family": "BootStackCanary",
+      "count": 1
+    },
+    {
+      "family": "BootTask",
       "count": 1
     },
     {
@@ -849,10 +849,6 @@
     },
     {
       "family": "RootPidNamespace",
-      "count": 1
-    },
-    {
-      "family": "RootStream",
       "count": 1
     },
     {

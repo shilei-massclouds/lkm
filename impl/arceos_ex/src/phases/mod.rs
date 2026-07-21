@@ -1,10 +1,10 @@
 pub mod boot;
+pub mod boot_init;
 pub mod interrupt;
 pub mod payload;
 pub mod prepare;
 pub mod smp_runtime;
 pub mod state;
-pub mod up_multitask;
 
 use crate::objects::state::{EventError, EventResult};
 

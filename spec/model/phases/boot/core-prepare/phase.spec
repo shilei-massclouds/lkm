@@ -309,7 +309,7 @@ object ResourceTree: ResourceObject {
                     KernelImage.state == State::Online;
                     Lds.state == State::Online;
                     ResourceLock.state == State::Ready;
-                    task_ref_ready(BootTaskRef);
+                    BootTask.state == State::Online;
                 }
 
                 within ResourceTreeWriteContext {
@@ -755,7 +755,7 @@ object StaticBranch: KernelObject {
                     SwapperVm.state == State::Online;
                     CpuHotplugLock.state == State::Ready;
                     JumpLabelMutex.state == State::Ready;
-                    task_ref_ready(BootTaskRef);
+                    BootTask.state == State::Online;
                 }
 
                 within CpuHotplugReadContext {

@@ -279,6 +279,20 @@ class BasicOrchestrationTests(unittest.TestCase):
 
 
 class EventAndDiffTests(unittest.TestCase):
+    def test_boot_entry_early_bytes_preserve_online_and_phase_order(self) -> None:
+        events = runner._extract_events("RTOAIK\n")
+        names = [event["name"] for event in events]
+        self.assertEqual(
+            names[:4],
+            [
+                "Kernel.Started",
+                "BootTask.Online",
+                "BootInitFlow.Started",
+                "EntryPreludePhase.Started",
+            ],
+        )
+        self.assertEqual(names.count("BootTask.Online"), 1)
+
     def test_complete_stress_record_is_decoded_but_partial_is_not(self) -> None:
         text = "checkpoint: SyscallTable.Wait4\n"
         record = stress_record(text)

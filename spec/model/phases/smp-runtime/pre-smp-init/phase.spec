@@ -210,7 +210,7 @@ object PreSmpInitBoundary: KernelObject {
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
  * 绑定为 KernelInitFlow 并指向 SmpRuntimePhase 入口。该真实任务入口
- * 只在 UpMultitaskPhase.Online 后由 Kernel.Enable continuation 启动。
+ * 只在 BootInitFlow.Online 后由 Kernel.Enable continuation 启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;
@@ -220,7 +220,7 @@ object PreSmpInitPhase: PhaseObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    UpMultitaskPhase.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     KernelInitTask.state == State::Online;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -302,7 +302,7 @@ object PreSmpInitPhase: PhaseObject {
 
     state State::Prepared {
         invariant {
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             KernelInitKthreaddDoneWait.state == State::Online;
             kernel_init_kthreadd_done_wait_released(
                 KernelInitKthreaddDoneWait,
@@ -332,7 +332,7 @@ object PreSmpInitPhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    UpMultitaskPhase.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     pre_smp_init_ready(PreSmpInitPhase);
                     PreSmpInitBoundary.state == State::Ready;
                 }
@@ -346,7 +346,7 @@ object PreSmpInitPhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             pre_smp_init_ready(PreSmpInitPhase);
             PreSmpInitBoundary.state == State::Ready;
         }
@@ -364,7 +364,7 @@ object PreSmpInitPhase: PhaseObject {
 
     state State::Online {
         invariant {
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             pre_smp_init_ready(PreSmpInitPhase);
             PreSmpInitBoundary.state == State::Ready;
             smp_init_not_called();

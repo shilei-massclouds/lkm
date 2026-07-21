@@ -10,7 +10,7 @@ drive 目标。model 来源为
 
 | Transition | Source -> target | depends / drives / ensures | continuation、checkpoint 与后续 |
 | --- | --- | --- | --- |
-| Preset | Base -> Prepared | 精确检查 Base、UpMultitask Online 和 KernelInitTask 主线事实；驱动 PreSmpInit.Preset 并要求其 Online | `preset_after_pre_smp_init()` 提交 Prepared，发出 `SmpRuntimePhase.Prepared`，进入父 Setup |
+| Preset | Base -> Prepared | 精确检查 Base、BootInitFlow Online 和 KernelInitTask 主线事实；驱动 PreSmpInit.Preset 并要求其 Online | `preset_after_pre_smp_init()` 提交 Prepared，发出 `SmpRuntimePhase.Prepared`，进入父 Setup |
 | Setup | Prepared -> Ready | 精确检查 Prepared、PreSmpInit Online 和当前 task stack；驱动 SmpBringup.Preset 并要求其 Online | `setup_after_smp_bringup()` 提交既有 Ready，进入父 Enable |
 | Enable | Ready -> Online | 精确检查 Ready、SmpBringup Online；依次驱动 RuntimeCore、Initcall、Rootfs、Finalize 的 Preset，并要求各自 Online | 四个具名 continuation 串联 sibling；`enable_after_finalize()` 提交 Online 后调用 `kernel::enable_after_smp_runtime()` |
 

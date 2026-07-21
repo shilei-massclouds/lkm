@@ -8,7 +8,6 @@ use super::{
 
 pub const USER_FLOW_SLOTS_PER_TASK: usize = 2;
 
-const FLOW_SLOT_ROOT_STREAM: u16 = 1;
 const FLOW_SLOT_BOOT_IDLE: u16 = 2;
 const FLOW_SLOT_KERNEL_INIT: u16 = 3;
 const FLOW_SLOT_KTHREADD: u16 = 4;
@@ -25,7 +24,6 @@ pub struct TaskFlowRef {
 
 impl TaskFlowRef {
     pub const NONE: Self = Self::new(0, 0);
-    pub const ROOT_STREAM: Self = Self::new(FLOW_SLOT_ROOT_STREAM, 1);
     pub const BOOT_IDLE: Self = Self::new(FLOW_SLOT_BOOT_IDLE, 1);
     pub const KERNEL_INIT: Self = Self::new(FLOW_SLOT_KERNEL_INIT, 1);
     pub const KTHREADD: Self = Self::new(FLOW_SLOT_KTHREADD, 1);

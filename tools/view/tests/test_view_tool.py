@@ -201,13 +201,12 @@ class ViewToolTests(unittest.TestCase):
                 if cell["kind"] == "verified_state"
                 and cell["label"] == "Riscv64.State::Online"
             )
-            root_stream_cell = next(
+            boot_task_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["kind"] == "state"
-                and cell["label"] == "RootStream.State::Base"
+                if cell["label"] == "BootTask.State::Online"
             )
-            self.assertEqual(riscv64_cell["column"], root_stream_cell["column"])
+            self.assertGreater(boot_task_cell["column"], riscv64_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"
@@ -354,7 +353,7 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     row.get("group_role") == "body_start"
-                    and row.get("label") == "RootStream.Transition::Preset.body.start"
+                    and row.get("label") == "BootInitFlow.Transition::Preset.body.start"
                     for row in metadata["trace_rows"]
                 )
             )
@@ -448,7 +447,7 @@ class ViewToolTests(unittest.TestCase):
             {
                 "trace": [
                     {
-                        "object": "UpMultitaskPhase",
+                        "object": "BootInitFlow",
                         "transition": "Setup",
                         "source_state": "Base",
                         "target_state": "Ready",
@@ -1170,7 +1169,7 @@ class ViewToolTests(unittest.TestCase):
                                     {
                                         "body": (
                                             "ResourceLock.Transition::WriteLock"
-                                            "(BootInitTaskRef);"
+                                            "(BootTaskRef);"
                                         )
                                     }
                                 ],
@@ -1178,7 +1177,7 @@ class ViewToolTests(unittest.TestCase):
                                     {
                                         "body": (
                                             "ResourceLock.Transition::WriteUnlock"
-                                            "(BootInitTaskRef);"
+                                            "(BootTaskRef);"
                                         )
                                     }
                                 ],

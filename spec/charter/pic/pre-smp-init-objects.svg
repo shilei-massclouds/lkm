@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="980" viewBox="0 0 1280 980" role="img" aria-labelledby="title desc">
   <title id="title">SMP 前初始化期对象分类与相互关系</title>
-  <desc id="desc">展示 UP Multitask Phase 子阶段 2 在 Linux 6.12 以 `../linux-6.12/.config` 为基线的 kernel_init_freeable() 到 smp_init() 前的对象边界。</desc>
+  <desc id="desc">展示 BootInitFlow Enable 子阶段 2 在 Linux 6.12 以 `../linux-6.12/.config` 为基线的 kernel_init_freeable() 到 smp_init() 前的对象边界。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -33,7 +33,7 @@
 
   <rect x="0" y="0" width="1280" height="980" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">SMP 前初始化期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase 子阶段 2：KernelInitTask 执行 kernel_init_freeable()，到 smp_init() 前结束</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootInitFlow Enable 子阶段 2：KernelInitTask 执行 kernel_init_freeable()，到 smp_init() 前结束</text>
 
   <rect x="44" y="116" width="250" height="804" rx="14" class="group"/>
   <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>

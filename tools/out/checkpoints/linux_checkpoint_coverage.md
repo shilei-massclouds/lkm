@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 490
+- total checkpoints: 488
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 373 |
+| unmapped | 371 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 373 |
+| none | 371 |
 | medium | 62 |
 | high | 55 |
 
@@ -50,6 +50,7 @@
 | CpuHotplugSync | 7 |
 | PageAllocator | 5 |
 | BootIdleEntryPhase | 4 |
+| BootInitFlow | 4 |
 | BootInitScheduleHandoffPhase | 4 |
 | BootPhase | 4 |
 | CpuGroup | 4 |
@@ -61,7 +62,6 @@
 | MemBlock | 4 |
 | SmpRuntimePhase | 4 |
 | SyscallTable | 4 |
-| UpMultitaskPhase | 4 |
 | VirtioBlk | 4 |
 | BootCPU | 3 |
 | BootInitRestInitPhase | 3 |
@@ -78,7 +78,6 @@
 | ApOnlineIdlePhase | 2 |
 | ApSmpCallinPhase | 2 |
 | BootCurrentCPU | 2 |
-| BootTask | 2 |
 | CommandLine | 2 |
 | CorePreparePhase | 2 |
 | EntryPreludePhase | 2 |

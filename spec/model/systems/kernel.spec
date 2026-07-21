@@ -8,13 +8,13 @@
 include "../phases/boot/entry-prelude/main.spec";
 include "../phases/boot/main.spec";
 include "../phases/interrupt/main.spec";
-include "../phases/up-multitask/main.spec";
+include "../phases/boot-init/main.spec";
 include "../phases/smp-runtime/main.spec";
 include "../phases/payload/main.spec";
 
 /*
  * Kernel 代表内核运行实例, 由 OpenSBI 交接控制权后启动。
- * 按照内核生命周期编排准备期、引导期、中断期、单核多任务期、
+ * 按照内核生命周期驱动 BootInitFlow，并在真实 PID 1 栈入口继续
  * 多核运行期以及应用交接期。
  */
 object Kernel: KernelObject {
@@ -39,13 +39,12 @@ object Kernel: KernelObject {
                     Config.state == State::Online;
                 }
 
-                within SingleTaskContext {
-                    drives {
-                        EntryPreludePhase.Transition::Preset;
-                    }
+                drives {
+                    BootInitFlow.Transition::Preset;
                 }
 
                 ensures {
+                    BootInitFlow.state == State::Prepared;
                     EntryPreludePhase.state == State::Online;
                 }
 
@@ -63,11 +62,11 @@ object Kernel: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 drives {
-                    BootPhase.Transition::Preset;
-                    InterruptPhase.Transition::Preset;
+                    BootInitFlow.Transition::Setup;
                 }
 
                 ensures {
+                    BootInitFlow.state == State::Ready;
                     BootPhase.state == State::Online;
                     InterruptPhase.state == State::Online;
                 }
@@ -86,18 +85,24 @@ object Kernel: KernelObject {
     state State::Ready {
         transitions {
             /*
-             * Enable 启动完整内核系统实例，进入多任务、推进 SMP/runtime 和
-             * selected payload 不返回交接边界。
+             * Enable 先提交 BootInitFlow.Online，再执行真实首次调度切换；
+             * KernelInitTask 的实际入口随后推进 SMP/runtime 和 payload。
              */
             on Transition::Enable -> State::Online {
                 drives {
-                    UpMultitaskPhase.Transition::Preset;
+                    BootInitFlow.Transition::Enable;
+                    Scheduler.Action::Schedule;
                     SmpRuntimePhase.Transition::Preset;
                     PayloadPhase.Transition::Preset;
                 }
 
                 ensures {
-                    UpMultitaskPhase.state == State::Online;
+                    BootInitFlow.state == State::Online;
+                    kernel_init_task_stack_switch_committed(
+                        Scheduler,
+                        BootTask,
+                        KernelInitTask
+                    );
                     SmpRuntimePhase.state == State::Online;
                     PayloadPhase.state == State::Online;
                 }

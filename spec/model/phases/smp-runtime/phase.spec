@@ -21,7 +21,7 @@ object SmpRuntimePhase: PhaseObject {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    UpMultitaskPhase.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     KernelInitTask.state == State::Online;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -77,7 +77,7 @@ object SmpRuntimePhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;
             KernelInitTask.state == State::Online;
@@ -105,7 +105,7 @@ object SmpRuntimePhase: PhaseObject {
 
     state State::Online {
         invariant {
-            UpMultitaskPhase.state == State::Online;
+            BootInitFlow.state == State::Online;
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;
             RuntimeCorePhase.state == State::Online;

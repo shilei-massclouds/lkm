@@ -1,30 +1,30 @@
-# UpMultitask rest_init 子阶段编码
+# BootInitFlow rest_init 子阶段编码
 
-本文件是 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase` 的
-coding 权威来源。原 `rest-init.spec` 的有效实现规则已全部归并到本文，不再维护平行 predicate
-索引。
+本文件是 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和恢复路径
+`BootIdleEntryPhase` 的 coding 权威来源。前两个阶段是 `BootInitFlow` 的直接子阶段；
+`BootIdleEntryPhase` 是 `BootIdleFlow` 的子阶段，不属于 BootInitFlow 或 KernelInitTask 执行链。
 
 ## 生命周期与 continuation
 
-三个子阶段都使用 `Base -> Prepared -> Ready -> Online`。对象动作只在 Preset 执行；Setup 和
+三个阶段都使用 `Base -> Prepared -> Ready -> Online`。对象动作只在 Preset 执行；Setup 和
 Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset start，不是状态。
 
 | 子阶段 | Preset 对象动作与 context | checkpoints | Online continuation |
 | --- | --- | --- | --- |
-| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::preset_after_boot_init_rest_init()` |
-| BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched` 与 Scheduler 既有 action context 中的首次 `Schedule` | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::setup_after_boot_init_schedule_handoff()` |
-| BootIdleEntry | `BootIdleStartupContext` 中进入 runtime、prepare entry 与代表性 idle loop | Started -> Prepared -> 既有 Ready -> Online | `up_multitask::enable_after_boot_idle_entry()` |
+| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `boot_init::enable_after_boot_init_rest_init()` |
+| BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched`、`BootIdleFlow.Setup` 和完整首次切换预检；不执行 `Scheduler.schedule()` | Started -> Prepared -> 既有 Ready -> Online | `boot_init::enable_after_boot_init_schedule_handoff()` |
+| BootIdleEntry | 仅在 scheduler 将来恢复 BootTask 后，于 `BootIdleStartupContext` 中进入 runtime、prepare entry 与代表性 idle loop | Started -> Prepared -> 既有 Ready -> Online | 进入 BootTask 的不返回 idle loop，不回调 BootInitFlow |
 
-每个 Online continuation 只返回父 transition，不启动 sibling。`dispatch_ready()` 保留为调度事实
-查询：BootInitScheduleHandoffPhase 提交 Online 时必须仍满足既有 first-schedule、
-pick/switch/current-task 与 completion dispatch invariant，并在同一边界锁存长期 dispatch fact；
-后续查询同时要求该阶段精确 Online 和锁存事实，不用已经发生后续调度的 current-task 瞬时值重算历史。
+每个 Online continuation 只返回所属父 transition，不启动 sibling。BootInitScheduleHandoffPhase
+提交 Online 时只允许查询 pre-commit readiness：PID 1/kthreadd runnable、completion、BootIdleFlow
+Ready/owner/active binding 和 scheduler 输入均已闭合；first-schedule、pick/switch/current-task 与
+stack-switch committed 只能由随后真实 `Scheduler.schedule()` 发布。
 
-BootIdleEntry Online 返回父 Enable continuation；父提交 UpMultitask Online 后才调用
-`handoff_boot_idle_to_kernel_init()`。`kernel_init_entry()` 验证真实 `sp` 后调用具名
-`kernel::enable_after_up_multitask()`，该 continuation 检查 Kernel Ready、UpMultitask Online、
-KernelInitTask Online、唯一 entry count 与 SP verification，再启动 SmpRuntime。线性模型中的
-`CurrentTaskRef` 标签不构成物理 Rust stack 归属证据。
+BootInitFlow 提交 Online 后，Kernel.Enable 立即调用真实 scheduler handoff。
+`kernel_init_entry()` 验证真实 `sp` 后调用具名 `kernel::enable_after_boot_init()`；该 continuation
+检查 Kernel Ready、BootInitFlow Online、KernelInitTask Online、唯一 entry count 与 SP
+verification，再启动 SmpRuntime。真实 schedule 调用将来返回到 BootTask 时才启动
+BootIdleEntryPhase；线性模型中的 current TaskRef 标签不构成物理 Rust stack 归属证据。
 
 ## 已迁移实现规则
 
@@ -32,23 +32,23 @@ KernelInitTask Online、唯一 entry count 与 SP verification，再启动 SmpRu
 
 The rest_init path is split into BootInitRestInitPhase,
 BootInitScheduleHandoffPhase and BootIdleEntryPhase under
-spec/model/phases/up-multitask/rest-init/. No RestInitPhase wrapper object,
+spec/model/phases/boot-init/rest-init/. No RestInitPhase wrapper object,
 state or checkpoint may be modeled; rest_init() remains only the
 Linux control-flow name for the owner-split path.
 
 #### Code path
 
 Phase source layout must follow the model phase tree. The target
-implementation path for this phase is the up-multitask phase
-subtree, for example impl/arceos_ex/src/phases/up_multitask/rest_init.rs.
+implementation path for this phase is the boot-init phase
+subtree, for example impl/arceos_ex/src/phases/boot_init/rest_init.rs.
 
 #### Ordering
 
 BootInitRestInitPhase must run after ProcessPreparePhase.Online;
-BootInitScheduleHandoffPhase then opens task-concurrency through the
-first scheduler handoff; BootIdleEntryPhase records the boot idle
-continuation. UpMultitaskPhase.Online is reached only after those
-three concrete subphases each reach Online; no extra RestInitPhase
+BootInitScheduleHandoffPhase then opens task-concurrency and closes the
+pre-commit boundary. BootInitFlow.Online is reached after those two direct
+subphases reach Online and before the first scheduler handoff. BootIdleEntryPhase
+records only the later restored boot-idle continuation; no extra RestInitPhase
 wrapper reports their readiness.
 
 #### Task creation facts
@@ -110,8 +110,9 @@ KernelInitTask's wait side.
 
 schedule_preempt_disabled() must be split across the owner boundary:
 BootInitScheduleHandoffPhase performs BootIdlePreemption
-enable_no_resched() and Scheduler.schedule(); BootIdleEntryPhase
-enters the post-schedule BootIdleStartupContext. It must not be
+enable_no_resched() and BootIdleFlow binding, BootInitFlow commits Online,
+and Kernel.Enable then calls Scheduler.schedule(); a later restored BootTask
+enters BootIdleEntryPhase's post-schedule BootIdleStartupContext. It must not be
 implemented as a single Scheduler action and must not introduce a
 KernelInitDispatchGate lifecycle object; the branch point is the
 combination of Scheduler first-schedule and KernelInitTask dispatch
@@ -124,7 +125,8 @@ CPU's CurrentTaskSlot; it must not infer or publish the current task
 only from Scheduler counters or BootRunQueue.curr.
 
 Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
-Scheduler.Online and drive Scheduler.Action::Schedule only; it must
+Scheduler.Online; the real Scheduler.Action::Schedule is driven by Kernel.Enable only after
+BootInitFlow.Online. It must
 not create a new Scheduler lifecycle boundary for dispatch. The
 schedule action must remain covered by the nested within sequence
 SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
@@ -517,7 +519,7 @@ question, not a completed resource-exclusive context.
 
 #### Fork dependency
 
-PreSmpInitPhase must depend on UpMultitaskPhase.Online in addition to
+PreSmpInitPhase must depend on BootInitFlow.Online in addition to
 the KernelInitTask release/dispatch facts and Scheduler first-schedule
 fact. It must not infer readiness from BootIdleEntryPhase.Ready or a
 nonexistent RestInitPhase wrapper.
@@ -525,7 +527,7 @@ nonexistent RestInitPhase wrapper.
 #### Real BootIdle to KernelInit stack handoff
 
 The implementation may linearize the owner-split rest_init object and
-checkpoint facts, but leaving UpMultitaskPhase must perform one real
+checkpoint facts, but leaving BootInitFlow must perform one real
 cooperative context transfer from BootTask to KernelInitTask. The
 handoff saves BootTask's `ra/sp/tp/s0..s11`, restores the initialized
 KernelInitTask context on its vmalloc stack, and enters `kernel_init_entry()`.

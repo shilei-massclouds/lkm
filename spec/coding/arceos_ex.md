@@ -12,7 +12,8 @@
    [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
 2. [`projects/kernel.md`](projects/kernel.md)：KernelProject 映射。
 3. [`systems/kernel.md`](systems/kernel.md)：Kernel 生命周期和顶层阶段树映射。
-4. 编排阶段：Boot -> Interrupt -> UpMultitask -> SmpRuntime -> Payload。
+4. 编排阶段：BootInitFlow（EntryPrelude -> Boot -> Interrupt -> rest_init/handoff）
+   -> SmpRuntime -> Payload。
 5. 对应叶子阶段和普通对象主题。
 6. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
 
@@ -32,8 +33,8 @@
 | Interrupt `local-irq-enable` | [`phases/interrupt/local-irq-enable.md`](phases/interrupt/local-irq-enable.md) |
 | Interrupt `irq-open-prepare` | [`phases/interrupt/irq-open-prepare.md`](phases/interrupt/irq-open-prepare.md) |
 | Interrupt `process-prepare` | [`phases/interrupt/process-prepare.md`](phases/interrupt/process-prepare.md) |
-| UpMultitask orchestration | [`phases/up-multitask.md`](phases/up-multitask.md) |
-| UpMultitask `rest-init` | [`phases/up-multitask/rest-init.md`](phases/up-multitask/rest-init.md) |
+| BootInitFlow orchestration | [`phases/boot-init.md`](phases/boot-init.md) |
+| BootInitFlow `rest-init` | [`phases/boot-init/rest-init.md`](phases/boot-init/rest-init.md) |
 | SMP runtime orchestration | [`phases/smp-runtime.md`](phases/smp-runtime.md) |
 | SMP runtime `pre-smp-init` | [`phases/smp-runtime/pre-smp-init.md`](phases/smp-runtime/pre-smp-init.md) |
 | SMP runtime `smp-bringup` | [`phases/smp-runtime/smp-bringup.md`](phases/smp-runtime/smp-bringup.md) |

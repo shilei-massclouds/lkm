@@ -246,8 +246,9 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
  * Scheduler 的生命周期由 boot/sched-init/phase.spec 中的 Scheduler object
  * 建立：Preset/Setup/Enable 使其进入 Online。rest_init 三子阶段不再推进
  * Scheduler 生命周期，只消费 Scheduler.state == Online，并在
- * BootInitScheduleHandoffPhase 中驱动 Scheduler.Action::Schedule 作为首次
- * handoff 点。该 action 自身通过嵌套 within 进入
+ * BootInitScheduleHandoffPhase 只关闭首次切换的可逆预检与 BootIdleFlow
+ * binding；真正的首次 handoff 由其父 BootInitFlow 提交 Online 后，交给
+ * Kernel.Enable 驱动 Scheduler.Action::Schedule。该 action 自身通过嵌套 within 进入
  * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
  * ScheduleRunQueueContext，分别覆盖 schedule-owned preempt-disabled guard、
  * __schedule() local-irq-disabled guard 和 rq->lock 独占区。
@@ -518,7 +519,7 @@ object SystemState: KernelObject {
 
                 ensures {
                     system_state_scheduling(SystemState);
-                    up_multitask_scheduling_open();
+                    boot_init_scheduling_open();
                     smp_concurrency_closed();
                 }
             }
@@ -533,7 +534,7 @@ object SystemState: KernelObject {
     state State::Ready {
         invariant {
             system_state_scheduling(SystemState);
-            up_multitask_scheduling_open();
+            boot_init_scheduling_open();
             smp_concurrency_closed();
         }
 
@@ -552,7 +553,7 @@ object SystemState: KernelObject {
 
                 ensures {
                     system_state_running(SystemState);
-                    up_multitask_scheduling_open();
+                    boot_init_scheduling_open();
                     smp_concurrency_open(CpuGroup);
                 }
             }
@@ -566,7 +567,7 @@ object SystemState: KernelObject {
     state State::Online {
         invariant {
             system_state_running(SystemState);
-            up_multitask_scheduling_open();
+            boot_init_scheduling_open();
             smp_concurrency_open(CpuGroup);
         }
     }
@@ -588,7 +589,7 @@ object SystemState: KernelObject {
 
             ensures {
                 system_state_freeing_initmem_window_entered(SystemState);
-                up_multitask_scheduling_open();
+                boot_init_scheduling_open();
                 smp_concurrency_closed();
             }
         }
@@ -679,9 +680,8 @@ object KthreaddReadyGate: Completion {
  * 先执行 current->flags |= PF_IDLE、arch_cpu_idle_prepare() 和
  * cpuhp_online_idle(CPUHP_ONLINE)，然后进入 while (1) do_idle()；当本 CPU
  * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度。当前实现可先
- * 线性提交 owner-split 的对象事实，但离开 UpMultitaskPhase 时必须把真实
- * BootTask switch context 保存，并恢复 KernelInitTask switch context；
- * 若 KernelInitTask 后续切回，BootTask 才从该 continuation 继续。
+ * 在不可逆切换前建立首个 owner/active binding；若 KernelInitTask 后续
+ * 切回，BootTask 才从该 continuation 继续并启动 BootIdleEntryPhase。
  */
 
 
@@ -694,7 +694,7 @@ object KthreaddReadyGate: Completion {
  */
 object BootInitRestInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: UpMultitaskPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {
@@ -1325,12 +1325,13 @@ object BootInitRestInitPhase: PhaseObject {
 
 /*
  * BootInitScheduleHandoffPhase 仍由 BootTask 执行。它只表示
- * schedule_preempt_disabled() 中退出 inherited preempt-disabled guard 并发起
- * 首次 scheduler handoff 的点；handoff 之后其它任务执行多久不在本阶段展开。
+ * schedule_preempt_disabled() 中退出 inherited preempt-disabled guard、建立
+ * BootIdleFlow owner/active binding 并完成首次 scheduler handoff 的可逆预检。
+ * 真正的 task stack switch 不属于本阶段。
  */
 object BootInitScheduleHandoffPhase: PhaseObject {
     initial_state: State::Base;
-    parent: UpMultitaskPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {
@@ -1350,69 +1351,22 @@ object BootInitScheduleHandoffPhase: PhaseObject {
 
                 drives {
                     BootIdlePreemption.Transition::EnableNoResched;
-                    Scheduler.Action::Schedule;
+                    BootIdleFlow.Transition::Setup;
                 }
 
                 ensures {
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+                    BootIdleFlow.state == State::Ready;
+                    task_owns_flow(BootTask, BootIdleFlow);
+                    task_flow_owner_is(BootIdleFlow, BootTask);
+                    task_flow_owner_exclusive(BootIdleFlow);
+                    task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
-                    scheduler_first_schedule_committed(Scheduler);
-                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
-                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
-                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
-                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
-                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_prepare_task_switch_done(
-                        Scheduler,
-                        BootRunQueue,
-                        CurrentTaskRef,
-                        KernelInitTaskRef
-                    );
-                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
-                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
-                    scheduler_finish_task_switch_restores_preempt_count(
-                        Scheduler,
-                        KernelInitTaskRef
-                    );
-                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
-                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
-                    scheduler_fpu_vector_switch_deferred(Scheduler);
-                    scheduler_generic_task_return_deferred(Scheduler);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                     task_concurrency_open();
                     smp_concurrency_closed();
-                    kernel_init_task_stack_switch_committed(
-                        Scheduler,
-                        BootTask,
-                        KernelInitTask
-                    );
                     secondary_cpus_not_started(CpuGroup);
-                }
-
-                deferred schedule_handoff.001 {
-                    category: DeferredCategory::Protocol;
-                    summary: "Complete address-space switch_mm/lazy-TLB and membarrier switch ordering.";
-                    evidence {
-                        scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
-                        scheduler_membarrier_switch_barrier_deferred(Scheduler);
-                    }
-                    close_when: "MM switch, lazy-TLB and membarrier ordering pass multi-mm task-switch tests.";
-                }
-                deferred schedule_handoff.002 {
-                    category: DeferredCategory::Protocol;
-                    summary: "Complete FPU and vector context switching.";
-                    evidence { scheduler_fpu_vector_switch_deferred(Scheduler); }
-                    close_when: "Per-task FPU/vector save, restore and lazy-state tests pass.";
-                }
-                deferred schedule_handoff.003 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Complete generic task return handling after context switches.";
-                    evidence { scheduler_generic_task_return_deferred(Scheduler); }
-                    close_when: "All supported kernel/user task return paths are modeled and tested.";
                 }
 
                 emits {
@@ -1428,36 +1382,11 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 ensures {
                     BootInitRestInitPhase.state == State::Online;
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-                    scheduler_first_schedule_committed(Scheduler);
-                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
-                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
-                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
-                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
-                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_prepare_task_switch_done(
-                        Scheduler,
-                        BootRunQueue,
-                        CurrentTaskRef,
-                        KernelInitTaskRef
-                    );
-                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
-                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
-                    scheduler_finish_task_switch_restores_preempt_count(
-                        Scheduler,
-                        KernelInitTaskRef
-                    );
-                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
-                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    BootIdleFlow.state == State::Ready;
+                    task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    kernel_init_task_stack_switch_committed(
-                        Scheduler,
-                        BootTask,
-                        KernelInitTask
-                    );
                     task_concurrency_open();
                     smp_concurrency_closed();
                 }
@@ -1473,30 +1402,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
         invariant {
             BootInitRestInitPhase.state == State::Online;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-            scheduler_first_schedule_committed(Scheduler);
-            scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-            scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
-            scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
-            scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
-            scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
-            scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-            scheduler_prepare_task_switch_done(
-                Scheduler,
-                BootRunQueue,
-                CurrentTaskRef,
-                KernelInitTaskRef
-            );
-            scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
-            scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
-            scheduler_finish_task_switch_restores_preempt_count(Scheduler, KernelInitTaskRef);
-            scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
-            scheduler_membarrier_switch_barrier_deferred(Scheduler);
-            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-            kernel_init_task_stack_switch_committed(
-                Scheduler,
-                BootTask,
-                KernelInitTask
-            );
+            BootIdleFlow.state == State::Ready;
+            task_active_flow_is(BootTask, BootIdleFlow);
             task_concurrency_open();
             smp_concurrency_closed();
         }
@@ -1506,36 +1413,11 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 ensures {
                     BootInitRestInitPhase.state == State::Online;
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
-                    scheduler_first_schedule_committed(Scheduler);
-                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
-                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
-                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
-                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
-                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
-                    scheduler_prepare_task_switch_done(
-                        Scheduler,
-                        BootRunQueue,
-                        CurrentTaskRef,
-                        KernelInitTaskRef
-                    );
-                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
-                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
-                    scheduler_finish_task_switch_restores_preempt_count(
-                        Scheduler,
-                        KernelInitTaskRef
-                    );
-                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
-                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
+                    BootIdleFlow.state == State::Ready;
+                    task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    kernel_init_task_stack_switch_committed(
-                        Scheduler,
-                        BootTask,
-                        KernelInitTask
-                    );
                     task_concurrency_open();
                     smp_concurrency_closed();
                 }
@@ -1544,6 +1426,14 @@ object BootInitScheduleHandoffPhase: PhaseObject {
     }
 
     state State::Online {
+        invariant {
+            BootInitRestInitPhase.state == State::Online;
+            boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+            BootIdleFlow.state == State::Ready;
+            task_active_flow_is(BootTask, BootIdleFlow);
+            task_concurrency_open();
+            smp_concurrency_closed();
+        }
     }
 }
 
@@ -1554,7 +1444,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
  */
 object BootIdleEntryPhase: PhaseObject {
     initial_state: State::Base;
-    parent: UpMultitaskPhase;
+    parent: BootIdleFlow;
 
     state State::Base {
         transitions {
@@ -1563,14 +1453,14 @@ object BootIdleEntryPhase: PhaseObject {
                     BootInitScheduleHandoffPhase.state == State::Online;
                     scheduler_first_schedule_committed(Scheduler);
                     BootIdleSetup.state == State::Ready;
-                    BootIdleFlow.state == State::Base;
+                    BootIdleFlow.state == State::Ready;
+                    task_active_flow_is(BootTask, BootIdleFlow);
                     CpuGroup.state == State::Ready;
                     task_concurrency_open();
                 }
 
                 within BootIdleStartupContext {
                     drives {
-                        BootIdleFlow.Transition::Setup;
                         BootIdleFlow.Action::PrepareIdleEntry;
                         BootIdleFlow.Action::RunIdleLoop;
                     }
@@ -1634,7 +1524,6 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
                     boot_idle_loop_cycle_committed(BootIdleFlow);
                     boot_idle_loop_continues(BootIdleFlow);
-                    task_flow_handoff(BootTask, RootStream, BootIdleFlow);
                     boot_cpu_idle_runtime_entered(BootIdleFlow);
                     secondary_cpus_not_started(CpuGroup);
                     kernel_init_task_stack_switch_committed(

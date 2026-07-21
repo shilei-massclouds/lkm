@@ -480,15 +480,23 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 kernel["children"],
                 [
-                    "EntryPreludePhase",
-                    "BootPhase",
-                    "InterruptPhase",
-                    "UpMultitaskPhase",
                     "SmpRuntimePhase",
                     "PayloadPhase",
                 ],
             )
-            self.assertEqual(objects["EntryPreludePhase"]["parent"], "Kernel")
+            self.assertEqual(objects["BootTask"]["initial_state"], "Online")
+            self.assertEqual(objects["BootInitFlow"]["parent"], "BootTask")
+            self.assertEqual(
+                objects["BootInitFlow"]["children"],
+                [
+                    "EntryPreludePhase",
+                    "BootPhase",
+                    "InterruptPhase",
+                    "BootInitRestInitPhase",
+                    "BootInitScheduleHandoffPhase",
+                ],
+            )
+            self.assertEqual(objects["EntryPreludePhase"]["parent"], "BootInitFlow")
             self.assertEqual(
                 objects["BootPhase"]["children"],
                 [
@@ -500,34 +508,49 @@ class ModelToolTests(unittest.TestCase):
             )
             kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
             kernel_setup = kernel["states"]["Prepared"]["transitions"]["Setup"]
+            boot_init_preset = objects["BootInitFlow"]["states"]["Base"][
+                "transitions"
+            ]["Preset"]
+            boot_init_setup = objects["BootInitFlow"]["states"]["Prepared"][
+                "transitions"
+            ]["Setup"]
             boot_preset = objects["BootPhase"]["states"]["Base"]["transitions"][
                 "Preset"
             ]
             self.assertEqual(
-                kernel_preset["body_members"][1]["within"]["context"],
+                boot_init_preset["body_members"][1]["within"]["context"],
                 "SingleTaskContext",
             )
             self.assertEqual(
                 [
                     entry["text"]
-                    for entry in kernel_preset["body_members"][1]["within"][
+                    for entry in boot_init_preset["body_members"][1]["within"][
                         "drives"
                     ][0]["entries"]
                 ],
                 ["EntryPreludePhase.Transition::Preset"],
             )
             self.assertEqual(
+                [entry["text"] for entry in kernel_preset["drives"][0]["entries"]],
+                ["BootInitFlow.Transition::Preset"],
+            )
+            self.assertEqual(
                 [entry["text"] for entry in kernel_setup["drives"][0]["entries"]],
+                ["BootInitFlow.Transition::Setup"],
+            )
+            self.assertEqual(
+                [entry["text"] for entry in boot_init_setup["drives"][0]["entries"]],
                 [
                     "BootPhase.Transition::Preset",
                     "InterruptPhase.Transition::Preset",
                 ],
             )
             self.assertEqual(
-                [entry["text"] for entry in kernel_setup["ensures"][0]["entries"]],
+                [entry["text"] for entry in boot_init_setup["ensures"][0]["entries"]],
                 [
                     "BootPhase.state == State::Online",
                     "InterruptPhase.state == State::Online",
+                    "BootTask.state == State::Online",
                 ],
             )
             self.assertEqual(boot_preset["drives"], [])
@@ -1388,11 +1411,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: JumpLabelMutex;
 
                     entered_by {
-                        JumpLabelMutex.Transition::Lock(BootInitTaskRef);
+                        JumpLabelMutex.Transition::Lock(BootTaskRef);
                     }
 
                     exited_by {
-                        JumpLabelMutex.Transition::Unlock(BootInitTaskRef);
+                        JumpLabelMutex.Transition::Unlock(BootTaskRef);
                     }
                 }
 

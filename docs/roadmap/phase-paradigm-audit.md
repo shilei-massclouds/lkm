@@ -47,22 +47,25 @@ model -> coding -> impl；不得先改 impl 再反向解释规格。
 ## 阶段树
 
 ```text
-Kernel
-├── EntryPreludePhase
-├── BootPhase
-│   ├── EntrySuccessorPhase
-│   ├── CorePreparePhase
-│   ├── MmCoreInitPhase
-│   └── SchedInitPhase
-├── InterruptPhase
-│   ├── IrqTimeInitPhase
-│   ├── LocalIrqEnablePhase
-│   ├── IrqOpenPreparePhase
-│   └── ProcessPreparePhase
-├── UpMultitaskPhase
+BootTask (Online)
+├── BootInitFlow
+│   ├── EntryPreludePhase
+│   ├── BootPhase
+│   │   ├── EntrySuccessorPhase
+│   │   ├── CorePreparePhase
+│   │   ├── MmCoreInitPhase
+│   │   └── SchedInitPhase
+│   ├── InterruptPhase
+│   │   ├── IrqTimeInitPhase
+│   │   ├── LocalIrqEnablePhase
+│   │   ├── IrqOpenPreparePhase
+│   │   └── ProcessPreparePhase
 │   ├── BootInitRestInitPhase
-│   ├── BootInitScheduleHandoffPhase
-│   └── BootIdleEntryPhase
+│   └── BootInitScheduleHandoffPhase
+└── BootIdleFlow
+    └── BootIdleEntryPhase
+
+Kernel
 ├── SmpRuntimePhase
 │   ├── PreSmpInitPhase
 │   ├── SmpBringupPhase
@@ -106,18 +109,13 @@ Kernel
    continuation，查询收敛为精确 Online。四个 legacy coding `.spec` 已迁移删除。五个阶段均完整
    观察 Started/Prepared/Ready/Online，旧 ID 保持，新 Prepared/Online 默认 unmapped。announce
    实测四条 Online -> sibling Started 顺序、ProcessPrepare.Online -> Interrupt.Prepared/Ready/Online
-   -> UpMultitask.Started，并最终到达 Kernel.Online 与 Hello；默认 stress 一轮 3/3 通过。
-6. **UpMultitaskPhase（完成）**：charter 固定三个直接子阶段、Interrupt.Online 入口和
-   Kernel.Enable 跨栈出口；父 Preset/Setup/Enable 分别驱动 RestInit/ScheduleHandoff/BootIdleEntry。
-   父与三个叶子统一四态，叶子对象动作归 Preset，Setup/Enable 只检查和发布；Online 只返回
-   三个具名父 continuation。离开 UpMultitask.Online 后执行真实 BootIdle -> KernelInit stack
-   handoff，KernelInit entry 验证实际 SP、唯一 switch/entry count 后经
-   `kernel::enable_after_up_multitask()` 启动 SmpRuntime。legacy `rest-init.spec` 已迁移删除，
-   查询收敛为精确 Online；dispatch 历史事实在 ScheduleHandoff.Online invariant 成立时锁存，
-   不受后续 scheduler smoke 改写 current-task 瞬时值影响。11 个新增 checkpoint 追加为
-   450–460，旧 268–272 不变且 Linux exact mapping 仍只保留 RestInit.Ready。announce 实测
-   三组 child Online -> parent state -> next child Started、UpMultitask.Online -> real switch ->
-   KernelInit entry -> SmpRuntime.Started，并最终到达 Kernel.Online 与 Hello；stress 一轮 3/3 通过。
+   -> BootInitFlow.Ready，并最终到达 Kernel.Online 与 Hello；默认 stress 一轮 3/3 通过。
+6. **BootInitFlow（完成）**：BootTask 是入口前已存在且始终 Online 的 PID 0 carrier；BootInitFlow
+   是其 PhaseObject 子对象。Preset 驱动 EntryPrelude，Setup 顺序驱动 Boot 与 Interrupt，Enable
+   驱动 RestInit 与 ScheduleHandoff，并在首次 PID 1 真实切换提交边界到达 Online。BootIdleEntry
+   不属于 BootInitFlow，而是 BootIdleFlow 的首阶段，只在将来恢复 BootTask 后执行。KernelInit
+   entry 验证实际 SP、唯一 switch/entry count 后经 `kernel::enable_after_boot_init()` 启动
+   SmpRuntime。checkpoint inventory 按新语义重新编号，不保留已删除 wrapper 的编号墓碑。
 7. **SmpRuntimePhase BP 主线（完成）**：charter 固定六个由 KernelInitTask 执行的直接子阶段，
    父 Preset/Setup/Enable 按 1/1/4 分别驱动 PreSmpInit、SmpBringup 和其余四阶段；父与六个
    叶子统一四态，叶子 Online 只返回六个具名父 continuation，下游只消费精确 Online。
@@ -175,11 +173,11 @@ Kernel
 | LocalIrqEnablePhase | 只开放 boot CPU 总入口 | 标准四态、无外层 context | early flag/SIE 顺序与负向 gates 已映射 | 四 checkpoint、父返回已验证 | complete |
 | IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptStream context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
 | ProcessPreparePhase | rest_init 前准备边界一致 | 标准四态、下游依赖 Online | 对象覆盖/deferred/父返回已映射 | 四 checkpoint、Interrupt.Prepared 已验证 | complete |
-| UpMultitaskPhase | 三子阶段、Interrupt/Kernel 边界固定 | 三迁移分担 drives、四态完整 | continuation/checkpoint/跨栈完整映射 | 精确 Online、三个父 continuation、Kernel continuation 已验证 | complete |
+| BootInitFlow | BootTask 子 Phase，入口到首次 PID 1 切换边界固定 | Preset/Setup/Enable 分担五个子阶段，四态完整 | continuation/checkpoint/跨栈完整映射 | 精确 Online、父 continuation、Kernel continuation 已验证 | complete |
 | BootInitRestInitPhase | BootTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |
 | BootInitScheduleHandoffPhase | BootTask 首次调度边界 | 标准四态、Scheduler action context 保持 | dispatch 锁存与父返回已映射 | 四 checkpoint、长期 dispatch query 已验证 | complete |
-| BootIdleEntryPhase | BootTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
-| SmpRuntimePhase | 六个直接子阶段、Up.Online 入口和 Payload 出口固定 | 1/1/4 drives、四态和精确 Online 完整 | KernelInitTask owner、栈检查与六个 continuation 已映射 | 四 checkpoint、实际 SP 和父 continuation 已验证 | complete |
+| BootIdleEntryPhase | BootIdleFlow 首阶段与 BootTask 恢复边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实返回已映射 | 仅 BootTask 被恢复后开始 | complete |
+| SmpRuntimePhase | 六个直接子阶段、KernelInitTask 实际栈入口和 Payload 出口固定 | 1/1/4 drives、四态和精确 Online 完整 | KernelInitTask owner、栈检查与六个 continuation 已映射 | 四 checkpoint、实际 SP 和父 continuation 已验证 | complete |
 | PreSmpInitPhase | BP 预备边界一致 | 标准四态、下游依赖 Online | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
 | SmpBringupPhase | BP 协调 replicated AP family | pointwise AP drives、all-online 后 ack | HSM/Acquire wait/completion/hotplug guard 已映射 | BP 不代写 AP 状态，全部 Online 后才 ack | complete |
 | ApEntryPreludePhase | per-logical-id AP entry family | 标准四态、真实 entry adoption facts | AcqRel 状态、SP/TP/boot-data 检查、父返回已映射 | SMP2/8 四 checkpoint 与 AP owner 已验证 | complete |
@@ -209,7 +207,7 @@ Kernel
 - Interrupt 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make run APP=hello PROBE=announce` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为
   450，Linux mapping 为 exact 103 / range 14 / unmapped 333，instrumentation plan 仍为 103。
-- UpMultitask 批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
+- 早期首次调度批次专项通过 `make checkpoints`、`make test-checkpoints`、`make verify`、
   `make build APP=hello PROBE=announce`、`make run APP=hello PROBE=announce`、
   `make run APP=smoke` 和 `make test-stress STRESS_RUNS=1`；checkpoint inventory 为 461，Linux
   mapping 为 exact 103 / range 14 / unmapped 344，instrumentation plan 仍为 103，stress 为 3/3。

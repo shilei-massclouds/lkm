@@ -9,7 +9,8 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
 
 ## 统一 Task carrier
 
-- 静态 `init_task` 只映射为 `BootTask`。该对象保存它的 lifecycle/storage/identity 事实；Scheduler
+- 静态 `init_task` 只映射为 `BootTask`。该对象从镜像入口前起就是 Online，并只保存稳定的
+  storage/PID 0/`TaskRef::BOOT`/canonical identity 事实；Scheduler
   内部可以保存 boot-task scheduling metadata、pi lock、CPU ref 和 switch context，但该结构必须
   命名为 metadata/setup/view，不得拥有第二套 Task identity 或对外生命周期。
 - `BootIdleSetup.Ready` 表示 scheduler 已把同一 `BootTask` 绑定为 boot CPU idle/current；它不是
@@ -42,11 +43,11 @@ copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 N
 Online。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
-`BootTask` 保留独立且完整的静态 override lowering，用于 `init_task_storage`、固定 `TaskRef::BOOT`
-和入口 binding milestone 后的薄 lifecycle 提交；不得把它的部分迁移与普通 `Task` core 合并，也
-不得令其他静态 Task 使用该 override。早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由
-EntryPrelude 私有 `BootTaskEntryBinding` lower，不得在 `BootTask` wrapper 中保留重复入口协议或
-phase 之外可调用的 lifecycle-driving alias。
+`BootTask` 使用 boot-only const initializer 直接构造 Online `init_task_storage` 和固定
+`TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
+早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有
+`BootTaskEntryBinding` lower，不得写入 BootTask 的稳定 Online invariant。各阶段只能静默验证该
+carrier 仍为 Online/canonical。
 
 ## TaskRef 与 storage
 
@@ -67,9 +68,9 @@ Task core 只保存 owned Flow refs 与 active Flow ref；Flow lifecycle、gener
 ownership，Task 提交 active binding，Flow exit 时清除 binding。不得公开任一 core 的字段、复制
 lifecycle state，或用角色 wrapper 绕过 owner/ref 校验。
 
-`RootStream` 的 Flow core 是 boot init ownership/active binding 的唯一实现权威。`BootTask` 的入口
-Preset/Enable 不得再次建立、镜像或推导该 ownership；它们只能在 phase 已验证 binding milestone
-后提交同一 carrier 的 Prepared/Online 状态。
+`BootIdleFlow` 是 BootTask 的首个 TaskFlow。BootInitScheduleHandoffPhase 在真实首次切换前直接把
+它建立为 Ready，并提交唯一 owner/active binding；BootInitFlow 期间更早的入口动作不要求 active
+TaskFlow，也不得建立临时 boot-init Flow。
 
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow

@@ -87,7 +87,6 @@ use crate::objects::{
         BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate,
         KthreaddTask, SystemState,
     },
-    root_stream::RootStream,
     rootfs::{
         InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFS, RootfsBoundary,
         RootfsConsoleDeferred, RootfsPrepareNamespacePaths,
@@ -130,7 +129,6 @@ pub struct Context {
     pub boot_cpu_local_interrupt: LocalInterruptControl,
     pub boot_cpu_current_task: CurrentTaskSlot,
     pub kernel_image: KernelImage,
-    pub root_stream: RootStream,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
     pub init_stack: InitStack,
@@ -354,7 +352,6 @@ impl Context {
             boot_cpu_local_interrupt: LocalInterruptControl::new(),
             boot_cpu_current_task: CurrentTaskSlot::new(),
             kernel_image: KernelImage::new(),
-            root_stream: RootStream::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
             init_stack: InitStack::new(),

@@ -34,7 +34,7 @@ context SingleTaskContext: Context {
  */
 object BootPhase: PhaseObject {
     initial_state: State::Base;
-    parent: Kernel;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

@@ -245,7 +245,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
+- 入口前导期对象来自 `EntryPreludePhase` 递归驱动出的对象状态推进结果，例如 `BootTaskEntryBinding`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
 - `ComputerProject` 是顶层工程对象，不在时间轴行中显示；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -472,7 +472,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `OpenSBI.Ready/Online` 包含 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)`，表示当前 OpenSBI 固件交接给内核的 DTB blob 位于物理 RAM 中。Linux RISC-V boot protocol 只解释 `$a1` 是内存中的 devicetree 地址；OpenSBI firmware handoff 负责把 previous `a1` 或 `FW_JUMP_FDT_ADDR` 作为 next `arg1/a1` 传给下一阶段。DTB blob 的 RAM containment 因此归入 `firmware_entry_state / opensbi_firmware`，不归入泛化的 `SbiSpec`，也不由 `PhysicalMemory.source=fdt::memory` 自证。
 - `CpuGroup.Preset` 已改为驱动 `BootCPU.Preset`，由 `BootCPU` 依赖 `BootArgs.boot_hartid` 并用 `ensures { boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid); }` 表达transition 完成后记录启动 hart 标识。这样 `BootArgs` 成为入口启动参数的统一抽象；启动 hart 是否属于平台有效 hart 集合由 `PlatformCpuInfo` 的 FDT CPU 描述事实证明，后续逻辑 CPU 映射由 `CpuGroup.Cpu[logical_id]` 和 `CpuGroup.possible_cpus` 集合视图直接表达。
 - `Riscv64.attrs_accessible(self)` 已从启动协议候选中移出，归入 `architecture_register_file / riscv_isa_spec` 并由对象声明 `source: external_spec::riscv_isa` 窄规则证明。该事实只表示模型声明的寄存器/CSR 属性来自 RISC-V ISA 寄存器文件且可被规格引用；具体寄存器值仍分别由启动协议、入口代码或transition 后置事实证明。
-- `RootStream.Preset` 已用transition 后置条件证明 `kernel_fpu_disabled(Riscv64.sstatus)` 和 `kernel_vector_disabled(Riscv64.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径执行 `li t0, SR_FS_VS; csrc CSR_STATUS, t0` 清除这些位；该事实表达入口前导期禁止内核态直接使用 FPU/VECTOR。
+- `EntryPreludePhase.Preset` 已用 transition 后置条件证明 `kernel_fpu_disabled(Riscv64.sstatus)` 和 `kernel_vector_disabled(Riscv64.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径执行 `li t0, SR_FS_VS; csrc CSR_STATUS, t0` 清除这些位；该事实表达入口前导期禁止内核态直接使用 FPU/VECTOR。
 
 后续规格结构清理：
 

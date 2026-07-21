@@ -31,9 +31,6 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_task.idle_role_bound()
         || ctx.boot_task.cpu_id() != boot_cpu.logical_id()
         || !ctx.boot_task.switch_context().initialized()
-        || ctx.root_stream.state() != State::Destroyed
-        || ctx.root_stream.active()
-        || !ctx.root_stream.destroyed()
         || ctx.boot_idle_flow.state() != State::Ready
         || !ctx.boot_idle_flow.active()
         || ctx.boot_idle_flow.owner() != TaskRef::BOOT
@@ -44,11 +41,11 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if !phases::up_multitask::rest_init::is_online()
-        || !phases::up_multitask::rest_init::boot_init_rest_init_is_online()
-        || !phases::up_multitask::rest_init::boot_init_schedule_handoff_is_online()
-        || !phases::up_multitask::rest_init::boot_idle_entry_is_online()
-        || !phases::up_multitask::is_online()
+    if !phases::boot_init::rest_init::is_online()
+        || !phases::boot_init::rest_init::boot_init_rest_init_is_online()
+        || !phases::boot_init::rest_init::boot_init_schedule_handoff_is_online()
+        || phases::boot_init::rest_init::boot_idle_entry_is_online()
+        || !phases::boot_init::is_online()
     {
         printk::write_str("rest init phase is not online\n");
         return SmokeResult::Failed;
@@ -211,7 +208,6 @@ pub fn run() -> SmokeResult {
         || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
         || ctx.scheduler.identity_switch_passes() != 0
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || !ctx.scheduler.boot_idle_preemption().disabled()
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || !boot_idle_setup_state.switch_ctx_initialized()
@@ -224,12 +220,9 @@ pub fn run() -> SmokeResult {
     }
 
     let idle_schedule_passes = ctx.scheduler.idle_schedule_passes();
-    if idle_schedule_passes == 0
-        || ctx.scheduler.idle_schedule_returned_passes() > idle_schedule_passes
+    if idle_schedule_passes != 0
+        || ctx.scheduler.idle_schedule_returned_passes() != 0
         || ctx.scheduler.idle_schedule_identity_passes() != 0
-        || ctx.scheduler.schedule_passes() < idle_schedule_passes
-        || ctx.scheduler.switch_to_passes() < idle_schedule_passes
-        || ctx.boot_cpu_current_task.switch_committed_count() < idle_schedule_passes
         || ctx.scheduler.identity_switch_passes() != 0
     {
         printk::write_str("idle schedule relation facts invalid\n");
@@ -237,47 +230,43 @@ pub fn run() -> SmokeResult {
     }
 
     if ctx.boot_idle_flow.state() != State::Ready
-        || !ctx.boot_idle_flow.first_schedule_committed()
-        || !ctx.boot_idle_flow.idle_entry_prepared()
-        || !ctx.boot_idle_flow.cpu_startup_entry_ready()
-        || !ctx.boot_idle_flow.idle_loop_entered()
-        || !ctx.boot_idle_flow.idle_cycle_committed()
-        || !ctx.boot_idle_flow.idle_cycle_started()
-        || !ctx.boot_idle_flow.need_resched_clear_before_wait()
-        || !ctx.boot_idle_flow.observed_no_need_resched()
-        || !ctx.boot_idle_flow.idle_polling_set()
-        || !ctx.boot_idle_flow.idle_polling_rmb_before_sleep_check()
-        || !ctx.boot_idle_flow.nohz_idle_entered()
-        || !ctx.boot_idle_flow.nohz_run_idle_balance_done()
-        || !ctx.boot_idle_flow.local_irq_disabled_for_sleep()
-        || ctx.boot_idle_flow.local_irq_save_count_for_sleep() == 0
-        || ctx.boot_idle_flow.local_irq_restore_count_for_sleep() == 0
-        || !ctx.boot_idle_flow.arch_cpu_idle_enter_done()
-        || !ctx.boot_idle_flow.arch_cpu_idle_exit_done()
-        || !ctx.boot_idle_flow.rcu_nocb_deferred_wakeup_flushed()
-        || !ctx.boot_idle_flow.cpu_offline_dead_path_not_taken()
-        || !ctx.boot_idle_flow.poll_or_cpuidle_path_deferred()
-        || !ctx.boot_idle_flow.idle_wait_committed()
-        || !ctx.boot_idle_flow.idle_wait_path_deferred()
-        || !ctx.boot_idle_flow.need_resched_set_for_schedule()
-        || !ctx.boot_idle_flow.observed_need_resched()
-        || !ctx.boot_idle_flow.idle_polling_cleared()
-        || !ctx.boot_idle_flow.preempt_need_resched_set()
-        || !ctx.boot_idle_flow.nohz_idle_exited()
-        || !ctx.boot_idle_flow.polling_clear_mb_before_flush()
-        || !ctx.boot_idle_flow.smp_call_function_queue_flushed()
-        || !ctx.boot_idle_flow.idle_schedule_requested()
-        || !ctx.boot_idle_flow.idle_schedule_returned()
-        || !ctx.boot_idle_flow.need_resched_drained()
-        || !ctx.boot_idle_flow.livepatch_state_update_deferred()
-        || !ctx.boot_idle_flow.idle_loop_continues()
-        || !ctx
+        || ctx.boot_idle_flow.first_schedule_committed()
+        || ctx.boot_idle_flow.idle_entry_prepared()
+        || ctx.boot_idle_flow.cpu_startup_entry_ready()
+        || ctx.boot_idle_flow.idle_loop_entered()
+        || ctx.boot_idle_flow.idle_cycle_committed()
+        || ctx.boot_idle_flow.idle_cycle_started()
+        || ctx.boot_idle_flow.need_resched_clear_before_wait()
+        || ctx.boot_idle_flow.observed_no_need_resched()
+        || ctx.boot_idle_flow.idle_polling_set()
+        || ctx.boot_idle_flow.idle_polling_rmb_before_sleep_check()
+        || ctx.boot_idle_flow.nohz_idle_entered()
+        || ctx.boot_idle_flow.local_irq_save_count_for_sleep() != 0
+        || ctx.boot_idle_flow.local_irq_restore_count_for_sleep() != 0
+        || ctx.boot_idle_flow.rcu_nocb_deferred_wakeup_flushed()
+        || ctx.boot_idle_flow.cpu_offline_dead_path_not_taken()
+        || ctx.boot_idle_flow.poll_or_cpuidle_path_deferred()
+        || ctx.boot_idle_flow.idle_wait_committed()
+        || ctx.boot_idle_flow.idle_wait_path_deferred()
+        || ctx.boot_idle_flow.need_resched_set_for_schedule()
+        || ctx.boot_idle_flow.observed_need_resched()
+        || ctx.boot_idle_flow.idle_polling_cleared()
+        || ctx.boot_idle_flow.preempt_need_resched_set()
+        || ctx.boot_idle_flow.nohz_idle_exited()
+        || ctx.boot_idle_flow.polling_clear_mb_before_flush()
+        || ctx.boot_idle_flow.idle_schedule_requested()
+        || ctx.boot_idle_flow.idle_schedule_returned()
+        || ctx.boot_idle_flow.need_resched_drained()
+        || ctx.boot_idle_flow.livepatch_state_update_deferred()
+        || ctx.boot_idle_flow.idle_loop_continues()
+        || ctx
             .boot_idle_flow
             .representative_need_resched_cycle_committed()
-        || !ctx.boot_idle_flow.boot_init_handoff_complete()
+        || ctx.boot_idle_flow.boot_init_handoff_complete()
         || !ctx.boot_idle_flow.secondary_cpus_not_started()
         || !ctx.boot_idle_flow.kernel_init_task_switch_handoff_ready()
         || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
+        || ctx.scheduler.kernel_init_stack_switch_returned_count() != 0
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
         || !ctx
@@ -292,13 +281,13 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "rest_init init_pid={} kthreadd_pid={} kernel_init_sp={:#x} schedule_passes={} switch_to_passes={} idle_schedule_passes={}\n",
+        "rest_init init_pid={} kthreadd_pid={} kernel_init_sp={:#x} schedule_passes={} switch_to_passes={} boot_idle_entry={}\n",
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
         ctx.kernel_init_task.entry_stack_pointer(),
         ctx.scheduler.schedule_passes(),
         ctx.scheduler.switch_to_passes(),
-        idle_schedule_passes
+        phases::boot_init::rest_init::boot_idle_entry_is_online()
     ));
     SmokeResult::Passed
 }

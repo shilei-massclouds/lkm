@@ -198,6 +198,11 @@ object OpenSBI: PrepareObject {
                     kernel_image_constructed();
                 }
 
+                ensures {
+                    task_ref_targets(BootTaskRef, BootTask);
+                    task_ref_ready(BootTaskRef);
+                }
+
                 emits {
                     Kernel.Transition::Preset;
                 }

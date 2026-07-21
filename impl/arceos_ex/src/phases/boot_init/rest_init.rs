@@ -11,7 +11,7 @@ use crate::{
         task::{TaskEntry, TaskKind},
     },
 };
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::AtomicU8;
 
 #[unsafe(link_section = ".data.phase")]
 static BOOT_INIT_REST_INIT_PHASE_STATE: AtomicU8 =
@@ -19,8 +19,6 @@ static BOOT_INIT_REST_INIT_PHASE_STATE: AtomicU8 =
 #[unsafe(link_section = ".data.phase")]
 static BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
-#[unsafe(link_section = ".data.phase")]
-static BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY: AtomicBool = AtomicBool::new(false);
 #[unsafe(link_section = ".data.phase")]
 static BOOT_IDLE_ENTRY_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
@@ -43,7 +41,7 @@ pub fn preset(ctx: &mut Context) -> ! {
         mark_boot_init_rest_init_online(ctx),
         "arceos_ex rest init enable failed\n",
     );
-    crate::phases::up_multitask::preset_after_boot_init_rest_init()
+    crate::phases::boot_init::enable_after_boot_init_rest_init()
 }
 
 pub fn setup(ctx: &mut Context) -> ! {
@@ -65,7 +63,7 @@ pub fn setup(ctx: &mut Context) -> ! {
         mark_boot_init_schedule_handoff_online(ctx),
         "arceos_ex schedule handoff enable failed\n",
     );
-    crate::phases::up_multitask::setup_after_boot_init_schedule_handoff()
+    crate::phases::boot_init::enable_after_boot_init_schedule_handoff()
 }
 
 pub fn enable(ctx: &mut Context) -> ! {
@@ -76,7 +74,6 @@ pub fn enable(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::BootIdleEntryPhaseStarted);
     crate::phases::shutdown_on_error(
         enter_boot_idle_startup_context(ctx)
-            .and_then(|()| setup_boot_idle_flow(ctx))
             .and_then(|()| prepare_boot_idle_entry(ctx))
             .and_then(|()| run_boot_idle_loop(ctx))
             .and_then(|()| mark_boot_idle_entry_prepared(ctx)),
@@ -90,7 +87,7 @@ pub fn enable(ctx: &mut Context) -> ! {
         mark_boot_idle_entry_online(ctx),
         "arceos_ex boot idle entry enable failed\n",
     );
-    crate::phases::up_multitask::enable_after_boot_idle_entry()
+    boot_idle_continuation(ctx)
 }
 
 fn require_boot_init_rest_init_preset() -> EventResult {
@@ -542,7 +539,6 @@ fn publish_kthreadd_global_ref(ctx: &mut Context) -> EventResult {
 fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_flow.setup(
         &mut ctx.boot_task,
-        &mut ctx.root_stream,
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
@@ -557,12 +553,6 @@ fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
 }
 
 fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
-    // The object model executes both task branches linearly. Re-enter the
-    // boot-idle continuation before modeling cpu_startup_entry()/do_idle();
-    // schedule_idle() then commits the selected runnable task as this CPU's
-    // CurrentTaskRef. The real future return to the idle-loop continuation is
-    // left to the later continuation/task-stack model.
-    ctx.boot_cpu_current_task.set_current_boot_task()?;
     ctx.boot_idle_flow.run_idle_loop(
         &mut ctx.scheduler,
         &ctx.cpu_group,
@@ -573,10 +563,23 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     )
 }
 
+fn boot_idle_continuation(ctx: &mut Context) -> ! {
+    loop {
+        let result = ctx.scheduler.schedule_idle(
+            &ctx.cpu_group,
+            &mut ctx.kernel_init_task,
+            &ctx.kthreadd_task,
+            &mut ctx.boot_cpu_local_interrupt,
+            &mut ctx.boot_cpu_current_task,
+        );
+        crate::phases::shutdown_on_error(result, "boot idle schedule loop failed\n");
+    }
+}
+
 fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
     if ctx.scheduler.state() != State::Online
         || !boot_init_rest_init_is_online()
-        || !boot_init_rest_init_phase_ready_after_handoff(ctx)
+        || !boot_init_rest_init_facts_stable(ctx)
         || ctx.kernel_init_task.state() != State::Online
         || ctx.kthreadd_task.state() != State::Online
         || ctx.system_state.state() != State::Ready
@@ -596,27 +599,12 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
     {
         return failed_schedule_handoff_preset();
     }
-
-    let schedule_result = ctx.scheduler.schedule(
-        &ctx.cpu_group,
-        &mut ctx.kernel_init_task,
-        &ctx.kthreadd_task,
-        &mut ctx.boot_cpu_local_interrupt,
-        &mut ctx.boot_cpu_current_task,
-    );
-    if schedule_result.is_err() {
-        return failed_schedule_handoff_preset();
-    }
-    crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToEntry, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToExit, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerScheduleExit, ctx);
-    Ok(())
+    setup_boot_idle_flow(ctx)
 }
 
 fn enter_boot_idle_startup_context(ctx: &mut Context) -> EventResult {
     if !boot_init_schedule_handoff_is_online()
-        || !boot_init_schedule_handoff_phase_ready(ctx)
+        || !boot_idle_restore_ready(ctx)
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
     {
         return failed_boot_idle_entry_preset();
@@ -746,18 +734,13 @@ fn mark_boot_init_schedule_handoff_online(ctx: &Context) -> EventResult {
         );
     }
 
-    BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.store(true, Ordering::Release);
-    let result = crate::phases::state::mark_checked(
+    crate::phases::state::mark_checked(
         &BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE,
         LifecycleEvent::Enable,
         State::Ready,
         State::Online,
         Checkpoint::BootInitScheduleHandoffPhaseOnline,
-    );
-    if result.is_err() {
-        BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.store(false, Ordering::Release);
-    }
-    result
+    )
 }
 
 fn mark_boot_idle_entry_prepared(ctx: &Context) -> EventResult {
@@ -814,9 +797,7 @@ fn mark_boot_idle_entry_online(ctx: &Context) -> EventResult {
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn is_online() -> bool {
-    boot_init_rest_init_is_online()
-        && boot_init_schedule_handoff_is_online()
-        && boot_idle_entry_is_online()
+    boot_init_rest_init_is_online() && boot_init_schedule_handoff_is_online()
 }
 
 pub fn boot_init_rest_init_is_online() -> bool {
@@ -827,13 +808,25 @@ pub fn boot_init_schedule_handoff_is_online() -> bool {
     crate::phases::state::load(&BOOT_INIT_SCHEDULE_HANDOFF_PHASE_STATE) == State::Online
 }
 
+#[cfg_attr(not(app_smoke), allow(dead_code))]
 pub fn boot_idle_entry_is_online() -> bool {
     crate::phases::state::load(&BOOT_IDLE_ENTRY_PHASE_STATE) == State::Online
 }
 
 pub fn dispatch_ready() -> bool {
-    boot_init_schedule_handoff_is_online()
-        && BOOT_INIT_SCHEDULE_HANDOFF_DISPATCH_READY.load(Ordering::Acquire)
+    let ctx = crate::context::context_ref();
+    crate::phases::boot_init::is_online()
+        && ctx.scheduler.schedule_passes() != 0
+        && ctx.scheduler.current_runqueue_resolve_passes() != 0
+        && ctx.scheduler.pick_next_task_passes() != 0
+        && ctx.scheduler.switch_to_passes() != 0
+        && ctx.boot_cpu_current_task.switch_committed_count() != 0
+        && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
+}
+
+pub fn precommit_ready() -> bool {
+    boot_init_schedule_handoff_phase_ready(crate::context::context_ref())
 }
 
 fn phase_failure(
@@ -927,20 +920,27 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
 }
 
 fn boot_init_schedule_handoff_phase_ready(ctx: &Context) -> bool {
-    boot_init_rest_init_phase_ready_after_handoff(ctx)
-        && ctx.scheduler.schedule_passes() != 0
-        && ctx.scheduler.current_runqueue_resolve_passes() != 0
-        && ctx.scheduler.pick_next_task_passes() != 0
-        && ctx.scheduler.switch_to_passes() != 0
-        && ctx.scheduler.identity_switch_passes() == 0
-        && ctx.boot_cpu_current_task.switch_committed_count() != 0
-        && ctx.boot_cpu_current_task.current_is_kernel_init()
+    boot_init_rest_init_facts_stable(ctx)
+        && ctx.scheduler.schedule_passes() == 0
+        && ctx.scheduler.current_runqueue_resolve_passes() == 0
+        && ctx.scheduler.pick_next_task_passes() == 0
+        && ctx.scheduler.switch_to_passes() == 0
+        && ctx.boot_cpu_current_task.switch_committed_count() == 0
+        && ctx.boot_cpu_current_task.current_is_boot_task()
+        && ctx.boot_idle_flow.state() == State::Ready
+        && ctx.boot_idle_flow.active()
+        && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()
+        && ctx
+            .boot_task
+            .task()
+            .owns_flow(ctx.boot_idle_flow.flow_ref())
+        && ctx.boot_task.task().active_flow() == ctx.boot_idle_flow.flow_ref()
         && ctx.kthreadd_ready_gate.completion().complete_committed()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
 fn boot_idle_entry_phase_ready(ctx: &Context) -> bool {
-    boot_init_schedule_handoff_phase_ready(ctx)
+    boot_idle_restore_ready(ctx)
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
         && ctx.boot_idle_flow.state() == State::Ready
@@ -966,7 +966,24 @@ fn boot_idle_entry_phase_ready(ctx: &Context) -> bool {
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
-fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
+fn boot_idle_restore_ready(ctx: &Context) -> bool {
+    boot_init_rest_init_facts_stable(ctx)
+        && crate::phases::boot_init::is_online()
+        && ctx.scheduler.schedule_passes() != 0
+        && ctx.scheduler.current_runqueue_resolve_passes() != 0
+        && ctx.scheduler.pick_next_task_passes() != 0
+        && ctx.scheduler.switch_to_passes() != 0
+        && ctx.scheduler.identity_switch_passes() == 0
+        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
+        && ctx.scheduler.kernel_init_stack_switch_returned_count() == 1
+        && ctx.boot_cpu_current_task.current_is_boot_task()
+        && ctx.boot_idle_flow.state() == State::Ready
+        && ctx.boot_idle_flow.active()
+        && ctx.boot_idle_flow.owner() == ctx.boot_task.task_ref()
+        && ctx.boot_task.task().active_flow() == ctx.boot_idle_flow.flow_ref()
+}
+
+fn boot_init_rest_init_facts_stable(ctx: &Context) -> bool {
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return false;
     };

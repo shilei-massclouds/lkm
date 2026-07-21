@@ -108,7 +108,7 @@ impl StaticBranch {
 
         /*
          * CpuHotplugReadContext:
-         * CpuHotplugLock.ReadLock(BootInitTaskRef) preserves the
+         * CpuHotplugLock.ReadLock(BootTaskRef) preserves the
          * cpus_read_lock() boundary even though the surrounding
          * SingleTaskContext already contributes single CPU/task facts.
          */
@@ -122,7 +122,7 @@ impl StaticBranch {
 
         /*
          * StaticBranchJumpLabelContext:
-         * JumpLabelMutex.Lock(BootInitTaskRef) preserves the jump_label_lock()
+         * JumpLabelMutex.Lock(BootTaskRef) preserves the jump_label_lock()
          * boundary for setup.
          */
         jump_label_mutex.lock_boot_init_task(boot_task)?;
@@ -141,13 +141,13 @@ impl StaticBranch {
         self.text_patch_sync_deferred = true;
         /*
          * StaticBranchJumpLabelContext:
-         * JumpLabelMutex.Unlock(BootInitTaskRef) exits the same modeled mutex
+         * JumpLabelMutex.Unlock(BootTaskRef) exits the same modeled mutex
          * boundary.
          */
         jump_label_mutex.unlock_boot_init_task(boot_task)?;
         /*
          * CpuHotplugReadContext:
-         * CpuHotplugLock.ReadUnlock(BootInitTaskRef) exits the same modeled
+         * CpuHotplugLock.ReadUnlock(BootTaskRef) exits the same modeled
          * read-side boundary.
          */
         cpu_hotplug_lock.read_unlock_owner(
