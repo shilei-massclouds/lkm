@@ -38,8 +38,14 @@ Online --Disable--> Offline --Cleanup--> Destroyed
 而不是类型名或 declaration site。
 
 `BootTask` 是唯一允许的静态 Task lifecycle override。它必须显式替换整张状态图，以承载静态
-`init_task` storage、`tp` 的物理地址到虚拟地址切换以及早期 preemption 事实；这些 boot-only
-语义不得合并进普通 Task lifecycle。除这一完整 override 外，不存在实例级 Task lifecycle 权威。
+`init_task` storage、固定 `TaskRef` 以及入口 binding milestone 的受控提交；这些 boot-only
+语义不得合并进普通 Task lifecycle。`tp` 的物理/虚拟绑定与早期 preemption 事实归
+`EntryPreludePhase` 私有的 `BootTaskEntryBinding`，不属于 Task carrier lifecycle。除这一完整
+override 外，不存在实例级 Task lifecycle 权威。
+
+`BootTaskEntryBinding` 只协调同一静态 carrier 的入口可寻址性：Base 表示尚未绑定，Prepared 表示
+`tp` 使用物理地址且初始抢占关闭条件已建立，Ready 表示 `EarlyVm` 下的虚拟地址绑定已提交。它不
+建立新的 Task identity/storage/Flow ownership，也不进入公共 Task 或 Context API。
 
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread

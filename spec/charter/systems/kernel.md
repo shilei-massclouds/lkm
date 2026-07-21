@@ -82,6 +82,14 @@
 * OnPreset：内核收到引导信号 startup，由静态 `BootTask` 的 `RootStream` 执行早期初始化。
   `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
 
+  入口协议由 `EntryPreludePhase` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp`
+  绑定到静态 `init_task` 并建立初始抢占关闭事实，再提交 `BootTask.Prepared`；`EarlyVm` 就绪后，
+  binding 把 `tp` 切换为同一 carrier 的虚拟地址，再提交 `BootTask.Online`。该 binding 不是第二个
+  Task、TaskRef 或调度实体，也不改变 PID 0 identity。
+
+  `RootStream` 是 boot init Flow ownership 与 active binding 的唯一权威；`BootTask` 只保存静态
+  carrier identity/storage 与 Task lifecycle，不复制 Flow ownership 事实。
+
   > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
   > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
   > `EntryPreludePhase.Transition::Preset`。

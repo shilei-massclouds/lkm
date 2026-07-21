@@ -1,15 +1,10 @@
 use core::cell::UnsafeCell;
 
-use crate::{
-    arch::riscv64::{csr, task_switch::TaskSwitchContext},
-    checkpoint::Checkpoint,
-};
+use crate::arch::riscv64::task_switch::TaskSwitchContext;
 
 use super::{
-    kernel_image::KernelImage,
     state::{EventResult, LifecycleEvent, State, failed_condition},
     task::{Task, TaskEntry, TaskKind, TaskRef},
-    vm::Vm,
 };
 
 /// Role metadata for the linker-visible PID 0 Task carrier.
@@ -50,53 +45,6 @@ impl BootTask {
 
     pub fn idle_role_bound(&self) -> bool {
         self.idle_role_bound
-    }
-
-    pub fn adopt_head_preset(&mut self, kernel_image: &KernelImage) -> EventResult {
-        let Some(init_task_phys) = kernel_image.runtime_to_phys(Self::task_ptr() as usize) else {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.state(),
-                State::Base,
-                State::Prepared,
-            );
-        };
-
-        if csr::read_tp() != init_task_phys {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-
-        let task = unsafe { &mut *Self::task_ptr() };
-        task.set_identity_metadata(0, TaskEntry::None, TaskKind::Idle)?;
-        task.adopt_preset()
-    }
-
-    pub fn enable(&mut self, kernel_image: &KernelImage, vm: &Vm) -> EventResult {
-        let Some(init_task_virt) = kernel_image.runtime_to_link(Self::task_ptr() as usize) else {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.state(),
-                State::Prepared,
-                State::Online,
-            );
-        };
-
-        if self.state() != State::Prepared || vm.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.state(),
-                State::Prepared,
-                State::Online,
-            );
-        }
-
-        csr::write_tp(init_task_virt);
-        unsafe { &mut *Self::task_ptr() }.enable_from_prepared(Checkpoint::BootTaskOnline)
     }
 
     pub fn bind_idle_metadata(&mut self, cpu_id: usize) -> EventResult {

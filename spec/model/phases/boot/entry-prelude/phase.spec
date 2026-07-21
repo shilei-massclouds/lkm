@@ -7,8 +7,88 @@
 
 /*
  * RootStream 与 BootTask 的定义分别集中在 task_flow.spec 和
- * task.spec；本文件只编排入口前导期中的迁移顺序。
+ * task.spec；本文件拥有它们进入早期地址空间时所需的 binding 协议，
+ * 并编排入口前导期中的迁移顺序。
  */
+
+/*
+ * BootTaskEntryBinding 是 EntryPreludePhase 私有的入口协调对象。它只
+ * 绑定同一个静态 BootTask carrier 的物理/虚拟地址并建立入口抢占条件，
+ * 不创建第二个 Task、TaskRef、Flow 或调度实体。
+ */
+object BootTaskEntryBinding: KernelObject {
+    initial_state: State::Base;
+    parent: EntryPreludePhase;
+
+    /* Base 表示 init_task 尚未绑定到当前 hart 的 tp。 */
+    state State::Base {
+        transitions {
+            /* Preset 建立物理地址阶段的 tp 与初始抢占关闭条件。 */
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Riscv64.state == State::Online;
+                    BootTask.state == State::Base;
+                }
+
+                may_change {
+                    Riscv64.tp;
+                }
+
+                ensures {
+                    Riscv64.tp == phys_addr(BootTask.storage);
+                    valid_task_ref(Riscv64.tp);
+                    task_preemption_control_ready(BootTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
+                    task_preemption_disabled(BootTask);
+                }
+            }
+        }
+    }
+
+    /* Prepared 表示物理 tp binding 已完整建立，可提交 BootTask.Prepared。 */
+    state State::Prepared {
+        invariant {
+            Riscv64.tp == phys_addr(BootTask.storage);
+            valid_task_ref(Riscv64.tp);
+            task_preemption_control_ready(BootTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootTask);
+            task_preemption_disabled(BootTask);
+        }
+
+        transitions {
+            /* Setup 在 EarlyVm 就绪后切换到同一 carrier 的虚拟地址。 */
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    BootTask.state == State::Prepared;
+                    Vm.state == State::Ready;
+                }
+
+                may_change {
+                    Riscv64.tp;
+                }
+
+                ensures {
+                    Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
+                    valid_task_ref(Riscv64.tp);
+                    task_preemption_control_ready(BootTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
+                    task_preemption_disabled(BootTask);
+                }
+            }
+        }
+    }
+
+    /* Ready 表示虚拟 tp binding 已提交，BootTask 可以进入 Online。 */
+    state State::Ready {
+        invariant {
+            Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
+            valid_task_ref(Riscv64.tp);
+            task_preemption_control_ready(BootTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootTask);
+            task_preemption_disabled(BootTask);
+        }
+    }
+}
 
 /*
  * BootInitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。
@@ -2073,6 +2153,7 @@ object EntryPreludePhase: PhaseObject {
                     BootCurrentCPU.Transition::Setup;
                     CpuGroup.Transition::Preset;
                     BootCurrentCPU.Transition::Enable;
+                    BootTaskEntryBinding.Transition::Preset;
                     BootTask.Transition::Preset;
                     BootInitStack.Transition::Preset;
                     EventStream.Transition::Preset;
@@ -2080,6 +2161,7 @@ object EntryPreludePhase: PhaseObject {
                     Vm.Transition::Preset;
                     Vm.Transition::Setup;
                     EventStream.Transition::Setup;
+                    BootTaskEntryBinding.Transition::Setup;
                     BootTask.Transition::Enable;
                     BootInitStack.Transition::Setup;
                     Soc.Transition::Preset;
@@ -2124,6 +2206,7 @@ object EntryPreludePhase: PhaseObject {
             UnexpectedException.state == State::Prepared;
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
+            BootTaskEntryBinding.state == State::Ready;
             BootTask.state == State::Online;
             BootInitStack.state == State::Ready;
             Vm.state == State::Ready;

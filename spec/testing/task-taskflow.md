@@ -8,6 +8,11 @@ carrier and its independently-lived `TaskFlow` instances.
 - Boot and scheduler tests must observe one `BootTask` identity. The
   `BootIdleSetup` scheduling record is an internal projection and must not be
   reported as a second Task or own a second Task lifecycle.
+- Entry tests must preserve the existing `BootTask.Prepared`/`BootTask.Online`
+  checkpoint IDs, names, `T` early marker and order. Successful boot must also
+  demonstrate that physical binding precedes Prepared, virtual binding follows
+  `Vm.Setup` and precedes Online, and both bindings resolve to the same
+  linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
 - PID 1 tests must keep `KernelInitTask` online across exec while observing
   an explicit fresh-Flow declaration that remains in `Base` before Preset, then
   `KernelInitFlow: Online -> Offline -> Destroyed` and

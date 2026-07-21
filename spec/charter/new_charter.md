@@ -191,7 +191,10 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 ### 入口前导期EntryPreludePhase
 
-待补充。
+`EntryPreludePhase` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
+`BootTask.Prepared` → VM setup → 虚拟 `tp` binding → `BootTask.Online`”推进同一静态
+`init_task` carrier，并建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef 或 Flow，
+不改变 PID 0 identity；`RootStream` 仍是 boot init Flow ownership 的唯一权威。
 
 ### 引导期BootPhase
 

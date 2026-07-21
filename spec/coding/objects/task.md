@@ -9,7 +9,7 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
 
 ## 统一 Task carrier
 
-- 静态 `init_task` 只映射为 `BootTask`。入口期对象保存它的 lifecycle/storage 事实；Scheduler
+- 静态 `init_task` 只映射为 `BootTask`。该对象保存它的 lifecycle/storage/identity 事实；Scheduler
   内部可以保存 boot-task scheduling metadata、pi lock、CPU ref 和 switch context，但该结构必须
   命名为 metadata/setup/view，不得拥有第二套 Task identity 或对外生命周期。
 - `BootIdleSetup.Ready` 表示 scheduler 已把同一 `BootTask` 绑定为 boot CPU idle/current；它不是
@@ -42,8 +42,11 @@ copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 N
 Online。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
-`BootTask` 保留独立且完整的静态 override lowering，用于 `init_task_storage`、早期 `tp` 地址模式与
-preemption 事实；不得把它的部分迁移与普通 `Task` core 合并，也不得令其他静态 Task 使用该 override。
+`BootTask` 保留独立且完整的静态 override lowering，用于 `init_task_storage`、固定 `TaskRef::BOOT`
+和入口 binding milestone 后的薄 lifecycle 提交；不得把它的部分迁移与普通 `Task` core 合并，也
+不得令其他静态 Task 使用该 override。早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由
+EntryPrelude 私有 `BootTaskEntryBinding` lower，不得在 `BootTask` wrapper 中保留重复入口协议或
+phase 之外可调用的 lifecycle-driving alias。
 
 ## TaskRef 与 storage
 
@@ -63,6 +66,10 @@ Task core 只保存 owned Flow refs 与 active Flow ref；Flow lifecycle、gener
 由独立 `TaskFlow` core 保存。双向协作只能通过 objects 内部的最小 bridge 完成：Flow 注册
 ownership，Task 提交 active binding，Flow exit 时清除 binding。不得公开任一 core 的字段、复制
 lifecycle state，或用角色 wrapper 绕过 owner/ref 校验。
+
+`RootStream` 的 Flow core 是 boot init ownership/active binding 的唯一实现权威。`BootTask` 的入口
+Preset/Enable 不得再次建立、镜像或推导该 ownership；它们只能在 phase 已验证 binding milestone
+后提交同一 carrier 的 Prepared/Online 状态。
 
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow

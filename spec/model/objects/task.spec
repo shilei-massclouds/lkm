@@ -462,6 +462,8 @@ object UserTaskSet: TaskSet {
 /*
  * Static init_task carrier. It remains the same Task when sched_init assigns
  * the boot-idle role; RootStream and BootIdleFlow distinguish its behavior.
+ * EntryPreludePhase-owned BootTaskEntryBinding owns tp/preemption setup while
+ * this override commits carrier identity/storage at the binding milestones.
  */
 object BootTask: Task {
     lifecycle_override: true;
@@ -476,115 +478,68 @@ object BootTask: Task {
         storage = symbol("init_task");
     }
 
-    /*
-     * Base 表示根任务对象尚未绑定到当前执行 hart 的任务指针。
-     */
+    /* Base 表示静态根任务 carrier 尚未提交入口 Prepared milestone。 */
     state State::Base {
         transitions {
-            /*
-             * Preset 建立物理地址阶段的根任务指针。
-             */
+            /* Preset 在物理 binding 完成后提交静态 carrier identity。 */
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    Riscv64.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.tp;
+                    BootTaskEntryBinding.state == State::Prepared;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_object_storage(storage);
                     valid_task_storage(storage);
-                    Riscv64.tp == phys_addr(BootTask.storage);
-                    valid_task_ref(Riscv64.tp);
-                    task_preemption_control_ready(BootTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
-                    task_preemption_disabled(BootTask);
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
-                    task_owns_flow(BootTask, RootStream);
-                    task_flow_owner_is(RootStream, BootTask);
-                    task_flow_owner_exclusive(RootStream);
                 }
             }
         }
     }
 
     /*
-     * Prepared 表示 tp 已经指向 init_task 的物理地址，可支撑物理地址阶段继续执行。
-     * init_task.thread_info.preempt_count 仍保持 INIT_PREEMPT_COUNT，使调度器运行前
-     * 内核抢占关闭。
+     * Prepared 表示静态 carrier identity/storage 已在物理 binding milestone 后提交。
      */
     state State::Prepared {
         invariant {
             attrs_accessible(self);
             valid_object_storage(storage);
             valid_task_storage(storage);
-            Riscv64.tp == phys_addr(BootTask.storage);
-            valid_task_ref(Riscv64.tp);
-            task_preemption_control_ready(BootTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootTask);
-            task_preemption_disabled(BootTask);
             task_ref_targets(BootTaskRef, BootTask);
             task_ref_ready(BootTaskRef);
-            task_owns_flow(BootTask, RootStream);
-            task_flow_owner_is(RootStream, BootTask);
-            task_flow_owner_exclusive(RootStream);
         }
 
         transitions {
-            /*
-             * Enable 在早期虚拟地址空间可用后，将根任务指针切换为虚拟地址。
-             */
+            /* Enable 在虚拟 binding 完成后提交 BootTask.Online。 */
             on Transition::Enable -> State::Online {
                 depends_on {
                     Vm.state == State::Ready;
-                }
-
-                may_change {
-                    Riscv64.tp;
+                    BootTaskEntryBinding.state == State::Ready;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_object_storage(storage);
                     valid_task_storage(storage);
-                    Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-                    valid_task_ref(Riscv64.tp);
-                    task_preemption_control_ready(BootTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootTask);
-                    task_preemption_disabled(BootTask);
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
-                    task_owns_flow(BootTask, RootStream);
-                    task_flow_owner_is(RootStream, BootTask);
-                    task_flow_owner_exclusive(RootStream);
                 }
             }
         }
     }
 
     /*
-     * Online 表示根任务指针已经使用 EarlyVm 中的内核映像虚拟区域地址，且调度器运行前的
-     * 初始抢占关闭状态仍被保留。
+     * Online 表示静态 carrier 已在虚拟 binding milestone 后提交服务状态。
      */
     state State::Online {
         invariant {
             attrs_accessible(self);
             valid_object_storage(storage);
             valid_task_storage(storage);
-            Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-            valid_task_ref(Riscv64.tp);
-            task_preemption_control_ready(BootTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootTask);
-            task_preemption_disabled(BootTask);
+            BootTaskEntryBinding.state == State::Ready;
             task_ref_targets(BootTaskRef, BootTask);
             task_ref_ready(BootTaskRef);
-            task_owns_flow(BootTask, RootStream);
-            task_flow_owner_is(RootStream, BootTask);
-            task_flow_owner_exclusive(RootStream);
         }
     }
 }
