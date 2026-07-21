@@ -17,7 +17,7 @@ runqueue 投影或用户资源字段可以拆成多个 Rust 结构，但结构�
   相应初始 Flow。
 - 用户 child 的实现容器是 `UserTaskSet`。内部固定容量表、active execution record 或 continuation
   snapshot 都只是集合 lowering；每次成功 fork/clone 必须分配新的 logical Task identity 和 PID，
-  不得把存储槽地址或测试字段当作可复用 TaskRef。
+  并发布指向该 identity 的 fresh `TaskRef`；不得把存储槽地址或测试字段当作可复用 TaskRef。
 
 ## TaskFlow lifecycle
 
@@ -33,8 +33,10 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 `RootStream` 继续作为 boot init Flow 的临时既有实现。`BootIdleFlow` metadata 归
 `BootIdleRuntime`/idle continuation；`KernelInitFlow` 和 `KthreaddFlow` 可以和相应 kernel Task
 实现共址，但必须有独立 lifecycle 查询。PID 1 用户资源必须命名并组织为 `KernelInitTask` 的
-user state；`Pid1UserAppFlow` 仅持有 application continuation lifecycle，不得把 credentials、files、
-signals、PID 或 process-group 身份再封装成 persona carrier。
+user state；首次 exec 声明的 `UserAppFlow` 仅持有 application continuation lifecycle，不得把
+credentials、files、signals、PID 或 process-group 身份再封装成 persona carrier。
+预分配的 Rust field 只是未占用 storage：生产路径必须先执行独立 `declare()`，把 fresh occurrence
+物化在 `Base`，随后才能调用 `preset()`；`declare()` 不得设置 owner、active binding 或推进 lifecycle。
 
 ## Handoff lowering
 
@@ -52,9 +54,10 @@ new flow enable
 old flow cleanup
 ```
 
-boot PID 1 的首个实例是 `Pid1UserAppFlow`。后续 runtime exec 与 fork continuation 每次使用 fresh
-Flow generation；新旧 Flow state、trace/checkpoint facts 不得复用。exit/exit_group 必须先停止并
-清理 Task 的 owned Flow，再允许 Task 退出。
+boot PID 1 首次 exec、每次 runtime exec 与每次 fork continuation 都建立 fresh Flow generation；
+新旧 Flow state、trace/checkpoint facts 不得复用。每次 exec 在新 Flow Preset/Setup 后依次完成旧
+Flow Disable、active handoff、新 Flow Enable、旧 Flow Cleanup，并把 retired Flow 记录为 Destroyed。
+exit/exit_group 必须确认所有 prior owned Flow 与当前 Flow 都已清理，才允许 Task 退出。
 
 ## 用户应用黑盒
 
@@ -65,9 +68,10 @@ Flow 类型内复制这些内核 actions。实现字段名、SyscallTable route 
 
 ## 测试与诊断
 
-- checkpoint 使用 `BootTask.Online`、`BootIdleSetup.Ready` 和 `Pid1UserAppFlow.Online`；不保留旧名称
-  alias。
+- checkpoint 使用 `BootTask.Online`、`BootIdleSetup.Ready` 和包含 runtime instance identity 的
+  `UserAppFlow.Online`；不保留临时具名 Flow alias。
 - scheduler handoff 日志使用 `BootTask -> KernelInitTask`，恢复日志使用 `BootTask restored`。
 - smoke 必须验证 boot idle 前后 Task identity 相同、PID 1 exec 前后 Task identity 相同、Flow
   lifecycle 独立，以及连续 child allocation 的 logical identity/PID 不复用。
-- 实现允许当前 DSL 只能形式化一个具名 child witness，但不得把该见证名或内部存储槽变成生产 API。
+- model/trace 与测试不得重新引入 PID 1 首个用户 Flow、child Task、fork continuation Flow 或
+  child exec Flow 的临时具名 compatibility alias。

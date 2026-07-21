@@ -66,6 +66,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("object view:", stdout.getvalue())
             self.assertIn("ComputerProject: ProjectObject", stdout.getvalue())
+            self.assertIn("DeclarationSite", stdout.getvalue())
 
     def test_render_dot_writes_ascii_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,7 +78,9 @@ class RenderToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             data = output.read_bytes()
             self.assertTrue(data.startswith(b"digraph ObjectView"))
-            data.decode("ascii")
+            text = data.decode("ascii")
+            self.assertIn("declare child of Task", text)
+            self.assertIn("DeclarationSite", text)
 
     def test_render_svg_from_timeline_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

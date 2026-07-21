@@ -16,6 +16,19 @@ class SourceSpan:
 
 
 @dataclass(frozen=True)
+class DriveStatement:
+    """One source-ordered executable statement in a drives block."""
+
+    kind: str
+    text: str
+    span: SourceSpan
+    ordinal: int = 0
+    alias: str | None = None
+    declared_type: str | None = None
+    owner_process: str | None = None
+
+
+@dataclass(frozen=True)
 class Block:
     """Raw block content preserved for later semantic analysis."""
 
@@ -24,6 +37,7 @@ class Block:
     span: SourceSpan
     header: str = ""
     body_start_line: int | None = None
+    statements: list[DriveStatement] = field(default_factory=list)
 
     @property
     def entries(self) -> list[str]:
@@ -92,6 +106,26 @@ class TransitionDecl:
 
 
 @dataclass(frozen=True)
+class ProcessDecl:
+    """A reusable Type process or object-local action declaration."""
+
+    kind: str
+    name: str
+    span: SourceSpan
+    parameters: tuple[tuple[str, str], ...] = ()
+    return_type: str | None = None
+    depends_on: list[Block] = field(default_factory=list)
+    drives: list[Block] = field(default_factory=list)
+    within: list[WithinDecl] = field(default_factory=list)
+    may_change: list[Block] = field(default_factory=list)
+    ensures: list[Block] = field(default_factory=list)
+    result: list[Block] = field(default_factory=list)
+    other_blocks: list[Block] = field(default_factory=list)
+    body_members: list["BodyMember"] = field(default_factory=list)
+    properties: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class BodyMember:
     """A source-ordered transition/within body member."""
 
@@ -112,6 +146,7 @@ class StateDecl:
     boundaries: list[BoundaryDecl] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     transitions: list[TransitionDecl] = field(default_factory=list)
+    processes: list[ProcessDecl] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
 
 
@@ -127,6 +162,7 @@ class ObjectDecl:
     attrs: list[Block] = field(default_factory=list)
     references: list[Block] = field(default_factory=list)
     states: list[StateDecl] = field(default_factory=list)
+    processes: list[ProcessDecl] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)
 
@@ -139,6 +175,7 @@ class TypeDecl:
     header: str
     span: SourceSpan
     blocks: list[Block] = field(default_factory=list)
+    processes: list[ProcessDecl] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)
 
 

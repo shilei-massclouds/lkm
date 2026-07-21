@@ -1435,15 +1435,14 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
+        assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
         assertions.assert(
             "PID 1 user flow preset",
-            ctx.pid1_user_app_flow.preset(&ctx.kernel_init_task).is_ok(),
+            ctx.user_app_flow.preset(&ctx.kernel_init_task).is_ok(),
         );
         assertions.assert(
             "PID 1 user flow setup",
-            ctx.pid1_user_app_flow
-                .setup(&ctx.kernel_init_user_state)
-                .is_ok(),
+            ctx.user_app_flow.setup(&ctx.kernel_init_user_state).is_ok(),
         );
         assertions.assert(
             "kernel init flow disabled for exec",
@@ -1454,28 +1453,25 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "PID 1 task flow handoff committed",
             ctx.kernel_init_task
-                .commit_pid1_user_flow_handoff(
-                    ctx.kernel_init_flow.state(),
-                    ctx.pid1_user_app_flow.state(),
-                )
+                .commit_user_flow_handoff(ctx.kernel_init_flow.state(), ctx.user_app_flow.state())
                 .is_ok(),
         );
         assertions.assert(
             "PID 1 user flow active binding",
-            ctx.pid1_user_app_flow
+            ctx.user_app_flow
                 .commit_active_binding(&ctx.kernel_init_task)
                 .is_ok(),
         );
         assertions.assert(
             "PID 1 user flow online",
-            ctx.pid1_user_app_flow
+            ctx.user_app_flow
                 .enable(&ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
             "PID 1 task user state active",
             ctx.kernel_init_user_state
-                .activate_user_flow(&ctx.pid1_user_app_flow)
+                .activate_user_flow(&ctx.user_app_flow)
                 .is_ok(),
         );
         assertions.assert(
@@ -1489,10 +1485,12 @@ impl SmokeScenario for UserBootElfScenario {
             "PID 1 user flow remains separate from task resources",
             process.resources_bound()
                 && process.active_user_flow_online()
-                && ctx.pid1_user_app_flow.state() == State::Online
-                && ctx.pid1_user_app_flow.owner_pid() == crate::objects::rest_init::KERNEL_INIT_PID
-                && ctx.pid1_user_app_flow.application_entered()
-                && !ctx.pid1_user_app_flow.released()
+                && ctx.user_app_flow.state() == State::Online
+                && ctx.user_app_flow.declared()
+                && ctx.user_app_flow.declaration_occurrence() == 1
+                && ctx.user_app_flow.owner_pid() == crate::objects::rest_init::KERNEL_INIT_PID
+                && ctx.user_app_flow.application_entered()
+                && !ctx.user_app_flow.released()
                 && ctx.kernel_init_flow.state() == State::Destroyed
                 && ctx.kernel_init_flow.owner_bound()
                 && !ctx.kernel_init_flow.active()
@@ -1502,7 +1500,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "user init identity",
-            process.reuses_kernel_init_task()
+            process.preserves_kernel_init_task()
                 && process.pid1_preserved()
                 && process.exec_identity_handoff()
                 && process.no_new_task_struct()

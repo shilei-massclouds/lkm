@@ -289,6 +289,57 @@ drives {
 `ProtectedCommit` 在 `SomeContext` 之内。代码生成或 lowering 不得把这三个动作
 重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 transition body。
 
+## SEM-DECLARE-001: Drives May Declare Fresh Runtime Instances
+
+`declare name of Type;` 是 transition/action 及其嵌套 `within` 的 `drives` 中唯一的运行期
+instance 声明语法。它是 source-ordered executable statement，不是顶层 declaration，也不是
+静态 object 的别名。
+
+执行规则：
+
+- derive 执行到声明语句时创建一个 declared Type 的 fresh instance；初始 lifecycle state 必须是
+  `State::Base`。声明本身不调用 `Preset`，也不建立任何 transition commit。
+- 同一 declaration site 每次执行都创建不同 runtime identity，实例间不得共享 state、facts、
+  transition commits 或 trace node。失败路径不隐式 rollback、Disable 或 Cleanup 已创建实例。
+- `declare` 不建立 parent、owner、active binding 或集合成员关系；这些关系只能由后续显式
+  process commit 和正式 fact 建立。
+- Type 必须存在。动态 receiver 的 transition/action 由 declared Type 及其父 Type process 解析；
+  process 不存在、参数不匹配或 lifecycle 迁移非法都必须报错。
+
+Alias 规则：
+
+- declaration alias 与 `let` 结果 alias、owner process 参数共享词法 SSA namespace。
+- 禁止重复声明、shadow、use-before-declare，以及与当前位置可见的静态 object 重名。
+- alias 从声明位置之后开始，对当前 `drives` 后续 statement 和随后进入的嵌套 `within` 可见。
+  嵌套 scope 内声明的 alias 不反向泄漏到父 scope，也不泄漏到 sibling scope。
+- callee 不捕获 caller alias；runtime instance 只能通过显式 typed process 参数传给 callee。
+- alias 离开 scope 不销毁 instance。实例可通过 ownership/集合 facts、Action result 返回的 typed
+  `Ref` 或后续 process 参数持久化并重新定位；alias 绝不是全局 object name。
+
+静态模型和 JSON 规则：
+
+- `ObjectModel.objects` 只包含源码具名 objects。declaration site 保存在 owner process 的有序
+  drive statements 中；runtime instance 只存在于 derive/trace 输出。
+- AST/model JSON 中 declaration statement 必须显式包含 `kind = "declare"`、`alias`、
+  `declared_type`、owner process、owner-local source ordinal 和诊断 span。普通 process call、`let`
+  binding、static object 与 declaration site 不得复用同一 JSON shape 来隐式消歧。
+- runtime JSON 必须显式区分 `declaration_site`、`runtime_instance_id`、`alias`、`declared_type`
+  和可选 `static_object`；运行期实例的 `static_object` 必须为空。
+
+稳定 identity 规则：
+
+- runtime identity 由“根调用路径 + owner process + declaration site 的 owner-local source ordinal +
+  alias + 该调用路径下 occurrence”组成。
+- source ordinal 来自 owner process 的有序 executable statement/declaration-site 序列，不使用
+  物理源码行号；源码行号只用于诊断。因此无关空行或源码行移动不得改变 identity。
+- occurrence 对同一根调用路径和 declaration site 单调区分每次执行。trace/view/render 不得把
+  多个 occurrence 折叠为一个 alias node。
+- static view/render 展示 declaration site；derive/trace view 展示实际 runtime instances 及各自
+  state/commit。任何展示层都不得把 runtime instance 写回 static object inventory。
+
+首版不新增循环、并发声明调度或通用垃圾回收语义；多 instance 来自同一 declaration site 在
+不同推导调用中的重复执行。
+
 ## SEM-TRANSITION-EMITS-001: Completion Events Are Post-Commit Events
 
 状态机是惰性的；外部事件或迁移完成事件触发 transition，transition 自身不得在未被
@@ -379,15 +430,15 @@ Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效
 
 Completion 也说明了 transition/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
-`Task` 是唯一的 task_struct-like 载体类型；运行时可以同时存在多个彼此独立的 `Task` 实例。`BootTask`、`KernelInitTask`、`KthreaddTask` 与具名见证 `UserChildTask1` 都是这个同一类型的实例。boot idle 只是 `BootTask` 的 Flow handoff，不产生第二个 Task。PID 1 的用户态身份、地址空间、文件、凭据、信号与 trap frame 直接关联稳定实例 `KernelInitTask`，不经过 persona wrapper。`UserTaskSet` 表示一般用户 Task 集合；每次 fork/clone 都向集合加入 fresh Task，该 Task 具有独立 PID 和 lifecycle。DSL 尚不能动态声明匿名对象，所以 `UserChildTask1` 只见证一个具体 child，禁止用它代表后续 child 身份。
+`Task` 是唯一的 task_struct-like 载体类型；运行时可以同时存在多个彼此独立的 `Task` 实例。`BootTask`、`KernelInitTask` 与 `KthreaddTask` 是静态具名实例；每次 fork/clone 则通过 `declare` 创建 fresh 动态 `Task`。boot idle 只是 `BootTask` 的 Flow handoff，不产生第二个 Task。PID 1 的用户态身份、地址空间、文件、凭据、信号与 trap frame 直接关联稳定实例 `KernelInitTask`，不经过 persona wrapper。`UserTaskSet` 表示一般用户 Task 集合；每次 fork/clone 都向集合加入 fresh Task/TaskRef pair，该 Task 具有独立 PID 和 lifecycle。动态 child 不获得全局具名 alias。
 
 `Task` 保存调度身份、任务执行上下文和 `TaskThreadContext`；每个 `TaskFlow` 实例则保存自己的 lifecycle state。Flow 类型与实例必须同时存在：`BootInitFlowType` 的临时具名实例是 `RootStream`，`KernelInitFlowType` 的实例是 `KernelInitFlow`，`KthreaddFlowType` 的实例是 `KthreaddFlow`，`BootIdleFlowType` 的实例是 `BootIdleFlow`；所有用户应用映像共用 `UserAppFlow` 类型，但每次 exec 或 fork continuation 都创建独立实例。应用映像不同不产生新的 Flow 类型。
 
-Flow 关系分为三类，不能混用：`task_owns_flow(task, flow)` 记录 Task 曾经拥有该实例，`task_active_flow_is(task, flow)` 记录当前 active binding，`task_flow_handoff(task, from, to)` 记录 handoff 历史。每个 Flow 只有一个 owner；一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 Flow Online。当前正式 handoff 是 `BootTask: RootStream -> BootIdleFlow`、`KernelInitTask: KernelInitFlow -> Pid1UserAppFlow` 和 `UserChildTask1: UserChildForkFlow1 -> UserChildExecFlow1`。不同 Task 绝不共享同一 `UserAppFlow` 实例。
+Flow 关系分为三类，不能混用：`task_owns_flow(task, flow)` 记录 Task 曾经拥有该实例，`task_active_flow_is(task, flow)` 记录当前 active binding，`task_flow_handoff(task, from, to)` 记录 handoff 历史。每个 Flow 只有一个 owner；一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 Flow Online。当前正式 handoff 是静态 `BootTask: RootStream -> BootIdleFlow`、稳定 `KernelInitTask: KernelInitFlow -> declared pid1 UserAppFlow`，以及每个动态 child 从 declared fork-continuation Flow 到每次 exec 新声明 Flow。不同 Task 绝不共享同一 `UserAppFlow` 实例。
 
 `UserAppFlow` 的统一 lifecycle 是：Preset 绑定唯一 owner 与入口来源并建立 fresh/独占关系；Setup 准备 exec 映像或 fork continuation 的执行上下文；Enable 成为 owner 唯一 Online Flow 并跨入用户应用黑盒；Disable 处理 exit、exit_group 或 successful-exec replacement；Cleanup 释放实例并保证它不再 active。用户应用内部不声明 action 或 transition；syscall、trap、files 和其它内核资源操作仍属于相应内核对象。successful exec 不替换 Task：新 Flow 先 Preset/Setup，旧 Flow 再 Disable，随后提交 active binding handoff、新 Flow Enable，最后旧 Flow Cleanup。
 
-Task 退出必须先 Disable/Cleanup 当前 Flow；`Task.Disable` 要求所有 owned Flow 已 inactive，`Task.Cleanup` 进一步要求它们都已 Destroyed，因此 Flow 仍存活时 Task 不得进入 Destroyed。动态匿名 Task/Flow 创建、owned Flow 集合与泛型实例 lifecycle 调用仍需要后续 DSL/验证器能力。`RootStream` 作为 `BootInitFlowType` 的临时具名封装保留；它的移除以及全仓 Stream -> Flow 迁移继续 deferred。
+Task 退出必须先 Disable/Cleanup 当前 Flow；每次成功 exec 还必须 Cleanup 被替换的旧 Flow 并记录 prior-owned Flow 已 Destroyed。`Task.Disable` 要求所有 owned Flow 已 inactive，`Task.Cleanup` 进一步要求它们都已 Destroyed，因此任一 owned Flow 仍存活时 Task 不得进入 Destroyed。动态声明、owned Flow facts 与泛型实例 lifecycle 调用是本模型的正式能力。`RootStream` 作为 `BootInitFlowType` 的临时具名封装保留；它的移除以及全仓 Stream -> Flow 迁移继续 deferred。
 
 `TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Transition::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 

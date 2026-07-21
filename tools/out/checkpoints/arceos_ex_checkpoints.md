@@ -398,7 +398,7 @@
 | 393 | UserBootInterpreterReady | UserBoot.InterpreterReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 394 | UserBootInitAttemptFailed | UserBoot.InitAttemptFailed | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 395 | UserBootAddressSpaceSetupStart | UserBoot.AddressSpaceSetupStart | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 396 | Pid1UserAppFlowEnterUserMode | Pid1UserAppFlow.EnterUserMode | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 396 | UserAppFlowEnterUserMode | UserAppFlow.EnterUserMode | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 397 | UserAddressSpaceReady | UserAddressSpace.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 398 | SyscallTableExecveArgsReady | SyscallTable.ExecveArgsReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 399 | UserExecMainElfReady | UserExec.MainElfReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -489,6 +489,6 @@
 | 484 | UserStackGrowRejected | UserStack.GrowRejected | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 485 | KernelInitFlowOffline | KernelInitFlow.Offline | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 486 | KernelInitFlowDestroyed | KernelInitFlow.Destroyed | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 487 | Pid1UserAppFlowPrepared | Pid1UserAppFlow.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 488 | Pid1UserAppFlowReady | Pid1UserAppFlow.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 489 | Pid1UserAppFlowOnline | Pid1UserAppFlow.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 487 | UserAppFlowPrepared | UserAppFlow.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 488 | UserAppFlowReady | UserAppFlow.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 489 | UserAppFlowOnline | UserAppFlow.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

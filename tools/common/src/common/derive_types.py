@@ -53,6 +53,11 @@ class TransitionCommit:
     transition_name: str
     source_state: str
     target_state: str
+    runtime_instance_id: str | None = None
+    declaration_site: str | None = None
+    alias: str | None = None
+    declared_type: str | None = None
+    static_object: str | None = None
 
     @property
     def label(self) -> str:
@@ -74,6 +79,11 @@ class DerivationTraceNode:
     message: str | None = None
     span: SourceSpan | None = None
     edge_kind: str | None = None
+    runtime_instance_id: str | None = None
+    declaration_site: str | None = None
+    alias: str | None = None
+    declared_type: str | None = None
+    static_object: str | None = None
     children: tuple["DerivationTraceNode", ...] = ()
 
     @property
@@ -93,6 +103,7 @@ class DerivationResult:
     records: tuple[DerivationRecord, ...] = ()
     transitions: tuple[TransitionCommit, ...] = ()
     trace: tuple[DerivationTraceNode, ...] = ()
+    runtime_instances: tuple["RuntimeInstance", ...] = ()
 
     @property
     def blocked(self) -> list[DerivationRecord]:
@@ -135,3 +146,23 @@ class DerivationResult:
     @property
     def ok(self) -> bool:
         return self.target_reached and not self.blocked and not self.contradictions
+
+
+@dataclass(frozen=True)
+class RuntimeInstance:
+    """One concrete runtime instance created by a declaration execution."""
+
+    runtime_instance_id: str
+    declaration_site: str
+    alias: str
+    declared_type: str
+    state: str
+    occurrence: int
+    root_call_path: str
+    owner_process: str
+    source_ordinal: int
+    static_object: str | None = None
+    ref_target: str | None = None
+    owner_task: str | None = None
+    active_flow: str | None = None
+    owned_flows: tuple[str, ...] = ()

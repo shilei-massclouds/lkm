@@ -352,11 +352,11 @@ ownership even when both paths share load_elf_binary(),
 begin_new_exec(), exec_mmap(), start_thread() or
 ret_from_exception anchors. Records emitted while kernel_init()
 reaches run_init_process()/kernel_execve() belong to UserBoot.*,
-UserAddressSpace.Ready and the first Pid1UserAppFlow entry
+UserAddressSpace.Ready and the first dynamic PID 1 UserAppFlow entry
 boundary; they must not also emit UserExec.*. UserExec.* records
 belong only to a runtime user exec that entered through
 do_execveat_common() after SyscallTable.ExecveArgsReady.
-Return-to-user markers used for UserExec or Pid1UserAppFlow must
+Return-to-user markers used for UserExec or dynamic UserAppFlow must
 also avoid flooding every ordinary syscall return; if the Linux
 instrumentation cannot apply that ownership guard, those events
 must remain outside active paired hard scope.

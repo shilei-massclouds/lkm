@@ -1452,7 +1452,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
                 "must be guarded out for this owner."
             ),
         ),
-        "Pid1UserAppFlow.EnterUserMode": MappingRule(
+        "UserAppFlow.EnterUserMode": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/entry.S",
             linux_symbol="ret_from_exception",
@@ -1463,7 +1463,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
                 "boot init return-to-user handoff; runtime instrumentation must "
                 "guard on saved SR_SPP == 0, record before the final "
                 "general-register restore and avoid reporting every later "
-                "ordinary syscall return as another Pid1UserAppFlow entry."
+                "ordinary syscall return as another UserAppFlow entry."
             ),
         ),
         "UserAddressSpace.Ready": MappingRule(

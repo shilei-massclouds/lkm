@@ -4357,14 +4357,14 @@
   },
   {
     "checkpoint_index": 396,
-    "checkpoint_name": "Pid1UserAppFlow.EnterUserMode",
-    "checkpoint_variant": "Pid1UserAppFlowEnterUserMode",
+    "checkpoint_name": "UserAppFlow.EnterUserMode",
+    "checkpoint_variant": "UserAppFlowEnterUserMode",
     "linux_file": "arch/riscv/kernel/entry.S",
     "linux_symbol": "ret_from_exception",
     "linux_anchor": "ret_from_exception line 279: sret",
     "mapping_kind": "exact",
     "confidence": "medium",
-    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another Pid1UserAppFlow entry."
+    "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another UserAppFlow entry."
   },
   {
     "checkpoint_index": 397,
@@ -5358,8 +5358,8 @@
   },
   {
     "checkpoint_index": 487,
-    "checkpoint_name": "Pid1UserAppFlow.Prepared",
-    "checkpoint_variant": "Pid1UserAppFlowPrepared",
+    "checkpoint_name": "UserAppFlow.Prepared",
+    "checkpoint_variant": "UserAppFlowPrepared",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,
@@ -5369,8 +5369,8 @@
   },
   {
     "checkpoint_index": 488,
-    "checkpoint_name": "Pid1UserAppFlow.Ready",
-    "checkpoint_variant": "Pid1UserAppFlowReady",
+    "checkpoint_name": "UserAppFlow.Ready",
+    "checkpoint_variant": "UserAppFlowReady",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,
@@ -5380,8 +5380,8 @@
   },
   {
     "checkpoint_index": 489,
-    "checkpoint_name": "Pid1UserAppFlow.Online",
-    "checkpoint_variant": "Pid1UserAppFlowOnline",
+    "checkpoint_name": "UserAppFlow.Online",
+    "checkpoint_variant": "UserAppFlowOnline",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

@@ -363,16 +363,15 @@ object TaskCreationCore: KernelObject {
             /*
              * CopyUserProcess is the Task/TaskRef-parameterized user fork/clone
              * creation boundary. Each invocation receives a fresh destination
-             * Task with an independent PID and lifecycle and binds a distinct
-             * fork-continuation UserAppFlow. UserChildTask1 and its reference
-             * are only the current named witness because anonymous dynamic
-             * object declaration remains a DSL limitation.
+             * Task with an independent PID and lifecycle and binds the fresh
+             * fork-continuation UserAppFlow supplied by the caller.
              */
             Action::CopyUserProcess(
                 src_process: Task,
                 src_ref: TaskRef,
                 dst_process: Task,
                 dst_ref: TaskRef,
+                flow: UserAppFlow,
                 pid_ns: RootPidNamespace,
                 scheduler: Scheduler,
                 fs: FsStruct,
@@ -395,9 +394,10 @@ object TaskCreationCore: KernelObject {
                     trap_frame.state == State::Ready;
                     boundaries.state == State::Ready;
                     task_clone_args_ready(dst_process);
-                    task_owns_flow(dst_process, UserChildForkFlow1);
-                    task_flow_owner_is(UserChildForkFlow1, dst_process);
-                    task_flow_owner_exclusive(UserChildForkFlow1);
+                    flow.state == State::Ready;
+                    task_owns_flow(dst_process, flow);
+                    task_flow_owner_is(flow, dst_process);
+                    task_flow_owner_exclusive(flow);
                     user_clone_plain_fork_first_slice_bound(boundaries);
                     user_clone_fresh_task_per_child_bound(boundaries);
                     user_clone_multiple_independent_tasks_bound(boundaries);
@@ -405,7 +405,6 @@ object TaskCreationCore: KernelObject {
                     user_task_set_contains(UserTaskSet, dst_process);
                     user_task_instance_fresh(dst_process);
                     user_task_pid_and_lifecycle_independent(dst_process);
-                    user_task_witness_not_reusable(dst_process);
                 }
 
                 drives {
@@ -417,7 +416,7 @@ object TaskCreationCore: KernelObject {
                 ensures {
                     task_creation_copy_process_committed(TaskCreationCore, src_process, dst_process);
                     task_creation_used_clone_args(TaskCreationCore, dst_process);
-                    task_creation_bound_flow(TaskCreationCore, dst_process, UserChildForkFlow1);
+                    task_creation_bound_flow(TaskCreationCore, dst_process, flow);
                     task_struct_allocated(dst_process);
                     task_duplicated_from(dst_process, src_process);
                     task_pid_allocated(dst_process, pid_ns);
@@ -438,13 +437,12 @@ object TaskCreationCore: KernelObject {
                     user_child_process_tls_inherited(dst_process);
                     user_child_process_enqueued(dst_process, BootRunQueue);
                     task_enqueued_on_runqueue(dst_ref, BootRunQueue);
-                    task_owns_flow(dst_process, UserChildForkFlow1);
-                    task_flow_owner_is(UserChildForkFlow1, dst_process);
-                    task_flow_owner_exclusive(UserChildForkFlow1);
+                    task_owns_flow(dst_process, flow);
+                    task_flow_owner_is(flow, dst_process);
+                    task_flow_owner_exclusive(flow);
                     user_task_set_contains(UserTaskSet, dst_process);
                     user_task_instance_fresh(dst_process);
                     user_task_pid_and_lifecycle_independent(dst_process);
-                    user_task_witness_not_reusable(dst_process);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
                     task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);

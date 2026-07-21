@@ -67,11 +67,18 @@ enum UserAppFlowEntrySource {
 
 type UserAppFlow: TaskFlow {
     lifecycle {
-        Transition::Preset {
+        Transition::Preset(
+            owner_task: Task,
+            entry_source: UserAppFlowEntrySource
+        ) {
             state_effect: StateEffect::Always;
             ensures {
+                task_owns_flow(owner_task, self);
+                task_flow_owner_is(self, owner_task);
+                task_flow_owner_exclusive(self);
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
+                user_app_flow_entry_source_is(self, entry_source);
                 user_app_flow_instance_fresh(self);
                 user_app_flow_owner_exclusive(self);
             }
@@ -180,9 +187,6 @@ predicate user_app_flow_disable_reason_is_exit_exit_group_or_successful_exec<F: 
 ) -> bool;
 predicate user_app_flow_execution_stopped<F: UserAppFlow>(flow: F) -> bool;
 predicate user_app_flow_resources_released<F: UserAppFlow>(flow: F) -> bool;
-predicate task_flow_dynamic_anonymous_task_and_flow_creation_deferred<T>(boundary: T) -> bool;
-predicate task_owned_flow_collection_dsl_deferred<T>(boundary: T) -> bool;
-predicate task_generic_instance_lifecycle_invocation_deferred<T>(boundary: T) -> bool;
 predicate boot_task_idle_flow_entered<T: Task, F: BootIdleFlowType>(
     task: T,
     flow: F
@@ -337,197 +341,6 @@ object KthreaddFlow: KthreaddFlowType {
                 kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
                 kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
             }
-        }
-    }
-}
-
-object Pid1UserAppFlow: UserAppFlow {
-    initial_state: State::Base;
-    parent: KernelInitTask;
-
-    state State::Base {
-    }
-
-    state State::Prepared {
-        invariant {
-            task_owns_flow(KernelInitTask, self);
-            task_flow_owner_is(self, KernelInitTask);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::Pid1Exec);
-            user_app_flow_instance_fresh(self);
-            user_app_flow_owner_exclusive(self);
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            task_owns_flow(KernelInitTask, self);
-            task_flow_owner_is(self, KernelInitTask);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::Pid1Exec);
-            user_app_flow_execution_context_ready(self);
-            user_app_flow_exec_image_or_fork_continuation_ready(self);
-        }
-    }
-
-    state State::Online {
-        invariant {
-            task_owns_flow(KernelInitTask, self);
-            task_flow_owner_is(self, KernelInitTask);
-            task_active_flow_is(KernelInitTask, self);
-            task_at_most_one_flow_online(KernelInitTask);
-            user_app_flow_online(self);
-            user_app_flow_is_owner_unique_online_flow(self);
-            user_application_black_box_entered(self);
-        }
-    }
-
-    state State::Offline {
-        invariant {
-            task_owns_flow(KernelInitTask, self);
-            task_flow_owner_is(self, KernelInitTask);
-            task_flow_no_longer_active(self);
-            user_app_flow_execution_stopped(self);
-        }
-    }
-
-    state State::Destroyed {
-        invariant {
-            task_owns_flow(KernelInitTask, self);
-            task_flow_owner_is(self, KernelInitTask);
-            task_flow_instance_released(self);
-            task_flow_not_active_after_cleanup(self);
-            user_app_flow_resources_released(self);
-        }
-    }
-}
-
-/*
- * The DSL cannot yet declare an anonymous instance at fork/clone time. These
- * two named objects are bounded witnesses for one child Task. They are never
- * reusable aliases for another child identity.
- */
-object UserChildForkFlow1: UserAppFlow {
-    initial_state: State::Base;
-    parent: UserChildTask1;
-
-    state State::Base {
-    }
-
-    state State::Prepared {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::ForkContinuation);
-            user_app_flow_instance_fresh(self);
-            user_app_flow_owner_exclusive(self);
-            task_flow_instances_distinct(Pid1UserAppFlow, self);
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::ForkContinuation);
-            user_app_flow_execution_context_ready(self);
-            user_app_flow_exec_image_or_fork_continuation_ready(self);
-        }
-    }
-
-    state State::Online {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_active_flow_is(UserChildTask1, self);
-            task_at_most_one_flow_online(UserChildTask1);
-            user_app_flow_online(self);
-            user_app_flow_is_owner_unique_online_flow(self);
-            user_application_black_box_entered(self);
-        }
-    }
-
-    state State::Offline {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_no_longer_active(self);
-            user_app_flow_execution_stopped(self);
-        }
-    }
-
-    state State::Destroyed {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_instance_released(self);
-            task_flow_not_active_after_cleanup(self);
-            user_app_flow_resources_released(self);
-        }
-    }
-}
-
-object UserChildExecFlow1: UserAppFlow {
-    initial_state: State::Base;
-    parent: UserChildTask1;
-
-    state State::Base {
-    }
-
-    state State::Prepared {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::ChildExec);
-            user_app_flow_instance_fresh(self);
-            user_app_flow_owner_exclusive(self);
-            task_flow_instances_distinct(UserChildForkFlow1, self);
-            task_flow_instances_distinct(Pid1UserAppFlow, self);
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_owner_exclusive(self);
-            user_app_flow_entry_source_is(self, UserAppFlowEntrySource::ChildExec);
-            user_app_flow_execution_context_ready(self);
-            user_app_flow_exec_image_or_fork_continuation_ready(self);
-        }
-    }
-
-    state State::Online {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_active_flow_is(UserChildTask1, self);
-            task_at_most_one_flow_online(UserChildTask1);
-            user_app_flow_online(self);
-            user_app_flow_is_owner_unique_online_flow(self);
-            user_application_black_box_entered(self);
-        }
-    }
-
-    state State::Offline {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_no_longer_active(self);
-            user_app_flow_execution_stopped(self);
-        }
-    }
-
-    state State::Destroyed {
-        invariant {
-            task_owns_flow(UserChildTask1, self);
-            task_flow_owner_is(self, UserChildTask1);
-            task_flow_instance_released(self);
-            task_flow_not_active_after_cleanup(self);
-            user_app_flow_resources_released(self);
         }
     }
 }
@@ -737,71 +550,19 @@ object BootIdleFlow: BootIdleFlowType {
 
 }
 
-object TaskFlowDslDeferredBoundaries: ResourceObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    task_flow_dynamic_anonymous_task_and_flow_creation_deferred(self);
-                    task_owned_flow_collection_dsl_deferred(self);
-                    task_generic_instance_lifecycle_invocation_deferred(self);
-                }
-
-                deferred task_flow_dsl.001 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Add dynamic anonymous Task and TaskFlow instance creation to the DSL.";
-                    evidence {
-                        task_flow_dynamic_anonymous_task_and_flow_creation_deferred(self);
-                    }
-                    close_when: "Fork/clone and exec can allocate fresh anonymous Task/Flow instances with verifier-checked identity.";
-                }
-
-                deferred task_flow_dsl.002 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Add verifier-checked owned Flow collections to Task.";
-                    evidence {
-                        task_owned_flow_collection_dsl_deferred(self);
-                    }
-                    close_when: "The verifier enforces exclusive ownership and at-most-one Online Flow over a Task-owned collection.";
-                }
-
-                deferred task_flow_dsl.003 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Add generic lifecycle invocation for dynamically selected Flow instances.";
-                    evidence {
-                        task_generic_instance_lifecycle_invocation_deferred(self);
-                    }
-                    close_when: "Generic exec and exit paths can invoke lifecycle transitions on runtime-selected Flow instances.";
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            task_flow_dynamic_anonymous_task_and_flow_creation_deferred(self);
-            task_owned_flow_collection_dsl_deferred(self);
-            task_generic_instance_lifecycle_invocation_deferred(self);
-        }
-    }
-}
-
 /*
  * Appendix: extracted flow mapping and deferred decisions
  *
  * - RootStream is the current BootInitFlowType instance. Its rename/removal and
  *   the broader Stream -> Flow migration are deferred to the next discussion.
  * - KernelInitFlow spans kernel_init, pre-SMP initialization, initcalls and the
- *   exec handoff. Pid1UserAppFlow becomes active after exec without replacing
- *   KernelInitTask.
+ *   exec handoff. A fresh declared UserAppFlow becomes active after exec
+ *   without replacing KernelInitTask.
  * - KthreaddFlow owns the kthreadd service loop; BootIdleFlow owns
  *   cpu_startup_entry()/do_idle()/schedule_idle behavior.
  * - User application images do not create per-program flow types. Every exec
  *   creates a fresh UserAppFlow instance owned by the unchanged Task.
- * - Dynamic anonymous Task/Flow allocation, owned-flow collections and generic
- *   instance lifecycle invocation require future DSL/verifier support. The
- *   named child and flow objects above are bounded witnesses, not reusable
- *   runtime slots.
+ * - Dynamic Task/Flow declaration, owned-flow facts and generic Type lifecycle
+ *   invocation are formal model capabilities. Runtime instances are not added
+ *   to the static object inventory.
  */

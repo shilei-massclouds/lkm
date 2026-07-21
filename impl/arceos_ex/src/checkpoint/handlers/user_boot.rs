@@ -52,7 +52,7 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserAddressSpaceReady,
     #[cfg(app_user_boot)]
-    Checkpoint::Pid1UserAppFlowEnterUserMode,
+    Checkpoint::UserAppFlowEnterUserMode,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExecveArgsReady,
     #[cfg(app_user_boot)]
@@ -229,7 +229,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             sink.diag_usize("tlb_flush", ctx.user_stack.last_tlb_flush() as usize);
         }
         #[cfg(app_user_boot)]
-        Checkpoint::Pid1UserAppFlowEnterUserMode => {
+        Checkpoint::UserAppFlowEnterUserMode => {
             run_user_mode_entry(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
@@ -848,7 +848,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && user_kernel_trap_overflow_stack_ready()
         && overflow_stack_top == overflow_stack_base + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE;
     let valid = process.state() == State::Online
-        && process.reuses_kernel_init_task()
+        && process.preserves_kernel_init_task()
         && process.pid1_preserved()
         && process.exec_identity_handoff()
         && process.address_space_bound()

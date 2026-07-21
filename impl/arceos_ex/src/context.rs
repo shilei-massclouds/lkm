@@ -105,7 +105,7 @@ use crate::objects::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     user_boot::{
-        ElfObject, KernelInitTaskUserState, Pid1UserAppFlow, UserAddressSpace, UserBootPayload,
+        ElfObject, KernelInitTaskUserState, UserAddressSpace, UserAppFlow, UserBootPayload,
         UserCloneDeferredBoundaries, UserTaskSet, UserTrapFrame,
     },
     user_stack::UserStack,
@@ -337,7 +337,7 @@ pub struct Context {
     pub user_task_set: UserTaskSet,
     pub kernel_init_user_state: KernelInitTaskUserState,
     #[cfg_attr(app_hello, allow(dead_code))]
-    pub pid1_user_app_flow: Pid1UserAppFlow,
+    pub user_app_flow: UserAppFlow,
 }
 
 impl Context {
@@ -545,7 +545,7 @@ impl Context {
             user_trap_frame: UserTrapFrame::new(),
             user_task_set: UserTaskSet::new(),
             kernel_init_user_state: KernelInitTaskUserState::new(),
-            pid1_user_app_flow: Pid1UserAppFlow::new(),
+            user_app_flow: UserAppFlow::new(),
         }
     }
 

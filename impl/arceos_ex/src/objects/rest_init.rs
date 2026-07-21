@@ -109,7 +109,7 @@ impl KernelInitFlow {
     pub fn cleanup_after_handoff(&mut self, owner: &KernelInitTask) -> EventResult {
         if self.lifecycle.state() != State::Offline
             || self.active
-            || !owner.pid1_user_flow_active()
+            || !owner.user_flow_active()
             || !owner.flow_handoff_committed()
         {
             return failed_condition(
@@ -150,9 +150,9 @@ pub struct KernelInitTask {
     entry_stack_pointer: usize,
     entry_stack_verified: bool,
     kernel_init_flow_owned: bool,
-    pid1_user_flow_owned: bool,
+    user_flow_owned: bool,
     kernel_init_flow_active: bool,
-    pid1_user_flow_active: bool,
+    user_flow_active: bool,
     flow_handoff_committed: bool,
 }
 
@@ -179,9 +179,9 @@ impl KernelInitTask {
             entry_stack_pointer: 0,
             entry_stack_verified: false,
             kernel_init_flow_owned: true,
-            pid1_user_flow_owned: false,
+            user_flow_owned: false,
             kernel_init_flow_active: true,
-            pid1_user_flow_active: false,
+            user_flow_active: false,
             flow_handoff_committed: false,
         }
     }
@@ -294,16 +294,16 @@ impl KernelInitTask {
         self.kernel_init_flow_owned
     }
 
-    pub const fn pid1_user_flow_owned(&self) -> bool {
-        self.pid1_user_flow_owned
+    pub const fn user_flow_owned(&self) -> bool {
+        self.user_flow_owned
     }
 
     pub const fn kernel_init_flow_active(&self) -> bool {
         self.kernel_init_flow_active
     }
 
-    pub const fn pid1_user_flow_active(&self) -> bool {
-        self.pid1_user_flow_active
+    pub const fn user_flow_active(&self) -> bool {
+        self.user_flow_active
     }
 
     pub const fn flow_handoff_committed(&self) -> bool {
@@ -311,7 +311,7 @@ impl KernelInitTask {
     }
 
     /// Commit the active-flow replacement without replacing the PID 1 Task.
-    pub fn commit_pid1_user_flow_handoff(
+    pub fn commit_user_flow_handoff(
         &mut self,
         kernel_flow_state: State,
         user_flow_state: State,
@@ -321,8 +321,8 @@ impl KernelInitTask {
             || user_flow_state != State::Ready
             || !self.kernel_init_flow_owned
             || !self.kernel_init_flow_active
-            || self.pid1_user_flow_owned
-            || self.pid1_user_flow_active
+            || self.user_flow_owned
+            || self.user_flow_active
             || self.flow_handoff_committed
         {
             return failed_condition(
@@ -334,8 +334,8 @@ impl KernelInitTask {
         }
 
         self.kernel_init_flow_active = false;
-        self.pid1_user_flow_owned = true;
-        self.pid1_user_flow_active = true;
+        self.user_flow_owned = true;
+        self.user_flow_active = true;
         self.flow_handoff_committed = true;
         Ok(())
     }

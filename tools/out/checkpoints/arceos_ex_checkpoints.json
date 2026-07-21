@@ -2773,8 +2773,8 @@
   },
   {
     "index": 396,
-    "variant": "Pid1UserAppFlowEnterUserMode",
-    "name": "Pid1UserAppFlow.EnterUserMode",
+    "variant": "UserAppFlowEnterUserMode",
+    "name": "UserAppFlow.EnterUserMode",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -3410,22 +3410,22 @@
   },
   {
     "index": 487,
-    "variant": "Pid1UserAppFlowPrepared",
-    "name": "Pid1UserAppFlow.Prepared",
+    "variant": "UserAppFlowPrepared",
+    "name": "UserAppFlow.Prepared",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 488,
-    "variant": "Pid1UserAppFlowReady",
-    "name": "Pid1UserAppFlow.Ready",
+    "variant": "UserAppFlowReady",
+    "name": "UserAppFlow.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 489,
-    "variant": "Pid1UserAppFlowOnline",
-    "name": "Pid1UserAppFlow.Online",
+    "variant": "UserAppFlowOnline",
+    "name": "UserAppFlow.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }

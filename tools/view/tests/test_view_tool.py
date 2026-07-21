@@ -66,6 +66,18 @@ class ViewToolTests(unittest.TestCase):
                     for edge in data["edges"]
                 )
             )
+            declaration_sites = data["metadata"]["declaration_sites"]
+            self.assertEqual(len(declaration_sites), 5)
+            self.assertTrue(
+                all(data["nodes"][site["id"]]["kind"] == "DeclarationSite" for site in declaration_sites)
+            )
+            self.assertTrue(
+                any(
+                    edge["target"] == declaration_sites[0]["id"]
+                    and edge["kind"] == "declares"
+                    for edge in data["edges"]
+                )
+            )
 
     def test_drives_view_contains_event_edges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -346,6 +358,69 @@ class ViewToolTests(unittest.TestCase):
                     for row in metadata["trace_rows"]
                 )
             )
+
+    def test_trace_view_keeps_repeated_runtime_instances_distinct(self) -> None:
+        runtime_ids = [
+            "runtime:root|Factory.Action::Make|s1|child|o1",
+            "runtime:root|Factory.Action::Make|s1|child|o2",
+        ]
+        runtime_instances = [
+            {
+                "runtime_instance_id": runtime_id,
+                "declaration_site": "Factory.Action::Make#s1:child",
+                "alias": "child",
+                "declared_type": "Task",
+                "state": "Prepared",
+                "occurrence": index,
+                "root_call_path": "root",
+                "owner_process": "Factory.Action::Make",
+                "source_ordinal": 1,
+                "static_object": None,
+            }
+            for index, runtime_id in enumerate(runtime_ids, start=1)
+        ]
+        trace = [
+            {
+                "object": "ComputerProject",
+                "transition": "Preset",
+                "source_state": "Base",
+                "target_state": "Prepared",
+                "status": "proved",
+                "label": "ComputerProject.Transition::Preset",
+                "children": [
+                    {
+                        "object": runtime_id,
+                        "transition": "Preset",
+                        "source_state": "Base",
+                        "target_state": "Prepared",
+                        "status": "proved",
+                        "label": f"{runtime_id}.Transition::Preset",
+                        "edge_kind": "runtime",
+                        "runtime_instance_id": runtime_id,
+                        "alias": "child",
+                        "children": [],
+                    }
+                    for runtime_id in runtime_ids
+                ],
+            }
+        ]
+
+        view = build_trace_view(
+            {"trace": trace, "records": [], "runtime_instances": runtime_instances}
+        )
+        metadata = view.metadata
+
+        self.assertEqual(metadata["runtime_instance_count"], 2)
+        self.assertEqual(
+            {item["runtime_instance_id"] for item in metadata["runtime_instances"]},
+            set(runtime_ids),
+        )
+        labels = {
+            cell.label
+            for cell in metadata["trace_cells"]
+            if cell.kind == "transition_span"
+        }
+        self.assertTrue(all(any(runtime_id in label for label in labels) for runtime_id in runtime_ids))
 
     def test_trace_view_rejects_negative_action_depth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

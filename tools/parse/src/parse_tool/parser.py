@@ -19,12 +19,14 @@ from common.spec_ast import (
     FunctionDecl,
     LockDecl,
     ObjectDecl,
+    ProcessDecl,
     PredicateDecl,
     SourceSpan,
     SpecDocument,
     StateDecl,
     TypeDecl,
     WithinDecl,
+    DriveStatement,
     statement_entries,
 )
 
@@ -55,6 +57,13 @@ _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
 _STATE_RE = re.compile(rf"\Astate\s+State::({_IDENT})\s*\{{", re.S)
 _TRANSITION_RE = re.compile(rf"\Aon\s+Transition::({_IDENT})\s*->\s*State::({_IDENT})\s*\{{", re.S)
+_PROCESS_RE = re.compile(
+    rf"\A(?:on\s+)?(Transition|Action)::({_IDENT})"
+    rf"\s*(?:<[^{{}};]*>)?"
+    rf"\s*(?:\(([^{{}};]*)\))?\s*(?:->\s*({_IDENT}))?\s*\{{",
+    re.S,
+)
+_DECLARE_RE = re.compile(rf"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+({_IDENT})\Z")
 _BLOCK_RE = re.compile(rf"\A({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _PROP_RE = re.compile(rf"\A({_IDENT})\s*:\s*(.+?)\s*;\Z", re.S)
 _INCLUDE_LINE_RE = re.compile(r'\A\s*include\s+"([^"]+)"\s*;\s*\Z')
@@ -209,6 +218,7 @@ def _enrich_obj(
         attrs=[_with_file_block(b, lf, ll) for b in obj.attrs],
         references=[_with_file_block(b, lf, ll) for b in obj.references],
         states=[_enrich_state(s, lf, ll) for s in obj.states],
+        processes=[_enrich_process(p, lf, ll) for p in obj.processes],
         other_blocks=[_with_file_block(b, lf, ll) for b in obj.other_blocks],
     )
 
@@ -223,6 +233,7 @@ def _enrich_state(
         boundaries=[_enrich_boundary(b, lf, ll) for b in state.boundaries],
         deferred=[_with_file_block(b, lf, ll) for b in state.deferred],
         transitions=[_enrich_tr(t, lf, ll) for t in state.transitions],
+        processes=[_enrich_process(p, lf, ll) for p in state.processes],
         other_blocks=[_with_file_block(b, lf, ll) for b in state.other_blocks],
     )
 
@@ -303,6 +314,24 @@ def _enrich_type(t: "TypeDecl", lf: list[str], ll: list[int]) -> "TypeDecl":
         t,
         span=_with_file(t.span, lf, ll),
         blocks=[_with_file_block(b, lf, ll) for b in t.blocks],
+        processes=[_enrich_process(p, lf, ll) for p in t.processes],
+    )
+
+
+def _enrich_process(
+    process: ProcessDecl, lf: list[str], ll: list[int]
+) -> ProcessDecl:
+    return dc_replace(
+        process,
+        span=_with_file(process.span, lf, ll),
+        depends_on=[_with_file_block(b, lf, ll) for b in process.depends_on],
+        drives=[_with_file_block(b, lf, ll) for b in process.drives],
+        within=[_enrich_within(w, lf, ll) for w in process.within],
+        may_change=[_with_file_block(b, lf, ll) for b in process.may_change],
+        ensures=[_with_file_block(b, lf, ll) for b in process.ensures],
+        result=[_with_file_block(b, lf, ll) for b in process.result],
+        other_blocks=[_with_file_block(b, lf, ll) for b in process.other_blocks],
+        body_members=[_enrich_bm(bm, lf, ll) for bm in process.body_members],
     )
 
 
@@ -311,7 +340,14 @@ def _with_file_node(node, lf: list[str], ll: list[int]):
 
 
 def _with_file_block(block: "Block", lf: list[str], ll: list[int]) -> "Block":
-    return dc_replace(block, span=_with_file(block.span, lf, ll))
+    return dc_replace(
+        block,
+        span=_with_file(block.span, lf, ll),
+        statements=[
+            dc_replace(statement, span=_with_file(statement.span, lf, ll))
+            for statement in block.statements
+        ],
+    )
 
 
 def _with_file(
@@ -493,12 +529,16 @@ def _parse_type(segment: _Segment) -> TypeDecl:
         segment.text, match.end() - 1, segment.start_line
     )
     blocks: list[Block] = []
+    processes: list[ProcessDecl] = []
     properties: dict[str, str] = {}
     for part in _split_members(body, body_start_line):
         stripped = part.text.strip()
         block_match = _BLOCK_RE.match(stripped)
         if block_match:
-            blocks.append(_to_block(part, block_match.group(1)))
+            block = _to_block(part, block_match.group(1))
+            blocks.append(block)
+            if block.kind in {"lifecycle", "processes", "transitions", "actions"}:
+                processes.extend(_parse_process_container(block, owner=match.group(1)))
             continue
         prop_match = _PROP_RE.match(stripped)
         if not prop_match:
@@ -511,6 +551,7 @@ def _parse_type(segment: _Segment) -> TypeDecl:
         header=match.group("header").strip(),
         span=segment.span,
         blocks=blocks,
+        processes=processes,
         properties=properties,
     )
 
@@ -663,6 +704,7 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
     attrs: list[Block] = []
     references: list[Block] = []
     states: list[StateDecl] = []
+    processes: list[ProcessDecl] = []
     other_blocks: list[Block] = []
     properties: dict[str, str] = {}
 
@@ -672,7 +714,7 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
         block_match = _BLOCK_RE.match(stripped)
 
         if state_match:
-            states.append(_parse_state(part))
+            states.append(_parse_state(part, owner=match.group(1)))
             continue
 
         if block_match:
@@ -681,6 +723,9 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
                 attrs.append(block)
             elif block.kind == "reference":
                 references.append(block)
+            elif block.kind in {"actions", "processes", "lifecycle"}:
+                processes.extend(_parse_process_container(block, owner=match.group(1)))
+                other_blocks.append(block)
             else:
                 other_blocks.append(block)
             continue
@@ -707,12 +752,13 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
         attrs=attrs,
         references=references,
         states=states,
+        processes=processes,
         other_blocks=other_blocks,
         properties=properties,
     )
 
 
-def _parse_state(segment: _Segment) -> StateDecl:
+def _parse_state(segment: _Segment, *, owner: str) -> StateDecl:
     match = _STATE_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid state declaration")
@@ -726,6 +772,7 @@ def _parse_state(segment: _Segment) -> StateDecl:
     boundaries: list[BoundaryDecl] = []
     deferred: list[Block] = []
     transitions: list[TransitionDecl] = []
+    processes: list[ProcessDecl] = []
     other_blocks: list[Block] = []
 
     for part in parts:
@@ -734,7 +781,7 @@ def _parse_state(segment: _Segment) -> StateDecl:
         block_match = _BLOCK_RE.match(stripped)
 
         if event_match:
-            transitions.append(_parse_event(part))
+            transitions.append(_parse_event(part, owner=owner))
             continue
 
         if not block_match:
@@ -753,7 +800,10 @@ def _parse_state(segment: _Segment) -> StateDecl:
         elif block.kind == "trimmed":
             boundaries.append(_parse_boundary(block))
         elif block.kind == "transitions":
-            transitions.extend(_parse_events_block(block))
+            transitions.extend(_parse_events_block(block, owner=owner))
+        elif block.kind in {"actions", "processes"}:
+            processes.extend(_parse_process_container(block, owner=owner))
+            other_blocks.append(block)
         else:
             other_blocks.append(block)
 
@@ -764,11 +814,12 @@ def _parse_state(segment: _Segment) -> StateDecl:
         boundaries=boundaries,
         deferred=deferred,
         transitions=transitions,
+        processes=processes,
         other_blocks=other_blocks,
     )
 
 
-def _parse_events_block(block: Block) -> list[TransitionDecl]:
+def _parse_events_block(block: Block, *, owner: str) -> list[TransitionDecl]:
     parts = _split_members(block.body, block.body_start_line or block.span.start_line)
     transitions: list[TransitionDecl] = []
     for part in parts:
@@ -776,11 +827,11 @@ def _parse_events_block(block: Block) -> list[TransitionDecl]:
             raise ParseError(
                 f"line {part.start_line}: invalid transitions member: {_preview(part.text)}"
             )
-        transitions.append(_parse_event(part))
+        transitions.append(_parse_event(part, owner=owner))
     return transitions
 
 
-def _parse_event(segment: _Segment) -> TransitionDecl:
+def _parse_event(segment: _Segment, *, owner: str) -> TransitionDecl:
     match = _TRANSITION_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid transition declaration")
@@ -843,7 +894,7 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
             other_blocks.append(block)
             body_members.append(_block_body_member(block))
 
-    return TransitionDecl(
+    transition = TransitionDecl(
         name=match.group(1),
         target_state=match.group(2),
         span=segment.span,
@@ -857,6 +908,210 @@ def _parse_event(segment: _Segment) -> TransitionDecl:
         deferred=deferred,
         other_blocks=other_blocks,
         body_members=body_members,
+    )
+    return _number_transition_statements(
+        transition, f"{owner}.Transition::{transition.name}"
+    )
+
+
+def _parse_process_container(block: Block, *, owner: str) -> list[ProcessDecl]:
+    processes: list[ProcessDecl] = []
+    for part in _split_members(
+        block.body, block.body_start_line or block.span.start_line
+    ):
+        if _PROCESS_RE.match(part.text.strip()) is None:
+            raise ParseError(
+                f"line {part.start_line}: invalid {block.kind} process member: "
+                f"{_preview(part.text)}"
+            )
+        processes.append(_parse_process(part, owner=owner))
+    return processes
+
+
+def _parse_process(segment: _Segment, *, owner: str) -> ProcessDecl:
+    match = _PROCESS_RE.match(segment.text.strip())
+    if match is None:
+        raise ParseError(f"line {segment.start_line}: invalid process declaration")
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
+    depends_on: list[Block] = []
+    drives: list[Block] = []
+    within: list[WithinDecl] = []
+    may_change: list[Block] = []
+    ensures: list[Block] = []
+    result: list[Block] = []
+    other_blocks: list[Block] = []
+    body_members: list[BodyMember] = []
+    properties: dict[str, str] = {}
+
+    for part in _split_members(body, body_start_line):
+        block_match = _BLOCK_RE.match(part.text.strip())
+        if block_match is None:
+            prop_match = _PROP_RE.match(part.text.strip())
+            if prop_match is None:
+                raise ParseError(
+                    f"line {part.start_line}: invalid process member: {_preview(part.text)}"
+                )
+            properties[prop_match.group(1)] = prop_match.group(2).strip()
+            continue
+        child = _to_block(part, block_match.group(1))
+        if child.kind == "depends_on":
+            depends_on.append(child)
+            body_members.append(_block_body_member(child))
+        elif child.kind == "drives":
+            drives.append(child)
+            body_members.append(_block_body_member(child))
+        elif child.kind == "within":
+            nested = _parse_within(child)
+            within.append(nested)
+            body_members.append(_within_body_member(nested))
+        elif child.kind == "may_change":
+            may_change.append(child)
+            body_members.append(_block_body_member(child))
+        elif child.kind == "ensures":
+            ensures.append(child)
+            body_members.append(_block_body_member(child))
+        elif child.kind == "result":
+            result.append(child)
+            body_members.append(_block_body_member(child))
+        else:
+            other_blocks.append(child)
+            body_members.append(_block_body_member(child))
+
+    process = ProcessDecl(
+        kind=match.group(1),
+        name=match.group(2),
+        span=segment.span,
+        parameters=_parse_process_parameters(match.group(3) or "", segment.start_line),
+        return_type=match.group(4),
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        result=result,
+        other_blocks=other_blocks,
+        body_members=body_members,
+        properties=properties,
+    )
+    return _number_process_statements(process, f"{owner}.{process.kind}::{process.name}")
+
+
+def _parse_process_parameters(raw: str, line: int) -> tuple[tuple[str, str], ...]:
+    raw = raw.strip()
+    if not raw:
+        return ()
+    parameters: list[tuple[str, str]] = []
+    for item in raw.split(","):
+        name, sep, type_name = item.strip().partition(":")
+        if not sep or not re.fullmatch(r"[a-z][A-Za-z0-9_]*", name.strip()):
+            raise ParseError(f"line {line}: invalid process parameter: {_preview(item)}")
+        if not re.fullmatch(_IDENT, type_name.strip()):
+            raise ParseError(f"line {line}: invalid process parameter type: {_preview(item)}")
+        parameters.append((name.strip(), type_name.strip()))
+    return tuple(parameters)
+
+
+def _number_process_statements(process: ProcessDecl, owner: str) -> ProcessDecl:
+    ordinal = 0
+
+    def number_block(block: Block) -> Block:
+        nonlocal ordinal
+        if block.kind != "drives":
+            return block
+        statements: list[DriveStatement] = []
+        for statement in block.statements:
+            ordinal += 1
+            statements.append(
+                dc_replace(statement, ordinal=ordinal, owner_process=owner)
+            )
+        return dc_replace(block, statements=statements)
+
+    def number_within(within: WithinDecl) -> WithinDecl:
+        members: list[BodyMember] = []
+        for member in within.body_members:
+            if member.block is not None:
+                block = number_block(member.block)
+                members.append(dc_replace(member, block=block))
+            elif member.within is not None:
+                nested = number_within(member.within)
+                members.append(dc_replace(member, within=nested))
+            else:
+                members.append(member)
+        return dc_replace(
+            within,
+            drives=[m.block for m in members if m.kind == "drives" and m.block is not None],
+            within=[m.within for m in members if m.within is not None],
+            body_members=members,
+        )
+
+    members: list[BodyMember] = []
+    for member in process.body_members:
+        if member.block is not None:
+            block = number_block(member.block)
+            members.append(dc_replace(member, block=block))
+        elif member.within is not None:
+            nested = number_within(member.within)
+            members.append(dc_replace(member, within=nested))
+        else:
+            members.append(member)
+    return dc_replace(
+        process,
+        depends_on=[m.block for m in members if m.kind == "depends_on" and m.block is not None],
+        drives=[m.block for m in members if m.kind == "drives" and m.block is not None],
+        within=[m.within for m in members if m.within is not None],
+        may_change=[m.block for m in members if m.kind == "may_change" and m.block is not None],
+        ensures=[m.block for m in members if m.kind == "ensures" and m.block is not None],
+        result=[m.block for m in members if m.kind == "result" and m.block is not None],
+        body_members=members,
+    )
+
+
+def _number_transition_statements(
+    transition: TransitionDecl, owner: str
+) -> TransitionDecl:
+    ordinal = 0
+
+    def number_block(block: Block) -> Block:
+        nonlocal ordinal
+        if block.kind != "drives":
+            return block
+        statements: list[DriveStatement] = []
+        for statement in block.statements:
+            ordinal += 1
+            statements.append(dc_replace(statement, ordinal=ordinal, owner_process=owner))
+        return dc_replace(block, statements=statements)
+
+    def number_within(within: WithinDecl) -> WithinDecl:
+        members: list[BodyMember] = []
+        for member in within.body_members:
+            if member.block is not None:
+                members.append(dc_replace(member, block=number_block(member.block)))
+            elif member.within is not None:
+                members.append(dc_replace(member, within=number_within(member.within)))
+            else:
+                members.append(member)
+        return dc_replace(
+            within,
+            drives=[m.block for m in members if m.kind == "drives" and m.block is not None],
+            within=[m.within for m in members if m.within is not None],
+            body_members=members,
+        )
+
+    members: list[BodyMember] = []
+    for member in transition.body_members:
+        if member.block is not None:
+            members.append(dc_replace(member, block=number_block(member.block)))
+        elif member.within is not None:
+            members.append(dc_replace(member, within=number_within(member.within)))
+        else:
+            members.append(member)
+    return dc_replace(
+        transition,
+        drives=[m.block for m in members if m.kind == "drives" and m.block is not None],
+        within=[m.within for m in members if m.within is not None],
+        body_members=members,
     )
 
 
@@ -1076,13 +1331,49 @@ def _to_block(segment: _Segment, kind: str) -> Block:
     body, body_start_line = _body_segment_from_braced_decl(
         text, match.end() - 1, segment.start_line
     )
-    return Block(
+    block = Block(
         kind=kind,
         body=body,
         span=segment.span,
         header=match.group("header").strip(),
         body_start_line=body_start_line,
     )
+    if kind == "drives":
+        if body.strip() and not body.rstrip().endswith(";"):
+            raise ParseError(
+                f"line {segment.start_line}: drives statement is missing semicolon"
+            )
+        statements: list[DriveStatement] = []
+        for entry, entry_span in block.entry_spans:
+            declare = _DECLARE_RE.match(entry)
+            if declare is not None:
+                statements.append(
+                    DriveStatement(
+                        kind="declare",
+                        text=entry,
+                        span=entry_span,
+                        alias=declare.group(1),
+                        declared_type=declare.group(2),
+                    )
+                )
+                continue
+            if entry.lstrip().startswith("declare"):
+                raise ParseError(
+                    f"line {entry_span.start_line}: malformed declare statement: "
+                    f"{_preview(entry)}"
+                )
+            statement_kind = "let" if entry.lstrip().startswith("let ") else "call"
+            statements.append(
+                DriveStatement(kind=statement_kind, text=entry, span=entry_span)
+            )
+        block = dc_replace(block, statements=statements)
+    else:
+        for entry, entry_span in block.entry_spans:
+            if entry.lstrip().startswith("declare"):
+                raise ParseError(
+                    f"line {entry_span.start_line}: declare is only allowed in drives"
+                )
+    return block
 
 
 def _top_level_segments(text: str) -> list[_Segment]:

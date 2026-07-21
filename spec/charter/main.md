@@ -15,6 +15,8 @@
 2. [内核系统](systems/kernel.md)：内核的一次运行实例，基于内存已经加载的内核映像，获得上级BootLoader移交的控制权后开始启动，为应用提供运行环境。
 3. [对象级章程入口](objects/README.md)：对象设计意图的专题入口；正式 model object 文件到 coding 的完整覆盖见
    [`../coding/objects/README.md`](../coding/objects/README.md)。
+4. [运行期实例声明](objects/dynamic-instance-declaration.md)：`drives` 中 fresh Type instance 的声明、
+   词法 alias、生命周期、稳定 trace identity 与静态/运行时视图边界。
 
 ## 定位
 
@@ -81,7 +83,7 @@
 | 流（Flow） | 一个抽象概念，用于描述系统在时间维度上的持续运行、状态推进与控制权传递。它贯穿硬件启动、固件执行、引导加载与内核运行全过程。 |
 | 类型（Type） | 定义一组对象共同结构、标准生命周期、扩展状态、过程、依赖、上下文约束和 API 语义的抽象规格单元。 |
 | 对象（Object） | 与 Flow 相对应的另一基础术语，指在某一层级中具有身份、边界、状态以及可被识别和操作方式的承载体。 |
-| 实例（Instance） | 某一 Type 的具名对象，具有自己的实例名称、生命周期状态、扩展状态值、属性、所在环境、上下文和句柄引用。本文在不强调类型/实例区别时，仍可把 object 作为 instance 的简称使用。 |
+| 实例（Instance） | 某一 Type 的独立对象。静态实例具有全局具名 object identity；运行期实例由声明点执行产生，只有稳定 runtime identity 和词法 alias，不因此成为全局具名 object。每个实例独立具有生命周期状态、扩展状态值、属性、所在环境、上下文和句柄引用。本文在不强调类型/实例区别时，仍可把 object 作为 instance 的简称使用。 |
 | 原子对象（Atomic Object） | 在当前建模层级中不再继续拆分的最小粒度对象。它可以仍然具有属性和内部实现细节，但这些细节在当前规格层级不作为独立对象暴露。 |
 | 复合对象（Composite Object） | 由更小粒度对象组合而成的对象。复合对象通过属性和子对象状态支撑自身状态，并通常通过驱动子对象 transition来完成自身状态迁移。 |
 | 扩展状态（Extended State） | Type 自定义的状态域，用于表达标准生命周期状态之外的内部语义状态。扩展状态可由 Type 自定义事件推进，也可被 action 读取或影响属性。 |
@@ -314,10 +316,20 @@ context SingleTaskContext: Context {
 当某种规格单元在系统中只会出现一个对象实例时，可以暂时不区分 Type 与 Instance；但只要一个 Type 可能定义多个实例，就应把规则写在 Type 上，把具体事实写在 Instance 上：
 
 - Type 定义标准生命周期、扩展状态集合、process 集合、状态迁移规则、属性语义、依赖对象类型、可暴露句柄和上下文约束。
-- Instance 具有实例名、所属 Type、当前生命周期状态、当前扩展状态值、属性值、所属环境、上下文绑定、句柄链和与其它实例的引用关系。
+- Instance 具有独立 identity、所属 Type、当前生命周期状态、当前扩展状态值、属性值、所属环境、
+  上下文绑定、句柄链和与其它实例的引用关系。静态 instance 使用全局具名 identity；运行期 instance
+  使用稳定 runtime identity，源码 alias 只在其词法作用域内引用该 identity。
 - 生命周期 transition、扩展状态 transition 和 action 的定义主要依附于 Type；对象图和时序图中出现的具名节点通常是 Instance。
 
 后续讨论 Flow、Object、句柄链与 Context 的关系时，应沿用这一分层：Flow 不直接裸访问资源对象，而是在某个 Context 中通过句柄链访问目标 Instance；句柄链负责表达可见性、权限、寻址和转交关系，Context 负责表达该访问发生时依赖的执行环境。
+
+### 运行期 Type instance
+
+同一 Type 的实例不要求全部预先成为全局具名 object。transition/action 的 `drives` 可以在控制流
+真正执行到声明语句时建立 fresh 运行期实例；其设计、作用域、持久化和可观测性统一服从
+[运行期实例声明](objects/dynamic-instance-declaration.md)。静态具名 object 与运行期 instance 使用
+同一 Type process 和 lifecycle 规则，但拥有不同的 identity 来源和展示方式。声明 instance 不是
+调用 lifecycle process，也不隐式建立 owner、parent、active binding 或集合成员关系。
 
 ### CPU / CpuGroup 类型与实例
 
@@ -3008,7 +3020,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 当前先保留两个规格变种：
 
-1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF；成功后 Task 身份保持，`KernelInitFlow` 被 fresh `Pid1UserAppFlow` 替换。
+1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF；成功后 Task 身份保持，`KernelInitFlow` 被 fresh `UserAppFlow` 替换。
 2. `UnikernelApp`：内核态应用变种，当前只做粗粒度规格约束。它要求 selected app、入口、参数和基础输出设施可用；`enable()` 调用 app 入口并把启动编排链交给 app，不展开 VFS、binfmt、用户态地址空间和 exec 细节。
 
 本阶段的输入事实至少包括：
@@ -3042,10 +3054,10 @@ Exec 核心对象的权威职责已经拆到
 6. `ELF 对象`（`ElfObject`）：表示 main/interpreter artifact 与 load plan。详细职责见独立 charter；格式选择属于 registry，提交属于 transaction，不建立 `ElfLoader`。
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射、用户栈映射和阶段性的 heap/mmap arena；dynamic libc 首片要求同一个 `UserAddressSpace` 同时映射主程序 ELF 和 `PT_INTERP` 指向的 musl interpreter ELF，并用固定 non-overlap load bias 装载 `ET_DYN` interpreter。ELF 段的 backing/PTE 以页粒度覆盖 `align_down(p_vaddr)..align_up(p_vaddr + p_memsz)`，因此 `mprotect`/`munmap` 对动态链接器 RELRO 页保护请求的 mapped-range 判断也必须按页范围处理，而不是只按原始 `p_vaddr..p_vaddr+p_memsz` 字节范围拒绝页内前缀。heap/mmap arena 用于承接动态链接器早期 `brk`/anonymous `mmap` 需求，属于正式运行时语义，不是测试专用入口。完整 VMA 树、文件映射、COW、ASLR 和 page fault recovery 后续再展开。
 8. `用户栈对象`（`UserStack`）：表示 exec initial stack 与当前用户栈的稀疏物理 backing owner。initial VMA 覆盖参数页并向下预扩展 128 KiB，只分配实际写入页；运行期 load/store fault 可在 8 MiB rlimit、256 页 guard gap 和相邻 mapping 允许时按页向下增长，跨页跳跃不填充中间页。每次 exec 的单次 24 字节 HWRNG 读取中，16 字节只供栈内 `AT_RANDOM`，独立 8 字节只在 `0x40000000` 以下 8 MiB 窗口内选择页对齐 top。initial auxv 是当前可准确表达的 Linux RISC-V 基线：程序头/entry/interpreter、HWCAP、页大小、时钟 tick、flags、exec 前 credentials、secure=0、`AT_RANDOM`、指向独立 filename 副本的 `AT_EXECFN` 和 `AT_NULL`；没有事实支撑的 platform/HWCAP2/rseq/vDSO 条目不生成。stack mapping 只持有 RW/NX VMA 与 ownership token，不复制 backing 引用；动态 `setrlimit`、越界 signal、通用 VMA fault core、COW/多线程栈、完整 CRNG 和内核 compiler stack protector 后续再展开。
-9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `Pid1UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。用户态 trap 继续用 `sscratch` 取得已知安全的 kernel stack top；内核态 trap 必须在保存任何通用寄存器前只借用 `sp`/`sscratch`，按 prospective frame SP 的 `((sp - 288) >> 14) & 1` 检查 VMAP guard 半区，并在正常分支恢复原 `sp`、清零 `sscratch` 后进入现有完整 frame 保存。溢出分支以 `t6`/`sscratch` 交换保持坏栈 SP 和原始 `t6`，切换到静态 overflow stack 构造包含全部整数寄存器与 `sepc/scause/stval/sstatus` 的完整 frame，只经 SBI 输出稳定诊断并 terminal panic；不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
+9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。用户态 trap 继续用 `sscratch` 取得已知安全的 kernel stack top；内核态 trap 必须在保存任何通用寄存器前只借用 `sp`/`sscratch`，按 prospective frame SP 的 `((sp - 288) >> 14) & 1` 检查 VMAP guard 半区，并在正常分支恢复原 `sp`、清零 `sscratch` 后进入现有完整 frame 保存。溢出分支以 `t6`/`sscratch` 交换保持坏栈 SP 和原始 `t6`，切换到静态 overflow stack 构造包含全部整数寄存器与 `sepc/scause/stval/sstatus` 的完整 frame，只经 SBI 输出稳定诊断并 terminal panic；不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
 10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Writev`、`SyscallTable.Action::OpenAt`、`SyscallTable.Action::Read`、`SyscallTable.Action::Close`、`SyscallTable.Action::NewFstatAt`、`SyscallTable.Action::Brk`、`SyscallTable.Action::Mmap`、`SyscallTable.Action::Mprotect`、`SyscallTable.Action::Munmap`、`SyscallTable.Action::SetTidAddress`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。`write/writev` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端；只读 `openat/read/close/newfstatat` 首片则经 `FilesStruct` 分配一个普通文件 opened instance，并通过 VFS path read 读取当前 ext2 rootfs 中已存在的 regular file；`brk/mmap/mprotect/munmap` 路由到 `UserAddressSpace` 的阶段性 heap/mmap arena，用于支撑 musl dynamic loader 的早期运行；`set_tid_address` 按 Linux `current->clear_child_tid = tidptr; return task_pid_vnr(current);` 的形态落到当前 `KernelInitTask` 的 PID 1 任务属性上，不建立 persona 或 futex 完整对象。
 11. `打开文件上下文对象`（`FilesStruct` / `FileDescriptorTable` / `OpenFileDescription` / `FileBackend`）：`FilesStruct` 是任务拥有的打开文件上下文，和表示 root/pwd 的 `FsStruct` 并列，不是 `FsStruct` 的下级类型。`FileDescriptorTable` 是 `FilesStruct` 内部的 fd table，负责把 fd 映射到 `OpenFileDescription`；`OpenFileDescription` 表示一次打开后的文件实例，承载 flags、offset 和后端引用；`FileBackend` 表示具体后端类型。当前支持边界分两层：第一层预安装 fd 0/1/2 为 console-like `CharDevice` 后端；第二层只支持一个 read-only `RegularFile` opened instance，用于 `openat` 后的 `read`、`close` 和 `newfstatat` 最小元数据返回。块设备文件、完整 `/dev/console`、TTY、权限、目录 fd、symlink、poll、共享 fd table、写路径和 page cache 后续展开。
-12. `PID 1 Task 与用户应用 Flow`（`KernelInitTask` / `Pid1UserAppFlow`）：`KernelInitTask` 是 exec 前后不变的 PID 1 Task carrier；用户地址空间、files、credentials、signal 和 trap frame 直接附着于它，不建立用户态 persona wrapper。`Pid1UserAppFlow` 是首次 exec 创建的 fresh `UserAppFlow` 实例，只承载该次应用 continuation 的 lifecycle。successful exec 固定按“新 Flow Preset/Setup -> `KernelInitFlow.Disable` -> `KernelInitTask.CommitFlowHandoff` -> 新 Flow Enable -> `KernelInitFlow.Cleanup`”推进；一个 Task 任一时刻最多一个 Flow Online。后续 exec 仍保持 Task 身份，并创建另一个 fresh `UserAppFlow`。
+12. `PID 1 Task 与用户应用 Flow`（`KernelInitTask` / `UserAppFlow`）：`KernelInitTask` 是 exec 前后不变的 PID 1 Task carrier；用户地址空间、files、credentials、signal 和 trap frame 直接附着于它，不建立用户态 persona wrapper。首次 exec 在执行点声明一个 fresh `UserAppFlow` 运行实例，只承载该次应用 continuation 的 lifecycle。successful exec 固定按“新 Flow Preset/Setup -> `KernelInitFlow.Disable` -> `KernelInitTask.CommitFlowHandoff` -> 新 Flow Enable -> `KernelInitFlow.Cleanup`”推进；一个 Task 任一时刻最多一个 Flow Online。后续 exec 仍保持 Task 身份，并声明另一个 fresh `UserAppFlow`。
 13. `信号运行期对象`（暂名 `SignalRuntime`）：表示 Task 拥有或引用的用户态信号运行期机制。它挂在 `KernelInitTask` 等 `Task` 实例之下，不属于 `UserAppFlow`。`SignalRuntime` 不等同于前序 `ProcessPreparePhase` 中的 `SignalCore`：`SignalCore` 只表示 `proc_caches_init()` / `signals_init()` 相关的全局分配基础与初始化边界，`SignalRuntime` 表示 task/process 运行期信号状态。后续规格应把 `SignalRuntime` 拆成三个主要子对象：`ProcessSignalState` 对应 Linux `signal_struct` 的线程组/进程共享状态，至少包括 `shared_pending` 及后续 group stop/job control 等进程级 signal 状态；`ThreadSignalState` 对应 Linux `task_struct` 的线程私有状态，包括 `pending`、`blocked`、`real_blocked` 和 `saved_sigmask`；`SignalActionTable` 对应 Linux `sighand_struct.action[_NSIG]`，其条目可命名为 `SignalAction`，由 `rt_sigaction()` 读写。`rt_sigprocmask()` 应建模为 `SignalRuntime.Action::RtSigprocmask`，作用于 `ThreadSignalState.blocked`；`rt_sigaction()` 应建模为 `SignalRuntime.Action::RtSigaction`，作用于 `SignalActionTable.actions[sig]`。`get_signal()`、`dequeue_signal()`、signal frame 构造、进入用户 handler 和 `rt_sigreturn` 不应作为这些状态集合的父对象，而应作为 `SignalRuntime` 上的后续运行期 actions，例如 `RecalcPending`、`DequeueSignal`、`DeliverSignal`、`BuildSignalFrame` 和 `RtSigreturn`；这些 action 消费 `ProcessSignalState`、`ThreadSignalState` 和 `SignalActionTable`，必要时创建或消费 `SignalFrame`。当前单 PID1/单线程首片可以在实现上把这些状态折叠到 `KernelInitTask` 的内部 user-resource 字段，但规格边界必须保留进程共享、线程私有和 action table 的区分。
 14. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
@@ -3072,7 +3084,7 @@ Exec 核心对象的权威职责已经拆到
 | ELF 类型检查 | event: `ElfObject.preset()` | 检查 ELF64、little-endian、RISC-V、当前支持的 executable 类型；失败是普通候选失败，不导致内核崩溃，除非该候选来自强制 `init=`。 |
 | ELF 解析与装载 | event: `ElfObject.setup()` | 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`；`PT_INTERP` 只建立 interpreter role 的第二个 `ElfObject`，不单独引入 `ElfLoader` 或 `Load` 生命周期阶段。 |
 | 用户态入口就绪 | event: `ElfObject.enable()` | 确认 entry、用户栈和 `UserTrapFrame` 已就绪，交给 `UserBootPayload` 做最终 U-mode handoff。 |
-| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则为 `KernelInitTask` 建立并 handoff 到 `Pid1UserAppFlow`；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
+| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则为 `KernelInitTask` 建立并 handoff 到 `UserAppFlow`；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
 | `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则 handoff 到 fresh `UserAppFlow`；失败只记录错误并继续 fallback。 |
 | `try_to_run_init_process("/sbin/init" ... "/bin/sh")` | action: `UserBootPayload.try_fallbacks()` | 固定 fallback 列表；每个候选仍调用 `try_candidate(path)`；`-ENOENT` 静默，其它错误打印后继续。 |
 | 所有候选失败 | terminal: `PayloadPanic.no_working_init()` | Linux panic，不形成 `PayloadPhase.Online`。 |
@@ -3093,14 +3105,14 @@ Exec 核心对象的权威职责已经拆到
 - `PayloadPhase.state == Online`，表示 selected payload 已完成不可逆交接
 - Linux-like 路径下，`UserBootPayload.state == Online`
 - Linux-like 路径下，`KernelInitTask.state == Online` 且 PID 1 Task identity 保持
-- Linux-like 路径下，`Pid1UserAppFlow.state == Online`、`KernelInitFlow.state == Destroyed`，active binding 指向 `Pid1UserAppFlow`
+- Linux-like 路径下，本次 exec 声明的 `UserAppFlow` 实例处于 `Online`、`KernelInitFlow.state == Destroyed`，active binding 指向该运行实例
 - Linux-like 路径下，`UserBootPayload.selected_path` 已确定
 - Linux-like 路径下，`InitArgEnv.argv0 == UserBootPayload.selected_path`
 - Linux-like 路径下，`ElfObject.state == Online`
 - Linux-like 路径下，`UserAddressSpace.state == Online`
 - Linux-like 路径下，`UserTrapFrame` 已绑定 entry 和用户栈
 - Linux-like 路径下，`SyscallException` 绑定 `SyscallTable`，并通过 `SyscallTable` actions 支持最小 `write` 与 `exit/exit_group`
-- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `Pid1UserAppFlow`
+- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `UserAppFlow`
 - 如果 Linux-like 路径进入 `PayloadPanic`，则该路径是失败终端，不满足 `PayloadPhase.state == Online`
 
 ### 内核领域与前置环境

@@ -1471,8 +1471,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=378,
-                variant="Pid1UserAppFlowEnterUserMode",
-                name="Pid1UserAppFlow.EnterUserMode",
+                variant="UserAppFlowEnterUserMode",
+                name="UserAppFlow.EnterUserMode",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=379,
@@ -1520,7 +1520,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("begin_new_exec", address_start.linux_anchor)
         self.assertIn("UserBoot-specific", address_start.notes)
 
-        enter_user = by_name["Pid1UserAppFlow.EnterUserMode"]
+        enter_user = by_name["UserAppFlow.EnterUserMode"]
         self.assertEqual(enter_user.linux_file, "arch/riscv/kernel/entry.S")
         self.assertEqual(enter_user.linux_symbol, "ret_from_exception")
         self.assertEqual(enter_user.confidence, "medium")
@@ -1879,7 +1879,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["UserBoot.MainElfReady"].linux_symbol, "load_elf_binary")
         self.assertEqual(by_name["UserBoot.InitAttemptFailed"].mapping_kind, "range")
         self.assertEqual(by_name["UserBoot.AddressSpaceSetupStart"].confidence, "medium")
-        self.assertEqual(by_name["Pid1UserAppFlow.EnterUserMode"].linux_symbol, "ret_from_exception")
+        self.assertEqual(by_name["UserAppFlow.EnterUserMode"].linux_symbol, "ret_from_exception")
         self.assertEqual(by_name["UserAddressSpace.Ready"].linux_symbol, "exec_mmap")
         self.assertEqual(by_name["UserExec.AddressSpaceReady"].mapping_kind, "range")
         self.assertEqual(by_name["UserExec.TrapFrameReady"].linux_symbol, "start_thread")

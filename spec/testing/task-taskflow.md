@@ -9,12 +9,13 @@ carrier and its independently-lived `TaskFlow` instances.
   `BootIdleSetup` scheduling record is an internal projection and must not be
   reported as a second Task or own a second Task lifecycle.
 - PID 1 tests must keep `KernelInitTask` online across exec while observing
+  an explicit fresh-Flow declaration that remains in `Base` before Preset, then
   `KernelInitFlow: Online -> Offline -> Destroyed` and
-  `Pid1UserAppFlow: Base -> Prepared -> Ready -> Online` in that order.
+  `UserAppFlow: Base -> Prepared -> Ready -> Online` in that order.
 - The handoff is valid only when the old flow is inactive before the active
   binding changes, the new flow is Ready at commit, and at most one owned flow
   is Online afterward.
-- User entry checkpoints use `Pid1UserAppFlow.EnterUserMode`. Old Task,
+- User entry checkpoints use `UserAppFlow.EnterUserMode`. Old Task,
   persona, and Flow checkpoint names are not compatibility interfaces.
 
 ## Fork and bounded storage

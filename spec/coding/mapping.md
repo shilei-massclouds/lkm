@@ -100,6 +100,10 @@ identity 聚合并对外发布；不得把实现结构拆分解释为额外 Task
 存储并由 owner Task 维护 active binding；exec/idle handoff 只替换 Flow，fork/clone 才创建 Task。
 专用约束见 [`objects/task-taskflow.md`](objects/task-taskflow.md)。
 
+`drives` 中的 runtime Type instance declaration 由共享工具链按源码顺序建模，不映射为静态 Rust
+singleton 或具名 model object。其 AST、checker、derive identity 和展示约束见
+[`objects/dynamic-instance-declaration.md`](objects/dynamic-instance-declaration.md)。
+
 除 Phase 对象外，模型对象原则上应对应 Rust `struct`、静态单例或启动上下文中的结构化字段。
 
 资源对象的事件应优先实现为该对象 `impl` 上的方法。若启动早期限制导致对象暂时只能由静态单例、裸指针范围或上下文字段承载，也应保留明确的对象命名和transition 函数边界，并记录后续收敛为独立对象文件的计划。

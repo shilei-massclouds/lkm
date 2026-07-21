@@ -7,13 +7,15 @@ Object-level charter notes live here when they need a dedicated topic file.
 | Object | Authoritative charter |
 | --- | --- |
 | `Task` / `TaskFlow` | [`task-taskflow.md`](task-taskflow.md) |
+| Runtime Type instance / `declare` | [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md) |
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
 | `UserStack` | [`user-stack.md`](user-stack.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |
 | `ExecSyncBoundaries` | [`exec-sync-boundaries.md`](exec-sync-boundaries.md) |
 | `ElfObject` | [`elf-object.md`](elf-object.md) |
 
-These are the four lifecycle objects in the shared boot/runtime exec pipeline. `BinaryFormatHandler` and
+The exec entries are lifecycle objects in the shared boot/runtime exec pipeline; the runtime-instance topic
+defines the common creation and identity mechanism used by any declared Type. `BinaryFormatHandler` and
 `ElfBinaryFormat` are registry entry/type contracts; `ExecArguments`, `ExecError` and `ExecOwner` are value
 types. None of them adds another four-layer object family.
 

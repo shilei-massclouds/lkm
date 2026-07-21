@@ -7,6 +7,7 @@ from typing import Any
 from common.schemas import MODEL_SCHEMA, MODEL_VERSION
 from common.model_types import (
     BoundaryDef,
+    DeclarationSiteDef,
     TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
@@ -24,11 +25,13 @@ from common.spec_ast import (
     FunctionDecl,
     LockDecl,
     ObjectDecl,
+    ProcessDecl,
     PredicateDecl,
     SourceSpan,
     StateDecl,
     TypeDecl,
     WithinDecl,
+    DriveStatement,
 )
 
 
@@ -72,6 +75,10 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         boundary_id: _boundary_def_from_json(item)
         for boundary_id, item in _object(model_data, "boundaries").items()
     }
+    declaration_sites = tuple(
+        _declaration_site_from_json(item)
+        for item in _list(model_data, "declaration_sites")
+    )
     children = {
         name: [_as_string(child, f"children.{name}") for child in _as_list(items, f"children.{name}")]
         for name, items in _object(model_data, "children").items()
@@ -86,6 +93,7 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         objects=objects,
         children=children,
         boundaries=boundaries,
+        declaration_sites=declaration_sites,
         legacy_boundary_count=_integer(
             _object(data, "summary"), "legacy_boundaries"
         ),
@@ -173,6 +181,7 @@ def _object_def_from_json(item: Any) -> ObjectDef:
         attrs=[],
         references=[],
         states=[state.decl for state in states.values()],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         other_blocks=[],
         properties={str(key): str(value) for key, value in _object(data, "properties").items()},
     )
@@ -207,6 +216,7 @@ def _state_def_from_json(item: Any) -> StateDef:
         ],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
         transitions=[transition.decl for transition in transitions.values()],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
     )
     return StateDef(
@@ -307,7 +317,64 @@ def _type_from_json(item: Any) -> TypeDecl:
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         properties={str(key): str(value) for key, value in properties.items()},
+    )
+
+
+def _process_from_json(item: Any) -> ProcessDecl:
+    data = _as_object(item, "process")
+    depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
+    drives = [_block_from_json(block) for block in _list(data, "drives")]
+    within = [_within_from_json(block) for block in _list(data, "within")]
+    may_change = [_block_from_json(block) for block in _list(data, "may_change")]
+    ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    result = [_block_from_json(block) for block in _list(data, "result")]
+    other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
+    body_members = _body_members_from_json(
+        data,
+        fallback=[
+            *(_block_body_member(block) for block in depends_on),
+            *(_block_body_member(block) for block in drives),
+            *(_within_body_member(block) for block in within),
+            *(_block_body_member(block) for block in may_change),
+            *(_block_body_member(block) for block in ensures),
+            *(_block_body_member(block) for block in result),
+            *(_block_body_member(block) for block in other_blocks),
+        ],
+    )
+    parameters: list[tuple[str, str]] = []
+    for parameter in _list(data, "parameters"):
+        param = _as_object(parameter, "process parameter")
+        parameters.append((_string(param, "name"), _string(param, "type")))
+    return ProcessDecl(
+        kind=_string(data, "kind"),
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        parameters=tuple(parameters),
+        return_type=_optional_string(data.get("return_type"), "process.return_type"),
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        result=result,
+        other_blocks=other_blocks,
+        body_members=body_members,
+        properties=_string_map(data.get("properties", {}), "process.properties"),
+    )
+
+
+def _declaration_site_from_json(item: Any) -> DeclarationSiteDef:
+    data = _as_object(item, "declaration site")
+    if data.get("kind") != "declare" or data.get("static_object") is not None:
+        raise ValueError("invalid declaration site shape")
+    return DeclarationSiteDef(
+        owner_process=_string(data, "owner_process"),
+        ordinal=_integer(data, "source_ordinal"),
+        alias=_string(data, "alias"),
+        declared_type=_string(data, "declared_type"),
+        span=_span_from_json(data["span"]),
     )
 
 
@@ -465,6 +532,24 @@ def _block_from_json(item: Any) -> Block:
         span=_span_from_json(data["span"]),
         header=_string(data, "header"),
         body_start_line=body_start_line,
+        statements=[_drive_statement_from_json(value) for value in data.get("statements", [])],
+    )
+
+
+def _drive_statement_from_json(item: Any) -> DriveStatement:
+    data = _as_object(item, "drive statement")
+    return DriveStatement(
+        kind=_string(data, "kind"),
+        text=_string(data, "text"),
+        span=_span_from_json(data["span"]),
+        ordinal=_integer(data, "ordinal"),
+        alias=_optional_string(data.get("alias"), "drive statement.alias"),
+        declared_type=_optional_string(
+            data.get("declared_type"), "drive statement.declared_type"
+        ),
+        owner_process=_optional_string(
+            data.get("owner_process"), "drive statement.owner_process"
+        ),
     )
 
 

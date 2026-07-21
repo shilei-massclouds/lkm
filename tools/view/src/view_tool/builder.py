@@ -37,7 +37,7 @@ _TRACE_PHASE_MIN_BODY_ROWS = 24
 
 
 def build_object_view(model: ObjectModel) -> ViewModel:
-    """Build an object-level view with static parent edges."""
+    """Build an object-level view with static objects and declaration sites."""
 
     nodes = {
         name: ViewNode(id=name, label=name, kind=obj.kind)
@@ -56,7 +56,52 @@ def build_object_view(model: ObjectModel) -> ViewModel:
                 )
             )
 
-    return ViewModel(name="object", nodes=nodes, edges=edges)
+    declaration_inventory: list[dict[str, object]] = []
+    for site in model.declaration_sites:
+        node_id = _declaration_site_node_id(
+            site.owner_process,
+            site.ordinal,
+            site.alias,
+        )
+        nodes[node_id] = ViewNode(
+            id=node_id,
+            label=(
+                f"declare {site.alias} of {site.declared_type}\n"
+                f"{site.owner_process} statement {site.ordinal}"
+            ),
+            kind="DeclarationSite",
+        )
+        owner_id = f"process::{site.owner_process}"
+        nodes.setdefault(
+            owner_id,
+            ViewNode(id=owner_id, label=site.owner_process, kind="Process"),
+        )
+        edges.append(
+            ViewEdge(
+                source=owner_id,
+                target=node_id,
+                kind="declares",
+                label="runtime template",
+            )
+        )
+        declaration_inventory.append(
+            {
+                "id": node_id,
+                "owner_process": site.owner_process,
+                "source_ordinal": site.ordinal,
+                "alias": site.alias,
+                "declared_type": site.declared_type,
+                "source_file": site.span.source_file,
+                "source_line": site.span.source_line or site.span.start_line,
+            }
+        )
+
+    return ViewModel(
+        name="object",
+        nodes=nodes,
+        edges=edges,
+        metadata={"declaration_sites": declaration_inventory},
+    )
 
 
 def build_boundary_view(model: ObjectModel) -> ViewModel:
@@ -244,8 +289,18 @@ def build_trace_view(
             "trace_rows": builder.rows,
             "trace_cells": tuple(builder.cells),
             "trace_arrows": tuple(builder.arrows),
+            "runtime_instances": derive_data.get("runtime_instances", []),
+            "runtime_instance_count": len(
+                derive_data.get("runtime_instances", [])
+                if isinstance(derive_data.get("runtime_instances"), list)
+                else []
+            ),
         },
     )
+
+
+def _declaration_site_node_id(owner_process: str, ordinal: int, alias: str) -> str:
+    return f"declaration::{owner_process}::s{ordinal}::{alias}"
 
 
 def _ordinary_action_records_by_transition(

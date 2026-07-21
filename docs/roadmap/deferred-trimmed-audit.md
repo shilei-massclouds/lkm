@@ -66,7 +66,7 @@
 | --- | --- |
 | legacy clone ABI/CSIGNAL、plain fork、newsp/TLS 首片 | 已实现；由正式 clone facts 和测试承载，删除历史叙述。 |
 | bounded wait4、parent frame/snapshot、writable-page rollback、ECHILD | 已实现首片；由 wait/rollback ensures、coding 和 user-mode 归档承载。 |
-| single active child slot、completed record/archive/release、递增 PID、有限 pidfd-like 可读性 | 已实现有界路径；从 active inventory 删除。 |
+| dynamic child Task identity、completed record/archive/release、递增 PID、有限 pidfd-like 可读性 | 正式模型使用 fresh Task；实现中的有界 record storage 只按 generation 承载记录，不定义单 child identity；从 active inventory 删除。 |
 | observed pending-child `setpgid` / `TIOCSPGRP`、login nested takeover、plain-fork grandchild continuation | 已完成并有 user-mode 专题证据；从 active inventory 删除。 |
 | complete clone3 | `user_clone.001`。 |
 | thread group / multi-thread lifecycle | `user_clone.002`。 |

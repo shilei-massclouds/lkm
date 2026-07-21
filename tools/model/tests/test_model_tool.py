@@ -21,6 +21,18 @@ class ModelToolTests(unittest.TestCase):
             / "main.spec"
         )
 
+    def _run_model_source(self, root: Path, source: str) -> tuple[int, str, dict]:
+        spec = root / "input.spec"
+        ast = root / "input.ast.json"
+        model = root / "input.model.json"
+        spec.write_text(source, encoding="utf-8")
+        self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = model_main([str(ast), "-o", str(model)])
+        data = read_json(model) if model.exists() else {}
+        return exit_code, stderr.getvalue(), data
+
     def test_model_writes_model_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ast = Path(tmp) / "model-main.ast.json"
@@ -72,6 +84,173 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
             self.assertGreater(clone["span"]["source_line"], 0)
+
+    def test_declare_scope_and_explicit_callee_parameter_are_valid(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            type Item {
+                processes {
+                    Transition::Preset {
+                    }
+                }
+            }
+
+            type Factory {
+                processes {
+                    Action::Receive(item: Item) {
+                        drives {
+                            item.Transition::Preset;
+                        }
+                    }
+
+                    Action::Build {
+                        drives {
+                            declare item of Item;
+                            self.Action::Receive(item: item);
+                        }
+                        within GuardedContext {
+                            drives {
+                                item.Transition::Preset;
+                                declare nested of Item;
+                                nested.Transition::Preset;
+                            }
+                        }
+                        drives {
+                            item.Transition::Preset;
+                        }
+                    }
+                }
+            }
+
+            object ComputerProject: Factory {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            drives {
+                                ComputerProject.Action::Build;
+                            }
+                        }
+                    }
+                }
+                state State::Prepared {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 0, stderr)
+            sites = data["model"]["declaration_sites"]
+            self.assertNotIn("item", data["model"]["objects"])
+            self.assertNotIn("nested", data["model"]["objects"])
+            self.assertEqual([site["alias"] for site in sites], ["item", "nested"])
+            self.assertEqual([site["source_ordinal"] for site in sites], [1, 4])
+            self.assertTrue(all(site["owner_process"] == "Factory.Action::Build" for site in sites))
+
+    def test_declare_checker_rejects_invalid_type_scope_and_dispatch(self) -> None:
+        base = """
+            {context}
+            type Item {{
+                processes {{
+                    Transition::Preset {{
+                    }}
+                }}
+            }}
+            type Factory {{
+                processes {{
+                    Action::Build {{
+                        {body}
+                    }}
+                    {extra_process}
+                }}
+            }}
+            {extra_object}
+            object ComputerProject: Factory {{
+                initial_state: State::Base;
+                state State::Base {{
+                    transitions {{
+                        on Transition::Preset -> State::Prepared {{
+                        }}
+                    }}
+                }}
+                state State::Prepared {{
+                }}
+            }}
+        """
+        cases = {
+            "use-before": (
+                "drives { child.Transition::Preset; declare child of Item; }",
+                "",
+                "",
+                "",
+                "unknown ref binding in transition reference: child.Transition::Preset",
+            ),
+            "duplicate": (
+                "drives { declare child of Item; declare child of Item; }",
+                "",
+                "",
+                "",
+                "duplicate or shadowed lexical alias: child",
+            ),
+            "nested-shadow": (
+                "drives { declare child of Item; } within GuardedContext { drives { declare child of Item; } }",
+                "context GuardedContext: Context { }",
+                "",
+                "",
+                "duplicate or shadowed lexical alias: child",
+            ),
+            "nested-leak": (
+                "within GuardedContext { drives { declare nested of Item; } } drives { nested.Transition::Preset; }",
+                "context GuardedContext: Context { }",
+                "",
+                "",
+                "unknown ref binding in transition reference: nested.Transition::Preset",
+            ),
+            "static-conflict": (
+                "drives { declare child of Item; }",
+                "",
+                "",
+                "object child: Item { initial_state: State::Base; state State::Base { } }",
+                "declaration alias conflicts with static object: child",
+            ),
+            "unknown-type": (
+                "drives { declare child of MissingType; }",
+                "",
+                "",
+                "",
+                "unknown declared type: MissingType",
+            ),
+            "unknown-process": (
+                "drives { declare child of Item; child.Transition::Missing; }",
+                "",
+                "",
+                "",
+                "unsupported ref transition reference: child: Item.Transition::Missing",
+            ),
+            "implicit-capture": (
+                "drives { declare child of Item; self.Action::Receive; }",
+                "",
+                "Action::Receive { drives { child.Transition::Preset; } }",
+                "",
+                "use before declaration or unknown lexical alias: child",
+            ),
+        }
+
+        for name, (body, context, extra_process, extra_object, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                source = base.format(
+                    context=context,
+                    body=body,
+                    extra_process=extra_process,
+                    extra_object=extra_object,
+                )
+                exit_code, stderr, _data = self._run_model_source(Path(tmp), source)
+
+                self.assertEqual(exit_code, 1)
+                self.assertIn(expected, stderr)
 
     def test_structured_boundary_validation_rejects_invalid_inventory(self) -> None:
         valid_boundary = """

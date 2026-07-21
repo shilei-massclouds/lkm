@@ -50,6 +50,7 @@ Classification meanings:
 
 ## Additional object mappings
 
+- [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md): shared parser/model/check/derive/view/render lowering for runtime Type instances.
 - [`device-tree.md`](device-tree.md): DeviceTree unflatten/storage rules used by CorePreparePhase.
 - [`completion.md`](completion.md): `main.spec` 中 reusable Completion primitive 的附加专用规则。
 - [`effective-context.md`](effective-context.md): `main.spec` 中 context/guard primitive 的附加专用规则。

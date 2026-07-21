@@ -70,8 +70,8 @@
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
-| Pid1UserAppFlow | 3 |
 | SlubSubsystem | 3 |
+| UserAppFlow | 3 |
 | UserClone | 3 |
 | Vm | 3 |
 | ApEntryPreludePhase | 2 |

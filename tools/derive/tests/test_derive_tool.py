@@ -28,6 +28,88 @@ class DeriveToolTests(unittest.TestCase):
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
         return model
 
+    def _derive_source(self, root: Path, source: str) -> dict:
+        spec = root / "input.spec"
+        ast = root / "input.ast.json"
+        model = root / "input.model.json"
+        derive = root / "input.derive.json"
+        spec.write_text(source, encoding="utf-8")
+        self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+        self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+        self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+        return read_json(derive)
+
+    @staticmethod
+    def _dynamic_fixture(factory_processes: str) -> str:
+        return f"""
+            type TaskFlow {{
+            }}
+
+            type UserAppFlow: TaskFlow {{
+                lifecycle {{
+                    Transition::Preset(owner_task: Task) {{
+                    }}
+                    Transition::Setup {{
+                    }}
+                    Transition::Enable {{
+                    }}
+                    Transition::Disable {{
+                    }}
+                    Transition::Cleanup {{
+                    }}
+                }}
+            }}
+
+            type Task {{
+                lifecycle {{
+                    Transition::Preset(initial_flow: UserAppFlow) {{
+                    }}
+                    Transition::Setup {{
+                    }}
+                    Transition::Enable {{
+                    }}
+                    Transition::Disable {{
+                    }}
+                    Transition::Cleanup {{
+                    }}
+                }}
+            }}
+
+            type TaskRef {{
+                processes {{
+                    Action::SetCurrent(task: Task) {{
+                    }}
+                }}
+            }}
+
+            type FactoryType {{
+                processes {{
+                    {factory_processes}
+                }}
+            }}
+
+            object Factory: FactoryType {{
+                initial_state: State::Base;
+                state State::Base {{
+                }}
+            }}
+
+            object ComputerProject: FactoryType {{
+                initial_state: State::Base;
+                state State::Base {{
+                    transitions {{
+                        on Transition::Preset -> State::Prepared {{
+                            drives {{
+                                ComputerProject.Action::Run;
+                            }}
+                        }}
+                    }}
+                }}
+                state State::Prepared {{
+                }}
+            }}
+        """
+
     def test_derive_writes_derive_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)
@@ -148,6 +230,7 @@ class DeriveToolTests(unittest.TestCase):
                     for transition in data["transitions"]
                 )
             )
+
             self.assertTrue(
                 any(
                     transition["object"] == "EntrySuccessorPhase"
@@ -1113,6 +1196,205 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+
+    def test_repeated_fork_declarations_create_independent_tasks_flows_and_refs(self) -> None:
+        processes = """
+            Action::Fork {
+                drives {
+                    declare child of Task;
+                    declare child_ref of TaskRef;
+                    declare flow of UserAppFlow;
+                    child_ref.Action::SetCurrent(task: child);
+                    child.Transition::Preset(initial_flow: flow);
+                    flow.Transition::Preset(owner_task: child);
+                    flow.Transition::Setup;
+                    child.Transition::Setup;
+                    child.Transition::Enable;
+                    flow.Transition::Enable;
+                }
+            }
+
+            Action::Run {
+                drives {
+                    self.Action::Fork;
+                    self.Action::Fork;
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), self._dynamic_fixture(processes))
+
+        self.assertTrue(data["summary"]["ok"])
+        instances = data["runtime_instances"]
+        tasks = [item for item in instances if item["declared_type"] == "Task"]
+        flows = [item for item in instances if item["declared_type"] == "UserAppFlow"]
+        refs = [item for item in instances if item["declared_type"] == "TaskRef"]
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(len(flows), 2)
+        self.assertEqual(len(refs), 2)
+        self.assertEqual({item["occurrence"] for item in tasks}, {1, 2})
+        self.assertEqual({item["state"] for item in tasks}, {"Online"})
+        self.assertEqual({item["state"] for item in flows}, {"Online"})
+        self.assertEqual(
+            {item["ref_target"] for item in refs},
+            {item["runtime_instance_id"] for item in tasks},
+        )
+        self.assertEqual(
+            {item["owner_task"] for item in flows},
+            {item["runtime_instance_id"] for item in tasks},
+        )
+        self.assertTrue(all(len(item["owned_flows"]) == 1 for item in tasks))
+
+    def test_repeated_exec_keeps_task_identity_and_creates_fresh_flows(self) -> None:
+        processes = """
+            Action::Exec(task: Task) {
+                drives {
+                    declare exec_flow of UserAppFlow;
+                    exec_flow.Transition::Preset(owner_task: task);
+                    exec_flow.Transition::Setup;
+                    exec_flow.Transition::Enable;
+                    exec_flow.Transition::Disable;
+                    exec_flow.Transition::Cleanup;
+                }
+            }
+
+            Action::Run {
+                drives {
+                    declare task of Task;
+                    self.Action::Exec(task: task);
+                    self.Action::Exec(task: task);
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), self._dynamic_fixture(processes))
+
+        self.assertTrue(data["summary"]["ok"])
+        tasks = [
+            item for item in data["runtime_instances"] if item["declared_type"] == "Task"
+        ]
+        flows = [
+            item
+            for item in data["runtime_instances"]
+            if item["declared_type"] == "UserAppFlow"
+        ]
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(len(flows), 2)
+        self.assertEqual({item["occurrence"] for item in flows}, {1, 2})
+        self.assertEqual({item["state"] for item in flows}, {"Destroyed"})
+        self.assertEqual(
+            {item["owner_task"] for item in flows},
+            {tasks[0]["runtime_instance_id"]},
+        )
+        self.assertEqual(
+            set(tasks[0]["owned_flows"]),
+            {item["runtime_instance_id"] for item in flows},
+        )
+
+    def test_runtime_relations_reject_flow_sharing_and_early_task_cleanup(self) -> None:
+        cases = {
+            "shared-flow": (
+                """
+                    Action::Run {
+                        drives {
+                            declare first of Task;
+                            declare second of Task;
+                            declare flow of UserAppFlow;
+                            first.Transition::Preset(initial_flow: flow);
+                            second.Transition::Preset(initial_flow: flow);
+                        }
+                    }
+                """,
+                "Flow already belongs to a different Task",
+            ),
+            "early-cleanup": (
+                """
+                    Action::Run {
+                        drives {
+                            declare task of Task;
+                            declare flow of UserAppFlow;
+                            task.Transition::Preset(initial_flow: flow);
+                            flow.Transition::Preset(owner_task: task);
+                            flow.Transition::Setup;
+                            task.Transition::Setup;
+                            task.Transition::Enable;
+                            flow.Transition::Enable;
+                            flow.Transition::Disable;
+                            task.Transition::Disable;
+                            task.Transition::Cleanup;
+                        }
+                    }
+                """,
+                "Task cannot be Destroyed before every owned Flow is Destroyed",
+            ),
+            "illegal-lifecycle": (
+                """
+                    Action::Run {
+                        drives {
+                            declare flow of UserAppFlow;
+                            flow.Transition::Enable;
+                        }
+                    }
+                """,
+                "illegal runtime lifecycle transition",
+            ),
+        }
+        for name, (processes, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                data = self._derive_source(Path(tmp), self._dynamic_fixture(processes))
+
+                self.assertFalse(data["summary"]["ok"])
+                self.assertGreater(data["summary"]["contradiction"], 0)
+                self.assertTrue(
+                    any(expected in record["message"] for record in data["records"])
+                )
+                self.assertGreater(len(data["runtime_instances"]), 0)
+
+    def test_runtime_identity_is_stable_across_unrelated_line_movement(self) -> None:
+        process_template = """
+            Action::Run {{
+                {padding}
+                drives {{
+                    declare flow of UserAppFlow;
+                    flow.Transition::Preset(owner_task: ComputerProject);
+                }}
+            }}
+        """
+        identities = []
+        for padding in ("", "/* unrelated diagnostic comment */\n\n"):
+            with tempfile.TemporaryDirectory() as tmp:
+                data = self._derive_source(
+                    Path(tmp),
+                    self._dynamic_fixture(process_template.format(padding=padding)),
+                )
+                identities.append(data["runtime_instances"][0]["runtime_instance_id"])
+
+        self.assertEqual(identities[0], identities[1])
+
+    def test_declaration_occurrence_stress_keeps_128_instances_distinct(self) -> None:
+        calls = "\n".join("self.Action::Make;" for _ in range(128))
+        processes = f"""
+            Action::Make {{
+                drives {{
+                    declare flow of UserAppFlow;
+                    flow.Transition::Preset(owner_task: ComputerProject);
+                }}
+            }}
+            Action::Run {{
+                drives {{
+                    {calls}
+                }}
+            }}
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), self._dynamic_fixture(processes))
+
+        instances = data["runtime_instances"]
+        self.assertTrue(data["summary"]["ok"])
+        self.assertEqual(len(instances), 128)
+        self.assertEqual(len({item["runtime_instance_id"] for item in instances}), 128)
+        self.assertEqual({item["state"] for item in instances}, {"Prepared"})
+        self.assertEqual({item["occurrence"] for item in instances}, set(range(1, 129)))
 
     def test_invalid_model_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,7 +15,7 @@ PayloadPhase 是 KernelInitTask 在内核初始化末尾准备并移交唯一 se
    UserBootPayload.Setup。
 4. Enable 准备不可返回入口；UserBoot 变种只选择 requested/default/fallback 候选并调用共享
    `ExecTransaction`，由 registry/ELF/address-space 管线完成映像准备，再提交 UserBootPayload.Online 和
-   `KernelInitTask: KernelInitFlow -> Pid1UserAppFlow` handoff；Hello/Smoke 只确认对应内核态入口。
+   `KernelInitTask: KernelInitFlow -> UserAppFlow` handoff；Hello/Smoke 只确认对应内核态入口。
 5. 出口边界：PayloadPhase Online 已提交，返回 Kernel.Enable continuation；Kernel Online 提交后
    才进入 selected payload 的不返回入口。
 
@@ -41,7 +41,7 @@ handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requ
   分支要求 UserBootPayload.Ready，随后提交 Ready 并发出 Enable。
 
 * Enable：驱动 SelectedPayloadHandoff.Enable。Hello/Smoke 绑定内核态 no-return entry；UserBoot
-  完成用户映像与入口准备，依次建立 fresh `Pid1UserAppFlow`、Disable `KernelInitFlow`、提交 stable
+  完成用户映像与入口准备，依次建立 fresh `UserAppFlow`、Disable `KernelInitFlow`、提交 stable
   `KernelInitTask` 的 active handoff、Enable 新 Flow、Cleanup 旧 Flow，并提交 UserBootPayload.Online。
   selected handoff Online 后提交
   PayloadPhase.Online，并返回 Kernel.Enable continuation。
@@ -53,7 +53,7 @@ handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requ
 entry 事实及真实 SP 位于 KernelInitTask vmalloc stack。
 
 成功 exec 不替换 PID 1 Task。用户地址空间、files、credentials、signal 和 trap frame 仍直接关联
-`KernelInitTask`；`Pid1UserAppFlow` 只保存本次应用 continuation 的独立 lifecycle。用户应用内部是
+`KernelInitTask`；`UserAppFlow` 只保存本次应用 continuation 的独立 lifecycle。用户应用内部是
 黑盒，syscall/trap 仍由相应内核对象处理。
 
 ## 引用

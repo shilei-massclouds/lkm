@@ -2507,8 +2507,10 @@ impl UserTrapFrame {
 /// task by exec.  Its lifecycle is independent from the task and from the
 /// task-owned resource state below.
 #[cfg_attr(not(app_smoke), allow(dead_code))]
-pub struct Pid1UserAppFlow {
+pub struct UserAppFlow {
     lifecycle: Lifecycle,
+    declared: bool,
+    declaration_occurrence: usize,
     owner_pid: usize,
     owner_bound: bool,
     entry_source_pid1_exec: bool,
@@ -2520,10 +2522,12 @@ pub struct Pid1UserAppFlow {
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
-impl Pid1UserAppFlow {
+impl UserAppFlow {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            declared: false,
+            declaration_occurrence: 0,
             owner_pid: 0,
             owner_bound: false,
             entry_source_pid1_exec: false,
@@ -2537,6 +2541,14 @@ impl Pid1UserAppFlow {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn declared(&self) -> bool {
+        self.declared
+    }
+
+    pub const fn declaration_occurrence(&self) -> usize {
+        self.declaration_occurrence
     }
 
     pub const fn owner_pid(&self) -> usize {
@@ -2555,11 +2567,29 @@ impl Pid1UserAppFlow {
         self.released
     }
 
+    /// Materialize the runtime Flow instance in Base without running Preset or
+    /// establishing owner/active relationships.
+    pub fn declare(&mut self) -> EventResult {
+        if self.declared || self.lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Base,
+            );
+        }
+        self.declared = true;
+        self.declaration_occurrence = self.declaration_occurrence.wrapping_add(1);
+        Ok(())
+    }
+
     pub fn preset(&mut self, owner: &KernelInitTask) -> EventResult {
-        if self.lifecycle.state() != State::Base
+        if !self.declared
+            || self.declaration_occurrence == 0
+            || self.lifecycle.state() != State::Base
             || owner.state() != State::Online
             || owner.pid() != super::rest_init::KERNEL_INIT_PID
-            || owner.pid1_user_flow_owned()
+            || owner.user_flow_owned()
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -2577,7 +2607,7 @@ impl Pid1UserAppFlow {
             LifecycleEvent::Preset,
             State::Base,
             State::Prepared,
-            crate::checkpoint::Checkpoint::Pid1UserAppFlowPrepared,
+            crate::checkpoint::Checkpoint::UserAppFlowPrepared,
         )
     }
 
@@ -2603,7 +2633,7 @@ impl Pid1UserAppFlow {
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
-            crate::checkpoint::Checkpoint::Pid1UserAppFlowReady,
+            crate::checkpoint::Checkpoint::UserAppFlowReady,
         )
     }
 
@@ -2612,8 +2642,8 @@ impl Pid1UserAppFlow {
             || !self.execution_context_ready
             || owner.state() != State::Online
             || owner.pid() != self.owner_pid
-            || !owner.pid1_user_flow_owned()
-            || !owner.pid1_user_flow_active()
+            || !owner.user_flow_owned()
+            || !owner.user_flow_active()
             || !owner.flow_handoff_committed()
         {
             return failed_condition(
@@ -2648,7 +2678,7 @@ impl Pid1UserAppFlow {
             LifecycleEvent::Enable,
             State::Ready,
             State::Online,
-            crate::checkpoint::Checkpoint::Pid1UserAppFlowOnline,
+            crate::checkpoint::Checkpoint::UserAppFlowOnline,
         )
     }
 }
@@ -2658,7 +2688,7 @@ impl Pid1UserAppFlow {
 pub struct KernelInitTaskUserState {
     resources_bound: bool,
     active_user_flow_online: bool,
-    reuses_kernel_init_task: bool,
+    preserves_kernel_init_task: bool,
     pid1_preserved: bool,
     exec_identity_handoff: bool,
     no_new_task_struct: bool,
@@ -6238,7 +6268,7 @@ impl KernelInitTaskUserState {
         Self {
             resources_bound: false,
             active_user_flow_online: false,
-            reuses_kernel_init_task: false,
+            preserves_kernel_init_task: false,
             pid1_preserved: false,
             exec_identity_handoff: false,
             no_new_task_struct: false,
@@ -6366,8 +6396,8 @@ impl KernelInitTaskUserState {
         self.active_user_flow_online
     }
 
-    pub const fn reuses_kernel_init_task(&self) -> bool {
-        self.reuses_kernel_init_task
+    pub const fn preserves_kernel_init_task(&self) -> bool {
+        self.preserves_kernel_init_task
     }
 
     pub const fn pid1_preserved(&self) -> bool {
@@ -6883,7 +6913,7 @@ impl KernelInitTaskUserState {
             );
         }
 
-        self.reuses_kernel_init_task = true;
+        self.preserves_kernel_init_task = true;
         self.pid1_preserved = true;
         self.exec_identity_handoff = true;
         self.no_new_task_struct = true;
@@ -6989,7 +7019,7 @@ impl KernelInitTaskUserState {
         Ok(())
     }
 
-    pub fn activate_user_flow(&mut self, flow: &Pid1UserAppFlow) -> EventResult {
+    pub fn activate_user_flow(&mut self, flow: &UserAppFlow) -> EventResult {
         if !self.resources_bound
             || self.active_user_flow_online
             || flow.state() != State::Online
@@ -7010,7 +7040,7 @@ impl KernelInitTaskUserState {
     pub fn enter_user_mode(
         &mut self,
         trap_frame: &UserTrapFrame,
-        flow: &Pid1UserAppFlow,
+        flow: &UserAppFlow,
     ) -> EventResult {
         if !self.active_user_flow_online
             || flow.state() != State::Online
@@ -8128,7 +8158,7 @@ impl UserBootPayload {
         elf: &ElfObject,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
-        pid1_user_app_flow: &Pid1UserAppFlow,
+        user_app_flow: &UserAppFlow,
         kernel_init_user_state: &KernelInitTaskUserState,
         exception_stream: &ExceptionStream,
         syscall_table: &SyscallTable,
@@ -8137,8 +8167,8 @@ impl UserBootPayload {
             || elf.state() != State::Online
             || address_space.state() != State::Online
             || trap_frame.state() != State::Ready
-            || pid1_user_app_flow.state() != State::Online
-            || !pid1_user_app_flow.active_binding_committed()
+            || user_app_flow.state() != State::Online
+            || !user_app_flow.active_binding_committed()
             || !kernel_init_user_state.active_user_flow_online()
             || !kernel_init_user_state.user_entry_ready()
             || !kernel_init_user_state.runtime_entered()
@@ -8245,12 +8275,10 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
     {
         user_boot_panic("PID 1 syscall context bind failed\n");
     }
-    if ctx
-        .pid1_user_app_flow
-        .preset(&ctx.kernel_init_task)
-        .is_err()
+    if ctx.user_app_flow.declare().is_err()
+        || ctx.user_app_flow.preset(&ctx.kernel_init_task).is_err()
         || ctx
-            .pid1_user_app_flow
+            .user_app_flow
             .setup(&ctx.kernel_init_user_state)
             .is_err()
         || ctx
@@ -8259,22 +8287,19 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .kernel_init_task
-            .commit_pid1_user_flow_handoff(
-                ctx.kernel_init_flow.state(),
-                ctx.pid1_user_app_flow.state(),
-            )
+            .commit_user_flow_handoff(ctx.kernel_init_flow.state(), ctx.user_app_flow.state())
             .is_err()
         || ctx
-            .pid1_user_app_flow
+            .user_app_flow
             .commit_active_binding(&ctx.kernel_init_task)
             .is_err()
         || ctx
-            .pid1_user_app_flow
+            .user_app_flow
             .enable(&ctx.kernel_init_user_state)
             .is_err()
         || ctx
             .kernel_init_user_state
-            .activate_user_flow(&ctx.pid1_user_app_flow)
+            .activate_user_flow(&ctx.user_app_flow)
             .is_err()
         || ctx
             .kernel_init_flow
@@ -8285,7 +8310,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
     }
     if ctx
         .kernel_init_user_state
-        .enter_user_mode(&ctx.user_trap_frame, &ctx.pid1_user_app_flow)
+        .enter_user_mode(&ctx.user_trap_frame, &ctx.user_app_flow)
         .is_err()
     {
         user_boot_panic("user init process enter failed\n");
@@ -8296,7 +8321,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             &ctx.elf_object,
             &ctx.user_address_space,
             &ctx.user_trap_frame,
-            &ctx.pid1_user_app_flow,
+            &ctx.user_app_flow,
             &ctx.kernel_init_user_state,
             &ctx.exception_stream,
             &ctx.syscall_table,
@@ -8314,7 +8339,7 @@ pub fn enter_first_user_init(
     payload: &UserBootPayload,
     address_space: &UserAddressSpace,
     trap_frame: &UserTrapFrame,
-    pid1_user_app_flow: &Pid1UserAppFlow,
+    user_app_flow: &UserAppFlow,
     kernel_init_user_state: &KernelInitTaskUserState,
 ) -> ! {
     if payload.state() != State::Online
@@ -8322,8 +8347,8 @@ pub fn enter_first_user_init(
         || !payload.no_return_handoff()
         || address_space.state() != State::Online
         || trap_frame.state() != State::Ready
-        || pid1_user_app_flow.state() != State::Online
-        || !pid1_user_app_flow.application_entered()
+        || user_app_flow.state() != State::Online
+        || !user_app_flow.application_entered()
         || !kernel_init_user_state.active_user_flow_online()
         || !kernel_init_user_state.user_entry_ready()
         || !kernel_init_user_state.runtime_entered()
@@ -8331,7 +8356,7 @@ pub fn enter_first_user_init(
         user_boot_panic("user init process entry invariant failed\n");
     }
     crate::checkpoint::dispatch(
-        crate::checkpoint::Checkpoint::Pid1UserAppFlowEnterUserMode,
+        crate::checkpoint::Checkpoint::UserAppFlowEnterUserMode,
         crate::context::context_ref(),
     );
     unsafe {

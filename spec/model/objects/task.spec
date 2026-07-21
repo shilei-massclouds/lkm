@@ -44,10 +44,18 @@ predicate task_exit_flow_disable_cleanup_ordered<T: Task>(task: T) -> bool;
 predicate task_destroyed_only_after_flow_cleanup<T: Task>(task: T) -> bool;
 predicate user_task_set_allows_multiple_independent_tasks<S: TaskSet>(set: S) -> bool;
 predicate user_task_set_contains<S: TaskSet, T: Task>(set: S, task: T) -> bool;
+predicate user_task_set_stores_ref<S: TaskSet, R: TaskRef>(set: S, task_ref: R) -> bool;
+predicate user_task_set_ref_targets_member<S: TaskSet, R: TaskRef, T: Task>(
+    set: S,
+    task_ref: R,
+    task: T
+) -> bool;
+predicate user_task_set_members_fresh_and_independent<S: TaskSet>(set: S) -> bool;
 predicate user_task_instance_fresh<T: Task>(task: T) -> bool;
 predicate user_task_pid_and_lifecycle_independent<T: Task>(task: T) -> bool;
-predicate user_task_witness_not_reusable<T: Task>(task: T) -> bool;
 predicate task_has_no_prior_active_flow<T: Task>(task: T) -> bool;
+predicate task_all_prior_owned_flows_destroyed<T: Task>(task: T) -> bool;
+predicate task_retired_flow_destroyed<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 
 predicate boot_task_idle_role_ready<T: Task, R>(
     task: T,
@@ -96,6 +104,83 @@ type Task: ResourceObject {
     }
 
     lifecycle {
+        Transition::Preset(
+            parent_task: Task,
+            task_ref: TaskRef,
+            initial_flow: UserAppFlow
+        ) {
+            state_effect: StateEffect::Always;
+            depends_on {
+                parent_task.state == State::Online;
+                initial_flow.state == State::Base;
+            }
+            ensures {
+                user_child_process_prepared(self);
+                task_clone_args_ready(self);
+                user_task_instance_fresh(self);
+                user_task_pid_and_lifecycle_independent(self);
+                task_ref_targets(task_ref, self);
+                task_ref_ready(task_ref);
+                task_owns_flow(self, initial_flow);
+                task_flow_owner_is(initial_flow, self);
+                task_flow_owner_exclusive(initial_flow);
+            }
+        }
+
+        Transition::Setup(
+            parent_task: Task,
+            initial_flow: UserAppFlow
+        ) {
+            state_effect: StateEffect::Always;
+            depends_on {
+                self.state == State::Prepared;
+                parent_task.state == State::Online;
+                initial_flow.state == State::Ready;
+                task_creation_copy_process_committed(
+                    TaskCreationCore,
+                    parent_task,
+                    self
+                );
+            }
+            ensures {
+                user_child_process_parent_pid1_or_current_child(self, parent_task);
+                user_child_process_pid_allocated(self, RootPidNamespace);
+                user_child_process_tgid_equals_pid(self);
+                user_child_process_process_group_visible_to_parent(self, parent_task);
+                user_child_process_exit_signal_sigchld(self);
+                user_child_process_files_struct_copied(self, FilesStruct);
+                user_child_process_fs_struct_copied(self, FsStruct);
+                user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
+                user_child_process_credentials_copied(self, parent_task);
+                user_child_process_signal_state_copied(self, parent_task);
+                user_child_process_user_address_space_snapshot(self, UserAddressSpace);
+                user_child_process_user_stack_snapshot_copied(self, UserAddressSpace);
+                user_child_process_trap_frame_copied(self, UserTrapFrame);
+                user_child_process_trap_frame_child_return_zero(self);
+                user_child_process_tls_inherited(self);
+                user_child_process_enqueued(self, Scheduler);
+                task_has_no_prior_active_flow(self);
+                task_all_prior_owned_flows_destroyed(self);
+            }
+        }
+
+        Transition::Enable(initial_flow: UserAppFlow) {
+            state_effect: StateEffect::Always;
+            depends_on {
+                self.state == State::Ready;
+                initial_flow.state == State::Ready;
+                task_active_flow_is(self, initial_flow);
+                task_flow_active_binding_committed(initial_flow);
+            }
+            ensures {
+                user_task_instance_fresh(self);
+                user_task_pid_and_lifecycle_independent(self);
+                task_owns_flow(self, initial_flow);
+                task_flow_owner_is(initial_flow, self);
+                task_active_flow_is(self, initial_flow);
+            }
+        }
+
         Transition::Disable {
             state_effect: StateEffect::Always;
             depends_on {
@@ -221,18 +306,25 @@ type Task: ResourceObject {
             }
         }
 
-        Action::ConfirmOwnedFlowSetDestroyed(
-            prior_flow: TaskFlow,
-            current_flow: TaskFlow
-        ) {
+        Action::RecordRetiredFlowDestroyed(flow: TaskFlow) {
             state_effect: StateEffect::None;
             depends_on {
-                task_owns_flow(self, prior_flow);
+                task_owns_flow(self, flow);
+                flow.state == State::Destroyed;
+                task_flow_not_active_after_cleanup(flow);
+            }
+            ensures {
+                task_retired_flow_destroyed(self, flow);
+                task_all_prior_owned_flows_destroyed(self);
+            }
+        }
+
+        Action::ConfirmOwnedFlowSetDestroyed(current_flow: TaskFlow) {
+            state_effect: StateEffect::None;
+            depends_on {
                 task_owns_flow(self, current_flow);
-                task_flow_handoff(self, prior_flow, current_flow);
-                prior_flow.state == State::Destroyed;
+                task_all_prior_owned_flows_destroyed(self);
                 current_flow.state == State::Destroyed;
-                task_flow_not_active_after_cleanup(prior_flow);
                 task_flow_not_active_after_cleanup(current_flow);
             }
             ensures {
@@ -247,8 +339,8 @@ type Task: ResourceObject {
 
 /*
  * General aggregate for all user Tasks. It does not impose a single active
- * child slot: every fork/clone adds a fresh Task with an independent PID and
- * lifecycle. UserChildTask1 below is only one bounded witness.
+ * child slot: every fork/clone adds a fresh TaskRef/Task pair with an
+ * independent PID and lifecycle.
  */
 object UserTaskSet: TaskSet {
     initial_state: State::Base;
@@ -258,10 +350,7 @@ object UserTaskSet: TaskSet {
             on Transition::Setup -> State::Ready {
                 ensures {
                     user_task_set_allows_multiple_independent_tasks(self);
-                    user_task_set_contains(self, UserChildTask1);
-                    user_task_instance_fresh(UserChildTask1);
-                    user_task_pid_and_lifecycle_independent(UserChildTask1);
-                    user_task_witness_not_reusable(UserChildTask1);
+                    user_task_set_members_fresh_and_independent(self);
                 }
             }
         }
@@ -270,10 +359,27 @@ object UserTaskSet: TaskSet {
     state State::Ready {
         invariant {
             user_task_set_allows_multiple_independent_tasks(self);
-            user_task_set_contains(self, UserChildTask1);
-            user_task_instance_fresh(UserChildTask1);
-            user_task_pid_and_lifecycle_independent(UserChildTask1);
-            user_task_witness_not_reusable(UserChildTask1);
+            user_task_set_members_fresh_and_independent(self);
+        }
+    }
+
+    actions {
+        Action::Insert(task: Task, task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                task.state == State::Prepared;
+                task_ref_targets(task_ref, task);
+                task_ref_ready(task_ref);
+                user_task_instance_fresh(task);
+                user_task_pid_and_lifecycle_independent(task);
+            }
+            ensures {
+                user_task_set_contains(self, task);
+                user_task_set_stores_ref(self, task_ref);
+                user_task_set_ref_targets_member(self, task_ref, task);
+                user_task_set_members_fresh_and_independent(self);
+            }
         }
     }
 }
@@ -281,9 +387,9 @@ object UserTaskSet: TaskSet {
 /*
  * Concrete Task instances
  *
- * BootTask is the statically allocated init_task carrier. KernelInitTask
- * and KthreaddTask are copy_process-created carriers. UserChildTask1 is one
- * concrete witness for the general fresh-user-Task rule.
+ * BootTask is the statically allocated init_task carrier. KernelInitTask and
+ * KthreaddTask are copy_process-created static model objects. User children
+ * are runtime Task instances declared by the clone action.
  */
 
 /*
@@ -417,7 +523,7 @@ object BootTask: Task {
 
 /*
  * PID 1 carrier created by copy_process. KernelInitFlow is its initial flow;
- * exec later hands the same carrier to Pid1UserAppFlow.
+ * exec later hands the same carrier to a declared UserAppFlow instance.
  */
 object KernelInitTask: Task {
     initial_state: State::Base;
@@ -968,161 +1074,6 @@ object KthreaddTask: Task {
 }
 
 /*
- * One concrete user-child witness. It cannot stand for a later child identity:
- * each fork/clone creates another fresh Task with its own PID and lifecycle.
- */
-object UserChildTask1: Task {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    KernelInitTask.state == State::Online;
-                    UserCloneDeferredBoundaries.state == State::Ready;
-                }
-
-                ensures {
-                    user_child_process_prepared(self);
-                    task_clone_args_ready(self);
-                    user_task_set_contains(UserTaskSet, self);
-                    user_task_instance_fresh(self);
-                    user_task_pid_and_lifecycle_independent(self);
-                    user_task_witness_not_reusable(self);
-                    task_ref_targets(UserChildTask1Ref, self);
-                    task_ref_ready(UserChildTask1Ref);
-                    task_owns_flow(self, UserChildForkFlow1);
-                    task_flow_owner_is(UserChildForkFlow1, self);
-                    task_flow_owner_exclusive(UserChildForkFlow1);
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        invariant {
-            user_child_process_prepared(self);
-            task_clone_args_ready(self);
-            user_task_set_contains(UserTaskSet, self);
-            user_task_instance_fresh(self);
-            user_task_pid_and_lifecycle_independent(self);
-            user_task_witness_not_reusable(self);
-            task_ref_targets(UserChildTask1Ref, self);
-            task_ref_ready(UserChildTask1Ref);
-            task_owns_flow(self, UserChildForkFlow1);
-            task_flow_owner_is(UserChildForkFlow1, self);
-            task_flow_owner_exclusive(UserChildForkFlow1);
-        }
-
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    task_creation_copy_process_committed(
-                        TaskCreationCore,
-                        KernelInitTask,
-                        self
-                    );
-                    UserChildForkFlow1.state == State::Ready;
-                }
-
-                ensures {
-                    user_child_process_parent_pid1_or_current_child(self, KernelInitTask);
-                    user_child_process_pid_allocated(self, RootPidNamespace);
-                    user_child_process_tgid_equals_pid(self);
-                    user_child_process_process_group_visible_to_parent(self, KernelInitTask);
-                    user_child_process_exit_signal_sigchld(self);
-                    user_child_process_files_struct_copied(self, FilesStruct);
-                    user_child_process_fs_struct_copied(self, FsStruct);
-                    user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
-                    user_child_process_credentials_copied(self, KernelInitTask);
-                    user_child_process_signal_state_copied(self, KernelInitTask);
-                    user_child_process_user_address_space_snapshot(self, UserAddressSpace);
-                    user_child_process_user_stack_snapshot_copied(self, UserAddressSpace);
-                    user_child_process_trap_frame_copied(self, UserTrapFrame);
-                    user_child_process_trap_frame_child_return_zero(self);
-                    user_child_process_tls_inherited(self);
-                    user_child_process_enqueued(self, Scheduler);
-                    task_has_no_prior_active_flow(self);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            user_child_process_parent_pid1_or_current_child(self, KernelInitTask);
-            user_child_process_pid_allocated(self, RootPidNamespace);
-            user_child_process_tgid_equals_pid(self);
-            user_child_process_process_group_visible_to_parent(self, KernelInitTask);
-            user_child_process_exit_signal_sigchld(self);
-            user_child_process_files_struct_copied(self, FilesStruct);
-            user_child_process_fs_struct_copied(self, FsStruct);
-            user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
-            user_child_process_credentials_copied(self, KernelInitTask);
-            user_child_process_signal_state_copied(self, KernelInitTask);
-            user_child_process_user_address_space_snapshot(self, UserAddressSpace);
-            user_child_process_user_stack_snapshot_copied(self, UserAddressSpace);
-            user_child_process_trap_frame_copied(self, UserTrapFrame);
-            user_child_process_trap_frame_child_return_zero(self);
-            user_child_process_tls_inherited(self);
-            user_child_process_enqueued(self, Scheduler);
-            user_task_set_contains(UserTaskSet, self);
-            user_task_instance_fresh(self);
-            user_task_pid_and_lifecycle_independent(self);
-            user_task_witness_not_reusable(self);
-            task_owns_flow(self, UserChildForkFlow1);
-            task_flow_owner_is(UserChildForkFlow1, self);
-            task_flow_owner_exclusive(UserChildForkFlow1);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    UserChildForkFlow1.state == State::Ready;
-                    task_active_flow_is(self, UserChildForkFlow1);
-                    task_flow_active_binding_committed(UserChildForkFlow1);
-                }
-
-                ensures {
-                    user_task_instance_fresh(self);
-                    user_task_pid_and_lifecycle_independent(self);
-                    user_task_witness_not_reusable(self);
-                    task_owns_flow(self, UserChildForkFlow1);
-                    task_flow_owner_is(UserChildForkFlow1, self);
-                    task_active_flow_is(self, UserChildForkFlow1);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            user_task_set_contains(UserTaskSet, self);
-            user_task_instance_fresh(self);
-            user_task_pid_and_lifecycle_independent(self);
-            user_task_witness_not_reusable(self);
-            task_owns_flow(self, UserChildForkFlow1);
-            task_flow_owner_is(UserChildForkFlow1, self);
-        }
-    }
-
-    state State::Offline {
-        invariant {
-            task_all_owned_flows_inactive(self);
-            task_no_owned_flow_online(self);
-            task_exit_flow_disable_cleanup_ordered(self);
-        }
-    }
-
-    state State::Destroyed {
-        invariant {
-            task_all_owned_flows_destroyed(self);
-            task_no_owned_flow_online(self);
-            task_destroyed_only_after_flow_cleanup(self);
-        }
-    }
-}
-
 /*
  * Appendix: current boundaries and deferred refinements
  *
@@ -1133,6 +1084,6 @@ object UserChildTask1: Task {
  *   no separate persona wrapper.
  * - SecondaryIdleTaskSet is an aggregate resource. Individuating one Task per
  *   possible non-boot CPU is deferred until the SMP task topology is expanded.
- * - UserTaskSet admits multiple independent child Tasks. Dynamic anonymous
- *   declaration is deferred; UserChildTask1 is a non-reusable witness only.
+ * - UserTaskSet admits multiple independent runtime child Tasks and stores
+ *   typed TaskRefs for later process dispatch; no static child witness exists.
  */

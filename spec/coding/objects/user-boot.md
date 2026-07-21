@@ -11,8 +11,8 @@ fd/OFD/backend dispatch、Task 用户资源以及当前 bounded user-task 集合
 `UserBootPayload`、首个 `UserAddressSpace` 和 `UserTrapFrame` 均属于
 `KernelInitTask` 的执行线。PID 1 的 files、credentials、signal、process-group 和 user trap 状态
 直接保存在 `KernelInitTask` 的 user-state lowering 中，不建立 exec 后 persona carrier。
-`Pid1UserAppFlow` 独立保存首次用户应用 continuation 的 lifecycle；它不是第二个 Task，也不拥有上述
-Task 资源。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
+首次 exec 声明的 fresh `UserAppFlow` 独立保存用户应用 continuation lifecycle；它不是第二个 Task，
+也不拥有上述 Task 资源。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
 不增加 `SyscallDispatcher`。
 
 用户栈 backing、initial stack 与增长语义由独立 [`UserStack`](user-stack.md) coding contract 承载；

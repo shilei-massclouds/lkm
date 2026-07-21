@@ -121,6 +121,17 @@ class BoundaryDef:
 
 
 @dataclass(frozen=True)
+class DeclarationSiteDef:
+    """A static runtime-instance declaration template owned by one process."""
+
+    owner_process: str
+    ordinal: int
+    alias: str
+    declared_type: str
+    span: SourceSpan
+
+
+@dataclass(frozen=True)
 class ObjectModel:
     """Static model built from the parsed spec."""
 
@@ -133,6 +144,7 @@ class ObjectModel:
     objects: dict[str, ObjectDef]
     children: dict[str, list[str]]
     boundaries: dict[str, BoundaryDef] = field(default_factory=dict)
+    declaration_sites: tuple[DeclarationSiteDef, ...] = ()
     legacy_boundary_count: int = 0
 
     @property

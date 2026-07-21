@@ -9,6 +9,7 @@ from common.model_types import (
     BoundaryDef,
     BuildResult,
     Diagnostic,
+    DeclarationSiteDef,
     TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
@@ -26,6 +27,7 @@ from common.spec_ast import (
     FunctionDecl,
     ObjectDecl,
     PredicateDecl,
+    ProcessDecl,
     SourceSpan,
     SpecDocument,
     StateDecl,
@@ -51,6 +53,12 @@ _ACTION_BIND_RE = re.compile(
     r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
     r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
+)
+_DECLARE_RE = re.compile(
+    r"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
+)
+_LOCAL_MEMBER_REF_RE = re.compile(
+    r"(?<!\.)\b([a-z][A-Za-z0-9_]*)\.(?:state|Transition::|Action::)"
 )
 _REF_TRANSITION_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
 _REF_TRANSITION_EXPR_RE = re.compile(
@@ -180,6 +188,7 @@ def build_model(
         diagnostics,
         allow=allow_legacy_boundaries,
     )
+    declaration_sites = _collect_declaration_sites(document)
 
     for parent, child_names in children.items():
         parent_obj = objects.get(parent)
@@ -197,6 +206,7 @@ def build_model(
         objects=objects,
         children=children,
         boundaries=boundaries,
+        declaration_sites=declaration_sites,
         legacy_boundary_count=legacy_boundary_count,
     )
 
@@ -205,6 +215,7 @@ def build_model(
     _check_lock_references(model, diagnostics)
     _check_exclusive_context_references(model, diagnostics)
     _check_references(model, diagnostics)
+    _check_process_references(model, diagnostics)
     _check_only_once_withins(model, diagnostics)
 
     return BuildResult(model=model, diagnostics=diagnostics)
@@ -221,6 +232,7 @@ def summarize_model(result: BuildResult) -> str:
             f"objects: {len(model.objects)}",
             f"states: {model.state_count}",
             f"transitions: {model.transition_count}",
+            f"declaration_sites: {len(model.declaration_sites)}",
             f"deferred: {model.deferred_count}",
             f"trimmed: {model.trimmed_count}",
             f"legacy_boundaries: {model.legacy_boundary_count}",
@@ -228,6 +240,41 @@ def summarize_model(result: BuildResult) -> str:
             f"warnings: {len(result.warnings)}",
         ]
     )
+
+
+def _collect_declaration_sites(document: SpecDocument) -> tuple[DeclarationSiteDef, ...]:
+    sites: list[DeclarationSiteDef] = []
+
+    def collect_members(members) -> None:
+        for member in members:
+            if member.block is not None and member.kind == "drives":
+                for statement in member.block.statements:
+                    if statement.kind != "declare":
+                        continue
+                    sites.append(
+                        DeclarationSiteDef(
+                            owner_process=statement.owner_process or "<unknown>",
+                            ordinal=statement.ordinal,
+                            alias=statement.alias or "",
+                            declared_type=statement.declared_type or "",
+                            span=statement.span,
+                        )
+                    )
+            elif member.within is not None:
+                collect_members(member.within.body_members)
+
+    for type_decl in document.types:
+        for process in type_decl.processes:
+            collect_members(process.body_members)
+    for obj in document.objects:
+        for process in obj.processes:
+            collect_members(process.body_members)
+        for state in obj.states:
+            for transition in state.transitions:
+                collect_members(transition.body_members)
+            for process in state.processes:
+                collect_members(process.body_members)
+    return tuple(sites)
 
 
 def _build_boundaries(
@@ -833,6 +880,11 @@ def _check_initial_states(model: ObjectModel, diagnostics: list[Diagnostic]) -> 
 
 def _check_event_targets(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
     for obj in model.objects.values():
+        for process in obj.decl.processes:
+            if not _process_contains_declare(process):
+                _check_process_lexical_captures(process, diagnostics)
+                continue
+            _check_one_process(model, process, diagnostics, receiver_type=obj.kind)
         for state in obj.states.values():
             for transition in state.transitions.values():
                 if transition.target_state not in obj.states:
@@ -1357,6 +1409,108 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
                 _check_emit_references(model, transition, diagnostics)
 
 
+def _check_process_references(
+    model: ObjectModel, diagnostics: list[Diagnostic]
+) -> None:
+    for type_decl in model.types.values():
+        for process in type_decl.processes:
+            if not _process_contains_declare(process):
+                _check_process_lexical_captures(process, diagnostics)
+                continue
+            _check_one_process(model, process, diagnostics, receiver_type=type_decl.name)
+    for obj in model.objects.values():
+        for state in obj.states.values():
+            for process in state.decl.processes:
+                if not _process_contains_declare(process):
+                    _check_process_lexical_captures(process, diagnostics)
+                    continue
+                _check_one_process(model, process, diagnostics, receiver_type=obj.kind)
+
+
+def _process_contains_declare(process: ProcessDecl) -> bool:
+    def members_contain(members) -> bool:
+        for member in members:
+            if member.block is not None and any(
+                statement.kind == "declare" for statement in member.block.statements
+            ):
+                return True
+            if member.within is not None and members_contain(member.within.body_members):
+                return True
+        return False
+
+    return members_contain(process.body_members)
+
+
+def _check_process_lexical_captures(
+    process: ProcessDecl, diagnostics: list[Diagnostic]
+) -> None:
+    """Reject process-local receivers that were not passed as parameters."""
+
+    bindings = {"self", *(name for name, _type_name in process.parameters)}
+
+    def check_members(members, visible: set[str]) -> None:
+        for member in members:
+            if member.block is not None:
+                for entry, span in member.block.entry_spans:
+                    for name in _LOCAL_MEMBER_REF_RE.findall(entry):
+                        if name not in visible:
+                            diagnostics.append(
+                                Diagnostic(
+                                    Severity.ERROR,
+                                    "use before declaration or unknown lexical alias: "
+                                    f"{name}",
+                                    span,
+                                )
+                            )
+                    bind = _ACTION_BIND_RE.match(entry)
+                    if bind is not None:
+                        visible.add(bind.group(1))
+                continue
+            child = member.within
+            if child is None:
+                continue
+            child_bindings = set(visible)
+            child_bindings.update(child.parameters)
+            check_members(child.body_members, child_bindings)
+
+    check_members(process.body_members, bindings)
+
+
+def _check_one_process(
+    model: ObjectModel,
+    process: ProcessDecl,
+    diagnostics: list[Diagnostic],
+    *,
+    receiver_type: str,
+) -> None:
+    bindings: dict[str, str] = {"self": receiver_type}
+    for name, type_name in process.parameters:
+        if name in bindings:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"duplicate process parameter: {name}",
+                    process.span,
+                )
+            )
+            continue
+        if name in model.objects:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"process parameter conflicts with static object: {name}",
+                    process.span,
+                )
+            )
+        bindings[name] = type_name
+    _check_body_member_references(
+        model,
+        process.body_members,
+        diagnostics,
+        bindings=bindings,
+    )
+
+
 def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
     transition_counts = _reachable_transition_call_counts(model)
     for obj in model.objects.values():
@@ -1563,7 +1717,27 @@ def _check_within_references(
 
     _check_lock_event_blocks(model, within.entered_by, diagnostics, context=context)
     bindings: dict[str, str] = dict(inherited_bindings or {})
-    bindings.update(_within_parameter_bindings(within.parameters, bindings))
+    parameter_bindings = _within_parameter_bindings(within.parameters, bindings)
+    for name, type_name in parameter_bindings.items():
+        if name in bindings:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"duplicate or shadowed lexical alias: {name}",
+                    within.span,
+                )
+            )
+            continue
+        if name in model.objects:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"within parameter conflicts with static object: {name}",
+                    within.span,
+                )
+            )
+            continue
+        bindings[name] = type_name
     _check_body_member_references(
         model,
         _ordered_body_members(within),
@@ -1588,6 +1762,7 @@ def _check_body_member_references(
         if member.block is not None:
             if member.kind == "depends_on":
                 _check_state_references(model, member.block, diagnostics)
+                _check_local_alias_references(member.block, bindings, diagnostics)
             elif member.kind == "drives":
                 _check_drive_references(
                     model,
@@ -1596,6 +1771,8 @@ def _check_body_member_references(
                     context=context,
                     bindings=bindings,
                 )
+            else:
+                _check_local_alias_references(member.block, bindings, diagnostics)
             continue
 
         child_within = member.within
@@ -1617,6 +1794,24 @@ def _check_body_member_references(
             inherited_bindings=bindings,
             inherited_context=inherited_context,
         )
+
+
+def _check_local_alias_references(
+    block: Block,
+    bindings: dict[str, str],
+    diagnostics: list[Diagnostic],
+) -> None:
+    for entry, span in block.entry_spans:
+        for name in _LOCAL_MEMBER_REF_RE.findall(entry):
+            if name == "self" or name in bindings:
+                continue
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"use before declaration or unknown lexical alias: {name}",
+                    span,
+                )
+            )
 
 
 def _check_emit_references(
@@ -1897,9 +2092,47 @@ def _check_drive_references(
     bindings: dict[str, str],
 ) -> None:
     for entry, entry_span in block.entry_spans:
+        declare = _DECLARE_RE.match(entry)
+        if declare is not None:
+            alias, type_name = declare.group(1, 2)
+            if type_name not in model.types:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown declared type: {type_name}",
+                        entry_span,
+                    )
+                )
+            if alias in bindings:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"duplicate or shadowed lexical alias: {alias}",
+                        entry_span,
+                    )
+                )
+            elif alias in model.objects:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"declaration alias conflicts with static object: {alias}",
+                        entry_span,
+                    )
+                )
+            else:
+                bindings[alias] = type_name
+            continue
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
             name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
+            if name in bindings or name in model.objects:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"duplicate or shadowed lexical alias: {name}",
+                        entry_span,
+                    )
+                )
             receiver_type = _binding_or_ref_value_type(object_name, bindings)
             if object_name in model.objects:
                 _check_action_reference(
@@ -1911,6 +2144,22 @@ def _check_drive_references(
                     context=context,
                 )
                 return_type = _action_return_type(model, object_name, action_name)
+            elif receiver_type is not None and _type_process_decl(
+                model, receiver_type, "Action", action_name
+            ) is not None:
+                return_type = _type_process_return_type(
+                    model, receiver_type, "Action", action_name
+                )
+                _check_process_arguments(
+                    model,
+                    receiver_type,
+                    "Action",
+                    action_name,
+                    args,
+                    diagnostics,
+                    entry_span,
+                    bindings=bindings,
+                )
             elif receiver_type is not None and _is_supported_ref_type_action(
                 receiver_type, action_name
             ):
@@ -1947,15 +2196,27 @@ def _check_drive_references(
             bindings[name] = type_name
             obj = model.objects.get(object_name)
             if obj is not None:
-                _check_process_arguments(
-                    model,
-                    obj.kind,
-                    "Action",
-                    action_name,
-                    args,
-                    diagnostics,
-                    entry_span,
-                )
+                object_process = _object_process_decl(obj, "Action", action_name)
+                if object_process is not None and _args_reference_bindings(args, bindings):
+                    _check_process_decl_arguments(
+                        model,
+                        object_process,
+                        args,
+                        diagnostics,
+                        entry_span,
+                        bindings=bindings,
+                    )
+                elif object_process is None:
+                    _check_process_arguments(
+                        model,
+                        obj.kind,
+                        "Action",
+                        action_name,
+                        args,
+                        diagnostics,
+                        entry_span,
+                        bindings=bindings,
+                    )
             continue
         if _check_drive_transition_entry(
             model,
@@ -1999,6 +2260,20 @@ def _check_drive_transition_entry(
                     f"unknown ref binding in transition reference: {receiver_name}.Transition::{transition_name}",
                     span,
                 )
+            )
+            return True
+        if _type_process_decl(
+            model, receiver_type, "Transition", transition_name
+        ) is not None:
+            _check_process_arguments(
+                model,
+                receiver_type,
+                "Transition",
+                transition_name,
+                args,
+                diagnostics,
+                span,
+                bindings=bindings,
             )
             return True
         if not _is_supported_ref_type_transition(receiver_type, transition_name):
@@ -2050,9 +2325,12 @@ def _check_drive_transition_entry(
                 span,
             )
         )
-    if not any(transition_name in state.transitions for state in obj.states.values()) and not (
-        obj.kind in model.types and _type_declares_event(model.types[obj.kind], transition_name)
-    ):
+    object_transition = any(
+        transition_name in state.transitions for state in obj.states.values()
+    )
+    if not object_transition and _type_process_decl(
+        model, obj.kind, "Transition", transition_name
+    ) is None:
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
@@ -2061,15 +2339,17 @@ def _check_drive_transition_entry(
             )
         )
         return True
-    _check_process_arguments(
-        model,
-        obj.kind,
-        "Transition",
-        transition_name,
-        args,
-        diagnostics,
-        span,
-    )
+    if not object_transition:
+        _check_process_arguments(
+            model,
+            obj.kind,
+            "Transition",
+            transition_name,
+            args,
+            diagnostics,
+            span,
+            bindings=bindings,
+        )
     return True
 
 
@@ -2093,6 +2373,18 @@ def _check_drive_action_entry(
                     f"unknown ref binding in action reference: {receiver_name}.Action::{action_name}",
                     span,
                 )
+            )
+            return True
+        if _type_process_decl(model, receiver_type, "Action", action_name) is not None:
+            _check_process_arguments(
+                model,
+                receiver_type,
+                "Action",
+                action_name,
+                args,
+                diagnostics,
+                span,
+                bindings=bindings,
             )
             return True
         if not _is_supported_ref_type_action(receiver_type, action_name):
@@ -2149,15 +2441,22 @@ def _check_drive_action_entry(
     )
     obj = model.objects.get(object_name)
     if obj is not None:
-        _check_process_arguments(
-            model,
-            obj.kind,
-            "Action",
-            action_name,
-            args,
-            diagnostics,
-            span,
-        )
+        object_process = _object_process_decl(obj, "Action", action_name)
+        if object_process is not None and _args_reference_bindings(args, bindings):
+            _check_process_decl_arguments(
+                model, object_process, args, diagnostics, span, bindings=bindings
+            )
+        elif object_process is None:
+            _check_process_arguments(
+                model,
+                obj.kind,
+                "Action",
+                action_name,
+                args,
+                diagnostics,
+                span,
+                bindings=bindings,
+            )
     return True
 
 
@@ -2210,6 +2509,10 @@ def _check_event_references(
                 )
             )
             continue
+        if _type_process_decl(
+            model, receiver_type, "Transition", transition_name
+        ) is not None:
+            return
         if not _is_supported_ref_type_transition(receiver_type, transition_name):
             diagnostics.append(
                 Diagnostic(
@@ -2223,6 +2526,10 @@ def _check_event_references(
     for object_name, transition_name in _OBJECT_TRANSITION_RE.findall(block.body):
         obj = model.objects.get(object_name)
         if obj is None:
+            if object_name in model.types and _type_process_decl(
+                model, object_name, "Transition", transition_name
+            ) is not None:
+                continue
             if _is_supported_ref_transition(object_name, transition_name):
                 continue
             diagnostics.append(
@@ -2247,13 +2554,17 @@ def _check_event_references(
 
 
 def _type_declares_event(type_decl: TypeDecl, transition_name: str) -> bool:
-    pattern = re.compile(_TYPE_TRANSITION_RE_TEMPLATE.format(re.escape(transition_name)))
-    return any(pattern.search(block.body) for block in type_decl.blocks)
+    return any(
+        process.kind == "Transition" and process.name == transition_name
+        for process in type_decl.processes
+    )
 
 
 def _type_declares_action(type_decl: TypeDecl, action_name: str) -> bool:
-    pattern = re.compile(r"\bAction::{}\b".format(re.escape(action_name)))
-    return any(pattern.search(block.body) for block in type_decl.blocks)
+    return any(
+        process.kind == "Action" and process.name == action_name
+        for process in type_decl.processes
+    )
 
 
 def _is_supported_ref_transition(receiver_name: str, transition_name: str) -> bool:
@@ -2283,17 +2594,59 @@ def _check_process_arguments(
     args: str | None,
     diagnostics: list[Diagnostic],
     span: SourceSpan,
+    *,
+    bindings: dict[str, str] | None = None,
 ) -> None:
     signature = _process_signature(model, type_name, process_kind, process_name)
     if signature is None:
         return
+    _check_signature_arguments(
+        model,
+        signature,
+        f"{type_name}.{process_kind}::{process_name}",
+        args,
+        diagnostics,
+        span,
+        bindings=bindings,
+    )
+
+
+def _check_process_decl_arguments(
+    model: ObjectModel,
+    process: ProcessDecl,
+    args: str | None,
+    diagnostics: list[Diagnostic],
+    span: SourceSpan,
+    *,
+    bindings: dict[str, str] | None = None,
+) -> None:
+    _check_signature_arguments(
+        model,
+        process.parameters,
+        f"{process.kind}::{process.name}",
+        args,
+        diagnostics,
+        span,
+        bindings=bindings,
+    )
+
+
+def _check_signature_arguments(
+    model: ObjectModel,
+    signature: tuple[tuple[str, str], ...],
+    label: str,
+    args: str | None,
+    diagnostics: list[Diagnostic],
+    span: SourceSpan,
+    *,
+    bindings: dict[str, str] | None,
+) -> None:
     if args is None:
         if signature:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "missing process argument: "
-                    f"{type_name}.{process_kind}::{process_name}",
+                    f"missing process argument: {label}",
                     span,
                 )
             )
@@ -2304,21 +2657,55 @@ def _check_process_arguments(
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "missing process argument: "
-                    f"{type_name}.{process_kind}::{process_name}",
+                    f"missing process argument: {label}",
                     span,
                 )
             )
         return
     if _uses_named_args(args):
+        if not _args_reference_bindings(args, bindings or {}):
+            return
+        provided: dict[str, str] = {}
+        for item in _split_process_args(args):
+            name, sep, value = item.partition(":")
+            if not sep:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"mixed or malformed named process argument: {item.strip()}",
+                        span,
+                    )
+                )
+                continue
+            provided[name.strip()] = value.strip()
+        expected = dict(signature)
+        if set(provided) != set(expected):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"named process arguments mismatch: {label}",
+                    span,
+                )
+            )
+            return
+        for name, value in provided.items():
+            actual = _expression_type(model, value, bindings or {})
+            if value in (bindings or {}) and actual is not None and not _type_assignable(model, actual, expected[name]):
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "process argument type mismatch: "
+                        f"{name}: expected {expected[name]}, got {actual}",
+                        span,
+                    )
+                )
         return
     raw_args = [item.strip() for item in args.split(",") if item.strip()]
     if len(signature) != len(raw_args):
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                "positional process argument count mismatch: "
-                f"{type_name}.{process_kind}::{process_name}",
+                f"positional process argument count mismatch: {label}",
                 span,
             )
         )
@@ -2361,22 +2748,8 @@ def _within_parameter_bindings(
 def _process_signature(
     model: ObjectModel, type_name: str, process_kind: str, process_name: str
 ) -> tuple[tuple[str, str], ...] | None:
-    type_decl = model.types.get(type_name)
-    if type_decl is None:
-        return None
-    pattern = re.compile(
-        r"\b"
-        + re.escape(process_kind)
-        + r"::"
-        + re.escape(process_name)
-        + r"\s*(?:\(([^{};]*)\))?(?:\s*->\s*[A-Z][A-Za-z0-9_]*)?\s*\{",
-        re.S,
-    )
-    for block in type_decl.blocks:
-        match = pattern.search(block.body)
-        if match is not None:
-            return _parse_process_parameters(match.group(1) or "")
-    return None
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    return process.parameters if process is not None else None
 
 
 def _parse_process_parameters(params: str) -> tuple[tuple[str, str], ...]:
@@ -2389,6 +2762,115 @@ def _parse_process_parameters(params: str) -> tuple[tuple[str, str], ...]:
         if sep:
             parsed.append((name.strip(), type_name.strip()))
     return tuple(parsed)
+
+
+def _type_process_decl(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+) -> ProcessDecl | None:
+    visited: set[str] = set()
+    current = type_name
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return None
+        for process in type_decl.processes:
+            if process.kind == process_kind and process.name == process_name:
+                return process
+        current = _base_type_name(type_decl)
+    return None
+
+
+def _object_process_decl(
+    obj: ObjectDef, process_kind: str, process_name: str
+) -> ProcessDecl | None:
+    for process in obj.decl.processes:
+        if process.kind == process_kind and process.name == process_name:
+            return process
+    for state in obj.states.values():
+        for process in state.decl.processes:
+            if process.kind == process_kind and process.name == process_name:
+                return process
+    return None
+
+
+def _type_process_return_type(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+) -> str | None:
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    return process.return_type if process is not None else None
+
+
+def _base_type_name(type_decl: TypeDecl) -> str | None:
+    match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
+    return match.group(1) if match is not None else None
+
+
+def _split_process_args(args: str) -> list[str]:
+    entries: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(args):
+        if char in "([{<":
+            depth += 1
+        elif char in ")]}>" :
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            entries.append(args[start:index].strip())
+            start = index + 1
+    tail = args[start:].strip()
+    if tail:
+        entries.append(tail)
+    return entries
+
+
+def _args_reference_bindings(
+    args: str | None, bindings: dict[str, str]
+) -> bool:
+    if not args:
+        return False
+    return any(
+        re.search(r"\b" + re.escape(name) + r"\b", args) is not None
+        for name in bindings
+        if name != "self"
+    )
+
+
+def _expression_type(
+    model: ObjectModel, expression: str, bindings: dict[str, str]
+) -> str | None:
+    value = expression.strip()
+    if value in bindings:
+        return bindings[value]
+    obj = model.objects.get(value)
+    if obj is not None:
+        return obj.kind
+    variant = re.match(r"([A-Z][A-Za-z0-9_]*)::", value)
+    if variant is not None and variant.group(1) in model.enums:
+        return variant.group(1)
+    return _known_ref_value_type(value)
+
+
+def _type_assignable(model: ObjectModel, actual: str, expected: str) -> bool:
+    if actual == expected:
+        return True
+    visited: set[str] = set()
+    current = actual
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return False
+        current = _base_type_name(type_decl)
+        if current == expected:
+            return True
+    return False
 
 
 def _uses_named_args(args: str) -> bool:
@@ -2404,22 +2886,18 @@ def _action_return_type(
     obj = model.objects.get(object_name)
     if obj is None:
         return None
-    candidates: list[str] = []
-    if obj.kind in model.types:
-        candidates.extend(block.body for block in model.types[obj.kind].blocks)
-    candidates.extend(block.body for block in obj.decl.other_blocks)
-    return _process_return_type(candidates, "Action", action_name)
+    object_process = _object_process_decl(obj, "Action", action_name)
+    if object_process is not None:
+        return object_process.return_type
+    return _type_process_return_type(model, obj.kind, "Action", action_name)
 
 
 def _ref_action_return_type(
     model: ObjectModel, receiver_type: str, action_name: str
 ) -> str | None:
     process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
-    type_decl = model.types.get(process_type or receiver_type)
-    if type_decl is None:
-        return None
-    return _process_return_type(
-        [block.body for block in type_decl.blocks], "Action", action_name
+    return _type_process_return_type(
+        model, process_type or receiver_type, "Action", action_name
     )
 
 

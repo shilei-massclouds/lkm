@@ -257,9 +257,9 @@ class ListCheckpointsTests(unittest.TestCase):
         appended_task_flow_ids = {
             "KernelInitFlowOffline": 485,
             "KernelInitFlowDestroyed": 486,
-            "Pid1UserAppFlowPrepared": 487,
-            "Pid1UserAppFlowReady": 488,
-            "Pid1UserAppFlowOnline": 489,
+            "UserAppFlowPrepared": 487,
+            "UserAppFlowReady": 488,
+            "UserAppFlowOnline": 489,
         }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(

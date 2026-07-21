@@ -9,18 +9,23 @@ process persona 或 idle-task carrier 类型。
 boot idle handoff 可以替换 active Flow，但不能替换 Task；fork/clone 则创建新的 Task，并为它
 建立独立 Flow。
 
-## 静态实例与稳定身份
+## 静态与动态实例的稳定身份
 
 - `BootTask` 对应静态 `init_task` / PID 0 / swapper。入口期由 `RootStream` 承载 boot init Flow；
   `sched_init()` 只为同一 Task 建立 idle 角色，之后 handoff 到 `BootIdleFlow`，不建立第二个
   idle Task carrier。
 - `KernelInitTask` 对应 `copy_process()` 创建的稳定 PID 1。`KernelInitFlow` 承载
-  `kernel_init()`、pre-SMP、initcall 和 exec 前的内核 continuation；首次成功 exec 后，
-  Task 身份仍是 `KernelInitTask`，active Flow 变为 fresh `UserAppFlow`。
+  `kernel_init()`、pre-SMP、initcall 和 exec 前的内核 continuation；首次成功 exec 在执行点声明
+  fresh `UserAppFlow`，Task 身份仍是 `KernelInitTask`，active Flow 改为该运行期实例。
 - `KthreaddTask` 是独立 Task，`KthreaddFlow` 承载其服务循环。
-- `UserTaskSet` 是 Task 集合，不是一个可复用 child carrier。每次 fork/clone 都创建 fresh、PID
-  和 lifecycle 独立的 Task。当前 DSL 尚不能动态声明实例，因此 `UserChildTask1` 只是一条不可
-  复用的具名见证；它不能表示下一次 fork 的身份。
+- `UserTaskSet` 是 Task 集合，不是一个可复用 child carrier。每次 fork/clone 都通过 `declare`
+  创建 fresh、PID 和 lifecycle 独立的 `Task`，并为该 Task 声明 fresh fork-continuation
+  `UserAppFlow`。后续 exec 保持 Task identity 并声明另一个 fresh `UserAppFlow`。
+
+PID 1 首个用户 Flow、child Task、fork continuation Flow 和 child exec Flow 的临时具名见证
+不再是正式静态对象，也不保留 compatibility alias。运行期实例 identity 和声明规则由
+[运行期实例声明](dynamic-instance-declaration.md)统一定义；Task/Flow 的 owner、集合成员和 active
+binding 仍必须由显式 lifecycle/action 与事实提交。
 
 `RootStream` 当前仍是 `BootInitFlowType` 的临时具名实例。它的重命名以及全仓 Stream -> Flow
 迁移不属于本轮，不得借 Task/TaskFlow 闭合顺带完成。
@@ -56,6 +61,6 @@ wrapper。fork continuation 和每次后续 exec 必须使用不同的 Flow 实�
 
 ## 当前能力边界
 
-动态匿名 Task/Flow 创建、owned Flow 集合的 verifier 量化以及通过运行期选择实例调用通用
-lifecycle，仍由 model 中的结构化 deferred 条目记录。在这些能力闭合前，具名 child/Flow 只能
-证明一个具体实例的所有权、handoff 和销毁顺序，不能作为 compatibility alias 或可复用 slot。
+本轮只引入顺序 `drives` 中的运行期实例声明，不同时引入循环、并发调度、通用垃圾回收或 Signal
+新语法。`RootStream` 的命名以及全仓 Stream -> Flow 迁移仍保持 deferred。运行期 alias 离开词法
+作用域不销毁实例；Task/Flow teardown 继续只由显式 `Disable/Cleanup` 和正式所有权事实决定。

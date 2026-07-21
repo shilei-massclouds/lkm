@@ -41,6 +41,7 @@ def derivation_to_json(
             "ok": result.ok,
             "target_reached": result.target_reached,
             "transitions": len(result.transitions),
+            "runtime_instances": len(result.runtime_instances),
             "proved": counts[DerivationStatus.PROVED.value],
             "assumed": counts[DerivationStatus.ASSUMED.value],
             "obligation": counts[DerivationStatus.OBLIGATION.value],
@@ -65,6 +66,25 @@ def derivation_to_json(
         ],
         "transitions": [
             _transition_to_json(transition) for transition in result.transitions
+        ],
+        "runtime_instances": [
+            {
+                "runtime_instance_id": instance.runtime_instance_id,
+                "declaration_site": instance.declaration_site,
+                "alias": instance.alias,
+                "declared_type": instance.declared_type,
+                "state": instance.state,
+                "occurrence": instance.occurrence,
+                "root_call_path": instance.root_call_path,
+                "owner_process": instance.owner_process,
+                "source_ordinal": instance.source_ordinal,
+                "static_object": instance.static_object,
+                "ref_target": instance.ref_target,
+                "owner_task": instance.owner_task,
+                "active_flow": instance.active_flow,
+                "owned_flows": list(instance.owned_flows),
+            }
+            for instance in result.runtime_instances
         ],
         "trace": [_trace_to_json(node) for node in result.trace],
     }
@@ -113,13 +133,18 @@ def _obligation_category_counts(
     return dict(sorted(counts.items()))
 
 
-def _transition_to_json(transition: TransitionCommit) -> dict[str, str]:
+def _transition_to_json(transition: TransitionCommit) -> dict[str, Any]:
     return {
         "object": transition.object_name,
         "transition": transition.transition_name,
         "source_state": transition.source_state,
         "target_state": transition.target_state,
         "label": transition.label,
+        "runtime_instance_id": transition.runtime_instance_id,
+        "declaration_site": transition.declaration_site,
+        "alias": transition.alias,
+        "declared_type": transition.declared_type,
+        "static_object": transition.static_object,
     }
 
 
@@ -133,6 +158,11 @@ def _trace_to_json(node: DerivationTraceNode) -> dict[str, Any]:
         "message": node.message,
         "span": _optional_span_to_json(node.span),
         "edge_kind": node.edge_kind,
+        "runtime_instance_id": node.runtime_instance_id,
+        "declaration_site": node.declaration_site,
+        "alias": node.alias,
+        "declared_type": node.declared_type,
+        "static_object": node.static_object,
         "label": node.label,
         "children": [_trace_to_json(child) for child in node.children],
     }

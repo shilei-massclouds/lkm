@@ -209,6 +209,101 @@ class ParseToolTests(unittest.TestCase):
                 "Transition::Enable",
             )
 
+    def test_declare_statements_preserve_source_order_and_site_ordinals(self) -> None:
+        source = """
+            type Item {
+                processes {
+                    Transition::Preset {
+                    }
+                }
+            }
+
+            object ComputerProject: ProjectObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            drives {
+                                declare first of Item;
+                                first.Transition::Preset;
+                                declare second of Item;
+                            }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "declare-order.spec"
+            output = Path(tmp) / "declare-order.ast.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(main([str(spec), "-o", str(output)]), 0)
+            data = read_json(output)
+            transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
+            statements = transition["drives"][0]["statements"]
+
+            self.assertEqual(
+                [(item["kind"], item["text"]) for item in statements],
+                [
+                    ("declare", "declare first of Item"),
+                    ("call", "first.Transition::Preset"),
+                    ("declare", "declare second of Item"),
+                ],
+            )
+            self.assertEqual([item["ordinal"] for item in statements], [1, 2, 3])
+            self.assertEqual(statements[0]["owner_process"], "ComputerProject.Transition::Preset")
+            self.assertEqual(statements[0]["alias"], "first")
+            self.assertEqual(statements[0]["declared_type"], "Item")
+
+    def test_declare_syntax_rejects_invalid_locations_and_forms(self) -> None:
+        cases = {
+            "outside-drives": (
+                "ensures { declare child of Item; }",
+                "declare is only allowed in drives",
+            ),
+            "missing-semicolon": (
+                "drives { declare child of Item }",
+                "drives statement is missing semicolon",
+            ),
+            "malformed": (
+                "drives { declare child Item; }",
+                "malformed declare statement",
+            ),
+        }
+        for name, (body, expected) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                source = f"""
+                    type Item {{
+                    }}
+
+                    object ComputerProject: ProjectObject {{
+                        initial_state: State::Base;
+                        state State::Base {{
+                            transitions {{
+                                on Transition::Preset -> State::Prepared {{
+                                    {body}
+                                }}
+                            }}
+                        }}
+                        state State::Prepared {{
+                        }}
+                    }}
+                """
+                spec = Path(tmp) / f"{name}.spec"
+                output = Path(tmp) / f"{name}.ast.json"
+                spec.write_text(source, encoding="utf-8")
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    exit_code = main([str(spec), "-o", str(output)])
+
+                self.assertEqual(exit_code, 1)
+                self.assertIn(expected, stderr.getvalue())
+
     def test_output_parent_directory_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "nested" / "model-main.ast.json"

@@ -12,6 +12,9 @@ Rootfs/user fixture、发行版 smoke、BusyBox-init scripted interaction 和 pa
 统一 Task carrier、独立 TaskFlow 生命周期、exec handoff 与 fresh child identity 的测试规则见
 [`task-taskflow.md`](task-taskflow.md)。
 
+运行期 `declare` 的 parser/checker/derive/JSON/view、128 次声明点压力与差分门禁见
+[`dynamic-instance-declaration.md`](dynamic-instance-declaration.md)。
+
 Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报告比较规则见
 [`composite-tests.md`](composite-tests.md)。
 

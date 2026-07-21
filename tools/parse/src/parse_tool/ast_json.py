@@ -17,6 +17,7 @@ from common.spec_ast import (
     FunctionDecl,
     LockDecl,
     ObjectDecl,
+    ProcessDecl,
     PredicateDecl,
     SourceSpan,
     SpecDocument,
@@ -79,6 +80,7 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
         "header": item.header,
         "span": _span_to_json(item.span),
         "blocks": [_block_to_json(block) for block in item.blocks],
+        "processes": [_process_to_json(process) for process in item.processes],
         "properties": item.properties,
     }
 
@@ -129,6 +131,7 @@ def _object_to_json(item: ObjectDecl) -> dict[str, Any]:
         "attrs": [_block_to_json(block) for block in item.attrs],
         "references": [_block_to_json(block) for block in item.references],
         "states": [_state_to_json(state) for state in item.states],
+        "processes": [_process_to_json(process) for process in item.processes],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "properties": item.properties,
     }
@@ -142,6 +145,7 @@ def _state_to_json(item: StateDecl) -> dict[str, Any]:
         "boundaries": [_boundary_to_json(boundary) for boundary in item.boundaries],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "transitions": [_event_to_json(transition) for transition in item.transitions],
+        "processes": [_process_to_json(process) for process in item.processes],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
     }
 
@@ -161,6 +165,28 @@ def _event_to_json(item: TransitionDecl) -> dict[str, Any]:
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "body_members": [_body_member_to_json(member) for member in item.body_members],
+    }
+
+
+def _process_to_json(item: ProcessDecl) -> dict[str, Any]:
+    return {
+        "kind": item.kind,
+        "name": item.name,
+        "span": _span_to_json(item.span),
+        "parameters": [
+            {"name": name, "type": type_name}
+            for name, type_name in item.parameters
+        ],
+        "return_type": item.return_type,
+        "depends_on": [_block_to_json(block) for block in item.depends_on],
+        "drives": [_block_to_json(block) for block in item.drives],
+        "within": [_within_to_json(block) for block in item.within],
+        "may_change": [_block_to_json(block) for block in item.may_change],
+        "ensures": [_block_to_json(block) for block in item.ensures],
+        "result": [_block_to_json(block) for block in item.result],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "body_members": [_body_member_to_json(member) for member in item.body_members],
+        "properties": item.properties,
     }
 
 
@@ -224,6 +250,18 @@ def _block_to_json(item: Block) -> dict[str, Any]:
                 "span": _span_to_json(span),
             }
             for entry, span in item.entry_spans
+        ],
+        "statements": [
+            {
+                "kind": statement.kind,
+                "text": statement.text,
+                "span": _span_to_json(statement.span),
+                "ordinal": statement.ordinal,
+                "alias": statement.alias,
+                "declared_type": statement.declared_type,
+                "owner_process": statement.owner_process,
+            }
+            for statement in item.statements
         ],
     }
 

@@ -16,12 +16,14 @@ from common.spec_ast import (
     FunctionDecl,
     LockDecl,
     ObjectDecl,
+    ProcessDecl,
     PredicateDecl,
     SourceSpan,
     SpecDocument,
     StateDecl,
     TypeDecl,
     WithinDecl,
+    DriveStatement,
 )
 
 
@@ -85,6 +87,7 @@ def _type_from_json(item: Any) -> TypeDecl:
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         properties={str(key): str(value) for key, value in properties.items()},
     )
 
@@ -167,6 +170,7 @@ def _object_from_json(item: Any) -> ObjectDecl:
         attrs=[_block_from_json(block) for block in _list(data, "attrs")],
         references=[_block_from_json(block) for block in _list(data, "references")],
         states=[_state_from_json(state) for state in _list(data, "states")],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
         properties={str(key): str(value) for key, value in properties.items()},
     )
@@ -184,7 +188,54 @@ def _state_from_json(item: Any) -> StateDecl:
         ],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
         transitions=[_event_from_json(transition) for transition in _list(data, "transitions")],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+    )
+
+
+def _process_from_json(item: Any) -> ProcessDecl:
+    data = _as_object(item, "process")
+    depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
+    drives = [_block_from_json(block) for block in _list(data, "drives")]
+    within = [_within_from_json(block) for block in _list(data, "within")]
+    may_change = [_block_from_json(block) for block in _list(data, "may_change")]
+    ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    result = [_block_from_json(block) for block in _list(data, "result")]
+    other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
+    body_members = _body_members_from_json(
+        data,
+        fallback=[
+            *(_block_body_member(block) for block in depends_on),
+            *(_block_body_member(block) for block in drives),
+            *(_within_body_member(block) for block in within),
+            *(_block_body_member(block) for block in may_change),
+            *(_block_body_member(block) for block in ensures),
+            *(_block_body_member(block) for block in result),
+            *(_block_body_member(block) for block in other_blocks),
+        ],
+    )
+    parameters = []
+    for parameter in _list(data, "parameters"):
+        param = _as_object(parameter, "process parameter")
+        parameters.append((_string(param, "name"), _string(param, "type")))
+    return_type = data.get("return_type")
+    if return_type is not None and not isinstance(return_type, str):
+        raise ValueError("process.return_type must be a string or null")
+    return ProcessDecl(
+        kind=_string(data, "kind"),
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        parameters=tuple(parameters),
+        return_type=return_type,
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        result=result,
+        other_blocks=other_blocks,
+        body_members=body_members,
+        properties=_string_map(data.get("properties", {}), "process.properties"),
     )
 
 
@@ -366,6 +417,26 @@ def _block_from_json(item: Any) -> Block:
         span=_span_from_json(data["span"]),
         header=_string(data, "header"),
         body_start_line=body_start_line,
+        statements=[_drive_statement_from_json(value) for value in data.get("statements", [])],
+    )
+
+
+def _drive_statement_from_json(item: Any) -> DriveStatement:
+    data = _as_object(item, "drive statement")
+    alias = data.get("alias")
+    declared_type = data.get("declared_type")
+    owner_process = data.get("owner_process")
+    for name, value in (("alias", alias), ("declared_type", declared_type), ("owner_process", owner_process)):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"drive statement {name} must be a string or null")
+    return DriveStatement(
+        kind=_string(data, "kind"),
+        text=_string(data, "text"),
+        span=_span_from_json(data["span"]),
+        ordinal=_integer(data, "ordinal"),
+        alias=alias,
+        declared_type=declared_type,
+        owner_process=owner_process,
     )
 
 

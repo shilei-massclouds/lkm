@@ -10,10 +10,19 @@ from common.derive_types import (
     DerivationResult,
     DerivationStatus,
     DerivationTraceNode,
+    RuntimeInstance,
     TransitionCommit,
 )
 from common.model_types import TransitionDef, ObjectDef, ObjectModel, StateDef
-from common.spec_ast import BoundaryDecl, BodyMember, Block, SourceSpan, WithinDecl
+from common.spec_ast import (
+    BoundaryDecl,
+    BodyMember,
+    Block,
+    DriveStatement,
+    ProcessDecl,
+    SourceSpan,
+    WithinDecl,
+)
 
 
 _TARGET_RE = re.compile(
@@ -45,6 +54,9 @@ _ACTION_BIND_RE = re.compile(
     r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
     r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
+)
+_DECLARE_RE = re.compile(
+    r"\Adeclare\s+([a-z][A-Za-z0-9_]*)\s+of\s+([A-Z][A-Za-z0-9_]*)\Z"
 )
 _REF_TRANSITION_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
@@ -820,6 +832,9 @@ class _Deriver:
         self.state_validation_transitions: dict[tuple[str, str], TransitionDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
         self.proved_expressions: set[str] = set()
+        self.runtime_instances: dict[str, dict[str, object]] = {}
+        self.declaration_occurrences: dict[tuple[str, str, int, str], int] = {}
+        self.runtime_owned_flows: dict[str, set[str]] = {}
 
     def run(self) -> DerivationResult:
         target_object, target_transition = self._parse_target()
@@ -838,6 +853,37 @@ class _Deriver:
             records=tuple(self.records),
             transitions=tuple(self.transitions),
             trace=tuple(self.trace),
+            runtime_instances=tuple(
+                RuntimeInstance(
+                    runtime_instance_id=runtime_id,
+                    declaration_site=str(data["declaration_site"]),
+                    alias=str(data["alias"]),
+                    declared_type=str(data["declared_type"]),
+                    state=str(data["state"]),
+                    occurrence=int(data["occurrence"]),
+                    root_call_path=str(data["root_call_path"]),
+                    owner_process=str(data["owner_process"]),
+                    source_ordinal=int(data["source_ordinal"]),
+                    static_object=None,
+                    ref_target=(
+                        str(data["ref_target"])
+                        if data.get("ref_target") is not None
+                        else None
+                    ),
+                    owner_task=(
+                        str(data["owner_task"])
+                        if data.get("owner_task") is not None
+                        else None
+                    ),
+                    active_flow=(
+                        str(data["active_flow"])
+                        if data.get("active_flow") is not None
+                        else None
+                    ),
+                    owned_flows=tuple(sorted(self.runtime_owned_flows.get(runtime_id, set()))),
+                )
+                for runtime_id, data in self.runtime_instances.items()
+            ),
         )
 
     def _parse_target(self) -> tuple[str | None, str | None]:
@@ -963,6 +1009,7 @@ class _Deriver:
                     transition_name=transition_name,
                     source_state=transition.source_state,
                     target_state=transition.target_state,
+                    static_object=object_name,
                 )
             )
             self._record(
@@ -1071,7 +1118,8 @@ class _Deriver:
     ) -> bool:
         bindings = bindings if bindings is not None else {}
         for block in blocks:
-            for entry, entry_span in block.entry_spans:
+            for index, (entry, entry_span) in enumerate(block.entry_spans):
+                statement = block.statements[index] if index < len(block.statements) else None
                 if not self._drive_entry(
                     entry,
                     entry_span,
@@ -1080,6 +1128,7 @@ class _Deriver:
                     bindings=bindings,
                     process_parent=process_parent,
                     result_hints=result_hints,
+                    statement=statement,
                 ):
                     return False
         return True
@@ -1094,7 +1143,80 @@ class _Deriver:
         bindings: dict[str, dict[str, str]],
         process_parent: str | None,
         result_hints: tuple[str, ...],
+        statement: DriveStatement | None = None,
     ) -> bool:
+        declare = _DECLARE_RE.match(entry)
+        if declare is not None:
+            alias, declared_type = declare.group(1, 2)
+            if declared_type not in self.model.types:
+                self._record(
+                    DerivationStatus.CONTRADICTION,
+                    f"unknown declared type: {declared_type}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="drives",
+                )
+                return False
+            if alias in bindings:
+                self._record(
+                    DerivationStatus.CONTRADICTION,
+                    f"duplicate or shadowed lexical alias: {alias}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="drives",
+                )
+                return False
+            owner_process = (
+                statement.owner_process
+                if statement is not None and statement.owner_process
+                else f"{transition.object_name}.Transition::{transition.name}"
+            )
+            source_ordinal = statement.ordinal if statement is not None else 0
+            root_call_path = self._runtime_root_call_path()
+            occurrence_key = (root_call_path, owner_process, source_ordinal, alias)
+            occurrence = self.declaration_occurrences.get(occurrence_key, 0) + 1
+            self.declaration_occurrences[occurrence_key] = occurrence
+            declaration_site = f"{owner_process}#s{source_ordinal}:{alias}"
+            runtime_id = (
+                f"runtime:{root_call_path}|{owner_process}|s{source_ordinal}|"
+                f"{alias}|o{occurrence}"
+            )
+            self.states[runtime_id] = "Base"
+            self.runtime_instances[runtime_id] = {
+                "declaration_site": declaration_site,
+                "alias": alias,
+                "declared_type": declared_type,
+                "state": "Base",
+                "occurrence": occurrence,
+                "root_call_path": root_call_path,
+                "owner_process": owner_process,
+                "source_ordinal": source_ordinal,
+            }
+            bindings[alias] = {
+                "type": declared_type,
+                "value": runtime_id,
+                "runtime_instance_id": runtime_id,
+                "alias": alias,
+            }
+            self._record(
+                DerivationStatus.PROVED,
+                f"runtime instance declared: {alias}: {declared_type} -> {runtime_id}",
+                entry_span,
+                object_name=transition.object_name,
+                transition_name=transition.name,
+                state_name="Base",
+                expression=entry,
+                source_kind="declare",
+                proof_class="runtime_instance_declaration",
+                proof_provider="derive",
+                process_parent=process_parent,
+            )
+            return True
+
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
             name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
@@ -1180,6 +1302,14 @@ class _Deriver:
                     result_hints=result_hints,
                 ):
                     return False
+                if (
+                    receiver is not None
+                    and receiver.get("runtime_instance_id")
+                ):
+                    if not self._apply_runtime_action_effect(
+                        receiver, action_name, args, bindings, entry_span, transition
+                    ):
+                        return False
                 self._record_type_process_ensures(
                     ref_process_type,
                     target_object or object_name,
@@ -1274,6 +1404,16 @@ class _Deriver:
                     result_hints=result_hints,
                 ):
                     return False
+                if receiver is not None and receiver.get("runtime_instance_id"):
+                    if not self._commit_runtime_transition(
+                        receiver,
+                        driven_transition,
+                        args,
+                        bindings,
+                        entry_span,
+                        transition,
+                    ):
+                        return False
                 self._record_type_process_ensures(
                     process_type,
                     target_object or receiver_name,
@@ -1566,6 +1706,14 @@ class _Deriver:
                     result_hints=result_hints,
                 ):
                     return False
+                if (
+                    receiver is not None
+                    and receiver.get("runtime_instance_id")
+                ):
+                    if not self._apply_runtime_action_effect(
+                        receiver, action_name, args, bindings, entry_span, transition
+                    ):
+                        return False
                 self._record_type_process_ensures(
                     process_type,
                     target_object or receiver_name,
@@ -1793,6 +1941,274 @@ class _Deriver:
         )
         return False
 
+    def _runtime_root_call_path(self) -> str:
+        transition_path = [
+            f"{object_name}.Transition::{transition_name}"
+            for object_name, transition_name in self.stack
+        ]
+        process_path = [
+            f"{self_name}.{process_kind}::{process_name}"
+            for _type_name, self_name, process_kind, process_name in self.process_stack
+        ]
+        path = transition_path + process_path
+        return " > ".join(path) if path else self.target
+
+    def _commit_runtime_transition(
+        self,
+        receiver: dict[str, str],
+        transition_name: str,
+        args: str | None,
+        bindings: dict[str, dict[str, str]],
+        span: SourceSpan,
+        owner_transition: TransitionDef,
+    ) -> bool:
+        runtime_id = receiver.get("runtime_instance_id") or receiver.get("value")
+        if runtime_id is None or runtime_id not in self.runtime_instances:
+            return False
+        lifecycle = {
+            "Preset": ("Base", "Prepared"),
+            "Setup": ("Prepared", "Ready"),
+            "Enable": ("Ready", "Online"),
+            "Disable": ("Online", "Offline"),
+            "Cleanup": ("Offline", "Destroyed"),
+        }
+        states = lifecycle.get(transition_name)
+        if states is None:
+            return True
+        source_state, target_state = states
+        current = self.states.get(runtime_id)
+        if current != source_state:
+            self._record(
+                DerivationStatus.CONTRADICTION,
+                "illegal runtime lifecycle transition: "
+                f"{runtime_id}.Transition::{transition_name} from State::{current}",
+                span,
+                object_name=runtime_id,
+                transition_name=transition_name,
+                state_name=current,
+            )
+            return False
+        declared_type = str(self.runtime_instances[runtime_id]["declared_type"])
+        process = _type_process_decl(
+            self.model, declared_type, "Transition", transition_name
+        )
+        arguments = _process_decl_argument_bindings(
+            process or ProcessDecl("Transition", transition_name, span),
+            args,
+        )
+        if _type_is_or_inherits(self.model, declared_type, "Task"):
+            owned = self.runtime_owned_flows.get(runtime_id, set())
+            if transition_name == "Disable" and any(
+                self.states.get(flow_id) == "Online" for flow_id in owned
+            ):
+                return self._runtime_relation_contradiction(
+                    runtime_id,
+                    transition_name,
+                    "Task cannot become Offline while an owned Flow is Online",
+                    span,
+                )
+            if transition_name == "Cleanup" and any(
+                self.states.get(flow_id) != "Destroyed" for flow_id in owned
+            ):
+                return self._runtime_relation_contradiction(
+                    runtime_id,
+                    transition_name,
+                    "Task cannot be Destroyed before every owned Flow is Destroyed",
+                    span,
+                )
+            if transition_name == "Preset":
+                initial_flow = self._runtime_argument_value(
+                    arguments.get("initial_flow"), bindings
+                )
+                if initial_flow and not self._bind_runtime_flow_owner(
+                    runtime_id, initial_flow, span, transition_name
+                ):
+                    return False
+        if _type_is_or_inherits(self.model, declared_type, "TaskFlow"):
+            if transition_name == "Preset":
+                owner_task = self._runtime_argument_value(
+                    arguments.get("owner_task"), bindings
+                )
+                if owner_task and not self._bind_runtime_flow_owner(
+                    owner_task, runtime_id, span, transition_name
+                ):
+                    return False
+            if transition_name == "Enable":
+                owner_task = self.runtime_instances[runtime_id].get("owner_task")
+                if isinstance(owner_task, str):
+                    for flow_id in self.runtime_owned_flows.get(owner_task, set()):
+                        if flow_id != runtime_id and self.states.get(flow_id) == "Online":
+                            return self._runtime_relation_contradiction(
+                                runtime_id,
+                                transition_name,
+                                "two owned Flows of one Task cannot be Online together",
+                                span,
+                            )
+        self.states[runtime_id] = target_state
+        data = self.runtime_instances[runtime_id]
+        data["state"] = target_state
+        declaration_site = str(data["declaration_site"])
+        alias = str(data["alias"])
+        declared_type = str(data["declared_type"])
+        self.transitions.append(
+            TransitionCommit(
+                object_name=runtime_id,
+                transition_name=transition_name,
+                source_state=source_state,
+                target_state=target_state,
+                runtime_instance_id=runtime_id,
+                declaration_site=declaration_site,
+                alias=alias,
+                declared_type=declared_type,
+                static_object=None,
+            )
+        )
+        node = DerivationTraceNode(
+            object_name=runtime_id,
+            transition_name=transition_name,
+            source_state=source_state,
+            target_state=target_state,
+            status=DerivationStatus.PROVED,
+            span=span,
+            edge_kind="runtime",
+            runtime_instance_id=runtime_id,
+            declaration_site=declaration_site,
+            alias=alias,
+            declared_type=declared_type,
+            static_object=None,
+        )
+        if self.trace_stack:
+            self.trace_stack[-1].children.append(node)
+        else:
+            self.trace.append(node)
+        self._record(
+            DerivationStatus.PROVED,
+            f"runtime transition: {alias}.Transition::{transition_name} "
+            f"State::{source_state} -> State::{target_state}",
+            span,
+            object_name=runtime_id,
+            transition_name=transition_name,
+            state_name=target_state,
+            source_kind="runtime_transition",
+            proof_class="runtime_lifecycle_commit",
+            proof_provider="derive",
+        )
+        return True
+
+    def _apply_runtime_action_effect(
+        self,
+        receiver: dict[str, str],
+        action_name: str,
+        args: str | None,
+        bindings: dict[str, dict[str, str]],
+        span: SourceSpan,
+        owner_transition: TransitionDef,
+    ) -> bool:
+        runtime_id = receiver.get("runtime_instance_id") or receiver.get("value")
+        if runtime_id is None or runtime_id not in self.runtime_instances or not args:
+            return True
+        declared_type = str(self.runtime_instances[runtime_id]["declared_type"])
+        process = _type_process_decl(
+            self.model, declared_type, "Action", action_name
+        )
+        values = _process_decl_argument_bindings(
+            process or ProcessDecl("Action", action_name, span),
+            args,
+        )
+        if _type_is_or_inherits(self.model, declared_type, "TaskRef") and action_name == "SetCurrent":
+            target = self._runtime_argument_value(values.get("task"), bindings)
+            if target:
+                self.runtime_instances[runtime_id]["ref_target"] = target
+            return True
+        if _type_is_or_inherits(self.model, declared_type, "Task"):
+            if action_name == "ActivateInitialFlow":
+                flow = self._runtime_argument_value(values.get("flow"), bindings)
+                if flow and not self._bind_runtime_flow_owner(
+                    runtime_id, flow, span, action_name
+                ):
+                    return False
+                self.runtime_instances[runtime_id]["active_flow"] = flow
+            elif action_name == "CommitFlowHandoff":
+                from_flow = self._runtime_argument_value(
+                    values.get("from_flow"), bindings
+                )
+                to_flow = self._runtime_argument_value(values.get("to_flow"), bindings)
+                for flow in (from_flow, to_flow):
+                    if flow and not self._bind_runtime_flow_owner(
+                        runtime_id, flow, span, action_name
+                    ):
+                        return False
+                if from_flow and self.states.get(from_flow) != "Offline":
+                    return self._runtime_relation_contradiction(
+                        runtime_id,
+                        action_name,
+                        "Flow handoff requires the old Flow to be Offline",
+                        span,
+                    )
+                if to_flow and self.states.get(to_flow) != "Ready":
+                    return self._runtime_relation_contradiction(
+                        runtime_id,
+                        action_name,
+                        "Flow handoff requires the new Flow to be Ready",
+                        span,
+                    )
+                self.runtime_instances[runtime_id]["active_flow"] = to_flow
+        return True
+
+    def _runtime_argument_value(
+        self,
+        value: str | None,
+        bindings: dict[str, dict[str, str]],
+    ) -> str | None:
+        if value is None:
+            return None
+        return bindings.get(value, {}).get("value", value)
+
+    def _bind_runtime_flow_owner(
+        self,
+        task_id: str,
+        flow_id: str,
+        span: SourceSpan,
+        process_name: str,
+    ) -> bool:
+        flow = self.runtime_instances.get(flow_id)
+        if flow is None:
+            return True
+        declared_type = str(flow.get("declared_type", ""))
+        if not _type_is_or_inherits(self.model, declared_type, "TaskFlow"):
+            return True
+        prior_owner = flow.get("owner_task")
+        if isinstance(prior_owner, str) and prior_owner != task_id:
+            return self._runtime_relation_contradiction(
+                flow_id,
+                process_name,
+                f"Flow already belongs to a different Task: {prior_owner}",
+                span,
+            )
+        flow["owner_task"] = task_id
+        self.runtime_owned_flows.setdefault(task_id, set()).add(flow_id)
+        return True
+
+    def _runtime_relation_contradiction(
+        self,
+        runtime_id: str,
+        process_name: str,
+        message: str,
+        span: SourceSpan,
+    ) -> bool:
+        self._record(
+            DerivationStatus.CONTRADICTION,
+            message,
+            span,
+            object_name=runtime_id,
+            transition_name=process_name,
+            state_name=self.states.get(runtime_id),
+            source_kind="runtime_relation",
+            proof_class="runtime_instance_relation",
+            proof_provider="derive",
+        )
+        return False
+
     def _execute_type_process_drives(
         self,
         type_name: str,
@@ -1807,6 +2223,7 @@ class _Deriver:
         process_parent: str | None = None,
         bindings: dict[str, dict[str, str]] | None = None,
         result_hints: tuple[str, ...] = (),
+        process_decl: ProcessDecl | None = None,
     ) -> bool:
         key = (type_name, self_name, process_kind, process_name)
         if key in self.process_stack:
@@ -1820,29 +2237,21 @@ class _Deriver:
             )
             return False
 
-        drives = _process_drives(self.model, type_name, process_kind, process_name)
-        withins = _process_withins(self.model, type_name, process_kind, process_name)
-        process_ensures = _process_ensures(
-            self.model,
-            type_name,
-            process_kind,
-            process_name,
+        process = process_decl or _type_process_decl(
+            self.model, type_name, process_kind, process_name
         )
-        if not drives and not withins:
+        process_ensures = (
+            tuple(entry for block in process.ensures for entry in block.entries)
+            if process is not None
+            else ()
+        )
+        if process is None or not process.body_members:
             return True
 
-        argument_bindings = _process_argument_bindings(
-            self.model,
-            type_name,
-            process_kind,
-            process_name,
-            args,
-        )
+        argument_bindings = _process_decl_argument_bindings(process, args)
         replacements = {**argument_bindings, "self": self_name}
         inherited_bindings = dict(bindings or {})
-        signature = dict(
-            _process_signature(self.model, type_name, process_kind, process_name) or ()
-        )
+        signature = dict(process.parameters)
         drive_bindings = dict(inherited_bindings)
         for name, value in argument_bindings.items():
             inherited = inherited_bindings.get(value)
@@ -1865,7 +2274,9 @@ class _Deriver:
                 drive_bindings[name] = {"type": ref_type, "value": value}
             else:
                 drive_bindings[name] = {"type": "ProcessArgument", "value": value}
-        drive_bindings["self"] = {"type": "Self", "value": self_name}
+        drive_bindings["self"] = {"type": type_name, "value": self_name}
+        if self_name in self.runtime_instances:
+            drive_bindings["self"]["runtime_instance_id"] = self_name
         hint_replacements = dict(replacements)
         for name in argument_bindings:
             value = drive_bindings.get(name, {}).get("value")
@@ -1878,41 +2289,19 @@ class _Deriver:
 
         self.process_stack.append(key)
         try:
-            for block in drives:
-                entries = [
-                    _substitute_process_bindings(entry, replacements)
-                    for entry in block.entries
-                ]
-                body = ";\n".join(entries)
-                if body:
-                    body += ";"
-                if not self._drive_blocks(
-                    (
-                        Block(
-                            block.kind,
-                            body,
-                            block.span,
-                            header=block.header,
-                            body_start_line=block.body_start_line,
-                        ),
-                    ),
-                    transition,
-                    action_provider=action_provider,
-                    bindings=drive_bindings,
-                    process_parent=process_parent,
-                    result_hints=local_result_hints,
-                ):
-                    return False
-            for within in withins:
-                substituted_within = _substitute_within_bindings(within, replacements)
-                if not self._execute_within(
-                    substituted_within,
-                    transition,
-                    bindings=drive_bindings,
-                    process_parent=process_parent,
-                    result_hints=local_result_hints,
-                ):
-                    return False
+            members = [
+                _substitute_body_member_bindings(member, replacements)
+                for member in process.body_members
+            ]
+            if not self._execute_body_members(
+                members,
+                transition,
+                action_provider=action_provider,
+                bindings=drive_bindings,
+                process_parent=process_parent,
+                result_hints=local_result_hints,
+            ):
+                return False
         finally:
             self.process_stack.pop()
         return True
@@ -2137,19 +2526,17 @@ class _Deriver:
         *,
         action_provider: str,
         bindings: dict[str, dict[str, str]] | None = None,
+        process_decl: ProcessDecl | None = None,
     ) -> None:
-        argument_bindings = _process_argument_bindings(
-            self.model,
-            type_name,
-            process_kind,
-            process_name,
-            args,
+        process = process_decl or _type_process_decl(
+            self.model, type_name, process_kind, process_name
         )
+        if process is None:
+            return
+        argument_bindings = _process_decl_argument_bindings(process, args)
         inherited_bindings = dict(bindings or {})
         replacements: dict[str, str] = {"self": self_name}
-        signature = dict(
-            _process_signature(self.model, type_name, process_kind, process_name) or ()
-        )
+        signature = dict(process.parameters)
         for name, value in argument_bindings.items():
             inherited = inherited_bindings.get(value)
             if inherited is not None:
@@ -2162,11 +2549,8 @@ class _Deriver:
                 replacements[name] = binding.get("value", value)
             else:
                 replacements[name] = value
-        for ensure in _process_ensures(
-            self.model,
-            type_name,
-            process_kind,
-            process_name,
+        for ensure in (
+            entry for block in process.ensures for entry in block.entries
         ):
             expression = _substitute_process_bindings(ensure, replacements)
             classification = _classify_obligation(
@@ -3170,6 +3554,7 @@ class _Deriver:
             message=message,
             span=frame.span,
             edge_kind=frame.edge_kind,
+            static_object=frame.object_name,
             children=tuple(frame.children),
         )
         if self.trace_stack:
@@ -3207,11 +3592,9 @@ def _find_transition(obj: ObjectDef, transition_name: str) -> TransitionDef | No
 
 
 def _type_declares_transition(model: ObjectModel, obj: ObjectDef, transition_name: str) -> bool:
-    type_decl = model.types.get(obj.kind)
-    if type_decl is None:
-        return False
-    pattern = re.compile(_TYPE_TRANSITION_RE_TEMPLATE.format(re.escape(transition_name)))
-    return any(pattern.search(block.body) for block in type_decl.blocks)
+    return _type_process_decl(
+        model, obj.kind, "Transition", transition_name
+    ) is not None
 
 
 def _ref_process_type(
@@ -3222,6 +3605,11 @@ def _ref_process_type(
 ) -> str | None:
     if receiver_type is None:
         return None
+
+    if _type_process_decl(
+        model, receiver_type, process_kind, process_name
+    ) is not None:
+        return receiver_type
 
     self_type = _ref_self_process_type(model, receiver_type, process_kind, process_name)
     if self_type is not None:
@@ -3447,21 +3835,58 @@ def _normalize_process_call(
 def _process_signature(
     model: ObjectModel, type_name: str, process_kind: str, process_name: str
 ) -> tuple[tuple[str, str], ...] | None:
-    type_decl = model.types.get(type_name)
-    if type_decl is None:
-        return None
-    pattern = re.compile(
-        r"\b"
-        + re.escape(process_kind)
-        + r"::"
-        + re.escape(process_name)
-        + r"\s*(?:\(([^{};]*)\))?(?:\s*->\s*[A-Z][A-Za-z0-9_]*)?\s*\{",
-        re.S,
-    )
-    for block in type_decl.blocks:
-        match = pattern.search(block.body)
-        if match is not None:
-            return _parse_process_parameters(match.group(1) or "")
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    return process.parameters if process is not None else None
+
+
+def _type_process_decl(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+) -> ProcessDecl | None:
+    visited: set[str] = set()
+    current = type_name
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return None
+        for process in type_decl.processes:
+            if process.kind == process_kind and process.name == process_name:
+                return process
+        match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
+        current = match.group(1) if match is not None else None
+    return None
+
+
+def _type_is_or_inherits(
+    model: ObjectModel, type_name: str, expected_type: str
+) -> bool:
+    visited: set[str] = set()
+    current: str | None = type_name
+    while current and current not in visited:
+        if current == expected_type:
+            return True
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return False
+        match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
+        current = match.group(1) if match is not None else None
+    return False
+
+
+def _object_process_decl(
+    obj: ObjectDef, process_kind: str, process_name: str
+) -> ProcessDecl | None:
+    for process in obj.decl.processes:
+        if process.kind == process_kind and process.name == process_name:
+            return process
+    for state in obj.states.values():
+        for process in state.decl.processes:
+            if process.kind == process_kind and process.name == process_name:
+                return process
     return None
 
 
@@ -3493,34 +3918,24 @@ def _process_body(
 def _process_ensures(
     model: ObjectModel, type_name: str, process_kind: str, process_name: str
 ) -> tuple[str, ...]:
-    body = _process_body(model, type_name, process_kind, process_name)
-    if body is None:
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    if process is None:
         return ()
-    ensures = _top_level_named_block_body(body, "ensures")
-    if ensures is None:
-        return ()
-    return tuple(entry for entry, _span in Block("ensures", ensures, SourceSpan(1, 1)).entry_spans)
+    return tuple(entry for block in process.ensures for entry in block.entries)
 
 
 def _process_drives(
     model: ObjectModel, type_name: str, process_kind: str, process_name: str
 ) -> tuple[Block, ...]:
-    body = _process_body(model, type_name, process_kind, process_name)
-    if body is None:
-        return ()
-    drives = _top_level_named_block_body(body, "drives")
-    if drives is None:
-        return ()
-    return (Block("drives", drives, SourceSpan(1, 1)),)
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    return tuple(process.drives) if process is not None else ()
 
 
 def _process_withins(
     model: ObjectModel, type_name: str, process_kind: str, process_name: str
 ) -> tuple[WithinDecl, ...]:
-    body = _process_body(model, type_name, process_kind, process_name)
-    if body is None:
-        return ()
-    return tuple(_top_level_withins(body))
+    process = _type_process_decl(model, type_name, process_kind, process_name)
+    return tuple(process.within) if process is not None else ()
 
 
 def _top_level_withins(body: str) -> list[WithinDecl]:
@@ -3835,6 +4250,18 @@ def _substitute_blocks(blocks: list[Block], replacements: dict[str, str]) -> lis
             block.span,
             header=_substitute_process_bindings(block.header, replacements),
             body_start_line=block.body_start_line,
+            statements=[
+                DriveStatement(
+                    kind=statement.kind,
+                    text=_substitute_process_bindings(statement.text, replacements),
+                    span=statement.span,
+                    ordinal=statement.ordinal,
+                    alias=statement.alias,
+                    declared_type=statement.declared_type,
+                    owner_process=statement.owner_process,
+                )
+                for statement in block.statements
+            ],
         )
         for block in blocks
     ]
@@ -3888,6 +4315,47 @@ def _process_argument_bindings(
         param_name: value
         for (param_name, _param_type), value in zip(signature, raw_args, strict=True)
     }
+
+
+def _process_decl_argument_bindings(
+    process: ProcessDecl, args: str | None
+) -> dict[str, str]:
+    if args is None:
+        return {}
+    raw_args = _split_process_args(args)
+    if _uses_named_args(args):
+        bindings: dict[str, str] = {}
+        for item in raw_args:
+            name, sep, value = item.partition(":")
+            if sep:
+                bindings[name.strip()] = value.strip()
+        return bindings
+    if len(process.parameters) != len(raw_args):
+        return {}
+    return {
+        param_name: value
+        for (param_name, _param_type), value in zip(
+            process.parameters, raw_args, strict=True
+        )
+    }
+
+
+def _split_process_args(args: str) -> list[str]:
+    entries: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(args):
+        if char in "([{<":
+            depth += 1
+        elif char in ")]}>" :
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            entries.append(args[start:index].strip())
+            start = index + 1
+    tail = args[start:].strip()
+    if tail:
+        entries.append(tail)
+    return entries
 
 
 def _substitute_process_bindings(expression: str, bindings: dict[str, str]) -> str:

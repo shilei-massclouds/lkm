@@ -33,10 +33,11 @@ Config 通过互斥的 `app_hello`、`app_smoke`、`app_user_boot` cfg 恰好绑
 
 user-boot prepare 保持 init candidate 选择、失败分类和 panic terminal 行为，然后把 normalized boot
 arguments 交给 `ExecTransaction`；共享管线完成 ELF/interpreter、地址空间、用户栈、trap frame 和提交。
-prepare 再完成 syscall、FilesStruct 与 stable `KernelInitTask` 的 user-resource binding，然后按
-`Pid1UserAppFlow.Preset/Setup -> KernelInitFlow.Disable -> CommitFlowHandoff -> Pid1UserAppFlow.Enable
--> KernelInitFlow.Cleanup` 完成 `UserBootPayload.Enable`。enter 不再准备对象，只发出
-`Pid1UserAppFlow.Online` checkpoint 并执行最终 RISC-V U-mode trap return。
+prepare 再完成 syscall、FilesStruct 与 stable `KernelInitTask` 的 user-resource binding，然后声明
+fresh `UserAppFlow`，按 `new.Preset/Setup -> KernelInitFlow.Disable -> CommitFlowHandoff -> new.Enable
+-> KernelInitFlow.Cleanup -> RecordRetiredFlowDestroyed` 完成 `UserBootPayload.Enable`。enter 不再准备
+对象，只发出带 runtime instance identity 的 `UserAppFlow.Online` checkpoint 并执行最终 RISC-V
+U-mode trap return。
 
 ## 提交与 checkpoint 顺序
 
@@ -53,7 +54,7 @@ variant prepare
 
 因此 PayloadPhase.Online 表示交接条件已经提交，不表示 payload 已经开始执行。user-boot requested-init
 或 default-init 失败发生在 variant prepare 内，失败路径不得发出 SelectedPayloadHandoff.Online、
-PayloadPhase.Online、Kernel.Online 或 Pid1UserAppFlow.Online checkpoint。
+PayloadPhase.Online、Kernel.Online 或 dynamic UserAppFlow.Online checkpoint。
 
 | Checkpoint | stable id | owner state |
 | --- | --- | --- |
