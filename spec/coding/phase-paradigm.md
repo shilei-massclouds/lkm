@@ -183,5 +183,6 @@ continuation。若某个子阶段按设计永不完成，父 transition 就不�
 3. 对控制权交接使用 focused run/checkpoint 证明实际 task、CPU、栈和 continuation。
 4. 执行仓库规定的 focused gate，并最终执行根目录 `make test`。
 
-运行结果只证明实现路径，不反向修改 model 语义。若 trace 与本规则冲突，应先定位边界，再按
-charter -> model -> coding -> impl 顺序修正。
+运行结果只证明实现路径，不反向修改 model 语义。若 trace 与本规则冲突，应先定位边界；默认
+按 `charter-first` 修正，用户显式触发 `model-first` 时则遵守
+[`spec/guidance`](../guidance/README.md) 的确认门禁与双向闭合规则。

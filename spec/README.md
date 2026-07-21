@@ -38,3 +38,17 @@
 各个规格层之间自上向下排列，上级约束下级，下级是对上级的明确、细化或后续：
 
 ![规格层次约束](charter/pic/spec-level.svg)
+
+# 变更工作流与权威层级
+
+最终权威层级始终是：
+
+```text
+charter -> model -> coding -> applicable compose -> impl -> testing/tests
+```
+
+工作流只规定当轮修改和确认的顺序，不改变这一权威关系。未明确指定时使用默认
+`charter-first`，从 charter 确定设计意图后沿上述层级向下闭合。只有用户明确声明本轮
+`model-first` 并提供 model 调整方案时，才允许先进行 model-only 调整和确认；确认后必须先向上
+闭合 charter，再沿 coding、适用的 compose、impl、testing/tests 向下闭合。完整门禁见
+[`guidance/README.md`](guidance/README.md) 和 [`guidance/generation.spec`](guidance/generation.spec)。

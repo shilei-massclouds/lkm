@@ -14,13 +14,22 @@ predicate guidance_agent_must_check_generated_result_against_concrete_requiremen
 predicate guidance_agent_must_not_guess_fix_without_reproducible_localization() -> bool;
 predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bool;
 predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
-predicate guidance_agent_must_read_specs_and_verify_baseline_before_no_feature_refactor() -> bool;
-predicate guidance_agent_may_implement_no_feature_refactor_before_spec_closure() -> bool;
-predicate guidance_agent_must_bound_no_feature_refactor_by_accepted_behavior() -> bool;
-predicate guidance_agent_must_keep_refactor_inconsistency_uncommitted() -> bool;
-predicate guidance_agent_must_close_refactor_layers_in_order() -> bool;
-predicate guidance_agent_must_preserve_test_acceptance_during_refactor() -> bool;
-predicate guidance_agent_must_stop_unclosable_refactor() -> bool;
+predicate guidance_agent_must_keep_temporary_layer_inconsistency_uncommitted() -> bool;
+predicate guidance_agent_must_review_each_applicable_layer_and_change_only_affected_layers() -> bool;
+predicate guidance_agent_must_require_explicit_commit_authorization() -> bool;
+predicate guidance_agent_must_default_to_charter_first() -> bool;
+predicate guidance_agent_must_follow_charter_first_layer_order() -> bool;
+predicate guidance_agent_must_resolve_conflicts_by_charter_first_authority() -> bool;
+predicate guidance_agent_must_require_explicit_user_trigger_for_model_first() -> bool;
+predicate guidance_agent_must_use_user_provided_model_first_adjustment() -> bool;
+predicate guidance_agent_must_record_and_verify_model_first_baseline() -> bool;
+predicate guidance_agent_must_keep_model_first_initial_phase_model_only() -> bool;
+predicate guidance_agent_must_show_model_first_diff_and_validation() -> bool;
+predicate guidance_agent_must_wait_for_explicit_model_first_confirmation() -> bool;
+predicate guidance_agent_must_close_model_first_charter_upward_before_downward_layers() -> bool;
+predicate guidance_agent_must_preserve_confirmed_model_meaning_during_charter_closure() -> bool;
+predicate guidance_agent_must_return_unclosable_charter_to_model_decision() -> bool;
+predicate guidance_agent_must_finish_model_first_validation() -> bool;
 predicate guidance_agent_must_use_structured_boundary_inventory() -> bool;
 predicate guidance_agent_must_not_treat_trimmed_as_unimplemented() -> bool;
 predicate guidance_agent_must_close_boundary_with_facts_tests_and_archive() -> bool;
@@ -82,9 +91,8 @@ type RepositoryChangeWorkflow {
 
         /*
          * Behavior, interface, object-boundary and Linux differential
-         * semantics changes are spec-first work. The applicable model,
-         * coding, testing or guidance specification must be updated before
-         * the implementation is changed.
+         * semantics changes must follow one of the named change workflows.
+         * Applicable specifications must be updated before implementation.
          */
         guidance_agent_must_update_spec_before_behavior_implementation();
 
@@ -94,6 +102,16 @@ type RepositoryChangeWorkflow {
          * gate. A focused run is not a substitute for the final regression.
          */
         guidance_agent_must_run_make_test_after_code_change();
+
+        /*
+         * Cross-layer closure is reviewable and uncommitted until complete.
+         * Every applicable layer must be reviewed, but a layer changes only
+         * when its semantics, mapping, composition or acceptance contract is
+         * affected. A commit always requires explicit user authorization.
+         */
+        guidance_agent_must_keep_temporary_layer_inconsistency_uncommitted();
+        guidance_agent_must_review_each_applicable_layer_and_change_only_affected_layers();
+        guidance_agent_must_require_explicit_commit_authorization();
 
         /*
          * Deferred/trimmed governance is inventory-driven.  Generators must
@@ -165,59 +183,67 @@ type RepositoryChangeWorkflow {
     }
 }
 
-type NoFeatureRefactorRoundWorkflow {
+type CharterFirstChangeWorkflow {
     invariant {
         /*
-         * A no-feature refactor round is a narrow implementation-first
-         * exception, not a feature-development shortcut. Before changing the
-         * implementation, the agent must read the applicable existing specs,
-         * record the baseline commit, behavior slice and acceptance tests,
-         * and confirm that the baseline repository-root make test passes.
+         * Charter-first is the default change workflow. The user or charter
+         * establishes design intent, then affected layers close top-down in
+         * this order: charter, model, coding, applicable compose,
+         * implementation, then testing/tests.
          */
-        guidance_agent_must_read_specs_and_verify_baseline_before_no_feature_refactor();
+        guidance_agent_must_default_to_charter_first();
+        guidance_agent_must_follow_charter_first_layer_order();
 
         /*
-         * The implementation may be reorganized before specification closure
-         * only for behavior already accepted by the recorded tests. The round
-         * must not add a capability, widen an interface or specified object
-         * boundary, change Linux differential semantics, or create a new
-         * semantic promise. Stable system semantics are identified by their
-         * meaning, not by requiring multiple implementation instances.
+         * Cross-layer conflicts are resolved by the same authority order.
+         * Plans, roadmaps, existing implementation and tests do not override
+         * an applicable higher layer.
          */
-        guidance_agent_may_implement_no_feature_refactor_before_spec_closure();
-        guidance_agent_must_bound_no_feature_refactor_by_accepted_behavior();
+        guidance_agent_must_resolve_conflicts_by_charter_first_authority();
+    }
+}
+
+type ModelFirstChangeWorkflow {
+    invariant {
+        /*
+         * Model-first is selected only when the user explicitly declares the
+         * round model-first and supplies the proposed model adjustment. The
+         * agent must not choose the scope or behavior slice itself.
+         */
+        guidance_agent_must_require_explicit_user_trigger_for_model_first();
+        guidance_agent_must_use_user_provided_model_first_adjustment();
 
         /*
-         * Temporary implementation/specification inconsistency may exist only
-         * in the uncommitted worktree. It must not be committed, carried into
-         * another round or presented as a completed result.
+         * Before editing, record the baseline commit, worktree state, relevant
+         * behavior and tests, and confirm a repository-root make test. The
+         * initial phase then changes only model, runs focused validation, and
+         * presents the actual diff and results to the user.
          */
-        guidance_agent_must_keep_refactor_inconsistency_uncommitted();
+        guidance_agent_must_record_and_verify_model_first_baseline();
+        guidance_agent_must_keep_model_first_initial_phase_model_only();
+        guidance_agent_must_show_model_first_diff_and_validation();
 
         /*
-         * Once the implementation diff is available, it and reproducible test
-         * observations are the evidence for closure. Every applicable layer
-         * must be reviewed, with needed changes closed in this order: charter,
-         * formal model, coding mapping, then testing. A reviewed layer changes
-         * only when its semantics, mapping or acceptance contract changed.
+         * No charter, coding, compose, implementation or testing change may
+         * begin until the user explicitly confirms the model adjustment.
          */
-        guidance_agent_must_close_refactor_layers_in_order();
+        guidance_agent_must_wait_for_explicit_model_first_confirmation();
 
         /*
-         * Tests may be reorganized with the refactor, but deleting, weakening
-         * or rewriting an assertion requires an explanation and preservation
-         * of the original scenario's observable acceptance purpose. Test
-         * weakening is not a specification-closure mechanism.
+         * After confirmation, close charter upward without changing the
+         * confirmed model meaning, then close coding, applicable compose,
+         * implementation and testing/tests downward in authority order.
          */
-        guidance_agent_must_preserve_test_acceptance_during_refactor();
+        guidance_agent_must_close_model_first_charter_upward_before_downward_layers();
+        guidance_agent_must_preserve_confirmed_model_meaning_during_charter_closure();
 
         /*
-         * If the implementation cannot be reconciled with a reasonable
-         * specification, the round stops and reports the conflict. The agent
-         * must not guess another implementation change or hide the conflict by
-         * weakening tests.
+         * If charter cannot close without changing the confirmed model
+         * meaning, stop and return to the model decision. Otherwise finish all
+         * applicable focused, specification, diff and repository-root tests.
          */
-        guidance_agent_must_stop_unclosable_refactor();
+        guidance_agent_must_return_unclosable_charter_to_model_decision();
+        guidance_agent_must_finish_model_first_validation();
     }
 }
 

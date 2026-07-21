@@ -1267,7 +1267,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 [`SEM-BOUNDARY-001`](../model/SEMANTICS.md#sem-boundary-001-deferred-and-trimmed-are-structured-boundaries)
 使用全模型唯一 ID、受控分类、可验证 evidence 和关闭/重审条件。已实现内容必须移出这两类 inventory，由正式事实、coding 和完成归档承载。
 
-后续修订时，若某一对象、状态、事件、谓词或类型已经进入形式化模型，应优先修改独立模型文件；正文只在需要同步解释、图示或设计背景时更新。
+后续修订默认按 `charter-first` 先在本文或对应 charter 专题确认设计意图，再修改独立模型文件；
+只有用户显式触发 `model-first` 并提供 model 调整方案时，才按
+[`spec/guidance`](../guidance/README.md) 的 model-only 确认门禁处理。无论采用哪种工作流，已经进入
+形式化模型的对象、状态、事件、谓词或类型都必须在独立模型文件中闭合；正文同步其解释、图示和
+设计背景，不能替代正式条目。
 
 #### 子阶段 2：入口后继期（Entry Successor Subphase）
 
@@ -1369,7 +1373,10 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 15. 执行 `MemBlock.enable() / memblock_allow_resize()`，在完整线性映射可用后允许 `MemBlock` 元数据扩展，使 `MemBlock` 从 `Ready` 推进到 `Online`。
 16. 执行 `EarlyDtb.cleanup()`，使早期 DTB 解析对象退出服务。这里的 `Destroyed` 不表示 `RawDtb` 物理内容消失，而表示早期解析对象的阶段性使命完成；后续正式 OF/DeviceTree 对象应视为重新建立的运行期对象。
 
-当前入口后继期的最小形式化对象模型已经落地；它的完成边界就是核心准备期的起点。后续围绕 `paging_init()` 之后到 `trap_init()` 之前的讨论，应先落入下面的核心准备期规格，再视稳定程度同步到形式化模型和对象级实现。
+当前入口后继期的最小形式化对象模型已经落地；它的完成边界就是核心准备期的起点。默认
+`charter-first` 下，后续围绕 `paging_init()` 之后到 `trap_init()` 之前的讨论应先落入下面的核心
+准备期规格，再视稳定程度同步到形式化模型和对象级实现；显式 `model-first` 轮遵守
+[`spec/guidance`](../guidance/README.md) 的确认门禁。
 
 #### 子阶段 3：核心准备期（Core Prepare Subphase）
 
@@ -1525,7 +1532,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 第四个子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 的内部内容。它从 `trap_init()` 完成后开始，在 `mm_core_init()` 返回时结束；后续的 `sched_init()`、IRQ/time/RCU/workqueue 初始化和 `local_irq_enable()` 都不属于本子阶段。
 
-本小节作为 `BootPhase` 子阶段 4 的讨论落点。新增讨论应先在这里明确 `mm_core_init()` 内部对象边界、阶段边界、状态推进和检查项；只有当语义已经稳定，才同步进入形式化模型、图示和对象级实现。若正文解释、形式化模型和实现之间出现差异，应优先回到本节确认设计意图，再更新可验证模型和代码。
+本小节作为 `BootPhase` 子阶段 4 的讨论落点。默认 `charter-first` 下，新增讨论应先在这里明确
+`mm_core_init()` 内部对象边界、阶段边界、状态推进和检查项；只有当语义已经稳定，才同步进入
+形式化模型、图示和对象级实现。显式 `model-first` 轮遵守
+[`spec/guidance`](../guidance/README.md) 的确认门禁。若正文解释、形式化模型和实现之间出现差异，
+仍按最终权威层级闭合，不得让实现反向覆盖 charter 意图。
 
 本子阶段仍处于 `引导期` 的 `System Exclusive` 上下文中。中断仍关闭，普通任务调度尚未启动，secondary hart 也尚未进入并发执行路径。因此，本阶段中的内存对象建立仍按单根流独占推进来理解。
 
@@ -1713,7 +1724,10 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 整体启动序列的第五个阶段、BootPhase 的第四个直接子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 返回后，到 `context_tracking_init()` 调用点完成的调度与异步基础准备段。它承接已经就绪的核心内存管理基础，先经过当前 `../linux-6.12/.config` 的 RISC-V 配置下裁剪的 `poking_init()` 和 `ftrace_init()` 调用点，再完成 `sched_init()`，建立 radix/maple 基础索引、workqueue early 框架、Softirq action table 壳和 RCU 支撑设施，使系统拥有“中断打开前所需的调度与异步基础”。当前配置下 `context_tracking_init()` 编译为空调用，只作为边界处的 trimmed/no-op 记录；后续 IRQ、timer/timekeeping、`softirq_init()` 和打开中断前收尾不属于本子阶段。
 
-本小节作为整体启动序列阶段 5、`BootPhase` 直接子阶段 4 的初步讨论落点。当前只做对象边界、Linux 调用分类、图示和结束状态的第一轮整理；后续逐个对象讨论稳定后，再同步进入形式化模型和 `impl/arceos_ex`。
+本小节作为整体启动序列阶段 5、`BootPhase` 直接子阶段 4 的初步讨论落点。当前只做对象边界、
+Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-first` 下，后续逐个对象讨论稳定后
+再同步进入形式化模型和 `impl/arceos_ex`，显式 `model-first` 轮则遵守
+[`spec/guidance`](../guidance/README.md) 的确认门禁。
 
 本子阶段仍处于 `System Exclusive` 上下文中：中断总开关仍关闭，secondary hart 仍未启动，普通任务切换尚未进入并发运行。`sched_init()` 是本阶段中心动作，但不能被理解为完整 SMP 调度器已经完成；Linux 注释明确说明完整拓扑设置发生在 `smp_init()`，本阶段只要求 boot CPU 和 possible CPU 的 runqueue 元数据、idle task 关联、调度类顺序和基础调度钩子可解释。
 
@@ -1732,7 +1746,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的启用配置包括：`CONFIG_SMP=y`、`CONFIG_PREEMPT=y`、`CONFIG_TREE_RCU=y`、`CONFIG_PREEMPT_RCU=y`、`CONFIG_TASKS_RCU=y`、`CONFIG_TASKS_TRACE_RCU=y`、`CONFIG_CONTEXT_TRACKING=y`、`CONFIG_CONTEXT_TRACKING_IDLE=y`、`CONFIG_CPU_ISOLATION=y`。当前 RISC-V 路径没有覆盖 `poking_init()`，因此使用 weak no-op；当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，因此 `ftrace_init()` 在 `include/linux/ftrace.h` 中折叠为空调用；当前未启用 `CONFIG_CONTEXT_TRACKING_USER_FORCE`，因此 `context_tracking_init()` 也在头文件中折叠为空调用。`housekeeping_init()` 虽然编译存在，将来需要作为 CPU isolation / nohz_full / isolcpus 相关对象展开，但当前最小启动输入未建模 `nohz_full=` 或 `isolcpus=` 参数，因此未设置 housekeeping flags 时直接返回。本阶段图示保留这类紧邻边界的 trimmed/deferred 调用位置，以避免误判 Linux 原始顺序。
 
-`early_trace_init()` 和 `trace_init()` 对应 Linux tracing core / event tracing 机制。当前项目已经有自己的 checkpoint announce/observer 机制，二者未来应合并为同一机制，还是保持并列并重新命名其边界和意义，暂未确定。由于 Linux tracing 不是本子阶段的核心启动功能，本阶段暂不建立主线 trace 对象；但未来若恢复，更可能是一个 `LinuxTracing` 对象，其中 `early_trace_init()` 对应 `preset()`，`trace_init()` 对应 `setup()`，而不是拆成 `EarlyTrace` 和 `TraceEvents` 两个独立对象。`ftrace_init()` 在当前配置下为空调用；如果后续配置启用 function tracing/mcount record，再考虑纳入同一 `LinuxTracing` 对象或单独作为 function tracing 子对象。为了保留 Linux 原始调用顺序，过程清单和时序图仍记录这些调用，并明确标记为 `trimmed` 或 `deferred`。后续若要恢复，应先明确它与项目内 checkpoint announce/observer 机制的关系、命名和责任边界，再进入形式化模型或实现。
+`early_trace_init()` 和 `trace_init()` 对应 Linux tracing core / event tracing 机制。当前项目已经有自己的 checkpoint announce/observer 机制，二者未来应合并为同一机制，还是保持并列并重新命名其边界和意义，暂未确定。由于 Linux tracing 不是本子阶段的核心启动功能，本阶段暂不建立主线 trace 对象；但未来若恢复，更可能是一个 `LinuxTracing` 对象，其中 `early_trace_init()` 对应 `preset()`，`trace_init()` 对应 `setup()`，而不是拆成 `EarlyTrace` 和 `TraceEvents` 两个独立对象。`ftrace_init()` 在当前配置下为空调用；如果后续配置启用 function tracing/mcount record，再考虑纳入同一 `LinuxTracing` 对象或单独作为 function tracing 子对象。为了保留 Linux 原始调用顺序，过程清单和时序图仍记录这些调用，并明确标记为 `trimmed` 或 `deferred`。后续若要恢复，默认按 `charter-first` 先明确它与项目内 checkpoint announce/observer 机制的关系、命名和责任边界，再进入形式化模型或实现；显式 `model-first` 轮遵守 [`spec/guidance`](../guidance/README.md) 的确认门禁。
 
 当前先将子阶段 5 的对象和边界记录如下：
 
@@ -3114,7 +3128,10 @@ Ext2 是当前第一个被具体展开的磁盘文件系统类型。它的建模
 
 ### Ext2 对象建模说明
 
-Ext2 的建模原则应先在本章程中以自然语言确定对象意图，再落到 `spec/model` 和 `spec/coding` 的正式规格，最后才指导实现。实现已经存在或 roadmap 已经列出任务，并不能反过来替代这一步；若后续 Ext2 对象边界发生变化，也应先回到这里或对应上级说明中修正意图，再同步正式规格。
+Ext2 的建模原则默认按 `charter-first` 在本章程中以自然语言确定对象意图，再落到
+`spec/model` 和 `spec/coding`，最后指导实现；显式 `model-first` 轮遵守
+[`spec/guidance`](../guidance/README.md) 的确认门禁。实现已经存在或 roadmap 已经列出任务，并不能
+反向覆盖最终权威层级；若后续 Ext2 对象边界发生变化，必须按所选具名工作流闭合。
 
 当前 Ext2 不建模为一个单一的大对象，也不把 Linux `file_system_type`、磁盘布局和 mount 后的文件系统实例混在一起。它至少拆为三个核心对象：
 
@@ -3618,7 +3635,12 @@ virtio-blk/block I/O、VFS/ext2、scheduler/task、payload 读取和 phase bound
 或 probe profile；开启某个域的重型观察不得改变其它域的正式对象语义。长期对象事实的粒度可以细到 source、request、
 inode、block、task 或 IRQ context，但命名和字段必须先服务通用定位，再服务具体缺陷分析。
 
-长期 checkpoint 不应由实现侧为了某个缺陷临时散落产生，而应从规格出发。新增点位应先在 `spec/model` 中定义稳定事件名、触发语义、所属阶段/对象和可选字段，再在 coding 规格中定义实现义务，最后由 `impl/arceos_ex` 生成对应 trace/checkpoint。`docs/DEFECTS.md` 只记录问题现象、证据、分析进展和下一步定位需求；checkpoint 的长期原则、分层方式和候选边界应进入 charter，并在落地时进一步细化到 model/coding 规格。
+长期 checkpoint 不应由实现侧为了某个缺陷临时散落产生，而应从规格出发。默认
+`charter-first` 下，新增点位先在本章或对应 charter 专题确定长期观察意图，再由 `spec/model`
+定义稳定事件名、触发语义、所属阶段/对象和可选字段，并在 coding 规格中定义实现义务；显式
+`model-first` 轮遵守 [`spec/guidance`](../guidance/README.md) 的 model-only 确认门禁。闭合后才由
+`impl/arceos_ex` 生成对应 trace/checkpoint。`docs/DEFECTS.md` 只记录问题现象、证据、分析进展和
+下一步定位需求，不能替代任一规格层。
 
 checkpoint 的选择标准是长期内部可见性，而不是一次性 debug 输出。合格点位应对应稳定系统语义边界，能够用于 stress/nightly 的纵向差分，能在 Linux-like 对照中找到概念位置，开销和时序扰动可控，并且不只服务单个缺陷。若某个事件暂时只能携带少量字段，应优先保持事件边界稳定，再逐步补充结构化字段；不得通过不断扩张事件名来编码大量临时状态组合。
 
@@ -3664,7 +3686,9 @@ handler 过滤应作为 handler 配置能力设计，而不是通过删除 check
 2. 粒度过滤：可以按全系统、子系统/模块、对象、迁移/动作方法、内部细节筛选；其中全系统表示不过滤，后续层级逐步收窄。
 
 多类过滤条件同时存在时，采集集合以条件交集为准。若后续确认第三类过滤条件，例如 observation domain、结果类别、
-运行 profile 或其它维度，必须先在本章或更细的 model/coding 规格中命名并定义语义；在确认前不得臆造第三类过滤行为。
+运行 profile 或其它维度，默认按 `charter-first` 在本章命名后细化到 model/coding；显式
+`model-first` 轮遵守 [`spec/guidance`](../guidance/README.md) 的确认门禁。在相应工作流确认前不得
+臆造第三类过滤行为。
 v2 不实现通用过滤引擎，只固定启用 103 个 exact-mapped runtime checkpoint；paired stress case 通过
 显式 `checkpoint_scope` 声明每个 case 的顺序兼容交集。scope 外 runtime 事件只能进入 observed-but-not-compared
 报告，不能直接作为 paired diff 失败条件。若某个额外事件需要进入硬门禁，必须先更新对应 case 的

@@ -91,8 +91,9 @@ eventual delivery 要求，以及异步响应是否建立新推导链。上述�
    表达；工具不得在没有新硬语义时自动改变其执行方式。
 5. 不进行无边界的全仓机械替换。每次迁移必须先确认术语所在层级、信号源和目标、同步方式、响应
    过程以及父子系统关系。
-6. `EventStream` 等既有正式对象名的更名属于模型接口变更，必须按“先 charter、再 model/coding、
-   最后 implementation/test”的顺序单独处理。
+6. `EventStream` 等既有正式对象名的更名属于模型接口变更，默认必须按 `charter-first` 单独处理；
+   用户显式触发 `model-first` 时适用 [`spec/guidance`](../guidance/README.md) 的确认门禁，但不改变
+   最终权威层级。
 7. 通用交互概念 `Signal` 与 Linux/POSIX 进程信号机制必须保持可区分。`SignalCore`、
    `SignalRuntime` 等名称表示进程信号领域对象，不等同于通用 System Signal。
 

@@ -31,8 +31,10 @@ Markdown 中用于评审追踪，但不再是 pyveri predicate。根目录 `make
 7. `arceos_ex.md`：当前目标内核的 coding 索引。
 8. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
 
-若四层发生冲突，不能选择更方便的解释：先回到 charter 明确意图，再修正 model，随后更新
-coding `.md`，最后修改 impl。计划文档不得覆盖 charter、model 或 coding。
+默认 `charter-first` 中，层间冲突按 charter、model、coding、适用的 compose、impl、testing
+权威顺序处理。用户显式触发的 `model-first` 例外按 [`spec/guidance`](../guidance/README.md)
+执行其 model 确认门禁，再恢复同一权威层级的双向闭合。计划文档不得覆盖 charter、model 或
+coding。
 
 ## 阶段边界
 
@@ -79,7 +81,8 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 
 ## 规格优先级
 
-编码阶段按以下顺序解释规格：
+以下是 `charter-first` 与 `model-first` 最终闭合后共同遵守的权威优先级，不表示代理可以自行
+选择当轮修改顺序：
 
 1. `spec/charter`：设计意图、职责边界和参考范围；若与 model 冲突，先完成审计并修正 model。
 2. `spec/model/SEMANTICS.md` 与 `spec/model/**/*.spec`：正式生命周期、对象、迁移和依赖语义。
