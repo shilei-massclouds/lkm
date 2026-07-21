@@ -79,21 +79,17 @@
 
   > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
 
-* OnPreset：内核收到引导信号startup，识别引导初始化任务BootInitTask并执行早期初始化。BootInitTask本质上是内核对于引导信号的反应过程的抽象。
-
-  > GAP: BootInitTask 在当前 model 中是根任务对象，不是 Kernel 引导响应过程本身，其对象身份和执行 owner 尚未对齐。
+* OnPreset：内核收到引导信号 startup，由静态 `BootTask` 的 `RootStream` 执行早期初始化。
+  `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
 
   > [model] MUST：在 `SingleTaskContext` 中向 `EntryPreludePhase` 同步发送 Preset 启动信号，
   > 等待 `EntryPreludePhase` 到达 `Online`；当前 model 兼容写法为驱动
   > `EntryPreludePhase.Transition::Preset`。
 
-* Prepared：内核此时不响应中断，只有唯一的引导初始化任务BootInitTask处于就绪状态。
+* Prepared：内核此时不响应中断，`BootTask` 已 Online，并由其 `RootStream` 继续推进引导阶段。
 
-  > GAP: 当前 model 在 Kernel.Prepared 时已使 BootInitTask 到达 Online，并由 EntryPreludePhase 建立多个其它对象；这里的“就绪”尚需定义为任务运行态事实或与 lifecycle 对齐。
-
-* OnSetup：内核收到Setup信号，BootInitTask正式启动并代表内核完成中期初始化。
-
-  > GAP: 当前 model 的 Kernel.Setup 只驱动 BootPhase 和 InterruptPhase，BootInitTask 已在 Kernel.Preset 内到达 Online，“正式启动”时点尚未对齐。
+* OnSetup：内核收到 Setup 信号，已 Online 的 `BootTask` 继续代表内核完成中期初始化；
+  该迁移不再次启动或替换 Task。
 
   > [model] MUST：先向 `BootPhase` 同步发送 Preset 启动信号并等待其到达 `Online`，再向
   > `InterruptPhase` 同步发送 Preset 启动信号并等待其到达 `Online`；当前 model 兼容写法为

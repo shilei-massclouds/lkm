@@ -6,174 +6,16 @@
  */
 
 /*
- * RootStream 表示内核接管后的第一条常规流对象。它在入口前导期建立最早执行流的受控执行状态。
+ * RootStream 与 BootTask 的定义分别集中在 task_flow.spec 和
+ * task.spec；本文件只编排入口前导期中的迁移顺序。
  */
-object RootStream: FlowObject {
-    initial_state: State::Base;
-    parent: BootInitTask;
-
-    /*
-     * Base 表示根流只进入模型空间，尚未完成入口前导期的执行约束预置。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 禁止内核态使用 FPU 和 VECTOR，建立根流的早期安全执行条件。
-             */
-            on Transition::Preset -> State::Prepared {
-                /*
-                 * Started is emitted in `_start`; source/dependency adoption occurs at the
-                 * earliest Rust boundary without re-emitting it. Online returns to the
-                 * Kernel.Preset continuation rather than starting a sibling phase.
-                 */
-                depends_on {
-                    Riscv64.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.sstatus;
-                }
-
-                ensures {
-                    kernel_fpu_disabled(Riscv64.sstatus);
-                    kernel_vector_disabled(Riscv64.sstatus);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示根流已经完成入口前导期要求的体系结构状态预置。
-     */
-    state State::Prepared {
-        invariant {
-            kernel_fpu_disabled(Riscv64.sstatus);
-            kernel_vector_disabled(Riscv64.sstatus);
-        }
-    }
-}
-
-/*
- * BootInitTask 表示入口前导期的根任务对象。它在 Preset 中绑定 Linux 静态 init_task
- * 存储，并承载根流的任务身份。
- */
-object BootInitTask: TaskObject {
-    initial_state: State::Base;
-    source: static::linux_6_12;
-
-    attrs {
-        storage: ObjectStorage<BootInitTask>;
-    }
-
-    reference linux_6_12 {
-        storage = symbol("init_task");
-    }
-
-    /*
-     * Base 表示根任务对象尚未绑定到当前执行 hart 的任务指针。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 建立物理地址阶段的根任务指针。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    Riscv64.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.tp;
-                }
-
-                ensures {
-                    attrs_accessible(self);
-                    valid_object_storage(storage);
-                    valid_task_storage(storage);
-                    Riscv64.tp == phys_addr(BootInitTask.storage);
-                    task_preemption_control_ready(BootInitTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
-                    task_preemption_disabled(BootInitTask);
-                    task_ref_targets(BootInitTaskRef, BootInitTask);
-                    task_ref_ready(BootInitTaskRef);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示 tp 已经指向 init_task 的物理地址，可支撑物理地址阶段继续执行。
-     * init_task.thread_info.preempt_count 仍保持 INIT_PREEMPT_COUNT，使调度器运行前
-     * 内核抢占关闭。
-     */
-    state State::Prepared {
-        invariant {
-            attrs_accessible(self);
-            valid_object_storage(storage);
-            valid_task_storage(storage);
-            Riscv64.tp == phys_addr(BootInitTask.storage);
-            valid_task_ref(Riscv64.tp);
-            task_preemption_control_ready(BootInitTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
-            task_preemption_disabled(BootInitTask);
-            task_ref_targets(BootInitTaskRef, BootInitTask);
-            task_ref_ready(BootInitTaskRef);
-        }
-
-        transitions {
-            /*
-             * Enable 在早期虚拟地址空间可用后，将根任务指针切换为虚拟地址。
-             */
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    Vm.state == State::Ready;
-                }
-
-                may_change {
-                    Riscv64.tp;
-                }
-
-                ensures {
-                    attrs_accessible(self);
-                    valid_object_storage(storage);
-                    valid_task_storage(storage);
-                    Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
-                    task_preemption_control_ready(BootInitTask);
-                    task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
-                    task_preemption_disabled(BootInitTask);
-                    task_ref_targets(BootInitTaskRef, BootInitTask);
-                    task_ref_ready(BootInitTaskRef);
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示根任务指针已经使用 EarlyVm 中的内核映像虚拟区域地址，且调度器运行前的
-     * 初始抢占关闭状态仍被保留。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            valid_object_storage(storage);
-            valid_task_storage(storage);
-            Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
-            valid_task_ref(Riscv64.tp);
-            task_preemption_control_ready(BootInitTask);
-            task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
-            task_preemption_disabled(BootInitTask);
-            task_ref_targets(BootInitTaskRef, BootInitTask);
-            task_ref_ready(BootInitTaskRef);
-        }
-    }
-}
 
 /*
  * BootInitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。
  */
 object BootInitStack: StackObject {
     initial_state: State::Base;
-    parent: BootInitTask;
+    parent: BootTask;
 
     attrs {
         range: Derived<AddrRange, range(Lds.init_stack_start, Lds.init_stack_end)>;
@@ -2231,14 +2073,14 @@ object EntryPreludePhase: PhaseObject {
                     BootCurrentCPU.Transition::Setup;
                     CpuGroup.Transition::Preset;
                     BootCurrentCPU.Transition::Enable;
-                    BootInitTask.Transition::Preset;
+                    BootTask.Transition::Preset;
                     BootInitStack.Transition::Preset;
                     EventStream.Transition::Preset;
                     ExceptionStream.Transition::Preset;
                     Vm.Transition::Preset;
                     Vm.Transition::Setup;
                     EventStream.Transition::Setup;
-                    BootInitTask.Transition::Enable;
+                    BootTask.Transition::Enable;
                     BootInitStack.Transition::Setup;
                     Soc.Transition::Preset;
                 }
@@ -2282,7 +2124,7 @@ object EntryPreludePhase: PhaseObject {
             UnexpectedException.state == State::Prepared;
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
-            BootInitTask.state == State::Online;
+            BootTask.state == State::Online;
             BootInitStack.state == State::Ready;
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;

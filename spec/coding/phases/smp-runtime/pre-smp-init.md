@@ -31,7 +31,7 @@ or a RestInitPhase wrapper.
 PreSmpInitPhase begins on the KernelInitTask execution line by
 observing kthreadd_done through the Completion wait side. The release
 fact must be produced by KernelInitTask observing KthreaddReadyGate,
-not by BootInitTask's complete side.
+not by BootTask's complete side.
 
 #### KernelInitTask entry
 

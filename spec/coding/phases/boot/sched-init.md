@@ -118,7 +118,8 @@ preset()  ← 由 BootPhase.enable_after_mm_core_init() 调用
 | MmCoreInitPhase | Online |
 | Scheduler | Online |
 | BootRunQueue | Ready |
-| BootIdleTask | Ready |
+| BootTask | Online |
+| BootIdleSetup | Ready |
 | RadixTree | Ready |
 | MapleTree | Ready |
 | Workqueue | Prepared |

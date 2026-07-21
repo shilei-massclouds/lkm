@@ -2,15 +2,17 @@
 
 本文件是 `spec/model/objects/user_boot.spec` 与 `files.spec` 的权威 coding 映射。VFS object/backend
 语义由 [`vfs.md`](vfs.md) 承载；本文件承载 init 候选策略、address-space/trap return、syscall table、
-fd/OFD/backend dispatch、进程身份以及当前单 child slice 的集成边界。共享 exec 对象分别由
+fd/OFD/backend dispatch、Task 用户资源以及当前 bounded user-task 集合的集成边界。共享 exec 对象分别由
 [`ExecTransaction`](exec-transaction.md)、[`BinaryFormatRegistry`](binary-format-registry.md)、
 [`ExecSyncBoundaries`](exec-sync-boundaries.md) 和 [`ElfObject`](elf-object.md) 承载。
 
 ## Ownership and entry
 
 `UserBootPayload`、首个 `UserAddressSpace` 和 `UserTrapFrame` 均属于
-`KernelInitTask` 的执行线。`UserInitProcess` 是同一 PID 1 task 经 exec/user-entry 后的身份视图，
-不是第二个 task。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
+`KernelInitTask` 的执行线。PID 1 的 files、credentials、signal、process-group 和 user trap 状态
+直接保存在 `KernelInitTask` 的 user-state lowering 中，不建立 exec 后 persona carrier。
+`Pid1UserAppFlow` 独立保存首次用户应用 continuation 的 lifecycle；它不是第二个 Task，也不拥有上述
+Task 资源。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
 不增加 `SyscallDispatcher`。
 
 用户栈 backing、initial stack 与增长语义由独立 [`UserStack`](user-stack.md) coding contract 承载；
@@ -91,29 +93,27 @@ wakeup, concurrent or multiple live pipes, expandable buffers, full OFD/files/ta
 
 ## Clone, wait and exec
 
-The supported `clone(220)` plain-fork shape decodes ABI flags in `SyscallTable` and delegates object
-creation to `TaskCreationCore.CopyUserProcess`. The current implementation deliberately uses one
-observed child slot: parent state and writable pages are saved for handoff, the child receives `a0=0`,
-and wait/exit restores the parent view before status copyout. Nested BusyBox-init/login slices reuse only the
-explicitly modeled continuation records; this is not a claim of a general runnable task graph or COW.
-For a PID1-originated plain fork, successful wait status copyout completes reaping: the exited internal
-`UserChild` task is removed from the runqueue, its slot becomes `Prepared`, and the next sequential fork
-reuses that task ref with a monotonically increasing user-visible pid. This path does not use the vfork
-completed-record archive.
+The supported `clone(220)` plain-fork shape decodes ABI flags in `SyscallTable` and delegates Task creation
+to `TaskCreationCore.CopyUserProcess`. Production state is owned by `UserTaskSet`: each successful fork
+allocates a fresh logical Task identity and monotonically increasing PID, while parent state and writable
+pages are saved in a continuation record for the handoff. The child receives `a0=0`; wait/exit restores the
+parent view before status copyout. A fixed-capacity Rust record may be recycled only after the prior Task and
+all its Flow instances are destroyed; record reuse must increment the allocation generation and must never
+reuse the prior TaskRef or lifecycle state. Nested BusyBox-init/login records are bounded lowering, not a
+single reusable child object or a claim of general COW.
 
-For the observed BusyBox init login-shell plain fork, `UserInitProcess` additionally owns one pending
-grandchild identity from clone return until the shell's wait4 handoff. It records the grandchild pid and
+For the observed BusyBox init login-shell plain fork, `UserTaskSet` additionally owns one pending
+grandchild record from clone return until the shell's wait4 handoff. It records the fresh grandchild Task identity, pid and
 the shell parent's inherited process group/session without creating another runnable task. While that
 identity is parent-visible and has not entered the handoff/exec continuation, the shell parent may issue
 only `setpgid(child_pid, child_pid)`; the update is consumed into the visible child identity at wait4
 handoff. Unknown pid remains `ESRCH`, negative pgid remains `EINVAL`, and unsupported or cross-session
 group selection remains `EPERM`. Parent-side setpgid after handoff/exec, multiple pending children and a
 general process-group/task lookup stay deferred. Grandchild exit restores the saved shell pgrp/session
-and clears any pending identity. The internal `UserChild` remains the `Ready`, enqueued shell continuation;
+and clears any pending identity. The corresponding user Task remains the `Ready`, enqueued shell continuation;
 the restore clears only the completed grandchild round's trap-frame, stack/address-space snapshot, wait
-frame/status and exit facts. A later sequential observed plain fork may reuse that shell slot and must
-receive the next pid. This is distinct from vfork active-slot reuse, which releases a completed execution
-slot to `Prepared`.
+frame/status and exit facts. A later sequential observed plain fork must allocate a new Task identity and
+receive the next pid; an implementation record may be reclaimed only after the prior Task/Flow teardown.
 
 The PID 1 parent wait handoff accepts both observed BusyBox forms:
 `wait4(-1, status, WUNTRACED, NULL)` from the interactive shell and
@@ -123,8 +123,8 @@ omits stop reporting.
 
 The LTP list-stage command substitution adds one narrower second-level shape. It accepts only
 `flags == SIGCHLD`, `newsp == 0`, and a current script continuation that came from an unfinished
-PID1-originated plain fork. The single internal `UserChild` slot may own at most one pending builtin-only
-grandchild. Clone returns a monotonically allocated pid to the script and records a distinct child trap/
+PID1-originated plain fork. The bounded `UserTaskSet` slice may hold at most one pending builtin-only
+grandchild record. Clone returns a monotonically allocated pid to the script and records a distinct Task identity, Flow, trap/
 stack/fd view; the grandchild receives zero from clone only when the script reaches wait4. A second pending
 child, a clone from the builtin grandchild, or any deeper/concurrent shape returns the existing unsupported
 boundary and does not consume a pid.

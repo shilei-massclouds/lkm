@@ -176,9 +176,9 @@ Kernel
 | IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptStream context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
 | ProcessPreparePhase | rest_init 前准备边界一致 | 标准四态、下游依赖 Online | 对象覆盖/deferred/父返回已映射 | 四 checkpoint、Interrupt.Prepared 已验证 | complete |
 | UpMultitaskPhase | 三子阶段、Interrupt/Kernel 边界固定 | 三迁移分担 drives、四态完整 | continuation/checkpoint/跨栈完整映射 | 精确 Online、三个父 continuation、Kernel continuation 已验证 | complete |
-| BootInitRestInitPhase | BootInitTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |
-| BootInitScheduleHandoffPhase | BootInitTask 首次调度边界 | 标准四态、Scheduler action context 保持 | dispatch 锁存与父返回已映射 | 四 checkpoint、长期 dispatch query 已验证 | complete |
-| BootIdleEntryPhase | BootIdleTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
+| BootInitRestInitPhase | BootTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |
+| BootInitScheduleHandoffPhase | BootTask 首次调度边界 | 标准四态、Scheduler action context 保持 | dispatch 锁存与父返回已映射 | 四 checkpoint、长期 dispatch query 已验证 | complete |
+| BootIdleEntryPhase | BootTask idle 入口边界 | 标准四态、BootIdleStartupContext 保持 | idle chain、父 continuation、真实 handoff 已映射 | 四 checkpoint、Up.Online 后真切栈已验证 | complete |
 | SmpRuntimePhase | 六个直接子阶段、Up.Online 入口和 Payload 出口固定 | 1/1/4 drives、四态和精确 Online 完整 | KernelInitTask owner、栈检查与六个 continuation 已映射 | 四 checkpoint、实际 SP 和父 continuation 已验证 | complete |
 | PreSmpInitPhase | BP 预备边界一致 | 标准四态、下游依赖 Online | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
 | SmpBringupPhase | BP 协调 replicated AP family | pointwise AP drives、all-online 后 ack | HSM/Acquire wait/completion/hotplug guard 已映射 | BP 不代写 AP 状态，全部 Online 后才 ack | complete |

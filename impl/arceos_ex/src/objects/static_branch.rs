@@ -1,5 +1,5 @@
 use super::{
-    init_task::InitTask,
+    boot_task::BootTask,
     kernel_image::KernelImage,
     mutex::Mutex,
     percpu_rw_semaphore::{PerCpuRwSemaphore, PerCpuRwSemaphoreReadOutcome},
@@ -93,7 +93,7 @@ impl StaticBranch {
         vm: &Vm,
         cpu_hotplug_lock: &mut PerCpuRwSemaphore,
         jump_label_mutex: &mut Mutex,
-        init_task: &InitTask,
+        boot_task: &BootTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || kernel_image.state() != State::Online
@@ -101,7 +101,7 @@ impl StaticBranch {
             || !vm.entry_successor_ready()
             || !cpu_hotplug_lock.ready()
             || !jump_label_mutex.ready()
-            || init_task.state() != State::Online
+            || boot_task.state() != State::Online
         {
             return self.failed_setup();
         }
@@ -113,7 +113,7 @@ impl StaticBranch {
          * SingleTaskContext already contributes single CPU/task facts.
          */
         if cpu_hotplug_lock.read_lock_owner(
-            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootInitTask,
+            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootTask,
             0,
         )? != PerCpuRwSemaphoreReadOutcome::AcquiredFast
         {
@@ -125,7 +125,7 @@ impl StaticBranch {
          * JumpLabelMutex.Lock(BootInitTaskRef) preserves the jump_label_lock()
          * boundary for setup.
          */
-        jump_label_mutex.lock_boot_init_task(init_task)?;
+        jump_label_mutex.lock_boot_init_task(boot_task)?;
         self.entries = [
             StaticKeyEntry::new(StaticKey::InitOnAlloc),
             StaticKeyEntry::new(StaticKey::InitOnFree),
@@ -144,14 +144,14 @@ impl StaticBranch {
          * JumpLabelMutex.Unlock(BootInitTaskRef) exits the same modeled mutex
          * boundary.
          */
-        jump_label_mutex.unlock_boot_init_task(init_task)?;
+        jump_label_mutex.unlock_boot_init_task(boot_task)?;
         /*
          * CpuHotplugReadContext:
          * CpuHotplugLock.ReadUnlock(BootInitTaskRef) exits the same modeled
          * read-side boundary.
          */
         cpu_hotplug_lock.read_unlock_owner(
-            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootInitTask,
+            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootTask,
             0,
         )?;
 

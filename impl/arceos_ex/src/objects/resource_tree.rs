@@ -117,7 +117,7 @@ impl ResourceTree {
          * write_lock() boundary even though the surrounding SingleTaskContext
          * already contributes single CPU/task facts.
          */
-        if resource_lock.write_lock_owner(super::rwlock::RwLockOwner::BootInitTask)?
+        if resource_lock.write_lock_owner(super::rwlock::RwLockOwner::BootTask)?
             != RwLockWriteOutcome::Acquired
         {
             return self.failed_setup();
@@ -134,7 +134,7 @@ impl ResourceTree {
             && self.resources_ready();
         if !records_ready {
             self.clear();
-            resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootInitTask)?;
+            resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootTask)?;
             return self.failed_setup();
         }
         self.write_lock_guard_used = true;
@@ -144,7 +144,7 @@ impl ResourceTree {
          * ResourceLock.WriteUnlock(BootInitTaskRef) exits the same modeled
          * write_lock() boundary.
          */
-        resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootInitTask)?;
+        resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootTask)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

@@ -109,7 +109,7 @@ _start:
     li a0, {trace_boot_cpu_preset}
     call {head_checkpoint}
 
-    # InitTask.Preset: install the init task pointer in tp.
+    # BootTask.Preset: install the init task pointer in tp.
     la tp, {init_task_storage}
     li a0, {trace_init_task_preset}
     call {head_checkpoint}
@@ -135,7 +135,7 @@ _start:
     head_init_stack_sp = sym head_init_stack_sp,
     head_trap_entry = sym arceos_ex_head_trap_entry,
     head_text_align = const HEAD_TEXT_ALIGN,
-    init_task_storage = sym crate::objects::init_task::init_task_storage,
+    init_task_storage = sym crate::objects::boot_task::init_task_storage,
     pt_size_on_stack = const crate::objects::init_stack::PT_SIZE_ON_STACK,
     rust_entry = sym entry_prelude_rust_entry,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
@@ -269,7 +269,7 @@ fn adopt_head_preset_start(boot_args: &BootArgs) -> EventResult {
 /// - `RootStream.Preset`
 /// - `KernelImage.Setup`
 /// - `BootCurrentCPU.Preset`
-/// - `InitTask.Preset`
+/// - `BootTask.Preset`
 /// - `InitStack.Preset`
 ///
 /// This Rust segment adopts those completed events into the resource objects,
@@ -319,7 +319,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.cpu_group.preset(&ctx.boot_current_cpu)?;
     crate::checkpoint::checkpoint(Checkpoint::CpuGroupPrepared);
     ctx.boot_current_cpu.enable(&ctx.cpu_group)?;
-    ctx.init_task.adopt_head_preset(&ctx.kernel_image)?;
+    ctx.boot_task.adopt_head_preset(&ctx.kernel_image)?;
     ctx.init_stack
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
 }
@@ -346,7 +346,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
         &ctx.exception_stream,
         &ctx.interrupt_stream,
     )?;
-    ctx.init_task.enable(&ctx.kernel_image, &ctx.vm)?;
+    ctx.boot_task.enable(&ctx.kernel_image, &ctx.vm)?;
     ctx.init_stack.setup(&ctx.vm)?;
     Soc::preset()?;
     adopt_prepared_with_check(ctx)
@@ -419,7 +419,7 @@ fn entry_prelude_phase_ready(ctx: &Context) -> bool {
         && ctx.exception_stream.unexpected_state() == State::Prepared
         && ctx.kernel_image.state() == State::Online
         && ctx.raw_dtb.state() == State::Ready
-        && ctx.init_task.state() == State::Online
+        && ctx.boot_task.state() == State::Online
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready
         && ctx.vm.entry_prelude_ready()

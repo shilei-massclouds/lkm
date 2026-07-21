@@ -1,26 +1,28 @@
 # UpMultitaskPhase 单核多任务阶段
 
-UpMultitaskPhase 是 Kernel 的第三个直接子阶段，由 BootInitTask 和身份转换后的
-BootIdleTask 执行。它负责准备 KernelInitTask 与 KthreaddTask、启用多任务支持，然后将
-BootInitTask 转换身份为 BootIdleTask。
+UpMultitaskPhase 是 Kernel 的第三个直接子阶段，由唯一的 `BootTask` 执行其启动
+continuation 和 idle continuation。它负责准备 `KernelInitTask` 与 `KthreaddTask`、启用多任务
+支持，并把 `BootTask` 的 active Flow 从 `RootStream` handoff 到 `BootIdleFlow`；该 handoff
+不创建或替换 Task。
 
 ## 边界与职责
 
 - 入口：`Kernel.Enable` 在 `InterruptPhase.Online` 后驱动 `UpMultitaskPhase.Preset`。
 - 直接子阶段固定为 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
   `BootIdleEntryPhase`；不建立 `RestInitPhase` wrapper。
-- 出口：`UpMultitaskPhase.Online` 已发布后，BootIdleTask 保存自己的 switch context，恢复
+- 出口：`UpMultitaskPhase.Online` 已发布后，BootTask 保存自己的 switch context，恢复
   KernelInitTask 的 vmalloc stack，并进入具名 `kernel::enable_after_up_multitask()`
   continuation。该 continuation 才能启动现有 SmpRuntime 入口。
 - secondary CPU、workqueue worker 和后续 runtime 不属于本阶段。
 
 三个子阶段按执行主体划分：
 
-1. `BootInitRestInitPhase` 由 BootInitTask 执行 `rcu_scheduler_starting()`，创建并唤醒
+1. `BootInitRestInitPhase` 由运行 `RootStream` 的 BootTask 执行 `rcu_scheduler_starting()`，创建并唤醒
    KernelInitTask/KthreaddTask，发布 `SYSTEM_SCHEDULING` 并完成 `kthreadd_done`。
-2. `BootInitScheduleHandoffPhase` 仍由 BootInitTask 执行
+2. `BootInitScheduleHandoffPhase` 仍由运行 `RootStream` 的 BootTask 执行
    `BootIdlePreemption.EnableNoResched` 和首次 `Scheduler.Schedule`，只提交调度/dispatch 事实。
-3. `BootIdleEntryPhase` 由 BootIdleTask continuation 在 `BootIdleStartupContext` 中进入
+3. `BootIdleEntryPhase` 由同一 BootTask 的 `BootIdleFlow` continuation 在
+   `BootIdleStartupContext` 中进入
    `cpu_startup_entry()` 与一轮代表性 idle loop，然后返回父 Enable continuation。
 
 叶子阶段 Online 后只返回 UpMultitask 持有的 continuation，不直接启动 sibling。
@@ -44,6 +46,10 @@ Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
 
 `KernelInitTask` 的 `CurrentTaskRef` 标签只是线性调度事实；只有上述真实 task stack handoff 和
 KernelInit 入口的实际 SP 验证构成物理跨栈边界。
+
+`BootTask` 始终是静态 `init_task`/PID 0/swapper 的唯一 Task carrier。`RootStream` 与
+`BootIdleFlow` 分别保存 handoff 前后的 Flow lifecycle；Task 的调度身份、CPU 归属、preemption
+状态和 `TaskThreadContext` 不随 Flow handoff 重建。
 
 ## 引用
 

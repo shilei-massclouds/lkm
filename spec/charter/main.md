@@ -95,7 +95,7 @@
 | 前置环境 | 内核领域建立之前，由硬件、固件与引导过程所提供的执行条件、资源基础及控制关系的总和。 |
 | 内核领域 | 本规格重点讨论的领域，指内核接管控制权后，用以组织执行流、资源对象与组件关系的对象空间。 |
 | 常规流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示在默认情况下持续推进、首尾衔接、源源不断的执行状态。 |
-| 根流（Root Stream） | 内核接管控制权后建立的第一条、也是引导期内唯一的常规流对象。它是后续常规流建立与早期初始化推进的根源流，负责一路执行早期初始化，直到创建 `kernel_init` 与 `kthreadd` 后，将执行承载 handoff 给 `BootIdleTask`。 |
+| 根流（Root Stream） | 内核接管控制权后建立的第一条、也是引导期内唯一的常规流对象。它是 `BootTask` 的初始 Flow，负责一路执行早期初始化；创建 `kernel_init` 与 `kthreadd` 后，`BootTask` 保持身份并把 active Flow handoff 给 `BootIdleFlow`。 |
 | 事件流 | 在本规格当前讨论中，指 Flow 在内核领域的一种核心表现形态，表示由事件源触发并导向相应处理路径的离散执行形态。其核心子形态包括中断流与异常流。 |
 | 内核 | 软件执行流中的核心阶段。它从前序引导阶段接收控制权，并继续组织系统初始化、组件装配、运行与退出。 |
 | 组件 | 内核内部参与某一段执行流的功能单元，具有明确职责、边界、输入输出与生命周期。 |
@@ -761,7 +761,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 在阶段内部继续划分子阶段时，应以执行主体的视角作为首要边界原则。子阶段是某个 `Flow` / 任务 / 事件处理流连续执行片段的最小规格粒度，不能跨越任务切换、中断进入/返回、异常进入/返回或其它执行主体交接边界。一个子阶段可以创建、唤醒、释放或调度其它任务，也可以发布其它执行主体后续入口所需的事实；但它不能驱动或声明已经执行了其它任务、异常流或中断流自己的子阶段。跨执行主体的衔接应通过 entry、release、dispatch、completion、scheduler handoff 等可观察事实表达，而不是把两个执行主体的子阶段串成普通 sibling 顺序。
 
-因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务身份转换或调度分叉，则函数前后应按执行主体拆成不同子阶段；例如启动根任务后续转为 boot idle 身份时，`BootInitTask` 执行片段和 `BootIdleTask` 执行片段应在规格上可区分。后续异常执行流和中断执行流也采用同一原则：它们拥有自己的子阶段，只能由对应事件流执行，常规任务子阶段只能记录进入这些事件流的边界事实。
+因此，Linux 源码中的函数边界只能作为识别子阶段的线索，不能覆盖执行主体边界。若一个函数内部发生任务切换、Flow handoff 或调度分叉，则函数前后应按执行 continuation 拆成不同子阶段；例如同一 `BootTask` 的 `RootStream` 片段和 `BootIdleFlow` 片段应在规格上可区分，但不得据此制造第二个 Task。后续异常执行流和中断执行流也采用同一原则：它们拥有自己的子阶段，只能由对应事件流执行，常规任务子阶段只能记录进入这些事件流的边界事实。
 
 <p align="center">
   <img src="pic/kernel-context-phases.svg" alt="内核上下文相关阶段划分" width="820">
@@ -975,7 +975,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 据此，当前可先识别出十一类本子阶段涉及的核心对象。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导期新建立的对象；它在本子阶段中作为只读资源布局被读取和验证。
 
 1. `根流`，英文名 `Root Stream`：内核引导过程中最早出现的执行流对象，表示当前唯一 `常规流+` 的 `Flow`，用于把前置环境交接下来的唯一执行流显式纳入内核对象体系，并作为后续常规流建立与早期初始化推进的根源流。
-2. `启动根任务`，英文名 `BootInitTask`：后续建立的流对象父对象，是 `根流` 在内核领域内的具体化对象，后续将主要用于跟踪这一早期执行实体；它对应 Linux 静态 `init_task` / PID 0 / swapper 的启动期身份。
+2. `启动根任务`，英文名 `BootTask`：后续建立的流对象父对象，是 `根流` 在内核领域内的具体化对象，后续将主要用于跟踪这一早期执行实体；它对应 Linux 静态 `init_task` / PID 0 / swapper 的启动期身份。
 3. `启动根栈`，英文名 `BootInitStack`：`启动根任务` 的对应栈，作为 `启动根任务` 的子对象；它对应 Linux 静态 `init_thread_union` / init stack 存储。
 4. `中断流`，英文名 `Interrupt Stream`：当前阶段的中断控制对象。在本子阶段，它还不是一个对外开放、可承担真实处理中断职责的运行流，而首先用于封闭中断进入路径，确保入口前导期在受控条件下继续执行。
 5. `事件流`，英文名 `Event Stream`：`中断流` 的下级子对象，维护中断/异常入口表以及中断和异常分叉前的公共流程。
@@ -996,7 +996,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 图 8 用于说明入口前导期涉及对象的分类与相互关系。该阶段主要涉及四类对象：流对象、地址空间对象、硬件对象和阶段对象。
 
-在流对象中，`根流`（`Root Stream`）是内核引导过程中最早出现的执行流。随后建立的 `启动根任务`（`BootInitTask`）是 `根流` 在内核领域内的具体化对象，未来将主要通过它跟踪这一早期执行实体。因此，在对象层级上，`启动根任务` 是父对象，`根流` 和 `启动根栈`（`BootInitStack`）都是它的子对象。入口后继期还会为 `启动根任务` 补充 `根任务地址空间`（`InitMM`）子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`事件流`（`Event Stream`）是 `中断流`（`Interrupt Stream`）的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
+在流对象中，`根流`（`Root Stream`）是内核引导过程中最早出现的执行流。随后建立的 `启动根任务`（`BootTask`）是 `根流` 在内核领域内的具体化对象，未来将主要通过它跟踪这一早期执行实体。因此，在对象层级上，`启动根任务` 是父对象，`根流` 和 `启动根栈`（`BootInitStack`）都是它的子对象。入口后继期还会为 `启动根任务` 补充 `根任务地址空间`（`InitMM`）子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`事件流`（`Event Stream`）是 `中断流`（`Interrupt Stream`）的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
 
 在地址空间对象中，`虚拟内存空间`（`VM`）的空间内容先拆为两个子对象，分别是内核映像和物理内存空间。其中，`物理内存空间` 是准备期输入对象，表示只读的物理资源布局；入口前导期不建立或修改它，只读取它提供的约束。`VM` 的建立过程还包含三个页表子对象：`跳板虚拟内存空间`（`TrampolineVM`）维护并使用 `静态对象集合.trampoline_pg_dir`，`早期虚拟内存空间`（`EarlyVM`）维护并使用 `静态对象集合.early_pg_dir`，`交换虚拟内存空间`（`SwapperVM`）维护并使用 `静态对象集合.swapper_pg_dir`。入口前导期只触发前两个子对象，`SwapperVM` 对应的完整虚拟内存空间由后续阶段继续建立。
 
@@ -1025,7 +1025,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
      * 执行动作：通过设置 `sstatus`，禁止在内核态执行 `FPU` 指令与 `VECTOR` 指令。
      * 结束状态：验证 `sstatus` 对应位，确保 `FPU` 指令与 `VECTOR` 指令已被禁止。
 
-2. `启动根任务`（`BootInitTask`）
+2. `启动根任务`（`BootTask`）
 
    描述：后续建立的流对象父对象，是 `根流` 在内核领域内的具体化对象，后续将主要用于跟踪这一早期执行实体；它对应 Linux 静态 `init_task` / PID 0 / swapper 的启动期身份。
 
@@ -1293,7 +1293,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 6. `命令行管理对象`（`CommandLine`）：代表启动命令行的文本视图管理对象。入口后继期的 `CommandLine.preset()` 建立 raw view，即 `KernelCmdline`，它来自 `EarlyDtb` 解析结果，只保存启动参数文本和必要边界事实，不负责解释每个参数的语义。完成 `parse_dtb()` 后，`CommandLine.state == Prepared`，`KernelCmdline.state == Ready`，供后续参数解析对象使用。`SavedCommandLine` 与 `StaticCommandLine` 是同一 `CommandLine` 对象在核心准备期建立的 saved/static 子视图，不作为新的顶级命令行管理对象。
 7. `参数解析管理对象`（`Params` / `EarlyParam` / `BootParam` / `PayloadParam`）：`Params` 是参数解析类对象的顶层管理者，不属于 `CommandLine`，也不合并命令行文本视图管理。入口后继期由 `Params.preset()` 驱动 `EarlyParam.setup()`，完成第一次 `parse_early_param()`；核心准备期由 `Params.setup()` 驱动 `BootParam.setup()` 和 `PayloadParam.setup()`，实现必须在二者之间保留 `print_unknown_bootoptions()` checkpoint。`EarlyParam.setup()` 依赖 `CommandLine` 的 raw view 和静态 `early_param` handler 表；当前规格要求 `earlycon` handler 必须存在，并在处理 `earlycon=sbi` 时连续驱动 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`。这意味着 `EarlyParam` 负责识别并分发参数处理过程，而 `EarlyCon` 仍负责自身后端建立与启用，只是这些对象推进发生在同一个参数处理调用链内部。
 8. `启动根栈`（`BootInitStack`）：入口前导期结束时已经进入 `Ready`，即 `sp` 已经切换到早期虚拟地址。入口后继期继续执行 `BootInitStack.enable()`，建立根栈边界和溢出保护事实，使 `BootInitStack` 进入 `Online`。这里的 `guard/保护` 只是 `enable` 的文档别名，不是单独transition 名；入口前导期的地址切换事件已经统一为 `setup`。
-9. `根任务地址空间`（`InitMM`）：`BootInitTask` 的子对象，代表 Linux `init_mm` 对应的根任务地址空间元数据。Linux 中 `init_task.mm == NULL`，但 `init_task.active_mm == &init_mm`；`init_mm.pgd` 静态指向 `swapper_pg_dir`，而 `setup_initial_init_mm(_stext, _etext, _edata, _end)` 会填入内核代码段、数据段与 `brk` 边界。因此，`InitMM` 不是另一个与 `VM`/`SwapperVM` 竞争的页表对象，而是 `BootInitTask` 关联的 `mm_struct` 抽象，用于把启动根任务与后续完整内核地址空间元数据连接起来。
+9. `根任务地址空间`（`InitMM`）：`BootTask` 的子对象，代表 Linux `init_mm` 对应的根任务地址空间元数据。Linux 中 `init_task.mm == NULL`，但 `init_task.active_mm == &init_mm`；`init_mm.pgd` 静态指向 `swapper_pg_dir`，而 `setup_initial_init_mm(_stext, _etext, _edata, _end)` 会填入内核代码段、数据段与 `brk` 边界。因此，`InitMM` 不是另一个与 `VM`/`SwapperVM` 竞争的页表对象，而是 `BootTask` 关联的 `mm_struct` 抽象，用于把启动根任务与后续完整内核地址空间元数据连接起来。
 10. `早期临时映射服务`（`EarlyIoremap`）：代表 `early_ioremap()` / `early_iounmap()` 使用的早期临时映射机制。它依赖 `FixMap` 已经提供 `FIX_BTMAP` 临时映射区，但不是 `FixMap` 的子对象；`FixMap` 是固定虚拟地址槽位布局，`EarlyIoremap` 则是使用这些槽位的服务对象。`EarlyIoremap.setup()` 对应 Linux `early_ioremap_setup()`，负责初始化各个 boot-time mapping slot 的虚拟起点并确认 `prev_map[]` 为空；后续 `early_ioremap()` 与 `early_iounmap()` 应建模为可重复执行的 `map/unmap` action，而不是生命周期 transition。
 11. `SBI能力视图`（`SBI`）：代表内核基于固件 SBI 接口建立的平台服务能力视图。`SBI.setup()` 对应 Linux `sbi_init()`，只负责探测并记录能力事实，例如 `spec_version`、固件实现标识、以及 `TIME`、`IPI`、`RFENCE`、`SRST`、`DBCN` 等扩展是否可用；它不把 `set_timer`、`send_ipi`、`rfence`、`debug_console_write` 等具体调用建模为自身生命周期 transition。后续对象通过依赖这些能力事实来完成自己的建立，例如 `EarlyCon.setup()` 依赖 `SBI.dbcn_available` 或 legacy console 能力来选择输出后端。
 12. `静态分支对象`（`StaticBranch`）：对应 RISC-V `setup_arch()` 早段中的第一次有效 `jump_label_init()`。它代表 static key / static branch 的全局基础设施，不直接照搬 Linux `jump_label` 命名。`StaticBranch.setup()` 建立静态分支表、排序分支项，并建立 static key 到分支点的关联，使对象进入 `Ready`。这里使用 `setup()` 而不是 `preset()`，因为该过程不是简单预置初值，而是实际建立后续 `static_branch_enable/disable` action 所需的查询和更新基础。`StaticBranch.set(key, value)` 是后续对象可调用的 action，用于启用或禁用某个已知 static key，不推进 `StaticBranch.state`。通用 `start_kernel()` 中的第二次 `jump_label_init()` 作为 `StaticBranch.setup()` 幂等 checkpoint，不推进状态。后续 `jump_label_init_ro()` 对应 `StaticBranch.enable()`，在内核只读保护建立前 seal `ro_after_init` static keys，使 `StaticBranch.state` 从 `Ready` 推进到 `Online`。当前 `default_config` 中 `CONFIG_JUMP_LABEL=y` 且 `CONFIG_STRICT_KERNEL_RWX=y`，因此本规格只讨论 jump label 启用和只读 seal 路径；禁用配置不进入当前边界。
@@ -1313,7 +1313,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 10 入口后继期对象分类与相互关系
 </p>
 
-图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `入口前导期对象`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootInitTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootInitTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
+图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `入口前导期对象`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
@@ -1328,7 +1328,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `BootCPU.state == Online`，表示启动 CPU 已记录物理 `hartid`，并基于 `PlatformCpuInfo` 完成 present/active/online 的语义推进
 - `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的基础索引事实成立，完整 secondary CPU 索引和 possible/present/online 集合边界留待 `CpuGroup.setup()`
 - `MemBlock.state == Online`，表示候选物理内存区段已经经过保留、裁剪和对齐等约束处理，且完整线性映射可用后已经允许 `MemBlock` 元数据扩展
-- `InitMM.state == Ready`，表示 `init_mm` 已记录内核代码段、数据段和 `brk` 边界，并与 `BootInitTask.active_mm` 关系一致
+- `InitMM.state == Ready`，表示 `init_mm` 已记录内核代码段、数据段和 `brk` 边界，并与 `BootTask.active_mm` 关系一致
 - `EarlyIoremap.state == Ready`，表示 `FIX_BTMAP` 临时映射槽位的服务端元数据已经初始化，后续可执行 `map/unmap` action
 - `SBI.state == Ready`，表示 SBI 规范版本、固件标识和扩展能力视图已经建立，至少可供 `EarlyCon` 判断 DBCN 或 legacy console 能力
 - `StaticBranch.state == Ready`，表示静态分支表和 static key 到分支点的关系已经建立，后续对象可以执行 `StaticBranch.set(key, value)` action
@@ -1362,7 +1362,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 4. 执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），基于 `PlatformCpuInfo` 已确认的启动 hartid，使 `BootCPU` 完成 present/active/online 的语义推进。
 5. 执行 `PrintkBuffer.preset()`，建立 printk 静态缓冲机制；随后 `arceos_ex` 启动 banner 可通过启动期内部输出前端或直接通过 `PrintkBuffer.write()` 写入统一 ring buffer。该写入是 `action`，不推进 `PrintkBuffer` 的生命周期状态，也不依赖应用侧 `axstd::println!`。
 6. 执行 `EarlyDtb.setup() / parse_dtb()` 的后续解析用途，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 形成 FDT reserved ranges，并触发 `MemBlock.preset()` 和 `CommandLine.preset()`，使 raw view `KernelCmdline` 进入 `Ready`，并形成候选可用物理内存区段和初步边界。
-7. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootInitTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。
+7. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。
 8. 执行 `EarlyIoremap.setup() / early_ioremap_setup()`，基于 `FixMap.FIX_BTMAP` 初始化早期临时映射服务的 slot 元数据；后续 `early_ioremap()` 与 `early_iounmap()` 是 `map/unmap` action。
 9. 执行 `SBI.setup() / sbi_init()`，探测并记录 SBI 规范版本、固件标识和扩展能力视图。该步骤只产出能力事实，不把具体 SBI 调用建模为 `SBI` 自身的生命周期 transition。
 10. 执行 RISC-V `setup_arch()` 早段中的 `jump_label_init()`，抽象为 `StaticBranch.setup()`，使 `StaticBranch` 进入 `Ready`。该调用发生在 `parse_early_param()` 之前，使早期参数处理路径可以安全使用 static key。通用 `start_kernel()` 在 `setup_arch()` 返回后还会再次调用 `jump_label_init()`；在当前 RISC-V 路径中第二次调用因 `StaticBranch` 已经 `Ready` 而作为幂等 checkpoint 处理，不再推进对象状态。
@@ -1751,7 +1751,7 @@ Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-f
 当前先将子阶段 5 的对象和边界记录如下：
 
 1. `调度准备期对象`（暂名 `SchedInitPhase`）：属于阶段对象，是 `BootPhase` 的第四个直接子阶段对象。它从 `MmCoreInitPhase.Ready` 接续，按 `mm_core_init()` 后到 `context_tracking_init()` 调用点完成的有效调用顺序编排对象推进。
-2. `调度器对象`（暂名 `Scheduler`）：覆盖 `sched_init()`。它在 `preset()` 中准备调度器的全局前置对象，并预留未来驱动各 `SchedClass.preset()` 形成基本对象壳；在 `setup()` 中驱动每个 possible CPU 的 `RunQueue`、boot CPU 的 `BootIdleTask`，并预留未来驱动各 `SchedClass.setup()` 建立正式对象；最后通过 `enable()` 设置 `scheduler_running`。当前阶段只要求 boot CPU 上调度器基础可用，不启动 secondary CPU，不建立完整 SMP 调度拓扑。`sched_class` 顺序检查更接近 Linux 链接/实现细节，暂不作为独立 checkpoint 建模。
+2. `调度器对象`（暂名 `Scheduler`）：覆盖 `sched_init()`。它在 `preset()` 中准备调度器的全局前置对象，并预留未来驱动各 `SchedClass.preset()` 形成基本对象壳；在 `setup()` 中驱动每个 possible CPU 的 `RunQueue`，并通过 `BootIdleSetup` 把既有 `BootTask` 绑定为 boot CPU idle task，绝不创建另一个 Task；最后通过 `enable()` 设置 `scheduler_running`。当前阶段只要求 boot CPU 上调度器基础可用，不启动 secondary CPU，不建立完整 SMP 调度拓扑。`sched_class` 顺序检查更接近 Linux 链接/实现细节，暂不作为独立 checkpoint 建模。
 3. `RadixTree 对象`：覆盖 `radix_tree_init()`。当前把该调用建模为 `RadixTree.setup()`，使对象进入 `Ready`：建立 `"radix_tree_node"` SLUB cache，登记 `CPUHP_RADIX_DEAD` CPU hotplug dead 回调，并形成后续 IDR/XArray/radix tree 实例可申请 node 的全局基础。具体 radix tree 实例和使用者对象不在本阶段建立；实现阶段应至少生成 `RadixTree` 对象本体、node cache 子对象/属性、CPU hotplug 回调事实和后续 `alloc_node/free_node` API 边界。
 4. `MapleTree 对象`：覆盖 `maple_tree_init()`。当前把该调用建模为 `MapleTree.setup()`，使对象进入 `Ready`：建立 `"maple_node"` SLUB cache，并形成后续 maple tree 实例可申请 node 的全局基础。具体 maple tree 实例，例如后续 VMA tree，不在本阶段建立；实现阶段应至少生成 `MapleTree` 对象本体、node cache 子对象/属性和后续 `alloc_node/free_node` API 边界。
 5. `Housekeeping`：`housekeeping_init()` 用于管理 routine work 可运行的 CPU 集合，包括 unbound workqueue、timer、kthread、RCU、tick/nohz 和 CPU isolation 相关路径。该对象将来需要实现；当前最小启动输入尚未建模 `nohz_full=` / `isolcpus=` 等参数来源，因此先作为 deferred 保留调用位置，并记录当前 no-op 条件：`housekeeping.flags == 0` 时直接返回，不进入当前主线 formal 对象。
@@ -1775,7 +1775,7 @@ Linux 调用分类、图示和结束状态的第一轮整理；默认 `charter-f
 
 参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，规格中把 `RunQueue` 和 `IdleTask` 建模为对应 CPU 实例的子对象，而不是 `Scheduler` 全局对象直接拥有的成员。正式访问路径应写成 `CpuGroup.Cpu[id].RunQueue` 和 `CpuGroup.Cpu[id].IdleTask`；其中 `RunQueue.cpu_ref == CpuGroup.Cpu[id].ref`，`RunQueue.idle == CpuGroup.Cpu[id].IdleTask`，`IdleTask.cpu_ref == CpuGroup.Cpu[id].ref`。`Scheduler` 的职责是编排这些 CPU-owned 对象的 setup/enable/action，并维护全局调度事实、调度类和选择策略；它不拥有每个 CPU 的 runqueue 或 idle task 本体。
 
-运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：本 CPU 的 `CurrentTaskRef` 指向正在执行的 `Task`，该 task 记录自己的 CPU logical-id/`cpu_ref`，再通过 `CpuGroup.Cpu[id].RunQueue` 得到当前 runqueue。当前 UP 最小路径仍会解析到 `BootRunQueue`，但原因是 `CurrentTaskRef -> BootIdleTask` 且 `BootIdleTask.cpu == BootCPU`；`CpuGroup.boot_cpu()` 只能作为 boot CPU 事实校验或索引便利，不能作为 current runqueue 的 primary source。
+运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：本 CPU 的 `CurrentTaskRef` 指向正在执行的 `Task`，该 task 记录自己的 CPU logical-id/`cpu_ref`，再通过 `CpuGroup.Cpu[id].RunQueue` 得到当前 runqueue。当前 UP 最小路径仍会解析到 `BootRunQueue`，但原因是 `CurrentTaskRef -> BootTask` 且 `BootTask.cpu == BootCPU`；`CpuGroup.boot_cpu()` 只能作为 boot CPU 事实校验或索引便利，不能作为 current runqueue 的 primary source。
 
 ```mermaid
 flowchart LR
@@ -1785,7 +1785,7 @@ flowchart LR
     CpuIndex --> IdleTask["Cpu.IdleTask"]
 ```
 
-当前实现若仍把 boot CPU 的 `BootRunQueue` / `BootIdleTask` 存在 `Scheduler` 结构体字段中，只能视为 Rust lowering 过渡形态；对外规格事实、smoke 检查和后续代码生成指引必须把它解释为 `BootCPU.RunQueue` 与 `BootCPU.IdleTask` 的物化视图。secondary CPU 的 `RunQueue` 元数据可以在 `sched_init()` 的 possible CPU 遍历中准备并 attach 到默认 root domain；secondary CPU 的 `IdleTask` 身份则跟随 `idle_threads_init()` / SMP bringup 路径推进，不能因为 `RunQueue` 已准备就假定 AP 已有 live `CurrentCPU` 或可运行任务流。
+当前实现若仍把 boot CPU 的 `BootRunQueue` 和 boot-task scheduler metadata 存在 `Scheduler` 结构体字段中，只能视为 Rust lowering；对外规格事实、smoke 检查和后续代码生成指引必须把它解释为 `BootCPU.RunQueue` 与唯一 `BootTask` 的投影视图，不得暴露为独立 idle Task carrier。secondary CPU 的 `RunQueue` 元数据可以在 `sched_init()` 的 possible CPU 遍历中准备并 attach 到默认 root domain；secondary CPU 的 `IdleTask` 身份则跟随 `idle_threads_init()` / SMP bringup 路径推进，不能因为 `RunQueue` 已准备就假定 AP 已有 live `CurrentCPU` 或可运行任务流。
 
 <p align="center">
   <img src="pic/scheduler-root-domain-cpu-group.svg" alt="DefaultSchedRootDomain 与 CpuGroup 的引用关系" width="900">
@@ -1820,8 +1820,8 @@ flowchart LR
 
 1. `Scheduler.preset()`：执行调度器全局前置准备。`SchedClasses` 本体暂时 deferred，但未来应由 `Scheduler.preset()` 统一驱动 `StopSchedClass.preset()`、`DeadlineSchedClass.preset()`、`RealtimeSchedClass.preset()`、`FairSchedClass.preset()` 和 `IdleSchedClass.preset()`，先形成可引用的基本对象壳。`BitWaitQueueTable.preset()` 预置 bit wait 机制使用的全局 waitqueue bucket 表。`DefaultSchedRootDomain.setup()` 建立默认的 CPU 间共享调度信息区域，供后续 `RunQueue` attach。调度类顺序检查暂不单独建 checkpoint，除非后续证明它是模型边界而不是实现细节。
 2. `Scheduler.setup()`：遍历 possible CPU，驱动 `Cpu[id].RunQueue.setup(DefaultSchedRootDomain)`。`RunQueue` 挂在对应 `Cpu` 对象下面，内部当前只显式展开 `CfsRunQueue`、`RealtimeRunQueue` 和 `DeadlineRunQueue` 三个子队列；其它 runqueue 字段先作为属性处理。`FairServer` 先作为 deferred 子结构保留。`Scheduler.setup()` 是编排者，不拥有这些 runqueue；当前实现中 `Scheduler.boot_runqueue` 只是 `BootCPU.RunQueue` 的临时 lowering。未来 `Scheduler.setup()` 还应驱动各 `SchedClass.setup()`，把 preset 阶段形成的调度类对象壳推进为正式对象。
-3. `BootCPU.IdleTask.setup(source = BootInitTask/current)`：把已有的 `BootInitTask/current` 推进为 boot CPU idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `BootCPU.RunQueue.idle == BootCPU.IdleTask`、`BootCPU.RunQueue.curr == BootCPU.IdleTask`、`BootCPU.IdleTask.cpu == BootCPU`、`CpuGroup.Cpu[BootCPU.id].IdleTask == BootIdleTask` 等 checkpoints。当前默认 logical boot CPU id 为 0，但规格中优先使用 `BootCPU.id`，避免把启动 CPU 固定写死为 `Cpu[0]`。
-4. `Scheduler.setup()` 的收尾属性动作包括初始化全局 load 更新期限、设置 `BootCPU.idle_thread_ref` / `per_cpu(idle_threads, BootCPU.id)` 指向 `BootCPU.RunQueue.BootIdleTask`，以及将 `BootCPU.RunQueue.balance_push_enabled` 置为 `false`。
+3. `BootIdleSetup.setup(source = BootTask/current)`：把已有的 `BootTask/current` 绑定为 boot CPU idle task，而不是新分配一个 task。该过程覆盖 `set_load_weight()`、`init_task.se.slice`、`mmgrab_lazy_tlb()`、`enter_lazy_tlb()`、`set_kthread_struct()`、`__sched_fork()` 和 `init_idle()`，并形成 `BootCPU.RunQueue.idle == BootTask`、`BootCPU.RunQueue.curr == BootTask`、`BootTask.cpu == BootCPU`、`CpuGroup.Cpu[BootCPU.id].IdleTask == BootTask` 等 checkpoints。当前默认 logical boot CPU id 为 0，但规格中优先使用 `BootCPU.id`，避免把启动 CPU 固定写死为 `Cpu[0]`。
+4. `Scheduler.setup()` 的收尾属性动作包括初始化全局 load 更新期限、设置 `BootCPU.idle_thread_ref` / `per_cpu(idle_threads, BootCPU.id)` 指向 `BootTask`，以及将 `BootCPU.RunQueue.balance_push_enabled` 置为 `false`。
 5. `SchedClass.setup()` 当前整体 deferred。`FairSchedClass.setup()` 对应 Linux `init_sched_fair_class()`，后续可在该边界内展开；`init_sched_ext_class()`、`psi_init()`、`init_uclamp()` 和 `preempt_dynamic_init()` 在当前 `default_config` 下为空实现或配置禁用，直接从当前主线省略。
 6. `Scheduler.enable()`：设置 `scheduler_running = true`，使调度器进入当前启动范围内的 running/online 状态。
 
@@ -1888,14 +1888,14 @@ flowchart LR
 2. `IRQ 分发树对象`（暂名 `IrqDispatchTree`）：`InterruptStream` 的子对象，覆盖 `early_irq_init()` 与 RISC-V64 `init_IRQ()`。`early_irq_init()` 对应 `IrqDispatchTree.preset()`：建立 IRQ 分发所需的全局编号空间、默认 affinity、early IRQ 基础和实现承载槽位，使对象进入 `Prepared`；Linux 中的 `irq_desc` 可作为实现承载，但当前规格不把每个 `irq_desc` 建成独立对象。`init_IRQ()` 对应 `IrqDispatchTree.setup()`：初始化 RISC-V irq stack/SCS，执行 `irqchip_init()` 建立平台 `IrqDomain` 树并关联 `IrqChip`，设置架构 IRQ 入口，并驱动 `SbiIpi.preset()` 与 `SbiIpi.setup()` 使 SBI IPI 结构进入 `Ready`。`SbiIpi.enable()` 保留给后续 IPI 正式启用边界；`init_IRQ()` 完成后并不表示中断已经打开，只表示中断到来时有可分发的控制结构。
 3. `Tick 对象`：覆盖 `tick_init()` 及后续 timer/clockevent 路径对 tick 控制结构的补完。`tick_init()` 对应 `Tick.preset()`：驱动 `TickBroadcast.preset()` 建立 broadcast/oneshot mask 基础，当前 `CONFIG_NO_HZ_FULL=n` 下 `tick_nohz_init()` 为 trimmed/no-op，使 `Tick.state == Prepared`。后续 `RiscvTimerProvider.setup()` 中的 `timer_probe()`、`clockevents_register_device()` 与 `tick_setup_hrtimer_broadcast()` 再补完 boot CPU tick device 和 broadcast clockevent，使 `Tick.state == Ready`；`Tick.enable()` 留到 tick 中断正式可接收/可服务的边界。
 4. `RCU nohz 动作`：覆盖 `rcu_init_nohz()`。当前 `CONFIG_RCU_NOCB_CPU` 未启用且 `CONFIG_NO_HZ_FULL=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 处理；未来启用 `nohz_full=`、`rcu_nocbs=` 或 `isolcpus=` 后，可恢复为 `RcuCore.configure_nohz()` action，用于配置 RCU callback offload CPU mask，但不重新建立 RCU 核心设施本体。
-5. `低精度定时器对象`（暂名 `TimerWheel`）：覆盖 `init_timers()`。`TimerWheel` 是全局对象，不是 per-CPU 对象；其下级 `TimerBaseSet` 管理 per-CPU 的 `CpuTimerBases[cpu]`。当前 `CONFIG_NO_HZ_COMMON=y`，每个 CPU 下包含 `LocalTimerBase`、`GlobalTimerBase` 与 `DeferrableTimerBase` 三类 base。`TimerWheel.setup()` 建立这些 base，初始化 `BootInitTask.PosixCpuTimerWork`，并向 `SoftirqActionTable` 注册 `TIMER_SOFTIRQ`。
+5. `低精度定时器对象`（暂名 `TimerWheel`）：覆盖 `init_timers()`。`TimerWheel` 是全局对象，不是 per-CPU 对象；其下级 `TimerBaseSet` 管理 per-CPU 的 `CpuTimerBases[cpu]`。当前 `CONFIG_NO_HZ_COMMON=y`，每个 CPU 下包含 `LocalTimerBase`、`GlobalTimerBase` 与 `DeferrableTimerBase` 三类 base。`TimerWheel.setup()` 建立这些 base，初始化 `BootTask.PosixCpuTimerWork`，并向 `SoftirqActionTable` 注册 `TIMER_SOFTIRQ`。
 6. `SRCU 对象`：覆盖 `srcu_init()`。当前 `CONFIG_TREE_SRCU=y`，该调用有实质作用：决定 `srcu_struct` small/big sizing 策略，设置 `srcu_init_done`，并把早期 `srcu_boot_list` 上的 work 转入 `rcu_gp_wq`。但当前子阶段暂不展开 `srcu_struct/srcu_usage/srcu_data/srcu_node` 体系，因此先标为 deferred；后续阻塞上下文或具体 SRCU 使用者建模时，再恢复为 `Srcu.setup()`。
 7. `高精度定时器核心对象`（暂名 `HrtimerCore`）：覆盖 `hrtimers_init()`。`HrtimerCore` 表示管理 `struct hrtimer` 实例的全局基础设施，而不是所有 hrtimer 实例本身；具体 `HrtimerInstance` 由使用者对象拥有，运行时关联到 `HrtimerCore` 管理的 per-CPU clock base。当前 `CONFIG_HIGH_RES_TIMERS=y`，本阶段准备 boot CPU hrtimer base，并注册 `HRTIMER_SOFTIRQ`。
 8. `Softirq 对象`：覆盖本阶段的 `softirq_init()`，并承接上一子阶段已进入 `Prepared` 的 `SoftirqActionTable`。`TimerWheel.setup()` 和 `HrtimerCore.setup()` 在本阶段继续通过 `SoftirqActionTable.register()` 分别注册 `TIMER_SOFTIRQ` 与 `HRTIMER_SOFTIRQ`；`Softirq.setup()` 对应 `softirq_init()`，建立 per-CPU tasklet 队列、注册 `TASKLET_SOFTIRQ` 与 `HI_SOFTIRQ`，并确认 pending bits 与 RISC-V `SOFTIRQ_ON_OWN_STACK` 运行条件。中断打开前只建立结构，不执行异步处理。
 9. `Timekeeper 对象`：覆盖 `timekeeping_init()`。`timekeeping_init()` 是初始化过程名，规格对象采用实际承载状态的 `Timekeeper`：它驱动 `ClocksourceCore.preset()` 与 `JiffiesClocksource.preset()`，再初始化 `tk_core.timekeeper`、shadow/fast timekeeper、wall time、monotonic offset、raw time，并把默认 clocksource 绑定为 `JiffiesClocksource`；后续随机数完整初始化依赖它。
 10. `RISC-V Timer Provider 对象`（暂名 `RiscvTimerProvider`）：覆盖 RISC-V64 `time_init()`。它是 RISC-V 架构 timer 能力的 provider，而不是通用 timer 子系统或单个 timer 实例。当前只建模 `RiscvTimerProvider.setup()`，不引入 `preset()`：在 FDT 路径中读取 `/cpus` 的 `timebase-frequency`，设置 `riscv_timebase` 和 `lpj_fine`，基于 `DeviceTree` 执行 `of_clk_init(NULL)` 初始化 clock provider，再执行 `timer_probe()` 匹配 RISC-V timer driver，建立 clocksource、clockevent、timer IRQ mapping 和 timer hotplug hook，最后执行 tick hrtimer broadcast setup 和 paravirt time 初始化。`SchedClock` 的 generic core 启动由后续 `sched_clock_init()` 单独建模，不并入 `RiscvTimerProvider`。`RiscvTimerProvider.enable()` 预留给后续 timer 中断和 clockevent 服务正式启用；当前子阶段只要求 `RiscvTimerProvider.state == Ready`。
 11. `随机数对象`（`Randomness` 的后续动作）：覆盖 `random_init()`。它承接核心准备期 `random_init_early(command_line)` 已经推进出的 `Randomness.state == Prepared`，必须发生在 `Timekeeper.Ready` 之后，以便使用可用的时间戳和 cycle counter；完成后把 `Randomness` 推进到启动期 `Ready`，供后续 stack canary 和内核随机数使用。
-12. `根任务 stack canary 刷新动作`：覆盖 `boot_init_stack_canary()`。当前 `CONFIG_STACKPROTECTOR=y`、`CONFIG_STACKPROTECTOR_STRONG=y` 且 `CONFIG_STACKPROTECTOR_PER_TASK=y`，该调用在 `Randomness.Ready` 后刷新 `BootInitTask/current` 的 `stack_canary` 属性；它不建立顶层 `StackCanary` 对象，也不推进 `BootInitTask` 或 `BootInitStack` 的生命周期状态。
+12. `根任务 stack canary 刷新动作`：覆盖 `boot_init_stack_canary()`。当前 `CONFIG_STACKPROTECTOR=y`、`CONFIG_STACKPROTECTOR_STRONG=y` 且 `CONFIG_STACKPROTECTOR_PER_TASK=y`，该调用在 `Randomness.Ready` 后刷新 `BootTask/current` 的 `stack_canary` 属性；它不建立顶层 `StackCanary` 对象，也不推进 `BootTask` 或 `BootInitStack` 的生命周期状态。
 13. `PerfEvent / PerfCore 路径`：覆盖 `perf_event_init()`。当前 `CONFIG_PERF_EVENTS=y`，该调用会初始化 generic perf core、PMU registry、per-CPU perf context、perf 内部 `pmus_srcu`、software/clock/tracepoint/uprobe PMU、reboot notifier 和 `perf_event` cache；但它不是当前最小启动闭环的关键功能，本阶段先标为 deferred。后续需要性能计数、perf trace 或 RISC-V PMU 时，再恢复为 `PerfCore.setup()`；RISC-V 硬件 PMU provider 本来也属于后续 `device_initcall(pmu_sbi_devinit)` 路径，不在当前子阶段完成。
 14. `Profiler 路径`：覆盖 `profile_init()`。当前 `CONFIG_PROFILING=y`，但默认命令行未要求 `profile=` 时 `prof_on == 0`，Linux 直接返回，不分配 `prof_buffer`。本阶段先标为 deferred；后续若支持 `profile=` 参数，再恢复为 `KernelProfiler.setup()`，消费 `BootParam.profile` 并建立 profiling buffer。
 15. `SMP CallFunction 对象`：覆盖 `call_function_init()`。它是独立的 generic SMP callback/call-function 基础设施对象，不是 `SbiIpi` 的子对象或别名。它拥有 per-CPU `CallSingleQueueSet` 与 `CallFunctionDataSet`，并通过 `SbiIpi/IpiMux` 提供的 `IPI_CALL_FUNC` 路由投递跨 CPU callback。secondary CPU 尚未启动，因此本阶段只要求 possible CPU 队列初始化以及 boot CPU 的 call-function data 准备完成。
@@ -1929,7 +1929,7 @@ flowchart LR
 - `TimerWheel` 是全局 timer wheel 规则对象；per-CPU 的是它的下级 base，而不是 `TimerWheel` 本身。
 - `TimerBaseSet` 是 `TimerWheel` 的下级集合对象。当前 `CONFIG_NO_HZ_COMMON=y`，因此每个 possible CPU 拥有一个 `CpuTimerBases[cpu]` 聚合对象，内含 `LocalTimerBase`、`GlobalTimerBase` 和 `DeferrableTimerBase` 三类 base，分别对应 Linux `BASE_LOCAL`、`BASE_GLOBAL` 与 `BASE_DEF`。
 - `CpuTimerBases[cpu].setup()` 至少初始化每个 base 的 `cpu`、`lock`、`clk = jiffies`、`next_expiry = clk + NEXT_TIMER_MAX_DELTA`、`running_timer = null`、`next_expiry_recalc = false`、`timers_pending = false`、`is_idle = false`、`pending_map` 和 `vectors[WHEEL_SIZE]`。`pending_map` 与 `vectors` 当前作为 base 属性处理，不继续拆成 bucket 对象。
-- `TimerWheel.setup()` 对应 `init_timers()`：驱动 `TimerBaseSet.setup()`，驱动 `BootInitTask.PosixCpuTimerWork.setup()` 初始化当前任务的 POSIX CPU timer task work，并调用 `SoftirqActionTable.register(TIMER_SOFTIRQ, run_timer_softirq)`。完成后 `TimerWheel.state == Ready`。`TimerWheel.enable()` 不在本阶段执行；timer callback 的实际执行需要后续 tick/timer interrupt raise `TIMER_SOFTIRQ` 并由 softirq 执行环境处理。
+- `TimerWheel.setup()` 对应 `init_timers()`：驱动 `TimerBaseSet.setup()`，驱动 `BootTask.PosixCpuTimerWork.setup()` 初始化当前任务的 POSIX CPU timer task work，并调用 `SoftirqActionTable.register(TIMER_SOFTIRQ, run_timer_softirq)`。完成后 `TimerWheel.state == Ready`。`TimerWheel.enable()` 不在本阶段执行；timer callback 的实际执行需要后续 tick/timer interrupt raise `TIMER_SOFTIRQ` 并由 softirq 执行环境处理。
 
 `HrtimerCore` 的内部建模边界暂定如下：
 
@@ -1968,7 +1968,7 @@ flowchart LR
 - `Randomness.preset()` 已在核心准备期完成，对应 Linux `random_init_early(command_line)`：混入 compile-time/latent entropy、架构随机数、`init_utsname()` 和 command line，并在 `trust_cpu` 允许时 credit 早期 CPU RNG bit。该状态不表示完整 RNG ready。
 - `Randomness.setup()` 对应 Linux `random_init()`，由本子阶段在 `Timekeeper.state == Ready` 后执行。它混入 `ktime_get_real()`、`random_get_entropy()` 与 latent entropy；如果早期阶段已经让 `crng_init >= CRNG_READY`，则启用 `crng_is_ready` static branch；若 CRNG 已 ready，则执行 reseed；并注册 random PM notifier。
 - `Randomness.setup()` 完成后要求 `Randomness.state == Ready`，表示启动期随机数基础可服务后续内核使用。它不要求已经有中断随机性输入，也不把后续硬件 RNG、输入设备、block、interrupt randomness 或 sysctl 注册纳入当前子阶段。
-- `boot_init_stack_canary()` 依赖 `Randomness.state == Ready`。规格层把它建模为 `BootInitTask.refresh_stack_canary(Randomness)` action/checkpoint：读取 `get_random_canary()` 并刷新 `BootInitTask.stack_canary`，在非 per-task stack protector 配置下还需要同步全局 `__stack_chk_guard`。当前基线启用 `CONFIG_STACKPROTECTOR_PER_TASK=y`，因此主线结束事实是 `BootInitTask.stack_canary_refreshed == true`；不拆单独的 `CanarySeed`、`StackRandomness` 或顶层 `StackCanary` 对象。
+- `boot_init_stack_canary()` 依赖 `Randomness.state == Ready`。规格层把它建模为 `BootTask.refresh_stack_canary(Randomness)` action/checkpoint：读取 `get_random_canary()` 并刷新 `BootTask.stack_canary`，在非 per-task stack protector 配置下还需要同步全局 `__stack_chk_guard`。当前基线启用 `CONFIG_STACKPROTECTOR_PER_TASK=y`，因此主线结束事实是 `BootTask.stack_canary_refreshed == true`；不拆单独的 `CanarySeed`、`StackRandomness` 或顶层 `StackCanary` 对象。
 
 `SmpCallFunction` 的内部建模边界暂定如下：
 
@@ -1996,14 +1996,14 @@ flowchart LR
 | `init_IRQ()` | formal candidate: `IrqDispatchTree.setup()` | RISC-V64 初始化 irq stack/SCS，执行 `irqchip_init()` 建立 `IrqDomain` 树并关联 `IrqChip`，设置架构 IRQ 入口，并驱动 `SbiIpi.preset/setup()`；`SbiIpi.enable()` 留给后续 IPI 正式启用边界。 |
 | `tick_init()` | formal candidate: `Tick.preset()` | 建立 Tick 控制对象的基础壳和 broadcast/oneshot mask；当前 `CONFIG_NO_HZ_FULL=n`，`tick_nohz_init()` 为 trimmed/no-op。 |
 | `rcu_init_nohz()` | trimmed/no-op | 当前 `CONFIG_RCU_NOCB_CPU` 未启用且 `CONFIG_NO_HZ_FULL=n`；未来可恢复为 `RcuCore.configure_nohz()` action。 |
-| `init_timers()` | formal candidate: `TimerWheel.setup()` | 建立全局 `TimerWheel` 下的 per-CPU `CpuTimerBases[*]`，初始化 `BootInitTask.PosixCpuTimerWork`，并注册 `TIMER_SOFTIRQ`。 |
+| `init_timers()` | formal candidate: `TimerWheel.setup()` | 建立全局 `TimerWheel` 下的 per-CPU `CpuTimerBases[*]`，初始化 `BootTask.PosixCpuTimerWork`，并注册 `TIMER_SOFTIRQ`。 |
 | `srcu_init()` | deferred | `CONFIG_TREE_SRCU=y`，有实质作用但当前暂不展开；依赖 `RcuCore` 已建立 `rcu_gp_wq/sync_wq`，并要求 `TimerWheel.state == Ready`。 |
 | `hrtimers_init()` | formal candidate: `HrtimerCore.setup()` | `CONFIG_HIGH_RES_TIMERS=y`，准备 boot CPU hrtimer base 并注册 `HRTIMER_SOFTIRQ`；具体 `HrtimerInstance` 由使用者对象拥有。 |
 | `softirq_init()` | formal candidate: `Softirq.setup()` | 建立 tasklet queues，注册 tasklet softirq，并确认 pending 状态和运行条件；异步执行仍等中断打开。 |
 | `timekeeping_init()` | formal candidate: `Timekeeper.setup()` | 驱动 `ClocksourceCore.preset()` 与 `JiffiesClocksource.preset()`，初始化 `tk_core.timekeeper`、shadow/fast timekeeper、初始 wall/monotonic/raw 时间，并把当前 clocksource 绑定为 `JiffiesClocksource`。 |
 | `time_init()` | formal candidate: `RiscvTimerProvider.setup()` | 从正式 DeviceTree 读取 `timebase-frequency`，执行 `of_clk_init(NULL)` 和 `timer_probe()`，建立 RISC-V clocksource、clockevent、timer IRQ mapping 和 hotplug hook；预留 `enable()`，当前不要求 clocksource 交接或 timer interrupt 服务运行。 |
 | `random_init()` | formal candidate: `Randomness.setup()` | 承接 `Randomness.Prepared`，在 timekeeper 可用后混入时间/cycle/latent entropy，处理 CRNG ready/reseed，并注册 random PM notifier，使 RNG 基础进入启动期 `Ready`。 |
-| `boot_init_stack_canary()` | action/checkpoint: `BootInitTask.refresh_stack_canary(Randomness)` | 使用完整 RNG 刷新 `BootInitTask/current.stack_canary`；它是属性刷新动作，不推进顶层对象生命周期。 |
+| `boot_init_stack_canary()` | action/checkpoint: `BootTask.refresh_stack_canary(Randomness)` | 使用完整 RNG 刷新 `BootTask/current.stack_canary`；它是属性刷新动作，不推进顶层对象生命周期。 |
 | `perf_event_init()` | deferred | `CONFIG_PERF_EVENTS=y`，有实质 generic perf core 初始化，但不是当前最小启动闭环关键功能；后续恢复为 `PerfCore.setup()`，RISC-V 硬件 PMU provider 留给 initcall 阶段。 |
 | `profile_init()` | deferred | `CONFIG_PROFILING=y`，但默认未启用 `profile=` 时直接返回；后续支持 kernel profiling 参数时再恢复为 `KernelProfiler.setup()`。 |
 | `call_function_init()` | formal candidate: `SmpCallFunction.setup()` | 建立 `CallSingleQueueSet` 与 boot CPU `CallFunctionData`，并关联 `SbiIpi/IpiMux` 的 `IPI_CALL_FUNC` 路由；不启动 secondary CPU。 |
@@ -2033,7 +2033,7 @@ flowchart LR
 - `JiffiesClocksource.state == Prepared`，且 `Timekeeper.current_clocksource == JiffiesClocksource`
 - `RiscvTimerProvider.state == Ready`，并已注册 `RiscvClocksource`、建立 `RiscvClockevent`、timer IRQ mapping 和 hotplug hook；`RiscvTimerProvider.enable()` 尚未执行，切换为当前 clocksource 留给后续 `clocksource_done_booting()`
 - `Randomness.state == Ready`，表示已经从核心准备期的 `Prepared` 经 `random_init()` 推进到启动期可用边界
-- `BootInitTask.stack_canary_refreshed == true`
+- `BootTask.stack_canary_refreshed == true`
 - `SmpCallFunction.state == Ready`，表示 per-CPU `CallSingleQueueSet` 已初始化，boot CPU `CallFunctionData` 已准备完成，并已关联 `IPI_CALL_FUNC` 投递路由；`SmpCallFunction.enable()` 尚未执行
 - `early_boot_irqs_disabled == true`
 - `InterruptStream.state == Ready`，限定为中断入口结构已建立但 boot CPU 本地中断总入口仍关闭
@@ -2224,7 +2224,7 @@ flowchart LR
 | `fork_init()` | formal candidate: `TaskCreationCore.setup()` | 先创建 `task_struct` cache，随后通过 `arch_task_cache_init()` 驱动架构 task cache 初始化，再设置 `max_threads`、`init_task` rlimit 和 `init_user_ns` ucount/rlimit，并登记 vm stack hotplug 回调。 |
 | `arch_task_cache_init()` / `riscv_v_setup_ctx_cache()` | nested formal: `VectorContext.preset()` | RISC-V vector 可用时创建 user vector context cache；当前 `CONFIG_RISCV_ISA_V_PREEMPTIVE=y` 时还创建 kernel vector context cache。 |
 | `scs_init()` in `fork_init()` | trimmed/no-op | 当前未启用 shadow call stack，`scs_init()` 不形成主线对象状态。 |
-| `lockdep_init_task(&init_task)` in `fork_init()` | trimmed/no-op | 当前未启用 `CONFIG_LOCKDEP`，该动作不形成主线对象状态；启用后应作为 lockdep 对 `BootInitTask` 的状态初始化。 |
+| `lockdep_init_task(&init_task)` in `fork_init()` | trimmed/no-op | 当前未启用 `CONFIG_LOCKDEP`，该动作不形成主线对象状态；启用后应作为 lockdep 对 `BootTask` 的状态初始化。 |
 | `uprobes_init()` in `fork_init()` | nested formal: `UprobeCore.setup()` | 当前 `CONFIG_UPROBES=y`，初始化 uprobes hash mutex 并注册 die notifier；它是独立调试/插桩核心，不是 `TaskCreationCore` 子对象。 |
 | `proc_caches_init()` | Linux aggregate, no object | 规格层不建立 `ProcessResourceCaches` 顶层对象；由 `ProcessPreparePhase.setup()` 在此位置直接驱动下列对象的 `preset()`。 |
 | `sighand_cache` / `signal_cache` in `proc_caches_init()` | nested formal: `SignalCore.preset()` | 创建 `sighand_struct` 与 `signal_struct` cache；`SignalCore` 暂到 `Prepared`，等待后续 `signals_init()`。 |
@@ -2284,7 +2284,7 @@ flowchart LR
 
 ### 单核多任务期对象建立
 
-从这一小节开始，对应顶层 `UP Multitask Phase`。本阶段从 `rest_init()` 开始，到 `kernel_init_freeable()` 中 `smp_init()` 执行前结束。阶段入口仍由上一阶段延续下来的 `BootInitTask` 执行，但入口动作会创建新的任务对象并打开调度运行状态；阶段末尾仍只有 boot CPU 在运行，secondary CPU 尚未启动，因此尚未进入真正多核并行。
+从这一小节开始，对应顶层 `UP Multitask Phase`。本阶段从 `rest_init()` 开始，到 `kernel_init_freeable()` 中 `smp_init()` 执行前结束。阶段入口仍由上一阶段延续下来的 `BootTask` 执行，但入口动作会创建新的任务对象并打开调度运行状态；阶段末尾仍只有 boot CPU 在运行，secondary CPU 尚未启动，因此尚未进入真正多核并行。
 
 本阶段的输入事实至少包括：
 
@@ -2306,8 +2306,8 @@ flowchart LR
 只在这三个具体子阶段分别到达 Online 后发布。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由
 `KernelInitTask` 驱动的执行线：
 
-- `BootInitTask` 继续执行 `rest_init()`，在调度交接后完成
-  `cpu_startup_entry(CPUHP_ONLINE)`，并以 `BootIdleTask` 身份进入 idle 路径。
+- `BootTask` 继续执行 `rest_init()`；在调度交接后保持 Task 身份，并由 `BootIdleFlow`
+  continuation 完成 `cpu_startup_entry(CPUHP_ONLINE)` 与 idle 路径。
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
   然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
   `PreSmpInitPhase`。
@@ -2317,14 +2317,14 @@ flowchart LR
   Kernel.Enable continuation 启动；BootIdleEntry Online 只返回 UpMultitask 父 continuation。
 
 按“子阶段不跨执行主体边界”的原则，`BootInitRestInitPhase` 只能表示
-`BootInitTask` 视角下执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
+`BootTask` 的 `RootStream` 视角下执行 `rest_init()` 前半段时能够直接推进和观察的片段。它可以创建并唤醒
 `KernelInitTask` / `KthreaddTask`，发布二者的 entry、release 和 provider facts；但首次调度交接、
 `KernelInitTask` 的 `PreSmpInitPhase`、`KthreaddTask` 的服务循环子阶段，以及调度交接后的
-`BootIdleTask` idle 子阶段，都应作为对应执行主体的子阶段处理。
+`BootIdleFlow` idle 子阶段，都应作为对应执行 continuation 的子阶段处理。
 
-1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootInitTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，并完成 `kthreadd_done`。PID 1 解除等待必须由 `KernelInitTask` 在自己的 wait side 观察该 completion 后提交。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
-2. `BootInitScheduleHandoffPhase`：仍由 `BootInitTask` 执行，只覆盖 `schedule_preempt_disabled()` 中退出 inherited preempt-disabled guard、进入 `Scheduler.schedule()` 并提交首次 handoff facts 的调度分界点。
-3. `BootIdleEntryPhase`：由首次调度交接后的 `BootIdleTask` continuation 执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
+1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，并完成 `kthreadd_done`。PID 1 解除等待必须由 `KernelInitTask` 在自己的 wait side 观察该 completion 后提交。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
+2. `BootInitScheduleHandoffPhase`：仍由 `BootTask` 执行，只覆盖 `schedule_preempt_disabled()` 中退出 inherited preempt-disabled guard、进入 `Scheduler.schedule()` 并提交首次 handoff facts 的调度分界点。
+3. `BootIdleEntryPhase`：由首次调度交接后同一 `BootTask` 的 `BootIdleFlow` continuation 执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
 4. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
 
 ##### UP Multitask Phase 分叉修正规则
@@ -2353,18 +2353,18 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 `BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase`。三者共同覆盖 Linux 6.12
 `rest_init()` 从 `rcu_scheduler_starting()` 到 boot CPU idle 入口的对象级边界，但不再把不同执行主体串成一个最小子阶段。
 
-这个边界的核心不是继续建立静态基础设施，而是把系统从“单根启动任务执行初始化”推进为“boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，`KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`，而原启动根任务被调度器接管并转换为 `BootIdleTask`。因此，本子阶段是 `InterruptPhase` 到 `UP Multitask Phase` 的实际运行语义转换点。
+这个边界的核心不是继续建立静态基础设施，而是把系统从“单根启动任务执行初始化”推进为“boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，`KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`，而原 `BootTask` 保持身份并由调度器把 active Flow 从 `RootStream` handoff 到 `BootIdleFlow`。因此，本子阶段是 `InterruptPhase` 到 `UP Multitask Phase` 的实际运行语义转换点。
 
 当前先将 rest_init 路径的对象和边界记录如下：
 
 1. `BootInitRestInitPhase`：属于阶段对象，是 `UP Multitask Phase` 的第一个 owner-scoped 子阶段对象。它从 `ProcessPreparePhase.Online` 接续，按 `rest_init()` 前半段有效顺序编排 RCU、任务创建、同步门和系统状态动作，并以 `kthreadd_done` release facts 作为完成边界。
 2. `RCU 核心对象`（暂名 `RcuCore`）的调度启动动作：覆盖 `rcu_scheduler_starting()`。它不是创建新的 RCU 对象，而是在前序 `RcuCore.Ready` 基础上执行 `RcuCore.setup()`，把 RCU 退出 early boot 模式并记录 scheduler 开始参与 RCU 语义；Linux 当前要求此时仍只有一个 online CPU，且尚未发生普通上下文切换。后续 `rcu_set_runtime_mode()` 可作为 `RcuCore.enable()` 推进到 `Online`；`rcu_end_inkernel_boot()` 不消耗主对象 slot，作为 `RcuCore.end_inkernel_boot()` action 修改内部 `boot_mode` / `inkernel_boot_ended` 子状态。将来若需要细化 RCU 流程，可以增加 `RcuTree`、`RcuSoftirqHook`、`RcuGpWorker` 或 `RcuBootMode` 等下级子对象，主对象 slots 仍然足够。
-3. `内核 init 任务对象`（暂名 `KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的 PID 1。它是本子阶段创建的第一个非 idle task，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 可通过公共 `TaskCreationCore.spawn_task(spec)` 以 `BootInitTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；它承载后续常规执行语义，但不再另建独立 flow 对象。`KernelInitTask` 的 slot 语义暂定为：
+3. `内核 init 任务对象`（`KernelInitTask`）：覆盖 `user_mode_thread(kernel_init, NULL, CLONE_FS)` 创建的稳定 PID 1。它是与 `BootTask` 同属唯一 `Task` 类型的独立实例，后续将执行 `kernel_init()`，先等待 `kthreadd_done`，再进入 `PreSmpInitPhase` 对应的 `kernel_init_freeable()`。规格层把目标新任务作为生命周期主体：`KernelInitTask.preset/setup/enable()` 通过公共 `TaskCreationCore.CopyProcess` 以 `BootTask/current` 为模板复制 task/thread 基础，再为新任务指定 `kernel_init` 入口和 `CLONE_FS` 等局部参数；`KernelInitFlow` 独立承载 exec 前 continuation，并在 successful exec 时被 fresh `UserAppFlow` 替换，Task 身份不变。`KernelInitTask` 的 lifecycle 语义为：
 
    | slot | Linux 对应动作 | 依赖 | drives / 产物 |
    |---|---|---|---|
-   | `KernelInitTask.preset()` | `user_mode_thread()` 形成 `kernel_clone_args` | 依赖 `BootInitTask/current` 作为复制模板，依赖 `TaskCreationCore.Ready` 提供统一 task 创建入口，依赖 `RootPidNamespace.Ready`、`CredentialCore.Prepared`、`SignalCore.Prepared`、`SecurityCore.Ready` 等作为后续复制所需的全局基础事实 | 形成 `TaskSpawnSpec` / task shell：`entry = kernel_init`、`arg = NULL`、`clone_flags = CLONE_VM | CLONE_UNTRACED | CLONE_FS`、`exit_signal = 0`、`kind = user_mode_thread`。此时只确定“要创建 PID 1 init task”的规格，不把任务放入调度队列。 |
-   | `KernelInitTask.setup()` | `kernel_clone()` 中的 `copy_process()`、RISC-V `copy_thread()` 等复制与初始化路径 | 依赖 `KernelInitTask.Prepared`，继续依赖 `BootInitTask/current` 的 task/thread/fs/cred 等模板属性，并由 `TaskCreationCore.spawn_task(spec)` / `TaskCreationCore.copy_from_current()` 这类创建 action 驱动 pid、task_struct、thread context、sched entity 等复制动作；其中 PID 分配依赖并调用 `RootPidNamespace.allocate_pid()` | 建立 `KernelInitTask` 的实体属性：`pid == 1`、入口为 `kernel_init`、参数为 `NULL`、共享 `CLONE_FS` 指定的 fs 语义，建立返回到 `ret_from_fork` 后调用 `kernel_init` 的线程上下文，并初始化可被调度器接收的 task/sched 属性。此时仍不是用户态进程，也不建立用户态 mm；用户态身份要等 `PayloadPhase` 中 `kernel_execve()` 成功后才转换。 |
+   | `KernelInitTask.preset()` | `user_mode_thread()` 形成 `kernel_clone_args` | 依赖 `BootTask/current` 作为复制模板，依赖 `TaskCreationCore.Ready` 提供统一 task 创建入口，依赖 `RootPidNamespace.Ready`、`CredentialCore.Prepared`、`SignalCore.Prepared`、`SecurityCore.Ready` 等作为后续复制所需的全局基础事实 | 形成 `TaskSpawnSpec` / task shell：`entry = kernel_init`、`arg = NULL`、`clone_flags = CLONE_VM | CLONE_UNTRACED | CLONE_FS`、`exit_signal = 0`、`kind = user_mode_thread`。此时只确定“要创建 PID 1 init task”的规格，不把任务放入调度队列。 |
+   | `KernelInitTask.setup()` | `kernel_clone()` 中的 `copy_process()`、RISC-V `copy_thread()` 等复制与初始化路径 | 依赖 `KernelInitTask.Prepared`，继续依赖 `BootTask/current` 的 task/thread/fs/cred 等模板属性，并由 `TaskCreationCore.spawn_task(spec)` / `TaskCreationCore.copy_from_current()` 这类创建 action 驱动 pid、task_struct、thread context、sched entity 等复制动作；其中 PID 分配依赖并调用 `RootPidNamespace.allocate_pid()` | 建立 `KernelInitTask` 的实体属性：`pid == 1`、入口为 `kernel_init`、参数为 `NULL`、共享 `CLONE_FS` 指定的 fs 语义，建立返回到 `ret_from_fork` 后调用 `kernel_init` 的线程上下文，并初始化可被调度器接收的 task/sched 属性。此时仍不是用户态进程，也不建立用户态 mm；用户态身份要等 `PayloadPhase` 中 `kernel_execve()` 成功后才转换。 |
    | `KernelInitTask.enable()` | `wake_up_new_task(p)` | 依赖 `KernelInitTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task。不依赖 `KthreaddReadyGate.Completed`，因为该 completion 控制的是 PID 1 后续执行进度而不是创建入队 | 将 `KernelInitTask` 放入调度器可运行集合并推进到 `Online`。它使 PID 1 获得被第一次调度交接选中的机会；真正进入 `kernel_init_freeable()` 还要等待后续 `KthreaddReadyGate.complete()`。 |
 4. `init CPU 亲和约束`：覆盖 `find_task_by_pid_ns(pid, &init_pid_ns)`、`PF_NO_SETAFFINITY` 和 `set_cpus_allowed_ptr(tsk, cpumask_of(smp_processor_id()))`。它不建立独立对象，而是 `KernelInitTask.Action::PinToBootCpu(BootCPURef)`：receiver 已经确定 PID 1 task，`BootCPURef` 来自前序 `BootCPU` online 边界，action 内只提交两类属性，即设置 `PF_NO_SETAFFINITY` 等价 flag 和把 cpumask 限制到 boot CPU。源码中的 pid lookup 是用局部 pid 重新取回 task 指针的实现路径，不作为正式 action 参数或 drives。包围该查找的 `rcu_read_lock()/unlock()` 当前记录为 deferred 上下文建模问题：它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。
 5. `NUMA 默认策略路径`：覆盖 `numa_default_policy()`。当前 `CONFIG_NUMA=n`，该调用为空实现，按 trimmed/no-op 记录。未来启用 NUMA 后，可恢复为 `NumaPolicy.set_default_for_init()` 之类的动作，但不影响当前 RestInit 主线。
@@ -2372,12 +2372,12 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
    | slot | Linux 对应动作 | 依赖 | drives / 产物 |
    |---|---|---|---|
-   | `KthreaddTask.preset()` | `kernel_thread()` 形成 `kernel_clone_args` | 依赖 `BootInitTask/current` 作为复制模板，依赖 `TaskCreationCore.Ready` 提供统一 task 创建入口，依赖 `RootPidNamespace.Ready` 等作为后续复制所需的全局基础事实 | 形成 `TaskSpawnSpec` / kthread shell：`entry = kthreadd`、`arg = NULL`、`clone_flags = CLONE_VM | CLONE_UNTRACED | CLONE_FS | CLONE_FILES`、`kthread = true`、`name = NULL`。此时只确定“要创建 kthreadd provider task”的规格，不把任务放入调度队列。 |
-   | `KthreaddTask.setup()` | `kernel_clone()` 中的 `copy_process()`、RISC-V `copy_thread()` 等复制与初始化路径，以及 `kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns)` 形成的 provider 引用事实 | 依赖 `KthreaddTask.Prepared`，继续依赖 `BootInitTask/current` 的 task/thread/fs/files/cred 等模板属性，并由 `TaskCreationCore.spawn_task(spec)` / `TaskCreationCore.copy_from_current()` 这类创建 action 驱动 task/thread/sched entity 等复制动作；其中 PID 分配依赖并调用 `RootPidNamespace.allocate_pid()`，全局 provider 引用依赖 `RootPidNamespace.lookup(pid)` | 建立 `KthreaddTask` 的实体属性和 kthread provider 属性：入口为 `kthreadd`，共享 `CLONE_FS | CLONE_FILES` 指定的 fs/files 语义，建立返回到 `ret_from_fork` 后调用 `kthreadd` 的线程上下文，并初始化可被调度器接收的 task/sched 属性；同时记录 `KthreaddTask.global_ref == kthreadd_task`，未来可等价归入 `KthreadCreationService.provider == KthreaddTask`。 |
+   | `KthreaddTask.preset()` | `kernel_thread()` 形成 `kernel_clone_args` | 依赖 `BootTask/current` 作为复制模板，依赖 `TaskCreationCore.Ready` 提供统一 task 创建入口，依赖 `RootPidNamespace.Ready` 等作为后续复制所需的全局基础事实 | 形成 `TaskSpawnSpec` / kthread shell：`entry = kthreadd`、`arg = NULL`、`clone_flags = CLONE_VM | CLONE_UNTRACED | CLONE_FS | CLONE_FILES`、`kthread = true`、`name = NULL`。此时只确定“要创建 kthreadd provider task”的规格，不把任务放入调度队列。 |
+   | `KthreaddTask.setup()` | `kernel_clone()` 中的 `copy_process()`、RISC-V `copy_thread()` 等复制与初始化路径，以及 `kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns)` 形成的 provider 引用事实 | 依赖 `KthreaddTask.Prepared`，继续依赖 `BootTask/current` 的 task/thread/fs/files/cred 等模板属性，并由 `TaskCreationCore.spawn_task(spec)` / `TaskCreationCore.copy_from_current()` 这类创建 action 驱动 task/thread/sched entity 等复制动作；其中 PID 分配依赖并调用 `RootPidNamespace.allocate_pid()`，全局 provider 引用依赖 `RootPidNamespace.lookup(pid)` | 建立 `KthreaddTask` 的实体属性和 kthread provider 属性：入口为 `kthreadd`，共享 `CLONE_FS | CLONE_FILES` 指定的 fs/files 语义，建立返回到 `ret_from_fork` 后调用 `kthreadd` 的线程上下文，并初始化可被调度器接收的 task/sched 属性；同时记录 `KthreaddTask.global_ref == kthreadd_task`，未来可等价归入 `KthreadCreationService.provider == KthreaddTask`。 |
    | `KthreaddTask.enable()` | `wake_up_new_task(p)` | 依赖 `KthreaddTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task | 将 `KthreaddTask` 放入调度器可运行集合并推进到 `Online`。它使 kthreadd provider 具备被调度执行并消费 `kthread_create_list` 的机会；后续外部 kthread 创建请求可通过全局 provider 引用唤醒它。 |
 7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，只发布 token/wake 事实；PID 1 继续执行 `kernel_init_freeable()` 的 release fact 由 `KernelInitTask` 的 wait side 观察或消费该 token 后提交。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
-9. `boot idle 任务对象`（暂名 `BootIdleTask`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。底层仍是 Linux 静态 `init_task/current`，因此 `BootInitTask` 与 `BootIdleTask` 可理解为同一底层 task 在不同时期的两个规格身份，而不是两个新旧 task 实体。`schedule_preempt_disabled()` 不建模为单个 action，而是展开为 `BootIdlePreemption.enable_no_resched()`、`Scheduler.schedule()` 和 post-schedule boot idle context；规格身份转换放在 `cpu_startup_entry(CPUHP_ONLINE)` 中，建模为 `BootInitTask.disable()` 与 `BootIdleTask.enable()` 的复合提交。这里 `handoff` 只作为 `disable()` 场景下的自然语言资源交接别名，不作为正式 slot 名。
+9. `boot idle Flow`（`BootIdleFlow`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。Task carrier 始终是 Linux 静态 `init_task/current` 对应的 `BootTask`；`schedule_preempt_disabled()` 展开为 `BootIdlePreemption.enable_no_resched()`、`Scheduler.schedule()` 和 post-schedule boot idle context。随后旧 `RootStream` 停止，`BootTask` 提交 `RootStream -> BootIdleFlow` active handoff，并由 `BootIdleFlow` 承载 idle lifecycle 和 continuation；不得用 Task disable/enable 模拟身份替换。
 
 <p align="center">
   <img src="pic/rest-init-objects.svg" alt="rest_init 期对象分类与相互关系" width="900">
@@ -2387,7 +2387,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
   图 24 rest_init 期对象分类与相互关系
 </p>
 
-图 24 用于说明 `UP Multitask Phase` 子阶段 1 的对象分类和依赖关系。左侧是阶段边界和从 `InterruptPhase` 接续而来的输入事实，中间是 `rest_init()` 创建和推进的三个 task 结果：`KernelInitTask`、`KthreaddTask` 与在 `cpu_startup_entry(CPUHP_ONLINE)` 中完成身份确认的 `BootIdleTask`；右侧是本子阶段使用的支撑对象和同步/状态属性。图中 `KthreaddReadyGate` 是显式同步门，`SystemState` 是全局状态推进，`NumaDefaultPolicy` 在当前配置下为 trimmed/no-op。
+图 24 用于说明 `UP Multitask Phase` 子阶段 1 的对象分类和依赖关系。左侧是阶段边界和从 `InterruptPhase` 接续而来的输入事实，中间是 `rest_init()` 创建和推进的三个 task 结果：`KernelInitTask`、`KthreaddTask` 与在 `cpu_startup_entry(CPUHP_ONLINE)` 中完成身份确认的 `BootTask`；右侧是本子阶段使用的支撑对象和同步/状态属性。图中 `KthreaddReadyGate` 是显式同步门，`SystemState` 是全局状态推进，`NumaDefaultPolicy` 在当前配置下为 trimmed/no-op。
 
 ##### UP Multitask Phase 子阶段 1 过程处理清单（初稿）
 
@@ -2402,7 +2402,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 | `system_state = SYSTEM_SCHEDULING` | formal candidate: `SystemState.setup()` | 把 `SystemState.state` 推进到 `Ready`，并把内部属性 `SystemState.value` 从 `SYSTEM_BOOTING` 更新为 `SYSTEM_SCHEDULING`；表示系统进入调度运行状态，但不等价于 SMP 已启动，也不自动推进 workqueue 到 enabled。 |
 | `complete(&kthreadd_done)` | extension event: `KthreaddReadyGate.complete()` | 对静态 `Completion` 实例执行 `complete()`：通常把扩展状态从 `Pending` 推进到 `Completed`，并唤醒等待中的 `KernelInitTask`。若随后 PID 1 的 `wait()` 消费该令牌，实例扩展状态可回到 `Pending`；因此本阶段不把 `Open` 作为长期结束状态。 |
 | `schedule_preempt_disabled()` | formal pattern: `BootIdlePreemption.enable_no_resched()` + `Scheduler.schedule()` + `BootIdleStartupContext` | 退出继承的禁抢占原子上下文，执行一次调度分界，再进入 post-schedule boot idle 原子上下文；形成第一次实际调度交接，使已入队的新任务具备运行机会。 |
-| `cpu_startup_entry(CPUHP_ONLINE)` | formal candidate: `BootInitTask.disable()` + `BootIdleTask.enable()` | 同一底层 `init_task/current` 的启动编排身份退出运行路径，并以 boot CPU idle 身份进入 idle 循环；`handoff` 只作为该 `disable()` 资源交接语义的自然语言别名，不作为正式 slot 名。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
+| `cpu_startup_entry(CPUHP_ONLINE)` | formal: `BootIdleFlow.Setup` + idle actions | 同一 `BootTask` 保持身份，active Flow 从 `RootStream` handoff 到 `BootIdleFlow` 后进入 idle 循环。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
 
 <p align="center">
   <img src="pic/rest-init-sequence.svg" alt="rest_init 期对象构建时序" width="900">
@@ -2430,8 +2430,8 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 - `SystemState.state == Ready`
 - `SystemState.value == SYSTEM_SCHEDULING`
 - `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 展开的 `Scheduler.schedule()` 已完成第一次实际调度交接
-- `BootInitTask.state == Offline`，表示启动编排身份已经在 `cpu_startup_entry(CPUHP_ONLINE)` 中退出运行路径
-- `BootIdleTask.state == Online`，表示同一底层 task 已经在 `cpu_startup_entry(CPUHP_ONLINE)` 中启用 boot CPU idle 身份并转入 idle 路径
+- `BootTask.state == Online`，且 Task identity、PID 0、CPU 归属和 switch context 均保持
+- `RootStream` 已 inactive，`BootIdleFlow.state == Ready`，并且 `task_active_flow_is(BootTask, BootIdleFlow)`
 - `BootCPU.hotplug_state == CPUHP_ONLINE`
 - `NumaDefaultPolicy` 按当前配置记录为 trimmed/no-op
 - 下一子阶段的主执行任务是 `KernelInitTask`，入口是 `kernel_init_freeable()` 中 `gfp_allowed_mask = __GFP_BITS_MASK`
@@ -2440,11 +2440,11 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 `SMP Runtime Phase` 的第一个子阶段暂名 `PreSmpInitPhase`，中文名为 SMP 前初始化期。它对应 Linux 6.12 `kernel_init_freeable()` 中从 `gfp_allowed_mask = __GFP_BITS_MASK` 开始，到 `smp_init()` 调用前结束的初始化段。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口。
 
-这个子阶段运行在上一子阶段创建并被 `KthreaddReadyGate` 释放的 `KernelInitTask` 上。此时 `BootIdleTask` 和 `KthreaddTask` 已经存在，`SystemState.state == Ready` 且内部属性 `SystemState.value == SYSTEM_SCHEDULING`，但只有 boot CPU online，secondary CPU 尚未启动。因此，本阶段可以使用调度、completion、kthread 和阻塞分配能力来完成更接近运行期的准备，但仍不能把任何对象解释为“多核并行已经开始”。
+这个子阶段运行在上一子阶段创建并被 `KthreaddReadyGate` 释放的 `KernelInitTask` 上。此时 `BootTask` 和 `KthreaddTask` 已经存在，`SystemState.state == Ready` 且内部属性 `SystemState.value == SYSTEM_SCHEDULING`，但只有 boot CPU online，secondary CPU 尚未启动。因此，本阶段可以使用调度、completion、kthread 和阻塞分配能力来完成更接近运行期的准备，但仍不能把任何对象解释为“多核并行已经开始”。
 
 当前先将 `PreSmpInitPhase` 的对象和边界记录如下：
 
-1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 UP multitask 聚合 wrapper 串行接续，而是在 Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后，由 `KernelInitTask` 先在 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已 complete，再经 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootIdleTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
+1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 UP multitask 聚合 wrapper 串行接续，而是在 Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后，由 `KernelInitTask` 先在 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已 complete，再经 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。
@@ -2561,7 +2561,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 - `BootInitRestInitPhase.state == Online`
 - `BootInitScheduleHandoffPhase.state == Online`
 - `UpMultitaskPhase.state == Online`
-- `BootIdleTask.state == Online`，表示 boot CPU idle/scheduler 路径已经接管原 `BootInitTask`
+- `BootTask.state == Online`，且 boot CPU idle/scheduler 路径已绑定同一 Task
 - `KernelInitTask.state == Online`，且 PID 1 已解除 `kthreadd_done` 等待
 - `KthreaddTask.state == Online`，表示 `kthreadd` 任务已建立并可由调度器运行
 - `SystemState.state == Ready`
@@ -2591,7 +2591,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 - `PreSmpInitPhase.state == Ready`
 - `KernelInitTask.state == Online`，且仍在 boot CPU 上执行 `kernel_init_freeable()`
-- `BootIdleTask.state == Online`
+- `BootTask.state == Online`
 - `KthreaddTask.state == Online`
 - `CpuGroup.CpuTopology.state == Ready`
 - 默认路径下 secondary CPU 已 marked present，但尚未 online
@@ -2616,7 +2616,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 `SMP Runtime Phase` 的第二个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
 
-这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootIdleTask` 绑定为 `CpuGroup.Cpu[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.Cpu[cpu].IdleTask`，不重新处理 boot CPU，并且每个 AP idle task 都必须拥有自己的 boot stack / pt_regs 栈顶事实。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 按 Linux `cpu_ops_sbi.cpu_start()` 发布每个 AP 的 `{ task_ptr, stack_ptr }` boot data，用 SBI HSM `hart_start(hartid, secondary_start_sbi, boot_data)` 释放目标 hart，然后等待同步 completion。AP 侧从区别于 BP `_start` 的 `secondary_start_sbi` 入口开始，依次进入 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`：先消费 HSM boot data 并建立 AP 当前 idle task/stack，再执行 `smp_callin()` 发布 `cpu_running`，最后进入 `CPUHP_AP_ONLINE_IDLE` 发布 `done_up`。`SecondaryCpuStartupAck` 和 `SecondaryCpuOnlineAck` 只表示 BP wait side 已观察这些 AP 事实，不能由 BP 直接模拟 AP online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。
+这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootTask` 绑定为 `CpuGroup.Cpu[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.Cpu[cpu].IdleTask`，不重新处理 boot CPU，并且每个 AP idle task 都必须拥有自己的 boot stack / pt_regs 栈顶事实。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 按 Linux `cpu_ops_sbi.cpu_start()` 发布每个 AP 的 `{ task_ptr, stack_ptr }` boot data，用 SBI HSM `hart_start(hartid, secondary_start_sbi, boot_data)` 释放目标 hart，然后等待同步 completion。AP 侧从区别于 BP `_start` 的 `secondary_start_sbi` 入口开始，依次进入 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`：先消费 HSM boot data 并建立 AP 当前 idle task/stack，再执行 `smp_callin()` 发布 `cpu_running`，最后进入 `CPUHP_AP_ONLINE_IDLE` 发布 `done_up`。`SecondaryCpuStartupAck` 和 `SecondaryCpuOnlineAck` 只表示 BP wait side 已观察这些 AP 事实，不能由 BP 直接模拟 AP online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。
 
 当前先将 `SmpBringupPhase` 的对象和边界记录如下：
 
@@ -2706,7 +2706,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 
 - `SmpBringupPhase.state == Ready`
 - `CpuGroup.state == Online`
-- `CpuGroup.Cpu[BootCPU.id].IdleTask == BootIdleTask`，该引用已由前序 `sched_init()` / `idle_thread_set_boot_cpu()` 建立
+- `CpuGroup.Cpu[BootCPU.id].IdleTask == BootTask`，该引用已由前序 `sched_init()` / `idle_thread_set_boot_cpu()` 建立
 - `for cpu in CpuGroup.possible_secondary_cpus: CpuGroup.Cpu[cpu].IdleTask.state == Prepared`，表示 `idle_threads_init()` 已准备 inactive secondary idle task
 - `for cpu in CpuGroup.possible_cpus: CpuGroup.Cpu[cpu].CpuHotplugState.done_up/down initialized`，二者是 `Completion` 实例，归属 `CpuHotplugState`
 - `CpuHotplugThread.template.registered == true`
@@ -2745,7 +2745,7 @@ BootIdleEntry 子阶段直接启动，也不从 `BootIdleEntryPhase.Ready` 推�
 当前先将 `RuntimeCorePhase` 的对象和边界记录如下：
 
 1. `运行核心补全期对象`（暂名 `RuntimeCorePhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `SmpBringupPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `sched_init_smp()` 到 `page_alloc_init_late()` 的有效顺序推进对象。
-2. `调度器 SMP 补全动作`：覆盖 `sched_init_smp()`。当前 `CONFIG_SMP=y`，它建模为 `Scheduler.enable_smp()` action，而不是 `Scheduler` 主对象的标准生命周期 `enable` slot。原因是 `Scheduler` 在此前已经支撑 `KernelInitTask` / `KthreaddTask` 创建、`schedule_preempt_disabled()` 展开的首次调度分界和 `BootIdleTask` 运行；这里的语义只是补齐 SMP 调度能力。该 action 建立 `SchedDomain`，把 PID 1 的 CPU affinity 改为 `Housekeeping` domain mask，清除 `PF_NO_SETAFFINITY`，刷新调度 granularity，并初始化 RT/DL 调度类的 SMP 后置状态；完成后 `sched_smp_initialized == true`。
+2. `调度器 SMP 补全动作`：覆盖 `sched_init_smp()`。当前 `CONFIG_SMP=y`，它建模为 `Scheduler.enable_smp()` action，而不是 `Scheduler` 主对象的标准生命周期 `enable` slot。原因是 `Scheduler` 在此前已经支撑 `KernelInitTask` / `KthreaddTask` 创建、`schedule_preempt_disabled()` 展开的首次调度分界和 `BootTask` 运行；这里的语义只是补齐 SMP 调度能力。该 action 建立 `SchedDomain`，把 PID 1 的 CPU affinity 改为 `Housekeeping` domain mask，清除 `PF_NO_SETAFFINITY`，刷新调度 granularity，并初始化 RT/DL 调度类的 SMP 后置状态；完成后 `sched_smp_initialized == true`。
 3. `Workqueue 拓扑启用动作`：覆盖 `workqueue_init_topology()`。规格语义上它是 Linux workqueue 三阶段初始化的第三步：前序 `workqueue_init_early()` 已对应 `Workqueue.preset()`，`workqueue_init()` 已对应 `Workqueue.setup()` 并推进到 `Ready`；这里在 SMP 和 CPU topology 信息稳定后补齐 unbound workqueue 的拓扑感知能力。当前 formal / coding 轮次为了保留前序阶段对 `Workqueue.Ready` 的历史不变式，将它落为 `WorkqueueTopology.setup()` action object，而不改变 `Workqueue` 主对象生命周期；后续若引入“阶段快照不变式”或更细的 Workqueue 子对象，可再把主对象推进到 `Online`。该 action 建立 CPU/SMT/cache/NUMA 四类 pod type，设置 `wq_topo_initialized = true`，并遍历已有 workqueue 与 online CPU 更新 unbound pool workqueue 绑定关系。
 4. `异步执行核心对象`（暂名 `AsyncCore`）：覆盖 `async_init()`。它创建专用 `"async"` unbound workqueue，并提高 `min_active`，用于后续异步 init work 的调度和同步。当前轮次不展开 `async_domain`、cookie、pending list、wait queue 和 async worker 执行细节，标记为 `deferred: AsyncCore.setup()`。
 5. `并行数据处理对象`（暂名 `PadataCore`）：覆盖 `padata_init()`。当前 `CONFIG_PADATA=y` 且 `CONFIG_HOTPLUG_CPU=y`，它登记 padata CPU online/dead hotplug state，并按 possible CPU 数分配 `padata_work` 数组，建立 free work list。由于具体 padata 实例在 `padata_alloc()` 时才创建，且当前轮次不深入 crypto、网络、驱动或大规模并行任务路径，标记为 `deferred: PadataCore.setup()`。
@@ -3008,7 +3008,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 当前先保留两个规格变种：
 
-1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF，成功后该任务成为 `UserInitProcess`。
+1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF；成功后 Task 身份保持，`KernelInitFlow` 被 fresh `Pid1UserAppFlow` 替换。
 2. `UnikernelApp`：内核态应用变种，当前只做粗粒度规格约束。它要求 selected app、入口、参数和基础输出设施可用；`enable()` 调用 app 入口并把启动编排链交给 app，不展开 VFS、binfmt、用户态地址空间和 exec 细节。
 
 本阶段的输入事实至少包括：
@@ -3027,6 +3027,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 当前先将 `PayloadPhase` 的对象和边界记录如下：
 
 Exec 核心对象的权威职责已经拆到
+[`Task / TaskFlow`](objects/task-taskflow.md)、
 [`ExecTransaction`](objects/exec-transaction.md)、
 [`BinaryFormatRegistry`](objects/binary-format-registry.md)、
 [`ExecSyncBoundaries`](objects/exec-sync-boundaries.md) 和
@@ -3041,11 +3042,11 @@ Exec 核心对象的权威职责已经拆到
 6. `ELF 对象`（`ElfObject`）：表示 main/interpreter artifact 与 load plan。详细职责见独立 charter；格式选择属于 registry，提交属于 transaction，不建立 `ElfLoader`。
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射、用户栈映射和阶段性的 heap/mmap arena；dynamic libc 首片要求同一个 `UserAddressSpace` 同时映射主程序 ELF 和 `PT_INTERP` 指向的 musl interpreter ELF，并用固定 non-overlap load bias 装载 `ET_DYN` interpreter。ELF 段的 backing/PTE 以页粒度覆盖 `align_down(p_vaddr)..align_up(p_vaddr + p_memsz)`，因此 `mprotect`/`munmap` 对动态链接器 RELRO 页保护请求的 mapped-range 判断也必须按页范围处理，而不是只按原始 `p_vaddr..p_vaddr+p_memsz` 字节范围拒绝页内前缀。heap/mmap arena 用于承接动态链接器早期 `brk`/anonymous `mmap` 需求，属于正式运行时语义，不是测试专用入口。完整 VMA 树、文件映射、COW、ASLR 和 page fault recovery 后续再展开。
 8. `用户栈对象`（`UserStack`）：表示 exec initial stack 与当前用户栈的稀疏物理 backing owner。initial VMA 覆盖参数页并向下预扩展 128 KiB，只分配实际写入页；运行期 load/store fault 可在 8 MiB rlimit、256 页 guard gap 和相邻 mapping 允许时按页向下增长，跨页跳跃不填充中间页。每次 exec 的单次 24 字节 HWRNG 读取中，16 字节只供栈内 `AT_RANDOM`，独立 8 字节只在 `0x40000000` 以下 8 MiB 窗口内选择页对齐 top。initial auxv 是当前可准确表达的 Linux RISC-V 基线：程序头/entry/interpreter、HWCAP、页大小、时钟 tick、flags、exec 前 credentials、secure=0、`AT_RANDOM`、指向独立 filename 副本的 `AT_EXECFN` 和 `AT_NULL`；没有事实支撑的 platform/HWCAP2/rseq/vDSO 条目不生成。stack mapping 只持有 RW/NX VMA 与 ownership token，不复制 backing 引用；动态 `setrlimit`、越界 signal、通用 VMA fault core、COW/多线程栈、完整 CRNG 和内核 compiler stack protector 后续再展开。
-9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `UserInitProcess.Action::EnterUserMode` 执行最终 trap-return handoff 的输入。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。用户态 trap 继续用 `sscratch` 取得已知安全的 kernel stack top；内核态 trap 必须在保存任何通用寄存器前只借用 `sp`/`sscratch`，按 prospective frame SP 的 `((sp - 288) >> 14) & 1` 检查 VMAP guard 半区，并在正常分支恢复原 `sp`、清零 `sscratch` 后进入现有完整 frame 保存。溢出分支以 `t6`/`sscratch` 交换保持坏栈 SP 和原始 `t6`，切换到静态 overflow stack 构造包含全部整数寄存器与 `sepc/scause/stval/sstatus` 的完整 frame，只经 SBI 输出稳定诊断并 terminal panic；不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
-10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Writev`、`SyscallTable.Action::OpenAt`、`SyscallTable.Action::Read`、`SyscallTable.Action::Close`、`SyscallTable.Action::NewFstatAt`、`SyscallTable.Action::Brk`、`SyscallTable.Action::Mmap`、`SyscallTable.Action::Mprotect`、`SyscallTable.Action::Munmap`、`SyscallTable.Action::SetTidAddress`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。`write/writev` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端；只读 `openat/read/close/newfstatat` 首片则经 `FilesStruct` 分配一个普通文件 opened instance，并通过 VFS path read 读取当前 ext2 rootfs 中已存在的 regular file；`brk/mmap/mprotect/munmap` 路由到 `UserAddressSpace` 的阶段性 heap/mmap arena，用于支撑 musl dynamic loader 的早期运行；`set_tid_address` 按 Linux `current->clear_child_tid = tidptr; return task_pid_vnr(current);` 的形态落到当前 `UserInitProcess` 的 PID1 任务身份属性上，不建立线程管理或 futex 完整对象。
+9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.runtime_entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。静态程序的 runtime entry 是主 ELF entry；动态程序的 runtime entry 是 interpreter entry。它是 `Pid1UserAppFlow.Enable` 执行最终 trap-return handoff 的输入，并直接关联稳定 `KernelInitTask`。当前 RISC-V `APP=user-boot` 入口还为 boot CPU 上的 PID 1 建立 16 KiB、32 KiB 对齐的 VMAP kernel trap stack 和 4 KiB、16 字节对齐的静态 overflow stack。用户态 trap 继续用 `sscratch` 取得已知安全的 kernel stack top；内核态 trap 必须在保存任何通用寄存器前只借用 `sp`/`sscratch`，按 prospective frame SP 的 `((sp - 288) >> 14) & 1` 检查 VMAP guard 半区，并在正常分支恢复原 `sp`、清零 `sscratch` 后进入现有完整 frame 保存。溢出分支以 `t6`/`sscratch` 交换保持坏栈 SP 和原始 `t6`，切换到静态 overflow stack 构造包含全部整数寄存器与 `sepc/scause/stval/sstatus` 的完整 frame，只经 SBI 输出稳定诊断并 terminal panic；不得进入普通 checkpoint、分配器、printk 锁或信号路径。该首片不把不可恢复的 kernel stack overflow 转换为用户信号；per-task stack owner 泛化、per-CPU overflow stack 与 IRQ hardirq stack switch 继续 deferred。
+10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Writev`、`SyscallTable.Action::OpenAt`、`SyscallTable.Action::Read`、`SyscallTable.Action::Close`、`SyscallTable.Action::NewFstatAt`、`SyscallTable.Action::Brk`、`SyscallTable.Action::Mmap`、`SyscallTable.Action::Mprotect`、`SyscallTable.Action::Munmap`、`SyscallTable.Action::SetTidAddress`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。`write/writev` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端；只读 `openat/read/close/newfstatat` 首片则经 `FilesStruct` 分配一个普通文件 opened instance，并通过 VFS path read 读取当前 ext2 rootfs 中已存在的 regular file；`brk/mmap/mprotect/munmap` 路由到 `UserAddressSpace` 的阶段性 heap/mmap arena，用于支撑 musl dynamic loader 的早期运行；`set_tid_address` 按 Linux `current->clear_child_tid = tidptr; return task_pid_vnr(current);` 的形态落到当前 `KernelInitTask` 的 PID 1 任务属性上，不建立 persona 或 futex 完整对象。
 11. `打开文件上下文对象`（`FilesStruct` / `FileDescriptorTable` / `OpenFileDescription` / `FileBackend`）：`FilesStruct` 是任务拥有的打开文件上下文，和表示 root/pwd 的 `FsStruct` 并列，不是 `FsStruct` 的下级类型。`FileDescriptorTable` 是 `FilesStruct` 内部的 fd table，负责把 fd 映射到 `OpenFileDescription`；`OpenFileDescription` 表示一次打开后的文件实例，承载 flags、offset 和后端引用；`FileBackend` 表示具体后端类型。当前支持边界分两层：第一层预安装 fd 0/1/2 为 console-like `CharDevice` 后端；第二层只支持一个 read-only `RegularFile` opened instance，用于 `openat` 后的 `read`、`close` 和 `newfstatat` 最小元数据返回。块设备文件、完整 `/dev/console`、TTY、权限、目录 fd、symlink、poll、共享 fd table、写路径和 page cache 后续展开。
-12. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在进入用户态 ELF 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。`UserInitProcess` 继承同一任务线上已经建立的 `FsStruct` 和 `FilesStruct`，其中 `FsStruct` 提供 root/pwd 视图，`FilesStruct` 提供 stdio fd 与后续 open/read/write syscall 的入口。`UserInitProcess.Action::EnterUserMode` 消费已就绪的 `UserAddressSpace` 和 `UserTrapFrame`，负责写入 `satp`、执行必要 `sfence.vma` 并通过 `sret` 进入 U-mode；它不负责制造 trap frame，也不是独立对象。`UserInitProcess.Action::SetClearChildTid` 只记录当前 PID1 的 `clear_child_tid` 用户指针并让 `set_tid_address` 返回 PID1；线程退出唤醒、futex、clone/thread group 语义后续再展开。
-13. `信号运行期对象`（暂名 `SignalRuntime`）：表示 task 拥有或引用的用户态信号运行期机制。规格概念上它应挂在 `Task` 之下，而不是绑定死到当前唯一实例 `UserInitProcess`；当前 `UserInitProcess` 只是第一个承载该机制的 task 实例。`SignalRuntime` 不等同于前序 `ProcessPreparePhase` 中的 `SignalCore`：`SignalCore` 只表示 `proc_caches_init()` / `signals_init()` 相关的全局分配基础与初始化边界，`SignalRuntime` 表示 task/process 运行期信号状态。后续规格应把 `SignalRuntime` 拆成三个主要子对象：`ProcessSignalState` 对应 Linux `signal_struct` 的线程组/进程共享状态，至少包括 `shared_pending` 及后续 group stop/job control 等进程级 signal 状态；`ThreadSignalState` 对应 Linux `task_struct` 的线程私有状态，包括 `pending`、`blocked`、`real_blocked` 和 `saved_sigmask`；`SignalActionTable` 对应 Linux `sighand_struct.action[_NSIG]`，其条目可命名为 `SignalAction`，由 `rt_sigaction()` 读写。`rt_sigprocmask()` 应建模为 `SignalRuntime.Action::RtSigprocmask`，作用于 `ThreadSignalState.blocked`；`rt_sigaction()` 应建模为 `SignalRuntime.Action::RtSigaction`，作用于 `SignalActionTable.actions[sig]`。`get_signal()`、`dequeue_signal()`、signal frame 构造、进入用户 handler 和 `rt_sigreturn` 不应作为这些状态集合的父对象，而应作为 `SignalRuntime` 上的后续运行期 actions，例如 `RecalcPending`、`DequeueSignal`、`DeliverSignal`、`BuildSignalFrame` 和 `RtSigreturn`；这些 action 消费 `ProcessSignalState`、`ThreadSignalState` 和 `SignalActionTable`，必要时创建或消费 `SignalFrame`。当前单 PID1/单线程首片可以在实现上把这些状态折叠到 `UserInitProcess` 内部字段，但规格边界必须保留进程共享、线程私有和 action table 的区分，以便后续支持 `clone/fork/thread group`、完整 pending 队列、siglock、signal delivery 和 `rt_sigreturn` 时自然展开。
+12. `PID 1 Task 与用户应用 Flow`（`KernelInitTask` / `Pid1UserAppFlow`）：`KernelInitTask` 是 exec 前后不变的 PID 1 Task carrier；用户地址空间、files、credentials、signal 和 trap frame 直接附着于它，不建立用户态 persona wrapper。`Pid1UserAppFlow` 是首次 exec 创建的 fresh `UserAppFlow` 实例，只承载该次应用 continuation 的 lifecycle。successful exec 固定按“新 Flow Preset/Setup -> `KernelInitFlow.Disable` -> `KernelInitTask.CommitFlowHandoff` -> 新 Flow Enable -> `KernelInitFlow.Cleanup`”推进；一个 Task 任一时刻最多一个 Flow Online。后续 exec 仍保持 Task 身份，并创建另一个 fresh `UserAppFlow`。
+13. `信号运行期对象`（暂名 `SignalRuntime`）：表示 Task 拥有或引用的用户态信号运行期机制。它挂在 `KernelInitTask` 等 `Task` 实例之下，不属于 `UserAppFlow`。`SignalRuntime` 不等同于前序 `ProcessPreparePhase` 中的 `SignalCore`：`SignalCore` 只表示 `proc_caches_init()` / `signals_init()` 相关的全局分配基础与初始化边界，`SignalRuntime` 表示 task/process 运行期信号状态。后续规格应把 `SignalRuntime` 拆成三个主要子对象：`ProcessSignalState` 对应 Linux `signal_struct` 的线程组/进程共享状态，至少包括 `shared_pending` 及后续 group stop/job control 等进程级 signal 状态；`ThreadSignalState` 对应 Linux `task_struct` 的线程私有状态，包括 `pending`、`blocked`、`real_blocked` 和 `saved_sigmask`；`SignalActionTable` 对应 Linux `sighand_struct.action[_NSIG]`，其条目可命名为 `SignalAction`，由 `rt_sigaction()` 读写。`rt_sigprocmask()` 应建模为 `SignalRuntime.Action::RtSigprocmask`，作用于 `ThreadSignalState.blocked`；`rt_sigaction()` 应建模为 `SignalRuntime.Action::RtSigaction`，作用于 `SignalActionTable.actions[sig]`。`get_signal()`、`dequeue_signal()`、signal frame 构造、进入用户 handler 和 `rt_sigreturn` 不应作为这些状态集合的父对象，而应作为 `SignalRuntime` 上的后续运行期 actions，例如 `RecalcPending`、`DequeueSignal`、`DeliverSignal`、`BuildSignalFrame` 和 `RtSigreturn`；这些 action 消费 `ProcessSignalState`、`ThreadSignalState` 和 `SignalActionTable`，必要时创建或消费 `SignalFrame`。当前单 PID1/单线程首片可以在实现上把这些状态折叠到 `KernelInitTask` 的内部 user-resource 字段，但规格边界必须保留进程共享、线程私有和 action table 的区分。
 14. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
 <p align="center">
@@ -3071,8 +3072,8 @@ Exec 核心对象的权威职责已经拆到
 | ELF 类型检查 | event: `ElfObject.preset()` | 检查 ELF64、little-endian、RISC-V、当前支持的 executable 类型；失败是普通候选失败，不导致内核崩溃，除非该候选来自强制 `init=`。 |
 | ELF 解析与装载 | event: `ElfObject.setup()` | 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`；`PT_INTERP` 只建立 interpreter role 的第二个 `ElfObject`，不单独引入 `ElfLoader` 或 `Load` 生命周期阶段。 |
 | 用户态入口就绪 | event: `ElfObject.enable()` | 确认 entry、用户栈和 `UserTrapFrame` 已就绪，交给 `UserBootPayload` 做最终 U-mode handoff。 |
-| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则通过 `KernelInitTask.exec_to(UserInitProcess, ...)` 完成交接；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
-| `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则交接到 `UserInitProcess`；失败只记录错误并继续 fallback。 |
+| `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则为 `KernelInitTask` 建立并 handoff 到 `Pid1UserAppFlow`；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
+| `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则 handoff 到 fresh `UserAppFlow`；失败只记录错误并继续 fallback。 |
 | `try_to_run_init_process("/sbin/init" ... "/bin/sh")` | action: `UserBootPayload.try_fallbacks()` | 固定 fallback 列表；每个候选仍调用 `try_candidate(path)`；`-ENOENT` 静默，其它错误打印后继续。 |
 | 所有候选失败 | terminal: `PayloadPanic.no_working_init()` | Linux panic，不形成 `PayloadPhase.Online`。 |
 | `UnikernelApp.setup()` / `UnikernelApp.enable()` | coarse variant | 只约束 app 已选定、入口存在、参数和基础输出设施可用；不展开 Linux exec 细节。 |
@@ -3091,15 +3092,15 @@ Exec 核心对象的权威职责已经拆到
 
 - `PayloadPhase.state == Online`，表示 selected payload 已完成不可逆交接
 - Linux-like 路径下，`UserBootPayload.state == Online`
-- Linux-like 路径下，`UserInitProcess.state == Online`
-- Linux-like 路径下，`KernelInitTask` 不再作为启动编排任务继续返回；其 PID 1 身份已经由 `kernel_execve()` 转换为用户态 init
+- Linux-like 路径下，`KernelInitTask.state == Online` 且 PID 1 Task identity 保持
+- Linux-like 路径下，`Pid1UserAppFlow.state == Online`、`KernelInitFlow.state == Destroyed`，active binding 指向 `Pid1UserAppFlow`
 - Linux-like 路径下，`UserBootPayload.selected_path` 已确定
 - Linux-like 路径下，`InitArgEnv.argv0 == UserBootPayload.selected_path`
 - Linux-like 路径下，`ElfObject.state == Online`
 - Linux-like 路径下，`UserAddressSpace.state == Online`
 - Linux-like 路径下，`UserTrapFrame` 已绑定 entry 和用户栈
 - Linux-like 路径下，`SyscallException` 绑定 `SyscallTable`，并通过 `SyscallTable` actions 支持最小 `write` 与 `exit/exit_group`
-- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `UserInitProcess`
+- Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `Pid1UserAppFlow`
 - 如果 Linux-like 路径进入 `PayloadPanic`，则该路径是失败终端，不满足 `PayloadPhase.state == Online`
 
 ### 内核领域与前置环境

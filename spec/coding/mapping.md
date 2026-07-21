@@ -94,6 +94,12 @@ adoption 方式必须由 project/system coding 文件记录，但不能降低普
 
 ## 普通对象
 
+`Task` 是普通资源对象中的唯一 task_struct-like carrier 类型。实现可以把 scheduler metadata、
+architecture switch context、用户资源和 continuation 存储拆到多个 Rust 结构，但必须由同一 Task
+identity 聚合并对外发布；不得把实现结构拆分解释为额外 Task/persona。`TaskFlow` 使用独立 lifecycle
+存储并由 owner Task 维护 active binding；exec/idle handoff 只替换 Flow，fork/clone 才创建 Task。
+专用约束见 [`objects/task-taskflow.md`](objects/task-taskflow.md)。
+
 除 Phase 对象外，模型对象原则上应对应 Rust `struct`、静态单例或启动上下文中的结构化字段。
 
 资源对象的事件应优先实现为该对象 `impl` 上的方法。若启动早期限制导致对象暂时只能由静态单例、裸指针范围或上下文字段承载，也应保留明确的对象命名和transition 函数边界，并记录后续收敛为独立对象文件的计划。

@@ -206,7 +206,7 @@ state State::Ready {
 示例：`copy_process()` 应建模为 `TaskCreationCore` 在 `Ready` 状态内的参数化 action，而不是为每个目标任务建立 `CopyKernelInitProcess` 之类的专名 action：
 
 ```text
-on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
+on Action::CopyProcess<Src: Task, New: Task>(
     src_task: Src,
     dst_task: New,
     pid_ns: RootPidNamespace,
@@ -214,7 +214,8 @@ on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
     signal: SignalCore,
     files: TaskFileContext,
     security: SecurityCore,
-    scheduler: Scheduler
+    scheduler: Scheduler,
+    flow: TaskFlow
 ) {
     depends_on {
         src_task.state == State::Online;
@@ -226,11 +227,13 @@ on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
         security.state == State::Ready;
         scheduler.state == State::Online;
         task_clone_args_ready(dst_task);
+        task_owns_flow(dst_task, flow);
     }
 
     ensures {
         task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
         task_creation_used_clone_args(TaskCreationCore, dst_task);
+        task_creation_bound_flow(TaskCreationCore, dst_task, flow);
         task_struct_allocated(dst_task);
         task_duplicated_from(dst_task, src_task);
         task_pid_allocated(dst_task, pid_ns);
@@ -376,19 +379,29 @@ Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效
 
 Completion 也说明了 transition/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
-`Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Transition::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
+`Task` 是唯一的 task_struct-like 载体类型；运行时可以同时存在多个彼此独立的 `Task` 实例。`BootTask`、`KernelInitTask`、`KthreaddTask` 与具名见证 `UserChildTask1` 都是这个同一类型的实例。boot idle 只是 `BootTask` 的 Flow handoff，不产生第二个 Task。PID 1 的用户态身份、地址空间、文件、凭据、信号与 trap frame 直接关联稳定实例 `KernelInitTask`，不经过 persona wrapper。`UserTaskSet` 表示一般用户 Task 集合；每次 fork/clone 都向集合加入 fresh Task，该 Task 具有独立 PID 和 lifecycle。DSL 尚不能动态声明匿名对象，所以 `UserChildTask1` 只见证一个具体 child，禁止用它代表后续 child 身份。
+
+`Task` 保存调度身份、任务执行上下文和 `TaskThreadContext`；每个 `TaskFlow` 实例则保存自己的 lifecycle state。Flow 类型与实例必须同时存在：`BootInitFlowType` 的临时具名实例是 `RootStream`，`KernelInitFlowType` 的实例是 `KernelInitFlow`，`KthreaddFlowType` 的实例是 `KthreaddFlow`，`BootIdleFlowType` 的实例是 `BootIdleFlow`；所有用户应用映像共用 `UserAppFlow` 类型，但每次 exec 或 fork continuation 都创建独立实例。应用映像不同不产生新的 Flow 类型。
+
+Flow 关系分为三类，不能混用：`task_owns_flow(task, flow)` 记录 Task 曾经拥有该实例，`task_active_flow_is(task, flow)` 记录当前 active binding，`task_flow_handoff(task, from, to)` 记录 handoff 历史。每个 Flow 只有一个 owner；一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 Flow Online。当前正式 handoff 是 `BootTask: RootStream -> BootIdleFlow`、`KernelInitTask: KernelInitFlow -> Pid1UserAppFlow` 和 `UserChildTask1: UserChildForkFlow1 -> UserChildExecFlow1`。不同 Task 绝不共享同一 `UserAppFlow` 实例。
+
+`UserAppFlow` 的统一 lifecycle 是：Preset 绑定唯一 owner 与入口来源并建立 fresh/独占关系；Setup 准备 exec 映像或 fork continuation 的执行上下文；Enable 成为 owner 唯一 Online Flow 并跨入用户应用黑盒；Disable 处理 exit、exit_group 或 successful-exec replacement；Cleanup 释放实例并保证它不再 active。用户应用内部不声明 action 或 transition；syscall、trap、files 和其它内核资源操作仍属于相应内核对象。successful exec 不替换 Task：新 Flow 先 Preset/Setup，旧 Flow 再 Disable，随后提交 active binding handoff、新 Flow Enable，最后旧 Flow Cleanup。
+
+Task 退出必须先 Disable/Cleanup 当前 Flow；`Task.Disable` 要求所有 owned Flow 已 inactive，`Task.Cleanup` 进一步要求它们都已 Destroyed，因此 Flow 仍存活时 Task 不得进入 Destroyed。动态匿名 Task/Flow 创建、owned Flow 集合与泛型实例 lifecycle 调用仍需要后续 DSL/验证器能力。`RootStream` 作为 `BootInitFlowType` 的临时具名封装保留；它的移除以及全仓 Stream -> Flow 迁移继续 deferred。
+
+`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Transition::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
 `task_state_running(task)` 是 `task_runtime_state_is(task, TaskRuntimeState::Running)` 的派生别名。调用 `Task.Transition::SetRuntimeState(TaskRuntimeState::Running)` 后，Type process ensures 先提交运行态事实，再由 derive 自动推出该别名；阶段规格不应在 `Enable.ensures` 中重复手写这个别名。
 
 `Task.Action::PinToBootCpu(cpu_ref: CpuRef)` 是状态内 action，用于提交 task 的亲和性约束属性，不推进 task lifecycle，也不改变 `TaskRuntimeState`。在 `rest_init()` 中，调用点写为 `KernelInitTask.Action::PinToBootCpu(BootCPURef)`：receiver 已经确定目标 task，`BootCPURef` 是 `BootCPU` 发布的 CPU 引用。该 action 只提交两类属性事实：设置 `PF_NO_SETAFFINITY` 等价的 task flag，以及把 task cpumask 限制到 boot CPU。Linux 源码中的 `find_task_by_pid_ns(pid, &init_pid_ns)` 是用局部 pid 重新取回 task 指针的实现路径，不作为正式参数或 drives；规格层已经持有 `KernelInitTask` receiver。该源码路径由 `rcu_read_lock()/unlock()` 定界，当前保留为 deferred 上下文建模问题：它是否属于资源独占上下文，还是应建模为独立的 RCU/读侧上下文，后续讨论。
 
-正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。`CurrentTaskRef` 是当前 CPU 视角下只属于本 CPU 的任务引用对象；规格不引入 `CurrentTask` 这种描述性对象，也不把 `CurrentTaskRef` 建模为全局 singleton。BP 规格中的 `CurrentTaskRef` 属于 `BootCurrentCPU` 的 current-task 视图，当前最小路径绑定到 `BootIdleTask`；未来 AP 规格应建立各自 CPU 视角下的私有 current-task 引用，而不是复用 BP 的引用。`CurrentRunQueueRef` 是当前 CPU 视角下只属于本 CPU 的当前 runqueue 引用对象；BP 最小路径中它指向 `BootRunQueue`，CPU 归属是 `BootCPURef`，并由本 CPU 的 `CurrentTaskRef` 指向任务的 CPU 归属间接确定。规格不引入描述性 current-runqueue 对象，也不把 `CurrentRunQueueRef` 建模为全局 singleton。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)` 或 `let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文直接使用该词法可见绑定，不通过 `within` 传参或重命名。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Transition::EnqueueTask(...)`、`prev_ref.Action::SaveCoreContext`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootIdleTask.Action`。任务记录的当前 CPU 归属是 `Task` 类型的公共属性，正式更新形态是 `Task.Action::SetTaskCpu(cpu_ref)`，调用点使用具体 task 对象 receiver，例如 `KernelInitTask.Action::SetTaskCpu(BootCPURef)`。
+正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。`CurrentTaskRef` 是当前 CPU 视角下只属于本 CPU 的任务引用对象；规格不引入 `CurrentTask` 这种描述性对象，也不把 `CurrentTaskRef` 建模为全局 singleton。BP 规格中的 `CurrentTaskRef` 属于 `BootCurrentCPU` 的 current-task 视图，当前最小路径绑定到 `BootTask`；未来 AP 规格应建立各自 CPU 视角下的私有 current-task 引用，而不是复用 BP 的引用。`CurrentRunQueueRef` 是当前 CPU 视角下只属于本 CPU 的当前 runqueue 引用对象；BP 最小路径中它指向 `BootRunQueue`，CPU 归属是 `BootCPURef`，并由本 CPU 的 `CurrentTaskRef` 指向任务的 CPU 归属间接确定。规格不引入描述性 current-runqueue 对象，也不把 `CurrentRunQueueRef` 建模为全局 singleton。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)` 或 `let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文直接使用该词法可见绑定，不通过 `within` 传参或重命名。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Transition::EnqueueTask(...)`、`prev_ref.Action::SaveCoreContext`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootTask.Action`。任务记录的当前 CPU 归属是 `Task` 类型的公共属性，正式更新形态是 `Task.Action::SetTaskCpu(cpu_ref)`，调用点使用具体 task 对象 receiver，例如 `KernelInitTask.Action::SetTaskCpu(BootCPURef)`。
 
 Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型也可以声明“引用自身”的 process，例如 `TaskRef.Action::SetCurrent(task)` 更新引用目标本身；这类 process 不分发到目标 `Task`，其 `self` 是引用对象。引用目标的属性或 owned 子对象透明访问是同一语义方向，但当前工具尚未提供统一语法和类型检查；正式规格暂时使用 `task_ref_targets(...)`、`runqueue_ref_targets(...)`、`runqueue_ref_cpu_is(...)` 等 fact 承载，后续再引入 `Ref.attr` / `Ref.child` 的解析规则。
 
 `CurrentTaskRef` 的正式语义是 CPU 视角私有的 current-task 引用：它由本 CPU 的 current-task 机制产生，可能由实现通过私有寄存器组、CPU-local 存储或其它架构设施承载，但模型层不把这些实现承载方式称为 `CurrentTaskRef` 的本体。发生本 CPU 任务切换时，`SchedulerObject.Action::SwitchTo(prev_ref, next_ref)` 必须提交 `next_ref` 成为本 CPU current-task 引用目标的事实。其它 CPU 的 current-task 进展对本 CPU 规格来说只能作为可观察环境事实进入，而不是由本 CPU 的 `CurrentTaskRef` 直接表达。
 
-`CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用：它不是全局 runqueue 单例，也不是 `BootRunQueue` 的别名。调度路径应先从本 CPU `CurrentTaskRef` 得到当前 task，再读取该 task 记录的 CPU logical-id / `cpu_ref`，最后通过 `CpuGroup.Cpu[id].RunQueue` 与 scheduler runqueue metadata 解析当前 runqueue 引用。BP 当前最小路径中这个解析固定为 `CurrentRunQueueRef -> BootRunQueue` 和 `CurrentRunQueueRef -> BootCPURef`，但原因是 `CurrentTaskRef -> BootIdleTask` 且 `task_cpu_ref_is(BootIdleTask, BootCPURef)`，不是因为 current runqueue 解析以 `CpuGroup.boot_cpu()` 为起点。未来 SMP 泛化时，AP 视角应拥有自己的 `CurrentRunQueueRef`，并由对应 CPU 的 current task 与 CPUGroup/runqueue topology 解析目标 runqueue。
+`CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用：它不是全局 runqueue 单例，也不是 `BootRunQueue` 的别名。调度路径应先从本 CPU `CurrentTaskRef` 得到当前 task，再读取该 task 记录的 CPU logical-id / `cpu_ref`，最后通过 `CpuGroup.Cpu[id].RunQueue` 与 scheduler runqueue metadata 解析当前 runqueue 引用。BP 当前最小路径中这个解析固定为 `CurrentRunQueueRef -> BootRunQueue` 和 `CurrentRunQueueRef -> BootCPURef`，但原因是 `CurrentTaskRef -> BootTask` 且 `task_cpu_ref_is(BootTask, BootCPURef)`，不是因为 current runqueue 解析以 `CpuGroup.boot_cpu()` 为起点。未来 SMP 泛化时，AP 视角应拥有自己的 `CurrentRunQueueRef`，并由对应 CPU 的 current task 与 CPUGroup/runqueue topology 解析目标 runqueue。
 
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，不提交 runqueue 成员关系，也不直接更新 task 记录的 CPU id。参照 Linux，`select_task_rq()` 只返回目标 CPU，后续由 `set_task_cpu()` / `__set_task_cpu()` 更新 `task_struct.thread_info.cpu`，再进入 task rq lock 和 enqueue/activate。规格中该更新表达为 `task.Action::SetTaskCpu(cpu_ref)`，并位于 `SelectRunQueue` 和 `EnqueueTask` 之间。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue，并通过 `runqueue_ref_cpu_is(selected_rq, BootCPURef)` 证明调用方写入 `Task.SetTaskCpu(BootCPURef)`；后续 SMP 选择策略应继续由 selected `RunQueueRef` 的 CPU 事实驱动 `Task.SetTaskCpu`，而不是由调用方硬编码 boot CPU。`RunQueueRef` 与 `CurrentRunQueueRef` 必须保持类型语义分离：`CurrentRunQueueRef` 只表示当前 CPU 视角的 current runqueue，不能作为 `SelectRunQueue` 返回值、普通入队目标或 smoke task 入队目标复用。完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
@@ -425,7 +438,7 @@ callee-saved `s0..s11`。这些寄存器不属于 `Scheduler`，而属于每个 
 拥有的 `TaskThreadContext` 内嵌结构。`SwitchTo(prev_ref, next_ref)` 内部通过
 `prev_ref.Action::SaveCoreContext` 和 `next_ref.Action::RestoreCoreContext`
 提交保存/恢复事实；完成后 next 必须成为本 CPU current-task 引用目标。当前 UP
-最小路径允许 `prev == next == CurrentTaskRef`，该引用目标是 `BootIdleTask`，
+最小路径允许 `prev == next == CurrentTaskRef`，该引用目标是 `BootTask`，
 因此 `SwitchTo` 只提交 identity switch 框架事实和核心上下文保存/恢复事实，
 不执行真实 task stack switch。完整 `prev != next` 切换、`last` 返回值、MM 切换、FPU/vector、
 `prepare_task_switch()`/`finish_task_switch()` 钩子、`sched_submit_work()`、
@@ -512,7 +525,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   context 的 `guard.entered_by` 内只能出现一个 owner 实参集合，
   `guard.exited_by` 内也只能出现一个 owner 实参集合，且二者必须完全一致。
   同一把 mutex 在不同执行 owner 线上复用时，必须拆成多个 owner-specific
-  context；不得在一个 guard 中同时列出 `Lock(BootInitTaskRef)` 和
+  context；不得在一个 guard 中同时列出 `Lock(BootTaskRef)` 和
   `Lock(KernelInitTaskRef)`，否则无法从规格上保证 unlock 释放的是同一 owner
   获取的锁。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。

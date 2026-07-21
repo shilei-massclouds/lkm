@@ -6,11 +6,11 @@ use super::{
     vm::Vm,
 };
 
-pub struct InitTask {
+pub struct BootTask {
     lifecycle: Lifecycle,
 }
 
-impl InitTask {
+impl BootTask {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -68,7 +68,7 @@ impl InitTask {
             LifecycleEvent::Enable,
             State::Prepared,
             State::Online,
-            Checkpoint::InitTaskOnline,
+            Checkpoint::BootTaskOnline,
         )
     }
 

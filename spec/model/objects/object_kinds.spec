@@ -31,5 +31,8 @@ type MemoryObject {
 type ResourceObject {
 }
 
+type FlowObject {
+}
+
 type CPUObject {
 }

@@ -26,7 +26,7 @@ pub enum RwLockExtState {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RwLockOwner {
     None,
-    BootInitTask,
+    BootTask,
     KernelInitTask,
     SmokeRwLockTask,
 }
@@ -363,7 +363,7 @@ impl RwLockOwner {
 
     const fn reader_index(self) -> Option<usize> {
         match self {
-            Self::BootInitTask => Some(0),
+            Self::BootTask => Some(0),
             Self::KernelInitTask => Some(1),
             Self::SmokeRwLockTask => Some(2),
             Self::None => None,
@@ -376,7 +376,7 @@ const fn owner_from_task_ref(task_ref: CurrentTaskRef) -> RwLockOwner {
         CurrentTaskRef::KernelInit => RwLockOwner::KernelInitTask,
         CurrentTaskRef::SmokeRwLock => RwLockOwner::SmokeRwLockTask,
         CurrentTaskRef::None
-        | CurrentTaskRef::BootIdle
+        | CurrentTaskRef::BootTask
         | CurrentTaskRef::Kthreadd
         | CurrentTaskRef::UserChild
         | CurrentTaskRef::SmokeScheduler

@@ -2503,8 +2503,161 @@ impl UserTrapFrame {
     }
 }
 
-pub struct UserInitProcess {
+/// The first user application continuation installed into the stable PID 1
+/// task by exec.  Its lifecycle is independent from the task and from the
+/// task-owned resource state below.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub struct Pid1UserAppFlow {
     lifecycle: Lifecycle,
+    owner_pid: usize,
+    owner_bound: bool,
+    entry_source_pid1_exec: bool,
+    instance_fresh: bool,
+    execution_context_ready: bool,
+    active_binding_committed: bool,
+    application_entered: bool,
+    released: bool,
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+impl Pid1UserAppFlow {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            owner_pid: 0,
+            owner_bound: false,
+            entry_source_pid1_exec: false,
+            instance_fresh: false,
+            execution_context_ready: false,
+            active_binding_committed: false,
+            application_entered: false,
+            released: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn owner_pid(&self) -> usize {
+        self.owner_pid
+    }
+
+    pub const fn active_binding_committed(&self) -> bool {
+        self.active_binding_committed
+    }
+
+    pub const fn application_entered(&self) -> bool {
+        self.application_entered
+    }
+
+    pub const fn released(&self) -> bool {
+        self.released
+    }
+
+    pub fn preset(&mut self, owner: &KernelInitTask) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || owner.state() != State::Online
+            || owner.pid() != super::rest_init::KERNEL_INIT_PID
+            || owner.pid1_user_flow_owned()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.owner_pid = owner.pid();
+        self.owner_bound = true;
+        self.entry_source_pid1_exec = true;
+        self.instance_fresh = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            crate::checkpoint::Checkpoint::Pid1UserAppFlowPrepared,
+        )
+    }
+
+    pub fn setup(&mut self, owner_state: &KernelInitTaskUserState) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || !self.owner_bound
+            || !self.entry_source_pid1_exec
+            || !self.instance_fresh
+            || !owner_state.resources_bound()
+            || !owner_state.trap_frame_bound()
+            || !owner_state.address_space_bound()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.execution_context_ready = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            crate::checkpoint::Checkpoint::Pid1UserAppFlowReady,
+        )
+    }
+
+    pub fn commit_active_binding(&mut self, owner: &KernelInitTask) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.execution_context_ready
+            || owner.state() != State::Online
+            || owner.pid() != self.owner_pid
+            || !owner.pid1_user_flow_owned()
+            || !owner.pid1_user_flow_active()
+            || !owner.flow_handoff_committed()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.active_binding_committed = true;
+        Ok(())
+    }
+
+    pub fn enable(&mut self, owner_state: &KernelInitTaskUserState) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.execution_context_ready
+            || !self.active_binding_committed
+            || !owner_state.resources_bound()
+            || !owner_state.syscall_context_bound()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.application_entered = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            crate::checkpoint::Checkpoint::Pid1UserAppFlowOnline,
+        )
+    }
+}
+
+/// PID 1 resources and execution context owned by the stable
+/// [`KernelInitTask`].  This is not a task or flow lifecycle carrier.
+pub struct KernelInitTaskUserState {
+    resources_bound: bool,
+    active_user_flow_online: bool,
     reuses_kernel_init_task: bool,
     pid1_preserved: bool,
     exec_identity_handoff: bool,
@@ -2771,8 +2924,9 @@ impl BuiltinGrandchildContinuation {
     }
 }
 
-pub struct UserChildProcess {
-    lifecycle: Lifecycle,
+pub struct UserTaskSet {
+    set_lifecycle: Lifecycle,
+    active_task_lifecycle: Lifecycle,
     prepared: bool,
     task_entry: TaskEntry,
     task_entry_bound: bool,
@@ -2883,16 +3037,17 @@ pub struct UserChildProcess {
     last_reaped_child_wait_status: usize,
     last_released_child_pid: usize,
     last_released_child_wait_status: usize,
-    active_slot_reusable: bool,
-    active_slot_reuse_count: usize,
+    active_task_record_available: bool,
+    task_allocation_count: usize,
     vfork_next_child_accepted: bool,
 }
 
 #[allow(dead_code)]
-impl UserChildProcess {
+impl UserTaskSet {
     pub const fn new() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
+            set_lifecycle: Lifecycle::new(State::Base),
+            active_task_lifecycle: Lifecycle::new(State::Base),
             prepared: false,
             task_entry: TaskEntry::None,
             task_entry_bound: false,
@@ -3003,14 +3158,18 @@ impl UserChildProcess {
             last_reaped_child_wait_status: 0,
             last_released_child_pid: 0,
             last_released_child_wait_status: 0,
-            active_slot_reusable: false,
-            active_slot_reuse_count: 0,
+            active_task_record_available: false,
+            task_allocation_count: 0,
             vfork_next_child_accepted: false,
         }
     }
 
     pub const fn state(&self) -> State {
-        self.lifecycle.state()
+        self.set_lifecycle.state()
+    }
+
+    pub const fn active_task_state(&self) -> State {
+        self.active_task_lifecycle.state()
     }
 
     pub const fn prepared(&self) -> bool {
@@ -3301,7 +3460,7 @@ impl UserChildProcess {
     }
 
     pub fn pid1_plain_fork_child_continuation(&self) -> bool {
-        self.lifecycle.state() == State::Ready
+        self.active_task_lifecycle.state() == State::Ready
             && self.current_child_continuation()
             && !self.vfork_clone()
             && self.pid != 0
@@ -3317,7 +3476,7 @@ impl UserChildProcess {
     }
 
     pub fn observed_plain_fork_child_pending_wait(&self) -> bool {
-        self.lifecycle.state() == State::Ready
+        self.active_task_lifecycle.state() == State::Ready
             && self.observed_plain_fork_clone
             && !self.observed_plain_fork_child_active
             && !self.observed_plain_fork_parent_restored
@@ -3331,15 +3490,16 @@ impl UserChildProcess {
         self.child_continuation_taken && !self.parent_wait_resumed && !self.vfork_parent_resumed
     }
 
-    pub fn active_slot_reusable(&self) -> bool {
-        self.active_slot_reusable
-            && self.lifecycle.state() == State::Prepared
+    pub fn active_task_record_available(&self) -> bool {
+        self.active_task_record_available
+            && self.set_lifecycle.state() == State::Ready
+            && self.active_task_lifecycle.state() == State::Prepared
             && self.prepared
             && self.task_entry == TaskEntry::UserChild
     }
 
-    pub const fn active_slot_reuse_count(&self) -> usize {
-        self.active_slot_reuse_count
+    pub const fn task_allocation_count(&self) -> usize {
+        self.task_allocation_count
     }
 
     pub const fn next_child_pid(&self) -> usize {
@@ -3480,11 +3640,11 @@ impl UserChildProcess {
     }
 
     pub fn nested_vfork_copy_ready(&self) -> bool {
-        self.lifecycle.state() == State::Ready
+        self.active_task_lifecycle.state() == State::Ready
             && self.current_child_continuation()
             && self.vfork_clone()
             && !self.nested_vfork_clone
-            && !self.active_slot_reusable
+            && !self.active_task_record_available
             && self.pid != 0
             && self.task_entry == TaskEntry::UserChild
     }
@@ -3675,29 +3835,32 @@ impl UserChildProcess {
         self.parent_wait_resumed && self.child_exit_status_observed
     }
 
-    pub fn preset(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base {
+    pub fn setup(&mut self) -> EventResult {
+        if self.set_lifecycle.state() != State::Base
+            || self.active_task_lifecycle.state() != State::Base
+        {
             return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
+                LifecycleEvent::Setup,
+                self.set_lifecycle.state(),
                 State::Base,
-                State::Prepared,
+                State::Ready,
             );
         }
 
         self.prepared = true;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
-        self.active_slot_reusable = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.active_task_record_available = true;
+        self.active_task_lifecycle = Lifecycle::new(State::Prepared);
+        self.set_lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
     // Plain-fork copy validates the complete specified parent and child task snapshot.
     #[allow(clippy::too_many_arguments)]
     pub fn copy_plain_fork_from_parent(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
@@ -3712,11 +3875,11 @@ impl UserChildProcess {
         sched_entity_ready: bool,
         task_state_new: bool,
     ) -> Option<usize> {
-        if self.lifecycle.state() != State::Prepared
+        if self.active_task_lifecycle.state() != State::Prepared
             || !self.prepared
-            || !self.active_slot_reusable
+            || !self.active_task_record_available
             || self.task_entry != TaskEntry::UserChild
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || boundaries.state() != State::Ready
             || !boundaries.accepts_plain_fork_first_slice(clone_flags, newsp)
@@ -3819,17 +3982,18 @@ impl UserChildProcess {
         self.pidfd_copyout = false;
         self.parent_clone_return = 0;
         self.clear_observed_plain_fork_state();
-        self.active_slot_reusable = false;
+        self.active_task_record_available = false;
         self.vfork_next_child_accepted = false;
         self.next_child_pid = child_pid.saturating_add(1);
 
         if self
-            .lifecycle
+            .active_task_lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .is_err()
         {
             return None;
         }
+        self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some(self.pid)
     }
 
@@ -3837,7 +4001,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn copy_vfork_from_parent(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
@@ -3855,11 +4019,11 @@ impl UserChildProcess {
         sched_entity_ready: bool,
         task_state_new: bool,
     ) -> Option<TrapFrame> {
-        if self.lifecycle.state() != State::Prepared
+        if self.active_task_lifecycle.state() != State::Prepared
             || !self.prepared
-            || !self.active_slot_reusable
+            || !self.active_task_record_available
             || self.task_entry != TaskEntry::UserChild
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || boundaries.state() != State::Ready
             || !(boundaries.accepts_vfork_pidfd_first_slice(clone_flags)
@@ -3909,7 +4073,7 @@ impl UserChildProcess {
 
         let child_pid = self.next_child_pid;
         let next_child_accepted =
-            self.completed_child_record_total_archived != 0 || self.active_slot_reuse_count != 0;
+            self.completed_child_record_total_archived != 0 || self.task_allocation_count != 0;
 
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
@@ -3984,17 +4148,18 @@ impl UserChildProcess {
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = true;
         self.clear_observed_plain_fork_state();
-        self.active_slot_reusable = false;
+        self.active_task_record_available = false;
         self.vfork_next_child_accepted = next_child_accepted;
         self.next_child_pid = child_pid.saturating_add(1);
 
         if self
-            .lifecycle
+            .active_task_lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .is_err()
         {
             return None;
         }
+        self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some(child_frame)
     }
 
@@ -4002,7 +4167,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn copy_nested_vfork_from_current_child(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
@@ -4019,7 +4184,7 @@ impl UserChildProcess {
         task_state_new: bool,
     ) -> Option<(TrapFrame, usize)> {
         if !self.nested_vfork_copy_ready()
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || boundaries.state() != State::Ready
             || !boundaries.accepts_vfork_vm_first_slice(clone_flags)
@@ -4154,10 +4319,11 @@ impl UserChildProcess {
         self.wait4_parent_wait_observed = false;
         self.child_continuation_taken = true;
         self.clear_observed_plain_fork_state();
-        self.active_slot_reusable = false;
+        self.active_task_record_available = false;
         self.vfork_next_child_accepted = true;
         self.next_child_pid = child_pid.saturating_add(1);
 
+        self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some((child_frame, parent_pid))
     }
 
@@ -4165,7 +4331,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn copy_plain_fork_from_current_child(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         boundaries: &UserCloneDeferredBoundaries,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
@@ -4177,13 +4343,13 @@ impl UserChildProcess {
         newsp: usize,
     ) -> Option<usize> {
         let builtin_grandchild_source = self.pid1_plain_fork_child_continuation();
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.current_child_continuation()
             || (!self.vfork_clone() && !builtin_grandchild_source)
             || self.observed_plain_fork_child_active
             || (self.observed_plain_fork_clone && !self.observed_plain_fork_parent_restored)
             || self.pid == 0
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || boundaries.state() != State::Ready
             || !boundaries.accepts_plain_fork_first_slice(clone_flags, newsp)
@@ -4273,6 +4439,7 @@ impl UserChildProcess {
         self.observed_plain_fork_child_active = false;
         self.observed_plain_fork_parent_restored = false;
         self.next_child_pid = child_pid.saturating_add(1);
+        self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some(child_pid)
     }
 
@@ -4301,7 +4468,10 @@ impl UserChildProcess {
     }
 
     pub fn mark_enqueued(&mut self) -> bool {
-        if self.lifecycle.state() != State::Ready || self.pid == 0 || self.active_slot_reusable {
+        if self.active_task_lifecycle.state() != State::Ready
+            || self.pid == 0
+            || self.active_task_record_available
+        {
             return false;
         }
         self.enqueued = true;
@@ -4312,7 +4482,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn wait4_yield_to_child_continuation(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         address_space: &UserAddressSpace,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
@@ -4322,7 +4492,7 @@ impl UserChildProcess {
         options: usize,
         rusage: usize,
     ) -> Option<TrapFrame> {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.enqueued
             || self.child_continuation_taken
             || self.pid == 0
@@ -4345,7 +4515,7 @@ impl UserChildProcess {
             || !self.trap_frame_child_return_zero
             || self.parent_wait_resumed
             || self.pid == 0
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
@@ -4424,7 +4594,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn wait4_yield_to_observed_child_continuation(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         address_space: &UserAddressSpace,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
@@ -4450,7 +4620,7 @@ impl UserChildProcess {
             );
         }
         if !self.observed_plain_fork_child_pending_wait()
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || address_space.state() != State::Online
             || !parent.pid1_preserved()
             || upid != USER_WAIT4_ALL_CHILDREN
@@ -4549,7 +4719,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     pub fn pipe_read_yield_to_builtin_grandchild_continuation(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         address_space: &UserAddressSpace,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
@@ -4576,7 +4746,7 @@ impl UserChildProcess {
     #[allow(clippy::too_many_arguments)]
     fn wait4_yield_to_builtin_grandchild_continuation(
         &mut self,
-        parent: &UserInitProcess,
+        parent: &KernelInitTaskUserState,
         address_space: &UserAddressSpace,
         fs_struct: &mut FsStruct,
         files_struct: &mut FilesStruct,
@@ -4589,7 +4759,7 @@ impl UserChildProcess {
     ) -> Option<(TrapFrame, usize, usize)> {
         if !self.observed_plain_fork_child_pending_wait()
             || !self.pid1_plain_fork_child_continuation()
-            || parent.state() != State::Online
+            || !parent.active_user_flow_online()
             || address_space.state() != State::Online
             || fs_struct.state() != State::Ready
             || files_struct.state() != State::Ready
@@ -4738,7 +4908,7 @@ impl UserChildProcess {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize)> {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.child_continuation_taken
             || self.parent_wait_resumed
             || !self.parent_address_space_snapshot_saved
@@ -4773,7 +4943,7 @@ impl UserChildProcess {
     ) -> Option<(TrapFrame, usize, usize, usize)> {
         let (retained_address_space, retained_stack) = retained_exec_objects;
         if self.builtin_grandchild.bound {
-            if self.lifecycle.state() != State::Ready
+            if self.active_task_lifecycle.state() != State::Ready
                 || !self.observed_plain_fork_clone
                 || !self.observed_plain_fork_child_active
                 || self.observed_plain_fork_parent_restored
@@ -4810,7 +4980,7 @@ impl UserChildProcess {
                 parent_pid,
             ));
         }
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
@@ -4851,7 +5021,7 @@ impl UserChildProcess {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize)> {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.vfork_clone()
             || !self.vfork_parent_resume_on_exit
             || !self.child_continuation_taken
@@ -5339,7 +5509,7 @@ impl UserChildProcess {
 
     pub fn finish_observed_child_parent_restore(&mut self) -> bool {
         if self.builtin_grandchild.bound {
-            if self.lifecycle.state() != State::Ready
+            if self.active_task_lifecycle.state() != State::Ready
                 || !self.observed_plain_fork_clone
                 || self.observed_plain_fork_child_active
                 || !self.observed_plain_fork_parent_restored
@@ -5386,7 +5556,7 @@ impl UserChildProcess {
             self.clear_observed_plain_fork_state();
             return true;
         }
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !self.observed_plain_fork_clone
             || self.observed_plain_fork_child_active
             || !self.observed_plain_fork_parent_restored
@@ -5526,7 +5696,7 @@ impl UserChildProcess {
         false
     }
 
-    pub fn mark_active_slot_reusable(&mut self) -> bool {
+    pub fn release_active_task_record(&mut self) -> bool {
         if !self.vfork_parent_resumed
             || !self.completed_child_record_archived
             || !self.parent_wait_writable_page_snapshot_restored
@@ -5534,11 +5704,11 @@ impl UserChildProcess {
             return false;
         }
 
-        self.reset_active_slot_reusable()
+        self.prepare_fresh_task_record()
     }
 
-    pub fn mark_plain_fork_reaped_slot_reusable(&mut self) -> bool {
-        if self.lifecycle.state() != State::Ready
+    pub fn release_reaped_active_task_record(&mut self) -> bool {
+        if self.active_task_lifecycle.state() != State::Ready
             || self.vfork_clone()
             || self.observed_plain_fork_clone
             || !self.parent_wait_resumed
@@ -5554,11 +5724,11 @@ impl UserChildProcess {
             return false;
         }
 
-        self.reset_active_slot_reusable()
+        self.prepare_fresh_task_record()
     }
 
-    fn reset_active_slot_reusable(&mut self) -> bool {
-        self.lifecycle = Lifecycle::new(State::Prepared);
+    fn prepare_fresh_task_record(&mut self) -> bool {
+        self.active_task_lifecycle = Lifecycle::new(State::Prepared);
         self.prepared = true;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
@@ -5643,8 +5813,7 @@ impl UserChildProcess {
         self.vfork_next_child_accepted = false;
         self.clear_observed_plain_fork_state();
         self.builtin_grandchild.reset_empty();
-        self.active_slot_reusable = true;
-        self.active_slot_reuse_count += 1;
+        self.active_task_record_available = true;
         true
     }
 
@@ -6064,10 +6233,11 @@ fn copy_user_stack_window_to_buffer(
 }
 
 #[allow(dead_code)]
-impl UserInitProcess {
+impl KernelInitTaskUserState {
     pub const fn new() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
+            resources_bound: false,
+            active_user_flow_online: false,
             reuses_kernel_init_task: false,
             pid1_preserved: false,
             exec_identity_handoff: false,
@@ -6188,8 +6358,12 @@ impl UserInitProcess {
         }
     }
 
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
+    pub const fn resources_bound(&self) -> bool {
+        self.resources_bound
+    }
+
+    pub const fn active_user_flow_online(&self) -> bool {
+        self.active_user_flow_online
     }
 
     pub const fn reuses_kernel_init_task(&self) -> bool {
@@ -6633,13 +6807,11 @@ impl UserInitProcess {
     }
 
     pub fn credentials_syscall_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
-            && self.credentials_inherited
-            && self.root_credentials_bound
+        self.active_user_flow_online && self.credentials_inherited && self.root_credentials_bound
     }
 
     pub fn signal_mask_syscall_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
+        self.active_user_flow_online
             && self.signal_state_inherited
             && self.signal_runtime_bound
             && self.thread_signal_state_bound
@@ -6647,7 +6819,7 @@ impl UserInitProcess {
     }
 
     pub fn signal_action_syscall_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
+        self.active_user_flow_online
             && self.signal_state_inherited
             && self.signal_runtime_bound
             && self.signal_action_table_bound
@@ -6655,7 +6827,7 @@ impl UserInitProcess {
     }
 
     pub fn signal_wait_syscall_ready(&self) -> bool {
-        self.lifecycle.state() == State::Online
+        self.active_user_flow_online
             && self.signal_state_inherited
             && self.signal_runtime_bound
             && self.thread_signal_state_bound
@@ -6692,7 +6864,7 @@ impl UserInitProcess {
         files_struct: &FilesStruct,
         selected_path: UserInitPathRef,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base
+        if self.resources_bound
             || kernel_init_task.state() != State::Online
             || kernel_init_task.pid() != super::rest_init::KERNEL_INIT_PID
             || address_space.state() != State::Online
@@ -6705,7 +6877,7 @@ impl UserInitProcess {
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                State::Ready,
                 State::Base,
                 State::Ready,
             );
@@ -6786,17 +6958,17 @@ impl UserInitProcess {
         self.rt_sigtimedwait_wake_signal = 0;
         self.rt_sigtimedwait_dequeued_signal = 0;
         self.rt_sigtimedwait_return_signal = 0;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+        self.resources_bound = true;
+        Ok(())
     }
 
-    pub fn enable(
+    pub fn bind_syscall_context(
         &mut self,
         trap_frame: &UserTrapFrame,
         exception_stream: &ExceptionStream,
         syscall_table: &SyscallTable,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+        if !self.resources_bound
             || trap_frame.state() != State::Ready
             || exception_stream.syscall_state() != State::Online
             || syscall_table.state() != State::Ready
@@ -6804,7 +6976,7 @@ impl UserInitProcess {
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.lifecycle.state(),
+                State::Base,
                 State::Ready,
                 State::Online,
             );
@@ -6814,18 +6986,40 @@ impl UserInitProcess {
         self.trap_return_bound = true;
         self.syscall_dispatch_bound = true;
         self.syscall_arguments_extracted = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+        Ok(())
     }
 
-    pub fn enter_user_mode(&mut self, trap_frame: &UserTrapFrame) -> EventResult {
-        if self.lifecycle.state() != State::Online
+    pub fn activate_user_flow(&mut self, flow: &Pid1UserAppFlow) -> EventResult {
+        if !self.resources_bound
+            || self.active_user_flow_online
+            || flow.state() != State::Online
+            || !flow.active_binding_committed()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.active_user_flow_online = true;
+        Ok(())
+    }
+
+    pub fn enter_user_mode(
+        &mut self,
+        trap_frame: &UserTrapFrame,
+        flow: &Pid1UserAppFlow,
+    ) -> EventResult {
+        if !self.active_user_flow_online
+            || flow.state() != State::Online
             || trap_frame.state() != State::Ready
             || !self.trap_return_bound
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.lifecycle.state(),
+                State::Ready,
                 State::Online,
                 State::Online,
             );
@@ -6845,7 +7039,7 @@ impl UserInitProcess {
     }
 
     pub fn set_clear_child_tid(&mut self, tidptr: usize) -> usize {
-        if self.lifecycle.state() != State::Online {
+        if !self.active_user_flow_online {
             return 0;
         }
         self.clear_child_tid = tidptr;
@@ -6862,7 +7056,7 @@ impl UserInitProcess {
     }
 
     pub fn read_pid(&mut self, current_child_continuation: bool) -> Option<usize> {
-        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+        if !self.active_user_flow_online || !self.pid1_preserved {
             return None;
         }
         let pid = if current_child_continuation {
@@ -6878,7 +7072,7 @@ impl UserInitProcess {
     }
 
     pub fn read_ppid(&mut self) -> Option<usize> {
-        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+        if !self.active_user_flow_online || !self.pid1_preserved {
             return None;
         }
         self.ppid_zero_first_slice = true;
@@ -6891,7 +7085,7 @@ impl UserInitProcess {
         pid_arg: usize,
         current_child_continuation: bool,
     ) -> UserProcessGroupLookup {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.process_group_leader_first_slice
             || self.process_group == 0
@@ -6934,7 +7128,7 @@ impl UserInitProcess {
         pid_arg: usize,
         current_child_continuation: bool,
     ) -> UserProcessGroupLookup {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || self.session_id == 0
@@ -6979,7 +7173,7 @@ impl UserInitProcess {
     }
 
     pub fn observe_child_process_group_visible(&mut self, child_pid: usize) -> bool {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || child_pid == 0
             || self.process_group == 0
@@ -7012,7 +7206,7 @@ impl UserInitProcess {
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || parent_pid == 0
             || child_pid == 0
@@ -7040,7 +7234,7 @@ impl UserInitProcess {
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || parent_pid == 0
             || child_pid == 0
@@ -7069,7 +7263,7 @@ impl UserInitProcess {
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || parent_pid == 0
             || child_pid == 0
@@ -7111,7 +7305,7 @@ impl UserInitProcess {
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || parent_pid == 0
             || child_pid == 0
@@ -7158,7 +7352,7 @@ impl UserInitProcess {
         pgid_arg: usize,
         current_child_continuation: bool,
     ) -> UserProcessGroupUpdate {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || !self.process_group_leader_first_slice
@@ -7249,7 +7443,7 @@ impl UserInitProcess {
         &mut self,
         current_child_continuation: bool,
     ) -> UserProcessGroupUpdate {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || self.session_id == 0
@@ -7292,7 +7486,7 @@ impl UserInitProcess {
     }
 
     pub fn read_foreground_pgrp(&mut self) -> Option<usize> {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || !self.process_group_leader_first_slice
@@ -7309,7 +7503,7 @@ impl UserInitProcess {
     }
 
     pub fn set_foreground_pgrp_first_slice(&mut self, pgrp_arg: u32) -> UserProcessGroupUpdate {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || !self.process_group_leader_first_slice
@@ -7353,7 +7547,7 @@ impl UserInitProcess {
         &mut self,
         current_child_continuation: bool,
     ) -> UserProcessGroupLookup {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || self.session_id == 0
@@ -7387,7 +7581,7 @@ impl UserInitProcess {
         current_child_continuation: bool,
         _arg: usize,
     ) -> UserProcessGroupUpdate {
-        if self.lifecycle.state() != State::Online
+        if !self.active_user_flow_online
             || !self.pid1_preserved
             || !self.session_leader_first_slice
             || self.session_id == 0
@@ -7622,7 +7816,7 @@ impl UserInitProcess {
     }
 
     pub fn record_child_exit_sigchld(&mut self) -> Option<bool> {
-        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+        if !self.active_user_flow_online || !self.pid1_preserved {
             return None;
         }
 
@@ -7655,7 +7849,7 @@ impl UserInitProcess {
     }
 
     pub fn observe_getcwd_root_slice(&mut self) -> bool {
-        if self.lifecycle.state() != State::Online || !self.fs_struct_inherited {
+        if !self.active_user_flow_online || !self.fs_struct_inherited {
             return false;
         }
         self.root_cwd_first_slice = true;
@@ -7665,7 +7859,7 @@ impl UserInitProcess {
 }
 
 pub struct UserBootPayload {
-    lifecycle: Lifecycle,
+    active_task_lifecycle: Lifecycle,
     exec_sync_boundaries_ready: bool,
     selected: bool,
     candidates_bound: bool,
@@ -7699,7 +7893,7 @@ pub struct UserBootPayload {
 impl UserBootPayload {
     pub const fn new() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
+            active_task_lifecycle: Lifecycle::new(State::Base),
             exec_sync_boundaries_ready: false,
             selected: false,
             candidates_bound: false,
@@ -7731,7 +7925,7 @@ impl UserBootPayload {
     }
 
     pub const fn state(&self) -> State {
-        self.lifecycle.state()
+        self.active_task_lifecycle.state()
     }
 
     pub const fn exec_sync_boundaries_ready(&self) -> bool {
@@ -7843,14 +8037,14 @@ impl UserBootPayload {
         kernel_init_task: &KernelInitTask,
         exec_sync: &ExecSyncBoundaries,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base
+        if self.active_task_lifecycle.state() != State::Base
             || kernel_init_task.state() != State::Online
             || exec_sync.state() != State::Ready
             || !exec_sync.kernel_execve_linux_window_bound()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.active_task_lifecycle.state(),
                 State::Base,
                 State::Ready,
             );
@@ -7871,8 +8065,11 @@ impl UserBootPayload {
         self.partition_objects_deferred = true;
         self.driven_by_kernel_init_task = true;
         self.try_candidate_bound = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+        self.active_task_lifecycle.adopt_transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+        )
     }
 
     pub fn try_candidate(
@@ -7881,13 +8078,13 @@ impl UserBootPayload {
         actual_path: &[u8],
         elf: &ElfObject,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || !matches!(elf.state(), State::Ready | State::Online)
             || !valid_selected_path(actual_path)
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.active_task_lifecycle.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -7906,13 +8103,13 @@ impl UserBootPayload {
 
     #[cfg(app_user_boot)]
     pub fn record_init_attempt_failure(&mut self, failure: UserInitAttemptFailure) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || failure.stage() == UserInitAttemptStage::None
             || failure.reason() == UserInitAttemptReason::None
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.active_task_lifecycle.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -7925,28 +8122,32 @@ impl UserBootPayload {
     }
 
     #[cfg(app_user_boot)]
+    #[allow(clippy::too_many_arguments)]
     pub fn enable_for_user_entry(
         &mut self,
         elf: &ElfObject,
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
-        user_init_process: &UserInitProcess,
+        pid1_user_app_flow: &Pid1UserAppFlow,
+        kernel_init_user_state: &KernelInitTaskUserState,
         exception_stream: &ExceptionStream,
         syscall_table: &SyscallTable,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+        if self.active_task_lifecycle.state() != State::Ready
             || elf.state() != State::Online
             || address_space.state() != State::Online
             || trap_frame.state() != State::Ready
-            || user_init_process.state() != State::Online
-            || !user_init_process.user_entry_ready()
-            || !user_init_process.runtime_entered()
+            || pid1_user_app_flow.state() != State::Online
+            || !pid1_user_app_flow.active_binding_committed()
+            || !kernel_init_user_state.active_user_flow_online()
+            || !kernel_init_user_state.user_entry_ready()
+            || !kernel_init_user_state.runtime_entered()
             || syscall_table.state() != State::Ready
             || exception_stream.syscall_state() != State::Online
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.lifecycle.state(),
+                self.active_task_lifecycle.state(),
                 State::Ready,
                 State::Online,
             );
@@ -7954,8 +8155,11 @@ impl UserBootPayload {
 
         self.enters_user_mode = true;
         self.no_return_handoff = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+        self.active_task_lifecycle.adopt_transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+        )
     }
 }
 #[cfg(app_user_boot)]
@@ -7968,7 +8172,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
     {
         user_boot_panic("user payload setup failed\n");
     }
-    if ctx.user_child_process.preset().is_err() {
+    if ctx.user_task_set.setup().is_err() {
         user_boot_panic("user child process preset failed\n");
     }
     if !prepare_user_kernel_trap_stack(
@@ -8016,7 +8220,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
         user_boot_panic("user stdin blocking wait setup failed\n");
     }
     if ctx
-        .user_init_process
+        .kernel_init_user_state
         .setup(
             &ctx.kernel_init_task,
             &ctx.user_address_space,
@@ -8031,19 +8235,57 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
         user_boot_panic("user init process setup failed\n");
     }
     if ctx
-        .user_init_process
-        .enable(
+        .kernel_init_user_state
+        .bind_syscall_context(
             &ctx.user_trap_frame,
             &ctx.exception_stream,
             &ctx.syscall_table,
         )
         .is_err()
     {
-        user_boot_panic("user init process enable failed\n");
+        user_boot_panic("PID 1 syscall context bind failed\n");
     }
     if ctx
-        .user_init_process
-        .enter_user_mode(&ctx.user_trap_frame)
+        .pid1_user_app_flow
+        .preset(&ctx.kernel_init_task)
+        .is_err()
+        || ctx
+            .pid1_user_app_flow
+            .setup(&ctx.kernel_init_user_state)
+            .is_err()
+        || ctx
+            .kernel_init_flow
+            .disable_for_exec(&ctx.kernel_init_task)
+            .is_err()
+        || ctx
+            .kernel_init_task
+            .commit_pid1_user_flow_handoff(
+                ctx.kernel_init_flow.state(),
+                ctx.pid1_user_app_flow.state(),
+            )
+            .is_err()
+        || ctx
+            .pid1_user_app_flow
+            .commit_active_binding(&ctx.kernel_init_task)
+            .is_err()
+        || ctx
+            .pid1_user_app_flow
+            .enable(&ctx.kernel_init_user_state)
+            .is_err()
+        || ctx
+            .kernel_init_user_state
+            .activate_user_flow(&ctx.pid1_user_app_flow)
+            .is_err()
+        || ctx
+            .kernel_init_flow
+            .cleanup_after_handoff(&ctx.kernel_init_task)
+            .is_err()
+    {
+        user_boot_panic("PID 1 flow handoff failed\n");
+    }
+    if ctx
+        .kernel_init_user_state
+        .enter_user_mode(&ctx.user_trap_frame, &ctx.pid1_user_app_flow)
         .is_err()
     {
         user_boot_panic("user init process enter failed\n");
@@ -8054,7 +8296,8 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             &ctx.elf_object,
             &ctx.user_address_space,
             &ctx.user_trap_frame,
-            &ctx.user_init_process,
+            &ctx.pid1_user_app_flow,
+            &ctx.kernel_init_user_state,
             &ctx.exception_stream,
             &ctx.syscall_table,
         )
@@ -8071,21 +8314,24 @@ pub fn enter_first_user_init(
     payload: &UserBootPayload,
     address_space: &UserAddressSpace,
     trap_frame: &UserTrapFrame,
-    user_init_process: &UserInitProcess,
+    pid1_user_app_flow: &Pid1UserAppFlow,
+    kernel_init_user_state: &KernelInitTaskUserState,
 ) -> ! {
     if payload.state() != State::Online
         || !payload.enters_user_mode()
         || !payload.no_return_handoff()
         || address_space.state() != State::Online
         || trap_frame.state() != State::Ready
-        || user_init_process.state() != State::Online
-        || !user_init_process.user_entry_ready()
-        || !user_init_process.runtime_entered()
+        || pid1_user_app_flow.state() != State::Online
+        || !pid1_user_app_flow.application_entered()
+        || !kernel_init_user_state.active_user_flow_online()
+        || !kernel_init_user_state.user_entry_ready()
+        || !kernel_init_user_state.runtime_entered()
     {
         user_boot_panic("user init process entry invariant failed\n");
     }
     crate::checkpoint::dispatch(
-        crate::checkpoint::Checkpoint::UserModeEntry,
+        crate::checkpoint::Checkpoint::Pid1UserAppFlowEnterUserMode,
         crate::context::context_ref(),
     );
     unsafe {

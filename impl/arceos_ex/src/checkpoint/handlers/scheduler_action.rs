@@ -48,7 +48,7 @@ fn check_pick_next_task_exit(
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.pick_next_task_exit_count() != 1
         || ctx.scheduler.pick_next_task_passes() != 1
-        || ctx.scheduler.pick_next_task_exit_prev_ref() != CurrentTaskRef::BootIdle
+        || ctx.scheduler.pick_next_task_exit_prev_ref() != CurrentTaskRef::BootTask
         || !next_is_first_boot_task
         || !ctx
             .scheduler
@@ -77,7 +77,7 @@ fn check_switch_to_exit(
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.switch_to_exit_count() != 1
-        || ctx.scheduler.switch_to_exit_prev_ref() != CurrentTaskRef::BootIdle
+        || ctx.scheduler.switch_to_exit_prev_ref() != CurrentTaskRef::BootTask
         || next_ref != ctx.scheduler.pick_next_task_exit_next_ref()
         || ctx.scheduler.switch_to_exit_current_ref() != next_ref
         || current_ref != next_ref
@@ -111,7 +111,7 @@ fn check_schedule_exit(
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_exit_count() != 1
         || ctx.scheduler.schedule_passes() != 1
-        || ctx.scheduler.schedule_exit_prev_ref() != CurrentTaskRef::BootIdle
+        || ctx.scheduler.schedule_exit_prev_ref() != CurrentTaskRef::BootTask
         || next_ref != ctx.scheduler.pick_next_task_exit_next_ref()
         || next_ref != ctx.scheduler.switch_to_exit_next_ref()
         || ctx.scheduler.schedule_exit_current_ref() != next_ref
@@ -146,10 +146,10 @@ fn check_switch_to_entry(
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.switch_to_entry_count() != 1
-        || ctx.scheduler.switch_to_entry_prev_ref() != CurrentTaskRef::BootIdle
+        || ctx.scheduler.switch_to_entry_prev_ref() != CurrentTaskRef::BootTask
         || ctx.scheduler.switch_to_entry_next_ref() != ctx.scheduler.pick_next_task_exit_next_ref()
         || !next_is_first_boot_task
-        || ctx.scheduler.switch_to_entry_current_ref() != CurrentTaskRef::BootIdle
+        || ctx.scheduler.switch_to_entry_current_ref() != CurrentTaskRef::BootTask
         || ctx.scheduler.switch_to_entry_committed_count()
             >= ctx.boot_cpu_current_task.switch_committed_count()
     {

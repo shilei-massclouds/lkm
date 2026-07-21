@@ -1,7 +1,7 @@
 # 多核运行期阶段
 
 SmpRuntimePhase 是 Kernel.Enable 在真实 KernelInitTask 执行线上驱动的第二个直接阶段。
-它承接 UpMultitaskPhase.Online 后完成的 BootIdleTask -> KernelInitTask 栈切换，从
+它承接 UpMultitaskPhase.Online 后完成的 BootTask -> KernelInitTask 调度/栈切换，从
 `kernel_init()` / `kernel_init_freeable()` 继续推进，直到内核初始化收尾完成并可进入
 PayloadPhase。
 

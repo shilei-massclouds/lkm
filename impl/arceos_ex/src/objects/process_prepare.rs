@@ -1,10 +1,10 @@
 use super::{
+    boot_task::BootTask,
     config::Config,
     cpu_capabilities::CpuCapabilities,
     cpu_group::CpuGroup,
     exception_stream::ExceptionStream,
     files::FilesStruct,
-    init_task::InitTask,
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
@@ -12,7 +12,7 @@ use super::{
     static_branch::StaticBranch,
     task::TaskEntry,
     user_boot::{
-        UserAddressSpace, UserChildProcess, UserCloneDeferredBoundaries, UserInitProcess,
+        KernelInitTaskUserState, UserAddressSpace, UserCloneDeferredBoundaries, UserTaskSet,
         UserTrapFrame,
     },
     vfs::{FsStruct, VfsCore},
@@ -518,7 +518,7 @@ impl TaskCreationCore {
             || inputs.cpu_group.state() != State::Ready
             || inputs.cpu_capabilities.state() != State::Ready
             || inputs.slub_subsystem.state() != State::Ready
-            || inputs.init_task.state() != State::Online
+            || inputs.boot_task.state() != State::Online
             || inputs.exception_stream.state() != State::Ready
         {
             return self.failed_setup();
@@ -620,10 +620,10 @@ impl TaskCreationCore {
         dst_state: State,
         dst_entry: TaskEntry,
     ) -> Result<TaskCopyProcessResult, EventError> {
-        let dst_prepared_slot = dst_state == State::Prepared
-            && inputs.dst_process.state() == State::Prepared
+        let dst_prepared_record = dst_state == State::Prepared
+            && inputs.dst_process.active_task_state() == State::Prepared
             && inputs.dst_process.prepared();
-        let dst_nested_vfork_slot = inputs.allow_nested_vfork
+        let dst_nested_vfork_record = inputs.allow_nested_vfork
             && dst_state == State::Ready
             && inputs.dst_process.nested_vfork_copy_ready();
         if self.lifecycle.state() != State::Ready
@@ -631,8 +631,8 @@ impl TaskCreationCore {
             || !self.rest_init_inputs_ready
             || dst_entry != TaskEntry::UserChild
             || inputs.entry != TaskEntry::UserChild
-            || inputs.src_process.state() != State::Online
-            || !(dst_prepared_slot || dst_nested_vfork_slot)
+            || !inputs.src_process.active_user_flow_online()
+            || !(dst_prepared_record || dst_nested_vfork_record)
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.scheduler.state() != State::Online
             || inputs.fs_struct.state() != State::Ready
@@ -686,7 +686,7 @@ impl TaskCreationCore {
 }
 
 pub struct TaskCopyProcessInputs<'a> {
-    pub src_task: &'a InitTask,
+    pub src_task: &'a BootTask,
     pub root_pid_namespace: &'a RootPidNamespace,
     pub credential_core: &'a CredentialCore,
     pub signal_core: &'a SignalCore,
@@ -698,8 +698,8 @@ pub struct TaskCopyProcessInputs<'a> {
 }
 
 pub struct TaskCopyUserProcessInputs<'a> {
-    pub src_process: &'a UserInitProcess,
-    pub dst_process: &'a UserChildProcess,
+    pub src_process: &'a KernelInitTaskUserState,
+    pub dst_process: &'a UserTaskSet,
     pub root_pid_namespace: &'a RootPidNamespace,
     pub scheduler: &'a Scheduler,
     pub cpu_group: &'a CpuGroup,
@@ -753,7 +753,7 @@ pub struct TaskCreationSetup<'a> {
     pub cpu_group: &'a CpuGroup,
     pub cpu_capabilities: &'a CpuCapabilities,
     pub slub_subsystem: &'a SlubSubsystem,
-    pub init_task: &'a InitTask,
+    pub boot_task: &'a BootTask,
     pub exception_stream: &'a ExceptionStream,
 }
 

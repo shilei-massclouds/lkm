@@ -35,7 +35,7 @@
 | model/coding/arceos_ex/trap/syscall | U-mode entry 与最小 syscall | [用户态 payload 历史](user-mode.md) |
 | validation/user | user-boot 验收闭环 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/payload/user | B 阶段对象边界收口 | [用户态 payload 历史](user-mode.md) |
-| model/coding/arceos_ex/task/mm | KernelInitTask 到 UserInitProcess 的任务身份语义 | [用户态 payload 历史](user-mode.md) |
+| model/coding/arceos_ex/task/mm | KernelInitTask 到 KernelInitTask/Pid1UserAppFlow 的任务身份语义 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/syscall/vfs | 最小 fd/VFS syscall 层首片 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/syscall/vfs | read-only open/read/close/stat syscall 首片 | [用户态 payload 历史](user-mode.md) |
 | model/coding/arceos_ex/elf/mm | 动态 libc 用户 init 前置条件 | [用户态 payload 历史](user-mode.md) |

@@ -8,7 +8,7 @@ continuation，不拥有 CorePrepare sibling 的启动权。
 
 ### Preset: Base -> Prepared
 
-`preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootInitTask/
+`preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootTask/
 KernelImage 状态，EarlyVm、BootInitStack、InterruptStream、RawDtb 和 FixMap 状态。检查通过后才
 发出 `EntrySuccessorPhase.Started`。
 

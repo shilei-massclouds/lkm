@@ -881,13 +881,13 @@
   },
   {
     "checkpoint_index": 396,
-    "checkpoint_name": "UserInitProcess.EnterUserMode",
-    "checkpoint_variant": "UserModeEntry",
+    "checkpoint_name": "Pid1UserAppFlow.EnterUserMode",
+    "checkpoint_variant": "Pid1UserAppFlowEnterUserMode",
     "linux_file": "arch/riscv/kernel/entry.S",
     "linux_symbol": "ret_from_exception",
     "linux_anchor": "ret_from_exception line 279: sret",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=UserInitProcess.EnterUserMode variant=UserModeEntry fingerprint=sha256:4e123c759fc00f1992c0cd1da108bbd5e1bf5e43e54bd87da816ea2f0d44593b */",
+    "marker": "/* LKM_CHECKPOINT name=Pid1UserAppFlow.EnterUserMode variant=Pid1UserAppFlowEnterUserMode fingerprint=sha256:4e123c759fc00f1992c0cd1da108bbd5e1bf5e43e54bd87da816ea2f0d44593b */",
     "anchor_fingerprint": "sha256:4e123c759fc00f1992c0cd1da108bbd5e1bf5e43e54bd87da816ea2f0d44593b"
   },
   {

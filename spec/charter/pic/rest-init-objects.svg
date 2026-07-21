@@ -31,7 +31,7 @@
 
   <rect x="0" y="0" width="1280" height="940" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">rest_init 期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase：rest_init() 按 BootInitTask handoff 与 BootIdleTask 入口拆分</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase：按 BootTask 的 RootStream handoff 与 BootIdleFlow 入口拆分</text>
 
   <rect x="44" y="116" width="250" height="760" rx="14" class="group"/>
   <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -72,10 +72,10 @@
   <text x="685" y="382" text-anchor="middle" class="small">kthreadd_task</text>
 
   <rect x="365" y="472" width="190" height="86" rx="8" class="box flow"/>
-  <text x="460" y="502" text-anchor="middle" class="label">BootInitTask</text>
+  <text x="460" y="502" text-anchor="middle" class="label">BootTask</text>
   <text x="460" y="526" text-anchor="middle" class="small">上一阶段遗留 current</text>
   <rect x="590" y="472" width="190" height="86" rx="8" class="box flow"/>
-  <text x="685" y="502" text-anchor="middle" class="label">BootIdleTask</text>
+  <text x="685" y="502" text-anchor="middle" class="label">BootIdleFlow</text>
   <text x="685" y="526" text-anchor="middle" class="small">boot CPU idle</text>
 
   <rect x="365" y="616" width="190" height="86" rx="8" class="box sched"/>

@@ -22,7 +22,7 @@ Preset 横跨三个物理实现段，但仍是一个 model transition：
 | --- | --- |
 | `_start` head | `InterruptStream.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；`RootStream.Preset` 禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart、`init_task` 和 init stack |
 | `preset_until_vm_switch()` | adoption head 对象事实；驱动 `BootCurrentCPU.Setup -> CpuGroup.Preset -> BootCurrentCPU.Enable`、`EventStream.Preset`、`ExceptionStream.Preset` 和 `Vm.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootInitTask.Enable`、`BootInitStack.Setup` 和 `Soc.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootTask.Enable`、`BootInitStack.Setup` 和 `Soc.Preset` |
 
 `Vm.Setup` 必须在同一个 Preset 内完成 TrampolineVm 到 EarlyVm 的切换，并通过
 `after_vm_setup_continuation()` 回到 EntryPrelude owner。所有 drives 成功后检查 Preset 后置对象
@@ -36,7 +36,7 @@ Ready，读回并发出 `EntryPreludePhase.Ready`，随后按 emits 调用 Enabl
 ## Enable: Ready -> Online
 
 Enable start 检查精确 Ready，并验证 model Online invariant：Root/Interrupt/Exception/Event streams、
-KernelImage、RawDtb、BootInitTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
+KernelImage、RawDtb、BootTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
 CpuGroup 和 Soc 必须处于 model 规定状态。成功后提交 Online，发出
 `EntryPreludePhase.Online`，再返回 Kernel.Preset completion continuation。该 continuation 提交
 Kernel.Prepared 后启动 BootPhase.Preset；本阶段不得直接启动 BootPhase 或 EntrySuccessorPhase。

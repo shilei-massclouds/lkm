@@ -51,7 +51,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.smpboot_threads_lock.setup()?;
     ctx.cpu_hotplug_sync.preset(
         &ctx.cpu_group,
-        &ctx.boot_idle_runtime,
+        &ctx.boot_idle_flow,
         &ctx.kthreadd_task,
         &mut ctx.cpu_hotplug_lock,
         &mut ctx.smpboot_threads_lock,

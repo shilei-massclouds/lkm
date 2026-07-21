@@ -29,7 +29,7 @@
 | 24 | BootCpuLocalInterruptReady | BootCpuLocalInterrupt.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 25 | BootCpuCurrentTaskReady | BootCpuCurrentTask.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 26 | CpuGroupPrepared | CpuGroup.Prepared | G | impl/arceos_ex/src/checkpoint/mod.rs |
-| 27 | InitTaskPrepared | InitTask.Prepared | T | impl/arceos_ex/src/checkpoint/mod.rs |
+| 27 | BootTaskPrepared | BootTask.Prepared | T | impl/arceos_ex/src/checkpoint/mod.rs |
 | 28 | InitStackPrepared | InitStack.Prepared | S | impl/arceos_ex/src/checkpoint/mod.rs |
 | 29 | EventStreamPrepared | EventStream.Prepared | V | impl/arceos_ex/src/checkpoint/mod.rs |
 | 30 | ExceptionStreamPrepared | ExceptionStream.Prepared | 9 | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -47,7 +47,7 @@
 | 42 | VmOnline | Vm.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 43 | KernelImageOnline | KernelImage.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 44 | EventStreamReady | EventStream.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 45 | InitTaskOnline | InitTask.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 45 | BootTaskOnline | BootTask.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 46 | InitStackReady | InitStack.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 47 | InitStackOnline | InitStack.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 48 | SocPrepared | Soc.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -156,7 +156,7 @@
 | 151 | BootRunQueueReady | BootRunQueue.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 152 | BootRunQueueLockReady | BootRunQueueLock.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 153 | BootInitPreemptionReady | BootInitPreemption.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 154 | BootIdleTaskReady | BootIdleTask.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 154 | BootIdleSetupReady | BootIdleSetup.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 155 | BootIdlePiLockReady | BootIdlePiLock.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 156 | BootIdlePreemptionReady | BootIdlePreemption.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 157 | SchedulerReady | Scheduler.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -295,7 +295,7 @@
 | 290 | SystemStateReady | SystemState.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 291 | KthreaddReadyGateReady | KthreaddReadyGate.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 292 | KthreaddReadyGateOnline | KthreaddReadyGate.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 293 | BootIdleRuntimeReady | BootIdleRuntime.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 293 | BootIdleFlowReady | BootIdleFlow.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 294 | PreSmpInitPhaseStarted | PreSmpInitPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 295 | PreSmpInitPhaseReady | PreSmpInitPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 296 | PageAllocatorFullGfpMaskOpen | PageAllocator.FullGfpMaskOpen | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -398,7 +398,7 @@
 | 393 | UserBootInterpreterReady | UserBoot.InterpreterReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 394 | UserBootInitAttemptFailed | UserBoot.InitAttemptFailed | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 395 | UserBootAddressSpaceSetupStart | UserBoot.AddressSpaceSetupStart | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 396 | UserModeEntry | UserInitProcess.EnterUserMode | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 396 | Pid1UserAppFlowEnterUserMode | Pid1UserAppFlow.EnterUserMode | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 397 | UserAddressSpaceReady | UserAddressSpace.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 398 | SyscallTableExecveArgsReady | SyscallTable.ExecveArgsReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 399 | UserExecMainElfReady | UserExec.MainElfReady | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -431,7 +431,7 @@
 | 426 | UserChildParentWaitResumed | UserChild.ParentWaitResumed | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 427 | UserCloneVforkParentResumed | UserClone.VforkParentResumed | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 428 | UserChildRecordArchived | UserChildRecord.Archived | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 429 | UserChildSlotReusable | UserChildSlot.Reusable | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 429 | UserTaskRecordReleased | UserTaskRecord.Released | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 430 | UserChildRecordReaped | UserChildRecord.Reaped | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 431 | SyscallTableExit | SyscallTable.Exit | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 432 | PayloadPhaseReady | PayloadPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -487,3 +487,8 @@
 | 482 | PayloadPhasePrepared | PayloadPhase.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 483 | UserStackGrowComplete | UserStack.GrowComplete | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 484 | UserStackGrowRejected | UserStack.GrowRejected | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 485 | KernelInitFlowOffline | KernelInitFlow.Offline | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 486 | KernelInitFlowDestroyed | KernelInitFlow.Destroyed | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 487 | Pid1UserAppFlowPrepared | Pid1UserAppFlow.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 488 | Pid1UserAppFlowReady | Pid1UserAppFlow.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 489 | Pid1UserAppFlowOnline | Pid1UserAppFlow.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |

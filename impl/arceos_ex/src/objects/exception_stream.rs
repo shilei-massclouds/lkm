@@ -856,42 +856,42 @@ pub struct SyscallTable {
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
     getrandom_full_random_core_deferred: bool,
-    getcwd_routes_to_user_init_process: bool,
+    getcwd_routes_to_kernel_init_user_state: bool,
     getcwd_root_first_slice_bound: bool,
-    getpid_routes_to_user_init_process: bool,
-    getpgid_routes_to_user_init_process: bool,
-    getsid_routes_to_user_init_process: bool,
-    setpgid_routes_to_user_init_process: bool,
-    setsid_routes_to_user_init_process: bool,
+    getpid_routes_to_kernel_init_user_state: bool,
+    getpgid_routes_to_kernel_init_user_state: bool,
+    getsid_routes_to_kernel_init_user_state: bool,
+    setpgid_routes_to_kernel_init_user_state: bool,
+    setsid_routes_to_kernel_init_user_state: bool,
     setsid_process_group_leader_eperm_first_slice: bool,
-    getppid_routes_to_user_init_process: bool,
-    getuid_routes_to_user_init_process: bool,
-    geteuid_routes_to_user_init_process: bool,
-    getgid_routes_to_user_init_process: bool,
-    getegid_routes_to_user_init_process: bool,
-    getresuid_routes_to_user_init_process: bool,
-    getresgid_routes_to_user_init_process: bool,
+    getppid_routes_to_kernel_init_user_state: bool,
+    getuid_routes_to_kernel_init_user_state: bool,
+    geteuid_routes_to_kernel_init_user_state: bool,
+    getgid_routes_to_kernel_init_user_state: bool,
+    getegid_routes_to_kernel_init_user_state: bool,
+    getresuid_routes_to_kernel_init_user_state: bool,
+    getresgid_routes_to_kernel_init_user_state: bool,
     uname_new_utsname_layout_bound: bool,
     uname_static_init_uts_namespace_first_slice: bool,
     uname_full_uts_namespace_deferred: bool,
-    setuid_routes_to_user_init_process: bool,
-    setgid_routes_to_user_init_process: bool,
-    getgroups_routes_to_user_init_process: bool,
+    setuid_routes_to_kernel_init_user_state: bool,
+    setgid_routes_to_kernel_init_user_state: bool,
+    getgroups_routes_to_kernel_init_user_state: bool,
     getgroups_bounded_supplementary_groups_first_slice: bool,
-    setgroups_routes_to_user_init_process: bool,
+    setgroups_routes_to_kernel_init_user_state: bool,
     setgroups_root_first_slice: bool,
     setgroups_bounded_supplementary_groups_first_slice: bool,
     credentials_full_linux_model_deferred: bool,
-    rt_sigprocmask_routes_to_user_init_process: bool,
+    rt_sigprocmask_routes_to_kernel_init_user_state: bool,
     rt_sigprocmask_sigsetsize_bound: bool,
     rt_sigprocmask_unblockable_signals_cleared: bool,
-    rt_sigaction_routes_to_user_init_process: bool,
+    rt_sigaction_routes_to_kernel_init_user_state: bool,
     rt_sigaction_routes_to_signal_action_table: bool,
     rt_sigaction_sigsetsize_bound: bool,
     rt_sigaction_layout_bound: bool,
     rt_sigaction_unblockable_signals_cleared: bool,
     rt_sigaction_kernel_only_signals_rejected: bool,
-    rt_sigtimedwait_routes_to_user_init_process: bool,
+    rt_sigtimedwait_routes_to_kernel_init_user_state: bool,
     rt_sigtimedwait_sigsetsize_bound: bool,
     rt_sigtimedwait_copies_wait_mask: bool,
     rt_sigtimedwait_uinfo_null_no_copyout_first_slice: bool,
@@ -1113,42 +1113,42 @@ impl SyscallTable {
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
             getrandom_full_random_core_deferred: false,
-            getcwd_routes_to_user_init_process: false,
+            getcwd_routes_to_kernel_init_user_state: false,
             getcwd_root_first_slice_bound: false,
-            getpid_routes_to_user_init_process: false,
-            getpgid_routes_to_user_init_process: false,
-            getsid_routes_to_user_init_process: false,
-            setpgid_routes_to_user_init_process: false,
-            setsid_routes_to_user_init_process: false,
+            getpid_routes_to_kernel_init_user_state: false,
+            getpgid_routes_to_kernel_init_user_state: false,
+            getsid_routes_to_kernel_init_user_state: false,
+            setpgid_routes_to_kernel_init_user_state: false,
+            setsid_routes_to_kernel_init_user_state: false,
             setsid_process_group_leader_eperm_first_slice: false,
-            getppid_routes_to_user_init_process: false,
-            getuid_routes_to_user_init_process: false,
-            geteuid_routes_to_user_init_process: false,
-            getgid_routes_to_user_init_process: false,
-            getegid_routes_to_user_init_process: false,
-            getresuid_routes_to_user_init_process: false,
-            getresgid_routes_to_user_init_process: false,
+            getppid_routes_to_kernel_init_user_state: false,
+            getuid_routes_to_kernel_init_user_state: false,
+            geteuid_routes_to_kernel_init_user_state: false,
+            getgid_routes_to_kernel_init_user_state: false,
+            getegid_routes_to_kernel_init_user_state: false,
+            getresuid_routes_to_kernel_init_user_state: false,
+            getresgid_routes_to_kernel_init_user_state: false,
             uname_new_utsname_layout_bound: false,
             uname_static_init_uts_namespace_first_slice: false,
             uname_full_uts_namespace_deferred: false,
-            setuid_routes_to_user_init_process: false,
-            setgid_routes_to_user_init_process: false,
-            getgroups_routes_to_user_init_process: false,
+            setuid_routes_to_kernel_init_user_state: false,
+            setgid_routes_to_kernel_init_user_state: false,
+            getgroups_routes_to_kernel_init_user_state: false,
             getgroups_bounded_supplementary_groups_first_slice: false,
-            setgroups_routes_to_user_init_process: false,
+            setgroups_routes_to_kernel_init_user_state: false,
             setgroups_root_first_slice: false,
             setgroups_bounded_supplementary_groups_first_slice: false,
             credentials_full_linux_model_deferred: false,
-            rt_sigprocmask_routes_to_user_init_process: false,
+            rt_sigprocmask_routes_to_kernel_init_user_state: false,
             rt_sigprocmask_sigsetsize_bound: false,
             rt_sigprocmask_unblockable_signals_cleared: false,
-            rt_sigaction_routes_to_user_init_process: false,
+            rt_sigaction_routes_to_kernel_init_user_state: false,
             rt_sigaction_routes_to_signal_action_table: false,
             rt_sigaction_sigsetsize_bound: false,
             rt_sigaction_layout_bound: false,
             rt_sigaction_unblockable_signals_cleared: false,
             rt_sigaction_kernel_only_signals_rejected: false,
-            rt_sigtimedwait_routes_to_user_init_process: false,
+            rt_sigtimedwait_routes_to_kernel_init_user_state: false,
             rt_sigtimedwait_sigsetsize_bound: false,
             rt_sigtimedwait_copies_wait_mask: false,
             rt_sigtimedwait_uinfo_null_no_copyout_first_slice: false,
@@ -1705,28 +1705,28 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn getuid_routes_to_user_init_process(&self) -> bool {
-        self.getuid_routes_to_user_init_process
+    pub const fn getuid_routes_to_kernel_init_user_state(&self) -> bool {
+        self.getuid_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
-    pub const fn getgid_routes_to_user_init_process(&self) -> bool {
-        self.getgid_routes_to_user_init_process
+    pub const fn getgid_routes_to_kernel_init_user_state(&self) -> bool {
+        self.getgid_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
-    pub const fn setuid_routes_to_user_init_process(&self) -> bool {
-        self.setuid_routes_to_user_init_process
+    pub const fn setuid_routes_to_kernel_init_user_state(&self) -> bool {
+        self.setuid_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
-    pub const fn setgid_routes_to_user_init_process(&self) -> bool {
-        self.setgid_routes_to_user_init_process
+    pub const fn setgid_routes_to_kernel_init_user_state(&self) -> bool {
+        self.setgid_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
-    pub const fn getgroups_routes_to_user_init_process(&self) -> bool {
-        self.getgroups_routes_to_user_init_process
+    pub const fn getgroups_routes_to_kernel_init_user_state(&self) -> bool {
+        self.getgroups_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
@@ -1735,8 +1735,8 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn setgroups_routes_to_user_init_process(&self) -> bool {
-        self.setgroups_routes_to_user_init_process
+    pub const fn setgroups_routes_to_kernel_init_user_state(&self) -> bool {
+        self.setgroups_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
@@ -1755,8 +1755,8 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn rt_sigprocmask_routes_to_user_init_process(&self) -> bool {
-        self.rt_sigprocmask_routes_to_user_init_process
+    pub const fn rt_sigprocmask_routes_to_kernel_init_user_state(&self) -> bool {
+        self.rt_sigprocmask_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
@@ -1770,8 +1770,8 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn rt_sigaction_routes_to_user_init_process(&self) -> bool {
-        self.rt_sigaction_routes_to_user_init_process
+    pub const fn rt_sigaction_routes_to_kernel_init_user_state(&self) -> bool {
+        self.rt_sigaction_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
@@ -1800,8 +1800,8 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
-    pub const fn rt_sigtimedwait_routes_to_user_init_process(&self) -> bool {
-        self.rt_sigtimedwait_routes_to_user_init_process
+    pub const fn rt_sigtimedwait_routes_to_kernel_init_user_state(&self) -> bool {
+        self.rt_sigtimedwait_routes_to_kernel_init_user_state
     }
 
     #[allow(dead_code)]
@@ -2316,42 +2316,42 @@ impl SyscallTable {
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
         self.getrandom_full_random_core_deferred = true;
-        self.getcwd_routes_to_user_init_process = true;
+        self.getcwd_routes_to_kernel_init_user_state = true;
         self.getcwd_root_first_slice_bound = true;
-        self.getpid_routes_to_user_init_process = true;
-        self.getpgid_routes_to_user_init_process = true;
-        self.getsid_routes_to_user_init_process = true;
-        self.setpgid_routes_to_user_init_process = true;
-        self.setsid_routes_to_user_init_process = true;
+        self.getpid_routes_to_kernel_init_user_state = true;
+        self.getpgid_routes_to_kernel_init_user_state = true;
+        self.getsid_routes_to_kernel_init_user_state = true;
+        self.setpgid_routes_to_kernel_init_user_state = true;
+        self.setsid_routes_to_kernel_init_user_state = true;
         self.setsid_process_group_leader_eperm_first_slice = true;
-        self.getppid_routes_to_user_init_process = true;
-        self.getuid_routes_to_user_init_process = true;
-        self.geteuid_routes_to_user_init_process = true;
-        self.getgid_routes_to_user_init_process = true;
-        self.getegid_routes_to_user_init_process = true;
-        self.getresuid_routes_to_user_init_process = true;
-        self.getresgid_routes_to_user_init_process = true;
+        self.getppid_routes_to_kernel_init_user_state = true;
+        self.getuid_routes_to_kernel_init_user_state = true;
+        self.geteuid_routes_to_kernel_init_user_state = true;
+        self.getgid_routes_to_kernel_init_user_state = true;
+        self.getegid_routes_to_kernel_init_user_state = true;
+        self.getresuid_routes_to_kernel_init_user_state = true;
+        self.getresgid_routes_to_kernel_init_user_state = true;
         self.uname_new_utsname_layout_bound = true;
         self.uname_static_init_uts_namespace_first_slice = true;
         self.uname_full_uts_namespace_deferred = true;
-        self.setuid_routes_to_user_init_process = true;
-        self.setgid_routes_to_user_init_process = true;
-        self.getgroups_routes_to_user_init_process = true;
+        self.setuid_routes_to_kernel_init_user_state = true;
+        self.setgid_routes_to_kernel_init_user_state = true;
+        self.getgroups_routes_to_kernel_init_user_state = true;
         self.getgroups_bounded_supplementary_groups_first_slice = true;
-        self.setgroups_routes_to_user_init_process = true;
+        self.setgroups_routes_to_kernel_init_user_state = true;
         self.setgroups_root_first_slice = true;
         self.setgroups_bounded_supplementary_groups_first_slice = true;
         self.credentials_full_linux_model_deferred = true;
-        self.rt_sigprocmask_routes_to_user_init_process = true;
+        self.rt_sigprocmask_routes_to_kernel_init_user_state = true;
         self.rt_sigprocmask_sigsetsize_bound = true;
         self.rt_sigprocmask_unblockable_signals_cleared = true;
-        self.rt_sigaction_routes_to_user_init_process = true;
+        self.rt_sigaction_routes_to_kernel_init_user_state = true;
         self.rt_sigaction_routes_to_signal_action_table = true;
         self.rt_sigaction_sigsetsize_bound = true;
         self.rt_sigaction_layout_bound = true;
         self.rt_sigaction_unblockable_signals_cleared = true;
         self.rt_sigaction_kernel_only_signals_rejected = true;
-        self.rt_sigtimedwait_routes_to_user_init_process = true;
+        self.rt_sigtimedwait_routes_to_kernel_init_user_state = true;
         self.rt_sigtimedwait_sigsetsize_bound = true;
         self.rt_sigtimedwait_copies_wait_mask = true;
         self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice = true;
@@ -2663,7 +2663,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getcwd_supported
             || !self.getcwd_usercopy_ready
-            || !self.getcwd_routes_to_user_init_process
+            || !self.getcwd_routes_to_kernel_init_user_state
             || !self.getcwd_root_first_slice_bound
         {
             complete_unsupported_syscall(frame);
@@ -2676,7 +2676,7 @@ impl SyscallTable {
     pub fn getpid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getpid_supported
-            || !self.getpid_routes_to_user_init_process
+            || !self.getpid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2688,7 +2688,7 @@ impl SyscallTable {
     pub fn getpgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getpgid_supported
-            || !self.getpgid_routes_to_user_init_process
+            || !self.getpgid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2700,7 +2700,7 @@ impl SyscallTable {
     pub fn getsid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getsid_supported
-            || !self.getsid_routes_to_user_init_process
+            || !self.getsid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2712,7 +2712,7 @@ impl SyscallTable {
     pub fn setpgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setpgid_supported
-            || !self.setpgid_routes_to_user_init_process
+            || !self.setpgid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2724,7 +2724,7 @@ impl SyscallTable {
     pub fn setsid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setsid_supported
-            || !self.setsid_routes_to_user_init_process
+            || !self.setsid_routes_to_kernel_init_user_state
             || !self.setsid_process_group_leader_eperm_first_slice
         {
             complete_unsupported_syscall(frame);
@@ -2737,7 +2737,7 @@ impl SyscallTable {
     pub fn getppid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getppid_supported
-            || !self.getppid_routes_to_user_init_process
+            || !self.getppid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2749,7 +2749,7 @@ impl SyscallTable {
     pub fn getuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getuid_supported
-            || !self.getuid_routes_to_user_init_process
+            || !self.getuid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2761,7 +2761,7 @@ impl SyscallTable {
     pub fn geteuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.geteuid_supported
-            || !self.geteuid_routes_to_user_init_process
+            || !self.geteuid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2773,7 +2773,7 @@ impl SyscallTable {
     pub fn getgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getgid_supported
-            || !self.getgid_routes_to_user_init_process
+            || !self.getgid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2785,7 +2785,7 @@ impl SyscallTable {
     pub fn getegid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getegid_supported
-            || !self.getegid_routes_to_user_init_process
+            || !self.getegid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2798,7 +2798,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getresuid_supported
             || !self.credentials_usercopy_ready
-            || !self.getresuid_routes_to_user_init_process
+            || !self.getresuid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2811,7 +2811,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getresgid_supported
             || !self.credentials_usercopy_ready
-            || !self.getresgid_routes_to_user_init_process
+            || !self.getresgid_routes_to_kernel_init_user_state
         {
             complete_unsupported_syscall(frame);
             return;
@@ -2838,7 +2838,7 @@ impl SyscallTable {
     pub fn setuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setuid_supported
-            || !self.setuid_routes_to_user_init_process
+            || !self.setuid_routes_to_kernel_init_user_state
             || !self.credentials_full_linux_model_deferred
         {
             complete_unsupported_syscall(frame);
@@ -2851,7 +2851,7 @@ impl SyscallTable {
     pub fn setgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.setgid_supported
-            || !self.setgid_routes_to_user_init_process
+            || !self.setgid_routes_to_kernel_init_user_state
             || !self.credentials_full_linux_model_deferred
         {
             complete_unsupported_syscall(frame);
@@ -2865,7 +2865,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.getgroups_supported
             || !self.credentials_usercopy_ready
-            || !self.getgroups_routes_to_user_init_process
+            || !self.getgroups_routes_to_kernel_init_user_state
             || !self.getgroups_bounded_supplementary_groups_first_slice
             || !self.credentials_full_linux_model_deferred
         {
@@ -2880,7 +2880,7 @@ impl SyscallTable {
         if self.lifecycle.state() != State::Ready
             || !self.setgroups_supported
             || !self.credentials_usercopy_ready
-            || !self.setgroups_routes_to_user_init_process
+            || !self.setgroups_routes_to_kernel_init_user_state
             || !self.setgroups_root_first_slice
             || !self.setgroups_bounded_supplementary_groups_first_slice
             || !self.credentials_full_linux_model_deferred
@@ -2895,7 +2895,7 @@ impl SyscallTable {
     pub fn rt_sigprocmask(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.rt_sigprocmask_supported
-            || !self.rt_sigprocmask_routes_to_user_init_process
+            || !self.rt_sigprocmask_routes_to_kernel_init_user_state
             || !self.rt_sigprocmask_sigsetsize_bound
             || !self.rt_sigprocmask_unblockable_signals_cleared
             || !self.signal_delivery_deferred
@@ -2911,7 +2911,7 @@ impl SyscallTable {
     pub fn rt_sigaction(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.rt_sigaction_supported
-            || !self.rt_sigaction_routes_to_user_init_process
+            || !self.rt_sigaction_routes_to_kernel_init_user_state
             || !self.rt_sigaction_routes_to_signal_action_table
             || !self.rt_sigaction_sigsetsize_bound
             || !self.rt_sigaction_layout_bound
@@ -2930,7 +2930,7 @@ impl SyscallTable {
     pub fn rt_sigtimedwait(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.rt_sigtimedwait_supported
-            || !self.rt_sigtimedwait_routes_to_user_init_process
+            || !self.rt_sigtimedwait_routes_to_kernel_init_user_state
             || !self.rt_sigtimedwait_sigsetsize_bound
             || !self.rt_sigtimedwait_copies_wait_mask
             || !self.rt_sigtimedwait_uinfo_null_no_copyout_first_slice
@@ -3865,10 +3865,10 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
         .files_struct
         .fd_is_pipe_read_wait_candidate(fd)
         || !crate::context::context_ref()
-            .user_child_process
+            .user_task_set
             .observed_plain_fork_child_pending_wait()
         || !crate::context::context_ref()
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_bound()
     {
         return false;
@@ -3877,9 +3877,9 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
     let (child_frame, parent_pid, child_pid) = {
         let ctx = crate::context::context();
         let Some(handoff) = ctx
-            .user_child_process
+            .user_task_set
             .pipe_read_yield_to_builtin_grandchild_continuation(
-                &ctx.user_init_process,
+                &ctx.kernel_init_user_state,
                 &ctx.user_address_space,
                 &mut ctx.fs_struct,
                 &mut ctx.files_struct,
@@ -3893,7 +3893,7 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
         handoff
     };
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .switch_observed_child_process_visible(parent_pid, child_pid)
     {
         return false;
@@ -4604,7 +4604,7 @@ fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
     }
     if crate::context::context_ref().fs_struct.root_pwd_same()
         && !crate::context::context()
-            .user_init_process
+            .kernel_init_user_state
             .observe_getcwd_root_slice()
     {
         complete_unsupported_syscall(frame);
@@ -4617,10 +4617,10 @@ fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
 
 fn syscall_table_getpid(table: &SyscallTable, frame: &mut TrapFrame) {
     let current_child_continuation = crate::context::context()
-        .user_child_process
+        .user_task_set
         .current_child_continuation();
     let Some(pid) = crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .read_pid(current_child_continuation)
     else {
         complete_unsupported_syscall(frame);
@@ -4635,8 +4635,8 @@ fn syscall_table_getpgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
     let lookup = {
         let ctx = crate::context::context();
-        let current_child_continuation = ctx.user_child_process.current_child_continuation();
-        ctx.user_init_process
+        let current_child_continuation = ctx.user_task_set.current_child_continuation();
+        ctx.kernel_init_user_state
             .read_process_group(pid, current_child_continuation)
     };
     match lookup {
@@ -4653,8 +4653,8 @@ fn syscall_table_getsid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pid = frame.reg(10);
     let lookup = {
         let ctx = crate::context::context();
-        let current_child_continuation = ctx.user_child_process.current_child_continuation();
-        ctx.user_init_process
+        let current_child_continuation = ctx.user_task_set.current_child_continuation();
+        ctx.kernel_init_user_state
             .read_session_id(pid, current_child_continuation)
     };
     match lookup {
@@ -4672,9 +4672,12 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let pgid = frame.reg(11);
     let update = {
         let ctx = crate::context::context();
-        let current_child_continuation = ctx.user_child_process.current_child_continuation();
-        ctx.user_init_process
-            .set_process_group_first_slice(pid, pgid, current_child_continuation)
+        let current_child_continuation = ctx.user_task_set.current_child_continuation();
+        ctx.kernel_init_user_state.set_process_group_first_slice(
+            pid,
+            pgid,
+            current_child_continuation,
+        )
     };
     match update {
         UserProcessGroupUpdate::Updated(_) => {
@@ -4705,8 +4708,8 @@ fn syscall_table_setpgid(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
     let update = {
         let ctx = crate::context::context();
-        let current_child_continuation = ctx.user_child_process.current_child_continuation();
-        ctx.user_init_process
+        let current_child_continuation = ctx.user_task_set.current_child_continuation();
+        ctx.kernel_init_user_state
             .set_session_id_first_slice(current_child_continuation)
     };
     match update {
@@ -4726,7 +4729,7 @@ fn syscall_table_setsid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getppid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(ppid) = crate::context::context().user_init_process.read_ppid() else {
+    let Some(ppid) = crate::context::context().kernel_init_user_state.read_ppid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4736,7 +4739,7 @@ fn syscall_table_getppid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(uid) = crate::context::context().user_init_process.read_uid() else {
+    let Some(uid) = crate::context::context().kernel_init_user_state.read_uid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4746,7 +4749,7 @@ fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_geteuid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(euid) = crate::context::context().user_init_process.read_euid() else {
+    let Some(euid) = crate::context::context().kernel_init_user_state.read_euid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4756,7 +4759,7 @@ fn syscall_table_geteuid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(gid) = crate::context::context().user_init_process.read_gid() else {
+    let Some(gid) = crate::context::context().kernel_init_user_state.read_gid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4766,7 +4769,7 @@ fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn syscall_table_getegid(table: &SyscallTable, frame: &mut TrapFrame) {
-    let Some(egid) = crate::context::context().user_init_process.read_egid() else {
+    let Some(egid) = crate::context::context().kernel_init_user_state.read_egid() else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4779,7 +4782,10 @@ fn syscall_table_getresuid(table: &SyscallTable, frame: &mut TrapFrame) {
     let ruid_ptr = frame.reg(10);
     let euid_ptr = frame.reg(11);
     let suid_ptr = frame.reg(12);
-    let Some((ruid, euid, suid)) = crate::context::context().user_init_process.read_resuid() else {
+    let Some((ruid, euid, suid)) = crate::context::context()
+        .kernel_init_user_state
+        .read_resuid()
+    else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4800,7 +4806,10 @@ fn syscall_table_getresgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let rgid_ptr = frame.reg(10);
     let egid_ptr = frame.reg(11);
     let sgid_ptr = frame.reg(12);
-    let Some((rgid, egid, sgid)) = crate::context::context().user_init_process.read_resgid() else {
+    let Some((rgid, egid, sgid)) = crate::context::context()
+        .kernel_init_user_state
+        .read_resgid()
+    else {
         complete_unsupported_syscall(frame);
         return;
     };
@@ -4844,7 +4853,7 @@ fn syscall_table_uname(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
     let uid = frame.reg(10);
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .set_uid_root_slice(uid)
     {
         complete_error_syscall(frame, EPERM);
@@ -4858,7 +4867,7 @@ fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_setgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let gid = frame.reg(10);
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .set_gid_root_slice(gid)
     {
         complete_error_syscall(frame, EPERM);
@@ -4873,7 +4882,7 @@ fn syscall_table_getgroups(table: &SyscallTable, frame: &mut TrapFrame) {
     let size = frame.reg(10);
     let list_ptr = frame.reg(11);
     let Some((count, groups)) = crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .read_supplementary_groups()
     else {
         complete_unsupported_syscall(frame);
@@ -4915,7 +4924,7 @@ fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
     let size = frame.reg(10);
     let list_ptr = frame.reg(11);
     let euid = {
-        let process = &crate::context::context_ref().user_init_process;
+        let process = &crate::context::context_ref().kernel_init_user_state;
         if process.credentials_syscall_ready() {
             Some(process.euid())
         } else {
@@ -4949,7 +4958,7 @@ fn syscall_table_setgroups(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .set_supplementary_groups_root_slice(size, first_gid)
     {
         complete_unsupported_syscall(frame);
@@ -4971,7 +4980,7 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let old_mask = crate::context::context_ref()
-        .user_init_process
+        .kernel_init_user_state
         .blocked_signal_mask();
     if new_set_ptr != 0 {
         let Some(mut new_mask) = read_user_usize(new_set_ptr) else {
@@ -4981,7 +4990,7 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
         new_mask &= !UNBLOCKABLE_SIGNAL_MASK;
 
         let current_mask = crate::context::context_ref()
-            .user_init_process
+            .kernel_init_user_state
             .blocked_signal_mask();
         let next_mask = match how {
             SIG_BLOCK => current_mask | new_mask,
@@ -4993,7 +5002,7 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
             }
         };
         if !crate::context::context()
-            .user_init_process
+            .kernel_init_user_state
             .set_blocked_signal_mask(next_mask)
         {
             complete_unsupported_syscall(frame);
@@ -5006,7 +5015,7 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .observe_rt_sigprocmask()
     {
         complete_unsupported_syscall(frame);
@@ -5043,7 +5052,7 @@ fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let Some(old_action) = crate::context::context_ref()
-        .user_init_process
+        .kernel_init_user_state
         .read_signal_action(signal)
     else {
         complete_unsupported_syscall(frame);
@@ -5057,7 +5066,7 @@ fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
             action.mask() & !UNBLOCKABLE_SIGNAL_MASK,
         );
         if !crate::context::context()
-            .user_init_process
+            .kernel_init_user_state
             .set_signal_action(signal, stored_action)
         {
             complete_unsupported_syscall(frame);
@@ -5071,7 +5080,7 @@ fn syscall_table_rt_sigaction(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     if !crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .observe_rt_sigaction()
     {
         complete_unsupported_syscall(frame);
@@ -5102,7 +5111,7 @@ fn syscall_table_rt_sigtimedwait(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let result = crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .begin_rt_sigtimedwait(mask, true, true, frame);
     if result == UserRtSigtimedwaitResult::Unsupported {
         complete_unsupported_syscall(frame);
@@ -5140,7 +5149,7 @@ fn enter_rt_sigtimedwait_wait_boundary(frame: &mut TrapFrame) {
     crate::arch::riscv64::csr::enable_supervisor_interrupts();
     loop {
         let signal = crate::context::context()
-            .user_init_process
+            .kernel_init_user_state
             .complete_rt_sigtimedwait_wake(frame);
         if let Some(signal) = signal {
             crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
@@ -5500,7 +5509,7 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             }
             let Some(pgrp) = crate::context::context()
-                .user_init_process
+                .kernel_init_user_state
                 .read_foreground_pgrp()
             else {
                 print_ioctl_error_detail(fd, cmd, arg, ENOTTY);
@@ -5529,7 +5538,7 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             };
             let update = crate::context::context()
-                .user_init_process
+                .kernel_init_user_state
                 .set_foreground_pgrp_first_slice(pgrp);
             match update {
                 UserProcessGroupUpdate::Updated(_)
@@ -5568,9 +5577,8 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
             let lookup = {
                 let ctx = crate::context::context();
-                let current_child_continuation =
-                    ctx.user_child_process.current_child_continuation();
-                ctx.user_init_process
+                let current_child_continuation = ctx.user_task_set.current_child_continuation();
+                ctx.kernel_init_user_state
                     .read_tty_session_id_first_slice(current_child_continuation)
             };
             match lookup {
@@ -5600,9 +5608,8 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
             }
             let update = {
                 let ctx = crate::context::context();
-                let current_child_continuation =
-                    ctx.user_child_process.current_child_continuation();
-                ctx.user_init_process
+                let current_child_continuation = ctx.user_task_set.current_child_continuation();
+                ctx.kernel_init_user_state
                     .bind_controlling_tty_first_slice(current_child_continuation, arg)
             };
             match update {
@@ -5865,14 +5872,14 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
     if clone_is_plain_fork {
         if crate::context::context_ref()
-            .user_child_process
+            .user_task_set
             .current_child_continuation()
         {
             let child_pid = {
                 let ctx = crate::context::context();
-                let parent_pid = ctx.user_child_process.pid();
-                let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_current_child(
-                    &ctx.user_init_process,
+                let parent_pid = ctx.user_task_set.pid();
+                let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
+                    &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
                     &ctx.user_address_space,
                     &ctx.user_trap_frame,
@@ -5887,12 +5894,12 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     return;
                 };
                 if !ctx
-                    .user_init_process
+                    .kernel_init_user_state
                     .observe_pending_plain_fork_child_process_group_visible(parent_pid, child_pid)
                 {
-                    if ctx.user_child_process.builtin_grandchild_bound() {
+                    if ctx.user_task_set.builtin_grandchild_bound() {
                         let _ = ctx
-                            .user_child_process
+                            .user_task_set
                             .rollback_builtin_grandchild_clone(&ctx.files_struct);
                     }
                     complete_unsupported_clone_syscall(frame, "pending_child_identity");
@@ -5914,8 +5921,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             let ctx = crate::context::context();
             let copy_result = match ctx.task_creation_core.copy_user_process(
                 TaskCopyUserProcessInputs {
-                    src_process: &ctx.user_init_process,
-                    dst_process: &ctx.user_child_process,
+                    src_process: &ctx.kernel_init_user_state,
+                    dst_process: &ctx.user_task_set,
                     root_pid_namespace: &ctx.root_pid_namespace,
                     scheduler: &ctx.scheduler,
                     cpu_group: &ctx.cpu_group,
@@ -5927,7 +5934,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     entry: TaskEntry::UserChild,
                     allow_nested_vfork: false,
                 },
-                ctx.user_child_process.state(),
+                ctx.user_task_set.active_task_state(),
                 TaskEntry::UserChild,
             ) {
                 Ok(result) => result,
@@ -5937,8 +5944,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 }
             };
 
-            let Some(child_pid) = ctx.user_child_process.copy_plain_fork_from_parent(
-                &ctx.user_init_process,
+            let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_parent(
+                &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
                 &ctx.user_trap_frame,
@@ -5975,12 +5982,12 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 complete_unsupported_clone_syscall(frame, "enqueue");
                 return;
             }
-            if !ctx.user_child_process.mark_enqueued() {
+            if !ctx.user_task_set.mark_enqueued() {
                 complete_unsupported_clone_syscall(frame, "mark_enqueued");
                 return;
             }
             if !ctx
-                .user_init_process
+                .kernel_init_user_state
                 .observe_child_process_group_visible(child_pid)
             {
                 complete_unsupported_clone_syscall(frame, "process_group_visible");
@@ -6005,7 +6012,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
     if crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .completed_child_records_full()
     {
         complete_unsupported_clone_syscall(frame, "child_records_full");
@@ -6013,16 +6020,16 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     }
     let clone_is_nested_vfork = clone_is_vfork_vm
         && crate::context::context_ref()
-            .user_child_process
+            .user_task_set
             .nested_vfork_copy_ready();
 
     let child_frame = {
         let ctx = crate::context::context();
-        let child_pid = ctx.user_child_process.next_child_pid();
+        let child_pid = ctx.user_task_set.next_child_pid();
         let copy_result = match ctx.task_creation_core.copy_user_process(
             TaskCopyUserProcessInputs {
-                src_process: &ctx.user_init_process,
-                dst_process: &ctx.user_child_process,
+                src_process: &ctx.kernel_init_user_state,
+                dst_process: &ctx.user_task_set,
                 root_pid_namespace: &ctx.root_pid_namespace,
                 scheduler: &ctx.scheduler,
                 cpu_group: &ctx.cpu_group,
@@ -6034,7 +6041,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 entry: TaskEntry::UserChild,
                 allow_nested_vfork: clone_is_nested_vfork,
             },
-            ctx.user_child_process.state(),
+            ctx.user_task_set.active_task_state(),
             TaskEntry::UserChild,
         ) {
             Ok(result) => result,
@@ -6065,8 +6072,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
         let (child_frame, nested_parent_pid) = if clone_is_nested_vfork {
             let Some((child_frame, parent_pid)) =
-                ctx.user_child_process.copy_nested_vfork_from_current_child(
-                    &ctx.user_init_process,
+                ctx.user_task_set.copy_nested_vfork_from_current_child(
+                    &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
                     &ctx.user_address_space,
                     &ctx.user_trap_frame,
@@ -6088,8 +6095,8 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
             };
             (child_frame, parent_pid)
         } else {
-            let Some(child_frame) = ctx.user_child_process.copy_vfork_from_parent(
-                &ctx.user_init_process,
+            let Some(child_frame) = ctx.user_task_set.copy_vfork_from_parent(
+                &ctx.kernel_init_user_state,
                 &ctx.user_clone_deferred_boundaries,
                 &ctx.user_address_space,
                 &ctx.user_trap_frame,
@@ -6132,16 +6139,16 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 complete_unsupported_clone_syscall(frame, "enqueue");
                 return;
             }
-            if !ctx.user_child_process.mark_enqueued() {
+            if !ctx.user_task_set.mark_enqueued() {
                 complete_unsupported_clone_syscall(frame, "mark_enqueued");
                 return;
             }
         }
         let child_visible = if clone_is_nested_vfork {
-            ctx.user_init_process
+            ctx.kernel_init_user_state
                 .observe_nested_child_process_group_visible(nested_parent_pid, child_pid)
         } else {
-            ctx.user_init_process
+            ctx.kernel_init_user_state
                 .observe_child_process_group_visible(child_pid)
         };
         if !child_visible {
@@ -6172,7 +6179,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
     if crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .vfork_next_child_accepted()
     {
         crate::checkpoint::dispatch(
@@ -6687,7 +6694,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     if let Some((child_pid, _exit_status, wait_status, _pidfd_fd)) = crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .first_unreaped_completed_child()
     {
         let status_copied = stat_addr == 0 || write_user_u32(stat_addr, wait_status as u32);
@@ -6699,10 +6706,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         }
         {
             let ctx = crate::context::context();
-            if !ctx
-                .user_child_process
-                .mark_completed_child_reaped(child_pid)
-            {
+            if !ctx.user_task_set.mark_completed_child_reaped(child_pid) {
                 complete_unsupported_syscall(frame);
                 return;
             }
@@ -6716,11 +6720,11 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     if crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .builtin_grandchild_exit_waitable()
     {
         let (child_pid, wait_status) = {
-            let child = &crate::context::context_ref().user_child_process;
+            let child = &crate::context::context_ref().user_task_set;
             (
                 child.observed_plain_fork_child_pid(),
                 (child.child_exit_status() & 0xff) << 8,
@@ -6736,11 +6740,9 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         {
             let ctx = crate::context::context();
             if !ctx
-                .user_child_process
+                .user_task_set
                 .mark_builtin_grandchild_reaped(wait_status)
-                || !ctx
-                    .user_child_process
-                    .finish_observed_child_parent_restore()
+                || !ctx.user_task_set.finish_observed_child_parent_restore()
             {
                 complete_unsupported_syscall(frame);
                 return;
@@ -6751,7 +6753,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     if crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .observed_plain_fork_child_pending_wait()
     {
         if options & WAIT4_WNOHANG != 0 {
@@ -6767,9 +6769,9 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         let (child_frame, _parent_pid, _child_pid) = {
             let ctx = crate::context::context();
             let Some((child_frame, parent_pid, child_pid)) = ctx
-                .user_child_process
+                .user_task_set
                 .wait4_yield_to_observed_child_continuation(
-                    &ctx.user_init_process,
+                    &ctx.kernel_init_user_state,
                     &ctx.user_address_space,
                     &mut ctx.fs_struct,
                     &mut ctx.files_struct,
@@ -6785,7 +6787,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             };
             if !ctx
-                .user_init_process
+                .kernel_init_user_state
                 .switch_observed_child_process_visible(parent_pid, child_pid)
             {
                 complete_error_syscall(frame, ECHILD);
@@ -6797,7 +6799,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
         table.wait4_observed.store(1, Ordering::Release);
         #[cfg(app_user_boot)]
         {
-            let child = &crate::context::context_ref().user_child_process;
+            let child = &crate::context::context_ref().user_task_set;
             record_wait4_parent_wait_saved(
                 frame,
                 stat_addr,
@@ -6817,8 +6819,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     let child_eligible_but_not_waitable = {
-        let child = &crate::context::context_ref().user_child_process;
-        child.state() == State::Ready
+        let child = &crate::context::context_ref().user_task_set;
+        child.active_task_state() == State::Ready
             && child.enqueued()
             && !child.child_continuation_taken()
             && !child.child_exit_status_observed()
@@ -6847,8 +6849,8 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
 
     let child_frame = {
         let ctx = crate::context::context();
-        let Some(child_frame) = ctx.user_child_process.wait4_yield_to_child_continuation(
-            &ctx.user_init_process,
+        let Some(child_frame) = ctx.user_task_set.wait4_yield_to_child_continuation(
+            &ctx.kernel_init_user_state,
             &ctx.user_address_space,
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
@@ -6867,7 +6869,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
     table.wait4_observed.store(1, Ordering::Release);
     #[cfg(app_user_boot)]
     {
-        let child = &crate::context::context_ref().user_child_process;
+        let child = &crate::context::context_ref().user_task_set;
         record_wait4_parent_wait_saved(
             frame,
             stat_addr,
@@ -6888,7 +6890,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
 fn syscall_table_set_tid_address(table: &SyscallTable, frame: &mut TrapFrame) {
     let tidptr = frame.reg(10);
     let pid = crate::context::context()
-        .user_init_process
+        .kernel_init_user_state
         .set_clear_child_tid(tidptr);
     if pid == 0 {
         complete_unsupported_syscall(frame);
@@ -6930,14 +6932,13 @@ fn complete_observed_child_exit_to_parent_wait(
     status: usize,
 ) -> bool {
     let wait_status = ((status & 0xff) << 8) as u32;
-    let child_before_restore = &crate::context::context_ref().user_child_process;
+    let child_before_restore = &crate::context::context_ref().user_task_set;
     let pipe_read_resume = child_before_restore.builtin_grandchild_parent_resume_is_pipe_read();
     let builtin_restore_expected = child_before_restore.builtin_grandchild_active();
     let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
         let ctx = crate::context::context();
-        let Some((parent_frame, status_ptr, child_pid, parent_pid)) = ctx
-            .user_child_process
-            .child_exit_to_observed_child_parent_wait(
+        let Some((parent_frame, status_ptr, child_pid, parent_pid)) =
+            ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -6973,19 +6974,19 @@ fn complete_observed_child_exit_to_parent_wait(
 
     let stack_window_compared = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
     };
 
     let writable_pages_compared = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
     };
 
     let parent_stack_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
     };
     if !parent_stack_restored {
@@ -6994,7 +6995,7 @@ fn complete_observed_child_exit_to_parent_wait(
 
     let writable_pages_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_wait_writable_page_snapshot(
                 &ctx.user_address_space,
                 &mut ctx.page_allocator,
@@ -7007,7 +7008,7 @@ fn complete_observed_child_exit_to_parent_wait(
 
     let fs_snapshot_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_observed_child_parent_fs_snapshot(&mut ctx.fs_struct)
     };
     if !fs_snapshot_restored {
@@ -7016,7 +7017,7 @@ fn complete_observed_child_exit_to_parent_wait(
 
     let fd_snapshot_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_fd_snapshot(&mut ctx.files_struct)
     };
     if !fd_snapshot_restored {
@@ -7026,7 +7027,7 @@ fn complete_observed_child_exit_to_parent_wait(
     {
         let ctx = crate::context::context();
         if !ctx
-            .user_init_process
+            .kernel_init_user_state
             .restore_observed_child_parent_process_visible(parent_pid, child_pid)
         {
             return false;
@@ -7035,7 +7036,7 @@ fn complete_observed_child_exit_to_parent_wait(
 
     if pipe_read_resume {
         if !crate::context::context()
-            .user_child_process
+            .user_task_set
             .mark_builtin_grandchild_exited_to_parent_read()
         {
             return false;
@@ -7053,7 +7054,7 @@ fn complete_observed_child_exit_to_parent_wait(
     {
         let ctx = crate::context::context();
         if !ctx
-            .user_child_process
+            .user_task_set
             .mark_observed_child_parent_wait_resumed(status_copied, wait_status as usize)
         {
             return false;
@@ -7075,7 +7076,7 @@ fn complete_observed_child_exit_to_parent_wait(
         writable_pages_first_non_stack_before_checksum,
         writable_pages_first_non_stack_after_checksum,
     ) = {
-        let child = &crate::context::context_ref().user_child_process;
+        let child = &crate::context::context_ref().user_task_set;
         (
             child.parent_wait_stack_window_diff_count(),
             child.parent_wait_stack_window_first_diff_addr(),
@@ -7134,10 +7135,7 @@ fn complete_observed_child_exit_to_parent_wait(
     );
     {
         let ctx = crate::context::context();
-        if !ctx
-            .user_child_process
-            .finish_observed_child_parent_restore()
-        {
+        if !ctx.user_task_set.finish_observed_child_parent_restore() {
             return false;
         }
     }
@@ -7157,7 +7155,7 @@ fn complete_observed_child_exit_to_parent_wait(
 fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usize) -> bool {
     let (mut parent_frame, child_pid, parent_satp) = {
         let ctx = crate::context::context();
-        let Some((parent_frame, child_pid)) = ctx.user_child_process.child_exit_to_vfork_parent(
+        let Some((parent_frame, child_pid)) = ctx.user_task_set.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -7169,7 +7167,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         (parent_frame, child_pid, ctx.user_address_space.satp_token())
     };
 
-    let has_pidfd = crate::context::context_ref().user_child_process.pidfd_fd() != usize::MAX;
+    let has_pidfd = crate::context::context_ref().user_task_set.pidfd_fd() != usize::MAX;
     if has_pidfd {
         let ctx = crate::context::context();
         if ctx
@@ -7185,7 +7183,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
 
     let writable_pages_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_wait_writable_page_snapshot(
                 &ctx.user_address_space,
                 &mut ctx.page_allocator,
@@ -7198,7 +7196,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
 
     let fd_snapshot_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_fd_snapshot(&mut ctx.files_struct)
     };
     if !fd_snapshot_restored {
@@ -7208,7 +7206,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
     complete_successful_syscall(&mut parent_frame, child_pid);
     {
         let ctx = crate::context::context();
-        if !ctx.user_child_process.mark_vfork_parent_resumed() {
+        if !ctx.user_task_set.mark_vfork_parent_resumed() {
             return false;
         }
     }
@@ -7220,7 +7218,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
     );
     {
         let ctx = crate::context::context();
-        if !ctx.user_child_process.archive_completed_child_record() {
+        if !ctx.user_task_set.archive_completed_child_record() {
             return false;
         }
     }
@@ -7231,7 +7229,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
 
     let signal_wait_woken = {
         let ctx = crate::context::context();
-        ctx.user_init_process
+        ctx.kernel_init_user_state
             .record_child_exit_sigchld()
             .unwrap_or(false)
     };
@@ -7251,13 +7249,13 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
             .scheduler
             .dequeue_user_child_from_runqueue(&ctx.cpu_group)
             .is_err()
-            || !ctx.user_child_process.mark_active_slot_reusable()
+            || !ctx.user_task_set.release_active_task_record()
         {
             return false;
         }
     }
     crate::checkpoint::dispatch(
-        Checkpoint::UserChildSlotReusable,
+        Checkpoint::UserTaskRecordReleased,
         crate::context::context_ref(),
     );
     true
@@ -7274,7 +7272,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
     let (mut parent_frame, status_ptr, child_pid, parent_satp) = {
         let ctx = crate::context::context();
         let Some((parent_frame, status_ptr, child_pid)) =
-            ctx.user_child_process.child_exit_to_parent_wait(
+            ctx.user_task_set.child_exit_to_parent_wait(
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 &mut ctx.page_allocator,
@@ -7294,7 +7292,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
 
     let signal_wait_woken = {
         let ctx = crate::context::context();
-        ctx.user_init_process
+        ctx.kernel_init_user_state
             .record_child_exit_sigchld()
             .unwrap_or(false)
     };
@@ -7310,19 +7308,19 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
 
     let stack_window_compared = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .compare_parent_wait_stack_window(&ctx.user_address_space, &ctx.page_metadata_map)
     };
 
     let writable_pages_compared = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .compare_parent_wait_writable_pages(&ctx.user_address_space, &ctx.page_metadata_map)
     };
 
     let parent_stack_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_wait_stack_snapshot(&ctx.user_address_space, &ctx.page_metadata_map)
     };
     if !parent_stack_restored {
@@ -7331,7 +7329,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
 
     let writable_pages_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_wait_writable_page_snapshot(
                 &ctx.user_address_space,
                 &mut ctx.page_allocator,
@@ -7344,7 +7342,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
 
     let fd_snapshot_restored = {
         let ctx = crate::context::context();
-        ctx.user_child_process
+        ctx.user_task_set
             .restore_parent_fd_snapshot(&mut ctx.files_struct)
     };
     if !fd_snapshot_restored {
@@ -7354,10 +7352,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
     let status_copied = status_ptr == 0 || write_user_u32(status_ptr, wait_status);
     {
         let ctx = crate::context::context();
-        if !ctx
-            .user_child_process
-            .mark_parent_wait_resumed(status_copied)
-        {
+        if !ctx.user_task_set.mark_parent_wait_resumed(status_copied) {
             return false;
         }
     }
@@ -7377,7 +7372,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         writable_pages_first_non_stack_before_checksum,
         writable_pages_first_non_stack_after_checksum,
     ) = {
-        let child = &crate::context::context_ref().user_child_process;
+        let child = &crate::context::context_ref().user_task_set;
         (
             child.parent_wait_stack_window_diff_count(),
             child.parent_wait_stack_window_first_diff_addr(),
@@ -7436,9 +7431,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
             .scheduler
             .dequeue_user_child_from_runqueue(&ctx.cpu_group)
             .is_err()
-            || !ctx
-                .user_child_process
-                .mark_plain_fork_reaped_slot_reusable()
+            || !ctx.user_task_set.release_reaped_active_task_record()
         {
             return false;
         }
@@ -8144,9 +8137,9 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     let flags = frame.reg(10);
     let flags_without_csignal = boundaries.clone_flags_without_csignal(flags);
     let exit_signal = boundaries.exit_signal(flags);
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let files = &ctx.files_struct;
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let clone_kind = clone_boundary_kind(boundaries, flags, frame.reg(11));
 
     crate::arch::riscv64::sbi::putstr(" clone_kind=");
@@ -8248,10 +8241,10 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     print_decimal(child.nested_vfork_parent_pid());
     crate::arch::riscv64::sbi::putstr(" vfork_resume_on_exit=");
     print_bool_digit(child.vfork_parent_resume_on_exit());
-    crate::arch::riscv64::sbi::putstr(" active_slot_state=");
-    print_decimal(child.state() as usize);
-    crate::arch::riscv64::sbi::putstr(" active_slot_reusable=");
-    print_bool_digit(child.active_slot_reusable());
+    crate::arch::riscv64::sbi::putstr(" active_task_record_state=");
+    print_decimal(child.active_task_state() as usize);
+    crate::arch::riscv64::sbi::putstr(" active_task_record_available=");
+    print_bool_digit(child.active_task_record_available());
     crate::arch::riscv64::sbi::putstr(" next_child_pid=");
     print_decimal(child.next_child_pid());
     crate::arch::riscv64::sbi::putstr(" completed_records=");
@@ -8528,7 +8521,7 @@ fn print_rt_sigtimedwait_unsupported_detail(frame: &TrapFrame) {
 }
 
 fn print_rt_sigtimedwait_wait_boundary(mask: usize) {
-    let process = &crate::context::context_ref().user_init_process;
+    let process = &crate::context::context_ref().kernel_init_user_state;
     crate::arch::riscv64::sbi::putstr("rt_sigtimedwait waiting uthese_copy=ok uthese_mask=0x");
     print_hex(mask);
     crate::arch::riscv64::sbi::putstr(" uinfo=NULL uts=NULL sigchld=17 sigchld_mask=0x");
@@ -8561,7 +8554,7 @@ fn print_execve_unsupported_detail(frame: &TrapFrame) {
     let argv_ptr = frame.reg(11);
     let envp_ptr = frame.reg(12);
     let child_continuation = crate::context::context_ref()
-        .user_child_process
+        .user_task_set
         .current_child_continuation();
     crate::arch::riscv64::sbi::putstr(" name=execve filename_ptr=0x");
     print_hex(filename_ptr);
@@ -9238,8 +9231,8 @@ fn print_setpgid_error_detail(
     let raw_pid = pid_arg as u32 as i32;
     let raw_pgid = pgid_arg as u32 as i32;
     let ctx = crate::context::context_ref();
-    let current_child = ctx.user_child_process.current_child_continuation();
-    let process = &ctx.user_init_process;
+    let current_child = ctx.user_task_set.current_child_continuation();
+    let process = &ctx.kernel_init_user_state;
     let current_pid = if current_child {
         process.child_process_pid()
     } else {
@@ -9289,7 +9282,7 @@ fn print_setpgid_reject_reason(
     normalized_pid: i64,
     normalized_pgid: i64,
 ) {
-    let process = &crate::context::context_ref().user_init_process;
+    let process = &crate::context::context_ref().kernel_init_user_state;
     match update {
         UserProcessGroupUpdate::Invalid => {
             crate::arch::riscv64::sbi::putstr("pgid_negative");
@@ -9376,7 +9369,7 @@ fn print_ioctl_error_detail(fd: usize, cmd: usize, arg: usize, errno: usize) {
             Some(value) => print_i64(value as i32 as i64),
             None => crate::arch::riscv64::sbi::putstr("unreadable"),
         }
-        let process = &crate::context::context_ref().user_init_process;
+        let process = &crate::context::context_ref().kernel_init_user_state;
         crate::arch::riscv64::sbi::putstr(" foreground_bound=");
         print_bool_digit(process.foreground_pgrp_bound());
         crate::arch::riscv64::sbi::putstr(" foreground_pgrp=");
@@ -9521,7 +9514,7 @@ pub(crate) fn print_builtin_grandchild_exec_retention(
 #[cfg(app_user_boot)]
 fn print_builtin_grandchild_exec_restore(status: &str) {
     let ctx = crate::context::context_ref();
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let obs = execve_checkpoint_observation();
     crate::arch::riscv64::sbi::putstr("execve builtin_grandchild restore_status=");
     crate::arch::riscv64::sbi::putstr(status);

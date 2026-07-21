@@ -2,7 +2,7 @@
 
 - exact: 103
 - range: 14
-- unmapped: 368
+- unmapped: 373
 
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -33,7 +33,7 @@
 | 24 | BootCpuLocalInterrupt.Ready | BootCpuLocalInterruptReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 25 | BootCpuCurrentTask.Ready | BootCpuCurrentTaskReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 26 | CpuGroup.Prepared | CpuGroupPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 27 | InitTask.Prepared | InitTaskPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 27 | BootTask.Prepared | BootTaskPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 28 | InitStack.Prepared | InitStackPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 29 | EventStream.Prepared | EventStreamPrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping. |
 | 30 | ExceptionStream.Prepared | ExceptionStreamPrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback exception path uses the temporary spin trap vector. |
@@ -51,7 +51,7 @@
 | 42 | Vm.Online | VmOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 43 | KernelImage.Online | KernelImageOnline | exact | medium | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 114: load_global_pointer | RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial. |
 | 44 | EventStream.Ready | EventStreamReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal trap-vector target in .Lsetup_trap_vector. |
-| 45 | InitTask.Online | InitTaskOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 45 | BootTask.Online | BootTaskOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 46 | InitStack.Ready | InitStackReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 47 | InitStack.Online | InitStackOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 48 | Soc.Prepared | SocPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -160,7 +160,7 @@
 | 151 | BootRunQueue.Ready | BootRunQueueReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 152 | BootRunQueueLock.Ready | BootRunQueueLockReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 153 | BootInitPreemption.Ready | BootInitPreemptionReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 154 | BootIdleTask.Ready | BootIdleTaskReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 154 | BootIdleSetup.Ready | BootIdleSetupReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 155 | BootIdlePiLock.Ready | BootIdlePiLockReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 156 | BootIdlePreemption.Ready | BootIdlePreemptionReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 157 | Scheduler.Ready | SchedulerReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -299,7 +299,7 @@
 | 290 | SystemState.Ready | SystemStateReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 291 | KthreaddReadyGate.Ready | KthreaddReadyGateReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 292 | KthreaddReadyGate.Online | KthreaddReadyGateOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 293 | BootIdleRuntime.Ready | BootIdleRuntimeReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 293 | BootIdleFlow.Ready | BootIdleFlowReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 294 | PreSmpInitPhase.Started | PreSmpInitPhaseStarted | exact | high | init/main.c | kernel_init_freeable | kernel_init_freeable() line 1562: smp_prepare_cpus(setup_max_cpus); | Linux kernel_init_freeable() starts pre-SMP preparation at smp_prepare_cpus(). |
 | 295 | PreSmpInitPhase.Ready | PreSmpInitPhaseReady | range | medium | init/main.c | kernel_init_freeable | kernel_init_freeable() lines 1562-1570: smp_prepare_cpus(setup_max_cpus); .. lockup_detector_init(); | Linux kernel_init_freeable() pre-SMP preparation interval before smp_init(). |
 | 296 | PageAllocator.FullGfpMaskOpen | PageAllocatorFullGfpMaskOpen | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -402,7 +402,7 @@
 | 393 | UserBoot.InterpreterReady | UserBootInterpreterReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 957: interp_elf_phdata = load_elf_phdrs(interp_elf_ex, | Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec, so runtime instrumentation must not emit UserExec.InterpreterReady for this owner. |
 | 394 | UserBoot.InitAttemptFailed | UserBootInitAttemptFailed | range | medium | init/main.c | try_to_run_init_process | try_to_run_init_process() lines 1397-1404: ret = run_init_process(init_filename); .. return ret; | Linux folds a default init candidate attempt, non-ENOENT diagnostic and fallback return into try_to_run_init_process(); there is no separate stage/reason checkpoint. |
 | 395 | UserBoot.AddressSpaceSetupStart | UserBootAddressSpaceSetupStart | exact | medium | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 999: retval = begin_new_exec(bprm); | Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary, and runtime UserExec records must be guarded out for this owner. |
-| 396 | UserInitProcess.EnterUserMode | UserModeEntry | exact | medium | arch/riscv/kernel/entry.S | ret_from_exception | ret_from_exception line 279: sret | RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another UserInitProcess entry. |
+| 396 | Pid1UserAppFlow.EnterUserMode | Pid1UserAppFlowEnterUserMode | exact | medium | arch/riscv/kernel/entry.S | ret_from_exception | ret_from_exception line 279: sret | RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another Pid1UserAppFlow entry. |
 | 397 | UserAddressSpace.Ready | UserAddressSpaceReady | exact | medium | fs/exec.c | exec_mmap | exec_mmap() line 1004: activate_mm(active_mm, mm); | Linux exec_mmap() installs and activates the new mm; Linux does not expose a separate UserAddressSpace object boundary. |
 | 398 | SyscallTable.ExecveArgsReady | SyscallTableExecveArgsReady | exact | high | fs/exec.c | do_execveat_common | do_execveat_common() line 1937: retval = copy_strings(bprm->argc, argv, bprm); | Linux do_execveat_common() has copied filename, envp and argv into linux_binprm before bprm_execve(). |
 | 399 | UserExec.MainElfReady | UserExecMainElfReady | exact | high | fs/binfmt_elf.c | load_elf_binary | load_elf_binary() line 856: elf_phdata = load_elf_phdrs(elf_ex, bprm->file); | Linux ELF loader has read the runtime exec main executable program headers; instrumentation must guard this shared load_elf_binary() anchor so kernel_execve() boot init records only UserBoot.MainElfReady. |
@@ -435,7 +435,7 @@
 | 426 | UserChild.ParentWaitResumed | UserChildParentWaitResumed | exact | medium | kernel/exit.c | kernel_wait4 | kernel_wait4() line 1853: if (ret > 0 && stat_addr && put_user(wo.wo_stat, stat_addr)) | Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent. |
 | 427 | UserClone.VforkParentResumed | UserCloneVforkParentResumed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 428 | UserChildRecord.Archived | UserChildRecordArchived | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 429 | UserChildSlot.Reusable | UserChildSlotReusable | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 429 | UserTaskRecord.Released | UserTaskRecordReleased | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 430 | UserChildRecord.Reaped | UserChildRecordReaped | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 431 | SyscallTable.Exit | SyscallTableExit | exact | medium | kernel/exit.c | do_group_exit | do_group_exit() line 1088: do_exit(exit_code); | Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit(). |
 | 432 | PayloadPhase.Ready | PayloadPhaseReady | exact | medium | init/main.c | kernel_init | kernel_init() line 1492: do_sysctl_args(); | Linux kernel_init() reaches the post-finalize payload-selection boundary. |
@@ -491,3 +491,8 @@
 | 482 | PayloadPhase.Prepared | PayloadPhasePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 483 | UserStack.GrowComplete | UserStackGrowComplete | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 484 | UserStack.GrowRejected | UserStackGrowRejected | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 485 | KernelInitFlow.Offline | KernelInitFlowOffline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 486 | KernelInitFlow.Destroyed | KernelInitFlowDestroyed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 487 | Pid1UserAppFlow.Prepared | Pid1UserAppFlowPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 488 | Pid1UserAppFlow.Ready | Pid1UserAppFlowReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 489 | Pid1UserAppFlow.Online | Pid1UserAppFlowOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

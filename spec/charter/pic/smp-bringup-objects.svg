@@ -87,7 +87,7 @@
 
   <rect x="360" y="720" width="200" height="82" rx="8" class="box cpu"/>
   <text x="460" y="748" text-anchor="middle" class="label">BootCPU</text>
-  <text x="460" y="772" text-anchor="middle" class="small">IdleTask = BootIdleTask</text>
+  <text x="460" y="772" text-anchor="middle" class="small">IdleTask = BootTask</text>
   <rect x="580" y="720" width="210" height="82" rx="8" class="box flow"/>
   <text x="685" y="748" text-anchor="middle" class="label">IdleTask.enable</text>
   <text x="685" y="772" text-anchor="middle" class="small">AP idle path</text>

@@ -1,5 +1,5 @@
 use super::{
-    init_task::InitTask,
+    boot_task::BootTask,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 
@@ -13,7 +13,7 @@ pub enum MutexInitKind {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum MutexOwner {
     None,
-    BootInitTask,
+    BootTask,
     KernelInitTask,
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     SmokeMutexTask,
@@ -155,8 +155,8 @@ impl Mutex {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
-    pub fn lock_boot_init_task(&mut self, init_task: &InitTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready || init_task.state() != State::Online {
+    pub fn lock_boot_init_task(&mut self, boot_task: &BootTask) -> EventResult {
+        if self.lifecycle.state() != State::Ready || boot_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -165,7 +165,7 @@ impl Mutex {
             );
         }
 
-        match self.lock_owner(MutexOwner::BootInitTask)? {
+        match self.lock_owner(MutexOwner::BootTask)? {
             MutexLockOutcome::Acquired => Ok(()),
             MutexLockOutcome::Blocked => failed_condition(
                 LifecycleEvent::Enable,
@@ -176,8 +176,8 @@ impl Mutex {
         }
     }
 
-    pub fn unlock_boot_init_task(&mut self, init_task: &InitTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready || init_task.state() != State::Online {
+    pub fn unlock_boot_init_task(&mut self, boot_task: &BootTask) -> EventResult {
+        if self.lifecycle.state() != State::Ready || boot_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
@@ -186,7 +186,7 @@ impl Mutex {
             );
         }
 
-        self.unlock_owner(MutexOwner::BootInitTask)
+        self.unlock_owner(MutexOwner::BootTask)
     }
 
     pub fn lock_owner(

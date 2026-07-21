@@ -10,7 +10,7 @@
 /*
  * RootPidNamespace 表示 pid_idr_init() 后 init_pid_ns 的 PID 分配基础。
  */
-object RootPidNamespace: TaskObject {
+object RootPidNamespace: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -80,7 +80,7 @@ object AnonVmaCore: MemoryObject {
 /*
  * CredentialCore 表示 cred_init() 后 cred cache 的准备边界。
  */
-object CredentialCore: TaskObject {
+object CredentialCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -179,11 +179,11 @@ object UprobeCore: KernelObject {
 /*
  * TaskCreationCore 表示 thread_stack_cache_init() 与 fork_init() 后的 task
  * 创建基础。它不创建 PID 1/kthreadd；这些属于 rest_init()。它提供
- * copy_process() 的通用创建契约：rest_init() 传入的 entry 是新任务的
- * 第一执行入口，并由该入口决定任务之后进入 kernel_init 线还是 kthreadd
- * 入口循环。
+ * copy_process() 的通用创建契约：rest_init() 传入的 flow 是新任务的
+ * 初始 TaskFlow，并由其具体类型决定任务之后进入 kernel_init 线还是
+ * kthreadd 入口循环。
  */
-object TaskCreationCore: TaskObject {
+object TaskCreationCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -219,7 +219,7 @@ object TaskCreationCore: TaskObject {
                     CpuGroup.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
-                    BootInitTask.state == State::Online;
+                    BootTask.state == State::Online;
                 }
 
                 drives {
@@ -231,10 +231,10 @@ object TaskCreationCore: TaskObject {
                     task_creation_core_ready(TaskCreationCore);
                     task_struct_cache_ready(TaskCreationCore, SlubSubsystem);
                     max_threads_configured(TaskCreationCore, CpuGroup);
-                    init_task_rlimits_ready(TaskCreationCore, BootInitTask);
+                    init_task_rlimits_ready(TaskCreationCore, BootTask);
                     init_user_namespace_ucounts_ready(TaskCreationCore);
                     fork_vm_stack_cpuhp_registered(TaskCreationCore);
-                    task_creation_entry_contract_ready(TaskCreationCore);
+                    task_creation_flow_contract_ready(TaskCreationCore);
                     rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
@@ -254,10 +254,10 @@ object TaskCreationCore: TaskObject {
             task_creation_core_ready(TaskCreationCore);
             task_struct_cache_ready(TaskCreationCore, SlubSubsystem);
             max_threads_configured(TaskCreationCore, CpuGroup);
-            init_task_rlimits_ready(TaskCreationCore, BootInitTask);
+            init_task_rlimits_ready(TaskCreationCore, BootTask);
             init_user_namespace_ucounts_ready(TaskCreationCore);
             fork_vm_stack_cpuhp_registered(TaskCreationCore);
-            task_creation_entry_contract_ready(TaskCreationCore);
+            task_creation_flow_contract_ready(TaskCreationCore);
             rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
             task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
             task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
@@ -307,11 +307,11 @@ object TaskCreationCore: TaskObject {
         actions {
             /*
              * CopyProcess 对应 kernel_clone()/copy_process() 的成功路径。
-             * entry 是调用者传入的启动入口，不是创建后的普通属性补丁：
+             * flow 是调用者传入的执行流程，不是创建后的普通属性补丁：
              * TaskCreationCore 必须把它绑定到新 task 的初始 thread context，
-             * 后续任务第一次被调度时就从该 entry 对应的执行线开始。
+             * 后续任务第一次被调度时就从该 TaskFlow 的 continuation 开始。
              */
-            Action::CopyProcess<Src: TaskObject, New: TaskObject>(
+            Action::CopyProcess<Src: Task, New: Task>(
                 src_task: Src,
                 dst_task: New,
                 pid_ns: RootPidNamespace,
@@ -320,7 +320,7 @@ object TaskCreationCore: TaskObject {
                 files: TaskFileContext,
                 security: SecurityCore,
                 scheduler: Scheduler,
-                entry: TaskEntry
+                flow: TaskFlow
             ) {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -332,15 +332,15 @@ object TaskCreationCore: TaskObject {
                     files.state == State::Prepared;
                     security.state == State::Ready;
                     scheduler.state == State::Online;
-                    task_creation_entry_contract_ready(TaskCreationCore);
+                    task_creation_flow_contract_ready(TaskCreationCore);
                     task_clone_args_ready(dst_task);
-                    task_entry_bound(dst_task, entry);
+                    task_owns_flow(dst_task, flow);
                 }
 
                 ensures {
                     task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
                     task_creation_used_clone_args(TaskCreationCore, dst_task);
-                    task_creation_bound_entry(TaskCreationCore, dst_task, entry);
+                    task_creation_bound_flow(TaskCreationCore, dst_task, flow);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
                     task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
@@ -361,34 +361,18 @@ object TaskCreationCore: TaskObject {
             }
 
             /*
-             * CopyUserProcess 是用户态 clone(220)/fork 首片使用的
-             * copy_process() 变体。它复用 TaskCreationCore.Ready 内的
-             * shared creation contract，但输入从 rest_init 内核线程 entry
-             * 切换为当前 UserInitProcess 的 trap frame、mm/files/fs/signal
-             * 可见状态。当前覆盖 BusyBox /bin/sh 触发的 plain fork
-             * 以及 BusyBox init 顺序/单层 nested CLONE_VM|CLONE_VFORK child。
-             * 后者仍只有一个 internal UserChild execution slot；每次
-             * bounded child exit 后由 UserChildProcess 归档 completed-child
-             * record，释放 active slot，再允许下一次 CopyUserProcess。
-             * 若当前 UserChild 已是 getty/login continuation，则只允许
-             * observed login post-auth nested vfork takeover：新 user-visible
-             * pid 复用同一 execution slot，不创建第二个 runnable task ref。
-             * 后续 BusyBox init login shell 中 /bin/ls 触发的 plain fork 也是
-             * current-child continuation，但不是 CopyUserProcess runnable
-             * task 创建路径；本片在 UserChildProcess 内规格化为
-             * observed child plain fork：保存 shell parent 和 grandchild
-             * continuation facts，shell clone 返回 child pid，只有 shell
-             * wait4 时才切入 grandchild，不 enqueue 第二个 UserChild task
-             * ref。PID1-originated plain fork 在 child exit + wait4 status
-             * copyout 后已经收割内部 child，因此必须 dequeue 并把单 slot
-             * 复位为 Prepared，下一次 CopyUserProcess 使用递增 pid 复用该
-             * internal task ref。observed shell grandchild 完成则不同：
-             * UserChild 仍承载 Ready shell continuation，必须保持 enqueue，
-             * 只清理上一轮 grandchild 的 snapshot/wait/exit 临时事实。
+             * CopyUserProcess is the Task/TaskRef-parameterized user fork/clone
+             * creation boundary. Each invocation receives a fresh destination
+             * Task with an independent PID and lifecycle and binds a distinct
+             * fork-continuation UserAppFlow. UserChildTask1 and its reference
+             * are only the current named witness because anonymous dynamic
+             * object declaration remains a DSL limitation.
              */
             Action::CopyUserProcess(
-                src_process: UserInitProcess,
-                dst_process: UserChildProcess,
+                src_process: Task,
+                src_ref: TaskRef,
+                dst_process: Task,
+                dst_ref: TaskRef,
                 pid_ns: RootPidNamespace,
                 scheduler: Scheduler,
                 fs: FsStruct,
@@ -401,6 +385,8 @@ object TaskCreationCore: TaskObject {
                 depends_on {
                     src_process.state == State::Online;
                     dst_process.state == State::Prepared;
+                    task_ref_targets(src_ref, src_process);
+                    task_ref_targets(dst_ref, dst_process);
                     pid_ns.state == State::Ready;
                     scheduler.state == State::Online;
                     fs.state == State::Ready;
@@ -409,22 +395,29 @@ object TaskCreationCore: TaskObject {
                     trap_frame.state == State::Ready;
                     boundaries.state == State::Ready;
                     task_clone_args_ready(dst_process);
-                    task_entry_bound(dst_process, TaskEntry::UserChild);
+                    task_owns_flow(dst_process, UserChildForkFlow1);
+                    task_flow_owner_is(UserChildForkFlow1, dst_process);
+                    task_flow_owner_exclusive(UserChildForkFlow1);
                     user_clone_plain_fork_first_slice_bound(boundaries);
-                    user_clone_bounded_sequential_vfork_records_bound(boundaries);
-                    user_child_process_active_slot_reusable(dst_process);
+                    user_clone_fresh_task_per_child_bound(boundaries);
+                    user_clone_multiple_independent_tasks_bound(boundaries);
+                    user_task_set_allows_multiple_independent_tasks(UserTaskSet);
+                    user_task_set_contains(UserTaskSet, dst_process);
+                    user_task_instance_fresh(dst_process);
+                    user_task_pid_and_lifecycle_independent(dst_process);
+                    user_task_witness_not_reusable(dst_process);
                 }
 
                 drives {
-                    let runqueue: RunQueueRef <- scheduler.Action::SelectRunQueue(UserChildTaskRef);
-                    UserChildTaskRef.Action::SetTaskCpu(BootCPURef);
-                    BootRunQueue.Action::EnqueueTask(runqueue, UserChildTaskRef);
+                    let runqueue: RunQueueRef <- scheduler.Action::SelectRunQueue(dst_ref);
+                    dst_ref.Action::SetTaskCpu(BootCPURef);
+                    BootRunQueue.Action::EnqueueTask(runqueue, dst_ref);
                 }
 
                 ensures {
                     task_creation_copy_process_committed(TaskCreationCore, src_process, dst_process);
                     task_creation_used_clone_args(TaskCreationCore, dst_process);
-                    task_creation_bound_entry(TaskCreationCore, dst_process, TaskEntry::UserChild);
+                    task_creation_bound_flow(TaskCreationCore, dst_process, UserChildForkFlow1);
                     task_struct_allocated(dst_process);
                     task_duplicated_from(dst_process, src_process);
                     task_pid_allocated(dst_process, pid_ns);
@@ -444,10 +437,14 @@ object TaskCreationCore: TaskObject {
                     user_child_process_trap_frame_child_return_zero(dst_process);
                     user_child_process_tls_inherited(dst_process);
                     user_child_process_enqueued(dst_process, BootRunQueue);
-                    task_enqueued_on_runqueue(UserChildTaskRef, BootRunQueue);
-                    user_child_process_single_active_slot(dst_process);
-                    user_child_process_next_child_pid_bound(dst_process);
-                    user_child_process_completed_records_capacity_bound(dst_process);
+                    task_enqueued_on_runqueue(dst_ref, BootRunQueue);
+                    task_owns_flow(dst_process, UserChildForkFlow1);
+                    task_flow_owner_is(UserChildForkFlow1, dst_process);
+                    task_flow_owner_exclusive(UserChildForkFlow1);
+                    user_task_set_contains(UserTaskSet, dst_process);
+                    user_task_instance_fresh(dst_process);
+                    user_task_pid_and_lifecycle_independent(dst_process);
+                    user_task_witness_not_reusable(dst_process);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
                     task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
                     task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
@@ -463,7 +460,7 @@ object TaskCreationCore: TaskObject {
  * SignalCore 表示 proc_caches_init() 中 signal/sighand cache 的准备边界。
  * signals_init() 暂缓，因此本阶段只推进到 Prepared。
  */
-object SignalCore: TaskObject {
+object SignalCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -497,7 +494,7 @@ object SignalCore: TaskObject {
 /*
  * TaskFileContext 表示 proc_caches_init() 中 files_struct/fs_struct cache。
  */
-object TaskFileContext: TaskObject {
+object TaskFileContext: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -569,7 +566,7 @@ object VmaCore: MemoryObject {
 /*
  * NsProxy 表示 task 指向 namespace 实例集合的聚合引用 cache。
  */
-object NsProxy: TaskObject {
+object NsProxy: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -601,7 +598,7 @@ object NsProxy: TaskObject {
 /*
  * UtsNamespace 表示 uts_ns_init() 后 UTS namespace clone/unshare cache。
  */
-object UtsNamespace: TaskObject {
+object UtsNamespace: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -995,7 +992,7 @@ object ProcessPreparePhase: PhaseObject {
                     MmStructCache.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
-                    BootInitTask.state == State::Online;
+                    BootTask.state == State::Online;
                     ExceptionStream.state == State::Ready;
                 }
 

@@ -6,7 +6,7 @@
  * wait_for_completion(), then covers kernel_init_freeable() from opening the
  * full GFP allocation mask through the point immediately before smp_init().
  * It is driven by KernelInitTask after the rest_init scheduler fork boundary,
- * while BootInitTask may still complete its boot idle tail.
+ * while BootTask may still complete its boot idle tail.
  */
 
 /*
@@ -206,10 +206,10 @@ object PreSmpInitBoundary: KernelObject {
  * PreSmpInitPhase 表示 KernelInitTask 在 kernel_init_freeable() 中推进的
  * SMP 启动前初始化段。它是 SmpRuntimePhase 的首个子阶段，先由
  * KernelInitTask 在 kernel_init() 入口通过 wait_for_completion(&kthreadd_done)
- * 观察 KthreaddReadyGate 已被 BootInitTask complete，然后进入
+ * 观察 KthreaddReadyGate 已被 BootTask complete，然后进入
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
- * 绑定为 TaskEntry::KernelInit 并指向 SmpRuntimePhase 入口。该真实任务入口
+ * 绑定为 KernelInitFlow 并指向 SmpRuntimePhase 入口。该真实任务入口
  * 只在 UpMultitaskPhase.Online 后由 Kernel.Enable continuation 启动。
  */
 object PreSmpInitPhase: PhaseObject {
@@ -222,8 +222,8 @@ object PreSmpInitPhase: PhaseObject {
                 depends_on {
                     UpMultitaskPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     KernelInitKthreaddDoneWait.state == State::Ready;
                     KthreaddReadyGate.state == State::Online;
@@ -253,8 +253,8 @@ object PreSmpInitPhase: PhaseObject {
 
                 ensures {
                     pre_smp_init_ready(PreSmpInitPhase);
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     KernelInitKthreaddDoneWait.state == State::Online;
                     kernel_init_kthreadd_done_wait_released(
@@ -311,8 +311,8 @@ object PreSmpInitPhase: PhaseObject {
             );
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
-            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);

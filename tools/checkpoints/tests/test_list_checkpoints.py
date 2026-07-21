@@ -254,6 +254,13 @@ class ListCheckpointsTests(unittest.TestCase):
             "UserStackGrowComplete": 483,
             "UserStackGrowRejected": 484,
         }
+        appended_task_flow_ids = {
+            "KernelInitFlowOffline": 485,
+            "KernelInitFlowDestroyed": 486,
+            "Pid1UserAppFlowPrepared": 487,
+            "Pid1UserAppFlowReady": 488,
+            "Pid1UserAppFlowOnline": 489,
+        }
         by_variant = {record.variant: record for record in records}
         self.assertEqual(
             {
@@ -315,7 +322,13 @@ class ListCheckpointsTests(unittest.TestCase):
             },
             appended_user_stack_ids,
         )
-        self.assertEqual(len(records), 485)
+        self.assertEqual(
+            {
+                variant: by_variant[variant].index for variant in appended_task_flow_ids
+            },
+            appended_task_flow_ids,
+        )
+        self.assertEqual(len(records), 490)
 
 
 if __name__ == "__main__":

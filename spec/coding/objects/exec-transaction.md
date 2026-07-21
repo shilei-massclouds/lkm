@@ -49,7 +49,7 @@ current/staging image, applies the prechecked bounded CLOEXEC pass, installs mai
 does the owner handoff, releases retired backing after SATP no longer references it, and resets the slot.
 Returning `ExecError` after point-of-no-return is forbidden; an invariant failure is terminal.
 
-The bounded `UserChildProcess` fork/vfork surrogate is an ownership exception, not a leak: when its saved
+The bounded `UserTaskSet` fork/vfork continuation record is an ownership exception, not a leak: when its saved
 parent snapshot has the same SATP as the retired image, commit transfers the retired address-space and
 `UserStack` ownership to that snapshot instead of freeing parent pages. Child exit releases the replacement
 child image (including page tables and stack backing), restores both parent objects, and only then resumes the

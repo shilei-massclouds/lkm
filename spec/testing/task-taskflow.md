@@ -1,0 +1,38 @@
+# Task / TaskFlow testing contract
+
+This file is the authoritative testing contract for the unified `Task`
+carrier and its independently-lived `TaskFlow` instances.
+
+## Carrier and flow boundaries
+
+- Boot and scheduler tests must observe one `BootTask` identity. The
+  `BootIdleSetup` scheduling record is an internal projection and must not be
+  reported as a second Task or own a second Task lifecycle.
+- PID 1 tests must keep `KernelInitTask` online across exec while observing
+  `KernelInitFlow: Online -> Offline -> Destroyed` and
+  `Pid1UserAppFlow: Base -> Prepared -> Ready -> Online` in that order.
+- The handoff is valid only when the old flow is inactive before the active
+  binding changes, the new flow is Ready at commit, and at most one owned flow
+  is Online afterward.
+- User entry checkpoints use `Pid1UserAppFlow.EnterUserMode`. Old Task,
+  persona, and Flow checkpoint names are not compatibility interfaces.
+
+## Fork and bounded storage
+
+- Every successful fork/clone observation must receive a monotonically fresh
+  PID and logical allocation occurrence. A released internal task record may
+  be recycled only after the prior task's exit/wait cleanup facts are complete;
+  recycling storage must never reuse the prior Task identity or lifecycle.
+- Tests must distinguish `UserTaskSet.state()` from the active task record's
+  lifecycle and must not describe the implementation as a reusable child
+  slot. Sequential storage is a bounded implementation constraint, not the
+  object model's multiplicity rule.
+- Nested fork/vfork smoke coverage must assert that the child identity differs
+  from its parent and that the allocation occurrence advances.
+
+## Gates
+
+Focused runtime coverage includes kernel smoke and user smoke. Checkpoint
+inventory/mapping/coverage/marker checks must be current after a checkpoint
+rename. The final regression gate after implementation changes is the direct
+repository-root `make test` command.

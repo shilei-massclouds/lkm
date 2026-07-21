@@ -619,7 +619,7 @@ class ViewToolTests(unittest.TestCase):
                         "target_state": "Prepared",
                         "children": [
                             {
-                                "object": "BootIdleTask",
+                                "object": "BootTask",
                                 "transition": "Enable",
                                 "source_state": "Prepared",
                                 "target_state": "Online",

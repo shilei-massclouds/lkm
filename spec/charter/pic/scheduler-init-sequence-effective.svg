@@ -96,10 +96,10 @@
   <g transform="translate(0 1048)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4a</text>
     <rect x="292" y="176" width="876" height="144" rx="10" class="box formal"/>
-    <text x="320" y="214" class="line1">BootCPU.RunQueue.BootIdleTask.setup(source = BootInitTask/current)</text>
-    <text x="320" y="244" class="line2">将已有 BootInitTask/current 推进为 boot CPU idle task 角色</text>
+    <text x="320" y="214" class="line1">BootIdleSetup.setup(source = BootTask/current)</text>
+    <text x="320" y="244" class="line2">将已有 BootTask/current 推进为 boot CPU idle task 角色</text>
     <text x="320" y="270" class="line2">覆盖 load weight、time slice、InitMM lazy TLB 和 kthread 元数据</text>
-    <text x="320" y="296" class="line2">checkpoint：RunQueue.idle == BootIdleTask 且 RunQueue.curr == BootIdleTask</text>
+    <text x="320" y="296" class="line2">checkpoint：RunQueue.idle == BootTask 且 RunQueue.curr == BootTask</text>
   </g>
 
   <g transform="translate(0 1224)">

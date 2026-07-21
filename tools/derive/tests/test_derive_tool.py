@@ -498,7 +498,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)"
+                    record["expression"] == "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -932,7 +932,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_task_ref"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -1095,10 +1095,10 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertNotIn("BootInitTask", attrs_providers)
+            self.assertNotIn("BootTask", attrs_providers)
             self.assertTrue(
                 any(
-                    record["object"] == "BootInitTask"
+                    record["object"] == "BootTask"
                     and record["predicate"] == "attrs_accessible"
                     and record["proof_class"] == "static_object_binding"
                     and record["proof_provider"] == "transition_ensures"

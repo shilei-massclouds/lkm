@@ -47,9 +47,9 @@ impl RawSpinLockFixture {
 
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
-        assertions.assert("init task online", ctx.init_task.state() == State::Online);
+        assertions.assert("init task online", ctx.boot_task.state() == State::Online);
         assertions.assert_ok("local interrupt setup", self.local_interrupt.setup());
-        assertions.assert_ok("preemption setup", self.preemption.setup(&ctx.init_task));
+        assertions.assert_ok("preemption setup", self.preemption.setup(&ctx.boot_task));
         assertions.assert_ok("lock setup", self.lock.setup());
     }
 

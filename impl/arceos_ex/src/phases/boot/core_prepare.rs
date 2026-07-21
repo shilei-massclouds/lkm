@@ -81,7 +81,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &ctx.vm,
         &mut ctx.cpu_hotplug_lock,
         &mut ctx.jump_label_mutex,
-        &ctx.init_task,
+        &ctx.boot_task,
     )?;
     ctx.command_line.setup(
         &ctx.kernel_cmdline,

@@ -9,6 +9,7 @@ use crate::objects::{
     binary_format_registry::BinaryFormatRegistry,
     block_device::BlockDeviceRegistry,
     boot_param::BootParam,
+    boot_task::BootTask,
     cache_block_info::CacheBlockInfo,
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
     config::Config,
@@ -40,7 +41,6 @@ use crate::objects::{
     hwrng::HwRngCore,
     init_mm::InitMm,
     init_stack::InitStack,
-    init_task::InitTask,
     initcall::{
         CpusetSmpTrimmed, CtorTable, DriverCoreBase, DriverCoreDeferred, InitcallBoundary,
         InitcallReturn, InitcallTable, IrqProcViewDeferred, PlatformBus, PlatformBusRootDevice,
@@ -83,7 +83,9 @@ use crate::objects::{
     raw_dtb::RawDtb,
     rcu::RcuCore,
     resource_tree::ResourceTree,
-    rest_init::{BootIdleRuntime, KernelInitTask, KthreaddReadyGate, KthreaddTask, SystemState},
+    rest_init::{
+        BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddReadyGate, KthreaddTask, SystemState,
+    },
     root_stream::RootStream,
     rootfs::{
         InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFS, RootfsBoundary,
@@ -103,8 +105,8 @@ use crate::objects::{
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     user_boot::{
-        ElfObject, UserAddressSpace, UserBootPayload, UserChildProcess,
-        UserCloneDeferredBoundaries, UserInitProcess, UserTrapFrame,
+        ElfObject, KernelInitTaskUserState, Pid1UserAppFlow, UserAddressSpace, UserBootPayload,
+        UserCloneDeferredBoundaries, UserTaskSet, UserTrapFrame,
     },
     user_stack::UserStack,
     vfs::{FsStruct, RamFsType, VfsCore},
@@ -129,7 +131,7 @@ pub struct Context {
     pub kernel_image: KernelImage,
     pub root_stream: RootStream,
     pub cpu_group: CpuGroup,
-    pub init_task: InitTask,
+    pub boot_task: BootTask,
     pub init_stack: InitStack,
     pub event_stream: EventStream,
     pub exception_stream: ExceptionStream,
@@ -258,13 +260,15 @@ pub struct Context {
     pub ramfs_type: RamFsType,
 
     pub kernel_init_task: KernelInitTask,
+    #[cfg_attr(app_hello, allow(dead_code))]
+    pub kernel_init_flow: KernelInitFlow,
     pub kernel_init_task_pi_lock: RawSpinLock,
     pub kthreadd_task: KthreaddTask,
     pub kthreadd_task_pi_lock: RawSpinLock,
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
     pub kthreadd_ready_gate_wait_lock: RawSpinLock,
-    pub boot_idle_runtime: BootIdleRuntime,
+    pub boot_idle_flow: BootIdleFlow,
     pub vmstat_core: VmstatCore,
     pub pre_smp_initcalls: PreSmpInitcallTable,
     pub pre_smp_boundary: PreSmpInitBoundary,
@@ -330,8 +334,10 @@ pub struct Context {
     #[cfg_attr(app_hello, allow(dead_code))]
     pub user_stack: UserStack,
     pub user_trap_frame: UserTrapFrame,
-    pub user_child_process: UserChildProcess,
-    pub user_init_process: UserInitProcess,
+    pub user_task_set: UserTaskSet,
+    pub kernel_init_user_state: KernelInitTaskUserState,
+    #[cfg_attr(app_hello, allow(dead_code))]
+    pub pid1_user_app_flow: Pid1UserAppFlow,
 }
 
 impl Context {
@@ -348,7 +354,7 @@ impl Context {
             kernel_image: KernelImage::new(),
             root_stream: RootStream::new(),
             cpu_group: CpuGroup::new(),
-            init_task: InitTask::new(),
+            boot_task: BootTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
             exception_stream: ExceptionStream::new(),
@@ -469,13 +475,14 @@ impl Context {
             files_struct: FilesStruct::new(),
             ramfs_type: RamFsType::new(),
             kernel_init_task: KernelInitTask::new(),
+            kernel_init_flow: KernelInitFlow::new(),
             kernel_init_task_pi_lock: RawSpinLock::new(),
             kthreadd_task: KthreaddTask::new(),
             kthreadd_task_pi_lock: RawSpinLock::new(),
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),
             kthreadd_ready_gate_wait_lock: RawSpinLock::new(),
-            boot_idle_runtime: BootIdleRuntime::new(),
+            boot_idle_flow: BootIdleFlow::new(),
             vmstat_core: VmstatCore::new(),
             pre_smp_initcalls: PreSmpInitcallTable::new(),
             pre_smp_boundary: PreSmpInitBoundary::new(),
@@ -536,8 +543,9 @@ impl Context {
             user_address_space: UserAddressSpace::new(),
             user_stack: UserStack::new(),
             user_trap_frame: UserTrapFrame::new(),
-            user_child_process: UserChildProcess::new(),
-            user_init_process: UserInitProcess::new(),
+            user_task_set: UserTaskSet::new(),
+            kernel_init_user_state: KernelInitTaskUserState::new(),
+            pid1_user_app_flow: Pid1UserAppFlow::new(),
         }
     }
 

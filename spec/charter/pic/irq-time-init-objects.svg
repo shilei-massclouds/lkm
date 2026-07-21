@@ -78,7 +78,7 @@
   <text x="1106" y="212" text-anchor="middle" class="label">Randomness</text>
   <text x="1106" y="236" text-anchor="middle" class="small">after timekeeping</text>
   <rect x="805" y="310" width="176" height="72" rx="8" class="box async"/>
-  <text x="893" y="338" text-anchor="middle" class="label">BootInitTask action</text>
+  <text x="893" y="338" text-anchor="middle" class="label">BootTask action</text>
   <text x="893" y="362" text-anchor="middle" class="small">refresh stack canary</text>
   <rect x="1018" y="310" width="176" height="72" rx="8" class="box deferred"/>
   <text x="1106" y="338" text-anchor="middle" class="label">Perf/Profile</text>

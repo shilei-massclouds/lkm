@@ -14,7 +14,7 @@ PayloadPhase no-return entry. Bounded CLOEXEC is prechecked before point-of-no-r
 the image swap begins.
 
 "CPU no longer references retired backing" includes the bounded saved-parent snapshot: a runtime child exec
-must transfer the old mm/stack to `UserChildProcess` while that parent continuation is live. The corresponding
+must transfer the old mm/stack to the `UserTaskSet`-owned continuation record while that parent continuation is live. The corresponding
 child-exit handoff releases the child image and restores the parent ownership before resuming it.
 
 No code may claim the deferred Linux locks/hooks are held or complete. Concurrency, credentials, signals,

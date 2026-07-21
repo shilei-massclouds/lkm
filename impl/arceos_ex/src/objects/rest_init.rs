@@ -1,4 +1,5 @@
 use super::{
+    boot_task::BootTask,
     completion::Completion,
     config::Config,
     cpu_control::{
@@ -9,7 +10,6 @@ use super::{
         AsyncFullSyncDeferred, InitMemoryCleanupDeferred, KernelMappingProtectionDeferred,
         PtiFinalizeTrimmed,
     },
-    init_task::InitTask,
     mm_core::{
         GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches,
         VmallocAllocator, VmapAreaFlags,
@@ -43,6 +43,93 @@ pub enum SystemStateValue {
     Running,
 }
 
+/// The kernel-mode continuation initially owned and activated by PID 1.
+///
+/// This is deliberately separate from [`KernelInitTask`]: exec retires this
+/// flow while preserving the task carrier and PID identity.
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub struct KernelInitFlow {
+    lifecycle: Lifecycle,
+    owner_bound: bool,
+    active: bool,
+    released: bool,
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+impl KernelInitFlow {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Online),
+            owner_bound: true,
+            active: true,
+            released: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn owner_bound(&self) -> bool {
+        self.owner_bound
+    }
+
+    pub const fn active(&self) -> bool {
+        self.active
+    }
+
+    pub const fn released(&self) -> bool {
+        self.released
+    }
+
+    pub fn disable_for_exec(&mut self, owner: &KernelInitTask) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || owner.state() != State::Online
+            || !self.owner_bound
+            || !self.active
+            || !owner.kernel_init_flow_active()
+        {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Offline,
+            );
+        }
+
+        self.active = false;
+        self.lifecycle.transition(
+            LifecycleEvent::Disable,
+            State::Online,
+            State::Offline,
+            Checkpoint::KernelInitFlowOffline,
+        )
+    }
+
+    pub fn cleanup_after_handoff(&mut self, owner: &KernelInitTask) -> EventResult {
+        if self.lifecycle.state() != State::Offline
+            || self.active
+            || !owner.pid1_user_flow_active()
+            || !owner.flow_handoff_committed()
+        {
+            return failed_condition(
+                LifecycleEvent::Cleanup,
+                self.lifecycle.state(),
+                State::Offline,
+                State::Destroyed,
+            );
+        }
+
+        self.released = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Cleanup,
+            State::Offline,
+            State::Destroyed,
+            Checkpoint::KernelInitFlowDestroyed,
+        )
+    }
+}
+
 pub struct KernelInitTask {
     pub task: Task,
     lifecycle: Lifecycle,
@@ -62,6 +149,11 @@ pub struct KernelInitTask {
     entry_started_count: usize,
     entry_stack_pointer: usize,
     entry_stack_verified: bool,
+    kernel_init_flow_owned: bool,
+    pid1_user_flow_owned: bool,
+    kernel_init_flow_active: bool,
+    pid1_user_flow_active: bool,
+    flow_handoff_committed: bool,
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -86,6 +178,11 @@ impl KernelInitTask {
             entry_started_count: 0,
             entry_stack_pointer: 0,
             entry_stack_verified: false,
+            kernel_init_flow_owned: true,
+            pid1_user_flow_owned: false,
+            kernel_init_flow_active: true,
+            pid1_user_flow_active: false,
+            flow_handoff_committed: false,
         }
     }
 
@@ -193,6 +290,56 @@ impl KernelInitTask {
         self.entry_stack_verified
     }
 
+    pub const fn kernel_init_flow_owned(&self) -> bool {
+        self.kernel_init_flow_owned
+    }
+
+    pub const fn pid1_user_flow_owned(&self) -> bool {
+        self.pid1_user_flow_owned
+    }
+
+    pub const fn kernel_init_flow_active(&self) -> bool {
+        self.kernel_init_flow_active
+    }
+
+    pub const fn pid1_user_flow_active(&self) -> bool {
+        self.pid1_user_flow_active
+    }
+
+    pub const fn flow_handoff_committed(&self) -> bool {
+        self.flow_handoff_committed
+    }
+
+    /// Commit the active-flow replacement without replacing the PID 1 Task.
+    pub fn commit_pid1_user_flow_handoff(
+        &mut self,
+        kernel_flow_state: State,
+        user_flow_state: State,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || kernel_flow_state != State::Offline
+            || user_flow_state != State::Ready
+            || !self.kernel_init_flow_owned
+            || !self.kernel_init_flow_active
+            || self.pid1_user_flow_owned
+            || self.pid1_user_flow_active
+            || self.flow_handoff_committed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.kernel_init_flow_active = false;
+        self.pid1_user_flow_owned = true;
+        self.pid1_user_flow_active = true;
+        self.flow_handoff_committed = true;
+        Ok(())
+    }
+
     pub fn switch_context(&self) -> &TaskSwitchContext {
         &self.task.switch_ctx
     }
@@ -243,7 +390,7 @@ impl KernelInitTask {
         signal_core: &SignalCore,
         task_file_context: &TaskFileContext,
         security_core: &SecurityCore,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -263,7 +410,7 @@ impl KernelInitTask {
 
         let copy_result = task_creation_core.copy_process(
             TaskCopyProcessInputs {
-                src_task: init_task,
+                src_task: boot_task,
                 root_pid_namespace,
                 credential_core,
                 signal_core,
@@ -325,7 +472,7 @@ impl KernelInitTask {
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+            || !current_task_slot.current_is_boot_task()
             || pi_lock.state() != State::Ready
             || scheduler.boot_idle_preemption().state() != State::Ready
             || self.task.pid != KERNEL_INIT_PID
@@ -638,7 +785,7 @@ impl KthreaddTask {
         signal_core: &SignalCore,
         task_file_context: &TaskFileContext,
         security_core: &SecurityCore,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -658,7 +805,7 @@ impl KthreaddTask {
 
         let copy_result = task_creation_core.copy_process(
             TaskCopyProcessInputs {
-                src_task: init_task,
+                src_task: boot_task,
                 root_pid_namespace,
                 credential_core,
                 signal_core,
@@ -720,7 +867,7 @@ impl KthreaddTask {
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+            || !current_task_slot.current_is_boot_task()
             || pi_lock.state() != State::Ready
             || scheduler.boot_idle_preemption().state() != State::Ready
             || self.task.pid != KTHREADD_PID
@@ -1243,7 +1390,7 @@ impl KthreaddReadyGate {
     }
 }
 
-pub struct BootIdleRuntime {
+pub struct BootIdleFlow {
     lifecycle: Lifecycle,
     first_schedule_committed: bool,
     idle_entry_prepared: bool,
@@ -1286,7 +1433,7 @@ pub struct BootIdleRuntime {
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
-impl BootIdleRuntime {
+impl BootIdleFlow {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -1583,7 +1730,7 @@ impl BootIdleRuntime {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            Checkpoint::BootIdleRuntimeReady,
+            Checkpoint::BootIdleFlowReady,
         )
     }
 
@@ -1747,7 +1894,7 @@ impl BootIdleRuntime {
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
             || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+            || !current_task_slot.current_is_boot_task()
         {
             return self.failed_ready_action();
         }
@@ -1793,7 +1940,7 @@ pub struct TaskSpawnInputs<'a> {
     pub signal_core: &'a SignalCore,
     pub task_file_context: &'a TaskFileContext,
     pub security_core: &'a SecurityCore,
-    pub init_task: &'a InitTask,
+    pub boot_task: &'a BootTask,
 }
 
 impl TaskSpawnInputs<'_> {
@@ -1804,7 +1951,7 @@ impl TaskSpawnInputs<'_> {
             && self.signal_core.state() == State::Prepared
             && self.task_file_context.state() == State::Prepared
             && self.security_core.state() == State::Ready
-            && self.init_task.state() == State::Online
+            && self.boot_task.state() == State::Online
     }
 
     fn ready_for_kthreadd(&self) -> bool {
@@ -1812,7 +1959,7 @@ impl TaskSpawnInputs<'_> {
             && self.root_pid_namespace.state() == State::Ready
             && self.credential_core.state() == State::Prepared
             && self.task_file_context.state() == State::Prepared
-            && self.init_task.state() == State::Online
+            && self.boot_task.state() == State::Online
     }
 }
 

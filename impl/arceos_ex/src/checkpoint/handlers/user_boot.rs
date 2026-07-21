@@ -52,7 +52,7 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserAddressSpaceReady,
     #[cfg(app_user_boot)]
-    Checkpoint::UserModeEntry,
+    Checkpoint::Pid1UserAppFlowEnterUserMode,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExecveArgsReady,
     #[cfg(app_user_boot)]
@@ -114,7 +114,7 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserChildRecordArchived,
     #[cfg(app_user_boot)]
-    Checkpoint::UserChildSlotReusable,
+    Checkpoint::UserTaskRecordReleased,
     #[cfg(app_user_boot)]
     Checkpoint::UserChildRecordReaped,
     #[cfg(app_user_boot)]
@@ -176,7 +176,7 @@ static USER_CLONE_VFORK_PARENT_RESUMED_REPORTED: AtomicBool = AtomicBool::new(fa
 #[cfg(app_user_boot)]
 static USER_CHILD_RECORD_ARCHIVED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
-static USER_CHILD_SLOT_REUSABLE_REPORTED: AtomicBool = AtomicBool::new(false);
+static USER_TASK_RECORD_RELEASED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
 static USER_CHILD_RECORD_REAPED_REPORTED: AtomicBool = AtomicBool::new(false);
 #[cfg(app_user_boot)]
@@ -229,7 +229,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             sink.diag_usize("tlb_flush", ctx.user_stack.last_tlb_flush() as usize);
         }
         #[cfg(app_user_boot)]
-        Checkpoint::UserModeEntry => {
+        Checkpoint::Pid1UserAppFlowEnterUserMode => {
             run_user_mode_entry(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
@@ -377,9 +377,9 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             });
         }
         #[cfg(app_user_boot)]
-        Checkpoint::UserChildSlotReusable => {
-            run_once(&USER_CHILD_SLOT_REUSABLE_REPORTED, || {
-                run_user_child_slot_reusable(checkpoint, ctx, sink, total)
+        Checkpoint::UserTaskRecordReleased => {
+            run_once(&USER_TASK_RECORD_RELEASED_REPORTED, || {
+                run_user_task_record_released(checkpoint, ctx, sink, total)
             });
         }
         #[cfg(app_user_boot)]
@@ -806,10 +806,10 @@ fn run_user_address_space_ready(
 
 #[cfg(app_user_boot)]
 fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink, total: usize) {
-    let name = "user_boot.user_init_process.enter_user_mode";
+    let name = "user_boot.kernel_init_user_state.enter_user_mode";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let trap_stack_base = user_kernel_trap_stack_base();
     let trap_stack_top = user_kernel_trap_stack_top();
     let trap_guard_base = user_kernel_trap_stack_guard_base();
@@ -1085,7 +1085,7 @@ fn run_syscall_table_set_tid_address(
     let name = "user_boot.syscall_table.set_tid_address";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
     let valid = process.state() == State::Online
         && process.runtime_entered()
@@ -1126,7 +1126,7 @@ fn run_syscall_table_clone(
     sink.start_case(total, "", name, checkpoint);
 
     let table = &ctx.syscall_table;
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let parent_pid = crate::objects::rest_init::KERNEL_INIT_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
@@ -1145,7 +1145,7 @@ fn run_syscall_table_clone(
         && table.clone_observed()
         && ctx.task_creation_core.state() == State::Ready
         && ctx.task_creation_core.user_child_created()
-        && child.state() == State::Ready
+        && child.active_task_state() == State::Ready
         && child.pid() >= internal_child_task
         && child.parent_pid() == parent_pid
         && child.tgid() == child.pid()
@@ -1168,7 +1168,7 @@ fn run_syscall_table_clone(
         && child.enqueued()
         && ctx.scheduler.selected_runqueue_task_id() == internal_child_task
         && runqueue_contains_child
-        && ctx.user_init_process.child_process_group_visible();
+        && ctx.kernel_init_user_state.child_process_group_visible();
 
     sink.diag_usize("clone_observed", table.clone_observed() as usize);
     sink.diag_usize("clone_child_pid", child.pid());
@@ -1207,7 +1207,7 @@ fn run_files_struct_pidfd_install(
     sink.start_case(total, "", name, checkpoint);
 
     let files = &ctx.files_struct;
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let valid = files.state() == State::Ready
         && files.pidfd_installed()
         && files.pidfd_fd() != usize::MAX
@@ -1236,7 +1236,7 @@ fn run_syscall_table_clone_vfork_pidfd(
     sink.start_case(total, "", name, checkpoint);
 
     let table = &ctx.syscall_table;
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let files = &ctx.files_struct;
     let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
@@ -1259,7 +1259,7 @@ fn run_syscall_table_clone_vfork_pidfd(
         && table.clone_full_pidfd_file_ops_deferred()
         && table.clone_observed()
         && ctx.task_creation_core.user_child_created()
-        && child.state() == State::Ready
+        && child.active_task_state() == State::Ready
         && child.vfork_pidfd_clone()
         && child.vfork_parent_frame_saved()
         && child.pidfd_copyout_observed()
@@ -1315,7 +1315,7 @@ fn run_syscall_table_clone_vfork_vm(
     sink.start_case(total, "", name, checkpoint);
 
     let table = &ctx.syscall_table;
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let internal_child_task = crate::objects::user_boot::USER_CHILD_PID;
     let child_a0 = child.child_trap_frame_reg(10).unwrap_or(usize::MAX);
     let child_sp = child.child_trap_frame_reg(2).unwrap_or(0);
@@ -1332,7 +1332,7 @@ fn run_syscall_table_clone_vfork_vm(
         && table.clone_vfork_vm_first_slice()
         && table.clone_observed()
         && ctx.task_creation_core.user_child_created()
-        && child.state() == State::Ready
+        && child.active_task_state() == State::Ready
         && child.vfork_vm_clone()
         && !child.vfork_pidfd_clone()
         && child.vfork_parent_frame_saved()
@@ -1378,7 +1378,7 @@ fn run_user_clone_vfork_child_handoff(
     let name = "user_boot.user_clone.vfork_child_handoff";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
         && child.current_child_continuation()
@@ -1414,7 +1414,7 @@ fn run_user_clone_vfork_next_child_accepted(
     let name = "user_boot.user_clone.vfork_next_child_accepted";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let valid = child.vfork_clone()
         && child.vfork_next_child_accepted()
         && child.completed_child_record_total_archived() != 0
@@ -1439,7 +1439,7 @@ fn run_user_clone_vfork_next_child_accepted(
         "completed_child_record_released_count",
         child.completed_child_record_released_count(),
     );
-    sink.diag_usize("active_slot_reuse_count", child.active_slot_reuse_count());
+    sink.diag_usize("task_allocation_count", child.task_allocation_count());
     sink.diag_usize("next_child_pid", child.next_child_pid());
     if valid {
         sink.pass(total, "", name);
@@ -1465,7 +1465,7 @@ fn run_syscall_table_openat(
         && files.fd_bound(FdRef::Regular0);
     let opened_directory = files.open_path_routes_to_vfs() && files.directory_fd_installed();
     let opened_special = files.tty_alias_fd_installed() || files.null_fd_installed();
-    let valid = ctx.user_init_process.state() == State::Online
+    let valid = ctx.kernel_init_user_state.active_user_flow_online()
         && table.state() == State::Ready
         && table.bound_to_exception()
         && table.openat_supported()
@@ -1568,7 +1568,7 @@ fn run_syscall_table_write(
     let name = "user_boot.syscall_table.write";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
     let valid = process.state() == State::Online
         && process.runtime_entered()
@@ -1718,11 +1718,11 @@ fn run_syscall_table_rt_sigtimedwait(
     sink.start_case(total, "", name, checkpoint);
 
     let table = &ctx.syscall_table;
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let valid = table.state() == State::Ready
         && table.rt_sigtimedwait_supported()
         && table.signal_mask_usercopy_ready()
-        && table.rt_sigtimedwait_routes_to_user_init_process()
+        && table.rt_sigtimedwait_routes_to_kernel_init_user_state()
         && table.rt_sigtimedwait_sigsetsize_bound()
         && table.rt_sigtimedwait_copies_wait_mask()
         && table.rt_sigtimedwait_uinfo_null_no_copyout_first_slice()
@@ -1804,7 +1804,7 @@ fn run_user_signal_wait_sleep(
     let name = "user_boot.user_signal_wait.sleep";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let valid = process.rt_sigtimedwait_observed()
         && process.rt_sigtimedwait_sleeping()
         && process.rt_sigtimedwait_waiter_enqueued()
@@ -1850,7 +1850,7 @@ fn run_user_signal_wait_wake_sigchld(
     let name = "user_boot.user_signal_wait.wake_sigchld";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let valid = process.rt_sigtimedwait_observed()
         && !process.rt_sigtimedwait_sleeping()
         && !process.rt_sigtimedwait_waiter_enqueued()
@@ -1892,8 +1892,8 @@ fn run_user_pidfd_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Si
     sink.start_case(total, "", name, checkpoint);
 
     let files = &ctx.files_struct;
-    let child = &ctx.user_child_process;
-    let process = &ctx.user_init_process;
+    let child = &ctx.user_task_set;
+    let process = &ctx.kernel_init_user_state;
     let valid = files.pidfd_installed()
         && files.pidfd_ready()
         && files.pidfd_fd() == child.pidfd_fd()
@@ -1932,7 +1932,7 @@ fn run_syscall_table_rt_sigtimedwait_return_signal(
     let name = "user_boot.syscall_table.rt_sigtimedwait_return_signal";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let valid = ctx.syscall_table.rt_sigtimedwait_observed()
         && process.rt_sigtimedwait_observed()
         && process.rt_sigtimedwait_dequeued_signal()
@@ -1972,7 +1972,7 @@ fn run_syscall_table_wait4(
     sink.start_case(total, "", name, checkpoint);
 
     let table = &ctx.syscall_table;
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
     let table_ready = table.state() == State::Ready
         && table.wait4_supported()
@@ -2070,7 +2070,7 @@ fn run_user_child_parent_wait_resumed(
     let name = "user_boot.user_child.parent_wait_resumed";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
     let runqueue_contains_internal_child = ctx
         .scheduler
@@ -2112,7 +2112,7 @@ fn run_user_child_parent_wait_resumed(
     sink.diag_usize("wait4_resumed_wait_status", obs.resumed_wait_status);
     sink.diag_usize("wait4_resumed_status_copied", obs.resumed_status_copied);
     sink.diag_usize("wait4_child_exit_status", obs.child_exit_status);
-    sink.diag_usize("child_lifecycle", child.state() as usize);
+    sink.diag_usize("child_lifecycle", child.active_task_state() as usize);
     sink.diag_usize("child_pid", child.pid());
     sink.diag_usize("child_parent_pid", child.parent_pid());
     sink.diag_usize("child_tgid", child.tgid());
@@ -2212,7 +2212,7 @@ fn run_user_clone_vfork_parent_resumed(
     let name = "user_boot.user_clone.vfork_parent_resumed";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let files = &ctx.files_struct;
     let pidfd_ok = if child.vfork_pidfd_clone() {
         files.pidfd_ready() && files.pidfd_child_pid() == child.pid()
@@ -2259,7 +2259,7 @@ fn run_user_child_record_archived(
     let name = "user_boot.user_child_record.archived";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let valid = child.completed_child_record_archived()
         && child.completed_child_record_count() != 0
         && child.completed_child_record_count() <= USER_COMPLETED_CHILD_RECORD_CAPACITY
@@ -2305,32 +2305,33 @@ fn run_user_child_record_archived(
 }
 
 #[cfg(app_user_boot)]
-fn run_user_child_slot_reusable(
+fn run_user_task_record_released(
     checkpoint: Checkpoint,
     ctx: &Context,
     sink: &mut dyn Sink,
     total: usize,
 ) {
-    let name = "user_boot.user_child_slot.reusable";
+    let name = "user_boot.user_task_record.released";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let runqueue_contains_internal_child = ctx
         .scheduler
         .boot_runqueue()
         .contains_task(crate::objects::user_boot::USER_CHILD_PID);
-    let valid = child.state() == State::Prepared
-        && child.active_slot_reusable()
+    let valid = child.state() == State::Ready
+        && child.active_task_state() == State::Prepared
+        && child.active_task_record_available()
         && child.completed_child_record_archived()
-        && child.active_slot_reuse_count() != 0
+        && child.task_allocation_count() != 0
         && child.next_child_pid() > child.last_archived_child_pid()
         && !runqueue_contains_internal_child;
 
     sink.diag_usize(
-        "active_slot_reusable",
-        child.active_slot_reusable() as usize,
+        "active_task_record_available",
+        child.active_task_record_available() as usize,
     );
-    sink.diag_usize("active_slot_reuse_count", child.active_slot_reuse_count());
+    sink.diag_usize("task_allocation_count", child.task_allocation_count());
     sink.diag_usize("next_child_pid", child.next_child_pid());
     sink.diag_usize(
         "runqueue_contains_internal_child",
@@ -2339,7 +2340,7 @@ fn run_user_child_slot_reusable(
     if valid {
         sink.pass(total, "", name);
     } else {
-        sink.fail(total, "", name, "child slot reusable facts invalid");
+        sink.fail(total, "", name, "released task record facts invalid");
     }
 }
 
@@ -2353,7 +2354,7 @@ fn run_user_child_record_reaped(
     let name = "user_boot.user_child_record.reaped";
     sink.start_case(total, "", name, checkpoint);
 
-    let child = &ctx.user_child_process;
+    let child = &ctx.user_task_set;
     let valid = child.completed_child_record_reaped()
         && child.completed_child_record_released()
         && child.completed_child_record_reaped_count() != 0
@@ -2415,7 +2416,7 @@ fn run_syscall_table_exit(
     let name = "user_boot.syscall_table.exit";
     sink.start_case(total, "", name, checkpoint);
 
-    let process = &ctx.user_init_process;
+    let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
     let valid = process.state() == State::Online
         && process.runtime_entered()

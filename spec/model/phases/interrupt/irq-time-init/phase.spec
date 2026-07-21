@@ -1516,7 +1516,7 @@ object TimerWheel: KernelObject {
                     PerCpuStorage.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     Softirq.state == State::Prepared;
-                    BootInitTask.state == State::Online;
+                    BootTask.state == State::Online;
                 }
 
                 within TimerBaseInitContext {
@@ -1534,7 +1534,7 @@ object TimerWheel: KernelObject {
                     timer_base_locks_ready(TimerWheel);
                     timer_base_pending_maps_ready(TimerWheel);
                     timer_base_vectors_empty(TimerWheel);
-                    boot_init_task_posix_cpu_timer_work_ready(BootInitTask);
+                    boot_task_posix_cpu_timer_work_ready(BootTask);
                     timer_softirq_registered(Softirq, TimerWheel);
                 }
             }
@@ -1548,7 +1548,7 @@ object TimerWheel: KernelObject {
             timer_base_locks_ready(TimerWheel);
             timer_base_pending_maps_ready(TimerWheel);
             timer_base_vectors_empty(TimerWheel);
-            boot_init_task_posix_cpu_timer_work_ready(BootInitTask);
+            boot_task_posix_cpu_timer_work_ready(BootTask);
             timer_softirq_registered(Softirq, TimerWheel);
         }
     }
@@ -1902,7 +1902,7 @@ object BootStackCanary: KernelObject {
                     ensures {
                         boot_stack_canary_init_context_used(BootStackCanary);
                         boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
-                        boot_init_task_canary_seeded(BootStackCanary);
+                        boot_task_canary_seeded(BootStackCanary);
                     }
                 }
 
@@ -1910,7 +1910,7 @@ object BootStackCanary: KernelObject {
                     stackprotector_enabled(BootStackCanary);
                     per_task_stack_canary_ready(BootStackCanary);
                     boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
-                    boot_init_task_canary_seeded(BootStackCanary);
+                    boot_task_canary_seeded(BootStackCanary);
                 }
             }
         }
@@ -1921,7 +1921,7 @@ object BootStackCanary: KernelObject {
             stackprotector_enabled(BootStackCanary);
             per_task_stack_canary_ready(BootStackCanary);
             boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
-            boot_init_task_canary_seeded(BootStackCanary);
+            boot_task_canary_seeded(BootStackCanary);
         }
     }
 }
@@ -2165,7 +2165,7 @@ object Plic: InterruptObject {
 /*
  * SmpCallFunction 表示 call_function_init() 建立的 SMP function-call 基础。
  */
-object SmpCallFunction: TaskObject {
+object SmpCallFunction: KernelObject {
     initial_state: State::Base;
 
     state State::Base {

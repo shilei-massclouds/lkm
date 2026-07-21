@@ -67,7 +67,7 @@ EARLY_CHECKPOINT_BYTES = {
     "Z": "KernelImage.Ready",
     "H": "BootCPU.Prepared",
     "G": "CpuGroup.Prepared",
-    "T": "InitTask.Prepared",
+    "T": "BootTask.Prepared",
     "S": "InitStack.Prepared",
     "V": "EventStream.Prepared",
     "9": "ExceptionStream.Prepared",

@@ -48,7 +48,7 @@ Kernel.Enable 的三个 `drives` 必须保持连续 owner 和顺序：
 
 ```text
 UpMultitaskPhase
-  -> real BootIdleTask-to-KernelInitTask stack handoff
+  -> real BootTask-to-KernelInitTask stack handoff
   -> enable_after_up_multitask() on KernelInitTask
   -> SmpRuntimePhase on KernelInitTask
   -> PayloadPhase on KernelInitTask

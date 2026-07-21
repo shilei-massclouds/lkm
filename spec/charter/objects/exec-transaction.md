@@ -25,7 +25,7 @@
   CLOEXEC 预检。失败释放全部 staging backing 并保持 current mm、SATP、trap frame、fd table 和进程身份不变。
 - 成功时依次标记 point-of-no-return、交换 current/staging image、执行已预检 CLOEXEC、安装映像/stack/
   trap frame、完成 owner-specific handoff、释放 retired mm，然后 reset slot。
-- `UserChildProcess` 的 bounded fork/vfork 替代路径若仍持有 parent mm，runtime exec 不得把该 parent backing
+- 用户 Task 的 bounded fork/vfork 实现路径若仍持有 parent mm，runtime exec 不得把该 parent backing
   当作无引用 retired mm 释放；transaction 将 address-space/stack 所有权交给 parent snapshot，child exit
   释放被替换的 child image 后再恢复 parent。无 parent snapshot 的 boot/runtime 路径仍在 handoff 后立即释放。
 

@@ -114,7 +114,7 @@ object PayloadPhase: PhaseObject {
                     SystemState.state == State::Online;
                     KernelInitTask.state == State::Online;
                     system_state_running(SystemState);
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     payload_phase_next_boundary();
                     BinaryFormatRegistry.state == State::Ready;

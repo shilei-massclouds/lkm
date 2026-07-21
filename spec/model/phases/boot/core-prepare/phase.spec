@@ -274,11 +274,11 @@ context ResourceTreeWriteContext: ResourceExclusiveContext {
         lock_ref: ResourceLock;
 
         entered_by {
-            ResourceLock.Transition::WriteLock(BootInitTaskRef);
+            ResourceLock.Transition::WriteLock(BootTaskRef);
         }
 
         exited_by {
-            ResourceLock.Transition::WriteUnlock(BootInitTaskRef);
+            ResourceLock.Transition::WriteUnlock(BootTaskRef);
         }
     }
 
@@ -309,7 +309,7 @@ object ResourceTree: ResourceObject {
                     KernelImage.state == State::Online;
                     Lds.state == State::Online;
                     ResourceLock.state == State::Ready;
-                    task_ref_ready(BootInitTaskRef);
+                    task_ref_ready(BootTaskRef);
                 }
 
                 within ResourceTreeWriteContext {
@@ -691,11 +691,11 @@ context CpuHotplugReadContext: ResourceExclusiveContext {
         lock_ref: CpuHotplugLock;
 
         entered_by {
-            CpuHotplugLock.Transition::ReadLock(BootInitTaskRef);
+            CpuHotplugLock.Transition::ReadLock(BootTaskRef);
         }
 
         exited_by {
-            CpuHotplugLock.Transition::ReadUnlock(BootInitTaskRef);
+            CpuHotplugLock.Transition::ReadUnlock(BootTaskRef);
         }
     }
 
@@ -709,17 +709,17 @@ context StaticBranchJumpLabelContext: ResourceExclusiveContext {
     /*
      * This context corresponds to Linux jump_label_lock() /
      * jump_label_unlock() around jump_label_init(). The current task is the
-     * early boot init_task represented by BootInitTaskRef.
+     * early boot init_task represented by BootTaskRef.
      */
     guard {
         lock_ref: JumpLabelMutex;
 
         entered_by {
-            JumpLabelMutex.Transition::Lock(BootInitTaskRef);
+            JumpLabelMutex.Transition::Lock(BootTaskRef);
         }
 
         exited_by {
-            JumpLabelMutex.Transition::Unlock(BootInitTaskRef);
+            JumpLabelMutex.Transition::Unlock(BootTaskRef);
         }
     }
 
@@ -755,7 +755,7 @@ object StaticBranch: KernelObject {
                     SwapperVm.state == State::Online;
                     CpuHotplugLock.state == State::Ready;
                     JumpLabelMutex.state == State::Ready;
-                    task_ref_ready(BootInitTaskRef);
+                    task_ref_ready(BootTaskRef);
                 }
 
                 within CpuHotplugReadContext {

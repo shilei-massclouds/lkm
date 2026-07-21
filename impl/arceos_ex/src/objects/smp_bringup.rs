@@ -15,7 +15,7 @@ use super::{
         PerCpuRwSemaphoreWriteOutcome,
     },
     pre_smp_init::PreSmpInitBoundary,
-    rest_init::{BootIdleRuntime, KernelInitTask, KthreaddTask},
+    rest_init::{BootIdleFlow, KernelInitTask, KthreaddTask},
     sbi::Sbi,
     scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -446,7 +446,7 @@ impl CpuHotplugSyncSet {
     pub fn preset(
         &mut self,
         cpu_group: &CpuGroup,
-        boot_idle_runtime: &BootIdleRuntime,
+        boot_idle_flow: &BootIdleFlow,
         kthreadd_task: &KthreaddTask,
         cpu_hotplug_lock: &mut PerCpuRwSemaphore,
         smpboot_threads_lock: &mut Mutex,
@@ -455,7 +455,7 @@ impl CpuHotplugSyncSet {
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
             || !cpu_group.secondary_cpus_present_not_online()
-            || boot_idle_runtime.state() != State::Ready
+            || boot_idle_flow.state() != State::Ready
             || kthreadd_task.state() != State::Online
             || !cpu_hotplug_lock.ready()
             || !smpboot_threads_lock.ready()

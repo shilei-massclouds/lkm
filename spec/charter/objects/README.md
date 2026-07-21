@@ -6,6 +6,7 @@ Object-level charter notes live here when they need a dedicated topic file.
 
 | Object | Authoritative charter |
 | --- | --- |
+| `Task` / `TaskFlow` | [`task-taskflow.md`](task-taskflow.md) |
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
 | `UserStack` | [`user-stack.md`](user-stack.md) |
 | `BinaryFormatRegistry` | [`binary-format-registry.md`](binary-format-registry.md) |

@@ -71,7 +71,7 @@ impl CurrentRunQueueFixture {
 
     fn pick_next(&self) -> Result<CurrentTaskRef, crate::objects::state::EventError> {
         self.runqueue
-            .pick_next_task(self.current_ref(), CurrentTaskRef::BootIdle)
+            .pick_next_task(self.current_ref(), CurrentTaskRef::BootTask)
     }
 }
 
@@ -285,7 +285,7 @@ impl SmokeScenario for InvalidTaskRefScenario {
         assertions.assert_fail("enqueue none", self.fixture.enqueue(CurrentTaskRef::None));
         assertions.assert_fail(
             "enqueue boot idle",
-            self.fixture.enqueue(CurrentTaskRef::BootIdle),
+            self.fixture.enqueue(CurrentTaskRef::BootTask),
         );
         assertions.assert_fail(
             "enqueue wrong cpu ref",

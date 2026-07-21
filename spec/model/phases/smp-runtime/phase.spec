@@ -23,8 +23,8 @@ object SmpRuntimePhase: PhaseObject {
                 depends_on {
                     UpMultitaskPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);

@@ -7,12 +7,12 @@
  */
 
 /*
- * InitMM 表示根任务关联的 init_mm 元数据。它连接 BootInitTask 与后续完整内核地址空间元数据，
+ * InitMM 表示根任务关联的 init_mm 元数据。它连接 BootTask 与后续完整内核地址空间元数据，
  * 但不作为另一个页表对象与 Vm/SwapperVm 竞争。
  */
 object InitMM: AddressSpaceObject {
     initial_state: State::Base;
-    parent: BootInitTask;
+    parent: BootTask;
 
     /*
      * Base 表示 init_mm 元数据尚未填入内核映像边界。
@@ -24,13 +24,13 @@ object InitMM: AddressSpaceObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootInitTask.state == State::Online;
+                    BootTask.state == State::Online;
                     Lds.state == State::Online;
                 }
 
                 ensures {
                     init_mm_bounds_ready(InitMM, Lds);
-                    init_task_active_mm_ready(BootInitTask, InitMM);
+                    init_task_active_mm_ready(BootTask, InitMM);
                 }
             }
         }
@@ -42,7 +42,7 @@ object InitMM: AddressSpaceObject {
     state State::Ready {
         invariant {
             init_mm_bounds_ready(InitMM, Lds);
-            init_task_active_mm_ready(BootInitTask, InitMM);
+            init_task_active_mm_ready(BootTask, InitMM);
         }
     }
 }
@@ -1054,7 +1054,7 @@ object EntrySuccessorPhase: PhaseObject {
                     EntryPreludePhase.state == State::Online;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Online;
-                    BootInitTask.state == State::Online;
+                    BootTask.state == State::Online;
                     BootInitStack.state == State::Ready;
                     InterruptStream.state == State::Prepared;
                     RawDtb.state == State::Ready;

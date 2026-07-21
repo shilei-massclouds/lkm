@@ -53,7 +53,7 @@ impl TaskCreationCoreFixture {
                 cpu_group: &ctx.cpu_group,
                 cpu_capabilities: &ctx.cpu_capabilities,
                 slub_subsystem: &ctx.slub_subsystem,
-                init_task: &ctx.init_task,
+                boot_task: &ctx.boot_task,
                 exception_stream: &ctx.exception_stream,
             }),
         );
@@ -63,7 +63,7 @@ impl TaskCreationCoreFixture {
         let ctx = context_ref();
         let Ok(result) = self.core.copy_process(
             TaskCopyProcessInputs {
-                src_task: &ctx.init_task,
+                src_task: &ctx.boot_task,
                 root_pid_namespace: &ctx.root_pid_namespace,
                 credential_core: &ctx.credential_core,
                 signal_core: &ctx.signal_core,
@@ -203,7 +203,7 @@ impl SmokeScenario for RejectMissingEntryScenario {
             "copy process",
             self.fixture.core.copy_process(
                 TaskCopyProcessInputs {
-                    src_task: &ctx.init_task,
+                    src_task: &ctx.boot_task,
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,
@@ -257,7 +257,7 @@ impl SmokeScenario for RejectEntryMismatchScenario {
             "copy process",
             self.fixture.core.copy_process(
                 TaskCopyProcessInputs {
-                    src_task: &ctx.init_task,
+                    src_task: &ctx.boot_task,
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,

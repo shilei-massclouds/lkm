@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 485,
+  "total_checkpoints": 490,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 368
+      "count": 373
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 368
+      "count": 373
     },
     {
       "confidence": "medium",
@@ -204,6 +204,10 @@
       "count": 3
     },
     {
+      "family": "Pid1UserAppFlow",
+      "count": 3
+    },
+    {
       "family": "SlubSubsystem",
       "count": 3
     },
@@ -232,6 +236,10 @@
       "count": 2
     },
     {
+      "family": "BootTask",
+      "count": 2
+    },
+    {
       "family": "CommandLine",
       "count": 2
     },
@@ -245,10 +253,6 @@
     },
     {
       "family": "FinalizePhase",
-      "count": 2
-    },
-    {
-      "family": "InitTask",
       "count": 2
     },
     {
@@ -269,6 +273,10 @@
     },
     {
       "family": "IrqTimeTrimmedPaths",
+      "count": 2
+    },
+    {
+      "family": "KernelInitFlow",
       "count": 2
     },
     {
@@ -432,6 +440,10 @@
       "count": 1
     },
     {
+      "family": "BootIdleFlow",
+      "count": 1
+    },
+    {
       "family": "BootIdlePiLock",
       "count": 1
     },
@@ -444,11 +456,7 @@
       "count": 1
     },
     {
-      "family": "BootIdleRuntime",
-      "count": 1
-    },
-    {
-      "family": "BootIdleTask",
+      "family": "BootIdleSetup",
       "count": 1
     },
     {
@@ -1016,11 +1024,11 @@
       "count": 1
     },
     {
-      "family": "UserChildSlot",
+      "family": "UserPidfd",
       "count": 1
     },
     {
-      "family": "UserPidfd",
+      "family": "UserTaskRecord",
       "count": 1
     },
     {

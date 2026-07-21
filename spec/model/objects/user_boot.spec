@@ -114,12 +114,8 @@ predicate user_clone_observed_vfork_pidfd_args_bound<T>(boundaries: T) -> bool;
 predicate user_clone_plain_fork_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_vm_first_slice_bound<T>(boundaries: T) -> bool;
 predicate user_clone_vfork_pidfd_first_slice_bound<T>(boundaries: T) -> bool;
-predicate user_clone_bounded_sequential_plain_fork_bound<T>(boundaries: T) -> bool;
-predicate user_clone_pid1_plain_fork_child_builtin_grandchild_bound<T>(boundaries: T) -> bool;
-predicate user_clone_builtin_grandchild_single_depth_bound<T>(boundaries: T) -> bool;
-predicate user_clone_bounded_sequential_vfork_records_bound<T>(boundaries: T) -> bool;
-predicate user_clone_single_active_child_slot_bound<T>(boundaries: T) -> bool;
-predicate user_clone_completed_child_record_capacity_bound<T>(boundaries: T) -> bool;
+predicate user_clone_fresh_task_per_child_bound<T>(boundaries: T) -> bool;
+predicate user_clone_multiple_independent_tasks_bound<T>(boundaries: T) -> bool;
 predicate user_clone_csignal_split_bound<T>(boundaries: T) -> bool;
 predicate user_clone_sigchld_exit_signal_bound<T>(boundaries: T) -> bool;
 predicate user_clone_newsp_zero_inherits_parent_sp<T>(boundaries: T) -> bool;
@@ -139,7 +135,7 @@ predicate user_clone_full_namespace_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_robust_futex_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_clear_child_tid_wake_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_wait_sleep_wakeup_deferred<T>(boundaries: T) -> bool;
-predicate user_clone_full_task_graph_reap_deferred<T>(boundaries: T) -> bool;
+predicate user_clone_full_zombie_reap_accounting_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_full_job_control_deferred<T>(boundaries: T) -> bool;
 predicate user_clone_unsupported_flags_first_slice<T>(boundaries: T) -> bool;
 
@@ -307,33 +303,33 @@ predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bo
 predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
 predicate syscall_getrandom_flags_first_slice_bound<T>(table: T) -> bool;
 predicate syscall_getrandom_full_random_core_deferred<T>(table: T) -> bool;
-predicate syscall_getuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_getgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_getpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_getsid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_setpgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_getuid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_getgid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_getpgid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_getsid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_setpgid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_setpgid_child_plain_fork_first_slice<T, P>(table: T, process: P) -> bool;
-predicate syscall_setsid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setsid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_setsid_process_group_leader_eperm_first_slice<T>(table: T) -> bool;
 predicate syscall_setsid_child_success_first_slice<T, P>(table: T, process: P) -> bool;
-predicate syscall_setuid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_setgid_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
-predicate syscall_getgroups_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setuid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_setgid_routes_to_user_task<T, P>(table: T, process: P) -> bool;
+predicate syscall_getgroups_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_getgroups_bounded_supplementary_groups_first_slice<T>(table: T) -> bool;
-predicate syscall_setgroups_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_setgroups_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_setgroups_root_first_slice<T>(table: T) -> bool;
 predicate syscall_setgroups_bounded_supplementary_groups_first_slice<T>(table: T) -> bool;
 predicate syscall_credentials_full_linux_model_deferred<T>(table: T) -> bool;
-predicate syscall_rt_sigprocmask_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigprocmask_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigprocmask_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigprocmask_unblockable_signals_cleared<T>(table: T) -> bool;
-predicate syscall_rt_sigaction_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigaction_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigaction_routes_to_signal_action_table<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigaction_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_layout_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_unblockable_signals_cleared<T>(table: T) -> bool;
 predicate syscall_rt_sigaction_kernel_only_signals_rejected<T>(table: T) -> bool;
-predicate syscall_rt_sigtimedwait_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_rt_sigtimedwait_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_rt_sigtimedwait_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_copies_wait_mask<T>(table: T) -> bool;
 predicate syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice<T>(table: T) -> bool;
@@ -359,7 +355,7 @@ predicate syscall_mmap_fixed_anonymous_prot_none_first_slice<T>(table: T) -> boo
 predicate syscall_mmap_full_vma_model_deferred<T>(table: T) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
-predicate syscall_set_tid_address_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
+predicate syscall_set_tid_address_routes_to_user_task<T, P>(table: T, process: P) -> bool;
 predicate syscall_clone_routes_to_task_creation_core<T, C>(table: T, core: C) -> bool;
 predicate syscall_clone_routes_to_user_clone_deferred_boundaries<T, B>(table: T, boundaries: B) -> bool;
 predicate syscall_clone_legacy_args_decoded<T>(table: T) -> bool;
@@ -382,7 +378,6 @@ predicate syscall_execve_retired_image_retention_classified<T, C, A, S>(table: T
 predicate syscall_execve_builtin_grandchild_first_parent_image_retained<T, C, A, S>(table: T, child: C, space: A, stack: S) -> bool;
 predicate syscall_execve_builtin_grandchild_subsequent_image_released<T, C, A, S>(table: T, child: C, space: A, stack: S) -> bool;
 predicate syscall_execve_builtin_grandchild_failure_atomic<T, C, F>(table: T, child: C, files: F) -> bool;
-predicate syscall_execve_current_pid1_first_slice<T, P>(table: T, process: P) -> bool;
 predicate syscall_execve_reuses_user_boot_payload_elf_loader<T, P>(table: T, payload: P) -> bool;
 predicate syscall_execve_replaces_user_address_space_first_slice<T, A>(table: T, space: A) -> bool;
 predicate syscall_execve_context_staging_address_space_bound<T, A>(table: T, space: A) -> bool;
@@ -473,62 +468,61 @@ predicate syscall_table_clone_observed<T>(table: T) -> bool;
 predicate syscall_table_execve_observed<T>(table: T) -> bool;
 predicate syscall_table_wait4_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
-predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
+predicate user_task_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
-predicate user_init_process_online<T>(process: T) -> bool;
-predicate user_init_process_reuses_kernel_init_task<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_pid1_preserved<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_exec_identity_handoff<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_no_new_task_struct<T>(process: T) -> bool;
-predicate user_init_process_kernel_init_not_destroyed<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_path_bound<T, P>(process: T, path: P) -> bool;
-predicate user_init_process_address_space_bound<T, A>(process: T, space: A) -> bool;
-predicate user_init_process_fs_struct_inherited<T, F>(process: T, fs: F) -> bool;
-predicate user_init_process_files_struct_inherited<T, F>(process: T, files: F) -> bool;
-predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
-predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
-predicate user_init_process_credentials_inherited<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_root_credentials_bound<T>(process: T) -> bool;
-predicate user_init_process_supplementary_groups_bound<T>(process: T) -> bool;
-predicate user_init_process_supplementary_groups_read_observed<T>(process: T) -> bool;
-predicate user_init_process_credentials_capability_model_deferred<T>(process: T) -> bool;
-predicate user_init_process_signal_state_inherited<T, K>(process: T, task: K) -> bool;
-predicate user_init_process_signal_runtime_bound<T>(process: T) -> bool;
-predicate user_init_process_thread_signal_state_bound<T>(process: T) -> bool;
-predicate user_init_process_process_signal_state_deferred<T>(process: T) -> bool;
-predicate user_init_process_signal_action_table_bound<T>(process: T) -> bool;
-predicate user_init_process_signal_action_table_layout_bound<T>(process: T) -> bool;
-predicate user_init_process_blocked_signal_mask_bound<T>(process: T) -> bool;
-predicate user_init_process_pending_signal_set_empty_first_slice<T>(process: T) -> bool;
-predicate user_init_process_signal_delivery_deferred<T>(process: T) -> bool;
-predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
-predicate user_init_process_session_leader_first_slice<T>(process: T) -> bool;
-predicate user_init_process_process_group_leader_first_slice<T>(process: T) -> bool;
-predicate user_init_process_process_group_read_observed<T>(process: T) -> bool;
-predicate user_init_process_process_group_set_observed<T>(process: T) -> bool;
-predicate user_init_process_child_same_session_pgrp_join_first_slice<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_session_id_read_observed<T>(process: T) -> bool;
-predicate user_init_process_setsid_eperm_observed<T>(process: T) -> bool;
-predicate user_init_process_child_setsid_success_observed<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_child_controlling_tty_clear_on_setsid_first_slice<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_child_process_group_visible<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_parent_visible<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_inherits_pgrp_session<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_setpgid_first_slice<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_setpgid_errno_bound<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_consumed_on_wait_handoff<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_pending_plain_fork_child_cleared_on_parent_restore<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_observed_child_visible_pid_only_restore<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_controlling_tty_bound<T>(process: T) -> bool;
-predicate user_init_process_foreground_pgrp_bound<T>(process: T) -> bool;
-predicate user_init_process_foreground_pgrp_read_observed<T>(process: T) -> bool;
-predicate user_init_process_foreground_pgrp_set_observed<T>(process: T) -> bool;
-predicate user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_foreground_pgrp_accepts_shell_inherited_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
-predicate user_init_process_tty_session_id_read_observed<T>(process: T) -> bool;
-predicate user_init_process_tiocsctty_observed<T>(process: T) -> bool;
-predicate user_init_process_child_controlling_tty_bound<T, C>(process: T, child: C) -> bool;
+predicate user_task_online<T>(process: T) -> bool;
+predicate user_task_pid1_preserved<T, K>(process: T, task: K) -> bool;
+predicate user_task_exec_identity_handoff<T, K>(process: T, task: K) -> bool;
+predicate user_task_no_new_task_struct<T>(process: T) -> bool;
+predicate user_task_kernel_init_not_destroyed<T, K>(process: T, task: K) -> bool;
+predicate user_task_path_bound<T, P>(process: T, path: P) -> bool;
+predicate user_task_address_space_bound<T, A>(process: T, space: A) -> bool;
+predicate user_task_fs_struct_inherited<T, F>(process: T, fs: F) -> bool;
+predicate user_task_files_struct_inherited<T, F>(process: T, files: F) -> bool;
+predicate user_task_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
+predicate user_task_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
+predicate user_task_credentials_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_task_root_credentials_bound<T>(process: T) -> bool;
+predicate user_task_supplementary_groups_bound<T>(process: T) -> bool;
+predicate user_task_supplementary_groups_read_observed<T>(process: T) -> bool;
+predicate user_task_credentials_capability_model_deferred<T>(process: T) -> bool;
+predicate user_task_signal_state_inherited<T, K>(process: T, task: K) -> bool;
+predicate user_task_signal_runtime_bound<T>(process: T) -> bool;
+predicate user_task_thread_signal_state_bound<T>(process: T) -> bool;
+predicate user_task_process_signal_state_deferred<T>(process: T) -> bool;
+predicate user_task_signal_action_table_bound<T>(process: T) -> bool;
+predicate user_task_signal_action_table_layout_bound<T>(process: T) -> bool;
+predicate user_task_blocked_signal_mask_bound<T>(process: T) -> bool;
+predicate user_task_pending_signal_set_empty_first_slice<T>(process: T) -> bool;
+predicate user_task_signal_delivery_deferred<T>(process: T) -> bool;
+predicate user_task_clear_child_tid_bound<T>(process: T) -> bool;
+predicate user_task_session_leader_first_slice<T>(process: T) -> bool;
+predicate user_task_process_group_leader_first_slice<T>(process: T) -> bool;
+predicate user_task_process_group_read_observed<T>(process: T) -> bool;
+predicate user_task_process_group_set_observed<T>(process: T) -> bool;
+predicate user_task_child_same_session_pgrp_join_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_task_session_id_read_observed<T>(process: T) -> bool;
+predicate user_task_setsid_eperm_observed<T>(process: T) -> bool;
+predicate user_task_child_setsid_success_observed<T, C>(process: T, child: C) -> bool;
+predicate user_task_child_controlling_tty_clear_on_setsid_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_task_child_process_group_visible<T, C>(process: T, child: C) -> bool;
+predicate user_task_child_process_group_set_observed<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_parent_visible<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_inherits_pgrp_session<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_setpgid_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_setpgid_errno_bound<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_consumed_on_wait_handoff<T, C>(process: T, child: C) -> bool;
+predicate user_task_pending_plain_fork_child_cleared_on_parent_restore<T, C>(process: T, child: C) -> bool;
+predicate user_task_observed_child_visible_pid_only_restore<T, C>(process: T, child: C) -> bool;
+predicate user_task_controlling_tty_bound<T>(process: T) -> bool;
+predicate user_task_foreground_pgrp_bound<T>(process: T) -> bool;
+predicate user_task_foreground_pgrp_read_observed<T>(process: T) -> bool;
+predicate user_task_foreground_pgrp_set_observed<T>(process: T) -> bool;
+predicate user_task_foreground_pgrp_accepts_child_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_task_foreground_pgrp_accepts_shell_inherited_pgrp_first_slice<T, C>(process: T, child: C) -> bool;
+predicate user_task_tty_session_id_read_observed<T>(process: T) -> bool;
+predicate user_task_tiocsctty_observed<T>(process: T) -> bool;
+predicate user_task_child_controlling_tty_bound<T, C>(process: T, child: C) -> bool;
 predicate user_child_process_prepared<T>(process: T) -> bool;
 predicate user_child_process_parent_pid1<T, P>(process: T, parent: P) -> bool;
 predicate user_child_process_parent_pid1_or_current_child<T, P>(process: T, parent: P) -> bool;
@@ -566,17 +560,13 @@ predicate user_child_process_outer_pid1_snapshot_ownership_preserved<T, A, F>(pr
 predicate user_child_process_builtin_grandchild_pipe_data_shared<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_builtin_grandchild_snapshot_failure_atomic<T, F>(process: T, files: F) -> bool;
 predicate user_child_process_observed_child_transient_state_cleared<T>(process: T) -> bool;
-predicate user_child_process_observed_shell_continuation_reusable<T>(process: T) -> bool;
 predicate user_child_process_observed_shell_runqueue_preserved<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_pidfd_copyout_observed<T>(process: T) -> bool;
-predicate user_child_process_single_active_slot<T>(process: T) -> bool;
-predicate user_child_process_completed_records_capacity_bound<T>(process: T) -> bool;
 predicate user_child_process_next_child_pid_bound<T>(process: T) -> bool;
 predicate user_child_process_completed_record_archived<T>(process: T) -> bool;
 predicate user_child_process_completed_record_unreaped<T>(process: T) -> bool;
 predicate user_child_process_completed_record_reaped<T>(process: T) -> bool;
 predicate user_child_process_completed_record_released<T>(process: T) -> bool;
-predicate user_child_process_active_slot_reusable<T>(process: T) -> bool;
 predicate user_child_process_plain_fork_reaped_slot_released<T, R>(process: T, runqueue: R) -> bool;
 predicate user_child_process_vfork_next_child_accepted<T>(process: T) -> bool;
 predicate user_child_process_wait4_handoff_frame_diagnostic_bound<T>(process: T) -> bool;
@@ -598,27 +588,27 @@ predicate user_child_process_wait4_status_copied<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_resumed<T>(process: T) -> bool;
 predicate user_child_process_parent_wait_resume_checkpoint_bound<T>(process: T) -> bool;
 predicate user_address_space_fault_mapping_diagnostic_bound<T>(space: T) -> bool;
-predicate user_init_process_uid_read_observed<T>(process: T) -> bool;
-predicate user_init_process_gid_read_observed<T>(process: T) -> bool;
-predicate user_init_process_uid_set_observed<T>(process: T) -> bool;
-predicate user_init_process_gid_set_observed<T>(process: T) -> bool;
-predicate user_init_process_setgroups_observed<T>(process: T) -> bool;
-predicate user_init_process_rt_sigprocmask_observed<T>(process: T) -> bool;
-predicate user_init_process_rt_sigaction_observed<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_observed<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_mask_observed<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_uinfo_null<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_uts_null<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_pending_match_empty<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_infinite_wait<T>(process: T) -> bool;
-predicate user_init_process_pending_sigchld_first_slice<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_waiter_enqueued<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_sleep_reason_bound<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_woken_by_sigchld<T>(process: T) -> bool;
-predicate user_init_process_rt_sigtimedwait_dequeued_sigchld<T>(process: T) -> bool;
-predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
-predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
-predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
+predicate user_task_uid_read_observed<T>(process: T) -> bool;
+predicate user_task_gid_read_observed<T>(process: T) -> bool;
+predicate user_task_uid_set_observed<T>(process: T) -> bool;
+predicate user_task_gid_set_observed<T>(process: T) -> bool;
+predicate user_task_setgroups_observed<T>(process: T) -> bool;
+predicate user_task_rt_sigprocmask_observed<T>(process: T) -> bool;
+predicate user_task_rt_sigaction_observed<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_observed<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_mask_observed<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_uinfo_null<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_uts_null<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_pending_match_empty<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_infinite_wait<T>(process: T) -> bool;
+predicate user_task_pending_sigchld_first_slice<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_waiter_enqueued<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_sleep_reason_bound<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_woken_by_sigchld<T>(process: T) -> bool;
+predicate user_task_rt_sigtimedwait_dequeued_sigchld<T>(process: T) -> bool;
+predicate user_task_user_entry_ready<T>(process: T) -> bool;
+predicate user_task_trap_return_bound<T, R>(process: T, frame: R) -> bool;
+predicate kernel_init_task_execve_to_pid1_user_app<K, T>(task: K, process: T) -> bool;
 predicate kernel_init_task_pid1_identity_preserved<K>(task: K) -> bool;
 predicate kernel_init_task_user_mm_attached<K, A>(task: K, space: A) -> bool;
 predicate kernel_init_task_user_trap_frame_attached<K, R>(task: K, frame: R) -> bool;
@@ -642,14 +632,14 @@ predicate tty_n_tty_blocking_read_deferred<T>(buffer: T) -> bool;
 
 context UserModeTrapReturnContext: Context {
     /*
-     * UserInitProcess.EnterUserMode is the final RISC-V trap-return handoff.
-     * The body writes sscratch/sepc/sstatus/satp, executes sfence.vma after
-     * the satp write, switches to the user stack and executes sret. It has no
-     * normal runtime exit because sret transfers to U-mode.
+     * Pid1UserAppFlow.Enable is the final RISC-V trap-return handoff. The
+     * kernel writes sscratch/sepc/sstatus/satp, executes sfence.vma after the
+     * satp write, switches to the user stack and executes sret. The user
+     * application beyond this boundary is intentionally opaque.
      */
     guard {
         entered_by {
-            UserInitProcess.Action::EnterUserMode;
+            Pid1UserAppFlow.Transition::Enable;
         }
 
         exited_by {
@@ -658,7 +648,8 @@ context UserModeTrapReturnContext: Context {
     }
 
     obj_refs {
-        UserInitProcess;
+        KernelInitTask;
+        Pid1UserAppFlow;
         UserAddressSpace;
         UserTrapFrame;
     }
@@ -678,7 +669,15 @@ object UserCloneDeferredBoundaries: KernelObject {
                     system_state_running(SystemState);
                 }
 
+                drives {
+                    UserTaskSet.Transition::Setup;
+                    TaskFlowDslDeferredBoundaries.Transition::Setup;
+                }
+
                 ensures {
+                    UserTaskSet.state == State::Ready;
+                    user_task_set_allows_multiple_independent_tasks(UserTaskSet);
+                    TaskFlowDslDeferredBoundaries.state == State::Ready;
                     user_clone_deferred_boundaries_ready(self);
                     user_clone_linux_6_12_legacy_clone_bound(self);
                     user_clone_riscv_abi_argument_order_bound(self);
@@ -688,12 +687,8 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_plain_fork_first_slice_bound(self);
                     user_clone_vfork_vm_first_slice_bound(self);
                     user_clone_vfork_pidfd_first_slice_bound(self);
-                    user_clone_bounded_sequential_plain_fork_bound(self);
-                    user_clone_pid1_plain_fork_child_builtin_grandchild_bound(self);
-                    user_clone_builtin_grandchild_single_depth_bound(self);
-                    user_clone_bounded_sequential_vfork_records_bound(self);
-                    user_clone_single_active_child_slot_bound(self);
-                    user_clone_completed_child_record_capacity_bound(self);
+                    user_clone_fresh_task_per_child_bound(self);
+                    user_clone_multiple_independent_tasks_bound(self);
                     user_clone_csignal_split_bound(self);
                     user_clone_sigchld_exit_signal_bound(self);
                     user_clone_newsp_zero_inherits_parent_sp(self);
@@ -713,7 +708,7 @@ object UserCloneDeferredBoundaries: KernelObject {
                     user_clone_full_robust_futex_deferred(self);
                     user_clone_full_clear_child_tid_wake_deferred(self);
                     user_clone_full_wait_sleep_wakeup_deferred(self);
-                    user_clone_full_task_graph_reap_deferred(self);
+                    user_clone_full_zombie_reap_accounting_deferred(self);
                     user_clone_full_job_control_deferred(self);
                     user_clone_unsupported_flags_first_slice(self);
                 }
@@ -811,9 +806,9 @@ object UserCloneDeferredBoundaries: KernelObject {
 
                 deferred user_clone.014 {
                     category: DeferredCategory::ModelDetail;
-                    summary: "Implement the general task graph, zombie, reap, PID hash and resource-accounting lifecycle.";
-                    evidence { user_clone_full_task_graph_reap_deferred(self); }
-                    close_when: "Multiple task relationships and zombie/release/resource accounting lifecycles are modeled and tested.";
+                    summary: "Complete zombie, reap, PID hash and resource-accounting lifecycle details.";
+                    evidence { user_clone_full_zombie_reap_accounting_deferred(self); }
+                    close_when: "Zombie/release/PID-hash/resource-accounting lifecycles are modeled and tested for independent Tasks.";
                 }
 
                 deferred user_clone.015 {
@@ -844,12 +839,8 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_plain_fork_first_slice_bound(self);
             user_clone_vfork_vm_first_slice_bound(self);
             user_clone_vfork_pidfd_first_slice_bound(self);
-            user_clone_bounded_sequential_plain_fork_bound(self);
-            user_clone_pid1_plain_fork_child_builtin_grandchild_bound(self);
-            user_clone_builtin_grandchild_single_depth_bound(self);
-            user_clone_bounded_sequential_vfork_records_bound(self);
-            user_clone_single_active_child_slot_bound(self);
-            user_clone_completed_child_record_capacity_bound(self);
+            user_clone_fresh_task_per_child_bound(self);
+            user_clone_multiple_independent_tasks_bound(self);
             user_clone_csignal_split_bound(self);
             user_clone_sigchld_exit_signal_bound(self);
             user_clone_newsp_zero_inherits_parent_sp(self);
@@ -869,7 +860,7 @@ object UserCloneDeferredBoundaries: KernelObject {
             user_clone_full_robust_futex_deferred(self);
             user_clone_full_clear_child_tid_wake_deferred(self);
             user_clone_full_wait_sleep_wakeup_deferred(self);
-            user_clone_full_task_graph_reap_deferred(self);
+            user_clone_full_zombie_reap_accounting_deferred(self);
             user_clone_full_job_control_deferred(self);
             user_clone_unsupported_flags_first_slice(self);
         }
@@ -1198,7 +1189,7 @@ object SyscallTable: ResourceObject {
                      * SetGroups action closes that shape. The current
                      * SetGid slice then accepts setgid(144) gid=100 while the
                      * effective uid remains 0 and updates only the bounded
-                     * UserInitProcess gid credential fields.
+                     * KernelInitTask gid credential fields.
                      * Copy fault returns EFAULT. All invalid
                      * length/family, non-AF_UNIX, abstract, non-UnixSocket0
                      * and non-pathname shapes still return ENOSYS with the
@@ -1227,8 +1218,8 @@ object SyscallTable: ResourceObject {
                     syscall_socket_routes_to_files_struct(self, FilesStruct);
                     syscall_socket_af_unix_stream_first_slice(self);
                     syscall_socket_backend_full_linux_model_deferred(self);
-                    syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
-                    syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setgroups_routes_to_user_task(self, KernelInitTask);
+                    syscall_getgroups_routes_to_user_task(self, KernelInitTask);
                     syscall_getgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_setgroups_root_first_slice(self);
                     syscall_setgroups_bounded_supplementary_groups_first_slice(self);
@@ -1266,7 +1257,7 @@ object SyscallTable: ResourceObject {
                     syscall_exit_records_status(self);
                     syscall_exit_group_pid1_shutdown_child_wait4_split(self);
                     syscall_setsid_process_group_leader_eperm_first_slice(self);
-                    syscall_setsid_child_success_first_slice(self, UserChildProcess);
+                    syscall_setsid_child_success_first_slice(self, UserChildTask1);
                     syscall_trace_probe_observes_returns_without_side_effect(self);
                 }
             }
@@ -1365,9 +1356,9 @@ object SyscallTable: ResourceObject {
             syscall_exit_records_status(self);
             syscall_exit_group_pid1_shutdown_child_wait4_split(self);
             syscall_setsid_process_group_leader_eperm_first_slice(self);
-            syscall_setsid_child_success_first_slice(self, UserChildProcess);
-            syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
-            syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+            syscall_setsid_child_success_first_slice(self, UserChildTask1);
+            syscall_setgroups_routes_to_user_task(self, KernelInitTask);
+            syscall_getgroups_routes_to_user_task(self, KernelInitTask);
             syscall_getgroups_bounded_supplementary_groups_first_slice(self);
             syscall_setgroups_root_first_slice(self);
             syscall_setgroups_bounded_supplementary_groups_first_slice(self);
@@ -1896,7 +1887,7 @@ object SyscallTable: ResourceObject {
                  * The current slice covers console-like char-device fds, the
                  * riscv64/generic 36-byte old struct termios, TCGETS readback,
                  * TCSETS immediate mutation, TIOCGPGRP/TIOCSPGRP against the
-                 * UserInitProcess controlling-tty foreground-pgrp state, and
+                 * KernelInitTask controlling-tty foreground-pgrp state, and
                  * the observed getty TIOCGSID/TIOCSCTTY controlling-tty first
                  * slice. TIOCSPGRP accepts PID1 pgrp, the current visible
                  * child pgrp, and the BusyBox init login shell's inherited
@@ -1919,10 +1910,6 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::LookupFd(FdRef::Stdout);
                     FilesStruct.Action::ReadTermios(FdRef::Stdout);
                     FilesStruct.Action::SetTermios(FdRef::Stdout);
-                    UserInitProcess.Action::ReadForegroundProcessGroup;
-                    UserInitProcess.Action::SetForegroundProcessGroup;
-                    UserInitProcess.Action::ReadTtySessionId;
-                    UserInitProcess.Action::BindControllingTty;
                 }
 
                 ensures {
@@ -1937,13 +1924,13 @@ object SyscallTable: ResourceObject {
                     files_struct_tty_termios_state_bound(FilesStruct);
                     files_struct_tty_termios_mutation_observed(FilesStruct);
                     files_struct_null_device_tty_ioctl_enotty(FilesStruct);
-                    user_init_process_controlling_tty_bound(UserInitProcess);
-                    user_init_process_foreground_pgrp_read_observed(UserInitProcess);
-                    user_init_process_foreground_pgrp_set_observed(UserInitProcess);
-                    user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice(UserInitProcess, UserChildProcess);
-                    user_init_process_tty_session_id_read_observed(UserInitProcess);
-                    user_init_process_tiocsctty_observed(UserInitProcess);
-                    user_init_process_child_controlling_tty_bound(UserInitProcess, UserChildProcess);
+                    user_task_controlling_tty_bound(KernelInitTask);
+                    user_task_foreground_pgrp_read_observed(KernelInitTask);
+                    user_task_foreground_pgrp_set_observed(KernelInitTask);
+                    user_task_foreground_pgrp_accepts_child_pgrp_first_slice(KernelInitTask, UserChildTask1);
+                    user_task_tty_session_id_read_observed(KernelInitTask);
+                    user_task_tiocsctty_observed(KernelInitTask);
+                    user_task_child_controlling_tty_bound(KernelInitTask, UserChildTask1);
                     syscall_ioctl_tty_full_linux_model_deferred(self);
                     syscall_table_ioctl_observed(self);
                 }
@@ -1995,16 +1982,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadUid;
-                }
 
                 ensures {
-                    syscall_getuid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_uid_read_observed(UserInitProcess);
+                    syscall_getuid_routes_to_user_task(self, KernelInitTask);
+                    user_task_uid_read_observed(KernelInitTask);
                     syscall_table_getuid_observed(self);
                 }
             }
@@ -2017,16 +2001,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadGid;
-                }
 
                 ensures {
-                    syscall_getgid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_gid_read_observed(UserInitProcess);
+                    syscall_getgid_routes_to_user_task(self, KernelInitTask);
+                    user_task_gid_read_observed(KernelInitTask);
                     syscall_table_getgid_observed(self);
                 }
             }
@@ -2036,22 +2017,18 @@ object SyscallTable: ResourceObject {
                  * Linux 6.12 kernel/sys.c::sys_getpid() returns
                  * task_tgid_vnr(current). The bounded first slice reads the
                  * current syscall identity: PID1 current returns the preserved
-                 * PID1 task identity, and an observed visible child
-                 * continuation returns the child pid without introducing a
-                 * full task graph.
+                 * PID1 task identity, while a current independent child Task
+                 * returns that Task's own pid.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadProcessId;
-                }
 
                 ensures {
-                    syscall_getpid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_pid_read_observed(UserInitProcess);
+                    syscall_getpid_routes_to_user_task(self, KernelInitTask);
+                    user_task_pid_read_observed(KernelInitTask);
                     syscall_table_getpid_observed(self);
                 }
             }
@@ -2066,17 +2043,14 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadParentProcessId;
-                }
 
                 ensures {
-                    syscall_getppid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_ppid_zero_first_slice(UserInitProcess);
-                    user_init_process_ppid_read_observed(UserInitProcess);
+                    syscall_getppid_routes_to_user_task(self, KernelInitTask);
+                    user_task_ppid_zero_first_slice(KernelInitTask);
+                    user_task_ppid_read_observed(KernelInitTask);
                     syscall_table_getppid_observed(self);
                 }
             }
@@ -2092,16 +2066,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadProcessGroup;
-                }
 
                 ensures {
-                    syscall_getpgid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_process_group_read_observed(UserInitProcess);
+                    syscall_getpgid_routes_to_user_task(self, KernelInitTask);
+                    user_task_process_group_read_observed(KernelInitTask);
                     syscall_table_getpgid_observed(self);
                 }
             }
@@ -2116,16 +2087,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadSessionId;
-                }
 
                 ensures {
-                    syscall_getsid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_session_id_read_observed(UserInitProcess);
+                    syscall_getsid_routes_to_user_task(self, KernelInitTask);
+                    user_task_session_id_read_observed(KernelInitTask);
                     syscall_table_getsid_observed(self);
                 }
             }
@@ -2136,9 +2104,9 @@ object SyscallTable: ResourceObject {
                  * pgid==0 to the normalized pid. After plain fork, the parent
                  * may set the not-yet-exec child into a process group whose
                  * id equals the child pid while PF_FORKNOEXEC remains set.
-                 * The current slice admits PID1, the current visible child,
-                 * and one parent-visible pending grandchild between observed
-                 * plain clone return and wait4 handoff. That pending child
+                 * The current slice admits PID1, a current visible child and
+                 * the named witness's parent-visible pending descendant
+                 * between clone return and wait4 handoff. That pending child
                  * inherits the shell parent's pgrp/session and only the
                  * parent-side setpgid(child_pid, child_pid) update is added.
                  * Unknown pid remains ESRCH, negative pgid remains EINVAL,
@@ -2149,20 +2117,17 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::SetProcessGroup;
-                }
 
                 ensures {
-                    syscall_setpgid_routes_to_user_init_process(self, UserInitProcess);
-                    syscall_setpgid_child_plain_fork_first_slice(self, UserChildProcess);
-                    user_init_process_process_group_set_observed(UserInitProcess);
-                    user_init_process_child_process_group_set_observed(UserInitProcess, UserChildProcess);
-                    user_init_process_pending_plain_fork_child_setpgid_first_slice(UserInitProcess, UserChildProcess);
-                    user_init_process_pending_plain_fork_child_setpgid_errno_bound(UserInitProcess, UserChildProcess);
+                    syscall_setpgid_routes_to_user_task(self, KernelInitTask);
+                    syscall_setpgid_child_plain_fork_first_slice(self, UserChildTask1);
+                    user_task_process_group_set_observed(KernelInitTask);
+                    user_task_child_process_group_set_observed(KernelInitTask, UserChildTask1);
+                    user_task_pending_plain_fork_child_setpgid_first_slice(KernelInitTask, UserChildTask1);
+                    user_task_pending_plain_fork_child_setpgid_errno_bound(KernelInitTask, UserChildTask1);
                     syscall_table_setpgid_observed(self);
                 }
             }
@@ -2180,19 +2145,16 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::SetSessionId;
-                }
 
                 ensures {
-                    syscall_setsid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setsid_routes_to_user_task(self, KernelInitTask);
                     syscall_setsid_process_group_leader_eperm_first_slice(self);
-                    syscall_setsid_child_success_first_slice(self, UserChildProcess);
-                    user_init_process_setsid_eperm_observed(UserInitProcess);
-                    user_init_process_child_setsid_success_observed(UserInitProcess, UserChildProcess);
+                    syscall_setsid_child_success_first_slice(self, UserChildTask1);
+                    user_task_setsid_eperm_observed(KernelInitTask);
+                    user_task_child_setsid_success_observed(KernelInitTask, UserChildTask1);
                     syscall_table_setsid_observed(self);
                 }
             }
@@ -2200,21 +2162,18 @@ object SyscallTable: ResourceObject {
             on Action::GetEuid {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_geteuid() reads current_euid().
-                 * The first slice routes it to the current UserInitProcess
+                 * The first slice routes it to the current KernelInitTask
                  * root credentials substate.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadEffectiveUid;
-                }
 
                 ensures {
-                    syscall_geteuid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_euid_read_observed(UserInitProcess);
+                    syscall_geteuid_routes_to_user_task(self, KernelInitTask);
+                    user_task_euid_read_observed(KernelInitTask);
                     syscall_table_geteuid_observed(self);
                 }
             }
@@ -2222,21 +2181,18 @@ object SyscallTable: ResourceObject {
             on Action::GetEgid {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_getegid() reads current_egid().
-                 * The first slice routes it to the current UserInitProcess
+                 * The first slice routes it to the current KernelInitTask
                  * root credentials substate.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadEffectiveGid;
-                }
 
                 ensures {
-                    syscall_getegid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_egid_read_observed(UserInitProcess);
+                    syscall_getegid_routes_to_user_task(self, KernelInitTask);
+                    user_task_egid_read_observed(KernelInitTask);
                     syscall_table_getegid_observed(self);
                 }
             }
@@ -2247,22 +2203,19 @@ object SyscallTable: ResourceObject {
                  * effective and saved uid from current_cred(), then writes the
                  * three uid_t values to user memory in order. User pointer
                  * failure returns EFAULT. The first slice keeps all three root
-                 * ids on UserInitProcess and writes riscv64 uid_t-sized
+                 * ids on KernelInitTask and writes riscv64 uid_t-sized
                  * values.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadResUid;
-                }
 
                 ensures {
-                    syscall_getresuid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_resuid_read_observed(UserInitProcess);
+                    syscall_getresuid_routes_to_user_task(self, KernelInitTask);
+                    user_task_resuid_read_observed(KernelInitTask);
                     syscall_table_getresuid_observed(self);
                 }
             }
@@ -2271,21 +2224,18 @@ object SyscallTable: ResourceObject {
                 /*
                  * Linux 6.12 kernel/sys.c::sys_getresgid() mirrors getresuid
                  * for real/effective/saved gid. The current slice writes the
-                 * three root gid_t values from UserInitProcess.
+                 * three root gid_t values from KernelInitTask.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadResGid;
-                }
 
                 ensures {
-                    syscall_getresgid_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_resgid_read_observed(UserInitProcess);
+                    syscall_getresgid_routes_to_user_task(self, KernelInitTask);
+                    user_task_resgid_read_observed(KernelInitTask);
                     syscall_table_getresgid_observed(self);
                 }
             }
@@ -2301,7 +2251,7 @@ object SyscallTable: ResourceObject {
                  * otherwise. The current BusyBox init login-shell evidence reaches
                  * getgroups(32, <user gid_t *>) after login has dropped to
                  * uid=1000/gid=100 and after setgroups(1, {100}) populated the
-                 * bounded UserInitProcess supplementary group view. This first
+                 * bounded KernelInitTask supplementary group view. This first
                  * slice only reads back that fixed-capacity view; it does not
                  * allocate or sort Linux group_info, expand NGROUPS_MAX, or
                  * connect group membership to permission, inode or TTY
@@ -2309,20 +2259,17 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadSupplementaryGroups;
-                }
 
                 ensures {
-                    syscall_getgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_getgroups_routes_to_user_task(self, KernelInitTask);
                     syscall_getgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_init_process_supplementary_groups_bound(UserInitProcess);
-                    user_init_process_supplementary_groups_read_observed(UserInitProcess);
+                    user_task_supplementary_groups_bound(KernelInitTask);
+                    user_task_supplementary_groups_read_observed(KernelInitTask);
                     syscall_table_getgroups_observed(self);
                 }
             }
@@ -2363,19 +2310,16 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
                     syscall_getcwd_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::ReadCurrentWorkingDirectory;
-                }
 
                 ensures {
-                    syscall_getcwd_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_root_cwd_first_slice(UserInitProcess, FsStruct);
+                    syscall_getcwd_routes_to_user_task(self, KernelInitTask);
+                    user_task_root_cwd_first_slice(KernelInitTask, FsStruct);
                     syscall_getcwd_returns_root_with_nul(self);
                     syscall_getcwd_builtin_grandchild_absolute_pwd_bound(self, FsStruct, VfsCore);
                     syscall_table_getcwd_observed(self);
@@ -2386,7 +2330,7 @@ object SyscallTable: ResourceObject {
                 /*
                  * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
                  * new credentials for current. The current first slice keeps a
-                 * bounded PID1 credential view on UserInitProcess. Following
+                 * bounded PID1 credential view on KernelInitTask. Following
                  * focused BusyBox-init evidence, it treats euid==0 as the temporary
                  * CAP_SETUID proxy and accepts 32-bit uid targets, syncing
                  * uid/euid/suid/fsuid. Namespaces, full capability checks, LSM
@@ -2400,17 +2344,14 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::SetUid;
-                }
 
                 ensures {
-                    syscall_setuid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setuid_routes_to_user_task(self, KernelInitTask);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_init_process_uid_set_observed(UserInitProcess);
+                    user_task_uid_set_observed(KernelInitTask);
                     syscall_table_setuid_observed(self);
                 }
             }
@@ -2421,24 +2362,21 @@ object SyscallTable: ResourceObject {
                  * group credentials. The current first slice treats
                  * effective uid 0 as the bounded CAP_SETGID proxy and accepts
                  * the observed gid=100 transition, synchronizing only
-                 * UserInitProcess gid/egid/sgid/fsgid. Full capabilities,
+                 * KernelInitTask gid/egid/sgid/fsgid. Full capabilities,
                  * user namespaces, LSM hooks and credential COW/RCU remain
                  * deferred. The post-SetGid focused rerun records the
                  * setuid(146) uid=1000 boundary that the SetUid slice closes.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::SetGid;
-                }
 
                 ensures {
-                    syscall_setgid_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setgid_routes_to_user_task(self, KernelInitTask);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_init_process_gid_set_observed(UserInitProcess);
+                    user_task_gid_set_observed(KernelInitTask);
                     syscall_table_setgid_observed(self);
                 }
             }
@@ -2454,7 +2392,7 @@ object SyscallTable: ResourceObject {
                  * evidence reaches setgroups(gidsetsize=1, grouplist=<user
                  * gid_t *>) immediately after the /var/run/nscd/socket
                  * connect(203) ENOENT fallback. This first slice keeps only a
-                 * bounded supplementary group view on UserInitProcess: root
+                 * bounded supplementary group view on KernelInitTask: root
                  * effective uid may clear the list with size 0 or copy one
                  * 32-bit gid_t from userspace with size 1; copy fault returns
                  * EFAULT, non-root returns EPERM, and size > 1 remains an
@@ -2470,21 +2408,18 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::SetSupplementaryGroups;
-                }
 
                 ensures {
-                    syscall_setgroups_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_setgroups_routes_to_user_task(self, KernelInitTask);
                     syscall_setgroups_root_first_slice(self);
                     syscall_setgroups_bounded_supplementary_groups_first_slice(self);
                     syscall_credentials_full_linux_model_deferred(self);
-                    user_init_process_supplementary_groups_bound(UserInitProcess);
-                    user_init_process_setgroups_observed(UserInitProcess);
+                    user_task_supplementary_groups_bound(KernelInitTask);
+                    user_task_setgroups_observed(KernelInitTask);
                     syscall_table_setgroups_observed(self);
                 }
             }
@@ -2499,7 +2434,7 @@ object SyscallTable: ResourceObject {
                  * and finally copies the old mask to user memory when oset is
                  * non-null.
                  *
-                 * The current slice stores the blocked mask on UserInitProcess
+                 * The current slice stores the blocked mask on KernelInitTask
                  * because the PID1 task is the exec-transformed
                  * KernelInitTask. Full signal delivery, shared sighand,
                  * pending queues, restart, thread-group semantics and
@@ -2507,20 +2442,17 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_signal_mask_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::RtSigprocmask;
-                }
 
                 ensures {
-                    syscall_rt_sigprocmask_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_rt_sigprocmask_routes_to_user_task(self, KernelInitTask);
                     syscall_rt_sigprocmask_sigsetsize_bound(self);
                     syscall_rt_sigprocmask_unblockable_signals_cleared(self);
                     syscall_signal_delivery_deferred(self);
-                    user_init_process_rt_sigprocmask_observed(UserInitProcess);
+                    user_task_rt_sigprocmask_observed(KernelInitTask);
                     syscall_table_rt_sigprocmask_observed(self);
                 }
             }
@@ -2541,7 +2473,7 @@ object SyscallTable: ResourceObject {
                  * action mask before updating sighand->action[sig - 1].
                  *
                  * The current slice models this as Task -> SignalRuntime ->
-                 * SignalActionTable, folded into the current UserInitProcess
+                 * SignalActionTable, folded into the current KernelInitTask
                  * implementation for single PID1/single-thread execution.
                  * ProcessSignalState shared pending queues, ThreadSignalState
                  * pending delivery, siglock/RCU, restart handling, signal
@@ -2549,23 +2481,20 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_signal_action_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::RtSigaction;
-                }
 
                 ensures {
-                    syscall_rt_sigaction_routes_to_user_init_process(self, UserInitProcess);
-                    syscall_rt_sigaction_routes_to_signal_action_table(self, UserInitProcess);
+                    syscall_rt_sigaction_routes_to_user_task(self, KernelInitTask);
+                    syscall_rt_sigaction_routes_to_signal_action_table(self, KernelInitTask);
                     syscall_rt_sigaction_sigsetsize_bound(self);
                     syscall_rt_sigaction_layout_bound(self);
                     syscall_rt_sigaction_unblockable_signals_cleared(self);
                     syscall_rt_sigaction_kernel_only_signals_rejected(self);
                     syscall_signal_delivery_deferred(self);
-                    user_init_process_rt_sigaction_observed(UserInitProcess);
+                    user_task_rt_sigaction_observed(KernelInitTask);
                     syscall_table_rt_sigaction_observed(self);
                 }
             }
@@ -2590,7 +2519,7 @@ object SyscallTable: ResourceObject {
                  * ENOSYS. Failed fork or unsupported clone paths are not
                  * signal sources and must not fabricate SIGCHLD.
                  *
-                 * A real observed UserChildProcess exit/exit_group may set
+                 * A real observed UserChildTask1 exit/exit_group may set
                  * PID1 pending SIGCHLD. If PID1 is sleeping in this
                  * rt_sigtimedwait shape and the saved mask contains
                  * SIGCHLD, the waiter is woken, SIGCHLD is dequeued and the
@@ -2602,16 +2531,13 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                     syscall_signal_mask_usercopy_ready(self);
                 }
 
-                drives {
-                    UserInitProcess.Action::RtSigtimedwait;
-                }
 
                 ensures {
-                    syscall_rt_sigtimedwait_routes_to_user_init_process(self, UserInitProcess);
+                    syscall_rt_sigtimedwait_routes_to_user_task(self, KernelInitTask);
                     syscall_rt_sigtimedwait_sigsetsize_bound(self);
                     syscall_rt_sigtimedwait_copies_wait_mask(self);
                     syscall_rt_sigtimedwait_uinfo_null_no_copyout_first_slice(self);
@@ -2620,14 +2546,14 @@ object SyscallTable: ResourceObject {
                     syscall_rt_sigtimedwait_waitqueue_sleep_first_slice(self);
                     syscall_rt_sigtimedwait_sigchld_pending_first_slice(self);
                     syscall_rt_sigtimedwait_return_signal_first_slice(self);
-                    user_init_process_rt_sigtimedwait_observed(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_pending_match_empty(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_infinite_wait(UserInitProcess);
-                    user_init_process_pending_sigchld_first_slice(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_waiter_enqueued(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_sleep_reason_bound(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_woken_by_sigchld(UserInitProcess);
-                    user_init_process_rt_sigtimedwait_dequeued_sigchld(UserInitProcess);
+                    user_task_rt_sigtimedwait_observed(KernelInitTask);
+                    user_task_rt_sigtimedwait_pending_match_empty(KernelInitTask);
+                    user_task_rt_sigtimedwait_infinite_wait(KernelInitTask);
+                    user_task_pending_sigchld_first_slice(KernelInitTask);
+                    user_task_rt_sigtimedwait_waiter_enqueued(KernelInitTask);
+                    user_task_rt_sigtimedwait_sleep_reason_bound(KernelInitTask);
+                    user_task_rt_sigtimedwait_woken_by_sigchld(KernelInitTask);
+                    user_task_rt_sigtimedwait_dequeued_sigchld(KernelInitTask);
                     syscall_table_rt_sigtimedwait_observed(self);
                 }
             }
@@ -2805,98 +2731,38 @@ object SyscallTable: ResourceObject {
             on Action::SetTidAddress {
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
                 }
 
-                drives {
-                    UserInitProcess.Action::SetClearChildTid;
-                }
 
                 ensures {
-                    syscall_set_tid_address_routes_to_user_init_process(self, UserInitProcess);
-                    user_init_process_clear_child_tid_bound(UserInitProcess);
+                    syscall_set_tid_address_routes_to_user_task(self, KernelInitTask);
+                    user_task_clear_child_tid_bound(KernelInitTask);
                     syscall_table_set_tid_address_observed(self);
                 }
             }
 
             on Action::Clone {
                 /*
-                 * Linux 6.12 legacy clone(220) on riscv64 receives
-                 * clone_flags, newsp, parent_tidptr, child_tidptr and tls in
-                 * a0..a4. The current observed BusyBox /bin/sh "ls" path is a
-                 * plain fork: clone_flags=0x11, so exit_signal=SIGCHLD and
-                 * flags with CSIGNAL removed are zero.  newsp=0 keeps the
-                 * copied child user sp, and tls is ignored because
-                 * CLONE_SETTLS is not set.  The syscall action decodes this
-                 * ABI shape, then drives TaskCreationCore.CopyUserProcess;
-                 * it must not synthesize a PID return without creating a
-                 * child task boundary. After wait4 has restored PID1 and
-                 * reaped that child, the exited internal UserChild task is
-                 * removed from the runqueue and its execution slot returns to
-                 * Prepared. A later sequential plain fork allocates the next
-                 * user-visible pid and reuses that internal task ref.
-                 * The later BusyBox init login shell /bin/ls focused baseline has
-                 * the same plain-fork flags, but current_child=1 and the
-                 * single active UserChild slot is still the shell
-                 * continuation. The login shell is a nested vfork child.
-                 * Canonical rc-local instead self-execs its launcher into a
-                 * PID 1 shell and uses the ordinary sequential plain-fork
-                 * slot above. This slice supports only the BusyBox-init-observed
-                 * observed child plain-fork shape: flags must be SIGCHLD
-                 * only, newsp must be zero, the parent must be the current
-                 * vfork child continuation, and the child must not already be
-                 * inside a deeper observed child.  clone records the shell
-                 * parent pid, allocates the next child pid for /bin/ls, copies
-                 * the fork-time stack/trap facts with child a0=0 and inherited
-                 * TLS, then returns that child pid to the shell parent.  It
-                 * still reuses the single
-                 * internal UserChild execution slot: no second runnable task
-                 * ref is enqueued, and the grandchild continuation runs only
-                 * when the shell later reaches wait4(-1, status,
-                 * allowed_options, NULL).  Child exit restores the shell
-                 * address-space, writable pages, fd snapshot and visible pid,
-                 * then returns the grandchild pid from the shell wait4. This
-                 * restore does not release the internal slot: it still carries
-                 * the Ready shell continuation and remains runqueue-visible.
-                 * Only the completed grandchild round's trap/snapshot/wait/
-                 * exit facts are cleared before the shell may create the next
-                 * sequential observed child.
+                 * Linux clone/fork creates a fresh Task identity. The current
+                 * DSL names UserChildTask1 as one concrete witness, but the
+                 * contract is Task/TaskRef-parameterized and UserTaskSet admits
+                 * multiple independent children. The child receives its own
+                 * PID, lifecycle and UserChildForkFlow1 instance; no Task or
+                 * Flow object is recycled for a later child.
                  *
-                 * The native BusyBox /sbin/init boundary observes
-                 * clone_flags=0x4111 and diagnostics decode
-                 * flags_without_csignal=0x4100: SIGCHLD plus CLONE_VM and
-                 * CLONE_VFORK, not CLONE_PIDFD.  Linux 6.12 legacy clone
-                 * maps CLONE_PIDFD to parent_tidptr only when the 0x1000 bit
-                 * is actually present, and kernel_clone() waits for vfork
-                 * completion before returning to parent.  This first slice
-                 * implements the bounded sequential child lifecycle: save
-                 * the parent clone frame, set child a0=0 and child sp=newsp,
-                 * then hand off directly to the child.  A previous completed
-                 * vfork child may remain as an unreaped completed-child record
-                 * until wait4 successfully reaps it; after successful wait4,
-                 * the slot is released and only total/last diagnostics remain.
-                 * The active execution slot must be reusable before
-                 * CopyUserProcess runs again.  Records-full means all bounded
-                 * slots are currently occupied by unreaped/diagnostic records,
-                 * not that the lifetime archive counter reached capacity.  A
-                 * true vfork+pidfd shape additionally installs a pidfd-like fd
-                 * in FilesStruct and copies it to parent_tidptr.
-                 *
-                 * Because the current runtime still has one shared
-                 * FilesStruct object, CopyUserProcess also saves a bounded
-                 * parent fd table and regular-slot metadata snapshot for the
-                 * single active child. Child execve close-on-exec may mutate
-                 * the shared runtime table while the child runs, but child
-                 * exit must restore the parent snapshot before resuming the
-                 * parent.
+                 * BusyBox command sequencing and other application behavior
+                 * are historical test evidence only. Clone ABI validation,
+                 * task/resource copying, scheduling and rollback remain kernel
+                 * contracts here.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
                     TaskCreationCore.state == State::Ready;
-                    UserInitProcess.state == State::Online;
-                    UserChildProcess.state == State::Prepared;
-                    user_child_process_active_slot_reusable(UserChildProcess);
-                    user_child_process_completed_records_capacity_bound(UserChildProcess);
+                    KernelInitTask.state == State::Online;
+                    UserChildTask1.state == State::Base;
+                    UserTaskSet.state == State::Ready;
+                    user_task_set_allows_multiple_independent_tasks(UserTaskSet);
                     UserCloneDeferredBoundaries.state == State::Ready;
                     Scheduler.state == State::Online;
                     RootPidNamespace.state == State::Ready;
@@ -2907,9 +2773,14 @@ object SyscallTable: ResourceObject {
                 }
 
                 drives {
+                    UserChildTask1.Transition::Preset;
+                    UserChildForkFlow1.Transition::Preset;
+                    UserChildForkFlow1.Transition::Setup;
                     TaskCreationCore.Action::CopyUserProcess(
-                        src_process: UserInitProcess,
-                        dst_process: UserChildProcess,
+                        src_process: KernelInitTask,
+                        src_ref: KernelInitTaskRef,
+                        dst_process: UserChildTask1,
+                        dst_ref: UserChildTask1Ref,
                         pid_ns: RootPidNamespace,
                         scheduler: Scheduler,
                         fs: FsStruct,
@@ -2919,6 +2790,10 @@ object SyscallTable: ResourceObject {
                         boundaries: UserCloneDeferredBoundaries
                     );
                     FilesStruct.Action::SaveParentFdSnapshot;
+                    UserChildTask1.Transition::Setup;
+                    UserChildTask1.Action::ActivateInitialFlow(UserChildForkFlow1);
+                    UserChildTask1.Transition::Enable;
+                    UserChildForkFlow1.Transition::Enable;
                 }
 
                 ensures {
@@ -2928,98 +2803,49 @@ object SyscallTable: ResourceObject {
                     syscall_clone_plain_fork_first_slice(self);
                     syscall_clone_vfork_vm_first_slice(self);
                     syscall_clone_vfork_pidfd_first_slice(self);
-                    syscall_clone_parent_returns_child_pid(self, UserInitProcess);
-                    syscall_clone_child_return_zero_bound(self, UserChildProcess);
+                    syscall_clone_parent_returns_child_pid(self, KernelInitTask);
+                    syscall_clone_child_return_zero_bound(self, UserChildTask1);
                     syscall_clone_pidfd_copyout_bound(self, FilesStruct);
-                    syscall_clone_vfork_parent_frame_saved(self, UserChildProcess);
-                    syscall_clone_vfork_child_handoff(self, UserChildProcess);
-                    syscall_clone_vfork_next_child_accepted(self, UserChildProcess);
+                    syscall_clone_vfork_parent_frame_saved(self, UserChildTask1);
+                    syscall_clone_vfork_child_handoff(self, UserChildTask1);
+                    syscall_clone_vfork_next_child_accepted(self, UserChildTask1);
                     syscall_clone_wake_up_new_task_shape(self, Scheduler);
-                    user_child_process_process_group_visible_to_parent(UserChildProcess, UserInitProcess);
-                    user_init_process_child_process_group_visible(UserInitProcess, UserChildProcess);
-                    user_child_process_user_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_fd_snapshot_saved(UserChildProcess, FilesStruct);
-                    files_struct_parent_fd_snapshot_saved(FilesStruct, UserChildProcess);
-                    user_child_process_single_active_slot(UserChildProcess);
-                    user_child_process_next_child_pid_bound(UserChildProcess);
+                    user_child_process_process_group_visible_to_parent(UserChildTask1, KernelInitTask);
+                    user_task_child_process_group_visible(KernelInitTask, UserChildTask1);
+                    user_child_process_user_stack_snapshot_copied(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_fd_snapshot_saved(UserChildTask1, FilesStruct);
+                    files_struct_parent_fd_snapshot_saved(FilesStruct, UserChildTask1);
+                    user_task_set_contains(UserTaskSet, UserChildTask1);
+                    user_task_instance_fresh(UserChildTask1);
+                    user_task_pid_and_lifecycle_independent(UserChildTask1);
+                    user_task_witness_not_reusable(UserChildTask1);
+                    task_owns_flow(UserChildTask1, UserChildForkFlow1);
+                    task_flow_owner_is(UserChildForkFlow1, UserChildTask1);
+                    task_flow_owner_exclusive(UserChildForkFlow1);
+                    task_active_flow_is(UserChildTask1, UserChildForkFlow1);
+                    task_at_most_one_flow_online(UserChildTask1);
+                    UserChildTask1.state == State::Online;
+                    UserChildForkFlow1.state == State::Online;
                     syscall_table_clone_observed(self);
                 }
             }
 
             on Action::Execve {
                 /*
-                 * Linux 6.12 execve(221) routes through
-                 * fs/exec.c::do_execveat_common()/bprm_execve() and the ELF
-                 * binfmt handler.  The observed BusyBox /bin/sh "ls" child
-                 * continuation issues execve("/bin/ls", argv={"ls", NULL},
-                 * envp={"SHLVL=1", "PWD=/", NULL}) and then tries
-                 * "/usr/bin/ls" if the first attempt returns ENOSYS.  This
-                 * first slice accepts either the current PID 1 user process or
-                 * the child-continuation path, and copies the
-                 * filename and a bounded argv vector.  Filename and argv
-                 * strings use an execve-only bounded C-string copy: each byte
-                 * up to the first NUL must be individually readable, but the
-                 * entire USER_PATH_MAX range after the user pointer need not
-                 * be mapped.  Empty strings, address overflow, unreadable
-                 * bytes or reaching USER_PATH_MAX without NUL remain copy
-                 * failures.  The bounded argv copy is intentionally small but
-                 * covers the observed BusyBox-init getty shape
-                 * argv={"/sbin/getty", "38400", "ttyN", NULL}; envp is only
-                 * observed/deferred and is not copied into the new stack in
-                 * this slice.  Non-execve path syscall C-string copies keep
-                 * their existing path-copy semantics.  The implementation
-                 * records stable filename_copy or argv_copy failure
-                 * stage/reason facts before returning EFAULT for filename or
-                 * argv pointer/string copy failure, and returns ENOSYS with
-                 * stable diagnostics when the bounded argv capacity is
-                 * exceeded.  It reuses the
-                 * current UserBootPayload VFS/ELF/interpreter/UserStack/
-                 * UserAddressSpace loading shape to build a replacement user
-                 * mm.  This follows the
-                 * local Linux 6.12 shape where fs/exec.c::alloc_bprm()
-                 * heap-allocates linux_binprm, bprm_mm_init() installs a
-                 * nascent bprm->mm from mm_alloc(), begin_new_exec() crosses
-                 * the point-of-no-return/context handoff, exec_mmap(bprm->mm)
-                 * installs the new mm, and RISC-V start_thread() installs
-                 * the return pt_regs.  The replacement UserAddressSpace is
-                 * staged in Context-owned storage rather than on the
-                 * syscall/trap stack.  Child exit paths release backing pages
-                 * for a child address space that exec replaced before
-                 * restoring the saved parent snapshot, while preserving a
-                 * vfork parent that still references the old mm; full
-                 * old-mm/page-table/VMA reclamation remains deferred.  The runtime
-                 * checkpoint order is ContextReplaced, SatpReady, then
-                 * TrapFrameReady; live satp switch and final return-frame
-                 * diagnostics remain later return-path boundaries.  The
-                 * current PID 1 slice covers an ordinary init launcher replacing
-                 * itself with `/bin/sh`; it preserves PID/process identity and
-                 * releases the retired image because no parent snapshot owns it.
-                 * The current first slice runs the fixed-table close-on-exec scan;
-                 * when this is a child continuation, the saved parent fd
-                 * snapshot is the rollback boundary that prevents child
-                 * close-on-exec from closing the parent's fd entries. It does
-                 * not model PATH search, script binfmt, execveat, full Linux
-                 * argument/env stack limits, the full point-of-no-return
-                 * rollback, credentials, signal table, files
-                 * unshare/refcounting, task comm, perf/audit/accounting or
-                 * complete old-mm reclamation paths. A command-substitution
-                 * grandchild created by an unfinished PID1-originated plain
-                 * fork is a separate builtin-only runtime-exec slice. Before
-                 * the point of no return retired ownership is classified as
-                 * None, OuterChild or BuiltinGrandchild, checking the builtin
-                 * source first. Its first exec transfers the retired script
-                 * address-space/UserStack to the inner continuation without
-                 * changing the outer PID1 snapshot; subsequent execs release
-                 * only the replaced grandchild executable. CLOEXEC mutates the
-                 * live grandchild fd view. Pre-commit failure changes neither
-                 * executable nor either snapshot layer, fd references or
-                 * pending identity. Retention/restore invariant failure is a
-                 * terminal stable diagnostic rather than a half-saved object.
+                 * A successful exec keeps the current Task identity and creates
+                 * a fresh UserAppFlow instance. The named child witness stages
+                 * UserChildExecFlow1, disables UserChildForkFlow1, commits the
+                 * active binding handoff, enables the new flow and then cleans
+                 * up the replaced flow. ELF, address-space, stack, trap-frame,
+                 * files and rollback behavior remain kernel-object contracts.
+                 * Executable-specific application behavior is opaque.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
                     UserBootPayload.state == State::Online;
-                    UserChildProcess.state == State::Ready;
+                    UserChildTask1.state == State::Online;
+                    UserChildForkFlow1.state == State::Online;
+                    UserChildExecFlow1.state == State::Base;
                     UserAddressSpace.state == State::Online;
                     UserTrapFrame.state == State::Ready;
                     FilesStruct.state == State::Ready;
@@ -3028,6 +2854,8 @@ object SyscallTable: ResourceObject {
                 }
 
                 drives {
+                    UserChildExecFlow1.Transition::Preset;
+                    UserChildExecFlow1.Transition::Setup;
                     UserBootPayload.Action::TryDefaultInitSequence;
                     ElfObject.Transition::Preset;
                     ElfObject.Transition::Setup;
@@ -3035,19 +2863,25 @@ object SyscallTable: ResourceObject {
                     UserAddressSpace.Transition::Setup;
                     UserAddressSpace.Transition::Enable;
                     UserTrapFrame.Transition::Setup;
+                    UserChildForkFlow1.Transition::Disable;
+                    UserChildTask1.Action::CommitFlowHandoff(
+                        from_flow: UserChildForkFlow1,
+                        to_flow: UserChildExecFlow1
+                    );
+                    UserChildExecFlow1.Transition::Enable;
+                    UserChildForkFlow1.Transition::Cleanup;
                 }
 
                 ensures {
                     syscall_execve_linux_6_12_do_execveat_common_bound(self);
                     syscall_execve_observed_shell_ls_args_bound(self);
                     syscall_execve_observed_busybox_init_getty_args_bound(self);
-                    syscall_execve_current_pid1_first_slice(self, UserInitProcess);
-                    syscall_execve_child_continuation_first_slice(self, UserChildProcess);
-                    syscall_execve_builtin_grandchild_runtime_exec_bound(self, UserChildProcess);
-                    syscall_execve_retired_image_retention_classified(self, UserChildProcess, UserAddressSpace, UserStack);
-                    syscall_execve_builtin_grandchild_first_parent_image_retained(self, UserChildProcess, UserAddressSpace, UserStack);
-                    syscall_execve_builtin_grandchild_subsequent_image_released(self, UserChildProcess, UserAddressSpace, UserStack);
-                    syscall_execve_builtin_grandchild_failure_atomic(self, UserChildProcess, FilesStruct);
+                    syscall_execve_child_continuation_first_slice(self, UserChildTask1);
+                    syscall_execve_builtin_grandchild_runtime_exec_bound(self, UserChildTask1);
+                    syscall_execve_retired_image_retention_classified(self, UserChildTask1, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_first_parent_image_retained(self, UserChildTask1, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_subsequent_image_released(self, UserChildTask1, UserAddressSpace, UserStack);
+                    syscall_execve_builtin_grandchild_failure_atomic(self, UserChildTask1, FilesStruct);
                     syscall_execve_reuses_user_boot_payload_elf_loader(self, UserBootPayload);
                     syscall_execve_replaces_user_address_space_first_slice(self, UserAddressSpace);
                     syscall_execve_context_staging_address_space_bound(self, UserAddressSpace);
@@ -3060,79 +2894,38 @@ object SyscallTable: ResourceObject {
                     syscall_execve_old_user_backing_reclaimed_first_slice(self);
                     syscall_execve_old_mm_reclaim_deferred(self);
                     syscall_execve_full_linux_model_deferred(self);
+                    UserChildExecFlow1.state == State::Online;
+                    UserChildForkFlow1.state == State::Destroyed;
+                    task_owns_flow(UserChildTask1, UserChildForkFlow1);
+                    task_owns_flow(UserChildTask1, UserChildExecFlow1);
+                    task_flow_owner_is(UserChildExecFlow1, UserChildTask1);
+                    task_flow_owner_exclusive(UserChildExecFlow1);
+                    task_flow_handoff(
+                        UserChildTask1,
+                        UserChildForkFlow1,
+                        UserChildExecFlow1
+                    );
+                    task_flow_handoff_old_inactive(UserChildTask1, UserChildForkFlow1);
+                    task_flow_handoff_new_active(UserChildTask1, UserChildExecFlow1);
+                    task_active_flow_is(UserChildTask1, UserChildExecFlow1);
+                    task_at_most_one_flow_online(UserChildTask1);
+                    task_flow_instances_distinct(UserChildForkFlow1, UserChildExecFlow1);
                     syscall_table_execve_observed(self);
                 }
             }
 
             on Action::Wait4 {
                 /*
-                 * Linux 6.12 wait4(260) routes through
-                 * kernel/exit.c::kernel_wait4()/do_wait(). For the observed
-                 * BusyBox /bin/sh "ls" parent path, pid is -1, status is a
-                 * user pointer, options is WUNTRACED, and rusage is NULL.
-                 * The non-interactive PID 1 rc.local shell uses the same
-                 * SIGCHLD child handoff with options=0; Linux adds WEXITED
-                 * internally for both shapes.
-                 * kernel_wait4() adds WEXITED internally. Because the cloned
-                 * child exists but has not produced a waitable exit/stop/
-                 * continue event, do_wait() reaches the interruptible
-                 * wait_chldexit boundary and would schedule another runnable
-                 * task. This first slice records that parent wait boundary,
-                 * saves the parent wait frame/address-space snapshot, and
-                 * yields to the child trap-frame continuation already produced
-                 * by clone. A later observed child exit_group can then restore
-                 * the parent address space, copy the Linux wait status to the
-                 * parent status pointer, and return the child pid from wait4.
-                 * After that observed child has been reaped, a follow-up
-                 * wait4(-1, status, valid_options, NULL) has no eligible child
-                 * and returns ECHILD, matching __do_wait()'s notask_error path
-                 * after kernel_wait4() adds WEXITED internally.
-                 * Completed vfork records are checked before the old active
-                 * slot state.  An unreaped completed record is a waitable
-                 * child event: wait4 copies status when requested, returns
-                 * that user-visible pid, marks only that record reaped, then
-                 * releases that occupied slot for bounded sequential reuse.
-                 * Status copyout failure returns EFAULT and must not reap or
-                 * release the record.  Consuming SIGCHLD through
-                 * rt_sigtimedwait is not reaping and cannot release a record.
-                 * The native BusyBox /sbin/init path reaches
-                 * wait4(-1, NULL, WNOHANG, NULL) after setsid and
-                 * rt_sigtimedwait. For that observed nonblocking shape, the
-                 * first slice follows __do_wait(): if an eligible child exists
-                 * but has no waitable event, return 0 without sleeping; if no
-                 * eligible child exists, return ECHILD. This does not create a
-                 * synthetic child, does not block, and does not consume signal
-                 * or scheduler wait state.
-                 * The BusyBox init login shell observed child plain-fork shape
-                 * and the LTP list-stage command substitution are eligible only
-                 * after clone has recorded the grandchild pid and the current
-                 * child parent reaches wait4. For a PID1-originated plain-fork
-                 * script child, a second-level wait4 or the first blocking
-                 * parent read on its command-substitution pipe is the handoff point:
-                 * save a distinct bounded parent frame/status, fd/fs view,
-                 * stack and writable-page snapshot, restore the fork-time
-                 * builtin grandchild stack/fd view, consume its pending identity
-                 * (including a parent-updated pgrp), and switch the single internal
-                 * slot to the grandchild trap frame. This continuation never
-                 * overwrites the outer PID1 wait frame/address-space/fd/stack/
-                 * writable-page ownership. Capture failure rolls back all
-                 * second-level pages, fd snapshot references and pending state.
-                 * The grandchild exit path must restore only the current child
-                 * parent view. A wait4-origin handoff copies status and returns
-                 * the grandchild pid immediately. A pipe-read-origin handoff
-                 * retries the restored parent read against shared pipe bytes,
-                 * leaves one completed grandchild waitable, and the later wait4
-                 * copies status/reaps it. The script's final exit restores PID1.
-                 * Only one pending builtin grandchild is allowed; concurrent
-                 * children and deeper nesting remain rejected. This is not
-                 * a general wait queue, zombie list or runnable task graph.
-                 * It still does not model full wait queues, zombie lists,
-                 * pid hashes, resource aggregation or release_task().
+                 * wait4 operates on independent child Task identities and
+                 * their exit/reap records. The bounded witness preserves the
+                 * existing Linux argument, status-copyout and wake/sleep
+                 * contracts; it does not encode a reusable child slot or make
+                 * application control flow part of UserAppFlow.
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
-                    UserChildProcess.state == State::Ready;
+                    KernelInitTask.state == State::Online;
+                    UserChildTask1.state == State::Online;
                     Scheduler.state == State::Online;
                 }
 
@@ -3145,26 +2938,26 @@ object SyscallTable: ResourceObject {
                     syscall_wait4_wnohang_no_waitable_child_first_slice(self);
                     syscall_wait4_completed_child_record_reap_first_slice(self);
                     syscall_wait4_parent_wait_chldexit_boundary(self);
-                    syscall_wait4_yields_to_user_child_continuation(self, UserChildProcess);
-                    user_child_process_wait4_parent_wait_observed(UserChildProcess);
-                    user_child_process_child_continuation_taken(UserChildProcess);
-                    user_child_process_wait4_handoff_frame_diagnostic_bound(UserChildProcess);
-                    user_child_process_parent_wait_frame_saved(UserChildProcess);
-                    user_child_process_parent_address_space_snapshot_saved(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_wait_register_checkpoint_bound(UserChildProcess);
-                    user_child_process_parent_wait_stack_window_checkpoint_bound(UserChildProcess);
-                    user_child_process_parent_wait_stack_snapshot_copied(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_copied(UserChildProcess, UserAddressSpace);
-                    user_child_process_user_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
-                    user_init_process_pending_plain_fork_child_consumed_on_wait_handoff(UserInitProcess, UserChildProcess);
+                    syscall_wait4_yields_to_user_child_continuation(self, UserChildTask1);
+                    user_child_process_wait4_parent_wait_observed(UserChildTask1);
+                    user_child_process_child_continuation_taken(UserChildTask1);
+                    user_child_process_wait4_handoff_frame_diagnostic_bound(UserChildTask1);
+                    user_child_process_parent_wait_frame_saved(UserChildTask1);
+                    user_child_process_parent_address_space_snapshot_saved(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_wait_register_checkpoint_bound(UserChildTask1);
+                    user_child_process_parent_wait_stack_window_checkpoint_bound(UserChildTask1);
+                    user_child_process_parent_wait_stack_snapshot_copied(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_copied(UserChildTask1, UserAddressSpace);
+                    user_child_process_user_stack_snapshot_restored(UserChildTask1, UserAddressSpace);
+                    user_task_pending_plain_fork_child_consumed_on_wait_handoff(KernelInitTask, UserChildTask1);
                     user_address_space_fault_mapping_diagnostic_bound(UserAddressSpace);
                     syscall_wait4_child_exit_status_copyout_first_slice(self);
                     syscall_wait4_observed_child_reap_first_slice(self);
                     syscall_wait4_no_child_echild_first_slice(self);
                     syscall_wait4_blocking_sleep_deferred(self);
-                    syscall_read_builtin_grandchild_pipe_block_handoff(self, UserChildProcess);
-                    syscall_wait4_builtin_grandchild_completed_reap(self, UserChildProcess);
-                    user_child_process_completed_record_reaped(UserChildProcess);
+                    syscall_read_builtin_grandchild_pipe_block_handoff(self, UserChildTask1);
+                    syscall_wait4_builtin_grandchild_completed_reap(self, UserChildTask1);
+                    user_child_process_completed_record_reaped(UserChildTask1);
                     syscall_table_wait4_observed(self);
                 }
             }
@@ -3172,10 +2965,30 @@ object SyscallTable: ResourceObject {
             on Action::Exit {
                 depends_on {
                     SyscallException.state == State::Online;
+                    KernelInitTask.state == State::Online;
+                    KernelInitFlow.state == State::Destroyed;
+                    Pid1UserAppFlow.state == State::Online;
+                }
+
+                drives {
+                    Pid1UserAppFlow.Transition::Disable;
+                    Pid1UserAppFlow.Transition::Cleanup;
+                    KernelInitTask.Action::ConfirmOwnedFlowSetDestroyed(
+                        prior_flow: KernelInitFlow,
+                        current_flow: Pid1UserAppFlow
+                    );
+                    KernelInitTask.Transition::Disable;
+                    KernelInitTask.Transition::Cleanup;
                 }
 
                 ensures {
                     syscall_exit_records_status(self);
+                    Pid1UserAppFlow.state == State::Destroyed;
+                    KernelInitTask.state == State::Destroyed;
+                    task_flow_not_active_after_cleanup(Pid1UserAppFlow);
+                    task_all_owned_flows_destroyed(KernelInitTask);
+                    task_no_owned_flow_online(KernelInitTask);
+                    task_destroyed_only_after_flow_cleanup(KernelInitTask);
                     syscall_table_exit_observed(self);
                 }
             }
@@ -3204,23 +3017,42 @@ object SyscallTable: ResourceObject {
             on Action::ExitGroup {
                 depends_on {
                     SyscallException.state == State::Online;
+                    UserChildTask1.state == State::Online;
+                    UserChildForkFlow1.state == State::Destroyed;
+                    UserChildExecFlow1.state == State::Online;
+                }
+
+                drives {
+                    UserChildExecFlow1.Transition::Disable;
+                    UserChildExecFlow1.Transition::Cleanup;
+                    UserChildTask1.Action::ConfirmOwnedFlowSetDestroyed(
+                        prior_flow: UserChildForkFlow1,
+                        current_flow: UserChildExecFlow1
+                    );
+                    UserChildTask1.Transition::Disable;
+                    UserChildTask1.Transition::Cleanup;
                 }
 
                 ensures {
                     syscall_exit_records_status(self);
                     syscall_exit_group_pid1_shutdown_child_wait4_split(self);
-                    user_child_process_exit_status_observed(UserChildProcess);
-                    user_child_process_wait4_status_copied(UserChildProcess);
-                    user_child_process_parent_wait_resumed(UserChildProcess);
-                    user_child_process_parent_wait_resume_checkpoint_bound(UserChildProcess);
-                    user_child_process_parent_wait_stack_window_compared(UserChildProcess);
-                    user_child_process_parent_wait_stack_snapshot_restored(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_compared(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_wait_writable_page_snapshot_restored(UserChildProcess, UserAddressSpace);
-                    user_child_process_parent_fd_snapshot_restored(UserChildProcess, FilesStruct);
-                    files_struct_parent_fd_snapshot_restored(FilesStruct, UserChildProcess);
-                    user_child_process_completed_record_archived(UserChildProcess);
-                    user_child_process_active_slot_reusable(UserChildProcess);
+                    user_child_process_exit_status_observed(UserChildTask1);
+                    user_child_process_wait4_status_copied(UserChildTask1);
+                    user_child_process_parent_wait_resumed(UserChildTask1);
+                    user_child_process_parent_wait_resume_checkpoint_bound(UserChildTask1);
+                    user_child_process_parent_wait_stack_window_compared(UserChildTask1);
+                    user_child_process_parent_wait_stack_snapshot_restored(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_compared(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_wait_writable_page_snapshot_restored(UserChildTask1, UserAddressSpace);
+                    user_child_process_parent_fd_snapshot_restored(UserChildTask1, FilesStruct);
+                    files_struct_parent_fd_snapshot_restored(FilesStruct, UserChildTask1);
+                    user_child_process_completed_record_archived(UserChildTask1);
+                    UserChildExecFlow1.state == State::Destroyed;
+                    UserChildTask1.state == State::Destroyed;
+                    task_flow_not_active_after_cleanup(UserChildExecFlow1);
+                    task_all_owned_flows_destroyed(UserChildTask1);
+                    task_no_owned_flow_online(UserChildTask1);
+                    task_destroyed_only_after_flow_cleanup(UserChildTask1);
                     syscall_table_exit_observed(self);
                 }
             }
@@ -3228,842 +3060,12 @@ object SyscallTable: ResourceObject {
     }
 }
 
-object UserChildProcess: ResourceObject {
-    initial_state: State::Base;
 
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    UserCloneDeferredBoundaries.state == State::Ready;
-                }
-
-                ensures {
-                    user_child_process_prepared(self);
-                    task_clone_args_ready(self);
-                    task_entry_bound(self, TaskEntry::UserChild);
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        invariant {
-            user_child_process_prepared(self);
-            task_clone_args_ready(self);
-            task_entry_bound(self, TaskEntry::UserChild);
-            user_child_process_single_active_slot(self);
-            user_child_process_active_slot_reusable(self);
-            user_child_process_completed_records_capacity_bound(self);
-            user_child_process_next_child_pid_bound(self);
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            user_child_process_parent_pid1_or_current_child(self, UserInitProcess);
-            user_child_process_pid_allocated(self, RootPidNamespace);
-            user_child_process_tgid_equals_pid(self);
-            user_child_process_process_group_visible_to_parent(self, UserInitProcess);
-            user_child_process_exit_signal_sigchld(self);
-            user_child_process_files_struct_copied(self, FilesStruct);
-            user_child_process_fs_struct_copied(self, FsStruct);
-            user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
-            user_child_process_credentials_copied(self, UserInitProcess);
-            user_child_process_signal_state_copied(self, UserInitProcess);
-            user_child_process_user_address_space_snapshot(self, UserAddressSpace);
-            user_child_process_user_stack_snapshot_copied(self, UserAddressSpace);
-            user_child_process_trap_frame_copied(self, UserTrapFrame);
-            user_child_process_trap_frame_child_return_zero(self);
-            user_child_process_tls_inherited(self);
-            user_child_process_enqueued(self, Scheduler);
-            user_child_process_single_active_slot(self);
-            user_child_process_completed_records_capacity_bound(self);
-            user_child_process_next_child_pid_bound(self);
-        }
-    }
-
-    actions {
-        on Action::PlainForkChildReaped {
-            /*
-             * A PID1-originated plain-fork child is fully reaped when its
-             * exit path restores the parent wait frame and successfully
-             * copies status. The internal UserChild task no longer carries a
-             * live shell at that boundary, so it is dequeued and its slot is
-             * released for the next monotonically allocated child pid. This
-             * path does not archive a vfork completed-child record.
-             */
-            depends_on {
-                UserChildProcess.state == State::Ready;
-                UserInitProcess.state == State::Online;
-                FilesStruct.state == State::Ready;
-            }
-
-            ensures {
-                user_child_process_exit_status_observed(self);
-                user_child_process_replaced_child_exec_backing_released(self);
-                user_child_process_parent_user_stack_restored(self, UserStack);
-                user_child_process_wait4_status_copied(self);
-                user_child_process_parent_wait_resumed(self);
-                user_child_process_plain_fork_reaped_slot_released(self, Scheduler);
-                user_child_process_active_slot_reusable(self);
-                user_child_process_next_child_pid_bound(self);
-            }
-        }
-
-        on Action::VforkChildExit {
-            /*
-             * Bounded BusyBox-init vfork completion: child exit restores the saved
-             * parent clone frame and makes parent clone(220) return the
-             * user-visible child pid, then archives a completed-child record
-             * with raw status, wait status and reaped=false. SIGCHLD pending/
-             * wake is derived from that archived record, but rt_sigtimedwait
-             * consumption does not reap it. The active execution slot and
-             * internal UserChild runqueue fact are then released so a later
-             * sequential vfork clone can reuse the slot. True vfork+pidfd
-             * shapes additionally mark the pidfd ready for read-interest
-             * ppoll and associate readiness with the same completed record.
-             */
-            depends_on {
-                UserChildProcess.state == State::Ready;
-                UserInitProcess.state == State::Online;
-                FilesStruct.state == State::Ready;
-            }
-
-            ensures {
-                user_child_process_exit_status_observed(self);
-                user_child_process_replaced_child_exec_backing_released(self);
-                user_child_process_parent_user_stack_restored(self, UserStack);
-                user_child_process_vfork_parent_resumed(self);
-                user_child_process_completed_record_archived(self);
-                user_child_process_completed_record_unreaped(self);
-                user_child_process_active_slot_reusable(self);
-                user_init_process_rt_sigtimedwait_woken_by_sigchld(UserInitProcess);
-                user_pidfd_ready(FilesStruct, self);
-            }
-        }
-
-        on Action::NestedVforkChildHandoff {
-            /*
-             * Observed BusyBox init login reaches BusyBox login post-auth while the
-             * existing UserChild execution slot is still the getty/login child
-             * continuation.  A single bounded nested CLONE_VM|CLONE_VFORK|
-             * SIGCHLD handoff may reuse the same internal UserChild task ref:
-             * the current child is treated as the vfork parent, the nested
-             * child receives a new user-visible pid and a0=0/newsp, and no
-             * second runnable task graph is created.  This is a first-slice
-             * takeover of the single execution slot, not full parent/child
-             * concurrency or full vfork completion scheduling.
-             */
-            depends_on {
-                UserChildProcess.state == State::Ready;
-                UserInitProcess.state == State::Online;
-                FilesStruct.state == State::Ready;
-            }
-
-            ensures {
-                user_child_process_vfork_child_handoff(self);
-                user_child_process_nested_vfork_child_handoff(self);
-                user_child_process_child_continuation_taken(self);
-                user_child_process_single_active_slot(self);
-                user_child_process_next_child_pid_bound(self);
-            }
-        }
-
-        on Action::ObservedChildPlainFork {
-            /*
-             * The observed BusyBox init login shell /bin/ls and the LTP list
-             * command substitution reach plain clone(SIGCHLD) from an already
-             * active child continuation. The new LTP shape is accepted only
-             * when that current child came from an unfinished PID1 plain fork;
-             * flags must be SIGCHLD-only and newsp must be zero.
-             * The shell parent stays in the same
-             * internal UserChild slot and clone returns the allocated
-             * grandchild pid to that shell.  The grandchild is only an observed child
-             * continuation saved in the slot until the shell reaches wait4.
-             * UserInitProcess records one parent-visible pending identity
-             * containing that pid and the shell's inherited pgrp/session so
-             * the shell may perform the bounded PF_FORKNOEXEC parent-side
-             * setpgid(child_pid, child_pid) operation before handoff;
-             * no second UserChildTaskRef is enqueued and no full task graph,
-             * COW mm, job-control or generic wait/reap model is introduced.
-             * The PID1-plain-fork source owns a distinct bounded child trap/
-             * stack/fd snapshot and later parent-continuation snapshot. If the
-             * grandchild execs, this inner record additionally owns the first
-             * retired script address-space/UserStack until grandchild exit;
-             * the outer PID1 restore objects remain owned by the outer wait.
-             * A second pending child, deeper clone and snapshot capture failure
-             * are rejected without consuming a pid or leaking snapshot refs.
-             */
-            depends_on {
-                UserChildProcess.state == State::Ready;
-                UserInitProcess.state == State::Online;
-                FilesStruct.state == State::Ready;
-            }
-
-            ensures {
-                user_child_process_observed_child_plain_fork_bound(self);
-                user_child_process_observed_child_plain_fork_parent_saved(self);
-                user_child_process_observed_child_plain_fork_child_pid_bound(self);
-                user_child_process_trap_frame_child_return_zero(self);
-                user_child_process_tls_inherited(self);
-                user_child_process_parent_fd_snapshot_saved(self, FilesStruct);
-                user_child_process_single_active_slot(self);
-                user_child_process_observed_child_plain_fork_no_second_task(self);
-                user_child_process_builtin_grandchild_parent_continuation_snapshot_bound(self, UserAddressSpace, FilesStruct);
-                user_child_process_outer_pid1_snapshot_ownership_preserved(self, UserAddressSpace, FilesStruct);
-                user_child_process_builtin_grandchild_pipe_data_shared(self, FilesStruct);
-                user_child_process_builtin_grandchild_snapshot_failure_atomic(self, FilesStruct);
-                user_child_process_next_child_pid_bound(self);
-                user_init_process_pending_plain_fork_child_parent_visible(UserInitProcess, self);
-                user_init_process_pending_plain_fork_child_inherits_pgrp_session(UserInitProcess, self);
-            }
-        }
-
-        on Action::ObservedChildParentWaitResumed {
-            /*
-             * Completion path for the observed grandchild: child exit first
-             * releases the current grandchild exec image, restores the saved
-             * script address-space/UserStack and switches SATP. It then restores
-             * the saved current-child parent stack bytes, writable pages, fs/fd view
-             * (and the legacy vfork-shell address-space when applicable),
-             * copies wait status when requested, returns the
-             * grandchild pid from shell wait4, and restores the visible
-             * current child pid to the login shell parent. The restore must
-             * be visible-pid-only: the shell's inherited pgrp, session id and
-             * controlling-tty facts remain the shell facts and are not
-             * overwritten by the grandchild pid. The shell remains Ready and
-             * scheduled in the same internal slot. The just-completed
-             * grandchild's saved frame/snapshot/wait/exit facts are cleared so
-             * a second sequential observed child can reuse the shell slot. For
-             * the builtin-only LTP shape, clearing the inner round cannot clear
-             * the outer PID1 continuation; the script's later exit owns that
-             * outer restoration.
-             */
-            depends_on {
-                UserChildProcess.state == State::Ready;
-                UserInitProcess.state == State::Online;
-                FilesStruct.state == State::Ready;
-            }
-
-            ensures {
-                user_child_process_exit_status_observed(self);
-                user_child_process_replaced_child_exec_backing_released(self);
-                user_child_process_parent_user_stack_restored(self, UserStack);
-                user_child_process_wait4_status_copied(self);
-                user_child_process_parent_wait_stack_snapshot_restored(self, UserAddressSpace);
-                user_child_process_parent_wait_writable_page_snapshot_restored(self, UserAddressSpace);
-                user_child_process_parent_fd_snapshot_restored(self, FilesStruct);
-                user_init_process_observed_child_visible_pid_only_restore(UserInitProcess, self);
-                user_init_process_pending_plain_fork_child_cleared_on_parent_restore(UserInitProcess, self);
-                user_child_process_observed_child_plain_fork_parent_restored(self);
-                user_child_process_outer_pid1_snapshot_ownership_preserved(self, UserAddressSpace, FilesStruct);
-                user_child_process_observed_child_transient_state_cleared(self);
-                user_child_process_observed_shell_continuation_reusable(self);
-                user_child_process_observed_shell_runqueue_preserved(self, Scheduler);
-                user_child_process_single_active_slot(self);
-            }
-        }
-
-        on Action::ReapCompletedChildRecord {
-            depends_on {
-                UserInitProcess.state == State::Online;
-                UserChildProcess.state == State::Prepared;
-            }
-
-            ensures {
-                user_child_process_completed_record_reaped(self);
-                user_child_process_completed_record_released(self);
-                user_child_process_active_slot_reusable(self);
-            }
-        }
-    }
-}
-
-object UserInitProcess: ResourceObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    KernelInitTask.state == State::Online;
-                    UserAddressSpace.state == State::Online;
-                    ElfObject.state == State::Online;
-                    UserTrapFrame.state == State::Ready;
-                    FsStruct.state == State::Ready;
-                    FilesStruct.state == State::Ready;
-                }
-
-                ensures {
-                    user_init_process_reuses_kernel_init_task(self, KernelInitTask);
-                    user_init_process_pid1_preserved(self, KernelInitTask);
-                    user_init_process_exec_identity_handoff(self, KernelInitTask);
-                    user_init_process_no_new_task_struct(self);
-                    user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
-                    user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
-                    user_init_process_address_space_bound(self, UserAddressSpace);
-                    user_init_process_fs_struct_inherited(self, FsStruct);
-                    user_init_process_files_struct_inherited(self, FilesStruct);
-                    user_init_process_trap_frame_bound(self, UserTrapFrame);
-                    user_init_process_credentials_inherited(self, KernelInitTask);
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_supplementary_groups_bound(self);
-                    user_init_process_credentials_capability_model_deferred(self);
-                    user_init_process_signal_state_inherited(self, KernelInitTask);
-                    user_init_process_signal_runtime_bound(self);
-                    user_init_process_thread_signal_state_bound(self);
-                    user_init_process_process_signal_state_deferred(self);
-                    user_init_process_signal_action_table_bound(self);
-                    user_init_process_signal_action_table_layout_bound(self);
-                    user_init_process_blocked_signal_mask_bound(self);
-                    user_init_process_pending_signal_set_empty_first_slice(self);
-                    user_init_process_signal_delivery_deferred(self);
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_process_group_leader_first_slice(self);
-                    user_init_process_controlling_tty_bound(self);
-                    user_init_process_foreground_pgrp_bound(self);
-                    kernel_init_task_execve_to_user_init(KernelInitTask, self);
-                    kernel_init_task_pid1_identity_preserved(KernelInitTask);
-                    kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
-                    kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            user_init_process_reuses_kernel_init_task(self, KernelInitTask);
-            user_init_process_pid1_preserved(self, KernelInitTask);
-            user_init_process_exec_identity_handoff(self, KernelInitTask);
-            user_init_process_no_new_task_struct(self);
-            user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
-            user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
-            user_init_process_address_space_bound(self, UserAddressSpace);
-            user_init_process_fs_struct_inherited(self, FsStruct);
-            user_init_process_files_struct_inherited(self, FilesStruct);
-            user_init_process_trap_frame_bound(self, UserTrapFrame);
-            user_init_process_credentials_inherited(self, KernelInitTask);
-            user_init_process_root_credentials_bound(self);
-            user_init_process_supplementary_groups_bound(self);
-            user_init_process_credentials_capability_model_deferred(self);
-            user_init_process_signal_state_inherited(self, KernelInitTask);
-            user_init_process_signal_runtime_bound(self);
-            user_init_process_thread_signal_state_bound(self);
-            user_init_process_process_signal_state_deferred(self);
-            user_init_process_signal_action_table_bound(self);
-            user_init_process_signal_action_table_layout_bound(self);
-            user_init_process_blocked_signal_mask_bound(self);
-            user_init_process_pending_signal_set_empty_first_slice(self);
-            user_init_process_signal_delivery_deferred(self);
-            user_init_process_session_leader_first_slice(self);
-            user_init_process_process_group_leader_first_slice(self);
-            user_init_process_controlling_tty_bound(self);
-            user_init_process_foreground_pgrp_bound(self);
-            kernel_init_task_execve_to_user_init(KernelInitTask, self);
-            kernel_init_task_pid1_identity_preserved(KernelInitTask);
-            kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
-            kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    UserTrapFrame.state == State::Ready;
-                    SyscallTable.state == State::Ready;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_online(self);
-                    user_init_process_pid1_preserved(self, KernelInitTask);
-                    user_init_process_exec_identity_handoff(self, KernelInitTask);
-                    user_init_process_address_space_bound(self, UserAddressSpace);
-                    user_init_process_fs_struct_inherited(self, FsStruct);
-                    user_init_process_trap_frame_bound(self, UserTrapFrame);
-                    user_init_process_credentials_inherited(self, KernelInitTask);
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_supplementary_groups_bound(self);
-                    user_init_process_signal_state_inherited(self, KernelInitTask);
-                    user_init_process_signal_runtime_bound(self);
-                    user_init_process_thread_signal_state_bound(self);
-                    user_init_process_process_signal_state_deferred(self);
-                    user_init_process_signal_action_table_bound(self);
-                    user_init_process_signal_action_table_layout_bound(self);
-                    user_init_process_blocked_signal_mask_bound(self);
-                    user_init_process_pending_signal_set_empty_first_slice(self);
-                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_process_group_leader_first_slice(self);
-                    user_init_process_controlling_tty_bound(self);
-                    user_init_process_foreground_pgrp_bound(self);
-                    kernel_init_task_execve_to_user_init(KernelInitTask, self);
-                    kernel_init_task_pid1_identity_preserved(KernelInitTask);
-                    kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
-                    kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
-                    user_init_process_trap_return_bound(self, UserTrapFrame);
-                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
-                    syscall_exception_extracts_arguments(SyscallException);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            user_init_process_online(self);
-            user_init_process_reuses_kernel_init_task(self, KernelInitTask);
-            user_init_process_pid1_preserved(self, KernelInitTask);
-            user_init_process_exec_identity_handoff(self, KernelInitTask);
-            user_init_process_no_new_task_struct(self);
-            user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
-            user_init_process_address_space_bound(self, UserAddressSpace);
-            user_init_process_fs_struct_inherited(self, FsStruct);
-            user_init_process_files_struct_inherited(self, FilesStruct);
-            user_init_process_trap_frame_bound(self, UserTrapFrame);
-            user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
-            user_init_process_credentials_inherited(self, KernelInitTask);
-            user_init_process_root_credentials_bound(self);
-            user_init_process_supplementary_groups_bound(self);
-            user_init_process_credentials_capability_model_deferred(self);
-            user_init_process_signal_state_inherited(self, KernelInitTask);
-            user_init_process_signal_runtime_bound(self);
-            user_init_process_thread_signal_state_bound(self);
-            user_init_process_process_signal_state_deferred(self);
-            user_init_process_signal_action_table_bound(self);
-            user_init_process_signal_action_table_layout_bound(self);
-            user_init_process_blocked_signal_mask_bound(self);
-            user_init_process_pending_signal_set_empty_first_slice(self);
-            user_init_process_signal_delivery_deferred(self);
-            user_init_process_session_leader_first_slice(self);
-            user_init_process_process_group_leader_first_slice(self);
-            user_init_process_controlling_tty_bound(self);
-            user_init_process_foreground_pgrp_bound(self);
-            kernel_init_task_execve_to_user_init(KernelInitTask, self);
-            kernel_init_task_pid1_identity_preserved(KernelInitTask);
-            kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
-            kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
-            user_init_process_trap_return_bound(self, UserTrapFrame);
-            syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
-        }
-
-        actions {
-            on Action::EnterUserMode {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    UserAddressSpace.state == State::Online;
-                    UserTrapFrame.state == State::Ready;
-                }
-
-                within UserModeTrapReturnContext {
-                    ensures {
-                        user_init_process_user_entry_ready(self);
-                        user_init_process_enter_user_mode_observed(self, UserTrapFrame);
-                        user_trap_return_context_used(self, UserTrapFrame);
-                        user_trap_return_switches_satp();
-                        user_trap_return_sfence_vma_after_satp();
-                        user_trap_return_sret_handoff();
-                        user_trap_entry_uses_kernel_stack(UserTrapFrame);
-                        user_kernel_trap_stack_linux_riscv_config_bound(UserTrapFrame);
-                        user_kernel_trap_stack_thread_size_bound(UserTrapFrame);
-                        user_kernel_trap_stack_vmap_alignment_bound(UserTrapFrame);
-                        user_kernel_trap_stack_vmapped_bound(UserTrapFrame);
-                        user_kernel_trap_stack_vmap_guard_page_bound(UserTrapFrame);
-                        user_kernel_trap_stack_overflow_stack_bound(UserTrapFrame);
-                        user_kernel_trap_stack_kernel_context_early_overflow_check_bound(UserTrapFrame);
-                        user_kernel_trap_stack_user_context_bit_test_bypassed(UserTrapFrame);
-                        user_kernel_trap_stack_early_check_registers_preserved(UserTrapFrame);
-                        user_kernel_trap_stack_overflow_frame_complete(UserTrapFrame);
-                        user_kernel_trap_stack_overflow_terminal_panic_bound(UserTrapFrame);
-                        user_kernel_trap_stack_irq_stack_switch_deferred(UserTrapFrame);
-                    }
-                }
-            }
-
-            on Action::SetClearChildTid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_clear_child_tid_bound(self);
-                }
-            }
-
-            on Action::ReadUid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_uid_read_observed(self);
-                }
-            }
-
-            on Action::ReadGid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_gid_read_observed(self);
-                }
-            }
-
-            on Action::ReadProcessId {
-                /*
-                 * Read the current bounded user task identity. Missing child
-                 * continuation facts remain unsupported instead of silently
-                 * aliasing the child to PID1.
-                 */
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_pid1_preserved(self, KernelInitTask);
-                    user_init_process_pid_read_observed(self);
-                }
-            }
-
-            on Action::ReadParentProcessId {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_pid1_preserved(self, KernelInitTask);
-                    user_init_process_ppid_zero_first_slice(self);
-                    user_init_process_ppid_read_observed(self);
-                }
-            }
-
-            on Action::ReadProcessGroup {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_process_group_leader_first_slice(self);
-                    user_init_process_process_group_read_observed(self);
-                }
-            }
-
-            on Action::ReadSessionId {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_session_id_read_observed(self);
-                }
-            }
-
-            on Action::SetProcessGroup {
-                /*
-                 * setpgid keeps Linux pid/pgid zero normalization. In
-                 * addition to putting the visible child in its own pgrp, the
-                 * BusyBox init login shell slice accepts setpgid(0,
-                 * inherited_child_pgrp) as a same-session join/no-op. This
-                 * covers the bounded shell job-control restore after staged
-                 * /bin/ls. One pending observed grandchild is also visible
-                 * to its shell parent from clone return until wait4 handoff;
-                 * it inherits the shell pgrp/session and only accepts
-                 * setpgid(child_pid, child_pid). No arbitrary process-group
-                 * lookup or post-exec parent update is introduced.
-                 */
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_process_group_leader_first_slice(self);
-                    user_init_process_process_group_set_observed(self);
-                    user_init_process_child_process_group_visible(self, UserChildProcess);
-                    user_init_process_child_process_group_set_observed(self, UserChildProcess);
-                    user_init_process_child_same_session_pgrp_join_first_slice(self, UserChildProcess);
-                    user_init_process_pending_plain_fork_child_setpgid_first_slice(self, UserChildProcess);
-                    user_init_process_pending_plain_fork_child_setpgid_errno_bound(self, UserChildProcess);
-                }
-            }
-
-            on Action::SetSessionId {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_session_leader_first_slice(self);
-                    user_init_process_process_group_leader_first_slice(self);
-                    user_init_process_setsid_eperm_observed(self);
-                    user_init_process_child_setsid_success_observed(self, UserChildProcess);
-                    user_init_process_child_controlling_tty_clear_on_setsid_first_slice(self, UserChildProcess);
-                }
-            }
-
-            on Action::ReadForegroundProcessGroup {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_controlling_tty_bound(self);
-                    user_init_process_foreground_pgrp_bound(self);
-                    user_init_process_foreground_pgrp_read_observed(self);
-                }
-            }
-
-            on Action::SetForegroundProcessGroup {
-                /*
-                 * The bounded TIOCSPGRP update may restore foreground pgrp to
-                 * the login shell's inherited same-session pgrp after the
-                 * observed /bin/ls grandchild exits. It still accepts only
-                 * PID1 pgrp, the visible child pgrp, or that inherited child
-                 * pgrp; it does not implement a process-group table.
-                 */
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_controlling_tty_bound(self);
-                    user_init_process_foreground_pgrp_bound(self);
-                    user_init_process_foreground_pgrp_set_observed(self);
-                    user_init_process_foreground_pgrp_accepts_child_pgrp_first_slice(self, UserChildProcess);
-                    user_init_process_foreground_pgrp_accepts_shell_inherited_pgrp_first_slice(self, UserChildProcess);
-                }
-            }
-
-            on Action::ReadTtySessionId {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_controlling_tty_bound(self);
-                    user_init_process_tty_session_id_read_observed(self);
-                }
-            }
-
-            on Action::BindControllingTty {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_child_setsid_success_observed(self, UserChildProcess);
-                    user_init_process_child_controlling_tty_clear_on_setsid_first_slice(self, UserChildProcess);
-                    user_init_process_child_controlling_tty_bound(self, UserChildProcess);
-                    user_init_process_foreground_pgrp_bound(self);
-                    user_init_process_tiocsctty_observed(self);
-                }
-            }
-
-            on Action::ReadEffectiveUid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_euid_read_observed(self);
-                }
-            }
-
-            on Action::ReadEffectiveGid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_egid_read_observed(self);
-                }
-            }
-
-            on Action::ReadResUid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_resuid_read_observed(self);
-                }
-            }
-
-            on Action::ReadResGid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_resgid_read_observed(self);
-                }
-            }
-
-            on Action::ReadCurrentWorkingDirectory {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                    FsStruct.state == State::Ready;
-                }
-
-                ensures {
-                    user_init_process_fs_struct_inherited(self, FsStruct);
-                    user_init_process_root_cwd_first_slice(self, FsStruct);
-                    user_init_process_getcwd_observed(self);
-                }
-            }
-
-            on Action::SetUid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_credentials_capability_model_deferred(self);
-                    user_init_process_uid_set_observed(self);
-                }
-            }
-
-            on Action::SetGid {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_credentials_capability_model_deferred(self);
-                    user_init_process_gid_set_observed(self);
-                }
-            }
-
-            on Action::SetSupplementaryGroups {
-                /*
-                 * First slice only stores the current bounded supplementary
-                 * group view on UserInitProcess. It does not allocate a Linux
-                 * group_info object, sort arbitrary group arrays, copy task
-                 * credentials, update file permission checks, or attach the
-                 * data to inode/TTY ownership semantics.
-                 */
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_supplementary_groups_bound(self);
-                    user_init_process_credentials_capability_model_deferred(self);
-                    user_init_process_setgroups_observed(self);
-                }
-            }
-
-            on Action::ReadSupplementaryGroups {
-                /*
-                 * First slice only snapshots the bounded supplementary group
-                 * view previously stored on UserInitProcess. It does not
-                 * expose Linux group_info lifetime, sorting, credentials COW,
-                 * permission checks or ownership semantics.
-                 */
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_root_credentials_bound(self);
-                    user_init_process_supplementary_groups_bound(self);
-                    user_init_process_credentials_capability_model_deferred(self);
-                    user_init_process_supplementary_groups_read_observed(self);
-                }
-            }
-
-            on Action::RtSigprocmask {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_blocked_signal_mask_bound(self);
-                    user_init_process_signal_delivery_deferred(self);
-                    user_init_process_rt_sigprocmask_observed(self);
-                }
-            }
-
-            on Action::RtSigaction {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_signal_runtime_bound(self);
-                    user_init_process_signal_action_table_bound(self);
-                    user_init_process_signal_action_table_layout_bound(self);
-                    user_init_process_signal_delivery_deferred(self);
-                    user_init_process_rt_sigaction_observed(self);
-                }
-            }
-
-            on Action::RtSigtimedwait {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                }
-
-                ensures {
-                    user_init_process_signal_runtime_bound(self);
-                    user_init_process_thread_signal_state_bound(self);
-                    user_init_process_pending_signal_set_empty_first_slice(self);
-                    user_init_process_signal_delivery_deferred(self);
-                    user_init_process_rt_sigtimedwait_observed(self);
-                    user_init_process_rt_sigtimedwait_mask_observed(self);
-                    user_init_process_rt_sigtimedwait_uinfo_null(self);
-                    user_init_process_rt_sigtimedwait_uts_null(self);
-                    user_init_process_rt_sigtimedwait_pending_match_empty(self);
-                    user_init_process_rt_sigtimedwait_infinite_wait(self);
-                    user_init_process_pending_sigchld_first_slice(self);
-                    user_init_process_rt_sigtimedwait_waiter_enqueued(self);
-                    user_init_process_rt_sigtimedwait_sleep_reason_bound(self);
-                    user_init_process_rt_sigtimedwait_woken_by_sigchld(self);
-                    user_init_process_rt_sigtimedwait_dequeued_sigchld(self);
-                }
-            }
-
-        }
-    }
-}
+/*
+ * PID 1 has no persona wrapper. Its user-mode resources and role remain
+ * attached directly to KernelInitTask, while Pid1UserAppFlow owns the
+ * per-exec lifecycle and the application body remains a black box.
+ */
 
 object UserBootPayload: ResourceObject {
     initial_state: State::Base;
@@ -4282,9 +3284,15 @@ object UserBootPayload: ResourceObject {
                     FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
                     FilesStruct.Action::EnableStdinBlockingWait;
-                    UserInitProcess.Transition::Setup;
-                    UserInitProcess.Transition::Enable;
-                    UserInitProcess.Action::EnterUserMode;
+                    Pid1UserAppFlow.Transition::Preset;
+                    Pid1UserAppFlow.Transition::Setup;
+                    KernelInitFlow.Transition::Disable;
+                    KernelInitTask.Action::CommitFlowHandoff(
+                        from_flow: KernelInitFlow,
+                        to_flow: Pid1UserAppFlow
+                    );
+                    Pid1UserAppFlow.Transition::Enable;
+                    KernelInitFlow.Transition::Cleanup;
                 }
 
                 ensures {
@@ -4293,7 +3301,28 @@ object UserBootPayload: ResourceObject {
                     UserTrapFrame.state == State::Ready;
                     SyscallTable.state == State::Ready;
                     SyscallException.state == State::Online;
-                    UserInitProcess.state == State::Online;
+                    KernelInitTask.state == State::Online;
+                    Pid1UserAppFlow.state == State::Online;
+                    KernelInitFlow.state == State::Destroyed;
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_owns_flow(KernelInitTask, Pid1UserAppFlow);
+                    task_flow_owner_is(Pid1UserAppFlow, KernelInitTask);
+                    task_flow_owner_exclusive(Pid1UserAppFlow);
+                    task_flow_handoff(KernelInitTask, KernelInitFlow, Pid1UserAppFlow);
+                    task_flow_handoff_old_inactive(KernelInitTask, KernelInitFlow);
+                    task_flow_handoff_new_active(KernelInitTask, Pid1UserAppFlow);
+                    task_active_flow_is(KernelInitTask, Pid1UserAppFlow);
+                    task_at_most_one_flow_online(KernelInitTask);
+                    task_flow_instances_distinct(KernelInitFlow, Pid1UserAppFlow);
+                    user_task_address_space_bound(KernelInitTask, UserAddressSpace);
+                    user_task_files_struct_inherited(KernelInitTask, FilesStruct);
+                    user_task_trap_frame_bound(KernelInitTask, UserTrapFrame);
+                    user_task_credentials_inherited(KernelInitTask, KernelInitTask);
+                    user_task_syscall_context_bound(
+                        KernelInitTask,
+                        SyscallException,
+                        SyscallTable
+                    );
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);
                     user_boot_payload_selected_path_bound(self);
                     user_boot_payload_selected_argv0_path_bound(self);
@@ -4314,6 +3343,15 @@ object UserBootPayload: ResourceObject {
     state State::Online {
         invariant {
             user_boot_payload_selected(self);
+            KernelInitTask.state == State::Online;
+            Pid1UserAppFlow.state == State::Online;
+            KernelInitFlow.state == State::Destroyed;
+            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_owns_flow(KernelInitTask, Pid1UserAppFlow);
+            task_flow_owner_is(Pid1UserAppFlow, KernelInitTask);
+            task_flow_handoff(KernelInitTask, KernelInitFlow, Pid1UserAppFlow);
+            task_active_flow_is(KernelInitTask, Pid1UserAppFlow);
+            task_at_most_one_flow_online(KernelInitTask);
             user_boot_payload_reads_init_from_vfs(self, VfsCore);
             user_boot_payload_selected_path_bound(self);
             user_boot_payload_selected_argv0_path_bound(self);

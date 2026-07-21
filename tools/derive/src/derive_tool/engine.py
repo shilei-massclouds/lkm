@@ -88,7 +88,7 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
     "Riscv64": ("architecture_register_file", "riscv_isa_spec_candidate"),
-    "BootInitTask": ("static_object_binding", "linker_symbol_candidate"),
+    "BootTask": ("static_object_binding", "linker_symbol_candidate"),
     "EventStream": ("static_entry_symbol_binding", "linker_symbol_candidate"),
     "TrampolineVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "EarlyVm": ("static_page_table_binding", "linker_symbol_candidate"),
@@ -195,7 +195,7 @@ _LINEAR_MAP_LAYOUT_PROOFS = {
     ),
 }
 _STATIC_SOURCE_PROOFS = {
-    "BootInitTask": {
+    "BootTask": {
         "attrs_accessible(self)": (
             "static_object_binding",
             "linux_static_object_binding",
@@ -696,11 +696,11 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == phys_addr(BootInitTask.storage)": (
+    "Riscv64.tp == phys_addr(BootTask.storage)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)": (
+    "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -3333,13 +3333,13 @@ def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str |
     if not ref_value:
         return None
     if ref_value == "CurrentTaskRef":
-        return "BootIdleTask"
+        return "BootTask"
     if ref_value == "CurrentRunQueueRef":
         return "BootRunQueue"
     if ref_value == "BootRunQueueRef":
         return "BootRunQueue"
     if ref_value == "BootIdleTaskRef":
-        return "BootIdleTask"
+        return "BootTask"
     if ref_value == "KernelInitTaskRef":
         return "KernelInitTask"
     if ref_value == "KthreaddTaskRef":
@@ -4300,11 +4300,11 @@ _PRIOR_FACT_PROOFS = {
     "valid_task_ref(Riscv64.tp)": (
         "object_storage",
         {
-            "Riscv64.tp == phys_addr(BootInitTask.storage)",
-            "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)",
+            "Riscv64.tp == phys_addr(BootTask.storage)",
+            "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
         },
     ),
-    "valid_task_storage(BootInitTask.storage)": (
+    "valid_task_storage(BootTask.storage)": (
         "object_storage",
         {
             "valid_object_storage(storage)",

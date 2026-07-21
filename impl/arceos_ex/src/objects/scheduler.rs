@@ -1,4 +1,5 @@
 use super::{
+    boot_task::BootTask,
     cpu::{CpuRef, MAX_CPUS},
     cpu_control::{
         CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock,
@@ -7,7 +8,6 @@ use super::{
     cpu_group::CpuGroup,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
-    init_task::InitTask,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
     rest_init::{KernelInitTask, KthreaddTask},
@@ -38,7 +38,7 @@ pub struct Scheduler {
     boot_idle_rcu_read_side: RcuReadSide,
     boot_runqueue: BootRunQueue,
     boot_init_preemption: PreemptionControl,
-    boot_idle_task: BootIdleTask,
+    boot_idle_setup_state: BootIdleSetupState,
     boot_idle_preemption: PreemptionControl,
     cpu_runqueues: [CpuRunQueueMetadata; MAX_CPUS],
     cpu_runqueue_count: usize,
@@ -112,7 +112,7 @@ impl Scheduler {
             boot_idle_rcu_read_side: RcuReadSide::new(),
             boot_runqueue: BootRunQueue::new(),
             boot_init_preemption: PreemptionControl::new(),
-            boot_idle_task: BootIdleTask::new(),
+            boot_idle_setup_state: BootIdleSetupState::new(),
             boot_idle_preemption: PreemptionControl::new(),
             cpu_runqueues: [const { CpuRunQueueMetadata::invalid() }; MAX_CPUS],
             cpu_runqueue_count: 0,
@@ -219,7 +219,7 @@ impl Scheduler {
     }
 
     pub const fn boot_idle_pi_lock(&self) -> &RawSpinLock {
-        self.boot_idle_task.pi_lock()
+        self.boot_idle_setup_state.pi_lock()
     }
 
     pub const fn boot_idle_preemption(&self) -> &PreemptionControl {
@@ -300,12 +300,12 @@ impl Scheduler {
     ) -> Option<CpuOwnedSchedulerView> {
         let boot_cpu = cpu_group.boot_cpu()?;
         let runqueue = self.cpu_runqueue(boot_cpu.logical_id())?;
-        let idle_task = self.boot_idle_task.view()?;
+        let idle_task = self.boot_idle_setup_state.view()?;
         if cpu_group.state() != State::Ready
             || !boot_cpu.cpu_ref().is_boot_cpu()
             || !self.boot_runqueue_matches_metadata()
             || !self
-                .boot_idle_task
+                .boot_idle_setup_state
                 .is_boot_cpu_idle_task_view(cpu_group, &self.boot_runqueue)
             || runqueue.cpu_ref() != boot_cpu.cpu_ref()
             || runqueue.cpu_hartid() != boot_cpu.hartid()
@@ -640,7 +640,7 @@ impl Scheduler {
         &mut self,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         init_mm: &InitMm,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
@@ -652,7 +652,7 @@ impl Scheduler {
             || cpu_group.state() != State::Ready
             || !cpu_group.possible_cpu_boundary_ready()
             || per_cpu_storage.state() != State::Ready
-            || init_task.state() != State::Online
+            || boot_task.state() != State::Online
             || init_mm.state() != State::Ready
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
@@ -664,13 +664,13 @@ impl Scheduler {
             cpu_group,
             per_cpu_storage,
             &self.default_root_domain,
-            init_task,
+            boot_task,
             local_interrupt,
             &mut self.boot_init_preemption,
         )?;
         self.setup_cpu_runqueue_metadata(cpu_group)?;
-        self.boot_idle_task.setup(
-            init_task,
+        self.boot_idle_setup_state.setup(
+            boot_task,
             init_mm,
             &mut self.boot_runqueue,
             &mut self.boot_idle_rcu_read_side,
@@ -692,7 +692,9 @@ impl Scheduler {
     }
 
     pub fn enable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || self.boot_idle_task.state() != State::Ready {
+        if self.lifecycle.state() != State::Ready
+            || self.boot_idle_setup_state.state() != State::Ready
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -720,12 +722,12 @@ impl Scheduler {
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+            || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
             || !matches!(
                 current_task_slot.current(),
-                CurrentTaskRef::BootIdle
+                CurrentTaskRef::BootTask
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::SmokeScheduler
@@ -822,7 +824,7 @@ impl Scheduler {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+            || !current_task_slot.current_is_boot_task()
         {
             return Err(self.failed_schedule_condition());
         }
@@ -836,7 +838,7 @@ impl Scheduler {
         )?;
         self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
         self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
-        if current_task_slot.current_is_boot_idle() {
+        if current_task_slot.current_is_boot_task() {
             self.idle_schedule_identity_passes = self.idle_schedule_identity_passes.wrapping_add(1);
         }
         Ok(())
@@ -852,25 +854,25 @@ impl Scheduler {
             || kernel_init_task.state() != State::Online
             || current_task_slot.state() != State::Ready
             || !current_task_slot.current_is_kernel_init()
-            || !self.boot_idle_task.switch_context().initialized()
+            || !self.boot_idle_setup_state.switch_context().initialized()
             || !kernel_init_task.switch_context().initialized()
             || self.kernel_init_stack_switch_started_count != 0
         {
             return Err(self.failed_schedule_condition());
         }
 
-        let prev = self.boot_idle_task.switch_context_mut() as *mut TaskSwitchContext;
+        let prev = self.boot_idle_setup_state.switch_context_mut() as *mut TaskSwitchContext;
         let next = kernel_init_task.switch_context() as *const TaskSwitchContext;
         self.task_stack_switching_online = true;
         self.kernel_init_stack_switch_started_count =
             self.kernel_init_stack_switch_started_count.wrapping_add(1);
-        crate::arch::riscv64::sbi::putstr("-> switch BootIdleTask -> KernelInitTask\n");
+        crate::arch::riscv64::sbi::putstr("-> switch BootTask -> KernelInitTask\n");
         unsafe {
             task_switch::switch(&mut *prev, &*next);
         }
         self.kernel_init_stack_switch_returned_count =
             self.kernel_init_stack_switch_returned_count.wrapping_add(1);
-        crate::arch::riscv64::sbi::putstr("<- switch BootIdleTask restored\n");
+        crate::arch::riscv64::sbi::putstr("<- switch BootTask restored\n");
         Ok(())
     }
 
@@ -905,7 +907,7 @@ impl Scheduler {
         kthreadd_task: &KthreaddTask,
     ) -> Option<usize> {
         match current_task_ref {
-            CurrentTaskRef::BootIdle => Some(self.boot_idle_task.cpu_id()),
+            CurrentTaskRef::BootTask => Some(self.boot_idle_setup_state.cpu_id()),
             CurrentTaskRef::KernelInit => Some(kernel_init_task.cpu_id()),
             CurrentTaskRef::Kthreadd => Some(kthreadd_task.cpu_id()),
             CurrentTaskRef::SmokeScheduler => Some(self.smoke_scheduler_task.cpu_id()),
@@ -924,7 +926,7 @@ impl Scheduler {
         if !current_rq.matches_cpu_owned_runqueue(self.boot_runqueue.cpu_id())
             || !matches!(
                 prev_ref,
-                CurrentTaskRef::BootIdle
+                CurrentTaskRef::BootTask
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::UserChild
@@ -933,7 +935,7 @@ impl Scheduler {
                     | CurrentTaskRef::SmokeRwsem
                     | CurrentTaskRef::SmokeRwLock
             )
-            || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+            || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || self.boot_runqueue.task_count() == 0
         {
             return Err(self.failed_schedule_condition());
@@ -970,7 +972,7 @@ impl Scheduler {
     ) -> EventResult {
         if !matches!(
             prev_ref,
-            CurrentTaskRef::BootIdle
+            CurrentTaskRef::BootTask
                 | CurrentTaskRef::KernelInit
                 | CurrentTaskRef::Kthreadd
                 | CurrentTaskRef::SmokeScheduler
@@ -979,15 +981,15 @@ impl Scheduler {
                 | CurrentTaskRef::SmokeRwLock
         ) || !matches!(
             next_ref,
-            CurrentTaskRef::BootIdle
+            CurrentTaskRef::BootTask
                 | CurrentTaskRef::KernelInit
                 | CurrentTaskRef::Kthreadd
                 | CurrentTaskRef::SmokeScheduler
                 | CurrentTaskRef::SmokeMutex
                 | CurrentTaskRef::SmokeRwsem
                 | CurrentTaskRef::SmokeRwLock
-        ) || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
-            || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+        ) || self.boot_runqueue.curr_task_id() != self.boot_idle_setup_state.task_id()
+            || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || current_task_slot.state() != State::Ready
             || current_task_slot.current() != prev_ref
         {
@@ -1025,9 +1027,9 @@ impl Scheduler {
         prev_ref: CurrentTaskRef,
         next_ref: CurrentTaskRef,
     ) -> EventResult {
-        if prev_ref == CurrentTaskRef::BootIdle {
-            self.boot_idle_task.save_core_context()?;
-            self.boot_idle_task.restore_core_context()?;
+        if prev_ref == CurrentTaskRef::BootTask {
+            self.boot_idle_setup_state.save_core_context()?;
+            self.boot_idle_setup_state.restore_core_context()?;
         }
         if prev_ref == CurrentTaskRef::SmokeScheduler {
             self.smoke_scheduler_task.save_core_context()?;
@@ -1068,7 +1070,7 @@ impl Scheduler {
         }
 
         let prev: *mut TaskSwitchContext = match prev_ref {
-            CurrentTaskRef::BootIdle => self.boot_idle_task.switch_context_mut(),
+            CurrentTaskRef::BootTask => self.boot_idle_setup_state.switch_context_mut(),
             CurrentTaskRef::KernelInit => {
                 kernel_init_task.switch_context() as *const TaskSwitchContext as *mut _
             }
@@ -1082,7 +1084,7 @@ impl Scheduler {
             _ => return Ok(()),
         };
         let next: &TaskSwitchContext = match next_ref {
-            CurrentTaskRef::BootIdle => self.boot_idle_task.switch_context(),
+            CurrentTaskRef::BootTask => self.boot_idle_setup_state.switch_context(),
             CurrentTaskRef::KernelInit => kernel_init_task.switch_context(),
             CurrentTaskRef::Kthreadd => kthreadd_task.switch_context(),
             CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context(),
@@ -1507,21 +1509,27 @@ impl Scheduler {
             && self.boot_runqueue.lock().irqrestore_exited_count() != 0
             && self.boot_init_preemption.state() == State::Ready
             && self.boot_init_preemption.disabled()
-            && self.boot_idle_task.state() == State::Ready
-            && self.boot_idle_task.pi_lock().state() == State::Ready
-            && !self.boot_idle_task.pi_lock().locked()
-            && self.boot_idle_task.pi_lock().irqsave_entered_count() != 0
-            && self.boot_idle_task.pi_lock().irqrestore_exited_count() != 0
+            && self.boot_idle_setup_state.state() == State::Ready
+            && self.boot_idle_setup_state.pi_lock().state() == State::Ready
+            && !self.boot_idle_setup_state.pi_lock().locked()
+            && self.boot_idle_setup_state.pi_lock().irqsave_entered_count() != 0
+            && self
+                .boot_idle_setup_state
+                .pi_lock()
+                .irqrestore_exited_count()
+                != 0
             && self.boot_idle_rcu_read_side.state() == State::Prepared
             && self.boot_idle_rcu_read_side.incomplete_first_slice()
             && self.boot_idle_rcu_read_side.full_semantics_deferred()
             && self.boot_idle_rcu_read_side.read_lock_count() != 0
             && self.boot_idle_rcu_read_side.read_unlock_count() != 0
             && self.boot_idle_rcu_read_side.balanced()
-            && self.boot_idle_task.init_held_pi_lock()
-            && self.boot_idle_task.init_held_runqueue_lock()
-            && self.boot_idle_task.cpu_set_under_rcu_read()
-            && self.boot_idle_task.runqueue_current_published_with_rcu()
+            && self.boot_idle_setup_state.init_held_pi_lock()
+            && self.boot_idle_setup_state.init_held_runqueue_lock()
+            && self.boot_idle_setup_state.cpu_set_under_rcu_read()
+            && self
+                .boot_idle_setup_state
+                .runqueue_current_published_with_rcu()
             && self.boot_idle_preemption.state() == State::Ready
             && self.boot_idle_preemption.disabled()
             && self.possible_cpu_runqueues_ready(cpu_group)
@@ -1538,8 +1546,8 @@ impl Scheduler {
             && self
                 .default_root_domain
                 .covers_cpu_ref(self.boot_runqueue.cpu_ref())
-            && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
-            && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
+            && self.boot_runqueue.curr_task_id() == self.boot_idle_setup_state.task_id()
+            && self.boot_runqueue.idle_task_id() == self.boot_idle_setup_state.task_id()
     }
 
     fn setup_cpu_runqueue_metadata(&mut self, cpu_group: &CpuGroup) -> EventResult {
@@ -1896,7 +1904,7 @@ fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
         CurrentTaskRef::SmokeMutex => Some(SMOKE_MUTEX_TASK_ID),
         CurrentTaskRef::SmokeRwsem => Some(SMOKE_RWSEM_TASK_ID),
         CurrentTaskRef::SmokeRwLock => Some(SMOKE_RWLOCK_TASK_ID),
-        CurrentTaskRef::None | CurrentTaskRef::BootIdle => None,
+        CurrentTaskRef::None | CurrentTaskRef::BootTask => None,
     }
 }
 
@@ -2261,7 +2269,7 @@ impl BootRunQueue {
         cpu_group: &CpuGroup,
         _per_cpu_storage: &PerCpuStorage,
         root_domain: &DefaultSchedRootDomain,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
         boot_init_preemption: &mut PreemptionControl,
     ) -> EventResult {
@@ -2270,7 +2278,7 @@ impl BootRunQueue {
             || cpu_group.state() != State::Ready
             || !cpu_group.possible_cpu_boundary_ready()
             || root_domain.state() != State::Ready
-            || init_task.state() != State::Online
+            || boot_task.state() != State::Online
             || local_interrupt.state() != State::Ready
             || boot_init_preemption.state() != State::Base
         {
@@ -2290,7 +2298,7 @@ impl BootRunQueue {
         self.lock
             .setup_with_checkpoint(Checkpoint::BootRunQueueLockReady)?;
         boot_init_preemption
-            .setup_disabled_with_checkpoint(init_task, Checkpoint::BootInitPreemptionReady)?;
+            .setup_disabled_with_checkpoint(boot_task, Checkpoint::BootInitPreemptionReady)?;
         self.cpu_ref = boot_cpu.cpu_ref();
         self.cpu_hartid = boot_cpu.hartid();
         self.curr_task_id = 0;
@@ -2390,7 +2398,7 @@ impl BootRunQueue {
             || self.lifecycle.state() != State::Ready
             || !matches!(
                 prev_ref,
-                CurrentTaskRef::BootIdle
+                CurrentTaskRef::BootTask
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::UserChild
@@ -2428,17 +2436,17 @@ impl BootRunQueue {
                 } else if self.kthreadd_task_enqueued {
                     CurrentTaskRef::Kthreadd
                 } else {
-                    CurrentTaskRef::BootIdle
+                    CurrentTaskRef::BootTask
                 }
             }
             CurrentTaskRef::Kthreadd => {
                 if self.kernel_init_task_enqueued {
                     CurrentTaskRef::KernelInit
                 } else {
-                    CurrentTaskRef::BootIdle
+                    CurrentTaskRef::BootTask
                 }
             }
-            CurrentTaskRef::BootIdle => self.first_runnable_task_ref(),
+            CurrentTaskRef::BootTask => self.first_runnable_task_ref(),
             CurrentTaskRef::None => CurrentTaskRef::None,
         };
         if matches!(next_ref, CurrentTaskRef::None) {
@@ -2552,8 +2560,8 @@ impl BootRunQueue {
     }
 }
 
-pub struct BootIdleTask {
-    pub task: Task,
+pub struct BootIdleSetupState {
+    task_record: Task,
     lifecycle: Lifecycle,
     pi_lock: RawSpinLock,
     cpu_ref: CpuRef,
@@ -2568,10 +2576,10 @@ pub struct BootIdleTask {
     core_restored_count: usize,
 }
 
-impl BootIdleTask {
+impl BootIdleSetupState {
     const fn new() -> Self {
         Self {
-            task: Task::new(),
+            task_record: Task::new(),
             lifecycle: Lifecycle::new(State::Base),
             pi_lock: RawSpinLock::new(),
             cpu_ref: CpuRef::invalid(),
@@ -2596,11 +2604,11 @@ impl BootIdleTask {
     }
 
     pub const fn task_id(&self) -> usize {
-        self.task.pid
+        self.task_record.pid
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.task.cpu.cpu_id()
+        self.task_record.cpu.cpu_id()
     }
 
     pub const fn init_held_pi_lock(&self) -> bool {
@@ -2620,31 +2628,31 @@ impl BootIdleTask {
     }
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
-        &self.task.switch_ctx
+        &self.task_record.switch_ctx
     }
 
     pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.task.switch_ctx
+        &mut self.task_record.switch_ctx
     }
 
     pub fn view(&self) -> Option<CpuIdleTaskView> {
         if self.lifecycle.state() != State::Ready
             || self.cpu_ref == CpuRef::invalid()
-            || self.task.cpu.cpu_id() == usize::MAX
+            || self.task_record.cpu.cpu_id() == usize::MAX
         {
             return None;
         }
 
         Some(CpuIdleTaskView {
             state: self.lifecycle.state(),
-            task_id: self.task.pid,
+            task_id: self.task_record.pid,
             cpu_ref: self.cpu_ref,
-            cpu_id: self.task.cpu.cpu_id(),
+            cpu_id: self.task_record.cpu.cpu_id(),
             uses_current_init_task: self.uses_current_init_task,
             lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
             no_set_affinity: self.no_set_affinity,
-            switch_ctx_ra: self.task.switch_ctx.ra(),
-            switch_ctx_initialized: self.task.switch_ctx.initialized(),
+            switch_ctx_ra: self.task_record.switch_ctx.ra(),
+            switch_ctx_initialized: self.task_record.switch_ctx.initialized(),
             core_saved_count: self.core_saved_count,
             core_restored_count: self.core_restored_count,
         })
@@ -2671,7 +2679,7 @@ impl BootIdleTask {
     #[allow(clippy::too_many_arguments)]
     fn setup(
         &mut self,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         init_mm: &InitMm,
         boot_runqueue: &mut BootRunQueue,
         boot_idle_rcu_read_side: &mut RcuReadSide,
@@ -2682,7 +2690,7 @@ impl BootIdleTask {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.pi_lock.state() != State::Base
-            || init_task.state() != State::Online
+            || boot_task.state() != State::Online
             || init_mm.state() != State::Ready
             || boot_runqueue.state() != State::Ready
             || boot_runqueue.lock().state() != State::Ready
@@ -2707,7 +2715,7 @@ impl BootIdleTask {
 
         self.pi_lock
             .setup_with_checkpoint(Checkpoint::BootIdlePiLockReady)?;
-        boot_idle_preemption.setup_disabled(init_task)?;
+        boot_idle_preemption.setup_disabled(boot_task)?;
         self.pi_lock
             .lock_irqsave(local_interrupt, boot_idle_preemption)?;
         let guarded_result = (|| {
@@ -2715,9 +2723,9 @@ impl BootIdleTask {
             boot_runqueue.lock.acquire()?;
             let runqueue_guarded_result = (|| {
                 self.init_held_runqueue_lock = true;
-                self.task.pid = boot_runqueue.idle_task_id();
+                self.task_record.pid = boot_runqueue.idle_task_id();
                 boot_idle_rcu_read_side.read_lock()?;
-                if !self.task.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
+                if !self.task_record.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
                     let _ = boot_idle_rcu_read_side.read_unlock();
                     return failed_condition(
                         LifecycleEvent::Setup,
@@ -2729,18 +2737,18 @@ impl BootIdleTask {
                 boot_idle_rcu_read_side.read_unlock()?;
                 self.cpu_set_under_rcu_read = true;
                 self.cpu_ref = boot_runqueue.cpu_ref();
-                self.task.kind = TaskKind::KernelThread;
-                self.task.switch_ctx.init_with_dummy();
+                self.task_record.kind = TaskKind::KernelThread;
+                self.task_record.switch_ctx.init_with_dummy();
                 self.uses_current_init_task = true;
                 self.lazy_tlb_mm_ready = true;
                 self.no_set_affinity = true;
-                current_task_slot.set_current_boot_idle()?;
+                current_task_slot.set_current_boot_task()?;
                 self.runqueue_current_published_with_rcu = true;
                 self.lifecycle.transition(
                     LifecycleEvent::Setup,
                     State::Base,
                     State::Ready,
-                    Checkpoint::BootIdleTaskReady,
+                    Checkpoint::BootIdleSetupReady,
                 )
             })();
             let release_result = boot_runqueue.lock.release();

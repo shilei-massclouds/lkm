@@ -245,7 +245,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`BootInitTask`、`BootInitStack`、`EventStream` 等。
+- 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
 - `ComputerProject` 是顶层工程对象，不在时间轴行中显示；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -494,7 +494,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `TrampolineVm.pg_dir`、`EarlyVm.pg_dir` 和 `SwapperVm.pg_dir` 各自承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明裸 `page_aligned(...)`；各 VM 阶段在自身 `Setup` 中绑定静态页表存储并声明映射语义。
 - `EventStream.early_event_entry` 和 `EventStream.formal_event_entry` 各自承担事件入口符号的存在性与稳定性约束。`EventStream.Preset` 和 `EventStream.Setup` 在绑定符号后设置对应入口，不再依赖准备期的统一静态对象集合。
 - `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；`valid_trampoline_map(...)` 已由 `Lds` 链接布局和 `Config` 地址配置共同证明，对应 Linux `setup_vm()` 中从 `_start`、`KERNEL_LINK_ADDR/kernel_map.virt_addr` 和 `PMD_SIZE` 建立 trampoline 映射。
-- `BootInitTask`、`EventStream`、`TrampolineVm`、`EarlyVm` 和 `SwapperVm` 已分别标注 `source: static::linux_6_12`。`BootInitTask.storage` 来自 `init/init_task.c` 中的静态 `init_task` 定义，事件入口符号来自 RISC-V 汇编入口符号，页表存储来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实由对象自身 Preset/Setup 后置条件收口，并按 `linux_static_object_binding` 归类。
+- `BootTask`、`EventStream`、`TrampolineVm`、`EarlyVm` 和 `SwapperVm` 已分别标注 `source: static::linux_6_12`。`BootTask.storage` 来自 `init/init_task.c` 中的静态 `init_task` 定义，事件入口符号来自 RISC-V 汇编入口符号，页表存储来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实由对象自身 Preset/Setup 后置条件收口，并按 `linux_static_object_binding` 归类。
 - `PhysicalMemory` 已标注 `source: fdt::memory`。`attrs_accessible(self)`、`valid_phys_range_set(ram)`、`valid_phys_range_set(iomap)` 和 `disjoint(ram, iomap)` 归入 `fdt_memory_layout` 直接证明，表示平台内存布局来自 FDT/platform memory description。具体 DTB 地址/范围落入 RAM 不由该来源自动证明，避免用 DTB 自身的 `/memory` 描述证明 DTB 自身位置；当前由 OpenSBI 固件交接事实与 RawDtb 边界派生共同收口。
 - 剩余泛化 provider 已继续细化：`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`Soc.Preset` 用transition 后置条件证明 `soc_early_platform_ready()`；对应 Linux `head.S` 在进入 `start_kernel` 前调用 `soc_early_init()`，而 `soc.c` 根据 `dtb_early_va` 的 compatible 匹配执行 SoC 早期函数。
 - 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。

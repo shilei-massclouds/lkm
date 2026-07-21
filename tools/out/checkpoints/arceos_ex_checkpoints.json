@@ -190,8 +190,8 @@
   },
   {
     "index": 27,
-    "variant": "InitTaskPrepared",
-    "name": "InitTask.Prepared",
+    "variant": "BootTaskPrepared",
+    "name": "BootTask.Prepared",
     "early_byte": "T",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -316,8 +316,8 @@
   },
   {
     "index": 45,
-    "variant": "InitTaskOnline",
-    "name": "InitTask.Online",
+    "variant": "BootTaskOnline",
+    "name": "BootTask.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -1079,8 +1079,8 @@
   },
   {
     "index": 154,
-    "variant": "BootIdleTaskReady",
-    "name": "BootIdleTask.Ready",
+    "variant": "BootIdleSetupReady",
+    "name": "BootIdleSetup.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -2052,8 +2052,8 @@
   },
   {
     "index": 293,
-    "variant": "BootIdleRuntimeReady",
-    "name": "BootIdleRuntime.Ready",
+    "variant": "BootIdleFlowReady",
+    "name": "BootIdleFlow.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -2773,8 +2773,8 @@
   },
   {
     "index": 396,
-    "variant": "UserModeEntry",
-    "name": "UserInitProcess.EnterUserMode",
+    "variant": "Pid1UserAppFlowEnterUserMode",
+    "name": "Pid1UserAppFlow.EnterUserMode",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -3004,8 +3004,8 @@
   },
   {
     "index": 429,
-    "variant": "UserChildSlotReusable",
-    "name": "UserChildSlot.Reusable",
+    "variant": "UserTaskRecordReleased",
+    "name": "UserTaskRecord.Released",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -3391,6 +3391,41 @@
     "index": 484,
     "variant": "UserStackGrowRejected",
     "name": "UserStack.GrowRejected",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 485,
+    "variant": "KernelInitFlowOffline",
+    "name": "KernelInitFlow.Offline",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 486,
+    "variant": "KernelInitFlowDestroyed",
+    "name": "KernelInitFlow.Destroyed",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 487,
+    "variant": "Pid1UserAppFlowPrepared",
+    "name": "Pid1UserAppFlow.Prepared",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 488,
+    "variant": "Pid1UserAppFlowReady",
+    "name": "Pid1UserAppFlow.Ready",
+    "early_byte": null,
+    "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
+  },
+  {
+    "index": 489,
+    "variant": "Pid1UserAppFlowOnline",
+    "name": "Pid1UserAppFlow.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   }

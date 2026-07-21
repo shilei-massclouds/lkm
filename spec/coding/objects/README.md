@@ -36,6 +36,8 @@ Classification meanings:
 | [`main.spec`](../../model/objects/main.spec) | `grouped` | [`mapping.md`](../mapping.md) |
 | [`ns16550a_driver.spec`](../../model/objects/ns16550a_driver.spec) | `phase-owned` | [`InitcallPhase`](../phases/smp-runtime/initcall.md) |
 | [`object_kinds.spec`](../../model/objects/object_kinds.spec) | `general-only` | [`mapping.md`](../mapping.md) |
+| [`task.spec`](../../model/objects/task.spec) | `dedicated` | [`task-taskflow.md`](task-taskflow.md) |
+| [`task_flow.spec`](../../model/objects/task_flow.spec) | `dedicated` | [`task-taskflow.md`](task-taskflow.md) |
 | [`user_boot.spec`](../../model/objects/user_boot.spec) | `dedicated` | [`user-boot.md`](user-boot.md) |
 | [`user_stack.spec`](../../model/objects/user_stack.spec) | `dedicated` | [`user-stack.md`](user-stack.md) |
 | [`vfs.spec`](../../model/objects/vfs.spec) | `dedicated` | [`vfs.md`](vfs.md) |

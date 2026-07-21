@@ -249,7 +249,7 @@ context DoneUpCompletionWaitLockContext: ResourceExclusiveContext {
  * task/stack 事实，不是 CpuGroup 拥有的 CPU 本体。它不启动 CPU，也不让
  * idle task 进入运行。
  */
-object SecondaryIdleTaskSet: TaskObject {
+object SecondaryIdleTaskSet: TaskSet {
     initial_state: State::Base;
     parent: CpuGroup;
 
@@ -930,8 +930,8 @@ object SmpBringupPhase: PhaseObject {
                 depends_on {
                     PreSmpInitPhase.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    BootIdleTask.state == State::Ready;
-                    BootIdleRuntime.state == State::Ready;
+                    BootIdleSetup.state == State::Ready;
+                    BootIdleFlow.state == State::Ready;
                     KthreaddTask.state == State::Online;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;

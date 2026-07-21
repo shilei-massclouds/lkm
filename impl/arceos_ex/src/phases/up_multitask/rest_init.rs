@@ -72,7 +72,7 @@ pub fn enable(ctx: &mut Context) -> ! {
     crate::checkpoint::checkpoint(Checkpoint::BootIdleEntryPhaseStarted);
     crate::phases::shutdown_on_error(
         enter_boot_idle_startup_context(ctx)
-            .and_then(|()| setup_boot_idle_runtime(ctx))
+            .and_then(|()| setup_boot_idle_flow(ctx))
             .and_then(|()| prepare_boot_idle_entry(ctx))
             .and_then(|()| run_boot_idle_loop(ctx))
             .and_then(|()| mark_boot_idle_entry_prepared(ctx)),
@@ -126,7 +126,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         signal_core: &ctx.signal_core,
         task_file_context: &ctx.task_file_context,
         security_core: &ctx.security_core,
-        init_task: &ctx.init_task,
+        boot_task: &ctx.boot_task,
     })?;
     ctx.kernel_init_task.setup(
         &mut ctx.task_creation_core,
@@ -135,7 +135,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.signal_core,
         &ctx.task_file_context,
         &ctx.security_core,
-        &ctx.init_task,
+        &ctx.boot_task,
         &ctx.scheduler,
         &ctx.cpu_group,
         &mut ctx.vmalloc_allocator,
@@ -175,7 +175,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         signal_core: &ctx.signal_core,
         task_file_context: &ctx.task_file_context,
         security_core: &ctx.security_core,
-        init_task: &ctx.init_task,
+        boot_task: &ctx.boot_task,
     })?;
     ctx.kthreadd_task.setup(
         &mut ctx.task_creation_core,
@@ -184,7 +184,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.signal_core,
         &ctx.task_file_context,
         &ctx.security_core,
-        &ctx.init_task,
+        &ctx.boot_task,
         &ctx.scheduler,
         &ctx.cpu_group,
         &mut ctx.vmalloc_allocator,
@@ -225,8 +225,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     )
 }
 
-fn setup_boot_idle_runtime(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_runtime.setup(
+fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
+    ctx.boot_idle_flow.setup(
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
@@ -236,7 +236,7 @@ fn setup_boot_idle_runtime(ctx: &mut Context) -> EventResult {
 }
 
 fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_runtime
+    ctx.boot_idle_flow
         .prepare_idle_entry(&ctx.scheduler, &ctx.cpu_group)
 }
 
@@ -246,8 +246,8 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     // schedule_idle() then commits the selected runnable task as this CPU's
     // CurrentTaskRef. The real future return to the idle-loop continuation is
     // left to the later continuation/task-stack model.
-    ctx.boot_cpu_current_task.set_current_boot_idle()?;
-    ctx.boot_idle_runtime.run_idle_loop(
+    ctx.boot_cpu_current_task.set_current_boot_task()?;
+    ctx.boot_idle_flow.run_idle_loop(
         &mut ctx.scheduler,
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
@@ -550,7 +550,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.gp_seq_baseline_synced()
         && ctx.rcu_core.gp_threads_deferred()
         && ctx.boot_cpu_current_task.state() == State::Ready
-        && ctx.boot_cpu_current_task.current_is_boot_idle()
+        && ctx.boot_cpu_current_task.current_is_boot_task()
         && ctx.task_creation_core.entry_contract_ready()
         && ctx.task_creation_core.kernel_init_created()
         && ctx.task_creation_core.kthreadd_created()
@@ -627,28 +627,26 @@ fn boot_idle_entry_phase_ready(ctx: &Context) -> bool {
     boot_init_schedule_handoff_phase_ready(ctx)
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
-        && ctx.boot_idle_runtime.state() == State::Ready
-        && ctx.boot_idle_runtime.first_schedule_committed()
-        && ctx.boot_idle_runtime.idle_entry_prepared()
-        && ctx.boot_idle_runtime.cpu_startup_entry_ready()
-        && ctx.boot_idle_runtime.idle_loop_entered()
-        && ctx.boot_idle_runtime.idle_cycle_committed()
+        && ctx.boot_idle_flow.state() == State::Ready
+        && ctx.boot_idle_flow.first_schedule_committed()
+        && ctx.boot_idle_flow.idle_entry_prepared()
+        && ctx.boot_idle_flow.cpu_startup_entry_ready()
+        && ctx.boot_idle_flow.idle_loop_entered()
+        && ctx.boot_idle_flow.idle_cycle_committed()
         && ctx
-            .boot_idle_runtime
+            .boot_idle_flow
             .representative_need_resched_cycle_committed()
-        && ctx.boot_idle_runtime.nohz_run_idle_balance_done()
-        && ctx.boot_idle_runtime.local_irq_disabled_for_sleep()
-        && ctx.boot_idle_runtime.arch_cpu_idle_enter_done()
-        && ctx.boot_idle_runtime.arch_cpu_idle_exit_done()
-        && ctx.boot_idle_runtime.smp_call_function_queue_flushed()
+        && ctx.boot_idle_flow.nohz_run_idle_balance_done()
+        && ctx.boot_idle_flow.local_irq_disabled_for_sleep()
+        && ctx.boot_idle_flow.arch_cpu_idle_enter_done()
+        && ctx.boot_idle_flow.arch_cpu_idle_exit_done()
+        && ctx.boot_idle_flow.smp_call_function_queue_flushed()
         && ctx.scheduler.idle_schedule_passes() != 0
         && ctx.scheduler.idle_schedule_returned_passes() != 0
-        && ctx.boot_idle_runtime.boot_init_handoff_complete()
-        && ctx.boot_idle_runtime.boot_cpu_hotplug_online()
-        && ctx.boot_idle_runtime.secondary_cpus_not_started()
-        && ctx
-            .boot_idle_runtime
-            .kernel_init_task_switch_handoff_ready()
+        && ctx.boot_idle_flow.boot_init_handoff_complete()
+        && ctx.boot_idle_flow.boot_cpu_hotplug_online()
+        && ctx.boot_idle_flow.secondary_cpus_not_started()
+        && ctx.boot_idle_flow.kernel_init_task_switch_handoff_ready()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 

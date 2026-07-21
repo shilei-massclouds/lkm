@@ -129,7 +129,7 @@ enter schedule_idle(); no exact loop or switch count is part of boot acceptance.
 
 #### Representative need_resched idle cycle
 
-BootIdleRuntime.do_idle_cycle() must expose the three model action
+BootIdleRuntime (the `BootIdleFlow` lowering) must expose the three model action
 hooks WaitWhileNoNeedResched, ObserveNeedResched and
 ScheduleIfNeedResched as named implementation boundaries. The first
 boundary records that the boot idle task enters an abstract
@@ -145,11 +145,10 @@ path remain deferred.
 
 BootIdleRuntime.schedule_if_need_resched() must now drive a concrete
 Scheduler.schedule_idle() implementation boundary. The wrapper must
-require the current CPU's CurrentTaskSlot to still target BootIdleTask
+require the current CPU's CurrentTaskSlot to still target BootTask
 and the need_resched observation to have been recorded by
 BootIdleRuntime. It must reuse the existing Scheduler.schedule()
-pick-next/switch-to skeleton and must not hand-commit a
-BootIdleTask -> BootIdleTask identity switch when runnable tasks are
+pick-next/switch-to skeleton and must not hand-commit a new Task identity or a second idle carrier when runnable tasks are
 present. It must publish idle-specific counters/facts separately
 from ordinary schedule() calls so smoke/KUnit coverage can distinguish the
 idle path. The finite object trace need not expand the full Linux do {
@@ -175,7 +174,7 @@ methods must not fetch the global Context themselves.
 Scheduler.schedule() checkpoint/KUnit coverage must proceed from
 the front of the action chain. First check PickNextTask exit: next_ref
 has been produced and, for the first rest_init schedule, prev_ref
-targets BootIdleTask while next_ref targets KernelInitTask or
+targets BootTask while next_ref targets KernelInitTask or
 KthreaddTask; the current implementation deterministically prefers
 KernelInitTask. Then check SwitchTo entry: the recorded
 prev_ref/next_ref match the pick result and the checkpoint observes
@@ -322,36 +321,36 @@ as objects owned by the corresponding CPU instance:
 CpuGroup.Cpu[id].RunQueue and CpuGroup.Cpu[id].IdleTask. Scheduler
 may orchestrate setup and policy, but must not be treated as owning
 every CPU's runqueue or idle task body. Current Rust lowering may
-temporarily store BootRunQueue/BootIdleTask inside Scheduler fields
-only if public facts and smoke checks expose them as BootCPU views.
+temporarily store BootRunQueue and boot-task scheduler metadata inside Scheduler fields
+only if public facts and smoke checks expose them as BootCPU views of the same `BootTask`.
 
 #### Boot scheduler lock ownership
 
 BootRunQueueLock must be lowered as the lock owned by the
 BootCPU-owned BootRunQueue object, and BootIdlePiLock must be
-lowered as the pi_lock owned by the BootCPU-owned BootIdleTask
+lowered as the pi_lock owned by the BootCPU-owned BootTask
 object. Scheduler.setup() may orchestrate init_idle() ordering, but
 must not become the semantic owner of those locks. Public readiness
 checks may expose transitional Scheduler accessors only as
-projections back to BootRunQueue.lock and BootIdleTask.pi_lock.
+projections back to BootRunQueue.lock and BootTask.pi_lock.
 
 #### CPU-owned scheduler view lowering
 
-While BootRunQueue and BootIdleTask are still stored inside the
+While BootRunQueue and boot-task scheduler metadata are still stored inside the
 Scheduler object, generated Rust must expose a formal boot CPU view
 of that storage. CpuOwnedSchedulerView is the public implementation
 surface for CpuGroup.Cpu[0].RunQueue and CpuGroup.Cpu[0].IdleTask;
 CpuIdleTaskView is the public idle-task half of that view. These
 views must be derived from CpuGroup.Cpu[0], BootRunQueue and
-BootIdleTask facts, must confirm BootRunQueue.curr/idle both point
-at BootIdleTask, and must reject mismatched CPU refs or hart ids.
+BootTask facts, must confirm BootRunQueue.curr/idle both point
+at BootTask, and must reject mismatched CPU refs or hart ids.
 They are not test-only wrappers, and smoke must check them directly.
 Core object implementations that only need the boot CPU-owned
 RunQueue/IdleTask facts must consume CpuOwnedSchedulerView instead
 of directly treating Scheduler.boot_runqueue() or
-Scheduler.boot_idle_task() as the formal ownership source. Direct
+Scheduler.boot_task_metadata() as the formal ownership source. Direct
 accessors may remain as transitional storage/debug observation
-surfaces and for BootRunQueue/BootIdleTask-local APIs, but not as the
+surfaces and for BootRunQueue/BootTask-local APIs, but not as the
 primary readiness predicate in rest_init task setup/enable paths.
 RestInit phase predicates and checkpoint/KUnit handlers that verify
 boot CPU runqueue membership or task count must consume read-only
@@ -364,7 +363,7 @@ an implicit scheduler-ready shortcut.
 Smoke tests that assert CPU-owned RunQueue/IdleTask functional facts
 must prefer CpuOwnedSchedulerView/CpuIdleTaskView observations. A
 smoke test may compare against Scheduler.boot_runqueue() or
-Scheduler.boot_idle_task() only when the comparison is explicitly a
+Scheduler.boot_task_metadata() only when the comparison is explicitly a
 transitional storage parity check.
 
 #### Transitional lowering
@@ -382,7 +381,7 @@ boot CPU possible/present/online facts, secondary possible/present
 but not-online facts, and unique logical-id/hartid boundaries.
 Scheduler smoke must also observe the formal CpuOwnedSchedulerView
 and CpuIdleTaskView rather than only comparing private
-Scheduler.boot_runqueue()/boot_idle_task() fields.
+Scheduler.boot_runqueue()/boot_task_metadata() fields.
 
 #### CurrentTaskRef scope
 
@@ -506,8 +505,8 @@ nonexistent RestInitPhase wrapper.
 
 The implementation may linearize the owner-split rest_init object and
 checkpoint facts, but leaving UpMultitaskPhase must perform one real
-cooperative context transfer from BootIdleTask to KernelInitTask. The
-handoff saves BootIdleTask's `ra/sp/tp/s0..s11`, restores the initialized
+cooperative context transfer from BootTask to KernelInitTask. The
+handoff saves BootTask's `ra/sp/tp/s0..s11`, restores the initialized
 KernelInitTask context on its vmalloc stack, and enters `kernel_init_entry()`.
 That entry must call the named Kernel.Enable continuation, which validates
 the owner and stack facts before driving SmpRuntimePhase and PayloadPhase. If a later
@@ -517,7 +516,7 @@ schedule loop. Neither continuation may execute the selected payload.
 
 #### Boot stack size after handoff
 
-Once the real BootIdleTask to KernelInitTask handoff is enabled and the
+Once the real BootTask to KernelInitTask handoff is enabled and the
 KernelInit entry verifies that it is running on its own 16 KiB vmalloc stack,
 the generated boot stack must use the codegen profile's 16 KiB size. This
 reduction is valid only while SmpRuntimePhase and PayloadPhase remain owned by

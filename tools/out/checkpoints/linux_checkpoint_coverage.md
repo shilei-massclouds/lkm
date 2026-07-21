@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 485
+- total checkpoints: 490
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 368 |
+| unmapped | 373 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 368 |
+| none | 373 |
 | medium | 62 |
 | high | 55 |
 
@@ -70,6 +70,7 @@
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
+| Pid1UserAppFlow | 3 |
 | SlubSubsystem | 3 |
 | UserClone | 3 |
 | Vm | 3 |
@@ -77,16 +78,17 @@
 | ApOnlineIdlePhase | 2 |
 | ApSmpCallinPhase | 2 |
 | BootCurrentCPU | 2 |
+| BootTask | 2 |
 | CommandLine | 2 |
 | CorePreparePhase | 2 |
 | EntryPreludePhase | 2 |
 | FinalizePhase | 2 |
-| InitTask | 2 |
 | InitcallPhase | 2 |
 | IrqChipInitTable | 2 |
 | IrqOpenPrepareTrimmedPaths | 2 |
 | IrqTimeInitPhase | 2 |
 | IrqTimeTrimmedPaths | 2 |
+| KernelInitFlow | 2 |
 | KthreaddReadyGate | 2 |
 | LocalIrqEnablePhase | 2 |
 | MmCoreInitPhase | 2 |

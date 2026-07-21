@@ -67,12 +67,12 @@
  * BusyBox-init probing; it is not devtmpfs, VT allocation, /dev/console,
  * major/minor lookup or a multiple-TTY driver registry.
  *
- * Plain fork/vfork child execution currently reuses the same runtime
- * FilesStruct object. To preserve Linux's user-visible rule that a child's
- * execve close-on-exec pass does not close the parent's fd entries, the single
- * active child slice saves a bounded parent fd table and regular-slot metadata
- * snapshot at clone time and restores it when the child returns to the parent.
- * This is a local rollback for the observed child continuation, not full
+ * The current bounded witness still shares the staged runtime FilesStruct
+ * object. To preserve Linux's user-visible rule that a child's execve
+ * close-on-exec pass does not close the parent's fd entries, the named child
+ * witness saves a bounded parent fd table and regular-slot metadata snapshot
+ * at clone time and restores it when the child returns to the parent. This is
+ * a local rollback for that witness, not Task identity reuse and not full
  * copy_files(), CLONE_FILES, files_struct refcounting, fdtable expansion or
  * OFD lifetime management.
  *
@@ -499,7 +499,7 @@ object FilesStruct: ResourceObject {
                  * Linux 6.12 CLONE_PIDFD allocates a pidfd in the parent's fd
                  * table and writes that fd to legacy clone parent_tidptr.
                  * This first slice installs one pidfd-like fd table entry for
-                 * the single UserChildProcess slot. It supports fd visibility,
+                 * the concrete UserChildTask1 witness. It supports fd visibility,
                  * close, F_GETFD/F_SETFD through the common fd flag path, and
                  * immediate ppoll readability after the child has exited.
                  * Full pidfs file operations, pidfd_send_signal, pidfd_getfd,
@@ -509,7 +509,7 @@ object FilesStruct: ResourceObject {
                 depends_on {
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
-                    UserChildProcess.state == State::Ready;
+                    UserChildTask1.state == State::Online;
                 }
 
                 drives {
@@ -518,7 +518,7 @@ object FilesStruct: ResourceObject {
 
                 ensures {
                     files_struct_pidfd_installed(self);
-                    files_struct_pidfd_child_bound(self, UserChildProcess);
+                    files_struct_pidfd_child_bound(self, UserChildTask1);
                     fd_table_pidfd_entry_installed(FileDescriptorTable, FdRef::Pidfd0);
                     fd_table_cloexec_bit_set_on_install(FileDescriptorTable, FdRef::Pidfd0);
                 }
@@ -527,13 +527,13 @@ object FilesStruct: ResourceObject {
             on Action::MarkPidfdReady {
                 depends_on {
                     FilesStruct.state == State::Ready;
-                    UserChildProcess.state == State::Ready;
-                    files_struct_pidfd_child_bound(self, UserChildProcess);
+                    UserChildTask1.state == State::Destroyed;
+                    files_struct_pidfd_child_bound(self, UserChildTask1);
                 }
 
                 ensures {
-                    files_struct_pidfd_readable_after_exit(self, UserChildProcess);
-                    user_pidfd_ready(self, UserChildProcess);
+                    files_struct_pidfd_readable_after_exit(self, UserChildTask1);
+                    user_pidfd_ready(self, UserChildTask1);
                 }
             }
 
@@ -763,7 +763,7 @@ object FilesStruct: ResourceObject {
                 depends_on {
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
-                    UserChildProcess.state == State::Prepared;
+                    UserChildTask1.state == State::Prepared;
                 }
 
                 drives {
@@ -771,7 +771,7 @@ object FilesStruct: ResourceObject {
                 }
 
                 ensures {
-                    files_struct_parent_fd_snapshot_saved(self, UserChildProcess);
+                    files_struct_parent_fd_snapshot_saved(self, UserChildTask1);
                     fd_table_parent_snapshot_saved(FileDescriptorTable);
                     fd_table_parent_snapshot_preserves_fd_metadata(FileDescriptorTable);
                 }
@@ -781,8 +781,8 @@ object FilesStruct: ResourceObject {
                 depends_on {
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
-                    UserChildProcess.state == State::Ready;
-                    files_struct_parent_fd_snapshot_saved(self, UserChildProcess);
+                    UserChildTask1.state == State::Online;
+                    files_struct_parent_fd_snapshot_saved(self, UserChildTask1);
                 }
 
                 drives {
@@ -790,7 +790,7 @@ object FilesStruct: ResourceObject {
                 }
 
                 ensures {
-                    files_struct_parent_fd_snapshot_restored(self, UserChildProcess);
+                    files_struct_parent_fd_snapshot_restored(self, UserChildTask1);
                     fd_table_parent_snapshot_restored(FileDescriptorTable);
                     fd_table_parent_snapshot_preserves_fd_metadata(FileDescriptorTable);
                 }

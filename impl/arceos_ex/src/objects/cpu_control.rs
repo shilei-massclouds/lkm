@@ -1,8 +1,8 @@
 use super::{
     boot_args::BootArgs,
+    boot_task::BootTask,
     cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
-    init_task::InitTask,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::arch::riscv64::csr;
@@ -14,7 +14,7 @@ const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CurrentTaskRef {
     None,
-    BootIdle,
+    BootTask,
     KernelInit,
     Kthreadd,
     UserChild,
@@ -29,7 +29,7 @@ impl CurrentTaskRef {
     pub const fn name(self) -> &'static str {
         match self {
             Self::None => "None",
-            Self::BootIdle => "BootIdleTask",
+            Self::BootTask => "BootTask",
             Self::KernelInit => "KernelInitTask",
             Self::Kthreadd => "KthreaddTask",
             Self::UserChild => "UserChildTask",
@@ -354,8 +354,8 @@ impl CurrentTaskSlot {
         )
     }
 
-    pub fn set_current_boot_idle(&mut self) -> EventResult {
-        self.set_current(CurrentTaskRef::BootIdle)
+    pub fn set_current_boot_task(&mut self) -> EventResult {
+        self.set_current(CurrentTaskRef::BootTask)
     }
 
     pub fn set_current(&mut self, task_ref: CurrentTaskRef) -> EventResult {
@@ -396,8 +396,8 @@ impl CurrentTaskSlot {
         Ok(())
     }
 
-    pub const fn current_is_boot_idle(&self) -> bool {
-        matches!(self.current, CurrentTaskRef::BootIdle)
+    pub const fn current_is_boot_task(&self) -> bool {
+        matches!(self.current, CurrentTaskRef::BootTask)
     }
 
     pub const fn current_is_kernel_init(&self) -> bool {
@@ -431,17 +431,17 @@ impl PreemptionControl {
         self.disable_depth != 0
     }
 
-    pub fn setup(&mut self, init_task: &InitTask) -> EventResult {
+    pub fn setup(&mut self, boot_task: &BootTask) -> EventResult {
         self.setup_with_depth(
-            init_task,
+            boot_task,
             0,
             crate::checkpoint::Checkpoint::BootIdlePreemptionReady,
         )
     }
 
-    pub fn setup_disabled(&mut self, init_task: &InitTask) -> EventResult {
+    pub fn setup_disabled(&mut self, boot_task: &BootTask) -> EventResult {
         self.setup_with_depth(
-            init_task,
+            boot_task,
             1,
             crate::checkpoint::Checkpoint::BootIdlePreemptionReady,
         )
@@ -449,19 +449,19 @@ impl PreemptionControl {
 
     pub fn setup_disabled_with_checkpoint(
         &mut self,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         checkpoint: Checkpoint,
     ) -> EventResult {
-        self.setup_with_depth(init_task, 1, checkpoint)
+        self.setup_with_depth(boot_task, 1, checkpoint)
     }
 
     fn setup_with_depth(
         &mut self,
-        init_task: &InitTask,
+        boot_task: &BootTask,
         disable_depth: usize,
         checkpoint: Checkpoint,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base || init_task.state() != State::Online {
+        if self.lifecycle.state() != State::Base || boot_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

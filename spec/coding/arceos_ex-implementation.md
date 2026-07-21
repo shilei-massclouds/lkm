@@ -80,8 +80,8 @@ instance。
 [`objects/effective-context.md`](objects/effective-context.md) 和 [`riscv64.md`](riscv64.md)。
 
 实现分布在 `impl/arceos_ex/src/phases/up_multitask/rest_init.rs`、scheduler/task/context 对象与 RISC-V
-switch lowering。BootIdleTask 保留静态 boot stack；KernelInitTask/KthreaddTask 使用新分配的 vmalloc
-stack。最终线性启动 handoff 保存 BootIdle context、恢复 KernelInitTask stack，由
+switch lowering。BootTask 保留静态 boot stack；KernelInitTask/KthreaddTask 使用新分配的 vmalloc
+stack。最终线性启动 handoff 保存 BootTask context、恢复 KernelInitTask stack，由
 `kernel_init_entry()` 继续 SmpRuntime/Payload。BootIdle continuation 进入 `schedule_idle()`，
 KthreaddTask 当前进入简化调度循环。完整 kthreadd 请求消费、通用 scheduler class/fairness 和更完整
 返回语义仍是后续工作。

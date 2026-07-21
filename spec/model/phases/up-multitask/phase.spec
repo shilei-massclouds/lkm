@@ -6,8 +6,8 @@
  * The expanded path is split by execution owner:
  * BootInitRestInitPhase creates PID 1/kthreadd and completes kthreadd_done,
  * BootInitScheduleHandoffPhase commits the first scheduler handoff from the
- * BootInitTask perspective, and BootIdleEntryPhase enters the boot idle
- * continuation owned by BootIdleTask. No RestInitPhase wrapper object is part
+ * BootTask perspective, and BootIdleEntryPhase enters the boot idle
+ * continuation owned by BootTask. No RestInitPhase wrapper object is part
  * of the formal phase tree.
  */
 
@@ -15,8 +15,8 @@ include "rest-init/main.spec";
 
 /*
  * UpMultitaskPhase 表示 rest_init() 所在的单核多任务启动分支。
- * 这三个子阶段分别属于 BootInitTask 的 rest_init 前半段、BootInitTask
- * 的首次 schedule handoff 点，以及 BootIdleTask 的 idle 入口。规格不再建立
+ * 这三个子阶段分别属于 BootTask 的 rest_init 前半段、BootTask
+ * 的首次 schedule handoff 点，以及 BootTask 的 idle 入口。规格不再建立
  * RestInitPhase 兼容 wrapper，避免后续依赖一个不对应真实 Linux 控制流边界
  * 或单一执行主体的阶段对象。
  */
@@ -37,8 +37,8 @@ object UpMultitaskPhase: PhaseObject {
 
                 ensures {
                     BootInitRestInitPhase.state == State::Online;
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                 }
 
@@ -62,8 +62,8 @@ object UpMultitaskPhase: PhaseObject {
 
                 ensures {
                     BootInitScheduleHandoffPhase.state == State::Online;
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -81,8 +81,8 @@ object UpMultitaskPhase: PhaseObject {
             InterruptPhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;
-            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
@@ -96,14 +96,14 @@ object UpMultitaskPhase: PhaseObject {
 
                 ensures {
                     BootIdleEntryPhase.state == State::Online;
-                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    task_owns_flow(KernelInitTask, KernelInitFlow);
+                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     kernel_init_task_stack_switch_committed(
                         Scheduler,
-                        BootIdleTask,
+                        BootTask,
                         KernelInitTask
                     );
                 }
@@ -117,14 +117,14 @@ object UpMultitaskPhase: PhaseObject {
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;
             BootIdleEntryPhase.state == State::Online;
-            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            task_owns_flow(KernelInitTask, KernelInitFlow);
+            task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
             kernel_init_task_stack_switch_committed(
                 Scheduler,
-                BootIdleTask,
+                BootTask,
                 KernelInitTask
             );
         }

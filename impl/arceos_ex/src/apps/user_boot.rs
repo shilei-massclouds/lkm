@@ -13,6 +13,7 @@ pub(crate) fn enter(ctx: &mut Context) -> ! {
         &ctx.user_boot_payload,
         &ctx.user_address_space,
         &ctx.user_trap_frame,
-        &ctx.user_init_process,
+        &ctx.pid1_user_app_flow,
+        &ctx.kernel_init_user_state,
     )
 }

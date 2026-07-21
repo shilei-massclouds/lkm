@@ -1,6 +1,6 @@
 use super::{
+    boot_task::BootTask,
     cpu_group::CpuGroup,
-    init_task::InitTask,
     mm_core::{NamedSlubCacheKind, PageAllocator, SlubSubsystem},
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
@@ -227,14 +227,14 @@ impl Workqueue {
         slub_subsystem: &mut SlubSubsystem,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
-        init_task: &InitTask,
+        boot_task: &BootTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || page_allocator.state() != State::Ready
             || slub_subsystem.state() != State::Ready
             || cpu_group.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
-            || init_task.state() != State::Online
+            || boot_task.state() != State::Online
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -272,12 +272,12 @@ impl Workqueue {
             );
         }
 
-        self.pool_mutex.lock_boot_init_task(init_task)?;
+        self.pool_mutex.lock_boot_init_task(boot_task)?;
         self.pool_mutex_guard_used = true;
-        self.struct_mutex.lock_boot_init_task(init_task)?;
+        self.struct_mutex.lock_boot_init_task(boot_task)?;
         self.struct_mutex_guard_used = true;
-        self.struct_mutex.unlock_boot_init_task(init_task)?;
-        self.pool_mutex.unlock_boot_init_task(init_task)?;
+        self.struct_mutex.unlock_boot_init_task(boot_task)?;
+        self.pool_mutex.unlock_boot_init_task(boot_task)?;
 
         self.possible_cpu_count = cpu_group.possible_cpu_count();
         self.system_queues_ready = true;

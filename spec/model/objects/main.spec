@@ -100,18 +100,6 @@ enum PerCpuRwSemaphoreInitKind {
     RuntimeInit,
 }
 
-enum TaskRuntimeState {
-    New,
-    Running,
-}
-
-enum TaskEntry {
-    None,
-    KernelInit,
-    Kthreadd,
-    UserChild,
-}
-
 enum RunQueueRuntimeState {
     None,
     Some,
@@ -124,6 +112,8 @@ enum SelectedPayloadKind {
     UserBoot,
 }
 
+include "task.spec";
+include "task_flow.spec";
 include "device.spec";
 include "initcall.spec";
 include "vmalloc.spec";
@@ -423,11 +413,10 @@ predicate current_task_ref_targets_cpu_task<T, U, V>(task_ref: T, current_cpu: U
 predicate current_task_ref_from_cpu_view<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
 predicate task_ref_loaded_into_current_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
 predicate current_task_ref_updated_by_switch<T, U, V>(current_cpu: T, prev_ref: U, next_ref: V) -> bool;
-predicate task_creation_entry_contract_ready<T>(core: T) -> bool;
+predicate task_creation_flow_contract_ready<T>(core: T) -> bool;
 predicate task_clone_args_ready<T>(task: T) -> bool;
 predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
 predicate task_creation_used_clone_args<T, U>(core: T, task: U) -> bool;
-predicate task_creation_bound_entry<T, U>(core: T, task: U, entry: TaskEntry) -> bool;
 predicate task_creation_copy_process_sighand_siglock_deferred<T>(core: T) -> bool;
 predicate task_creation_copy_process_tasklist_lock_deferred<T>(core: T) -> bool;
 predicate task_creation_copy_process_pidmap_lock_deferred<T>(core: T) -> bool;
@@ -443,8 +432,7 @@ predicate task_signal_context_ready<T, U>(task: T, signal: U) -> bool;
 predicate task_security_context_allocated<T, U>(task: T, security: U) -> bool;
 predicate task_thread_context_ready<T>(task: T) -> bool;
 predicate task_sched_entity_initialized<T, U>(task: T, scheduler: U) -> bool;
-predicate task_entry_bound<T>(task: T, entry: TaskEntry) -> bool;
-predicate task_entry_first_phase<T, U>(task: T, phase: U) -> bool;
+predicate task_flow_first_phase<T, U>(task: T, phase: U) -> bool;
 predicate kernel_init_entry_reaches_smp_runtime<T, U>(task: T, phase: U) -> bool;
 predicate kernel_init_task_stack_switch_committed<T, U, V>(scheduler: T, prev_task: U, next_task: V) -> bool;
 predicate kernel_init_task_owns_smp_runtime_mainline<T, U>(task: T, phase: U) -> bool;
@@ -580,7 +568,6 @@ predicate task_wakeup_new_task_woken_hook_deferred<T>(task: T) -> bool;
 predicate scheduler_payload_cooperative_switch_ready<T>(scheduler: T) -> bool;
 predicate scheduler_payload_schedule_from_kernel_init<T, U>(scheduler: T, current_ref: U) -> bool;
 predicate scheduler_payload_smoke_task_enqueued<T, U>(scheduler: T, task_ref: U) -> bool;
-predicate scheduler_payload_smoke_task_entry_executed<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_payload_smoke_task_yielded_back<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
 predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
@@ -724,7 +711,6 @@ predicate boot_idle_entry_prepared<T, U>(runtime: T, task: U) -> bool;
 predicate boot_idle_arch_cpu_idle_prepare_done<T, U>(runtime: T, cpu: U) -> bool;
 predicate boot_idle_cpuhp_online_state_confirmed<T, U>(runtime: T, cpu: U) -> bool;
 predicate boot_idle_task_pf_idle<T>(task: T) -> bool;
-predicate boot_idle_task_identity_entered<T, U>(boot_init_task: T, boot_idle_task: U) -> bool;
 predicate boot_idle_runtime_loop_entered<T, U>(runtime: T, task: U) -> bool;
 predicate boot_idle_runtime_cycle_started<T, U>(runtime: T, task: U) -> bool;
 predicate boot_idle_runtime_waiting<T, U>(runtime: T, task: U) -> bool;
@@ -963,30 +949,10 @@ type FixMapConfig {
     }
 }
 
-type TaskObject {
-}
-
-type TaskRef {
-    processes {
-        Action::SetCurrent(task: Task) {
-            state_effect: StateEffect::None;
-            ensures {
-                task_ref_targets(self, task);
-            }
-        }
-    }
-}
-
 type RunQueueRef {
 }
 
 type CpuRef {
-}
-
-type TaskRefSet {
-}
-
-type RegisterValue {
 }
 
 type BufferObject {
@@ -1011,111 +977,6 @@ type BufferObject {
             state_effect: StateEffect::None;
             ensures {
                 printk_buffer_setup_copied_remaining_records(self);
-            }
-        }
-    }
-}
-
-/*
- * TaskThreadContext is the architecture-specific core switch context owned by
- * every Task. On RISC-V this corresponds to Linux task_struct.thread fields
- * saved/restored by arch/riscv/kernel/entry.S::__switch_to:
- * ra, sp and callee-saved s0..s11. Floating-point/vector state, prev_cpu,
- * icache flush policy and memory-context switching are intentionally outside
- * this minimum core context and are modeled later as separate task subobjects
- * or scheduler hooks.
- */
-type TaskThreadContext {
-    ra: RegisterValue;
-    sp: RegisterValue;
-    s0: RegisterValue;
-    s1: RegisterValue;
-    s2: RegisterValue;
-    s3: RegisterValue;
-    s4: RegisterValue;
-    s5: RegisterValue;
-    s6: RegisterValue;
-    s7: RegisterValue;
-    s8: RegisterValue;
-    s9: RegisterValue;
-    s10: RegisterValue;
-    s11: RegisterValue;
-}
-
-/*
- * Task is a reusable runtime task type. TaskRuntimeState is an extended
- * runtime state rather than an object lifecycle state. The current formal
- * model keeps SetRuntimeState as a simple operational event; later state
- * machine support will add transition guards and enter-state consistency
- * checks for concrete runtime states.
- */
-type Task: TaskObject {
-    ext_state: TaskRuntimeState;
-    cpu_ref: CpuRef;
-
-    owned {
-        thread_context: TaskThreadContext;
-    }
-
-    processes {
-        Transition::SetRuntimeState(state: TaskRuntimeState) {
-            state_effect: StateEffect::Conditional;
-            depends_on {
-                task_runtime_state_transition_allowed(self, state);
-            }
-            transitions {
-                TaskRuntimeState::New -> TaskRuntimeState::Running;
-                TaskRuntimeState::Running -> TaskRuntimeState::Running;
-            }
-            ensures {
-                task_runtime_state_is(self, state);
-            }
-            result {
-                Allowed: Success(runtime_state_set);
-                Disallowed: Failed(invalid_runtime_state_transition);
-            }
-        }
-
-        Action::PinToBootCpu(cpu_ref: CpuRef) {
-            state_effect: StateEffect::None;
-            depends_on {
-                cpu_ref_ready(cpu_ref);
-            }
-            ensures {
-                task_flag_no_setaffinity(self);
-                task_cpumask_is(self, cpu_ref);
-            }
-        }
-
-        Action::SetTaskCpu(cpu_ref: CpuRef) {
-            state_effect: StateEffect::None;
-            depends_on {
-                cpu_ref_ready(cpu_ref);
-            }
-            ensures {
-                task_cpu_ref_is(self, cpu_ref);
-            }
-        }
-
-        Action::SaveCoreContext {
-            state_effect: StateEffect::None;
-            depends_on {
-                task_thread_context_owned(self, self.thread_context);
-                task_thread_context_core_register_set(self.thread_context);
-            }
-            ensures {
-                task_thread_context_core_saved(self.thread_context);
-            }
-        }
-
-        Action::RestoreCoreContext {
-            state_effect: StateEffect::None;
-            depends_on {
-                task_thread_context_owned(self, self.thread_context);
-                task_thread_context_core_register_set(self.thread_context);
-            }
-            ensures {
-                task_thread_context_core_restored(self.thread_context);
             }
         }
     }
@@ -1153,7 +1014,7 @@ type Task: TaskObject {
  * private current-CPU reference and must not be reused as SelectRunQueue's
  * result or as the generic EnqueueTask receiver.
  */
-type SchedulerObject: TaskObject {
+type SchedulerObject: KernelObject {
     processes {
         Action::Schedule {
             state_effect: StateEffect::None;
@@ -1164,19 +1025,19 @@ type SchedulerObject: TaskObject {
                 within ScheduleLocalInterruptContext {
                     within ScheduleRunQueueContext {
                         depends_on {
-                            task_ref_targets(CurrentTaskRef, BootIdleTask);
-                            boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
-                            task_ref_targets(CurrentTaskRef, BootIdleTask);
+                            task_ref_targets(CurrentTaskRef, BootTask);
+                            boot_task_idle_role_ready(BootTask, BootRunQueue);
+                            task_ref_targets(CurrentTaskRef, BootTask);
                             task_ref_ready(CurrentTaskRef);
                             current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
-                            current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
-                            current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
-                            task_cpu_ref_is(BootIdleTask, BootCPURef);
+                            current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootTask);
+                            current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootTask);
+                            task_cpu_ref_is(BootTask, BootCPURef);
                             runqueue_ref_ready(CurrentRunQueueRef);
                             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
                             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
                             current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
-                            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
+                            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
                         }
 
                         drives {
@@ -1260,8 +1121,8 @@ type SchedulerObject: TaskObject {
             depends_on {
                 scheduler_schedule_event_available(self);
                 task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-                boot_idle_need_resched_set_for_schedule(BootIdleTask);
+                task_ref_targets(CurrentTaskRef, BootTask);
+                boot_idle_need_resched_set_for_schedule(BootTask);
             }
             drives {
                 self.Action::Schedule;
@@ -1271,7 +1132,7 @@ type SchedulerObject: TaskObject {
                 scheduler_idle_schedule_committed(self, CurrentTaskRef);
                 scheduler_idle_schedule_committed_to_runnable(self, KernelInitTaskRef);
                 boot_idle_schedule_idle_loop_until_resched_clear(self);
-                boot_idle_need_resched_drained_after_schedule(BootIdleTask);
+                boot_idle_need_resched_drained_after_schedule(BootTask);
                 task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
             }
         }
@@ -1318,140 +1179,6 @@ type SchedulerObject: TaskObject {
 }
 
 /*
- * BootIdleRuntimeObject is the boot CPU idle runtime process type. It models
- * the Linux cpu_startup_entry(CPUHP_ONLINE) tail without treating the wrapper
- * function itself as a standalone object: PrepareIdleEntry covers
- * current->flags |= PF_IDLE, arch_cpu_idle_prepare(), and
- * cpuhp_online_idle(CPUHP_ONLINE); RunIdleLoop covers while (1) do_idle();
- * DoIdleCycle covers one representative do_idle() pass and its conditional
- * schedule_idle() boundary.
- */
-type BootIdleRuntimeObject: TaskObject {
-    processes {
-        Action::PrepareIdleEntry {
-            state_effect: StateEffect::None;
-            depends_on {
-                self.state == State::Ready;
-                scheduler_first_schedule_committed(Scheduler);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-            ensures {
-                boot_idle_entry_prepared(self, BootIdleTask);
-                boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
-                boot_idle_task_pf_idle(BootIdleTask);
-                boot_idle_arch_cpu_idle_prepare_done(self, BootCPU);
-                boot_idle_cpuhp_online_state_confirmed(self, BootCPU);
-                boot_cpu_hotplug_state_online(BootCPU);
-                boot_idle_need_resched_clear_before_wait(BootIdleTask);
-            }
-        }
-
-        Action::RunIdleLoop {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(self, BootIdleTask);
-            }
-            drives {
-                self.Action::DoIdleCycle;
-            }
-            ensures {
-                boot_idle_runtime_loop_entered(self, BootIdleTask);
-                boot_idle_loop_continues(self);
-            }
-        }
-
-        Action::DoIdleCycle {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(self, BootIdleTask);
-            }
-            drives {
-                self.Action::WaitWhileNoNeedResched;
-                self.Action::ObserveNeedResched;
-                self.Action::ScheduleIfNeedResched;
-            }
-            ensures {
-                boot_idle_runtime_cycle_started(self, BootIdleTask);
-                boot_idle_nohz_run_idle_balance_done(self, BootCPU);
-                boot_idle_loop_cycle_committed(self);
-                boot_idle_loop_continues(self);
-            }
-        }
-
-        Action::WaitWhileNoNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(self, BootIdleTask);
-            }
-            within BootIdleWaitLocalInterruptContext {
-                ensures {
-                    boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
-                    boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
-                    boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
-                    boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
-                    boot_idle_poll_or_cpuidle_path_deferred(self);
-                    boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
-                }
-            }
-            ensures {
-                boot_idle_runtime_cycle_started(self, BootIdleTask);
-                boot_idle_need_resched_clear_before_wait(BootIdleTask);
-                boot_idle_runtime_observed_no_need_resched(self, BootIdleTask);
-                boot_idle_polling_set(BootIdleTask);
-                boot_idle_polling_rmb_before_sleep_check(BootIdleTask);
-                boot_idle_nohz_entered(self);
-                boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
-                boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
-                boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
-                boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
-                boot_idle_poll_or_cpuidle_path_deferred(self);
-                boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
-                boot_idle_runtime_waiting(self, BootIdleTask);
-                boot_idle_wait_path_deferred(self);
-            }
-        }
-
-        Action::ObserveNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_runtime_waiting(self, BootIdleTask);
-            }
-            ensures {
-                boot_idle_need_resched_set_for_schedule(BootIdleTask);
-                boot_idle_runtime_observed_need_resched(self, BootIdleTask);
-                boot_idle_polling_cleared(BootIdleTask);
-                boot_idle_preempt_need_resched_set(BootIdleTask);
-                boot_idle_nohz_exited(self);
-                boot_idle_polling_clear_mb_before_flush(BootIdleTask);
-                boot_idle_smp_call_function_queue_flushed(self);
-            }
-        }
-
-        Action::ScheduleIfNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_need_resched_set_for_schedule(BootIdleTask);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-            drives {
-                Scheduler.Action::ScheduleIdle;
-            }
-            ensures {
-                boot_idle_schedule_requested(self, Scheduler);
-                boot_idle_schedule_returned(self, Scheduler);
-                scheduler_idle_schedule_returned_to_idle(Scheduler, CurrentTaskRef);
-                boot_idle_need_resched_drained_after_schedule(BootIdleTask);
-                boot_idle_loop_continues(self);
-                boot_idle_livepatch_state_update_deferred(self);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-        }
-    }
-}
-
-/*
  * RunQueue is the CPU-owned scheduler runqueue abstraction. A concrete
  * instance is reached through CpuGroup.Cpu[id].RunQueue, while Scheduler
  * orchestrates setup and selection policy rather than owning every runqueue.
@@ -1463,7 +1190,7 @@ type BootIdleRuntimeObject: TaskObject {
  * both succeed. PickNextTask is a pure selection action corresponding to the
  * current minimal pick_next_task(rq, prev, &rf) boundary.
  */
-type RunQueue: TaskObject {
+type RunQueue: ResourceObject {
     ext_state: RunQueueRuntimeState;
     task_refs: TaskRefSet;
 

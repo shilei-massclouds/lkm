@@ -580,9 +580,9 @@ pub fn smoke_consecutive_exec_randoms_differ(ctx: &mut crate::context::Context) 
 pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
     ctx: &mut crate::context::Context,
 ) -> bool {
-    if !ctx.user_child_process.builtin_grandchild_active()
+    if !ctx.user_task_set.builtin_grandchild_active()
         || !ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_first_exec_retention_required()
     {
         return false;
@@ -591,7 +591,7 @@ pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
     let current_satp_before = ctx.user_address_space.satp_token();
     let current_stack_top_before = ctx.user_stack.top();
     let open_fds_before = ctx.files_struct.fd_table_open_count();
-    let outer_snapshot_before = ctx.user_child_process.parent_address_space_snapshot_saved();
+    let outer_snapshot_before = ctx.user_task_set.parent_address_space_snapshot_saved();
     let abort_count_before = ctx.exec_transaction.abort_count();
     if ctx
         .exec_transaction
@@ -625,16 +625,13 @@ pub fn smoke_builtin_grandchild_precommit_failure_is_atomic(
         && ctx.user_address_space.satp_token() == current_satp_before
         && ctx.user_stack.top() == current_stack_top_before
         && ctx.files_struct.fd_table_open_count() == open_fds_before
-        && ctx.user_child_process.parent_address_space_snapshot_saved() == outer_snapshot_before
+        && ctx.user_task_set.parent_address_space_snapshot_saved() == outer_snapshot_before
         && ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_first_exec_retention_required()
-        && ctx
-            .user_child_process
-            .builtin_grandchild_exec_commit_count()
-            == 0
+        && ctx.user_task_set.builtin_grandchild_exec_commit_count() == 0
         && !ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_parent_exec_snapshot_ever_saved()
         && ctx.exec_transaction.abort_count() == abort_count_before + 1
         && ctx.exec_transaction.last_error() == Some(ExecError::InvalidState)
@@ -646,7 +643,7 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
     main_image: &[u8],
     interpreter_image: Option<&[u8]>,
 ) -> Option<ExecSuccess> {
-    if !ctx.user_child_process.builtin_grandchild_active() {
+    if !ctx.user_task_set.builtin_grandchild_active() {
         return None;
     }
     ctx.exec_transaction
@@ -704,10 +701,10 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
                 &[0; super::user_stack::USER_STACK_ASLR_BYTES],
                 UserStackAuxv::new(
                     ctx.cpu_capabilities.elf_hwcap(),
-                    ctx.user_init_process.uid(),
-                    ctx.user_init_process.euid(),
-                    ctx.user_init_process.gid(),
-                    ctx.user_init_process.egid(),
+                    ctx.kernel_init_user_state.uid(),
+                    ctx.kernel_init_user_state.euid(),
+                    ctx.kernel_init_user_state.gid(),
+                    ctx.kernel_init_user_state.egid(),
                 ),
                 &mut ctx.page_allocator,
                 &ctx.page_metadata_map,
@@ -775,7 +772,7 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
     };
     let builtin_subsequent_exec = retention == RetiredImageRetention::None
         && ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_exec_parent_snapshot_live();
     ctx.exec_transaction.mark_point_of_no_return().ok()?;
     let mut directly_released = 0;
@@ -819,13 +816,10 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
 
     match retention {
         RetiredImageRetention::BuiltinGrandchild => {
-            if !ctx
-                .user_child_process
-                .retain_builtin_grandchild_exec_objects(
-                    &ctx.exec_transaction.retired_address_space,
-                    &mut ctx.exec_transaction.retired_stack,
-                )
-            {
+            if !ctx.user_task_set.retain_builtin_grandchild_exec_objects(
+                &ctx.exec_transaction.retired_address_space,
+                &mut ctx.exec_transaction.retired_stack,
+            ) {
                 return None;
             }
         }
@@ -834,7 +828,7 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
     }
     let released = if builtin_subsequent_exec {
         if !ctx
-            .user_child_process
+            .user_task_set
             .mark_builtin_grandchild_subsequent_exec_committed()
         {
             return None;
@@ -992,10 +986,10 @@ fn prepare_and_commit(
         } else {
             UserStackAuxv::new(
                 ctx.cpu_capabilities.elf_hwcap(),
-                ctx.user_init_process.uid(),
-                ctx.user_init_process.euid(),
-                ctx.user_init_process.gid(),
-                ctx.user_init_process.egid(),
+                ctx.kernel_init_user_state.uid(),
+                ctx.kernel_init_user_state.euid(),
+                ctx.kernel_init_user_state.gid(),
+                ctx.kernel_init_user_state.egid(),
             )
         };
         let transaction = &mut ctx.exec_transaction;
@@ -1200,7 +1194,7 @@ fn commit_prepared(
     })?;
     let builtin_subsequent_exec = retention == RetiredImageRetention::None
         && ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_exec_parent_snapshot_live();
     ctx.exec_transaction.mark_point_of_no_return()?;
     let old_satp = crate::arch::riscv64::csr::read_satp();
@@ -1274,18 +1268,15 @@ fn commit_prepared(
 
     match retention {
         RetiredImageRetention::BuiltinGrandchild => {
-            if !ctx
-                .user_child_process
-                .retain_builtin_grandchild_exec_objects(
-                    &ctx.exec_transaction.retired_address_space,
-                    &mut ctx.exec_transaction.retired_stack,
-                )
-            {
+            if !ctx.user_task_set.retain_builtin_grandchild_exec_objects(
+                &ctx.exec_transaction.retired_address_space,
+                &mut ctx.exec_transaction.retired_stack,
+            ) {
                 exec_terminal("builtin grandchild exec retention invariant failed\n");
             }
         }
         RetiredImageRetention::OuterChild => {
-            if !ctx.user_child_process.retain_parent_exec_objects(
+            if !ctx.user_task_set.retain_parent_exec_objects(
                 &ctx.exec_transaction.retired_address_space,
                 &mut ctx.exec_transaction.retired_stack,
             ) {
@@ -1339,27 +1330,26 @@ fn commit_prepared(
         }
     };
     if retention == RetiredImageRetention::None
-        && ctx.user_child_process.builtin_grandchild_active()
+        && ctx.user_task_set.builtin_grandchild_active()
         && !ctx
-            .user_child_process
+            .user_task_set
             .mark_builtin_grandchild_subsequent_exec_committed()
     {
         exec_terminal("builtin grandchild subsequent exec ownership invariant failed\n");
     }
-    if ctx.user_child_process.builtin_grandchild_active() {
+    if ctx.user_task_set.builtin_grandchild_active() {
         observation::print_builtin_grandchild_exec_retention(
             match retention {
                 RetiredImageRetention::None => "none",
                 RetiredImageRetention::OuterChild => "outer_child",
                 RetiredImageRetention::BuiltinGrandchild => "builtin_grandchild",
             },
-            ctx.user_child_process
-                .builtin_grandchild_exec_commit_count(),
+            ctx.user_task_set.builtin_grandchild_exec_commit_count(),
             ctx.user_address_space.satp_token(),
-            ctx.user_child_process.builtin_grandchild_parent_exec_satp(),
-            ctx.user_child_process
+            ctx.user_task_set.builtin_grandchild_parent_exec_satp(),
+            ctx.user_task_set
                 .builtin_grandchild_parent_exec_snapshot_saved(),
-            ctx.user_child_process
+            ctx.user_task_set
                 .builtin_grandchild_parent_exec_snapshot_restored(),
             released,
         );
@@ -1382,13 +1372,13 @@ fn classify_retired_image_retention(
     if owner != ExecOwner::Runtime {
         return Ok(RetiredImageRetention::None);
     }
-    if ctx.user_child_process.builtin_grandchild_active() {
+    if ctx.user_task_set.builtin_grandchild_active() {
         if ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_first_exec_retention_required()
         {
             if ctx
-                .user_child_process
+                .user_task_set
                 .can_retain_builtin_grandchild_exec_objects(
                     &ctx.user_address_space,
                     &ctx.user_stack,
@@ -1399,7 +1389,7 @@ fn classify_retired_image_retention(
             return Err(ExecError::InvalidState);
         }
         if ctx
-            .user_child_process
+            .user_task_set
             .builtin_grandchild_exec_parent_snapshot_live()
         {
             return Ok(RetiredImageRetention::None);
@@ -1407,11 +1397,11 @@ fn classify_retired_image_retention(
         return Err(ExecError::InvalidState);
     }
     if ctx
-        .user_child_process
+        .user_task_set
         .runtime_exec_parent_snapshot_live(&ctx.user_address_space)
     {
         if ctx
-            .user_child_process
+            .user_task_set
             .can_retain_parent_exec_objects(&ctx.user_address_space, &ctx.user_stack)
         {
             return Ok(RetiredImageRetention::OuterChild);

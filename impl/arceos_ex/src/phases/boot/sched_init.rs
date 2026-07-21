@@ -53,7 +53,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.scheduler.setup(
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
-        &ctx.init_task,
+        &ctx.boot_task,
         &ctx.init_mm,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
@@ -68,7 +68,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.slub_subsystem,
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
-        &ctx.init_task,
+        &ctx.boot_task,
     )?;
     ctx.softirq.preset(&ctx.per_cpu_storage)?;
     ctx.rcu_core.setup(
@@ -151,7 +151,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         return false;
     };
     let boot_runqueue = ctx.scheduler.boot_runqueue();
-    let boot_idle_task = boot_scheduler_view.idle_task();
+    let boot_idle_setup_state = boot_scheduler_view.idle_task();
 
     crate::phases::boot::mm_core_init::is_online()
         && ctx.scheduler.state() == State::Online
@@ -203,11 +203,11 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx
             .scheduler
             .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group)
-        && boot_idle_task.state() == State::Ready
+        && boot_idle_setup_state.state() == State::Ready
         && boot_scheduler_view.runqueue_idle_task_matches()
-        && boot_idle_task.uses_current_init_task()
-        && boot_idle_task.lazy_tlb_mm_ready()
-        && boot_idle_task.no_set_affinity()
+        && boot_idle_setup_state.uses_current_init_task()
+        && boot_idle_setup_state.lazy_tlb_mm_ready()
+        && boot_idle_setup_state.no_set_affinity()
         && ctx.scheduler.boot_idle_pi_lock().state() == State::Ready
         && !ctx.scheduler.boot_idle_pi_lock().locked()
         && ctx.scheduler.boot_idle_pi_lock().irqsave_entered_count() != 0
@@ -227,7 +227,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
         && ctx.boot_cpu_current_task.state() == State::Ready
-        && ctx.boot_cpu_current_task.current_is_boot_idle()
+        && ctx.boot_cpu_current_task.current_is_boot_task()
         && ctx.radix_tree.state() == State::Ready
         && ctx.radix_tree.node_cache_ready()
         && ctx.radix_tree.registered_in_slub_registry()
