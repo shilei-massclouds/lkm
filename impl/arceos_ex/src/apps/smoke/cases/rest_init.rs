@@ -5,7 +5,8 @@ use crate::{
         printk,
         rest_init::SystemStateValue,
         state::State,
-        task::{TaskEntry, TaskFlowRef, TaskKind, TaskRef},
+        task::{TaskEntry, TaskKind, TaskRef},
+        task_flow::TaskFlowRef,
     },
     phases,
 };

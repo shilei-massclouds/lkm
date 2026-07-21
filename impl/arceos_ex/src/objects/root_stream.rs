@@ -3,7 +3,7 @@ use crate::arch::riscv64::csr;
 use super::{
     boot_task::BootTask,
     state::{EventResult, LifecycleEvent, State, failed_condition},
-    task::{TaskFlow, TaskFlowRef},
+    task_flow::{TaskFlow, TaskFlowRef},
 };
 
 pub struct RootStream {

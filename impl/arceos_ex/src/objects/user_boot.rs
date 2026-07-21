@@ -26,6 +26,7 @@ use super::{
     files::{FilesStruct, FilesStructSnapshot},
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
+    next_generation,
     page_table::{
         PageTablePage, copy_high_half_root_entries, page_table_storage_ready, sv39_indices,
         table_pte_from_phys, user_leaf_pte_from_phys,
@@ -34,10 +35,8 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
-    task::{
-        Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef, USER_FLOW_SLOTS_PER_TASK,
-        USER_TASK_SLOT_COUNT, next_generation,
-    },
+    task::{Task, TaskEntry, TaskKind, TaskRef, USER_TASK_SLOT_COUNT},
+    task_flow::{TaskFlow, TaskFlowRef, USER_FLOW_SLOTS_PER_TASK},
     vfs::{FsStruct, FsStructSnapshot},
 };
 
@@ -2551,7 +2550,7 @@ impl UserTrapFrame {
 /// state below.
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct UserAppFlow {
-    flows: [super::task::TaskFlow; 2],
+    flows: [super::task_flow::TaskFlow; 2],
     active_flow_slot: usize,
     staging_flow_slot: usize,
     has_active_flow: bool,
@@ -2572,8 +2571,8 @@ impl UserAppFlow {
     pub const fn new() -> Self {
         Self {
             flows: [
-                super::task::TaskFlow::new_kernel_init_user(0),
-                super::task::TaskFlow::new_kernel_init_user(1),
+                super::task_flow::TaskFlow::new_kernel_init_user(0),
+                super::task_flow::TaskFlow::new_kernel_init_user(1),
             ],
             active_flow_slot: 0,
             staging_flow_slot: 0,
@@ -2672,7 +2671,7 @@ impl UserAppFlow {
         self.instance_fresh = true;
         flow.preset(
             owner.task_mut(),
-            super::task::TaskFlowRef::KERNEL_INIT,
+            super::task_flow::TaskFlowRef::KERNEL_INIT,
             Some(crate::checkpoint::Checkpoint::UserAppFlowPrepared),
         )
     }
@@ -2754,7 +2753,7 @@ impl UserAppFlow {
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
-    pub const fn flow_ref(&self) -> super::task::TaskFlowRef {
+    pub const fn flow_ref(&self) -> super::task_flow::TaskFlowRef {
         self.flows[self.active_flow_slot].flow_ref()
     }
 
@@ -2766,7 +2765,7 @@ impl UserAppFlow {
         self.flows[self.active_flow_slot].generation()
     }
 
-    pub const fn flow_ref_valid(&self, flow_ref: super::task::TaskFlowRef) -> bool {
+    pub const fn flow_ref_valid(&self, flow_ref: super::task_flow::TaskFlowRef) -> bool {
         let mut index = 0usize;
         while index < self.flows.len() {
             if self.flows[index].declared() && self.flows[index].flow_ref().same_identity(flow_ref)
@@ -2778,7 +2777,7 @@ impl UserAppFlow {
         false
     }
 
-    pub(crate) fn core_mut(&mut self) -> &mut super::task::TaskFlow {
+    pub(crate) fn core_mut(&mut self) -> &mut super::task_flow::TaskFlow {
         &mut self.flows[self.staging_flow_slot]
     }
 

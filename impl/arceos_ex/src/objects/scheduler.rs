@@ -14,7 +14,8 @@ use super::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
     static_branch::StaticBranch,
-    task::{Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef},
+    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task_flow::{TaskFlow, TaskFlowRef},
     user_boot::USER_CHILD_PID,
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};

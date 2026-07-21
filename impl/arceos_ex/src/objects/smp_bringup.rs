@@ -20,7 +20,8 @@ use super::{
     scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
-    task::{Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef},
+    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task_flow::{TaskFlow, TaskFlowRef},
 };
 use crate::checkpoint::Checkpoint;
 

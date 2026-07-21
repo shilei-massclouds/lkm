@@ -101,7 +101,8 @@ identity 聚合并对外发布；不得把实现结构拆分解释为额外 Task
 `Task` 类型声明的完整状态图统一 lower 到 Rust `Task` core；无本地 lifecycle 的静态 object 与
 runtime `declare` instance 都使用该图和同一组 transition API。object 不得局部遮蔽或合并类型状态图；
 显式完整 override 才可替换，其中 `BootTask` 是当前唯一静态例外。
-专用约束见 [`objects/task-taskflow.md`](objects/task-taskflow.md)。
+Task 专用约束见 [`objects/task.md`](objects/task.md)；TaskFlow 专用约束见
+[`objects/task-flow.md`](objects/task-flow.md)。
 
 `drives` 中的 runtime Type instance declaration 由共享工具链按源码顺序建模，不映射为静态 Rust
 singleton 或具名 model object。其 AST、checker、derive identity 和展示约束见

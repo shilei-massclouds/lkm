@@ -6,7 +6,8 @@ Object-level charter notes live here when they need a dedicated topic file.
 
 | Object | Authoritative charter |
 | --- | --- |
-| `Task` / `TaskFlow` | [`task-taskflow.md`](task-taskflow.md) |
+| `Task` | [`task.md`](task.md) |
+| `TaskFlow` | [`task-flow.md`](task-flow.md) |
 | Runtime Type instance / `declare` | [`dynamic-instance-declaration.md`](dynamic-instance-declaration.md) |
 | `ExecTransaction` | [`exec-transaction.md`](exec-transaction.md) |
 | `UserStack` | [`user-stack.md`](user-stack.md) |

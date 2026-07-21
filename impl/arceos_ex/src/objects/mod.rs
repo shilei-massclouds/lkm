@@ -92,6 +92,7 @@ pub mod static_objects;
 pub mod static_page_tables;
 pub mod swapper_vm;
 pub mod task;
+pub mod task_flow;
 pub mod trampoline_vm;
 pub mod user_boot;
 pub mod user_stack;
@@ -105,3 +106,8 @@ pub mod vm;
 pub mod vm_setup;
 pub mod workqueue;
 pub mod zones;
+
+pub(in crate::objects) const fn next_generation(current: u32) -> u32 {
+    let next = current.wrapping_add(1);
+    if next == 0 { 1 } else { next }
+}

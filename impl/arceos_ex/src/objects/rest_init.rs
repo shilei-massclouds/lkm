@@ -15,7 +15,8 @@ use super::{
     rcu::RcuCore,
     scheduler::Scheduler,
     state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    task::{Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef},
+    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task_flow::{TaskFlow, TaskFlowRef},
     workqueue::Workqueue,
 };
 use crate::arch::riscv64::task_switch::TaskSwitchContext;

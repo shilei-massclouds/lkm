@@ -3045,7 +3045,8 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 当前先将 `PayloadPhase` 的对象和边界记录如下：
 
 Exec 核心对象的权威职责已经拆到
-[`Task / TaskFlow`](objects/task-taskflow.md)、
+[`Task`](objects/task.md)、
+[`TaskFlow`](objects/task-flow.md)、
 [`ExecTransaction`](objects/exec-transaction.md)、
 [`BinaryFormatRegistry`](objects/binary-format-registry.md)、
 [`ExecSyncBoundaries`](objects/exec-sync-boundaries.md) 和

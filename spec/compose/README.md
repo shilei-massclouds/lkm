@@ -4,6 +4,11 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-21 Task / TaskFlow 内部 module 对齐审查：本轮在既有 objects crate 内把
+`objects::task_flow::{TaskFlow, TaskFlowRef}` 建立为独立规范路径，并由 `objects::task` 仅承载 Task
+core/identity。该路径调整不新增 crate、facade、build feature 或外部兼容 API，不保留旧 module
+re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需修改。
+
 2026-07-21 Task 类型级 lifecycle 与 instance 瘦身闭合审查：本轮把普通 Task lifecycle 统一 lower
 到既有 Rust `Task` core，并把 KernelInit/Kthreadd 角色编排收回既有 up-multitask phase module；
 不改变 crate、module、facade、build feature 或组件发布边界。`spec/compose/main.spec` 已复核，
