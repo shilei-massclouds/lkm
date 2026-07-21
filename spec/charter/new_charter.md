@@ -34,6 +34,25 @@
 3. 迁移 - transition：对象从一个状态到另一个状态的过程，有事件触发且符合条件时才会执行过程，过程完成时改变状态，过程中可以驱动本对象或其它对象的迁移或动作。
 4. 动作 - action：对象响应处理事件的过程，不改变对象状态。
 
+## Task、TaskFlow 与稳定引用
+
+`Task` 是内核中唯一的 task_struct-like carrier。每个 Task 独立保存生命周期、稳定 identity、
+PID、CPU 归属、调度状态、线程切换上下文以及它拥有的 Flow 引用。`BootTask`、
+`KernelInitTask`（PID 1）、`KthreaddTask`、普通用户 child、AP idle 和由 smpboot 模板创建的
+内核线程都使用同一 Task 类型；idle、init、
+kthread 或测试角色只是 Task metadata，不能成为另一套 lifecycle、PID 或 switch-context carrier。
+
+`TaskFlow` 是 Task 上一段 execution continuation 的独立生命周期载体。每个 Flow 恰有一个 owner
+Task；一个 Task 可以按执行历史拥有多个 Flow，但任一时刻最多只能有一个 active Flow。exec 和
+boot-idle handoff 保持 Task identity，只替换 active Flow；fork/clone 才创建 fresh Task，并为它
+创建 fresh Flow。syscall、files、credentials、signal、地址空间等资源归属于实际当前 Task，不能
+因为启动主线最初由 `KernelInitTask`（PID 1）执行就一律归入它。
+
+`TaskRef` / `TaskFlowRef` 是分别引用 Task / TaskFlow runtime identity 的稳定句柄。引用必须同时
+携带私有 storage slot 和非零 generation；storage 可在对象完整 Cleanup 后回收，但旧 generation
+永远不能重新变为有效。current-task slot、runqueue、scheduler、wait/reap record 和 checkpoint
+诊断都传递这种引用，不能用 BootTask/KernelInitTask/UserChild 等角色枚举代替 identity。
+
 本项目采用相对简单的状态机模型，简化未来的建模、推导。
 
 唯一复杂之处在于，事件不仅可以来自外部，也可以是来自迁移完成时触发的通知，是否触发可以根据情况配置。通过此机制可以让部分状态无须由外部事件触发而自动迁移，进而达到一个外部事件引起多个状态顺序推进的连锁反应效果。
@@ -220,7 +239,9 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 ### 单核多任务期UpMultiTaskPhase
 
-引导任务转化为IDLE任务，同时启动了内核初始化任务和内核线程守护任务。
+同一 `BootTask` 保持 PID 0 与 Task identity，把 active Flow 从 `RootStream` handoff 到
+`BootIdleFlow`；同时创建具有各自 Task identity 与初始 Flow 的 `KernelInitTask` 和
+`KthreaddTask`。Boot idle 是 continuation 替换，不是引导 Task 转化或复制成另一个 Task。
 
 #### BootInitScheduleHandoffPhase
 

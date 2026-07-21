@@ -52,9 +52,10 @@ handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requ
 三个 transition 和它们驱动的对象动作都由 KernelInitTask 执行，并持续验证唯一 task handoff、
 entry 事实及真实 SP 位于 KernelInitTask vmalloc stack。
 
-成功 exec 不替换 PID 1 Task。用户地址空间、files、credentials、signal 和 trap frame 仍直接关联
-`KernelInitTask`；`UserAppFlow` 只保存本次应用 continuation 的独立 lifecycle。用户应用内部是
-黑盒，syscall/trap 仍由相应内核对象处理。
+成功 exec 不替换 `KernelInitTask`（PID 1）。首次 exec 的用户地址空间、files、credentials、signal 和 trap
+frame 直接关联 `KernelInitTask`；runtime child fork/exec 后同类资源关联实际当前 child Task，不能
+一律回指 `KernelInitTask`。`UserAppFlow` 只保存本次应用 continuation 的独立 lifecycle。用户应用内部是
+黑盒，syscall/trap 仍由当前 Task 和相应内核对象处理。
 
 ## 引用
 

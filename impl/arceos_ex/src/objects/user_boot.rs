@@ -34,7 +34,10 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_page_tables,
     swapper_vm::SwapperVm,
-    task::TaskEntry,
+    task::{
+        Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef, USER_FLOW_SLOTS_PER_TASK,
+        USER_TASK_SLOT_COUNT, next_generation,
+    },
     vfs::{FsStruct, FsStructSnapshot},
 };
 
@@ -259,6 +262,7 @@ const USER_CLONE_SETTLS: usize = 0x0008_0000;
 #[derive(Clone, Copy)]
 struct UserCompletedChildRecord {
     occupied: bool,
+    task_ref: TaskRef,
     pid: usize,
     exit_status: usize,
     wait_status: usize,
@@ -270,6 +274,7 @@ impl UserCompletedChildRecord {
     const fn empty() -> Self {
         Self {
             occupied: false,
+            task_ref: TaskRef::NONE,
             pid: 0,
             exit_status: 0,
             wait_status: 0,
@@ -278,15 +283,52 @@ impl UserCompletedChildRecord {
         }
     }
 
-    const fn archived(pid: usize, exit_status: usize, pidfd_fd: usize) -> Self {
+    const fn archived(task_ref: TaskRef, pid: usize, exit_status: usize, pidfd_fd: usize) -> Self {
         Self {
             occupied: true,
+            task_ref,
             pid,
             exit_status,
             wait_status: (exit_status & 0xff) << 8,
             pidfd_fd,
             reaped: false,
         }
+    }
+}
+
+struct UserTaskStorageSlot {
+    generation: u32,
+    occupied: bool,
+    pid: usize,
+    task: Task,
+    flows: [TaskFlow; USER_FLOW_SLOTS_PER_TASK],
+    active_flow_slot: usize,
+}
+
+impl UserTaskStorageSlot {
+    const fn new(slot: usize) -> Self {
+        Self {
+            generation: 0,
+            occupied: false,
+            pid: 0,
+            task: Task::new(),
+            flows: [TaskFlow::new_user(slot, 0), TaskFlow::new_user(slot, 1)],
+            active_flow_slot: 0,
+        }
+    }
+
+    const fn task_ref(&self) -> TaskRef {
+        self.task.task_ref()
+    }
+
+    const fn state(&self) -> State {
+        self.task.state()
+    }
+}
+
+fn task_event_or_terminate(result: EventResult) {
+    if result.is_err() {
+        panic!("declared Task/TaskFlow invariant failed");
     }
 }
 
@@ -2503,13 +2545,17 @@ impl UserTrapFrame {
     }
 }
 
-/// The first user application continuation installed into the stable PID 1
-/// task by exec.  Its lifecycle is independent from the task and from the
-/// task-owned resource state below.
+/// The first user application continuation installed by exec into the stable
+/// [`KernelInitTask`](super::rest_init::KernelInitTask), whose PID is 1. Its
+/// lifecycle is independent from the task and from the task-owned resource
+/// state below.
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct UserAppFlow {
-    lifecycle: Lifecycle,
-    declared: bool,
+    flows: [super::task::TaskFlow; 2],
+    active_flow_slot: usize,
+    staging_flow_slot: usize,
+    has_active_flow: bool,
+    staging_declared: bool,
     declaration_occurrence: usize,
     owner_pid: usize,
     owner_bound: bool,
@@ -2525,8 +2571,14 @@ pub struct UserAppFlow {
 impl UserAppFlow {
     pub const fn new() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
-            declared: false,
+            flows: [
+                super::task::TaskFlow::new_kernel_init_user(0),
+                super::task::TaskFlow::new_kernel_init_user(1),
+            ],
+            active_flow_slot: 0,
+            staging_flow_slot: 0,
+            has_active_flow: false,
+            staging_declared: false,
             declaration_occurrence: 0,
             owner_pid: 0,
             owner_bound: false,
@@ -2540,11 +2592,11 @@ impl UserAppFlow {
     }
 
     pub const fn state(&self) -> State {
-        self.lifecycle.state()
+        self.flows[self.observation_slot()].state()
     }
 
     pub const fn declared(&self) -> bool {
-        self.declared
+        self.flows[self.observation_slot()].declared()
     }
 
     pub const fn declaration_occurrence(&self) -> usize {
@@ -2570,30 +2622,45 @@ impl UserAppFlow {
     /// Materialize the runtime Flow instance in Base without running Preset or
     /// establishing owner/active relationships.
     pub fn declare(&mut self) -> EventResult {
-        if self.declared || self.lifecycle.state() != State::Base {
+        let slot = if self.has_active_flow {
+            1usize.wrapping_sub(self.active_flow_slot)
+        } else {
+            0
+        };
+        if self.staging_declared || self.flows[slot].declared() {
             return failed_condition(
                 LifecycleEvent::Preset,
-                self.lifecycle.state(),
+                self.flows[slot].state(),
                 State::Base,
                 State::Base,
             );
         }
-        self.declared = true;
+        self.flows[slot].declare()?;
+        self.staging_flow_slot = slot;
+        self.staging_declared = true;
         self.declaration_occurrence = self.declaration_occurrence.wrapping_add(1);
+        self.owner_bound = false;
+        self.execution_context_ready = false;
+        self.active_binding_committed = false;
+        self.application_entered = false;
+        self.released = false;
         Ok(())
     }
 
-    pub fn preset(&mut self, owner: &KernelInitTask) -> EventResult {
-        if !self.declared
+    pub fn preset(&mut self, owner: &mut KernelInitTask) -> EventResult {
+        let flow = &mut self.flows[self.staging_flow_slot];
+        if !self.staging_declared
+            || !flow.declared()
             || self.declaration_occurrence == 0
-            || self.lifecycle.state() != State::Base
+            || flow.state() != State::Base
             || owner.state() != State::Online
             || owner.pid() != super::rest_init::KERNEL_INIT_PID
+            || self.has_active_flow
             || owner.user_flow_owned()
         {
             return failed_condition(
                 LifecycleEvent::Preset,
-                self.lifecycle.state(),
+                flow.state(),
                 State::Base,
                 State::Prepared,
             );
@@ -2603,16 +2670,16 @@ impl UserAppFlow {
         self.owner_bound = true;
         self.entry_source_pid1_exec = true;
         self.instance_fresh = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            crate::checkpoint::Checkpoint::UserAppFlowPrepared,
+        flow.preset(
+            owner.task_mut(),
+            super::task::TaskFlowRef::KERNEL_INIT,
+            Some(crate::checkpoint::Checkpoint::UserAppFlowPrepared),
         )
     }
 
     pub fn setup(&mut self, owner_state: &KernelInitTaskUserState) -> EventResult {
-        if self.lifecycle.state() != State::Prepared
+        let flow = &mut self.flows[self.staging_flow_slot];
+        if flow.state() != State::Prepared
             || !self.owner_bound
             || !self.entry_source_pid1_exec
             || !self.instance_fresh
@@ -2622,44 +2689,50 @@ impl UserAppFlow {
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                flow.state(),
                 State::Prepared,
                 State::Ready,
             );
         }
 
         self.execution_context_ready = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            crate::checkpoint::Checkpoint::UserAppFlowReady,
-        )
+        flow.setup(Some(crate::checkpoint::Checkpoint::UserAppFlowReady))
     }
 
     pub fn commit_active_binding(&mut self, owner: &KernelInitTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+        let flow = &self.flows[self.staging_flow_slot];
+        if flow.state() != State::Ready
             || !self.execution_context_ready
             || owner.state() != State::Online
             || owner.pid() != self.owner_pid
             || !owner.user_flow_owned()
             || !owner.user_flow_active()
             || !owner.flow_handoff_committed()
+            || !flow.active()
+            || flow.owner() != owner.task_ref()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                flow.state(),
                 State::Ready,
                 State::Ready,
             );
         }
 
         self.active_binding_committed = true;
+        self.active_flow_slot = self.staging_flow_slot;
+        self.has_active_flow = true;
+        self.staging_declared = false;
         Ok(())
     }
 
-    pub fn enable(&mut self, owner_state: &KernelInitTaskUserState) -> EventResult {
-        if self.lifecycle.state() != State::Ready
+    pub fn enable(
+        &mut self,
+        owner: &KernelInitTask,
+        owner_state: &KernelInitTaskUserState,
+    ) -> EventResult {
+        let flow = &mut self.flows[self.active_flow_slot];
+        if flow.state() != State::Ready
             || !self.execution_context_ready
             || !self.active_binding_committed
             || !owner_state.resources_bound()
@@ -2667,19 +2740,121 @@ impl UserAppFlow {
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.lifecycle.state(),
+                flow.state(),
                 State::Ready,
                 State::Online,
             );
         }
 
         self.application_entered = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            crate::checkpoint::Checkpoint::UserAppFlowOnline,
+        flow.enable(
+            owner.task(),
+            Some(crate::checkpoint::Checkpoint::UserAppFlowOnline),
         )
+    }
+
+    #[cfg_attr(app_smoke, allow(dead_code))]
+    pub const fn flow_ref(&self) -> super::task::TaskFlowRef {
+        self.flows[self.active_flow_slot].flow_ref()
+    }
+
+    pub const fn task_ref_owner(&self) -> super::task::TaskRef {
+        self.flows[self.active_flow_slot].owner()
+    }
+
+    pub const fn flow_generation(&self) -> u32 {
+        self.flows[self.active_flow_slot].generation()
+    }
+
+    pub const fn flow_ref_valid(&self, flow_ref: super::task::TaskFlowRef) -> bool {
+        let mut index = 0usize;
+        while index < self.flows.len() {
+            if self.flows[index].declared() && self.flows[index].flow_ref().same_identity(flow_ref)
+            {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub(crate) fn core_mut(&mut self) -> &mut super::task::TaskFlow {
+        &mut self.flows[self.staging_flow_slot]
+    }
+
+    pub fn commit_runtime_exec_handoff(&mut self, owner: &mut KernelInitTask) -> EventResult {
+        if !self.has_active_flow
+            || self.staging_declared
+            || owner.state() != State::Online
+            || owner.task().active_flow() != self.flows[self.active_flow_slot].flow_ref()
+            || self.flows[self.active_flow_slot].state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.declare()?;
+        let old_index = self.active_flow_slot;
+        let new_index = self.staging_flow_slot;
+        let (old, new) = if old_index == 0 {
+            let (old_slice, new_slice) = self.flows.split_at_mut(1);
+            (&mut old_slice[0], &mut new_slice[0])
+        } else {
+            let (new_slice, old_slice) = self.flows.split_at_mut(1);
+            (&mut old_slice[0], &mut new_slice[0])
+        };
+        new.preset(owner.task_mut(), old.flow_ref(), None)?;
+        new.setup(None)?;
+        old.disable(owner.task(), None)?;
+        owner.task_mut().commit_flow_handoff(old, new)?;
+        new.enable(owner.task(), None)?;
+        old.cleanup(owner.task(), None)?;
+        owner.task_mut().retire_destroyed_flow(old)?;
+
+        self.active_flow_slot = new_index;
+        self.has_active_flow = true;
+        self.staging_declared = false;
+        self.active_binding_committed = true;
+        self.application_entered = true;
+        owner.mark_user_flow_handoff_committed();
+        Ok(())
+    }
+
+    pub fn cleanup_for_shutdown(&mut self, owner: &mut KernelInitTask) -> EventResult {
+        if !self.has_active_flow
+            || self.staging_declared
+            || owner.state() != State::Online
+            || owner.task().active_flow() != self.flows[self.active_flow_slot].flow_ref()
+            || self.flows[self.active_flow_slot].state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Cleanup,
+                self.state(),
+                State::Online,
+                State::Destroyed,
+            );
+        }
+
+        self.flows[self.active_flow_slot].cleanup_active_for_exit(owner.task_mut())?;
+        owner.task_mut().disable()?;
+        owner.task_mut().cleanup()?;
+        self.has_active_flow = false;
+        self.active_binding_committed = false;
+        self.application_entered = false;
+        self.released = true;
+        Ok(())
+    }
+
+    const fn observation_slot(&self) -> usize {
+        if self.staging_declared {
+            self.staging_flow_slot
+        } else {
+            self.active_flow_slot
+        }
     }
 }
 
@@ -2956,7 +3131,11 @@ impl BuiltinGrandchildContinuation {
 
 pub struct UserTaskSet {
     set_lifecycle: Lifecycle,
-    active_task_lifecycle: Lifecycle,
+    task_slots: [UserTaskStorageSlot; USER_TASK_SLOT_COUNT],
+    active_task_ref: TaskRef,
+    parent_task_ref: TaskRef,
+    pending_task_ref: TaskRef,
+    last_exited_task_ref: TaskRef,
     prepared: bool,
     task_entry: TaskEntry,
     task_entry_bound: bool,
@@ -3077,7 +3256,20 @@ impl UserTaskSet {
     pub const fn new() -> Self {
         Self {
             set_lifecycle: Lifecycle::new(State::Base),
-            active_task_lifecycle: Lifecycle::new(State::Base),
+            task_slots: [
+                UserTaskStorageSlot::new(0),
+                UserTaskStorageSlot::new(1),
+                UserTaskStorageSlot::new(2),
+                UserTaskStorageSlot::new(3),
+                UserTaskStorageSlot::new(4),
+                UserTaskStorageSlot::new(5),
+                UserTaskStorageSlot::new(6),
+                UserTaskStorageSlot::new(7),
+            ],
+            active_task_ref: TaskRef::NONE,
+            parent_task_ref: TaskRef::NONE,
+            pending_task_ref: TaskRef::NONE,
+            last_exited_task_ref: TaskRef::NONE,
             prepared: false,
             task_entry: TaskEntry::None,
             task_entry_bound: false,
@@ -3199,7 +3391,327 @@ impl UserTaskSet {
     }
 
     pub const fn active_task_state(&self) -> State {
-        self.active_task_lifecycle.state()
+        if let Some(slot) = self.slot_for_ref(self.active_task_ref) {
+            slot.state()
+        } else if self.active_task_record_available {
+            State::Prepared
+        } else if let Some(slot) = self.slot_for_ref(self.last_exited_task_ref) {
+            slot.state()
+        } else {
+            State::Base
+        }
+    }
+
+    pub const fn active_task_ref(&self) -> TaskRef {
+        self.active_task_ref
+    }
+
+    pub const fn last_exited_task_ref(&self) -> TaskRef {
+        self.last_exited_task_ref
+    }
+
+    pub const fn last_exited_flow_ref(&self) -> TaskFlowRef {
+        if let Some(slot) = self.slot_for_ref(self.last_exited_task_ref) {
+            slot.flows[slot.active_flow_slot].flow_ref()
+        } else {
+            TaskFlowRef::NONE
+        }
+    }
+
+    pub const fn parent_task_ref(&self) -> TaskRef {
+        self.parent_task_ref
+    }
+
+    pub const fn pending_task_ref(&self) -> TaskRef {
+        self.pending_task_ref
+    }
+
+    pub const fn active_task_generation(&self) -> u32 {
+        self.active_task_ref.generation()
+    }
+
+    pub const fn active_flow_ref(&self) -> TaskFlowRef {
+        if let Some(slot) = self.slot_for_ref(self.active_task_ref) {
+            slot.task.active_flow()
+        } else {
+            TaskFlowRef::NONE
+        }
+    }
+
+    pub const fn active_flow_generation(&self) -> u32 {
+        self.active_flow_ref().generation()
+    }
+
+    pub const fn task_ref_valid(&self, task_ref: TaskRef) -> bool {
+        self.slot_for_ref(task_ref).is_some()
+    }
+
+    pub const fn flow_ref_valid(&self, task_ref: TaskRef, flow_ref: TaskFlowRef) -> bool {
+        let Some(slot) = self.slot_for_ref(task_ref) else {
+            return false;
+        };
+        let mut index = 0usize;
+        while index < USER_FLOW_SLOTS_PER_TASK {
+            if slot.flows[index].declared() && slot.flows[index].flow_ref().same_identity(flow_ref)
+            {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub const fn free_task_slot_count(&self) -> usize {
+        let mut count = 0usize;
+        let mut index = 0usize;
+        while index < USER_TASK_SLOT_COUNT {
+            if !self.task_slots[index].occupied {
+                count += 1;
+            }
+            index += 1;
+        }
+        count
+    }
+
+    const fn slot_for_ref(&self, task_ref: TaskRef) -> Option<&UserTaskStorageSlot> {
+        let Some(index) = task_ref.user_slot() else {
+            return None;
+        };
+        let slot = &self.task_slots[index];
+        if slot.occupied && slot.task_ref().same_identity(task_ref) {
+            Some(slot)
+        } else {
+            None
+        }
+    }
+
+    fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
+        if pid == 0 {
+            return None;
+        }
+        let mut index = 0usize;
+        while index < USER_TASK_SLOT_COUNT && self.task_slots[index].occupied {
+            index += 1;
+        }
+        if index == USER_TASK_SLOT_COUNT {
+            return None;
+        }
+
+        let slot = &mut self.task_slots[index];
+        slot.generation = next_generation(slot.generation);
+        let task_ref = TaskRef::user(index, slot.generation);
+        slot.task = Task::with_ref(task_ref);
+        slot.pid = pid;
+        slot.active_flow_slot = 0;
+        slot.occupied = true;
+
+        task_event_or_terminate(slot.task.set_identity_metadata(
+            pid,
+            TaskEntry::UserChild,
+            TaskKind::UserModeThread,
+        ));
+        task_event_or_terminate(slot.task.adopt_preset());
+        task_event_or_terminate(slot.task.adopt_setup());
+        task_event_or_terminate(slot.flows[0].declare());
+
+        self.parent_task_ref = parent_ref;
+        self.active_task_ref = task_ref;
+        self.pending_task_ref = TaskRef::NONE;
+        self.last_exited_task_ref = TaskRef::NONE;
+
+        let slot = &mut self.task_slots[index];
+        let UserTaskStorageSlot { task, flows, .. } = slot;
+        task_event_or_terminate(flows[0].preset(task, TaskFlowRef::NONE, None));
+        task_event_or_terminate(flows[0].setup(None));
+        task_event_or_terminate(task.bind_initial_flow(&mut flows[0]));
+        task_event_or_terminate(task.adopt_enable());
+        task_event_or_terminate(flows[0].enable(task, None));
+        Some(task_ref)
+    }
+
+    fn destroy_active_user_task(&mut self) -> bool {
+        let Some(index) = self.active_task_ref.user_slot() else {
+            return false;
+        };
+        if !self.task_slots[index].occupied
+            || !self.task_slots[index]
+                .task_ref()
+                .same_identity(self.active_task_ref)
+        {
+            return false;
+        }
+
+        let slot = &mut self.task_slots[index];
+        let flow_index = slot.active_flow_slot;
+        let UserTaskStorageSlot { task, flows, .. } = slot;
+        if flows[flow_index].cleanup_active_for_exit(task).is_err()
+            || task.disable().is_err()
+            || task.cleanup().is_err()
+        {
+            return false;
+        }
+
+        self.last_exited_task_ref = self.active_task_ref;
+        self.active_task_ref = if self.task_ref_valid(self.parent_task_ref) {
+            self.parent_task_ref
+        } else {
+            TaskRef::NONE
+        };
+        self.parent_task_ref = TaskRef::NONE;
+        true
+    }
+
+    fn release_destroyed_task_ref(&mut self, task_ref: TaskRef) -> bool {
+        let Some(index) = task_ref.user_slot() else {
+            return false;
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied
+            || !slot.task_ref().same_identity(task_ref)
+            || slot.state() != State::Destroyed
+        {
+            return false;
+        }
+        slot.occupied = false;
+        slot.pid = 0;
+        if self.last_exited_task_ref.same_identity(task_ref) {
+            self.last_exited_task_ref = TaskRef::NONE;
+        }
+        true
+    }
+
+    pub fn commit_active_exec_flow_handoff(&mut self) -> bool {
+        let Some(index) = self.active_task_ref.user_slot() else {
+            return false;
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied || !slot.task_ref().same_identity(self.active_task_ref) {
+            return false;
+        }
+        let old_index = slot.active_flow_slot;
+        let new_index = 1usize.wrapping_sub(old_index);
+        let UserTaskStorageSlot { task, flows, .. } = slot;
+        let (old, new) = if old_index == 0 {
+            let (old_slice, new_slice) = flows.split_at_mut(1);
+            (&mut old_slice[0], &mut new_slice[0])
+        } else {
+            let (new_slice, old_slice) = flows.split_at_mut(1);
+            (&mut old_slice[0], &mut new_slice[0])
+        };
+
+        if new.declare().is_err()
+            || new.preset(task, old.flow_ref(), None).is_err()
+            || new.setup(None).is_err()
+            || old.disable(task, None).is_err()
+            || task.commit_flow_handoff(old, new).is_err()
+            || new.enable(task, None).is_err()
+            || old.cleanup(task, None).is_err()
+            || task.retire_destroyed_flow(old).is_err()
+        {
+            return false;
+        }
+        slot.active_flow_slot = new_index;
+        true
+    }
+
+    pub fn cleanup_active_task_for_shutdown(&mut self) -> bool {
+        self.destroy_active_user_task()
+    }
+
+    #[cfg(app_smoke)]
+    pub fn smoke_task_slot_generation_contract(&mut self) -> bool {
+        if self.free_task_slot_count() != USER_TASK_SLOT_COUNT
+            || self.active_task_ref.is_valid()
+            || !self.active_task_record_available
+        {
+            return false;
+        }
+
+        let next_pid_before = self.next_child_pid;
+        let mut task_refs = [TaskRef::NONE; USER_TASK_SLOT_COUNT];
+        let mut flow_refs = [TaskFlowRef::NONE; USER_TASK_SLOT_COUNT];
+        let mut index = 0usize;
+        while index < USER_TASK_SLOT_COUNT {
+            let Some(task_ref) = self.allocate_user_task(10_000 + index, TaskRef::NONE) else {
+                return false;
+            };
+            task_refs[index] = task_ref;
+            flow_refs[index] = self.active_flow_ref();
+            index += 1;
+        }
+
+        if self.free_task_slot_count() != 0
+            || self
+                .allocate_user_task(10_000 + USER_TASK_SLOT_COUNT, TaskRef::NONE)
+                .is_some()
+            || self.next_child_pid != next_pid_before
+            || !self.task_slots[0].task.disable().is_err()
+            || self.task_slots[1].task.owns_flow(flow_refs[0])
+            || self.flow_ref_valid(task_refs[1], flow_refs[0])
+        {
+            return false;
+        }
+
+        index = 0;
+        while index < USER_TASK_SLOT_COUNT {
+            let mut other = index + 1;
+            while other < USER_TASK_SLOT_COUNT {
+                if task_refs[index].same_identity(task_refs[other])
+                    || flow_refs[index].same_identity(flow_refs[other])
+                {
+                    return false;
+                }
+                other += 1;
+            }
+
+            let slot = &mut self.task_slots[index];
+            let flow_index = slot.active_flow_slot;
+            let UserTaskStorageSlot { task, flows, .. } = slot;
+            if flows[flow_index].cleanup_active_for_exit(task).is_err()
+                || task.disable().is_err()
+                || task.cleanup().is_err()
+            {
+                return false;
+            }
+            index += 1;
+        }
+
+        index = 0;
+        while index < USER_TASK_SLOT_COUNT {
+            if !self.release_destroyed_task_ref(task_refs[index]) {
+                return false;
+            }
+            index += 1;
+        }
+        self.active_task_ref = TaskRef::NONE;
+        self.parent_task_ref = TaskRef::NONE;
+        self.pending_task_ref = TaskRef::NONE;
+        self.last_exited_task_ref = TaskRef::NONE;
+
+        if self.task_ref_valid(task_refs[0]) || self.flow_ref_valid(task_refs[0], flow_refs[0]) {
+            return false;
+        }
+
+        let Some(recycled_ref) = self.allocate_user_task(20_000, TaskRef::NONE) else {
+            return false;
+        };
+        let recycled_flow_ref = self.active_flow_ref();
+        if recycled_ref.slot() != task_refs[0].slot()
+            || recycled_ref.generation() == task_refs[0].generation()
+            || recycled_flow_ref.slot() != flow_refs[0].slot()
+            || recycled_flow_ref.generation() == flow_refs[0].generation()
+            || self.task_ref_valid(task_refs[0])
+            || self.flow_ref_valid(recycled_ref, flow_refs[0])
+            || !self.task_ref_valid(recycled_ref)
+            || !self.flow_ref_valid(recycled_ref, recycled_flow_ref)
+            || !self.destroy_active_user_task()
+        {
+            return false;
+        }
+        let destroyed_ref = self.last_exited_task_ref;
+        self.release_destroyed_task_ref(destroyed_ref)
+            && self.free_task_slot_count() == USER_TASK_SLOT_COUNT
+            && self.next_child_pid == next_pid_before
     }
 
     pub const fn prepared(&self) -> bool {
@@ -3490,7 +4002,7 @@ impl UserTaskSet {
     }
 
     pub fn pid1_plain_fork_child_continuation(&self) -> bool {
-        self.active_task_lifecycle.state() == State::Ready
+        self.active_task_state() == State::Online
             && self.current_child_continuation()
             && !self.vfork_clone()
             && self.pid != 0
@@ -3506,7 +4018,7 @@ impl UserTaskSet {
     }
 
     pub fn observed_plain_fork_child_pending_wait(&self) -> bool {
-        self.active_task_lifecycle.state() == State::Ready
+        self.active_task_state() == State::Online
             && self.observed_plain_fork_clone
             && !self.observed_plain_fork_child_active
             && !self.observed_plain_fork_parent_restored
@@ -3523,7 +4035,7 @@ impl UserTaskSet {
     pub fn active_task_record_available(&self) -> bool {
         self.active_task_record_available
             && self.set_lifecycle.state() == State::Ready
-            && self.active_task_lifecycle.state() == State::Prepared
+            && self.active_task_state() == State::Prepared
             && self.prepared
             && self.task_entry == TaskEntry::UserChild
     }
@@ -3670,7 +4182,7 @@ impl UserTaskSet {
     }
 
     pub fn nested_vfork_copy_ready(&self) -> bool {
-        self.active_task_lifecycle.state() == State::Ready
+        self.active_task_state() == State::Online
             && self.current_child_continuation()
             && self.vfork_clone()
             && !self.nested_vfork_clone
@@ -3866,9 +4378,7 @@ impl UserTaskSet {
     }
 
     pub fn setup(&mut self) -> EventResult {
-        if self.set_lifecycle.state() != State::Base
-            || self.active_task_lifecycle.state() != State::Base
-        {
+        if self.set_lifecycle.state() != State::Base || self.active_task_state() != State::Base {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.set_lifecycle.state(),
@@ -3881,7 +4391,6 @@ impl UserTaskSet {
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
         self.active_task_record_available = true;
-        self.active_task_lifecycle = Lifecycle::new(State::Prepared);
         self.set_lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -3905,9 +4414,10 @@ impl UserTaskSet {
         sched_entity_ready: bool,
         task_state_new: bool,
     ) -> Option<usize> {
-        if self.active_task_lifecycle.state() != State::Prepared
+        if self.active_task_state() != State::Prepared
             || !self.prepared
             || !self.active_task_record_available
+            || self.free_task_slot_count() == 0
             || self.task_entry != TaskEntry::UserChild
             || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
@@ -3936,6 +4446,7 @@ impl UserTaskSet {
         let parent_fd_snapshot = files_struct.save_parent_fd_snapshot().ok()?;
 
         let child_pid = self.next_child_pid;
+        self.allocate_user_task(child_pid, TaskRef::NONE)?;
         self.pid = child_pid;
         self.parent_pid = super::rest_init::KERNEL_INIT_PID;
         self.tgid = child_pid;
@@ -4016,13 +4527,6 @@ impl UserTaskSet {
         self.vfork_next_child_accepted = false;
         self.next_child_pid = child_pid.saturating_add(1);
 
-        if self
-            .active_task_lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
-            .is_err()
-        {
-            return None;
-        }
         self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some(self.pid)
     }
@@ -4049,9 +4553,10 @@ impl UserTaskSet {
         sched_entity_ready: bool,
         task_state_new: bool,
     ) -> Option<TrapFrame> {
-        if self.active_task_lifecycle.state() != State::Prepared
+        if self.active_task_state() != State::Prepared
             || !self.prepared
             || !self.active_task_record_available
+            || self.free_task_slot_count() == 0
             || self.task_entry != TaskEntry::UserChild
             || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
@@ -4102,6 +4607,7 @@ impl UserTaskSet {
         )?;
 
         let child_pid = self.next_child_pid;
+        self.allocate_user_task(child_pid, TaskRef::NONE)?;
         let next_child_accepted =
             self.completed_child_record_total_archived != 0 || self.task_allocation_count != 0;
 
@@ -4182,13 +4688,6 @@ impl UserTaskSet {
         self.vfork_next_child_accepted = next_child_accepted;
         self.next_child_pid = child_pid.saturating_add(1);
 
-        if self
-            .active_task_lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
-            .is_err()
-        {
-            return None;
-        }
         self.task_allocation_count = self.task_allocation_count.wrapping_add(1);
         Some(child_frame)
     }
@@ -4214,6 +4713,7 @@ impl UserTaskSet {
         task_state_new: bool,
     ) -> Option<(TrapFrame, usize)> {
         if !self.nested_vfork_copy_ready()
+            || self.free_task_slot_count() == 0
             || !parent.active_user_flow_online()
             || !parent.pid1_preserved()
             || boundaries.state() != State::Ready
@@ -4233,6 +4733,7 @@ impl UserTaskSet {
         }
 
         let parent_pid = self.pid;
+        let parent_task_ref = self.active_task_ref;
         let child_pid = self.next_child_pid;
         let mut child_frame = *current_frame;
         child_frame.set_reg(10, 0);
@@ -4275,6 +4776,8 @@ impl UserTaskSet {
             &mut self.parent_wait_writable_page_snapshot_pages,
             &mut self.parent_wait_writable_page_checksums,
         )?;
+
+        self.allocate_user_task(child_pid, parent_task_ref)?;
 
         self.pid = child_pid;
         self.parent_pid = parent_pid;
@@ -4373,7 +4876,7 @@ impl UserTaskSet {
         newsp: usize,
     ) -> Option<usize> {
         let builtin_grandchild_source = self.pid1_plain_fork_child_continuation();
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.current_child_continuation()
             || (!self.vfork_clone() && !builtin_grandchild_source)
             || self.observed_plain_fork_child_active
@@ -4396,11 +4899,13 @@ impl UserTaskSet {
             || !self.fs_struct_copied
             || !self.credentials_copied
             || !self.signal_state_copied
+            || self.free_task_slot_count() == 0
         {
             return None;
         }
 
         let parent_pid = self.pid;
+        let parent_task_ref = self.active_task_ref;
         let parent_parent_pid = self.parent_pid;
         let parent_tgid = self.tgid;
         let child_pid = self.next_child_pid;
@@ -4458,6 +4963,9 @@ impl UserTaskSet {
             self.parent_wait_stack_window_after_byte = 0;
             self.parent_clone_return = child_pid;
         }
+        self.allocate_user_task(child_pid, parent_task_ref)?;
+        self.pending_task_ref = self.active_task_ref;
+        self.active_task_ref = parent_task_ref;
         self.child_exit_status = 0;
         self.child_exit_status_observed = false;
         self.wait4_status_copied = false;
@@ -4473,32 +4981,8 @@ impl UserTaskSet {
         Some(child_pid)
     }
 
-    pub fn rollback_builtin_grandchild_clone(&mut self, files_struct: &FilesStruct) -> bool {
-        if !self.builtin_grandchild.bound
-            || !self.observed_plain_fork_clone
-            || self.observed_plain_fork_child_active
-            || self.observed_plain_fork_parent_restored
-            || !self.builtin_grandchild.child_fd_snapshot_saved
-            || self.builtin_grandchild.child_fd_snapshot_restored
-        {
-            return false;
-        }
-
-        files_struct.discard_parent_fd_snapshot(&self.builtin_grandchild.child_fd_snapshot);
-        let child_pid = self.observed_plain_fork_child_pid;
-        if self.next_child_pid == child_pid.saturating_add(1) {
-            self.next_child_pid = child_pid;
-        }
-        self.builtin_grandchild.reset_empty();
-        self.clear_observed_plain_fork_state();
-        self.child_exit_status = 0;
-        self.child_exit_status_observed = false;
-        self.wait4_status_copied = false;
-        true
-    }
-
     pub fn mark_enqueued(&mut self) -> bool {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || self.pid == 0
             || self.active_task_record_available
         {
@@ -4522,7 +5006,7 @@ impl UserTaskSet {
         options: usize,
         rusage: usize,
     ) -> Option<TrapFrame> {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.enqueued
             || self.child_continuation_taken
             || self.pid == 0
@@ -4740,6 +5224,8 @@ impl UserTaskSet {
         self.wait4_parent_wait_observed = true;
         self.user_stack_snapshot_restored = true;
         self.observed_plain_fork_child_active = true;
+        self.active_task_ref = self.pending_task_ref;
+        self.pending_task_ref = TaskRef::NONE;
         self.pid = child_pid;
         self.parent_pid = parent_pid;
         self.tgid = child_pid;
@@ -4924,6 +5410,8 @@ impl UserTaskSet {
         let parent_pid = self.observed_plain_fork_parent_pid;
         let child_pid = self.observed_plain_fork_child_pid;
         self.observed_plain_fork_child_active = true;
+        self.active_task_ref = self.pending_task_ref;
+        self.pending_task_ref = TaskRef::NONE;
         self.pid = child_pid;
         self.parent_pid = parent_pid;
         self.tgid = child_pid;
@@ -4938,7 +5426,7 @@ impl UserTaskSet {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize, usize)> {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.child_continuation_taken
             || self.parent_wait_resumed
             || !self.parent_address_space_snapshot_saved
@@ -4959,6 +5447,9 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
+        if !self.destroy_active_user_task() {
+            return None;
+        }
         Some((parent_frame, self.parent_wait_status_ptr, self.pid))
     }
 
@@ -4973,7 +5464,7 @@ impl UserTaskSet {
     ) -> Option<(TrapFrame, usize, usize, usize)> {
         let (retained_address_space, retained_stack) = retained_exec_objects;
         if self.builtin_grandchild.bound {
-            if self.active_task_lifecycle.state() != State::Ready
+            if self.active_task_state() != State::Online
                 || !self.observed_plain_fork_clone
                 || !self.observed_plain_fork_child_active
                 || self.observed_plain_fork_parent_restored
@@ -5003,6 +5494,9 @@ impl UserTaskSet {
             }
             self.child_exit_status = exit_status;
             self.child_exit_status_observed = true;
+            if !self.destroy_active_user_task() {
+                return None;
+            }
             return Some((
                 parent_frame,
                 self.builtin_grandchild.parent_wait_status_ptr,
@@ -5010,7 +5504,7 @@ impl UserTaskSet {
                 parent_pid,
             ));
         }
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.observed_plain_fork_clone
             || !self.observed_plain_fork_child_active
             || self.observed_plain_fork_parent_restored
@@ -5035,6 +5529,9 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
+        if !self.destroy_active_user_task() {
+            return None;
+        }
         Some((
             parent_frame,
             self.parent_wait_status_ptr,
@@ -5051,7 +5548,7 @@ impl UserTaskSet {
         page_metadata_map: &PageMetadataMap,
         exit_status: usize,
     ) -> Option<(TrapFrame, usize)> {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.vfork_clone()
             || !self.vfork_parent_resume_on_exit
             || !self.child_continuation_taken
@@ -5075,6 +5572,9 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
+        if !self.destroy_active_user_task() {
+            return None;
+        }
         Some((parent_frame, self.pid))
     }
 
@@ -5528,6 +6028,9 @@ impl UserTaskSet {
             return false;
         }
         let child_pid = self.observed_plain_fork_child_pid;
+        if !self.release_destroyed_task_ref(self.last_exited_task_ref) {
+            return false;
+        }
         self.wait4_status_copied = true;
         self.last_reaped_child_pid = child_pid;
         self.last_reaped_child_wait_status = wait_status;
@@ -5539,7 +6042,7 @@ impl UserTaskSet {
 
     pub fn finish_observed_child_parent_restore(&mut self) -> bool {
         if self.builtin_grandchild.bound {
-            if self.active_task_lifecycle.state() != State::Ready
+            if self.active_task_state() != State::Online
                 || !self.observed_plain_fork_clone
                 || self.observed_plain_fork_child_active
                 || !self.observed_plain_fork_parent_restored
@@ -5569,6 +6072,12 @@ impl UserTaskSet {
                 return false;
             }
 
+            if self.last_exited_task_ref.is_valid()
+                && !self.release_destroyed_task_ref(self.last_exited_task_ref)
+            {
+                return false;
+            }
+
             self.builtin_grandchild.reset_empty();
             self.child_exit_status = 0;
             self.child_exit_status_observed = false;
@@ -5586,7 +6095,7 @@ impl UserTaskSet {
             self.clear_observed_plain_fork_state();
             return true;
         }
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Online
             || !self.observed_plain_fork_clone
             || self.observed_plain_fork_child_active
             || !self.observed_plain_fork_parent_restored
@@ -5597,6 +6106,10 @@ impl UserTaskSet {
             || !self.parent_wait_writable_page_snapshot_restored
             || !self.parent_fd_snapshot_restored
         {
+            return false;
+        }
+
+        if !self.release_destroyed_task_ref(self.last_exited_task_ref) {
             return false;
         }
 
@@ -5677,8 +6190,18 @@ impl UserTaskSet {
             return false;
         }
 
-        let record =
-            UserCompletedChildRecord::archived(self.pid, self.child_exit_status, self.pidfd_fd);
+        let Some(exited_slot) = self.slot_for_ref(self.last_exited_task_ref) else {
+            return false;
+        };
+        if exited_slot.state() != State::Destroyed || exited_slot.pid != self.pid {
+            return false;
+        }
+        let record = UserCompletedChildRecord::archived(
+            self.last_exited_task_ref,
+            self.pid,
+            self.child_exit_status,
+            self.pidfd_fd,
+        );
         let mut index = 0usize;
         while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
             if !self.completed_child_records[index].occupied {
@@ -5703,12 +6226,14 @@ impl UserTaskSet {
 
         let mut index = 0usize;
         while index < USER_COMPLETED_CHILD_RECORD_CAPACITY {
-            let record = &mut self.completed_child_records[index];
+            let record = self.completed_child_records[index];
             if record.occupied && record.pid == pid && !record.reaped {
                 if self.completed_child_record_count == 0 {
                     return false;
                 }
-                record.reaped = true;
+                if !self.release_destroyed_task_ref(record.task_ref) {
+                    return false;
+                }
                 self.completed_child_record_reaped = true;
                 self.completed_child_record_released = true;
                 self.completed_child_record_reaped_count += 1;
@@ -5738,7 +6263,7 @@ impl UserTaskSet {
     }
 
     pub fn release_reaped_active_task_record(&mut self) -> bool {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.active_task_state() != State::Destroyed
             || self.vfork_clone()
             || self.observed_plain_fork_clone
             || !self.parent_wait_resumed
@@ -5754,11 +6279,13 @@ impl UserTaskSet {
             return false;
         }
 
+        if !self.release_destroyed_task_ref(self.last_exited_task_ref) {
+            return false;
+        }
         self.prepare_fresh_task_record()
     }
 
     fn prepare_fresh_task_record(&mut self) -> bool {
-        self.active_task_lifecycle = Lifecycle::new(State::Prepared);
         self.prepared = true;
         self.task_entry = TaskEntry::UserChild;
         self.task_entry_bound = true;
@@ -7202,13 +7729,16 @@ impl KernelInitTaskUserState {
         UserProcessGroupLookup::Found(self.session_id)
     }
 
+    pub const fn can_observe_child_process_group_visible(&self, child_pid: usize) -> bool {
+        self.active_user_flow_online
+            && self.pid1_preserved
+            && child_pid != 0
+            && self.process_group != 0
+            && self.session_id != 0
+    }
+
     pub fn observe_child_process_group_visible(&mut self, child_pid: usize) -> bool {
-        if !self.active_user_flow_online
-            || !self.pid1_preserved
-            || child_pid == 0
-            || self.process_group == 0
-            || self.session_id == 0
-        {
+        if !self.can_observe_child_process_group_visible(child_pid) {
             return false;
         }
 
@@ -7231,22 +7761,29 @@ impl KernelInitTaskUserState {
         true
     }
 
+    pub const fn can_observe_pending_plain_fork_child_process_group_visible(
+        &self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        self.active_user_flow_online
+            && self.pid1_preserved
+            && parent_pid != 0
+            && child_pid != 0
+            && parent_pid != child_pid
+            && self.child_process_pid == parent_pid
+            && self.child_process_group_visible
+            && self.child_process_group != 0
+            && self.child_process_session_id != 0
+            && !self.pending_plain_fork_child_visible
+    }
+
     pub fn observe_pending_plain_fork_child_process_group_visible(
         &mut self,
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if !self.active_user_flow_online
-            || !self.pid1_preserved
-            || parent_pid == 0
-            || child_pid == 0
-            || parent_pid == child_pid
-            || self.child_process_pid != parent_pid
-            || !self.child_process_group_visible
-            || self.child_process_group == 0
-            || self.child_process_session_id == 0
-            || self.pending_plain_fork_child_visible
-        {
+        if !self.can_observe_pending_plain_fork_child_process_group_visible(parent_pid, child_pid) {
             return false;
         }
 
@@ -7259,20 +7796,27 @@ impl KernelInitTaskUserState {
         true
     }
 
+    pub const fn can_observe_nested_child_process_group_visible(
+        &self,
+        parent_pid: usize,
+        child_pid: usize,
+    ) -> bool {
+        self.active_user_flow_online
+            && self.pid1_preserved
+            && parent_pid != 0
+            && child_pid != 0
+            && self.child_process_pid == parent_pid
+            && self.child_process_group_visible
+            && self.child_process_group != 0
+            && self.child_process_session_id != 0
+    }
+
     pub fn observe_nested_child_process_group_visible(
         &mut self,
         parent_pid: usize,
         child_pid: usize,
     ) -> bool {
-        if !self.active_user_flow_online
-            || !self.pid1_preserved
-            || parent_pid == 0
-            || child_pid == 0
-            || self.child_process_pid != parent_pid
-            || !self.child_process_group_visible
-            || self.child_process_group == 0
-            || self.child_process_session_id == 0
-        {
+        if !self.can_observe_nested_child_process_group_visible(parent_pid, child_pid) {
             return false;
         }
 
@@ -7889,7 +8433,7 @@ impl KernelInitTaskUserState {
 }
 
 pub struct UserBootPayload {
-    active_task_lifecycle: Lifecycle,
+    payload_lifecycle: Lifecycle,
     exec_sync_boundaries_ready: bool,
     selected: bool,
     candidates_bound: bool,
@@ -7923,7 +8467,7 @@ pub struct UserBootPayload {
 impl UserBootPayload {
     pub const fn new() -> Self {
         Self {
-            active_task_lifecycle: Lifecycle::new(State::Base),
+            payload_lifecycle: Lifecycle::new(State::Base),
             exec_sync_boundaries_ready: false,
             selected: false,
             candidates_bound: false,
@@ -7955,7 +8499,7 @@ impl UserBootPayload {
     }
 
     pub const fn state(&self) -> State {
-        self.active_task_lifecycle.state()
+        self.payload_lifecycle.state()
     }
 
     pub const fn exec_sync_boundaries_ready(&self) -> bool {
@@ -8067,14 +8611,14 @@ impl UserBootPayload {
         kernel_init_task: &KernelInitTask,
         exec_sync: &ExecSyncBoundaries,
     ) -> EventResult {
-        if self.active_task_lifecycle.state() != State::Base
+        if self.payload_lifecycle.state() != State::Base
             || kernel_init_task.state() != State::Online
             || exec_sync.state() != State::Ready
             || !exec_sync.kernel_execve_linux_window_bound()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.active_task_lifecycle.state(),
+                self.payload_lifecycle.state(),
                 State::Base,
                 State::Ready,
             );
@@ -8095,11 +8639,8 @@ impl UserBootPayload {
         self.partition_objects_deferred = true;
         self.driven_by_kernel_init_task = true;
         self.try_candidate_bound = true;
-        self.active_task_lifecycle.adopt_transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-        )
+        self.payload_lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
     pub fn try_candidate(
@@ -8108,13 +8649,13 @@ impl UserBootPayload {
         actual_path: &[u8],
         elf: &ElfObject,
     ) -> EventResult {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.payload_lifecycle.state() != State::Ready
             || !matches!(elf.state(), State::Ready | State::Online)
             || !valid_selected_path(actual_path)
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.active_task_lifecycle.state(),
+                self.payload_lifecycle.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -8133,13 +8674,13 @@ impl UserBootPayload {
 
     #[cfg(app_user_boot)]
     pub fn record_init_attempt_failure(&mut self, failure: UserInitAttemptFailure) -> EventResult {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.payload_lifecycle.state() != State::Ready
             || failure.stage() == UserInitAttemptStage::None
             || failure.reason() == UserInitAttemptReason::None
         {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.active_task_lifecycle.state(),
+                self.payload_lifecycle.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -8163,7 +8704,7 @@ impl UserBootPayload {
         exception_stream: &ExceptionStream,
         syscall_table: &SyscallTable,
     ) -> EventResult {
-        if self.active_task_lifecycle.state() != State::Ready
+        if self.payload_lifecycle.state() != State::Ready
             || elf.state() != State::Online
             || address_space.state() != State::Online
             || trap_frame.state() != State::Ready
@@ -8177,7 +8718,7 @@ impl UserBootPayload {
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.active_task_lifecycle.state(),
+                self.payload_lifecycle.state(),
                 State::Ready,
                 State::Online,
             );
@@ -8185,11 +8726,8 @@ impl UserBootPayload {
 
         self.enters_user_mode = true;
         self.no_return_handoff = true;
-        self.active_task_lifecycle.adopt_transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-        )
+        self.payload_lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 }
 #[cfg(app_user_boot)]
@@ -8276,7 +8814,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
         user_boot_panic("PID 1 syscall context bind failed\n");
     }
     if ctx.user_app_flow.declare().is_err()
-        || ctx.user_app_flow.preset(&ctx.kernel_init_task).is_err()
+        || ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_err()
         || ctx
             .user_app_flow
             .setup(&ctx.kernel_init_user_state)
@@ -8287,7 +8825,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .kernel_init_task
-            .commit_user_flow_handoff(ctx.kernel_init_flow.state(), ctx.user_app_flow.state())
+            .commit_user_flow_handoff(&ctx.kernel_init_flow, ctx.user_app_flow.core_mut())
             .is_err()
         || ctx
             .user_app_flow
@@ -8295,7 +8833,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .user_app_flow
-            .enable(&ctx.kernel_init_user_state)
+            .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
             .is_err()
         || ctx
             .kernel_init_user_state
@@ -8303,7 +8841,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .kernel_init_flow
-            .cleanup_after_handoff(&ctx.kernel_init_task)
+            .cleanup_after_handoff(&mut ctx.kernel_init_task)
             .is_err()
     {
         user_boot_panic("PID 1 flow handoff failed\n");

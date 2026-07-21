@@ -383,24 +383,25 @@ Scheduler smoke must also observe the formal CpuOwnedSchedulerView
 and CpuIdleTaskView rather than only comparing private
 Scheduler.boot_runqueue()/boot_task_metadata() fields.
 
-#### CurrentTaskRef scope
+#### Current TaskRef scope
 
-CurrentTaskRef must be realized as a private object in the current
-CPU view. The BP path owns the BootCurrentCPU CurrentTaskRef and must
+The current CPU view must store a generation-checked `TaskRef`; the
+old role enum `CurrentTaskRef` is forbidden and has no compatibility
+alias. The BP path owns the BootCurrentCPU `CurrentTaskSlot` and must
 not introduce a descriptive CurrentTask object or a global current
-task singleton. On task switch, next must become the target of this
-CPU-local CurrentTaskRef. RISC-V64 code should follow the Linux-style
-tp register implementation reference through the object-level
-CurrentTaskSlot boundary, but per-cpu storage remains an
-implementation term, not the model definition.
+task singleton. On task switch, next must become the TaskRef stored in
+this CPU-local slot. RISC-V64 code follows the Linux-style `tp`
+implementation reference through `CurrentTaskSlot`; for BootTask the
+resolved Task carrier address and `tp` must both equal linker-visible
+`init_task_storage`.
 
 #### CurrentRunQueueRef scope
 
 CurrentRunQueueRef must be realized as a private reference in the
 current CPU view. It must not be implemented as a descriptive
 current-runqueue object or as a global current-runqueue singleton. Code
-should follow the Linux-style path: derive the current task through
-CurrentTaskRef, read the task's recorded CPU id, then resolve that
+should follow the Linux-style path: resolve the current `TaskRef`, read
+the validated Task's recorded CPU id, then resolve that
 CPU's runqueue through CPUGroup/runqueue topology. The current BP
 implementation may collapse this to the boot runqueue while marking
 that binding as a temporary UP specialization.
@@ -410,7 +411,7 @@ that binding as a temporary UP specialization.
 Current Rust lowering must carry the resolved CPU id inside
 CurrentRunQueueRef even while the only concrete target is
 BootRunQueue. Scheduler.schedule() lowering must derive that CPU id
-from the CurrentTaskRef target task's recorded CPU id, then validate
+from the TaskRef target Task's recorded CPU id, then validate
 it against CpuGroup.Cpu[id], Scheduler.cpu_runqueue(id) metadata and
 DefaultSchedRootDomain coverage. CpuGroup.boot_cpu() may be used only
 as a boot CPU consistency check after the current task CPU id is
@@ -431,7 +432,7 @@ lowering must return a RunQueueRef value, not CurrentRunQueueRef.
 RestInit enqueue paths and smoke task enqueue/dequeue helpers must
 pass RunQueueRef into BootRunQueue enqueue/dequeue APIs. Only the
 schedule()/pick-next path may use CurrentRunQueueRef, after deriving
-it from CurrentTaskRef -> task CPU id -> CpuGroup.Cpu[id].RunQueue.
+it from TaskRef -> validated Task -> CPU id -> CpuGroup.Cpu[id].RunQueue.
 Both reference types may currently carry the same boot CPU id in the
 UP path, but sharing the enum/type is not allowed because the object
 capabilities differ.
@@ -468,7 +469,7 @@ KernelInitTask enqueues a smoke scheduler task, calls schedule() a
 bounded number of times until that task's entry runs, the smoke task
 records that it executed and calls schedule()/yield, and control
 returns to KernelInitTask. This requires schedule() to support
-non-idle CurrentTaskRef in the payload path and requires switch_to to
+non-idle TaskRef in the payload path and requires switch_to to
 perform a real cooperative stack/context transfer for the smoke task.
 It must not reuse or weaken the checkpoint/KUnit expectations for
 the first rest_init schedule, and it must not add test_* subject APIs;

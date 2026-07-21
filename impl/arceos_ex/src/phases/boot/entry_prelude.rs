@@ -310,7 +310,7 @@ fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResul
 fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.interrupt_stream.adopt_head_preset()?;
     ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds)?;
-    ctx.root_stream.adopt_head_preset()?;
+    ctx.root_stream.adopt_head_preset(&mut ctx.boot_task)?;
     ctx.kernel_image.adopt_head_setup(&ctx.lds)?;
     ctx.boot_current_cpu.adopt_head_preset(boot_args)?;
     ctx.boot_cpu_local_interrupt.setup()?;

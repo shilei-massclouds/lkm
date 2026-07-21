@@ -37,7 +37,7 @@ local interrupt gate already established.
 #### rest_init boundary
 
 This phase prepares the inputs to rest_init(). It must not create
-kernel_init, kthreadd or any PID 1 task, and must not advance the
+kernel_init, kthreadd, `KernelInitTask` (PID 1), or any equivalent task, and must not advance the
 system into the scheduling-running state.
 
 #### Runtime services

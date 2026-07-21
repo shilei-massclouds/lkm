@@ -451,6 +451,22 @@ fn run_once(reported: &AtomicBool, run_case: impl FnOnce()) {
 fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
     let _ = checkpoint;
     let obs = execve_checkpoint_observation();
+    let ctx = crate::context::context_ref();
+    let (task_ref, flow_ref) = if ctx.user_task_set.active_task_ref().is_valid() {
+        (
+            ctx.user_task_set.active_task_ref(),
+            ctx.user_task_set.active_flow_ref(),
+        )
+    } else {
+        (
+            ctx.kernel_init_task.task_ref(),
+            ctx.user_app_flow.flow_ref(),
+        )
+    };
+    sink.diag_usize("execve_task_ref_slot", task_ref.slot());
+    sink.diag_usize("execve_task_generation", task_ref.generation() as usize);
+    sink.diag_usize("execve_flow_ref_slot", flow_ref.slot());
+    sink.diag_usize("execve_flow_generation", flow_ref.generation() as usize);
     sink.diag_usize("execve_stage", obs.stage);
     sink.diag_usize("execve_filename_len", obs.filename_len);
     sink.diag_usize("execve_argv0_len", obs.argv0_len);
@@ -518,9 +534,7 @@ fn emit_execve_checkpoint_diag(checkpoint: Checkpoint, sink: &mut dyn Sink) {
         obs.frame_after_sstatus,
     );
     sink.diag_usize("execve_kernel_sp", obs.kernel_sp);
-    let close_report = crate::context::context_ref()
-        .files_struct
-        .close_on_exec_report();
+    let close_report = ctx.files_struct.close_on_exec_report();
     sink.diag_usize("execve_close_on_exec_scanned", close_report.scanned);
     sink.diag_usize("execve_close_on_exec_closed", close_report.closed);
     sink.diag_usize(
@@ -868,6 +882,9 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && ctx.user_trap_frame.user_fpu_initial()
         && ctx.user_trap_frame.fpu_context_switch_deferred()
         && ctx.user_trap_frame.sret_ready()
+        && ctx.user_app_flow.state() == State::Online
+        && ctx.user_app_flow.task_ref_owner() == ctx.kernel_init_task.task_ref()
+        && ctx.user_app_flow.flow_generation() != 0
         && ctx.files_struct.state() == State::Ready
         && ctx.files_struct.stdio_bound()
         && ctx.files_struct.fd_bound(FdRef::Stdout)
@@ -887,6 +904,19 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         ctx.user_trap_frame.fpu_context_switch_deferred() as usize,
     );
     sink.diag_usize("user_entry_ready", process.user_entry_ready() as usize);
+    sink.diag_usize(
+        "kernel_init_task_ref_slot",
+        ctx.kernel_init_task.task_ref().slot(),
+    );
+    sink.diag_usize(
+        "kernel_init_task_generation",
+        ctx.kernel_init_task.task_ref().generation() as usize,
+    );
+    sink.diag_usize("user_flow_ref_slot", ctx.user_app_flow.flow_ref().slot());
+    sink.diag_usize(
+        "user_flow_generation",
+        ctx.user_app_flow.flow_generation() as usize,
+    );
     sink.diag_usize(
         "trap_return_context_used",
         process.trap_return_context_used() as usize,
@@ -1135,7 +1165,7 @@ fn run_syscall_table_clone(
     let runqueue_contains_child = ctx
         .scheduler
         .boot_runqueue()
-        .contains_task(internal_child_task);
+        .contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1145,7 +1175,7 @@ fn run_syscall_table_clone(
         && table.clone_observed()
         && ctx.task_creation_core.state() == State::Ready
         && ctx.task_creation_core.user_child_created()
-        && child.active_task_state() == State::Ready
+        && child.active_task_state() == State::Online
         && child.pid() >= internal_child_task
         && child.parent_pid() == parent_pid
         && child.tgid() == child.pid()
@@ -1245,7 +1275,7 @@ fn run_syscall_table_clone_vfork_pidfd(
     let runqueue_contains_child = ctx
         .scheduler
         .boot_runqueue()
-        .contains_task(internal_child_task);
+        .contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1259,7 +1289,7 @@ fn run_syscall_table_clone_vfork_pidfd(
         && table.clone_full_pidfd_file_ops_deferred()
         && table.clone_observed()
         && ctx.task_creation_core.user_child_created()
-        && child.active_task_state() == State::Ready
+        && child.active_task_state() == State::Online
         && child.vfork_pidfd_clone()
         && child.vfork_parent_frame_saved()
         && child.pidfd_copyout_observed()
@@ -1323,7 +1353,7 @@ fn run_syscall_table_clone_vfork_vm(
     let runqueue_contains_child = ctx
         .scheduler
         .boot_runqueue()
-        .contains_task(internal_child_task);
+        .contains_task_ref(child.active_task_ref());
 
     let valid = table.state() == State::Ready
         && table.clone_supported()
@@ -1332,7 +1362,7 @@ fn run_syscall_table_clone_vfork_vm(
         && table.clone_vfork_vm_first_slice()
         && table.clone_observed()
         && ctx.task_creation_core.user_child_created()
-        && child.active_task_state() == State::Ready
+        && child.active_task_state() == State::Online
         && child.vfork_vm_clone()
         && !child.vfork_pidfd_clone()
         && child.vfork_parent_frame_saved()
@@ -2075,7 +2105,7 @@ fn run_user_child_parent_wait_resumed(
     let runqueue_contains_internal_child = ctx
         .scheduler
         .boot_runqueue()
-        .contains_task(crate::objects::user_boot::USER_CHILD_PID);
+        .contains_task_ref(child.last_exited_task_ref());
     let valid = child.child_exit_status_observed()
         && child.wait4_status_copied()
         && child.parent_wait_resumed()
@@ -2113,6 +2143,16 @@ fn run_user_child_parent_wait_resumed(
     sink.diag_usize("wait4_resumed_status_copied", obs.resumed_status_copied);
     sink.diag_usize("wait4_child_exit_status", obs.child_exit_status);
     sink.diag_usize("child_lifecycle", child.active_task_state() as usize);
+    sink.diag_usize("child_task_ref_slot", child.last_exited_task_ref().slot());
+    sink.diag_usize(
+        "child_task_generation",
+        child.last_exited_task_ref().generation() as usize,
+    );
+    sink.diag_usize("child_flow_ref_slot", child.last_exited_flow_ref().slot());
+    sink.diag_usize(
+        "child_flow_generation",
+        child.last_exited_flow_ref().generation() as usize,
+    );
     sink.diag_usize("child_pid", child.pid());
     sink.diag_usize("child_parent_pid", child.parent_pid());
     sink.diag_usize("child_tgid", child.tgid());
@@ -2318,7 +2358,7 @@ fn run_user_task_record_released(
     let runqueue_contains_internal_child = ctx
         .scheduler
         .boot_runqueue()
-        .contains_task(crate::objects::user_boot::USER_CHILD_PID);
+        .contains_task_ref(child.last_exited_task_ref());
     let valid = child.state() == State::Ready
         && child.active_task_state() == State::Prepared
         && child.active_task_record_available()

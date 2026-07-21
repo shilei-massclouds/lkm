@@ -4,42 +4,12 @@ use super::{
     cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    task::TaskRef,
 };
 use crate::arch::riscv64::csr;
 use crate::checkpoint::Checkpoint;
 
 const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CurrentTaskRef {
-    None,
-    BootTask,
-    KernelInit,
-    Kthreadd,
-    UserChild,
-    SmokeScheduler,
-    SmokeMutex,
-    SmokeRwsem,
-    SmokeRwLock,
-}
-
-#[allow(dead_code)]
-impl CurrentTaskRef {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::BootTask => "BootTask",
-            Self::KernelInit => "KernelInitTask",
-            Self::Kthreadd => "KthreaddTask",
-            Self::UserChild => "UserChildTask",
-            Self::SmokeScheduler => "SmokeSchedulerTask",
-            Self::SmokeMutex => "SmokeMutexTask",
-            Self::SmokeRwsem => "SmokeRwsemTask",
-            Self::SmokeRwLock => "SmokeRwLockTask",
-        }
-    }
-}
 
 pub struct BootCurrentCpu {
     lifecycle: Lifecycle,
@@ -311,7 +281,7 @@ impl LocalInterruptControl {
 
 pub struct CurrentTaskSlot {
     lifecycle: Lifecycle,
-    current: CurrentTaskRef,
+    current: TaskRef,
     switch_committed_count: usize,
 }
 
@@ -319,7 +289,7 @@ impl CurrentTaskSlot {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            current: CurrentTaskRef::None,
+            current: TaskRef::NONE,
             switch_committed_count: 0,
         }
     }
@@ -328,7 +298,7 @@ impl CurrentTaskSlot {
         self.lifecycle.state()
     }
 
-    pub const fn current(&self) -> CurrentTaskRef {
+    pub const fn current(&self) -> TaskRef {
         self.current
     }
 
@@ -355,10 +325,10 @@ impl CurrentTaskSlot {
     }
 
     pub fn set_current_boot_task(&mut self) -> EventResult {
-        self.set_current(CurrentTaskRef::BootTask)
+        self.set_current(TaskRef::BOOT)
     }
 
-    pub fn set_current(&mut self, task_ref: CurrentTaskRef) -> EventResult {
+    pub fn set_current(&mut self, task_ref: TaskRef) -> EventResult {
         if self.lifecycle.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -368,7 +338,7 @@ impl CurrentTaskSlot {
             );
         }
 
-        if matches!(task_ref, CurrentTaskRef::None) {
+        if !task_ref.is_valid() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -381,8 +351,8 @@ impl CurrentTaskSlot {
         Ok(())
     }
 
-    pub fn commit_switch_to(&mut self, next_ref: CurrentTaskRef) -> EventResult {
-        if self.lifecycle.state() != State::Ready || matches!(next_ref, CurrentTaskRef::None) {
+    pub fn commit_switch_to(&mut self, next_ref: TaskRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !next_ref.is_valid() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -397,11 +367,11 @@ impl CurrentTaskSlot {
     }
 
     pub const fn current_is_boot_task(&self) -> bool {
-        matches!(self.current, CurrentTaskRef::BootTask)
+        self.current.same_identity(TaskRef::BOOT)
     }
 
     pub const fn current_is_kernel_init(&self) -> bool {
-        matches!(self.current, CurrentTaskRef::KernelInit)
+        self.current.same_identity(TaskRef::KERNEL_INIT)
     }
 }
 

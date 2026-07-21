@@ -1,9 +1,9 @@
 use super::{
-    cpu_control::CurrentTaskRef,
     per_cpu_storage::PerCpuStorage,
     state::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
+    task::TaskRef,
 };
 
 const OWNER_SLOTS: usize = 4;
@@ -500,12 +500,12 @@ impl PerCpuRwSemaphore {
 
     pub fn read_lock_task(
         &mut self,
-        task_ref: CurrentTaskRef,
+        task_ref: TaskRef,
     ) -> Result<PerCpuRwSemaphoreReadOutcome, EventError> {
         self.read_lock_owner(owner_from_task_ref(task_ref), BOOT_CPU_ID)
     }
 
-    pub fn read_unlock_task(&mut self, task_ref: CurrentTaskRef) -> EventResult {
+    pub fn read_unlock_task(&mut self, task_ref: TaskRef) -> EventResult {
         self.read_unlock_owner(owner_from_task_ref(task_ref), BOOT_CPU_ID)
     }
 
@@ -544,16 +544,10 @@ impl PerCpuRwSemaphoreOwner {
     }
 }
 
-const fn owner_from_task_ref(task_ref: CurrentTaskRef) -> PerCpuRwSemaphoreOwner {
+const fn owner_from_task_ref(task_ref: TaskRef) -> PerCpuRwSemaphoreOwner {
     match task_ref {
-        CurrentTaskRef::KernelInit => PerCpuRwSemaphoreOwner::KernelInitTask,
-        CurrentTaskRef::SmokeRwsem => PerCpuRwSemaphoreOwner::SmokeRwsemTask,
-        CurrentTaskRef::None
-        | CurrentTaskRef::BootTask
-        | CurrentTaskRef::Kthreadd
-        | CurrentTaskRef::UserChild
-        | CurrentTaskRef::SmokeScheduler
-        | CurrentTaskRef::SmokeMutex
-        | CurrentTaskRef::SmokeRwLock => PerCpuRwSemaphoreOwner::None,
+        TaskRef::KERNEL_INIT => PerCpuRwSemaphoreOwner::KernelInitTask,
+        TaskRef::SMOKE_RWSEM => PerCpuRwSemaphoreOwner::SmokeRwsemTask,
+        _ => PerCpuRwSemaphoreOwner::None,
     }
 }

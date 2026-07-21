@@ -53,7 +53,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.scheduler.setup(
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
-        &ctx.boot_task,
+        &mut ctx.boot_task,
         &ctx.init_mm,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,

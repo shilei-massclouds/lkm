@@ -84,7 +84,8 @@ use crate::objects::{
     rcu::RcuCore,
     resource_tree::ResourceTree,
     rest_init::{
-        BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddReadyGate, KthreaddTask, SystemState,
+        BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate,
+        KthreaddTask, SystemState,
     },
     root_stream::RootStream,
     rootfs::{
@@ -264,6 +265,7 @@ pub struct Context {
     pub kernel_init_flow: KernelInitFlow,
     pub kernel_init_task_pi_lock: RawSpinLock,
     pub kthreadd_task: KthreaddTask,
+    pub kthreadd_flow: KthreaddFlow,
     pub kthreadd_task_pi_lock: RawSpinLock,
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
@@ -478,6 +480,7 @@ impl Context {
             kernel_init_flow: KernelInitFlow::new(),
             kernel_init_task_pi_lock: RawSpinLock::new(),
             kthreadd_task: KthreaddTask::new(),
+            kthreadd_flow: KthreaddFlow::new(),
             kthreadd_task_pi_lock: RawSpinLock::new(),
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),

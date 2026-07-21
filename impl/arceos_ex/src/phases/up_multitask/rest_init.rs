@@ -145,6 +145,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.config,
     )?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
+    ctx.kernel_init_flow
+        .bind_initial(&mut ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
     ctx.kernel_init_task.enable(
         &mut ctx.scheduler,
@@ -154,6 +156,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kernel_init_task_pi_lock,
     )?;
+    ctx.kernel_init_flow.enable_initial(&ctx.kernel_init_task)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return failed_condition(
@@ -193,6 +196,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &mut ctx.page_table_caches,
         &ctx.config,
     )?;
+    ctx.kthreadd_flow.bind_initial(&mut ctx.kthreadd_task)?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     ctx.kthreadd_task.enable(
@@ -203,6 +207,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kthreadd_task_pi_lock,
     )?;
+    ctx.kthreadd_flow.enable_initial(&ctx.kthreadd_task)?;
     ctx.kthreadd_task.bind_global_ref(
         &ctx.root_pid_namespace,
         ctx.scheduler.boot_idle_rcu_read_side_mut(),
@@ -227,6 +232,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
 
 fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_flow.setup(
+        &mut ctx.boot_task,
+        &mut ctx.root_stream,
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,

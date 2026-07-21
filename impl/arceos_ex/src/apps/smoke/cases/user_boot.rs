@@ -1426,7 +1426,7 @@ impl SmokeScenario for UserBootElfScenario {
                 .is_ok(),
         );
         assertions.assert(
-            "PID 1 syscall context bind",
+            "KernelInitTask syscall context bind",
             ctx.kernel_init_user_state
                 .bind_syscall_context(
                     &ctx.user_trap_frame,
@@ -1437,11 +1437,11 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
         assertions.assert(
-            "PID 1 user flow preset",
-            ctx.user_app_flow.preset(&ctx.kernel_init_task).is_ok(),
+            "KernelInitTask user flow preset",
+            ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_ok(),
         );
         assertions.assert(
-            "PID 1 user flow setup",
+            "KernelInitTask user flow setup",
             ctx.user_app_flow.setup(&ctx.kernel_init_user_state).is_ok(),
         );
         assertions.assert(
@@ -1451,25 +1451,25 @@ impl SmokeScenario for UserBootElfScenario {
                 .is_ok(),
         );
         assertions.assert(
-            "PID 1 task flow handoff committed",
+            "KernelInitTask flow handoff committed",
             ctx.kernel_init_task
-                .commit_user_flow_handoff(ctx.kernel_init_flow.state(), ctx.user_app_flow.state())
+                .commit_user_flow_handoff(&ctx.kernel_init_flow, ctx.user_app_flow.core_mut())
                 .is_ok(),
         );
         assertions.assert(
-            "PID 1 user flow active binding",
+            "KernelInitTask user flow active binding",
             ctx.user_app_flow
                 .commit_active_binding(&ctx.kernel_init_task)
                 .is_ok(),
         );
         assertions.assert(
-            "PID 1 user flow online",
+            "KernelInitTask user flow online",
             ctx.user_app_flow
-                .enable(&ctx.kernel_init_user_state)
+                .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
-            "PID 1 task user state active",
+            "KernelInitTask user state active",
             ctx.kernel_init_user_state
                 .activate_user_flow(&ctx.user_app_flow)
                 .is_ok(),
@@ -1477,12 +1477,12 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "kernel init flow cleaned after exec",
             ctx.kernel_init_flow
-                .cleanup_after_handoff(&ctx.kernel_init_task)
+                .cleanup_after_handoff(&mut ctx.kernel_init_task)
                 .is_ok(),
         );
         let process = &ctx.kernel_init_user_state;
         assertions.assert(
-            "PID 1 user flow remains separate from task resources",
+            "KernelInitTask user flow remains separate from task resources",
             process.resources_bound()
                 && process.active_user_flow_online()
                 && ctx.user_app_flow.state() == State::Online
@@ -1496,7 +1496,10 @@ impl SmokeScenario for UserBootElfScenario {
                 && !ctx.kernel_init_flow.active()
                 && ctx.kernel_init_flow.released()
                 && ctx.kernel_init_task.state() == State::Online
-                && ctx.kernel_init_task.kernel_init_flow_owned(),
+                && !ctx.kernel_init_task.kernel_init_flow_owned()
+                && ctx.kernel_init_task.user_flow_owned()
+                && ctx.user_app_flow.task_ref_owner() == ctx.kernel_init_task.task_ref()
+                && ctx.user_app_flow.flow_generation() != 0,
         );
         assertions.assert(
             "user init identity",
@@ -1505,6 +1508,30 @@ impl SmokeScenario for UserBootElfScenario {
                 && process.exec_identity_handoff()
                 && process.no_new_task_struct()
                 && process.kernel_init_not_destroyed(),
+        );
+        let kernel_init_task_ref = ctx.kernel_init_task.task_ref();
+        let initial_user_flow_ref = ctx.user_app_flow.flow_ref();
+        let first_runtime_handoff = ctx
+            .user_app_flow
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .is_ok();
+        let first_runtime_flow_ref = ctx.user_app_flow.flow_ref();
+        let second_runtime_handoff = ctx
+            .user_app_flow
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .is_ok();
+        let second_runtime_flow_ref = ctx.user_app_flow.flow_ref();
+        assertions.assert(
+            "KernelInitTask consecutive exec preserves TaskRef and replaces FlowRef",
+            first_runtime_handoff
+                && second_runtime_handoff
+                && ctx.kernel_init_task.task_ref() == kernel_init_task_ref
+                && !initial_user_flow_ref.same_identity(first_runtime_flow_ref)
+                && !first_runtime_flow_ref.same_identity(second_runtime_flow_ref)
+                && !ctx.user_app_flow.flow_ref_valid(initial_user_flow_ref)
+                && !ctx.user_app_flow.flow_ref_valid(first_runtime_flow_ref)
+                && ctx.user_app_flow.flow_ref_valid(second_runtime_flow_ref)
+                && ctx.kernel_init_task.task().active_flow() == second_runtime_flow_ref,
         );
         assertions.assert(
             "user init inherited context",
@@ -1732,6 +1759,12 @@ impl SmokeScenario for ChildLifecycleScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
+        assertions.assert(
+            "user task slots reject ninth live task and invalidate stale generations",
+            context()
+                .user_task_set
+                .smoke_task_slot_generation_contract(),
+        );
         exercise_completed_child_record_reuse(assertions);
         exercise_nested_vfork_task_record(assertions);
         exercise_observed_child_plain_fork(assertions);
@@ -2106,7 +2139,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         };
         let Some(runqueue_ref) = ctx
             .scheduler
-            .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
+            .select_runqueue_for_task(child_pid, &ctx.cpu_group)
             .ok()
         else {
             assertions.assert("pid1 plain fork runqueue select", false);
@@ -2114,7 +2147,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         };
         if ctx
             .scheduler
-            .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+            .enqueue_task_on_runqueue(child_pid, ctx.user_task_set.active_task_ref(), runqueue_ref)
             .is_err()
             || !ctx.user_task_set.mark_enqueued()
             || !ctx
@@ -2296,6 +2329,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     if !context()
         .kernel_init_user_state
         .switch_observed_child_process_visible(inner_parent_pid, inner_child_pid)
+        || !replace_runqueue_parent_with_active()
     {
         assertions.assert("builtin grandchild visible handoff", false);
         return;
@@ -2350,11 +2384,14 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     }
     let interpreter_image =
         (interpreter_len != 0).then_some(&interpreter_buffer[..interpreter_len]);
+    let exec_task_ref = context().user_task_set.active_task_ref();
+    let fork_flow_ref = context().user_task_set.active_flow_ref();
     let first_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
         context(),
         &main_buffer[..main_len],
         interpreter_image,
     );
+    let first_exec_flow_ref = context().user_task_set.active_flow_ref();
     let first_exec_closed_child_fd = matches!(
         context().files_struct.fcntl_getfd_fd(cloexec_fd),
         Err(FileError::BadFd)
@@ -2384,7 +2421,15 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context()
                 .user_task_set
                 .parent_address_space_snapshot_saved()
-                == outer_parent_satp_owned,
+                == outer_parent_satp_owned
+            && context().user_task_set.active_task_ref() == exec_task_ref
+            && !fork_flow_ref.same_identity(first_exec_flow_ref)
+            && !context()
+                .user_task_set
+                .flow_ref_valid(exec_task_ref, fork_flow_ref)
+            && context()
+                .user_task_set
+                .flow_ref_valid(exec_task_ref, first_exec_flow_ref),
     );
     let first_exec_satp = context().user_address_space.satp_token();
     let second_exec = crate::objects::exec_transaction::smoke_commit_builtin_grandchild_exec_image(
@@ -2392,6 +2437,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         &main_buffer[..main_len],
         interpreter_image,
     );
+    let second_exec_flow_ref = context().user_task_set.active_flow_ref();
     assertions.assert(
         "builtin grandchild consecutive exec releases intermediate image",
         second_exec.is_some_and(|success| success.retired_pages_released != 0)
@@ -2410,7 +2456,15 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context()
                 .user_task_set
                 .parent_address_space_snapshot_saved()
-                == outer_parent_satp_owned,
+                == outer_parent_satp_owned
+            && context().user_task_set.active_task_ref() == exec_task_ref
+            && !first_exec_flow_ref.same_identity(second_exec_flow_ref)
+            && !context()
+                .user_task_set
+                .flow_ref_valid(exec_task_ref, first_exec_flow_ref)
+            && context()
+                .user_task_set
+                .flow_ref_valid(exec_task_ref, second_exec_flow_ref),
     );
     if context().files_struct.close_fd(pipe_pair[0]).is_err()
         || context().files_struct.write_fd(pipe_pair[1], b"/opt/ltp\n") != Ok(9)
@@ -2440,6 +2494,19 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         };
         if child_pid != first_grandchild_pid || parent_pid != outer_child_pid {
             assertions.assert("builtin grandchild exit identity", false);
+            return;
+        }
+        if ctx
+            .scheduler
+            .replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+                ctx.user_task_set.active_task_ref(),
+                parent_pid,
+            )
+            .is_err()
+        {
+            assertions.assert("builtin grandchild restores runqueue TaskRef", false);
             return;
         }
         parent_frame
@@ -2593,29 +2660,22 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context().user_task_set.next_child_pid() == invalid_next_pid,
     );
 
-    let rollback_pid = {
-        let ctx = context();
-        ctx.user_task_set.copy_plain_fork_from_current_child(
-            &ctx.kernel_init_user_state,
-            &ctx.user_clone_deferred_boundaries,
-            &ctx.user_address_space,
-            &ctx.user_trap_frame,
-            &ctx.fs_struct,
-            &ctx.files_struct,
-            &ctx.page_metadata_map,
-            &invalid_clone,
-            USER_PLAIN_FORK_FLAGS,
-            0,
-        )
-    };
-    let rollback_ok = context()
-        .user_task_set
-        .rollback_builtin_grandchild_clone(&context().files_struct);
+    let precheck_task_ref = context().user_task_set.active_task_ref();
+    let precheck_flow_ref = context().user_task_set.active_flow_ref();
+    let precheck_free_slots = context().user_task_set.free_task_slot_count();
+    let invalid_identity_rejected = !context()
+        .kernel_init_user_state
+        .can_observe_pending_plain_fork_child_process_group_visible(
+            outer_child_pid,
+            outer_child_pid,
+        );
     assertions.assert(
-        "builtin grandchild clone rollback preserves pid and outer owner",
-        rollback_pid == Some(invalid_next_pid)
-            && rollback_ok
+        "builtin grandchild staging precheck preserves task and flow identity",
+        invalid_identity_rejected
             && context().user_task_set.next_child_pid() == invalid_next_pid
+            && context().user_task_set.active_task_ref() == precheck_task_ref
+            && context().user_task_set.active_flow_ref() == precheck_flow_ref
+            && context().user_task_set.free_task_slot_count() == precheck_free_slots
             && !context().user_task_set.builtin_grandchild_bound()
             && context().user_task_set.pid1_plain_fork_child_continuation(),
     );
@@ -2658,7 +2718,10 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             || !ctx.user_task_set.mark_parent_wait_resumed(true)
             || ctx
                 .scheduler
-                .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+                .dequeue_user_child_from_runqueue(
+                    &ctx.cpu_group,
+                    ctx.user_task_set.last_exited_task_ref(),
+                )
                 .is_err()
             || !ctx.user_task_set.release_reaped_active_task_record()
         {
@@ -2736,6 +2799,15 @@ fn exercise_builtin_grandchild_wait4_exec(
         if !ctx
             .kernel_init_user_state
             .switch_observed_child_process_visible(parent_pid, child_pid)
+            || ctx
+                .scheduler
+                .replace_user_task_on_runqueue(
+                    &ctx.cpu_group,
+                    ctx.user_task_set.parent_task_ref(),
+                    ctx.user_task_set.active_task_ref(),
+                    child_pid,
+                )
+                .is_err()
         {
             assertions.assert("builtin grandchild wait4 round visible", false);
             return false;
@@ -2767,6 +2839,19 @@ fn exercise_builtin_grandchild_wait4_exec(
         };
         if child_pid != wait_grandchild_pid || parent_pid != outer_child_pid {
             assertions.assert("builtin grandchild wait4 exit identity", false);
+            return false;
+        }
+        if ctx
+            .scheduler
+            .replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+                ctx.user_task_set.active_task_ref(),
+                parent_pid,
+            )
+            .is_err()
+        {
+            assertions.assert("builtin grandchild wait4 restores runqueue TaskRef", false);
             return false;
         }
         parent_frame
@@ -3053,6 +3138,15 @@ fn exercise_nested_vfork_task_record(assertions: &mut SmokeAssertions) {
         if !ctx
             .kernel_init_user_state
             .observe_nested_child_process_group_visible(parent_pid, child_pid)
+            || ctx
+                .scheduler
+                .replace_user_task_on_runqueue(
+                    &ctx.cpu_group,
+                    ctx.user_task_set.parent_task_ref(),
+                    ctx.user_task_set.active_task_ref(),
+                    child_pid,
+                )
+                .is_err()
         {
             assertions.assert("nested child process group visible", false);
             return;
@@ -3240,6 +3334,15 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         if !ctx
             .kernel_init_user_state
             .switch_observed_child_process_visible(parent_pid, observed_child_pid)
+            || ctx
+                .scheduler
+                .replace_user_task_on_runqueue(
+                    &ctx.cpu_group,
+                    ctx.user_task_set.parent_task_ref(),
+                    ctx.user_task_set.active_task_ref(),
+                    observed_child_pid,
+                )
+                .is_err()
         {
             assertions.assert("observed child process visible", false);
             return;
@@ -3282,6 +3385,19 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             assertions.assert("observed child exits to shell wait", false);
             return;
         };
+        if ctx
+            .scheduler
+            .replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+                ctx.user_task_set.active_task_ref(),
+                exit_parent_pid,
+            )
+            .is_err()
+        {
+            assertions.assert("observed child restores shell runqueue TaskRef", false);
+            return;
+        }
         (parent_frame, exit_child_pid, exit_parent_pid)
     };
     if exit_child_pid != child_pid || exit_parent_pid != shell_pid {
@@ -3353,7 +3469,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         );
         assertions.assert(
             "observed plain fork preserves shell identity",
-            ctx.user_task_set.active_task_state() == State::Ready
+            ctx.user_task_set.active_task_state() == State::Online
                 && ctx.user_task_set.pid() == shell_pid
                 && ctx.user_task_set.parent_pid() == shell_parent_pid
                 && ctx.user_task_set.tgid() == shell_tgid,
@@ -3366,7 +3482,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             "observed plain fork preserves shell runqueue visibility",
             ctx.scheduler
                 .boot_runqueue()
-                .contains_task(crate::objects::user_boot::USER_CHILD_PID),
+                .contains_task_ref(ctx.user_task_set.active_task_ref()),
         );
         assertions.assert(
             "observed plain fork clears completed round snapshots",
@@ -3467,10 +3583,14 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
         if !ctx.scheduler.boot_runqueue().contains_task(USER_CHILD_PID) {
             let runqueue_ref = ctx
                 .scheduler
-                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
+                .select_runqueue_for_task(ctx.user_task_set.pid(), &ctx.cpu_group)
                 .ok()?;
             ctx.scheduler
-                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+                .enqueue_task_on_runqueue(
+                    ctx.user_task_set.pid(),
+                    ctx.user_task_set.active_task_ref(),
+                    runqueue_ref,
+                )
                 .ok()?;
         }
         if !ctx.user_task_set.mark_enqueued() {
@@ -3506,6 +3626,18 @@ fn copy_user_process_for_current_slot(allow_nested_vfork: bool) -> bool {
             },
             ctx.user_task_set.active_task_state(),
             TaskEntry::UserChild,
+        )
+        .is_ok()
+}
+
+fn replace_runqueue_parent_with_active() -> bool {
+    let ctx = context();
+    ctx.scheduler
+        .replace_user_task_on_runqueue(
+            &ctx.cpu_group,
+            ctx.user_task_set.parent_task_ref(),
+            ctx.user_task_set.active_task_ref(),
+            ctx.user_task_set.pid(),
         )
         .is_ok()
 }

@@ -601,7 +601,11 @@ impl TaskCreationCore {
         match inputs.entry {
             TaskEntry::KernelInit => self.kernel_init_created = true,
             TaskEntry::Kthreadd => self.kthreadd_created = true,
-            TaskEntry::None | TaskEntry::UserChild | TaskEntry::SmokeScheduler => {}
+            TaskEntry::None
+            | TaskEntry::BootIdle
+            | TaskEntry::UserChild
+            | TaskEntry::ApIdle
+            | TaskEntry::SmokeScheduler => {}
         }
 
         Ok(TaskCopyProcessResult {
@@ -624,7 +628,7 @@ impl TaskCreationCore {
             && inputs.dst_process.active_task_state() == State::Prepared
             && inputs.dst_process.prepared();
         let dst_nested_vfork_record = inputs.allow_nested_vfork
-            && dst_state == State::Ready
+            && dst_state == State::Online
             && inputs.dst_process.nested_vfork_copy_ready();
         if self.lifecycle.state() != State::Ready
             || !self.entry_contract_ready

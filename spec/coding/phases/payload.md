@@ -39,6 +39,11 @@ fresh `UserAppFlow`，按 `new.Preset/Setup -> KernelInitFlow.Disable -> CommitF
 对象，只发出带 runtime instance identity 的 `UserAppFlow.Online` checkpoint 并执行最终 RISC-V
 U-mode trap return。
 
+runtime `execve` 必须复用同一个 helper 和五步 handoff；它保持当前 TaskRef，并在该 Task 的两个
+UserAppFlow slot 之间建立 fresh generation。child fork/exec/syscall 的资源 owner 是实际当前 child
+TaskRef，不得回退到 KernelInitTask persona。可恢复的 candidate/staging/precheck 失败必须发生在
+Flow declaration 前；声明后的内部 invariant 失败是 terminal。
+
 ## 提交与 checkpoint 顺序
 
 Enable 的固定顺序是：

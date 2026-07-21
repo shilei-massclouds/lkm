@@ -67,6 +67,11 @@ AP family 的四个 checkpoint 由每个 `ApIdleTask[logical_id]` 重复发出�
 Acquire wait、completion ack、CpuGroup online publish 和 SmpBringup 状态 checkpoint 继续由
 KernelInitTask 发出，不能替代任何 AP phase state/checkpoint。
 
+AP boot-data 中的 `task_ptr` 必须指向统一 `Task` carrier，AP idle continuation 由该 Task 拥有的
+统一 `TaskFlow` core 承载。`SecondaryIdleTaskSet` 仍是当前 model 对 AP individuation 的聚合
+lowering；AP 的具体 TaskRef/FlowRef 和 storage slot 只是实现内部 identity，不把 deferred 的 AP
+正式对象拓扑提前提升进 model。
+
 ## 引用
 
 - [阶段范式](../phase-paradigm.md)

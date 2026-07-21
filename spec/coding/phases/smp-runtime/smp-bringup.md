@@ -63,6 +63,13 @@ Each secondary CPU must have its own inactive IdleTask and dedicated
 stack/pt_regs pointer prepared before hart_start. BootCPU's idle
 task/stack must not be reused for AP boot data.
 
+The inactive IdleTask storage is the same unified `Task` core used by
+all other task families, and its initial idle continuation uses the
+unified `TaskFlow` core. `task_ptr` in HSM boot data points to that
+Task carrier. Concrete AP TaskRef/TaskFlowRef slots are internal
+lowering under `SecondaryIdleTaskSet`; they do not complete the model-
+deferred AP object topology.
+
 #### SBI HSM start path
 
 RISC-V cpu_ops_sbi.cpu_start() must be lowered through SBI HSM

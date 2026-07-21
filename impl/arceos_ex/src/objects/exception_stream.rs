@@ -20,11 +20,10 @@ use super::{
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     task::TaskEntry,
     user_boot::{
-        USER_CHILD_PID, USER_SIGNAL_COUNT,
-        USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE, USER_SUPPLEMENTARY_GROUP_MAX,
-        USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED, UserFaultAccess, UserFaultMappingDiagnostic,
-        UserMappingKind, UserMmapError, UserProcessGroupLookup, UserProcessGroupUpdate,
-        UserRtSigtimedwaitResult, UserSignalAction,
+        USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
+        USER_SUPPLEMENTARY_GROUP_MAX, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
+        UserFaultAccess, UserFaultMappingDiagnostic, UserMappingKind, UserMmapError,
+        UserProcessGroupLookup, UserProcessGroupUpdate, UserRtSigtimedwaitResult, UserSignalAction,
     },
 };
 
@@ -3892,11 +3891,27 @@ fn pipe_read_yield_to_builtin_grandchild(frame: &mut TrapFrame, fd: usize) -> bo
         };
         handoff
     };
-    if !crate::context::context()
-        .kernel_init_user_state
-        .switch_observed_child_process_visible(parent_pid, child_pid)
     {
-        return false;
+        let ctx = crate::context::context();
+        if !ctx
+            .kernel_init_user_state
+            .switch_observed_child_process_visible(parent_pid, child_pid)
+            || ctx
+                .scheduler
+                .replace_user_task_on_runqueue(
+                    &ctx.cpu_group,
+                    ctx.user_task_set.parent_task_ref(),
+                    ctx.user_task_set.active_task_ref(),
+                    child_pid,
+                )
+                .is_err()
+            || ctx
+                .boot_cpu_current_task
+                .set_current(ctx.user_task_set.active_task_ref())
+                .is_err()
+        {
+            return false;
+        }
     }
 
     print_wait4_child_handoff_trace(&child_frame);
@@ -5873,11 +5888,30 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     if clone_is_plain_fork {
         if crate::context::context_ref()
             .user_task_set
+            .free_task_slot_count()
+            == 0
+        {
+            complete_unsupported_clone_syscall(frame, "task_slots_full");
+            return;
+        }
+        if crate::context::context_ref()
+            .user_task_set
             .current_child_continuation()
         {
             let child_pid = {
                 let ctx = crate::context::context();
                 let parent_pid = ctx.user_task_set.pid();
+                let next_child_pid = ctx.user_task_set.next_child_pid();
+                if !ctx
+                    .kernel_init_user_state
+                    .can_observe_pending_plain_fork_child_process_group_visible(
+                        parent_pid,
+                        next_child_pid,
+                    )
+                {
+                    complete_unsupported_clone_syscall(frame, "pending_child_identity");
+                    return;
+                }
                 let Some(child_pid) = ctx.user_task_set.copy_plain_fork_from_current_child(
                     &ctx.kernel_init_user_state,
                     &ctx.user_clone_deferred_boundaries,
@@ -5897,13 +5931,7 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                     .kernel_init_user_state
                     .observe_pending_plain_fork_child_process_group_visible(parent_pid, child_pid)
                 {
-                    if ctx.user_task_set.builtin_grandchild_bound() {
-                        let _ = ctx
-                            .user_task_set
-                            .rollback_builtin_grandchild_clone(&ctx.files_struct);
-                    }
-                    complete_unsupported_clone_syscall(frame, "pending_child_identity");
-                    return;
+                    panic_dispatch("declared child process-group invariant failed\n");
                 }
                 child_pid
             };
@@ -5919,6 +5947,24 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
 
         let child_pid = {
             let ctx = crate::context::context();
+            let next_child_pid = ctx.user_task_set.next_child_pid();
+            let runqueue_ref = match ctx
+                .scheduler
+                .select_runqueue_for_task(next_child_pid, &ctx.cpu_group)
+            {
+                Ok(runqueue_ref) => runqueue_ref,
+                Err(_) => {
+                    complete_unsupported_clone_syscall(frame, "select_runqueue");
+                    return;
+                }
+            };
+            if !ctx
+                .kernel_init_user_state
+                .can_observe_child_process_group_visible(next_child_pid)
+            {
+                complete_unsupported_clone_syscall(frame, "process_group_visible");
+                return;
+            }
             let copy_result = match ctx.task_creation_core.copy_user_process(
                 TaskCopyUserProcessInputs {
                     src_process: &ctx.kernel_init_user_state,
@@ -5964,34 +6010,25 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 return;
             };
 
-            let runqueue_ref = match ctx
-                .scheduler
-                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
-            {
-                Ok(runqueue_ref) => runqueue_ref,
-                Err(_) => {
-                    complete_unsupported_clone_syscall(frame, "select_runqueue");
-                    return;
-                }
-            };
             if ctx
                 .scheduler
-                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+                .enqueue_task_on_runqueue(
+                    child_pid,
+                    ctx.user_task_set.active_task_ref(),
+                    runqueue_ref,
+                )
                 .is_err()
             {
-                complete_unsupported_clone_syscall(frame, "enqueue");
-                return;
+                panic_dispatch("declared child runqueue publish invariant failed\n");
             }
             if !ctx.user_task_set.mark_enqueued() {
-                complete_unsupported_clone_syscall(frame, "mark_enqueued");
-                return;
+                panic_dispatch("declared child enqueue invariant failed\n");
             }
             if !ctx
                 .kernel_init_user_state
                 .observe_child_process_group_visible(child_pid)
             {
-                complete_unsupported_clone_syscall(frame, "process_group_visible");
-                return;
+                panic_dispatch("declared child process-group invariant failed\n");
             }
             child_pid
         };
@@ -6018,6 +6055,14 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         complete_unsupported_clone_syscall(frame, "child_records_full");
         return;
     }
+    if crate::context::context_ref()
+        .user_task_set
+        .free_task_slot_count()
+        == 0
+    {
+        complete_unsupported_clone_syscall(frame, "task_slots_full");
+        return;
+    }
     let clone_is_nested_vfork = clone_is_vfork_vm
         && crate::context::context_ref()
             .user_task_set
@@ -6026,6 +6071,43 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
     let child_frame = {
         let ctx = crate::context::context();
         let child_pid = ctx.user_task_set.next_child_pid();
+        let selected_runqueue = if clone_is_nested_vfork {
+            let parent_pid = ctx.user_task_set.pid();
+            if !ctx.scheduler.can_replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.active_task_ref(),
+            ) {
+                complete_unsupported_clone_syscall(frame, "replace_nested_task_ref");
+                return;
+            }
+            if !ctx
+                .kernel_init_user_state
+                .can_observe_nested_child_process_group_visible(parent_pid, child_pid)
+            {
+                complete_unsupported_clone_syscall(frame, "process_group_visible");
+                return;
+            }
+            None
+        } else {
+            let runqueue_ref = match ctx
+                .scheduler
+                .select_runqueue_for_task(child_pid, &ctx.cpu_group)
+            {
+                Ok(runqueue_ref) => runqueue_ref,
+                Err(_) => {
+                    complete_unsupported_clone_syscall(frame, "select_runqueue");
+                    return;
+                }
+            };
+            if !ctx
+                .kernel_init_user_state
+                .can_observe_child_process_group_visible(child_pid)
+            {
+                complete_unsupported_clone_syscall(frame, "process_group_visible");
+                return;
+            }
+            Some(runqueue_ref)
+        };
         let copy_result = match ctx.task_creation_core.copy_user_process(
             TaskCopyUserProcessInputs {
                 src_process: &ctx.kernel_init_user_state,
@@ -6121,28 +6203,34 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
         };
 
         if !clone_is_nested_vfork {
-            let runqueue_ref = match ctx
-                .scheduler
-                .select_runqueue_for_task(USER_CHILD_PID, &ctx.cpu_group)
-            {
-                Ok(runqueue_ref) => runqueue_ref,
-                Err(_) => {
-                    complete_unsupported_clone_syscall(frame, "select_runqueue");
-                    return;
-                }
+            let Some(runqueue_ref) = selected_runqueue else {
+                panic_dispatch("declared child runqueue selection invariant failed\n");
             };
             if ctx
                 .scheduler
-                .enqueue_task_on_runqueue(USER_CHILD_PID, runqueue_ref)
+                .enqueue_task_on_runqueue(
+                    ctx.user_task_set.pid(),
+                    ctx.user_task_set.active_task_ref(),
+                    runqueue_ref,
+                )
                 .is_err()
             {
-                complete_unsupported_clone_syscall(frame, "enqueue");
-                return;
+                panic_dispatch("declared child runqueue publish invariant failed\n");
             }
             if !ctx.user_task_set.mark_enqueued() {
-                complete_unsupported_clone_syscall(frame, "mark_enqueued");
-                return;
+                panic_dispatch("declared child enqueue invariant failed\n");
             }
+        } else if ctx
+            .scheduler
+            .replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.parent_task_ref(),
+                ctx.user_task_set.active_task_ref(),
+                ctx.user_task_set.pid(),
+            )
+            .is_err()
+        {
+            panic_dispatch("declared nested child runqueue invariant failed\n");
         }
         let child_visible = if clone_is_nested_vfork {
             ctx.kernel_init_user_state
@@ -6152,8 +6240,14 @@ fn syscall_table_clone(table: &SyscallTable, frame: &mut TrapFrame) {
                 .observe_child_process_group_visible(child_pid)
         };
         if !child_visible {
-            complete_unsupported_clone_syscall(frame, "process_group_visible");
-            return;
+            panic_dispatch("declared child process-group invariant failed\n");
+        }
+        if ctx
+            .boot_cpu_current_task
+            .set_current(ctx.user_task_set.active_task_ref())
+            .is_err()
+        {
+            panic_dispatch("declared child current TaskRef invariant failed\n");
         }
         child_frame
     };
@@ -6789,6 +6883,19 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
             if !ctx
                 .kernel_init_user_state
                 .switch_observed_child_process_visible(parent_pid, child_pid)
+                || ctx
+                    .scheduler
+                    .replace_user_task_on_runqueue(
+                        &ctx.cpu_group,
+                        ctx.user_task_set.parent_task_ref(),
+                        ctx.user_task_set.active_task_ref(),
+                        child_pid,
+                    )
+                    .is_err()
+                || ctx
+                    .boot_cpu_current_task
+                    .set_current(ctx.user_task_set.active_task_ref())
+                    .is_err()
             {
                 complete_error_syscall(frame, ECHILD);
                 return;
@@ -6820,7 +6927,7 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
 
     let child_eligible_but_not_waitable = {
         let child = &crate::context::context_ref().user_task_set;
-        child.active_task_state() == State::Ready
+        child.active_task_state() == State::Online
             && child.enqueued()
             && !child.child_continuation_taken()
             && !child.child_exit_status_observed()
@@ -6863,6 +6970,13 @@ fn syscall_table_wait4(table: &SyscallTable, frame: &mut TrapFrame) {
             complete_error_syscall(frame, ECHILD);
             return;
         };
+        if ctx
+            .boot_cpu_current_task
+            .set_current(ctx.user_task_set.active_task_ref())
+            .is_err()
+        {
+            panic_dispatch("child wait handoff current TaskRef invariant failed\n");
+        }
         child_frame
     };
 
@@ -6922,7 +7036,21 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
     crate::arch::riscv64::sbi::putstr("user exit status=");
     print_decimal(status);
     crate::arch::riscv64::sbi::putchar(b'\n');
+    if !cleanup_current_task_for_shutdown() {
+        crate::arch::riscv64::sbi::putstr("current Task/TaskFlow shutdown cleanup failed\n");
+    }
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn cleanup_current_task_for_shutdown() -> bool {
+    let ctx = crate::context::context();
+    if ctx.user_task_set.active_task_ref().is_valid() {
+        ctx.user_task_set.cleanup_active_task_for_shutdown()
+    } else {
+        ctx.user_app_flow
+            .cleanup_for_shutdown(&mut ctx.kernel_init_task)
+            .is_ok()
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -6956,6 +7084,18 @@ fn complete_observed_child_exit_to_parent_wait(
             }
             return false;
         };
+        if ctx
+            .scheduler
+            .replace_user_task_on_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+                ctx.user_task_set.active_task_ref(),
+                parent_pid,
+            )
+            .is_err()
+        {
+            return false;
+        }
         (
             parent_frame,
             status_ptr,
@@ -7038,6 +7178,17 @@ fn complete_observed_child_exit_to_parent_wait(
         if !crate::context::context()
             .user_task_set
             .mark_builtin_grandchild_exited_to_parent_read()
+        {
+            return false;
+        }
+        if crate::context::context()
+            .boot_cpu_current_task
+            .set_current(
+                crate::context::context_ref()
+                    .user_task_set
+                    .active_task_ref(),
+            )
+            .is_err()
         {
             return false;
         }
@@ -7128,6 +7279,17 @@ fn complete_observed_child_exit_to_parent_wait(
         writable_pages_first_non_stack_before_checksum,
         writable_pages_first_non_stack_after_checksum,
     );
+    if crate::context::context()
+        .boot_cpu_current_task
+        .set_current(
+            crate::context::context_ref()
+                .user_task_set
+                .active_task_ref(),
+        )
+        .is_err()
+    {
+        return false;
+    }
     *frame = parent_frame;
     crate::checkpoint::dispatch(
         Checkpoint::UserChildParentWaitResumed,
@@ -7211,6 +7373,13 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         }
     }
 
+    if crate::context::context()
+        .boot_cpu_current_task
+        .set_current(crate::objects::task::TaskRef::KERNEL_INIT)
+        .is_err()
+    {
+        return false;
+    }
     *frame = parent_frame;
     crate::checkpoint::dispatch(
         Checkpoint::UserCloneVforkParentResumed,
@@ -7247,7 +7416,10 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         let ctx = crate::context::context();
         if ctx
             .scheduler
-            .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+            .dequeue_user_child_from_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+            )
             .is_err()
             || !ctx.user_task_set.release_active_task_record()
         {
@@ -7420,6 +7592,13 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         writable_pages_first_non_stack_before_checksum,
         writable_pages_first_non_stack_after_checksum,
     );
+    if crate::context::context()
+        .boot_cpu_current_task
+        .set_current(crate::objects::task::TaskRef::KERNEL_INIT)
+        .is_err()
+    {
+        return false;
+    }
     *frame = parent_frame;
     crate::checkpoint::dispatch(
         Checkpoint::UserChildParentWaitResumed,
@@ -7429,7 +7608,10 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         let ctx = crate::context::context();
         if ctx
             .scheduler
-            .dequeue_user_child_from_runqueue(&ctx.cpu_group)
+            .dequeue_user_child_from_runqueue(
+                &ctx.cpu_group,
+                ctx.user_task_set.last_exited_task_ref(),
+            )
             .is_err()
             || !ctx.user_task_set.release_reaped_active_task_record()
         {
@@ -8224,11 +8406,13 @@ fn print_clone_boundary(frame: &TrapFrame, stage: &str) {
     crate::arch::riscv64::sbi::putstr(" child_enqueued=");
     print_bool_digit(child.enqueued());
     crate::arch::riscv64::sbi::putstr(" runqueue_contains_internal_child=");
-    print_bool_digit(
-        ctx.scheduler
-            .boot_runqueue()
-            .contains_task(crate::objects::user_boot::USER_CHILD_PID),
-    );
+    print_bool_digit(ctx.scheduler.boot_runqueue().contains_task_ref(
+        if child.active_task_ref().is_valid() {
+            child.active_task_ref()
+        } else {
+            child.last_exited_task_ref()
+        },
+    ));
     crate::arch::riscv64::sbi::putstr(" child_exit_status=");
     print_decimal(child.child_exit_status());
     crate::arch::riscv64::sbi::putstr(" pending_sigchld=");

@@ -19,6 +19,7 @@ pub fn run() -> SmokeResult {
         || !ctx.secondary_idle_tasks.per_secondary_idle_task()
         || !ctx.secondary_idle_tasks.dedicated_stack()
         || !ctx.secondary_idle_tasks.pt_regs_stack_pointer()
+        || !ctx.secondary_idle_tasks.unified_task_flow_carriers()
     {
         printk::write_str("secondary idle task facts invalid\n");
         return SmokeResult::Failed;

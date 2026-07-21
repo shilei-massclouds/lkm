@@ -56,8 +56,14 @@ successful exec 也保持 Task 身份，并使用固定顺序：
 5. 旧 Flow `Cleanup`。
 
 应用内部指令不进入 `UserAppFlow` 状态机。syscall、trap、files、credentials、signal 和地址空间
-操作仍由 `KernelInitTask` 及相应内核资源对象承载；Task 上的用户资源不会因为 exec 产生 persona
-wrapper。fork continuation 和每次后续 exec 必须使用不同的 Flow 实例。
+操作由发生该操作时的实际当前 Task 及相应内核资源对象承载；PID 1 路径的 owner 是
+`KernelInitTask`，child 路径的 owner 是对应 fresh 用户 Task。Task 上的用户资源不会因为 exec
+产生 persona wrapper。fork continuation 和每次后续 exec 必须使用不同的 Flow 实例。
+
+Task 与 Flow 的引用都必须使用 storage slot 加非零 generation。静态 Task/Flow 使用固定 slot 和
+固定 generation；动态 slot 每次分配或回收后再声明时递增 generation。lookup 必须同时校验两者，
+所以保存旧 generation 的 current/runqueue/wait/checkpoint 引用在 slot 回收后稳定失效。PID、角色名
+和 storage 地址都不能替代这种 identity。
 
 ## 当前能力边界
 

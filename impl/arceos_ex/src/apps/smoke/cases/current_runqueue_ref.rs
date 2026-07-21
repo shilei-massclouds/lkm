@@ -5,10 +5,10 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        cpu_control::CurrentTaskRef,
         rest_init::{KERNEL_INIT_PID, KTHREADD_PID},
         scheduler::{BootRunQueue, CurrentRunQueueRef, RunQueueRef},
         state::State,
+        task::TaskRef,
     },
 };
 
@@ -19,6 +19,7 @@ pub fn run() -> SmokeResult {
     suite.scenario(&mut KthreaddQueueScenario::new());
     suite.scenario(&mut MixedQueueScenario::new());
     suite.scenario(&mut InvalidTaskRefScenario::new());
+    suite.scenario(&mut DynamicTaskGenerationScenario::new());
     suite.result()
 }
 
@@ -53,10 +54,7 @@ impl CurrentRunQueueFixture {
         RunQueueRef::cpu_owned(self.runqueue.cpu_id())
     }
 
-    fn enqueue(
-        &mut self,
-        task_ref: CurrentTaskRef,
-    ) -> Result<(), crate::objects::state::EventError> {
+    fn enqueue(&mut self, task_ref: TaskRef) -> Result<(), crate::objects::state::EventError> {
         self.runqueue
             .enqueue_task_ref(self.selected_ref(), task_ref)
     }
@@ -64,14 +62,28 @@ impl CurrentRunQueueFixture {
     fn enqueue_with_ref(
         &mut self,
         runqueue_ref: RunQueueRef,
-        task_ref: CurrentTaskRef,
+        task_ref: TaskRef,
     ) -> Result<(), crate::objects::state::EventError> {
         self.runqueue.enqueue_task_ref(runqueue_ref, task_ref)
     }
 
-    fn pick_next(&self) -> Result<CurrentTaskRef, crate::objects::state::EventError> {
+    fn pick_next(&self) -> Result<TaskRef, crate::objects::state::EventError> {
         self.runqueue
-            .pick_next_task(self.current_ref(), CurrentTaskRef::BootTask)
+            .pick_next_task(self.current_ref(), TaskRef::BOOT)
+    }
+
+    fn enqueue_dynamic(
+        &mut self,
+        task_ref: TaskRef,
+        pid: usize,
+    ) -> Result<(), crate::objects::state::EventError> {
+        self.runqueue
+            .enqueue_task_with_id(self.selected_ref(), task_ref, pid)
+    }
+
+    fn dequeue(&mut self, task_ref: TaskRef) -> Result<(), crate::objects::state::EventError> {
+        self.runqueue
+            .dequeue_task_ref(self.selected_ref(), task_ref)
     }
 }
 
@@ -114,7 +126,7 @@ impl SmokeScenario for EmptyQueueScenario {
         assertions.assert("empty", self.fixture.runqueue.task_count() == 0);
         assertions.assert(
             "no runnable",
-            self.fixture.runqueue.first_runnable_task_ref() == CurrentTaskRef::None,
+            self.fixture.runqueue.first_runnable_task_ref() == TaskRef::NONE,
         );
         assertions.assert_fail("pick empty", self.fixture.pick_next());
     }
@@ -144,7 +156,7 @@ impl SmokeScenario for KernelInitQueueScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert_ok("enqueue", self.fixture.enqueue(CurrentTaskRef::KernelInit));
+        assertions.assert_ok("enqueue", self.fixture.enqueue(TaskRef::KERNEL_INIT));
         assertions.assert(
             "contains kernel init",
             self.fixture.runqueue.contains_task(KERNEL_INIT_PID),
@@ -152,15 +164,15 @@ impl SmokeScenario for KernelInitQueueScenario {
         assertions.assert("task count", self.fixture.runqueue.task_count() == 1);
         assertions.assert(
             "first runnable",
-            self.fixture.runqueue.first_runnable_task_ref() == CurrentTaskRef::KernelInit,
+            self.fixture.runqueue.first_runnable_task_ref() == TaskRef::KERNEL_INIT,
         );
         assertions.assert(
             "pick kernel init",
-            self.fixture.pick_next() == Ok(CurrentTaskRef::KernelInit),
+            self.fixture.pick_next() == Ok(TaskRef::KERNEL_INIT),
         );
         assertions.assert_fail(
             "duplicate enqueue",
-            self.fixture.enqueue(CurrentTaskRef::KernelInit),
+            self.fixture.enqueue(TaskRef::KERNEL_INIT),
         );
     }
 
@@ -189,7 +201,7 @@ impl SmokeScenario for KthreaddQueueScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert_ok("enqueue", self.fixture.enqueue(CurrentTaskRef::Kthreadd));
+        assertions.assert_ok("enqueue", self.fixture.enqueue(TaskRef::KTHREADD));
         assertions.assert(
             "contains kthreadd",
             self.fixture.runqueue.contains_task(KTHREADD_PID),
@@ -197,11 +209,11 @@ impl SmokeScenario for KthreaddQueueScenario {
         assertions.assert("task count", self.fixture.runqueue.task_count() == 1);
         assertions.assert(
             "first runnable",
-            self.fixture.runqueue.first_runnable_task_ref() == CurrentTaskRef::Kthreadd,
+            self.fixture.runqueue.first_runnable_task_ref() == TaskRef::KTHREADD,
         );
         assertions.assert(
             "pick kthreadd",
-            self.fixture.pick_next() == Ok(CurrentTaskRef::Kthreadd),
+            self.fixture.pick_next() == Ok(TaskRef::KTHREADD),
         );
     }
 
@@ -230,13 +242,10 @@ impl SmokeScenario for MixedQueueScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert_ok(
-            "enqueue kthreadd",
-            self.fixture.enqueue(CurrentTaskRef::Kthreadd),
-        );
+        assertions.assert_ok("enqueue kthreadd", self.fixture.enqueue(TaskRef::KTHREADD));
         assertions.assert_ok(
             "enqueue kernel init",
-            self.fixture.enqueue(CurrentTaskRef::KernelInit),
+            self.fixture.enqueue(TaskRef::KERNEL_INIT),
         );
         assertions.assert("task count", self.fixture.runqueue.task_count() == 2);
         assertions.assert(
@@ -249,7 +258,7 @@ impl SmokeScenario for MixedQueueScenario {
         );
         assertions.assert(
             "pick kernel init",
-            self.fixture.pick_next() == Ok(CurrentTaskRef::KernelInit),
+            self.fixture.pick_next() == Ok(TaskRef::KERNEL_INIT),
         );
     }
 
@@ -276,25 +285,82 @@ impl SmokeScenario for InvalidTaskRefScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail(
             "enqueue before setup",
-            self.fixture.enqueue(CurrentTaskRef::KernelInit),
+            self.fixture.enqueue(TaskRef::KERNEL_INIT),
         );
         self.fixture.setup_ready(assertions);
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert_fail("enqueue none", self.fixture.enqueue(CurrentTaskRef::None));
-        assertions.assert_fail(
-            "enqueue boot idle",
-            self.fixture.enqueue(CurrentTaskRef::BootTask),
-        );
+        assertions.assert_fail("enqueue none", self.fixture.enqueue(TaskRef::NONE));
+        assertions.assert_fail("enqueue boot idle", self.fixture.enqueue(TaskRef::BOOT));
         assertions.assert_fail(
             "enqueue wrong cpu ref",
-            self.fixture.enqueue_with_ref(
-                RunQueueRef::cpu_owned(usize::MAX),
-                CurrentTaskRef::KernelInit,
-            ),
+            self.fixture
+                .enqueue_with_ref(RunQueueRef::cpu_owned(usize::MAX), TaskRef::KERNEL_INIT),
         );
         assertions.assert("still empty", self.fixture.runqueue.task_count() == 0);
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct DynamicTaskGenerationScenario {
+    fixture: CurrentRunQueueFixture,
+}
+
+impl DynamicTaskGenerationScenario {
+    fn new() -> Self {
+        Self {
+            fixture: CurrentRunQueueFixture::new(),
+        }
+    }
+}
+
+impl SmokeScenario for DynamicTaskGenerationScenario {
+    fn name(&self) -> &'static str {
+        "current_runqueue_ref.dynamic_generation"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let first = TaskRef::user(0, 1);
+        let recycled = TaskRef::user(0, 2);
+        assertions.assert_ok(
+            "enqueue first generation",
+            self.fixture.enqueue_dynamic(first, 3),
+        );
+        assertions.assert(
+            "first generation visible",
+            self.fixture.runqueue.contains_task_ref(first),
+        );
+        assertions.assert(
+            "future generation rejected",
+            !self.fixture.runqueue.contains_task_ref(recycled),
+        );
+        assertions.assert_fail(
+            "future generation cannot dequeue",
+            self.fixture.dequeue(recycled),
+        );
+        assertions.assert_ok("dequeue first generation", self.fixture.dequeue(first));
+        assertions.assert_ok(
+            "enqueue recycled slot",
+            self.fixture.enqueue_dynamic(recycled, 4),
+        );
+        assertions.assert(
+            "stale generation rejected",
+            !self.fixture.runqueue.contains_task_ref(first),
+        );
+        assertions.assert(
+            "recycled generation visible",
+            self.fixture.runqueue.contains_task_ref(recycled),
+        );
+        assertions.assert(
+            "pick exact recycled ref",
+            self.fixture.pick_next() == Ok(recycled),
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}

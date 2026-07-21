@@ -5,7 +5,7 @@ use crate::{
         kunit::Sink,
     },
     context::Context,
-    objects::{cpu_control::CurrentTaskRef, state::State},
+    objects::{state::State, task::TaskRef},
 };
 
 const SCOPE: &[Checkpoint] = &[
@@ -42,13 +42,12 @@ fn check_pick_next_task_exit(
     let name = "scheduler_action.pick_next_task_exit";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.pick_next_task_exit_next_ref();
-    let next_is_first_boot_task =
-        next_ref == CurrentTaskRef::KernelInit || next_ref == CurrentTaskRef::Kthreadd;
+    let next_is_first_boot_task = next_ref == TaskRef::KERNEL_INIT || next_ref == TaskRef::KTHREADD;
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.pick_next_task_exit_count() != 1
         || ctx.scheduler.pick_next_task_passes() != 1
-        || ctx.scheduler.pick_next_task_exit_prev_ref() != CurrentTaskRef::BootTask
+        || ctx.scheduler.pick_next_task_exit_prev_ref() != TaskRef::BOOT
         || !next_is_first_boot_task
         || !ctx
             .scheduler
@@ -73,11 +72,11 @@ fn check_switch_to_exit(
     let next_ref = ctx.scheduler.switch_to_exit_next_ref();
     let current_ref = ctx.boot_cpu_current_task.current();
     let current_is_first_boot_task =
-        current_ref == CurrentTaskRef::KernelInit || current_ref == CurrentTaskRef::Kthreadd;
+        current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.switch_to_exit_count() != 1
-        || ctx.scheduler.switch_to_exit_prev_ref() != CurrentTaskRef::BootTask
+        || ctx.scheduler.switch_to_exit_prev_ref() != TaskRef::BOOT
         || next_ref != ctx.scheduler.pick_next_task_exit_next_ref()
         || ctx.scheduler.switch_to_exit_current_ref() != next_ref
         || current_ref != next_ref
@@ -106,12 +105,12 @@ fn check_schedule_exit(
     let next_ref = ctx.scheduler.schedule_exit_next_ref();
     let current_ref = ctx.boot_cpu_current_task.current();
     let current_is_first_boot_task =
-        current_ref == CurrentTaskRef::KernelInit || current_ref == CurrentTaskRef::Kthreadd;
+        current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_exit_count() != 1
         || ctx.scheduler.schedule_passes() != 1
-        || ctx.scheduler.schedule_exit_prev_ref() != CurrentTaskRef::BootTask
+        || ctx.scheduler.schedule_exit_prev_ref() != TaskRef::BOOT
         || next_ref != ctx.scheduler.pick_next_task_exit_next_ref()
         || next_ref != ctx.scheduler.switch_to_exit_next_ref()
         || ctx.scheduler.schedule_exit_current_ref() != next_ref
@@ -141,15 +140,14 @@ fn check_switch_to_entry(
     let name = "scheduler_action.switch_to_entry";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.switch_to_entry_next_ref();
-    let next_is_first_boot_task =
-        next_ref == CurrentTaskRef::KernelInit || next_ref == CurrentTaskRef::Kthreadd;
+    let next_is_first_boot_task = next_ref == TaskRef::KERNEL_INIT || next_ref == TaskRef::KTHREADD;
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.switch_to_entry_count() != 1
-        || ctx.scheduler.switch_to_entry_prev_ref() != CurrentTaskRef::BootTask
+        || ctx.scheduler.switch_to_entry_prev_ref() != TaskRef::BOOT
         || ctx.scheduler.switch_to_entry_next_ref() != ctx.scheduler.pick_next_task_exit_next_ref()
         || !next_is_first_boot_task
-        || ctx.scheduler.switch_to_entry_current_ref() != CurrentTaskRef::BootTask
+        || ctx.scheduler.switch_to_entry_current_ref() != TaskRef::BOOT
         || ctx.scheduler.switch_to_entry_committed_count()
             >= ctx.boot_cpu_current_task.switch_committed_count()
     {

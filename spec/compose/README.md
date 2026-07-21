@@ -4,6 +4,10 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-21 Task/TaskFlow carrier 闭合审查：本轮只统一对象级 Task/Flow storage、引用与 lifecycle，
+不改变 crate、module、facade、build feature 或组件发布边界；`spec/compose/main.spec` reviewed，
+无需语义修改。
+
 `Composition Phase` 位于 `Object Coding Phase` 之后。它不重新定义模型对象、状态、事件、依赖和阶段顺序，而是在对象级编码实现已经满足规格语义的前提下，决定这些对象如何被组合、封装和发布。
 
 ## 阶段目标

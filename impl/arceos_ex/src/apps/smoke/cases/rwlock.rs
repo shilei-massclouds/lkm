@@ -5,12 +5,12 @@ use crate::{
     },
     context::context,
     objects::{
-        cpu_control::CurrentTaskRef,
         rwlock::{
             RwLock, RwLockExtState, RwLockInitKind, RwLockOwner, RwLockReadOutcome,
             RwLockWriteOutcome,
         },
         state::State,
+        task::TaskRef,
     },
 };
 
@@ -431,7 +431,7 @@ impl SmokeScenario for CooperativeWriterScenario {
             );
             assertions.assert(
                 "current returned kernel init",
-                context().boot_cpu_current_task.current() == CurrentTaskRef::KernelInit,
+                context().boot_cpu_current_task.current() == TaskRef::KERNEL_INIT,
             );
             assertions.assert_ok(
                 "kernel reader unlock",

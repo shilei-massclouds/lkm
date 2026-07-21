@@ -2,8 +2,7 @@ use super::{
     boot_task::BootTask,
     cpu::{CpuRef, MAX_CPUS},
     cpu_control::{
-        CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock,
-        RcuReadSide,
+        CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock, RcuReadSide,
     },
     cpu_group::CpuGroup,
     default_sched_root_domain::DefaultSchedRootDomain,
@@ -15,7 +14,7 @@ use super::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
     static_branch::StaticBranch,
-    task::{Task, TaskCpuState, TaskKind},
+    task::{Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef},
     user_boot::USER_CHILD_PID,
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
@@ -74,22 +73,22 @@ pub struct Scheduler {
     scheduler_finish_preempt_count_restore_count: usize,
     scheduler_switch_mm_or_lazy_tlb_deferred: bool,
     scheduler_membarrier_switch_barrier_deferred: bool,
-    pick_next_task_exit_prev_ref: CurrentTaskRef,
-    pick_next_task_exit_next_ref: CurrentTaskRef,
+    pick_next_task_exit_prev_ref: TaskRef,
+    pick_next_task_exit_next_ref: TaskRef,
     pick_next_task_exit_count: usize,
-    switch_to_entry_prev_ref: CurrentTaskRef,
-    switch_to_entry_next_ref: CurrentTaskRef,
-    switch_to_entry_current_ref: CurrentTaskRef,
+    switch_to_entry_prev_ref: TaskRef,
+    switch_to_entry_next_ref: TaskRef,
+    switch_to_entry_current_ref: TaskRef,
     switch_to_entry_committed_count: usize,
     switch_to_entry_count: usize,
-    switch_to_exit_prev_ref: CurrentTaskRef,
-    switch_to_exit_next_ref: CurrentTaskRef,
-    switch_to_exit_current_ref: CurrentTaskRef,
+    switch_to_exit_prev_ref: TaskRef,
+    switch_to_exit_next_ref: TaskRef,
+    switch_to_exit_current_ref: TaskRef,
     switch_to_exit_committed_count: usize,
     switch_to_exit_count: usize,
-    schedule_exit_prev_ref: CurrentTaskRef,
-    schedule_exit_next_ref: CurrentTaskRef,
-    schedule_exit_current_ref: CurrentTaskRef,
+    schedule_exit_prev_ref: TaskRef,
+    schedule_exit_next_ref: TaskRef,
+    schedule_exit_current_ref: TaskRef,
     schedule_exit_saved_interrupt_count: usize,
     schedule_exit_restored_interrupt_count: usize,
     schedule_exit_count: usize,
@@ -148,22 +147,22 @@ impl Scheduler {
             scheduler_finish_preempt_count_restore_count: 0,
             scheduler_switch_mm_or_lazy_tlb_deferred: true,
             scheduler_membarrier_switch_barrier_deferred: true,
-            pick_next_task_exit_prev_ref: CurrentTaskRef::None,
-            pick_next_task_exit_next_ref: CurrentTaskRef::None,
+            pick_next_task_exit_prev_ref: TaskRef::NONE,
+            pick_next_task_exit_next_ref: TaskRef::NONE,
             pick_next_task_exit_count: 0,
-            switch_to_entry_prev_ref: CurrentTaskRef::None,
-            switch_to_entry_next_ref: CurrentTaskRef::None,
-            switch_to_entry_current_ref: CurrentTaskRef::None,
+            switch_to_entry_prev_ref: TaskRef::NONE,
+            switch_to_entry_next_ref: TaskRef::NONE,
+            switch_to_entry_current_ref: TaskRef::NONE,
             switch_to_entry_committed_count: 0,
             switch_to_entry_count: 0,
-            switch_to_exit_prev_ref: CurrentTaskRef::None,
-            switch_to_exit_next_ref: CurrentTaskRef::None,
-            switch_to_exit_current_ref: CurrentTaskRef::None,
+            switch_to_exit_prev_ref: TaskRef::NONE,
+            switch_to_exit_next_ref: TaskRef::NONE,
+            switch_to_exit_current_ref: TaskRef::NONE,
             switch_to_exit_committed_count: 0,
             switch_to_exit_count: 0,
-            schedule_exit_prev_ref: CurrentTaskRef::None,
-            schedule_exit_next_ref: CurrentTaskRef::None,
-            schedule_exit_current_ref: CurrentTaskRef::None,
+            schedule_exit_prev_ref: TaskRef::NONE,
+            schedule_exit_next_ref: TaskRef::NONE,
+            schedule_exit_current_ref: TaskRef::NONE,
             schedule_exit_saved_interrupt_count: 0,
             schedule_exit_restored_interrupt_count: 0,
             schedule_exit_count: 0,
@@ -486,11 +485,11 @@ impl Scheduler {
         self.scheduler_membarrier_switch_barrier_deferred
     }
 
-    pub const fn pick_next_task_exit_prev_ref(&self) -> CurrentTaskRef {
+    pub const fn pick_next_task_exit_prev_ref(&self) -> TaskRef {
         self.pick_next_task_exit_prev_ref
     }
 
-    pub const fn pick_next_task_exit_next_ref(&self) -> CurrentTaskRef {
+    pub const fn pick_next_task_exit_next_ref(&self) -> TaskRef {
         self.pick_next_task_exit_next_ref
     }
 
@@ -499,17 +498,17 @@ impl Scheduler {
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_entry_prev_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_entry_prev_ref(&self) -> TaskRef {
         self.switch_to_entry_prev_ref
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_entry_next_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_entry_next_ref(&self) -> TaskRef {
         self.switch_to_entry_next_ref
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_entry_current_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_entry_current_ref(&self) -> TaskRef {
         self.switch_to_entry_current_ref
     }
 
@@ -523,17 +522,17 @@ impl Scheduler {
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_exit_prev_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_exit_prev_ref(&self) -> TaskRef {
         self.switch_to_exit_prev_ref
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_exit_next_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_exit_next_ref(&self) -> TaskRef {
         self.switch_to_exit_next_ref
     }
 
     #[allow(dead_code)]
-    pub const fn switch_to_exit_current_ref(&self) -> CurrentTaskRef {
+    pub const fn switch_to_exit_current_ref(&self) -> TaskRef {
         self.switch_to_exit_current_ref
     }
 
@@ -548,17 +547,17 @@ impl Scheduler {
     }
 
     #[allow(dead_code)]
-    pub const fn schedule_exit_prev_ref(&self) -> CurrentTaskRef {
+    pub const fn schedule_exit_prev_ref(&self) -> TaskRef {
         self.schedule_exit_prev_ref
     }
 
     #[allow(dead_code)]
-    pub const fn schedule_exit_next_ref(&self) -> CurrentTaskRef {
+    pub const fn schedule_exit_next_ref(&self) -> TaskRef {
         self.schedule_exit_next_ref
     }
 
     #[allow(dead_code)]
-    pub const fn schedule_exit_current_ref(&self) -> CurrentTaskRef {
+    pub const fn schedule_exit_current_ref(&self) -> TaskRef {
         self.schedule_exit_current_ref
     }
 
@@ -640,7 +639,7 @@ impl Scheduler {
         &mut self,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
-        boot_task: &BootTask,
+        boot_task: &mut BootTask,
         init_mm: &InitMm,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
@@ -664,7 +663,7 @@ impl Scheduler {
             cpu_group,
             per_cpu_storage,
             &self.default_root_domain,
-            boot_task,
+            &*boot_task,
             local_interrupt,
             &mut self.boot_init_preemption,
         )?;
@@ -725,16 +724,7 @@ impl Scheduler {
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
-            || !matches!(
-                current_task_slot.current(),
-                CurrentTaskRef::BootTask
-                    | CurrentTaskRef::KernelInit
-                    | CurrentTaskRef::Kthreadd
-                    | CurrentTaskRef::SmokeScheduler
-                    | CurrentTaskRef::SmokeMutex
-                    | CurrentTaskRef::SmokeRwsem
-                    | CurrentTaskRef::SmokeRwLock
-            )
+            || !current_task_slot.current().is_boot_scheduler_ref()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -745,7 +735,7 @@ impl Scheduler {
         }
 
         let prev_ref = current_task_slot.current();
-        let mut next_ref = CurrentTaskRef::None;
+        let mut next_ref = TaskRef::NONE;
 
         self.boot_idle_preemption.disable()?;
         self.schedule_preemption_disable_count =
@@ -854,14 +844,14 @@ impl Scheduler {
             || kernel_init_task.state() != State::Online
             || current_task_slot.state() != State::Ready
             || !current_task_slot.current_is_kernel_init()
-            || !self.boot_idle_setup_state.switch_context().initialized()
+            || !BootTask::canonical_switch_context().initialized()
             || !kernel_init_task.switch_context().initialized()
             || self.kernel_init_stack_switch_started_count != 0
         {
             return Err(self.failed_schedule_condition());
         }
 
-        let prev = self.boot_idle_setup_state.switch_context_mut() as *mut TaskSwitchContext;
+        let prev = BootTask::canonical_switch_context_mut() as *mut TaskSwitchContext;
         let next = kernel_init_task.switch_context() as *const TaskSwitchContext;
         self.task_stack_switching_online = true;
         self.kernel_init_stack_switch_started_count =
@@ -881,7 +871,7 @@ impl Scheduler {
         cpu_group: &CpuGroup,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
-        current_task_ref: CurrentTaskRef,
+        current_task_ref: TaskRef,
     ) -> Result<CurrentRunQueueRef, EventError> {
         let Some(cpu_id) =
             self.current_task_cpu_id(current_task_ref, kernel_init_task, kthreadd_task)
@@ -902,39 +892,38 @@ impl Scheduler {
 
     fn current_task_cpu_id(
         &self,
-        current_task_ref: CurrentTaskRef,
+        current_task_ref: TaskRef,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
     ) -> Option<usize> {
-        match current_task_ref {
-            CurrentTaskRef::BootTask => Some(self.boot_idle_setup_state.cpu_id()),
-            CurrentTaskRef::KernelInit => Some(kernel_init_task.cpu_id()),
-            CurrentTaskRef::Kthreadd => Some(kthreadd_task.cpu_id()),
-            CurrentTaskRef::SmokeScheduler => Some(self.smoke_scheduler_task.cpu_id()),
-            CurrentTaskRef::SmokeMutex => Some(self.smoke_mutex_task.cpu_id()),
-            CurrentTaskRef::SmokeRwsem => Some(self.smoke_rwsem_task.cpu_id()),
-            CurrentTaskRef::SmokeRwLock => Some(self.smoke_rwlock_task.cpu_id()),
-            CurrentTaskRef::None | CurrentTaskRef::UserChild => None,
+        if current_task_ref == TaskRef::BOOT {
+            Some(BootTask::canonical_cpu_id())
+        } else if current_task_ref == TaskRef::KERNEL_INIT {
+            Some(kernel_init_task.cpu_id())
+        } else if current_task_ref == TaskRef::KTHREADD {
+            Some(kthreadd_task.cpu_id())
+        } else if current_task_ref == TaskRef::SMOKE_SCHEDULER {
+            Some(self.smoke_scheduler_task.cpu_id())
+        } else if current_task_ref == TaskRef::SMOKE_MUTEX {
+            Some(self.smoke_mutex_task.cpu_id())
+        } else if current_task_ref == TaskRef::SMOKE_RWSEM {
+            Some(self.smoke_rwsem_task.cpu_id())
+        } else if current_task_ref == TaskRef::SMOKE_RWLOCK {
+            Some(self.smoke_rwlock_task.cpu_id())
+        } else if current_task_ref.is_user() {
+            Some(self.boot_runqueue.cpu_id())
+        } else {
+            None
         }
     }
 
     fn pick_next_task(
         &mut self,
         current_rq: CurrentRunQueueRef,
-        prev_ref: CurrentTaskRef,
-    ) -> Result<CurrentTaskRef, EventError> {
+        prev_ref: TaskRef,
+    ) -> Result<TaskRef, EventError> {
         if !current_rq.matches_cpu_owned_runqueue(self.boot_runqueue.cpu_id())
-            || !matches!(
-                prev_ref,
-                CurrentTaskRef::BootTask
-                    | CurrentTaskRef::KernelInit
-                    | CurrentTaskRef::Kthreadd
-                    | CurrentTaskRef::UserChild
-                    | CurrentTaskRef::SmokeScheduler
-                    | CurrentTaskRef::SmokeMutex
-                    | CurrentTaskRef::SmokeRwsem
-                    | CurrentTaskRef::SmokeRwLock
-            )
+            || !prev_ref.is_boot_scheduler_ref()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || self.boot_runqueue.task_count() == 0
         {
@@ -966,29 +955,13 @@ impl Scheduler {
 
     fn switch_to(
         &mut self,
-        prev_ref: CurrentTaskRef,
-        next_ref: CurrentTaskRef,
+        prev_ref: TaskRef,
+        next_ref: TaskRef,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
-        if !matches!(
-            prev_ref,
-            CurrentTaskRef::BootTask
-                | CurrentTaskRef::KernelInit
-                | CurrentTaskRef::Kthreadd
-                | CurrentTaskRef::SmokeScheduler
-                | CurrentTaskRef::SmokeMutex
-                | CurrentTaskRef::SmokeRwsem
-                | CurrentTaskRef::SmokeRwLock
-        ) || !matches!(
-            next_ref,
-            CurrentTaskRef::BootTask
-                | CurrentTaskRef::KernelInit
-                | CurrentTaskRef::Kthreadd
-                | CurrentTaskRef::SmokeScheduler
-                | CurrentTaskRef::SmokeMutex
-                | CurrentTaskRef::SmokeRwsem
-                | CurrentTaskRef::SmokeRwLock
-        ) || self.boot_runqueue.curr_task_id() != self.boot_idle_setup_state.task_id()
+        if !prev_ref.is_boot_scheduler_ref()
+            || !next_ref.is_boot_scheduler_ref()
+            || self.boot_runqueue.curr_task_id() != self.boot_idle_setup_state.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || current_task_slot.state() != State::Ready
             || current_task_slot.current() != prev_ref
@@ -1022,37 +995,33 @@ impl Scheduler {
         Ok(())
     }
 
-    fn record_core_context_switch(
-        &mut self,
-        prev_ref: CurrentTaskRef,
-        next_ref: CurrentTaskRef,
-    ) -> EventResult {
-        if prev_ref == CurrentTaskRef::BootTask {
+    fn record_core_context_switch(&mut self, prev_ref: TaskRef, next_ref: TaskRef) -> EventResult {
+        if prev_ref == TaskRef::BOOT {
             self.boot_idle_setup_state.save_core_context()?;
             self.boot_idle_setup_state.restore_core_context()?;
         }
-        if prev_ref == CurrentTaskRef::SmokeScheduler {
+        if prev_ref == TaskRef::SMOKE_SCHEDULER {
             self.smoke_scheduler_task.save_core_context()?;
         }
-        if prev_ref == CurrentTaskRef::SmokeMutex {
+        if prev_ref == TaskRef::SMOKE_MUTEX {
             self.smoke_mutex_task.save_core_context()?;
         }
-        if prev_ref == CurrentTaskRef::SmokeRwsem {
+        if prev_ref == TaskRef::SMOKE_RWSEM {
             self.smoke_rwsem_task.save_core_context()?;
         }
-        if prev_ref == CurrentTaskRef::SmokeRwLock {
+        if prev_ref == TaskRef::SMOKE_RWLOCK {
             self.smoke_rwlock_task.save_core_context()?;
         }
-        if next_ref == CurrentTaskRef::SmokeScheduler {
+        if next_ref == TaskRef::SMOKE_SCHEDULER {
             self.smoke_scheduler_task.restore_core_context()?;
         }
-        if next_ref == CurrentTaskRef::SmokeMutex {
+        if next_ref == TaskRef::SMOKE_MUTEX {
             self.smoke_mutex_task.restore_core_context()?;
         }
-        if next_ref == CurrentTaskRef::SmokeRwsem {
+        if next_ref == TaskRef::SMOKE_RWSEM {
             self.smoke_rwsem_task.restore_core_context()?;
         }
-        if next_ref == CurrentTaskRef::SmokeRwLock {
+        if next_ref == TaskRef::SMOKE_RWLOCK {
             self.smoke_rwlock_task.restore_core_context()?;
         }
         Ok(())
@@ -1060,8 +1029,8 @@ impl Scheduler {
 
     fn cooperative_context_switch(
         &mut self,
-        prev_ref: CurrentTaskRef,
-        next_ref: CurrentTaskRef,
+        prev_ref: TaskRef,
+        next_ref: TaskRef,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
     ) -> EventResult {
@@ -1070,27 +1039,27 @@ impl Scheduler {
         }
 
         let prev: *mut TaskSwitchContext = match prev_ref {
-            CurrentTaskRef::BootTask => self.boot_idle_setup_state.switch_context_mut(),
-            CurrentTaskRef::KernelInit => {
+            TaskRef::BOOT => BootTask::canonical_switch_context_mut(),
+            TaskRef::KERNEL_INIT => {
                 kernel_init_task.switch_context() as *const TaskSwitchContext as *mut _
             }
-            CurrentTaskRef::Kthreadd => {
+            TaskRef::KTHREADD => {
                 kthreadd_task.switch_context() as *const TaskSwitchContext as *mut _
             }
-            CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context_mut(),
-            CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context_mut(),
-            CurrentTaskRef::SmokeRwsem => self.smoke_rwsem_task.switch_context_mut(),
-            CurrentTaskRef::SmokeRwLock => self.smoke_rwlock_task.switch_context_mut(),
+            TaskRef::SMOKE_SCHEDULER => self.smoke_scheduler_task.switch_context_mut(),
+            TaskRef::SMOKE_MUTEX => self.smoke_mutex_task.switch_context_mut(),
+            TaskRef::SMOKE_RWSEM => self.smoke_rwsem_task.switch_context_mut(),
+            TaskRef::SMOKE_RWLOCK => self.smoke_rwlock_task.switch_context_mut(),
             _ => return Ok(()),
         };
         let next: &TaskSwitchContext = match next_ref {
-            CurrentTaskRef::BootTask => self.boot_idle_setup_state.switch_context(),
-            CurrentTaskRef::KernelInit => kernel_init_task.switch_context(),
-            CurrentTaskRef::Kthreadd => kthreadd_task.switch_context(),
-            CurrentTaskRef::SmokeScheduler => self.smoke_scheduler_task.switch_context(),
-            CurrentTaskRef::SmokeMutex => self.smoke_mutex_task.switch_context(),
-            CurrentTaskRef::SmokeRwsem => self.smoke_rwsem_task.switch_context(),
-            CurrentTaskRef::SmokeRwLock => self.smoke_rwlock_task.switch_context(),
+            TaskRef::BOOT => BootTask::canonical_switch_context(),
+            TaskRef::KERNEL_INIT => kernel_init_task.switch_context(),
+            TaskRef::KTHREADD => kthreadd_task.switch_context(),
+            TaskRef::SMOKE_SCHEDULER => self.smoke_scheduler_task.switch_context(),
+            TaskRef::SMOKE_MUTEX => self.smoke_mutex_task.switch_context(),
+            TaskRef::SMOKE_RWSEM => self.smoke_rwsem_task.switch_context(),
+            TaskRef::SMOKE_RWLOCK => self.smoke_rwlock_task.switch_context(),
             _ => return Ok(()),
         };
         if !next.initialized() {
@@ -1126,7 +1095,7 @@ impl Scheduler {
 
         self.boot_runqueue.enqueue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeScheduler,
+            TaskRef::SMOKE_SCHEDULER,
         )?;
         self.smoke_scheduler_task.mark_enqueued();
         Ok(())
@@ -1156,7 +1125,7 @@ impl Scheduler {
 
         self.boot_runqueue.enqueue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeMutex,
+            TaskRef::SMOKE_MUTEX,
         )?;
         self.smoke_mutex_task.mark_enqueued();
         Ok(())
@@ -1173,7 +1142,7 @@ impl Scheduler {
 
         self.boot_runqueue.dequeue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeMutex,
+            TaskRef::SMOKE_MUTEX,
         )?;
         self.smoke_mutex_task.mark_dequeued();
         Ok(())
@@ -1203,7 +1172,7 @@ impl Scheduler {
 
         self.boot_runqueue.enqueue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeRwsem,
+            TaskRef::SMOKE_RWSEM,
         )?;
         self.smoke_rwsem_task.mark_enqueued();
         Ok(())
@@ -1220,7 +1189,7 @@ impl Scheduler {
 
         self.boot_runqueue.dequeue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeRwsem,
+            TaskRef::SMOKE_RWSEM,
         )?;
         self.smoke_rwsem_task.mark_dequeued();
         Ok(())
@@ -1250,7 +1219,7 @@ impl Scheduler {
 
         self.boot_runqueue.enqueue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeRwLock,
+            TaskRef::SMOKE_RWLOCK,
         )?;
         self.smoke_rwlock_task.mark_enqueued();
         Ok(())
@@ -1267,7 +1236,7 @@ impl Scheduler {
 
         self.boot_runqueue.dequeue_task_ref(
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
-            CurrentTaskRef::SmokeRwLock,
+            TaskRef::SMOKE_RWLOCK,
         )?;
         self.smoke_rwlock_task.mark_dequeued();
         Ok(())
@@ -1310,6 +1279,7 @@ impl Scheduler {
     pub fn enqueue_task_on_runqueue(
         &mut self,
         task_id: usize,
+        task_ref: TaskRef,
         runqueue_ref: RunQueueRef,
     ) -> EventResult {
         if self.selected_runqueue_task_id != task_id
@@ -1323,26 +1293,17 @@ impl Scheduler {
             );
         }
 
-        let task_ref = if task_id == crate::objects::rest_init::KERNEL_INIT_PID {
-            CurrentTaskRef::KernelInit
-        } else if task_id == crate::objects::rest_init::KTHREADD_PID {
-            CurrentTaskRef::Kthreadd
-        } else if task_id == USER_CHILD_PID {
-            CurrentTaskRef::UserChild
-        } else {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
-        };
-        self.boot_runqueue.enqueue_task_ref(runqueue_ref, task_ref)
+        self.boot_runqueue
+            .enqueue_task_with_id(runqueue_ref, task_ref, task_id)
     }
 
     // Used by the user-boot syscall continuation configuration.
     #[allow(dead_code)]
-    pub fn dequeue_user_child_from_runqueue(&mut self, cpu_group: &CpuGroup) -> EventResult {
+    pub fn dequeue_user_child_from_runqueue(
+        &mut self,
+        cpu_group: &CpuGroup,
+        task_ref: TaskRef,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.state() != State::Ready
@@ -1358,8 +1319,40 @@ impl Scheduler {
         else {
             return Err(self.failed_enable_condition());
         };
+        self.boot_runqueue.dequeue_task_ref(runqueue_ref, task_ref)
+    }
+
+    pub fn replace_user_task_on_runqueue(
+        &mut self,
+        cpu_group: &CpuGroup,
+        previous: TaskRef,
+        next: TaskRef,
+        next_pid: usize,
+    ) -> EventResult {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return Err(self.failed_enable_condition());
+        };
+        let Some(runqueue_ref) =
+            self.resolve_selected_runqueue_ref_for_cpu(cpu_group, boot_cpu.logical_id())
+        else {
+            return Err(self.failed_enable_condition());
+        };
         self.boot_runqueue
-            .dequeue_task_ref(runqueue_ref, CurrentTaskRef::UserChild)
+            .replace_user_task_ref(runqueue_ref, previous, next, next_pid)
+    }
+
+    pub fn can_replace_user_task_on_runqueue(
+        &self,
+        cpu_group: &CpuGroup,
+        previous: TaskRef,
+    ) -> bool {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return false;
+        };
+        self.resolve_selected_runqueue_ref_for_cpu(cpu_group, boot_cpu.logical_id())
+            .is_some()
+            && previous.is_user()
+            && self.boot_runqueue.contains_task_ref(previous)
     }
 
     fn resolve_runqueue_ref_for_cpu(
@@ -1589,11 +1582,7 @@ impl Scheduler {
     }
 }
 
-fn trace_switch_to(
-    prev_ref: CurrentTaskRef,
-    next_ref: CurrentTaskRef,
-    current_after: CurrentTaskRef,
-) {
+fn trace_switch_to(prev_ref: TaskRef, next_ref: TaskRef, current_after: TaskRef) {
     #[cfg(checkpoint_handler_announce)]
     {
         crate::arch::riscv64::sbi::putstr("checkpoint: Scheduler.SwitchTo prev=");
@@ -1895,26 +1884,27 @@ impl CpuIdleTaskView {
     }
 }
 
-fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
+fn task_id_for_current_task_ref(task_ref: TaskRef) -> Option<usize> {
+    if task_ref.is_user() {
+        return Some(USER_CHILD_PID);
+    }
     match task_ref {
-        CurrentTaskRef::KernelInit => Some(crate::objects::rest_init::KERNEL_INIT_PID),
-        CurrentTaskRef::Kthreadd => Some(crate::objects::rest_init::KTHREADD_PID),
-        CurrentTaskRef::UserChild => Some(USER_CHILD_PID),
-        CurrentTaskRef::SmokeScheduler => Some(SMOKE_SCHEDULER_TASK_ID),
-        CurrentTaskRef::SmokeMutex => Some(SMOKE_MUTEX_TASK_ID),
-        CurrentTaskRef::SmokeRwsem => Some(SMOKE_RWSEM_TASK_ID),
-        CurrentTaskRef::SmokeRwLock => Some(SMOKE_RWLOCK_TASK_ID),
-        CurrentTaskRef::None | CurrentTaskRef::BootTask => None,
+        TaskRef::KERNEL_INIT => Some(crate::objects::rest_init::KERNEL_INIT_PID),
+        TaskRef::KTHREADD => Some(crate::objects::rest_init::KTHREADD_PID),
+        TaskRef::SMOKE_SCHEDULER => Some(SMOKE_SCHEDULER_TASK_ID),
+        TaskRef::SMOKE_MUTEX => Some(SMOKE_MUTEX_TASK_ID),
+        TaskRef::SMOKE_RWSEM => Some(SMOKE_RWSEM_TASK_ID),
+        TaskRef::SMOKE_RWLOCK => Some(SMOKE_RWLOCK_TASK_ID),
+        TaskRef::NONE | TaskRef::BOOT => None,
+        _ => None,
     }
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct SmokeSchedulerTask {
-    lifecycle: Lifecycle,
-    task_id: usize,
-    cpu: TaskCpuState,
+    task: Task,
+    flow: TaskFlow,
     thread_context: TaskThreadContext,
-    switch_context: TaskSwitchContext,
     stack: [usize; SMOKE_SCHEDULER_STACK_WORDS],
     enqueued: bool,
     entry_ran: bool,
@@ -1925,11 +1915,9 @@ pub struct SmokeSchedulerTask {
 impl SmokeSchedulerTask {
     const fn new(task_id: usize) -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
-            task_id,
-            cpu: TaskCpuState::new(),
+            task: Task::with_ref(smoke_task_ref(task_id)),
+            flow: TaskFlow::new_static(TaskFlowRef::smoke(smoke_flow_index(task_id))),
             thread_context: TaskThreadContext::new(),
-            switch_context: TaskSwitchContext::new(),
             stack: [0; SMOKE_SCHEDULER_STACK_WORDS],
             enqueued: false,
             entry_ran: false,
@@ -1938,15 +1926,15 @@ impl SmokeSchedulerTask {
     }
 
     pub const fn state(&self) -> State {
-        self.lifecycle.state()
+        self.task.state()
     }
 
     pub const fn task_id(&self) -> usize {
-        self.task_id
+        self.task.pid()
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.cpu.cpu_id()
+        self.task.cpu_id()
     }
 
     pub const fn enqueued(&self) -> bool {
@@ -1965,20 +1953,63 @@ impl SmokeSchedulerTask {
         &self.thread_context
     }
 
+    pub const fn task_ref(&self) -> TaskRef {
+        self.task.task_ref()
+    }
+
+    pub const fn flow_ref(&self) -> TaskFlowRef {
+        self.flow.flow_ref()
+    }
+
+    pub fn unified_carrier_ready(&self) -> bool {
+        self.task.state() == State::Ready
+            && self.flow.state() == State::Ready
+            && self.flow.active()
+            && self.flow.owner().same_identity(self.task.task_ref())
+            && self.task.active_flow().same_identity(self.flow.flow_ref())
+    }
+
     fn setup(&mut self, entry: extern "C" fn() -> !, cpu_id: usize) -> bool {
-        if self.lifecycle.state() != State::Base || cpu_id == usize::MAX {
+        if self.task.state() != State::Base || cpu_id == usize::MAX {
             return false;
         }
 
         let stack_top = self.stack.as_ptr() as usize + core::mem::size_of_val(&self.stack);
-        self.switch_context.init(entry, stack_top, 0);
-        self.thread_context.setup_smoke_scheduler(stack_top);
-        if !self.cpu.set_task_cpu(cpu_id) {
+        if self
+            .task
+            .set_identity_metadata(
+                self.task_id_from_ref(),
+                TaskEntry::SmokeScheduler,
+                TaskKind::TestOnly,
+            )
+            .is_err()
+            || self.task.adopt_preset().is_err()
+            || self
+                .flow
+                .preset(&mut self.task, TaskFlowRef::NONE, None)
+                .is_err()
+            || self.flow.setup(None).is_err()
+            || self.task.bind_initial_flow(&mut self.flow).is_err()
+            || self.task.adopt_setup().is_err()
+        {
             return false;
         }
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
-            .is_ok()
+        self.task.init_switch_context(entry, stack_top);
+        self.thread_context.setup_smoke_scheduler();
+        if !self.task.set_task_cpu(cpu_id) {
+            return false;
+        }
+        true
+    }
+
+    const fn task_id_from_ref(&self) -> usize {
+        match self.task.task_ref() {
+            TaskRef::SMOKE_SCHEDULER => SMOKE_SCHEDULER_TASK_ID,
+            TaskRef::SMOKE_MUTEX => SMOKE_MUTEX_TASK_ID,
+            TaskRef::SMOKE_RWSEM => SMOKE_RWSEM_TASK_ID,
+            TaskRef::SMOKE_RWLOCK => SMOKE_RWLOCK_TASK_ID,
+            _ => usize::MAX,
+        }
     }
 
     fn mark_enqueued(&mut self) {
@@ -1990,10 +2021,10 @@ impl SmokeSchedulerTask {
     }
 
     pub fn mark_entry_ran(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.enqueued {
+        if self.task.state() != State::Ready || !self.enqueued {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.task.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -2004,10 +2035,10 @@ impl SmokeSchedulerTask {
     }
 
     pub fn mark_yielded_back(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.entry_ran {
+        if self.task.state() != State::Ready || !self.entry_ran {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.task.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -2018,10 +2049,10 @@ impl SmokeSchedulerTask {
     }
 
     fn save_core_context(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.task.state() != State::Ready || !self.thread_context.core_register_set() {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.task.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -2032,10 +2063,10 @@ impl SmokeSchedulerTask {
     }
 
     fn restore_core_context(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.task.state() != State::Ready || !self.thread_context.core_register_set() {
             return failed_condition(
                 LifecycleEvent::Setup,
-                self.lifecycle.state(),
+                self.task.state(),
                 State::Ready,
                 State::Ready,
             );
@@ -2046,11 +2077,31 @@ impl SmokeSchedulerTask {
     }
 
     fn switch_context(&self) -> &TaskSwitchContext {
-        &self.switch_context
+        self.task.switch_context()
     }
 
     fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.switch_context
+        self.task.switch_context_mut()
+    }
+}
+
+const fn smoke_task_ref(task_id: usize) -> TaskRef {
+    match task_id {
+        SMOKE_SCHEDULER_TASK_ID => TaskRef::SMOKE_SCHEDULER,
+        SMOKE_MUTEX_TASK_ID => TaskRef::SMOKE_MUTEX,
+        SMOKE_RWSEM_TASK_ID => TaskRef::SMOKE_RWSEM,
+        SMOKE_RWLOCK_TASK_ID => TaskRef::SMOKE_RWLOCK,
+        _ => TaskRef::NONE,
+    }
+}
+
+const fn smoke_flow_index(task_id: usize) -> usize {
+    match task_id {
+        SMOKE_SCHEDULER_TASK_ID => 0,
+        SMOKE_MUTEX_TASK_ID => 1,
+        SMOKE_RWSEM_TASK_ID => 2,
+        SMOKE_RWLOCK_TASK_ID => 3,
+        _ => 0,
     }
 }
 
@@ -2137,6 +2188,8 @@ pub struct BootRunQueue {
     kernel_init_task_enqueued: bool,
     kthreadd_task_enqueued: bool,
     user_child_task_enqueued: bool,
+    user_child_task_ref: TaskRef,
+    user_child_task_pid: usize,
     smoke_scheduler_task_enqueued: bool,
     smoke_mutex_task_enqueued: bool,
     smoke_rwsem_task_enqueued: bool,
@@ -2162,6 +2215,8 @@ impl BootRunQueue {
             kernel_init_task_enqueued: false,
             kthreadd_task_enqueued: false,
             user_child_task_enqueued: false,
+            user_child_task_ref: TaskRef::NONE,
+            user_child_task_pid: 0,
             smoke_scheduler_task_enqueued: false,
             smoke_mutex_task_enqueued: false,
             smoke_rwsem_task_enqueued: false,
@@ -2226,7 +2281,7 @@ impl BootRunQueue {
     pub const fn contains_task(&self, task_id: usize) -> bool {
         (self.kernel_init_task_enqueued && task_id == crate::objects::rest_init::KERNEL_INIT_PID)
             || (self.kthreadd_task_enqueued && task_id == crate::objects::rest_init::KTHREADD_PID)
-            || (self.user_child_task_enqueued && task_id == USER_CHILD_PID)
+            || (self.user_child_task_enqueued && task_id == self.user_child_task_pid)
             || (self.smoke_scheduler_task_enqueued && task_id == SMOKE_SCHEDULER_TASK_ID)
             || (self.smoke_mutex_task_enqueued && task_id == SMOKE_MUTEX_TASK_ID)
             || (self.smoke_rwsem_task_enqueued && task_id == SMOKE_RWSEM_TASK_ID)
@@ -2243,21 +2298,43 @@ impl BootRunQueue {
             + self.smoke_rwlock_task_enqueued as usize
     }
 
-    pub const fn first_runnable_task_ref(&self) -> CurrentTaskRef {
-        if self.smoke_rwlock_task_enqueued {
-            CurrentTaskRef::SmokeRwLock
-        } else if self.smoke_rwsem_task_enqueued {
-            CurrentTaskRef::SmokeRwsem
-        } else if self.smoke_mutex_task_enqueued {
-            CurrentTaskRef::SmokeMutex
-        } else if self.smoke_scheduler_task_enqueued {
-            CurrentTaskRef::SmokeScheduler
-        } else if self.kernel_init_task_enqueued {
-            CurrentTaskRef::KernelInit
-        } else if self.kthreadd_task_enqueued {
-            CurrentTaskRef::Kthreadd
+    pub const fn contains_task_ref(&self, task_ref: TaskRef) -> bool {
+        if task_ref.is_user() {
+            self.user_child_task_enqueued && self.user_child_task_ref.same_identity(task_ref)
+        } else if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            self.kernel_init_task_enqueued
+        } else if task_ref.same_identity(TaskRef::KTHREADD) {
+            self.kthreadd_task_enqueued
+        } else if task_ref.same_identity(TaskRef::SMOKE_SCHEDULER) {
+            self.smoke_scheduler_task_enqueued
+        } else if task_ref.same_identity(TaskRef::SMOKE_MUTEX) {
+            self.smoke_mutex_task_enqueued
+        } else if task_ref.same_identity(TaskRef::SMOKE_RWSEM) {
+            self.smoke_rwsem_task_enqueued
+        } else if task_ref.same_identity(TaskRef::SMOKE_RWLOCK) {
+            self.smoke_rwlock_task_enqueued
         } else {
-            CurrentTaskRef::None
+            false
+        }
+    }
+
+    pub const fn first_runnable_task_ref(&self) -> TaskRef {
+        if self.smoke_rwlock_task_enqueued {
+            TaskRef::SMOKE_RWLOCK
+        } else if self.smoke_rwsem_task_enqueued {
+            TaskRef::SMOKE_RWSEM
+        } else if self.smoke_mutex_task_enqueued {
+            TaskRef::SMOKE_MUTEX
+        } else if self.smoke_scheduler_task_enqueued {
+            TaskRef::SMOKE_SCHEDULER
+        } else if self.user_child_task_enqueued {
+            self.user_child_task_ref
+        } else if self.kernel_init_task_enqueued {
+            TaskRef::KERNEL_INIT
+        } else if self.kthreadd_task_enqueued {
+            TaskRef::KTHREADD
+        } else {
+            TaskRef::NONE
         }
     }
 
@@ -2377,10 +2454,14 @@ impl BootRunQueue {
     pub fn enqueue_task_ref(
         &mut self,
         runqueue_ref: RunQueueRef,
-        task_ref: CurrentTaskRef,
+        task_ref: TaskRef,
     ) -> EventResult {
         if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id()) {
             return self.failed_setup();
+        }
+
+        if task_ref.is_user() {
+            return self.enqueue_task_with_id(runqueue_ref, task_ref, USER_CHILD_PID);
         }
 
         let Some(task_id) = task_id_for_current_task_ref(task_ref) else {
@@ -2389,67 +2470,93 @@ impl BootRunQueue {
         self.enqueue_task(task_id)
     }
 
+    pub fn enqueue_task_with_id(
+        &mut self,
+        runqueue_ref: RunQueueRef,
+        task_ref: TaskRef,
+        task_id: usize,
+    ) -> EventResult {
+        if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id())
+            || !task_ref.is_boot_scheduler_ref()
+            || task_ref.same_identity(TaskRef::BOOT)
+            || task_id == usize::MAX
+        {
+            return self.failed_setup();
+        }
+        if task_ref.is_user() {
+            if self.user_child_task_enqueued || task_id < USER_CHILD_PID {
+                return self.failed_setup();
+            }
+            self.user_child_task_ref = task_ref;
+            self.user_child_task_pid = task_id;
+            self.user_child_task_enqueued = true;
+            self.enqueued_task_id = task_id;
+            return Ok(());
+        }
+        if task_id_for_current_task_ref(task_ref) != Some(task_id) {
+            return self.failed_setup();
+        }
+        self.enqueue_task(task_id)
+    }
+
     pub fn pick_next_task(
         &self,
         runqueue_ref: CurrentRunQueueRef,
-        prev_ref: CurrentTaskRef,
-    ) -> Result<CurrentTaskRef, EventError> {
+        prev_ref: TaskRef,
+    ) -> Result<TaskRef, EventError> {
         if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id())
             || self.lifecycle.state() != State::Ready
-            || !matches!(
-                prev_ref,
-                CurrentTaskRef::BootTask
-                    | CurrentTaskRef::KernelInit
-                    | CurrentTaskRef::Kthreadd
-                    | CurrentTaskRef::UserChild
-                    | CurrentTaskRef::SmokeScheduler
-                    | CurrentTaskRef::SmokeMutex
-                    | CurrentTaskRef::SmokeRwsem
-                    | CurrentTaskRef::SmokeRwLock
-            )
+            || !prev_ref.is_boot_scheduler_ref()
             || self.task_count() == 0
         {
             return Err(self.failed_setup_error());
         }
 
-        let next_ref = match prev_ref {
-            CurrentTaskRef::SmokeScheduler
-            | CurrentTaskRef::SmokeMutex
-            | CurrentTaskRef::SmokeRwsem
-            | CurrentTaskRef::SmokeRwLock
-            | CurrentTaskRef::UserChild => {
-                if self.kernel_init_task_enqueued {
-                    CurrentTaskRef::KernelInit
-                } else {
-                    CurrentTaskRef::None
-                }
+        let next_ref = if prev_ref.is_user()
+            || matches!(
+                prev_ref,
+                TaskRef::SMOKE_SCHEDULER
+                    | TaskRef::SMOKE_MUTEX
+                    | TaskRef::SMOKE_RWSEM
+                    | TaskRef::SMOKE_RWLOCK
+            ) {
+            if self.kernel_init_task_enqueued {
+                TaskRef::KERNEL_INIT
+            } else {
+                TaskRef::NONE
             }
-            CurrentTaskRef::KernelInit => {
-                if self.smoke_rwlock_task_enqueued {
-                    CurrentTaskRef::SmokeRwLock
-                } else if self.smoke_rwsem_task_enqueued {
-                    CurrentTaskRef::SmokeRwsem
-                } else if self.smoke_mutex_task_enqueued {
-                    CurrentTaskRef::SmokeMutex
-                } else if self.smoke_scheduler_task_enqueued {
-                    CurrentTaskRef::SmokeScheduler
-                } else if self.kthreadd_task_enqueued {
-                    CurrentTaskRef::Kthreadd
-                } else {
-                    CurrentTaskRef::BootTask
+        } else {
+            match prev_ref {
+                TaskRef::KERNEL_INIT => {
+                    if self.smoke_rwlock_task_enqueued {
+                        TaskRef::SMOKE_RWLOCK
+                    } else if self.smoke_rwsem_task_enqueued {
+                        TaskRef::SMOKE_RWSEM
+                    } else if self.smoke_mutex_task_enqueued {
+                        TaskRef::SMOKE_MUTEX
+                    } else if self.smoke_scheduler_task_enqueued {
+                        TaskRef::SMOKE_SCHEDULER
+                    } else if self.user_child_task_enqueued {
+                        self.user_child_task_ref
+                    } else if self.kthreadd_task_enqueued {
+                        TaskRef::KTHREADD
+                    } else {
+                        TaskRef::BOOT
+                    }
                 }
-            }
-            CurrentTaskRef::Kthreadd => {
-                if self.kernel_init_task_enqueued {
-                    CurrentTaskRef::KernelInit
-                } else {
-                    CurrentTaskRef::BootTask
+                TaskRef::KTHREADD => {
+                    if self.kernel_init_task_enqueued {
+                        TaskRef::KERNEL_INIT
+                    } else {
+                        TaskRef::BOOT
+                    }
                 }
+                TaskRef::BOOT => self.first_runnable_task_ref(),
+                TaskRef::NONE => TaskRef::NONE,
+                _ => TaskRef::NONE,
             }
-            CurrentTaskRef::BootTask => self.first_runnable_task_ref(),
-            CurrentTaskRef::None => CurrentTaskRef::None,
         };
-        if matches!(next_ref, CurrentTaskRef::None) {
+        if matches!(next_ref, TaskRef::NONE) {
             return Err(self.failed_setup_error());
         }
         Ok(next_ref)
@@ -2498,16 +2605,49 @@ impl BootRunQueue {
     pub fn dequeue_task_ref(
         &mut self,
         runqueue_ref: RunQueueRef,
-        task_ref: CurrentTaskRef,
+        task_ref: TaskRef,
     ) -> EventResult {
         if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id()) {
             return self.failed_setup();
+        }
+
+        if task_ref.is_user() {
+            if !self.user_child_task_enqueued || !self.user_child_task_ref.same_identity(task_ref) {
+                return self.failed_setup();
+            }
+            self.user_child_task_enqueued = false;
+            self.user_child_task_ref = TaskRef::NONE;
+            self.user_child_task_pid = 0;
+            self.enqueued_task_id = usize::MAX;
+            return Ok(());
         }
 
         let Some(task_id) = task_id_for_current_task_ref(task_ref) else {
             return self.failed_setup();
         };
         self.dequeue_task(task_id)
+    }
+
+    pub fn replace_user_task_ref(
+        &mut self,
+        runqueue_ref: RunQueueRef,
+        previous: TaskRef,
+        next: TaskRef,
+        next_pid: usize,
+    ) -> EventResult {
+        if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id())
+            || !previous.is_user()
+            || !next.is_user()
+            || next_pid < USER_CHILD_PID
+            || !self.user_child_task_enqueued
+            || !self.user_child_task_ref.same_identity(previous)
+        {
+            return self.failed_setup();
+        }
+        self.user_child_task_ref = next;
+        self.user_child_task_pid = next_pid;
+        self.enqueued_task_id = next_pid;
+        Ok(())
     }
 
     fn dequeue_task(&mut self, task_id: usize) -> EventResult {
@@ -2523,6 +2663,8 @@ impl BootRunQueue {
         }
         if task_id == USER_CHILD_PID {
             self.user_child_task_enqueued = false;
+            self.user_child_task_ref = TaskRef::NONE;
+            self.user_child_task_pid = 0;
         }
         if task_id == SMOKE_SCHEDULER_TASK_ID {
             self.smoke_scheduler_task_enqueued = false;
@@ -2561,7 +2703,6 @@ impl BootRunQueue {
 }
 
 pub struct BootIdleSetupState {
-    task_record: Task,
     lifecycle: Lifecycle,
     pi_lock: RawSpinLock,
     cpu_ref: CpuRef,
@@ -2579,7 +2720,6 @@ pub struct BootIdleSetupState {
 impl BootIdleSetupState {
     const fn new() -> Self {
         Self {
-            task_record: Task::new(),
             lifecycle: Lifecycle::new(State::Base),
             pi_lock: RawSpinLock::new(),
             cpu_ref: CpuRef::invalid(),
@@ -2604,11 +2744,11 @@ impl BootIdleSetupState {
     }
 
     pub const fn task_id(&self) -> usize {
-        self.task_record.pid
+        0
     }
 
-    pub const fn cpu_id(&self) -> usize {
-        self.task_record.cpu.cpu_id()
+    pub fn cpu_id(&self) -> usize {
+        BootTask::canonical_cpu_id()
     }
 
     pub const fn init_held_pi_lock(&self) -> bool {
@@ -2627,32 +2767,24 @@ impl BootIdleSetupState {
         self.runqueue_current_published_with_rcu
     }
 
-    pub fn switch_context(&self) -> &TaskSwitchContext {
-        &self.task_record.switch_ctx
-    }
-
-    pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.task_record.switch_ctx
-    }
-
     pub fn view(&self) -> Option<CpuIdleTaskView> {
         if self.lifecycle.state() != State::Ready
             || self.cpu_ref == CpuRef::invalid()
-            || self.task_record.cpu.cpu_id() == usize::MAX
+            || BootTask::canonical_cpu_id() == usize::MAX
         {
             return None;
         }
 
         Some(CpuIdleTaskView {
             state: self.lifecycle.state(),
-            task_id: self.task_record.pid,
+            task_id: BootTask::canonical_pid(),
             cpu_ref: self.cpu_ref,
-            cpu_id: self.task_record.cpu.cpu_id(),
+            cpu_id: BootTask::canonical_cpu_id(),
             uses_current_init_task: self.uses_current_init_task,
             lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
             no_set_affinity: self.no_set_affinity,
-            switch_ctx_ra: self.task_record.switch_ctx.ra(),
-            switch_ctx_initialized: self.task_record.switch_ctx.initialized(),
+            switch_ctx_ra: BootTask::canonical_switch_context().ra(),
+            switch_ctx_initialized: BootTask::canonical_switch_context().initialized(),
             core_saved_count: self.core_saved_count,
             core_restored_count: self.core_restored_count,
         })
@@ -2679,7 +2811,7 @@ impl BootIdleSetupState {
     #[allow(clippy::too_many_arguments)]
     fn setup(
         &mut self,
-        boot_task: &BootTask,
+        boot_task: &mut BootTask,
         init_mm: &InitMm,
         boot_runqueue: &mut BootRunQueue,
         boot_idle_rcu_read_side: &mut RcuReadSide,
@@ -2715,7 +2847,7 @@ impl BootIdleSetupState {
 
         self.pi_lock
             .setup_with_checkpoint(Checkpoint::BootIdlePiLockReady)?;
-        boot_idle_preemption.setup_disabled(boot_task)?;
+        boot_idle_preemption.setup_disabled(&*boot_task)?;
         self.pi_lock
             .lock_irqsave(local_interrupt, boot_idle_preemption)?;
         let guarded_result = (|| {
@@ -2723,9 +2855,11 @@ impl BootIdleSetupState {
             boot_runqueue.lock.acquire()?;
             let runqueue_guarded_result = (|| {
                 self.init_held_runqueue_lock = true;
-                self.task_record.pid = boot_runqueue.idle_task_id();
                 boot_idle_rcu_read_side.read_lock()?;
-                if !self.task_record.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
+                if boot_task
+                    .bind_idle_metadata(boot_runqueue.cpu_id())
+                    .is_err()
+                {
                     let _ = boot_idle_rcu_read_side.read_unlock();
                     return failed_condition(
                         LifecycleEvent::Setup,
@@ -2737,8 +2871,6 @@ impl BootIdleSetupState {
                 boot_idle_rcu_read_side.read_unlock()?;
                 self.cpu_set_under_rcu_read = true;
                 self.cpu_ref = boot_runqueue.cpu_ref();
-                self.task_record.kind = TaskKind::KernelThread;
-                self.task_record.switch_ctx.init_with_dummy();
                 self.uses_current_init_task = true;
                 self.lazy_tlb_mm_ready = true;
                 self.no_set_affinity = true;
@@ -2791,9 +2923,6 @@ impl BootIdleSetupState {
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct TaskThreadContext {
-    ra: usize,
-    sp: usize,
-    s: [usize; 12],
     core_register_set: bool,
     core_saved_count: usize,
     core_restored_count: usize,
@@ -2803,9 +2932,6 @@ pub struct TaskThreadContext {
 impl TaskThreadContext {
     const fn new() -> Self {
         Self {
-            ra: 0,
-            sp: 0,
-            s: [0; 12],
             core_register_set: false,
             core_saved_count: 0,
             core_restored_count: 0,
@@ -2824,10 +2950,7 @@ impl TaskThreadContext {
         self.core_restored_count
     }
 
-    fn setup_smoke_scheduler(&mut self, stack_top: usize) {
-        self.ra = 0;
-        self.sp = stack_top;
-        self.s = [0; 12];
+    fn setup_smoke_scheduler(&mut self) {
         self.core_register_set = true;
     }
 

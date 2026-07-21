@@ -4,7 +4,7 @@ use crate::{
         harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
     },
     context::context,
-    objects::{cpu_control::CurrentTaskRef, state::State},
+    objects::{state::State, task::TaskRef},
 };
 
 const SCHEDULE_ATTEMPTS: usize = 4;
@@ -98,8 +98,14 @@ impl SmokeScenario for CooperativeSwitchScenario {
             ctx.scheduler.smoke_scheduler_task().yielded_back(),
         );
         assertions.assert(
+            "smoke task uses unified task and flow carriers",
+            ctx.scheduler.smoke_scheduler_task().unified_carrier_ready()
+                && ctx.scheduler.smoke_scheduler_task().task_ref() == TaskRef::SMOKE_SCHEDULER
+                && ctx.scheduler.smoke_scheduler_task().flow_ref().is_valid(),
+        );
+        assertions.assert(
             "current returned kernel init",
-            ctx.boot_cpu_current_task.current() == CurrentTaskRef::KernelInit,
+            ctx.boot_cpu_current_task.current() == TaskRef::KERNEL_INIT,
         );
         assertions.assert(
             "smoke switch saved",

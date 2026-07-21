@@ -5,9 +5,9 @@ use crate::{
     },
     context::context,
     objects::{
-        cpu_control::CurrentTaskRef,
         mutex::{Mutex, MutexInitKind, MutexLockOutcome, MutexOwner},
         state::State,
+        task::TaskRef,
     },
 };
 
@@ -285,7 +285,7 @@ impl SmokeScenario for CooperativeContentionScenario {
             assertions.assert("contended once", shared.lock.contended_count() == 1);
             assertions.assert(
                 "current returned kernel init",
-                context().boot_cpu_current_task.current() == CurrentTaskRef::KernelInit,
+                context().boot_cpu_current_task.current() == TaskRef::KERNEL_INIT,
             );
             assertions.assert_ok(
                 "kernel init unlock",

@@ -20,6 +20,7 @@ use super::{
     scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
+    task::{Task, TaskEntry, TaskFlow, TaskFlowRef, TaskKind, TaskRef},
 };
 use crate::checkpoint::Checkpoint;
 
@@ -64,6 +65,8 @@ impl SbiHartBootData {
 
 #[repr(C, align(64))]
 struct ApIdleTaskRecord {
+    task: Task,
+    flow: TaskFlow,
     logical_id: usize,
     hartid: usize,
 }
@@ -71,9 +74,46 @@ struct ApIdleTaskRecord {
 impl ApIdleTaskRecord {
     const fn empty() -> Self {
         Self {
+            task: Task::new(),
+            flow: TaskFlow::new_static(TaskFlowRef::NONE),
             logical_id: usize::MAX,
             hartid: usize::MAX,
         }
+    }
+
+    fn prepare(&mut self, logical_id: usize, hartid: usize) -> bool {
+        if logical_id == 0 || logical_id >= MAX_CPUS || hartid == usize::MAX {
+            return false;
+        }
+        self.task = Task::with_ref(TaskRef::ap_idle(logical_id));
+        self.flow = TaskFlow::new_static(TaskFlowRef::ap_idle(logical_id));
+        self.logical_id = logical_id;
+        self.hartid = hartid;
+        self.task
+            .set_identity_metadata(0, TaskEntry::ApIdle, TaskKind::Idle)
+            .is_ok()
+            && self.task.set_task_cpu(logical_id)
+            && self.task.adopt_preset().is_ok()
+            && self
+                .flow
+                .preset(&mut self.task, TaskFlowRef::NONE, None)
+                .is_ok()
+            && self.flow.setup(None).is_ok()
+            && self.task.bind_initial_flow(&mut self.flow).is_ok()
+            && self.task.adopt_setup().is_ok()
+    }
+
+    fn unified_carrier_ready(&self, logical_id: usize) -> bool {
+        self.logical_id == logical_id
+            && self.task.task_ref() == TaskRef::ap_idle(logical_id)
+            && self.task.state() == State::Ready
+            && self.task.cpu_id() == logical_id
+            && self.task.entry() == TaskEntry::ApIdle
+            && self.task.kind() == TaskKind::Idle
+            && self.flow.owner() == self.task.task_ref()
+            && self.flow.state() == State::Ready
+            && self.flow.active()
+            && self.task.active_flow() == self.flow.flow_ref()
     }
 }
 
@@ -263,7 +303,7 @@ fn ap_idle_task_virt(logical_id: usize) -> Option<usize> {
     if logical_id >= MAX_CPUS {
         return None;
     }
-    Some(unsafe { core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) as usize })
+    Some(unsafe { core::ptr::addr_of!(AP_IDLE_TASKS[logical_id].task) as usize })
 }
 
 fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {
@@ -318,6 +358,24 @@ impl SecondaryIdleTaskSet {
 
     pub const fn pt_regs_stack_pointer(&self) -> bool {
         self.pt_regs_stack_pointer
+    }
+
+    pub fn unified_task_flow_carriers(&self) -> bool {
+        if self.lifecycle.state() != State::Prepared || self.prepared_count == 0 {
+            return false;
+        }
+        let mut logical_id = 1usize;
+        while logical_id <= self.prepared_count && logical_id < MAX_CPUS {
+            let ready = unsafe {
+                let record = core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]);
+                (*record).unified_carrier_ready(logical_id)
+            };
+            if !ready {
+                return false;
+            }
+            logical_id += 1;
+        }
+        true
     }
 
     pub fn preset(
@@ -748,10 +806,9 @@ impl CpuStartProvider {
                 return false;
             };
             unsafe {
-                AP_IDLE_TASKS[logical_id] = ApIdleTaskRecord {
-                    logical_id,
-                    hartid: cpu.hartid(),
-                };
+                if !AP_IDLE_TASKS[logical_id].prepare(logical_id, cpu.hartid()) {
+                    return false;
+                }
                 AP_BOOT_DATA[logical_id] = SbiHartBootData {
                     logical_id,
                     hartid: cpu.hartid(),

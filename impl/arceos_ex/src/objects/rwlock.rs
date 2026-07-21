@@ -1,8 +1,8 @@
 use super::{
-    cpu_control::CurrentTaskRef,
     state::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
+    task::TaskRef,
 };
 
 const OWNER_SLOTS: usize = 4;
@@ -314,25 +314,19 @@ impl RwLock {
         Ok(())
     }
 
-    pub fn read_lock_task(
-        &mut self,
-        task_ref: CurrentTaskRef,
-    ) -> Result<RwLockReadOutcome, EventError> {
+    pub fn read_lock_task(&mut self, task_ref: TaskRef) -> Result<RwLockReadOutcome, EventError> {
         self.read_lock_owner(owner_from_task_ref(task_ref))
     }
 
-    pub fn read_unlock_task(&mut self, task_ref: CurrentTaskRef) -> EventResult {
+    pub fn read_unlock_task(&mut self, task_ref: TaskRef) -> EventResult {
         self.read_unlock_owner(owner_from_task_ref(task_ref))
     }
 
-    pub fn write_lock_task(
-        &mut self,
-        task_ref: CurrentTaskRef,
-    ) -> Result<RwLockWriteOutcome, EventError> {
+    pub fn write_lock_task(&mut self, task_ref: TaskRef) -> Result<RwLockWriteOutcome, EventError> {
         self.write_lock_owner(owner_from_task_ref(task_ref))
     }
 
-    pub fn write_unlock_task(&mut self, task_ref: CurrentTaskRef) -> EventResult {
+    pub fn write_unlock_task(&mut self, task_ref: TaskRef) -> EventResult {
         self.write_unlock_owner(owner_from_task_ref(task_ref))
     }
 
@@ -371,16 +365,10 @@ impl RwLockOwner {
     }
 }
 
-const fn owner_from_task_ref(task_ref: CurrentTaskRef) -> RwLockOwner {
+const fn owner_from_task_ref(task_ref: TaskRef) -> RwLockOwner {
     match task_ref {
-        CurrentTaskRef::KernelInit => RwLockOwner::KernelInitTask,
-        CurrentTaskRef::SmokeRwLock => RwLockOwner::SmokeRwLockTask,
-        CurrentTaskRef::None
-        | CurrentTaskRef::BootTask
-        | CurrentTaskRef::Kthreadd
-        | CurrentTaskRef::UserChild
-        | CurrentTaskRef::SmokeScheduler
-        | CurrentTaskRef::SmokeMutex
-        | CurrentTaskRef::SmokeRwsem => RwLockOwner::None,
+        TaskRef::KERNEL_INIT => RwLockOwner::KernelInitTask,
+        TaskRef::SMOKE_RWLOCK => RwLockOwner::SmokeRwLockTask,
+        _ => RwLockOwner::None,
     }
 }
