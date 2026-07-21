@@ -25,6 +25,24 @@ scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段�
 `init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue、current slot 和
 BootTask API 必须解析到该同一地址。
 
+## Task 类型级 lifecycle lowering
+
+普通 Task 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 状态和
+`preset/setup/enable/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
+`KernelInitTask`、`KthreaddTask` 与 `UserTaskSet` 创建的 child 都通过 core 的同一组方法推进；角色
+结构不得定义同名 lifecycle-driving API，也不得保留转发 alias。它们只可暴露角色 metadata、只读
+查询、受控的 `Task` core 访问，以及不推进 lifecycle 的 metadata commit helper。
+
+`Task::preset` 负责 identity/TaskRef/初始 Flow ownership/clone specification；
+`Task::setup` 必须在 Phase 或 runtime fork 路径已调用 `TaskCreationCore::copy_process` 后消费其
+copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 New/not-enqueued 状态；
+`Task::enable` 只在调用者已完成 running、runqueue publication 与初始 Flow active binding 后提交
+Online。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
+provider、CPU pin 或 global reference publication 不得写入这些通用方法。
+
+`BootTask` 保留独立且完整的静态 override lowering，用于 `init_task_storage`、早期 `tp` 地址模式与
+preemption 事实；不得把它的部分迁移与普通 `Task` core 合并，也不得令其他静态 Task 使用该 override。
+
 ## TaskRef 与 storage
 
 `TaskRef` 是 value type，内部恰含 private storage slot 和非零 generation；角色 enum 不是允许的
@@ -54,7 +72,8 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 user state；首次 exec 声明的 `UserAppFlow` 仅持有 application continuation lifecycle，不得把
 credentials、files、signals、PID 或 process-group 身份再封装成 persona carrier。
 预分配的 Rust field 只是未占用 storage：生产路径必须先执行独立 `declare()`，把 fresh occurrence
-物化在 `Base`，随后才能调用 `preset()`；`declare()` 不得设置 owner、active binding 或推进 lifecycle。
+物化在声明 Type 的 `initial_state`（当前 Task/TaskFlow 均为 `Base`），随后才能调用 `preset()`；
+`declare()` 不得设置 owner、active binding 或推进 lifecycle。
 
 统一 `TaskFlow` core 保存独立 lifecycle、`TaskFlowRef`、owner `TaskRef`、active binding、handoff
 predecessor 以及 Disable/Cleanup facts。`TaskFlowRef` 与 `TaskRef` 使用相同的 private slot + nonzero

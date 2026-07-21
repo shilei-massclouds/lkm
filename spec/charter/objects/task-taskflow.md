@@ -30,6 +30,31 @@ binding 仍必须由显式 lifecycle/action 与事实提交。
 `RootStream` 当前仍是 `BootInitFlowType` 的临时具名实例。它的重命名以及全仓 Stream -> Flow
 迁移不属于本轮，不得借 Task/TaskFlow 闭合顺带完成。
 
+## 类型级生命周期权威
+
+`Task` 类型拥有普通 Task 的唯一完整 lifecycle 定义：
+
+```text
+Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
+Online --Disable--> Offline --Cleanup--> Destroyed
+```
+
+`KernelInitTask`、`KthreaddTask` 等静态实例以及 `declare` 创建的 runtime child 都完整继承这张
+状态图；实例不得重复声明、局部合并或遮蔽其中任一状态、迁移、ensures 或 invariant。静态实例与
+运行期实例进入继承状态时都必须检查同一类型 invariant，其中 `self` 绑定到实际 instance identity，
+而不是类型名或 declaration site。
+
+`BootTask` 是唯一允许的静态 Task lifecycle override。它必须显式替换整张状态图，以承载静态
+`init_task` storage、`tp` 的物理地址到虚拟地址切换以及早期 preemption 事实；这些 boot-only
+语义不得合并进普通 Task lifecycle。除这一完整 override 外，不存在实例级 Task lifecycle 权威。
+
+普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、初始 Flow ownership 与 clone
+specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
+context、scheduler entity 和 New/not-enqueued 状态；`Enable` 统一消费 running、runqueue publication
+与初始 Flow binding，并保证恰有一个 active Flow。`Disable/Cleanup` 继续要求所有 owned Flow 先
+分别退出 Online / 到达 Destroyed，Task 才能离线与销毁。PID 1 入口、`CLONE_FS`、kthreadd flags、
+provider 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
+
 ## 所有权与 active binding
 
 每个 Flow 恰有一个 owner Task。`task_owns_flow(task, flow)` 记录 Task 曾经拥有该 Flow；

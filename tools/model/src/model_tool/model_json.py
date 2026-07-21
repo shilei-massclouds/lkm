@@ -133,6 +133,7 @@ def _state_to_json(item: StateDef) -> dict[str, Any]:
     return {
         "name": item.name,
         "object_name": item.object_name,
+        "lifecycle_owner": item.lifecycle_owner,
         "span": _span_to_json(item.decl.span),
         "invariants": [_block_to_json(block) for block in item.decl.invariants],
         "boundaries": [
@@ -155,7 +156,12 @@ def _event_to_json(item: TransitionDef) -> dict[str, Any]:
         "object_name": item.object_name,
         "source_state": item.source_state,
         "target_state": item.target_state,
+        "lifecycle_owner": item.lifecycle_owner,
         "span": _span_to_json(decl.span),
+        "parameters": [
+            {"name": name, "type": type_name}
+            for name, type_name in decl.parameters
+        ],
         "depends_on": [_block_to_json(block) for block in decl.depends_on],
         "drives": [_block_to_json(block) for block in decl.drives],
         "emits": [_block_to_json(block) for block in decl.emits],
@@ -237,9 +243,50 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
         "name": item.name,
         "header": item.header,
         "span": _span_to_json(item.span),
+        "initial_state": item.initial_state,
+        "states": [_type_state_to_json(state) for state in item.states],
         "blocks": [_block_to_json(block) for block in item.blocks],
         "processes": [_process_to_json(process) for process in item.processes],
         "properties": item.properties,
+    }
+
+
+def _type_state_to_json(item) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "span": _span_to_json(item.span),
+        "invariants": [_block_to_json(block) for block in item.invariants],
+        "boundaries": [
+            _boundary_decl_to_json(boundary) for boundary in item.boundaries
+        ],
+        "deferred": [_block_to_json(block) for block in item.deferred],
+        "transitions": [_type_event_to_json(event) for event in item.transitions],
+        "processes": [_process_to_json(process) for process in item.processes],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+    }
+
+
+def _type_event_to_json(item) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "target_state": item.target_state,
+        "span": _span_to_json(item.span),
+        "parameters": [
+            {"name": name, "type": type_name}
+            for name, type_name in item.parameters
+        ],
+        "depends_on": [_block_to_json(block) for block in item.depends_on],
+        "drives": [_block_to_json(block) for block in item.drives],
+        "emits": [_block_to_json(block) for block in item.emits],
+        "within": [_within_to_json(block) for block in item.within],
+        "may_change": [_block_to_json(block) for block in item.may_change],
+        "ensures": [_block_to_json(block) for block in item.ensures],
+        "boundaries": [
+            _boundary_decl_to_json(boundary) for boundary in item.boundaries
+        ],
+        "deferred": [_block_to_json(block) for block in item.deferred],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "body_members": [_body_member_to_json(member) for member in item.body_members],
     }
 
 

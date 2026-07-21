@@ -21,6 +21,9 @@ from common.spec_ast import (
     DriveStatement,
     ProcessDecl,
     SourceSpan,
+    StateDecl,
+    TransitionDecl,
+    TypeDecl,
     WithinDecl,
 )
 
@@ -932,6 +935,8 @@ class _Deriver:
         transition_name: str,
         *,
         edge_kind: str | None = None,
+        args: str | None = None,
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
         key = (object_name, transition_name)
         if key in self.stack:
@@ -954,9 +959,17 @@ class _Deriver:
             return False
 
         current_state = self.states.get(object_name)
-        transition = self._transition_from_current_state(obj, transition_name, current_state)
-        if transition is None:
+        raw_transition = self._transition_from_current_state(
+            obj, transition_name, current_state
+        )
+        if raw_transition is None:
             return False
+        transition = _bind_static_transition(
+            raw_transition,
+            object_name,
+            args,
+            bindings or {},
+        )
 
         trace_frame = _TraceFrame(
             object_name=object_name,
@@ -1021,6 +1034,14 @@ class _Deriver:
                 transition_name=transition_name,
                 state_name=transition.target_state,
             )
+            if transition.lifecycle_owner is not None:
+                self._prove_blocks(
+                    transition.decl.ensures,
+                    "type lifecycle ensures",
+                    transition=transition,
+                    proof_class="type_lifecycle_ensures",
+                    proof_provider=transition.lifecycle_owner,
+                )
             if not self._validate_state(object_name, transition.target_state, entered_by=transition):
                 exit_message = "target state invariant blocked"
                 return False
@@ -1185,12 +1206,19 @@ class _Deriver:
                 f"runtime:{root_call_path}|{owner_process}|s{source_ordinal}|"
                 f"{alias}|o{occurrence}"
             )
-            self.states[runtime_id] = "Base"
+            lifecycle_type = _type_lifecycle_decl(self.model, declared_type)
+            initial_state = (
+                lifecycle_type.initial_state
+                if lifecycle_type is not None
+                else "Base"
+            )
+            assert initial_state is not None
+            self.states[runtime_id] = initial_state
             self.runtime_instances[runtime_id] = {
                 "declaration_site": declaration_site,
                 "alias": alias,
                 "declared_type": declared_type,
-                "state": "Base",
+                "state": initial_state,
                 "occurrence": occurrence,
                 "root_call_path": root_call_path,
                 "owner_process": owner_process,
@@ -1208,14 +1236,14 @@ class _Deriver:
                 entry_span,
                 object_name=transition.object_name,
                 transition_name=transition.name,
-                state_name="Base",
+                state_name=initial_state,
                 expression=entry,
                 source_kind="declare",
                 proof_class="runtime_instance_declaration",
                 proof_provider="derive",
                 process_parent=process_parent,
             )
-            return True
+            return self._validate_runtime_state(runtime_id, initial_state)
 
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
@@ -1627,6 +1655,8 @@ class _Deriver:
                     driven_object,
                     driven_transition,
                     edge_kind="drives",
+                    args=args,
+                    bindings=bindings,
                 ):
                     return True
             self._record(
@@ -1904,20 +1934,24 @@ class _Deriver:
             parent_expression = display_expression if expression != display_expression else expression
             obj = self.model.objects.get(object_name)
             if obj is not None:
-                if not self._execute_type_process_drives(
-                    obj.kind,
-                    object_name,
-                    "Action",
-                    action_name,
-                    args,
-                    entry_span,
-                    transition,
-                    action_provider=action_provider,
-                    process_parent=parent_expression,
-                    bindings=bindings,
-                    result_hints=result_hints,
-                ):
-                    return False
+                object_process = _object_process_decl(
+                    obj, "Action", action_name
+                )
+                if object_process is None:
+                    if not self._execute_type_process_drives(
+                        obj.kind,
+                        object_name,
+                        "Action",
+                        action_name,
+                        args,
+                        entry_span,
+                        transition,
+                        action_provider=action_provider,
+                        process_parent=parent_expression,
+                        bindings=bindings,
+                        result_hints=result_hints,
+                    ):
+                        return False
                 self._record_type_process_ensures(
                     obj.kind,
                     object_name,
@@ -1928,6 +1962,7 @@ class _Deriver:
                     transition,
                     action_provider=action_provider,
                     bindings=bindings,
+                    process_decl=object_process,
                 )
             return True
 
@@ -1965,37 +2000,68 @@ class _Deriver:
         runtime_id = receiver.get("runtime_instance_id") or receiver.get("value")
         if runtime_id is None or runtime_id not in self.runtime_instances:
             return False
-        lifecycle = {
-            "Preset": ("Base", "Prepared"),
-            "Setup": ("Prepared", "Ready"),
-            "Enable": ("Ready", "Online"),
-            "Disable": ("Online", "Offline"),
-            "Cleanup": ("Offline", "Destroyed"),
-        }
-        states = lifecycle.get(transition_name)
-        if states is None:
-            return True
-        source_state, target_state = states
-        current = self.states.get(runtime_id)
-        if current != source_state:
-            self._record(
-                DerivationStatus.CONTRADICTION,
-                "illegal runtime lifecycle transition: "
-                f"{runtime_id}.Transition::{transition_name} from State::{current}",
-                span,
-                object_name=runtime_id,
-                transition_name=transition_name,
-                state_name=current,
-            )
-            return False
         declared_type = str(self.runtime_instances[runtime_id]["declared_type"])
-        process = _type_process_decl(
-            self.model, declared_type, "Transition", transition_name
+        current = self.states.get(runtime_id)
+        lifecycle_type = _type_lifecycle_decl(self.model, declared_type)
+        lifecycle_transition = _type_lifecycle_transition(
+            lifecycle_type, current, transition_name
         )
+        if lifecycle_type is not None:
+            if lifecycle_transition is None:
+                if _type_lifecycle_transition(
+                    lifecycle_type, None, transition_name
+                ) is None:
+                    return True
+                return self._illegal_runtime_transition(
+                    runtime_id, transition_name, current, span
+                )
+            source_state = current
+            target_state = lifecycle_transition.target_state
+            process = lifecycle_transition
+        else:
+            legacy_lifecycle = {
+                "Preset": ("Base", "Prepared"),
+                "Setup": ("Prepared", "Ready"),
+                "Enable": ("Ready", "Online"),
+                "Disable": ("Online", "Offline"),
+                "Cleanup": ("Offline", "Destroyed"),
+            }
+            states = legacy_lifecycle.get(transition_name)
+            if states is None:
+                return True
+            source_state, target_state = states
+            process = _type_process_decl(
+                self.model, declared_type, "Transition", transition_name
+            )
+        if current != source_state:
+            return self._illegal_runtime_transition(
+                runtime_id, transition_name, current, span
+            )
         arguments = _process_decl_argument_bindings(
             process or ProcessDecl("Transition", transition_name, span),
             args,
         )
+        if lifecycle_transition is not None and lifecycle_type is not None:
+            replacements = {"self": runtime_id}
+            for name, value in arguments.items():
+                replacements[name] = _runtime_binding_value(value, bindings)
+            bound_decl = _substitute_transition_bindings(
+                lifecycle_transition, replacements
+            )
+            bound_transition = TransitionDef(
+                name=transition_name,
+                object_name=runtime_id,
+                source_state=source_state,
+                target_state=target_state,
+                decl=bound_decl,
+                lifecycle_owner=lifecycle_type.name,
+            )
+            if not self._verify_blocks(
+                bound_decl.depends_on,
+                "runtime lifecycle depends_on",
+                transition=bound_transition,
+            ):
+                return False
         if _type_is_or_inherits(self.model, declared_type, "Task"):
             owned = self.runtime_owned_flows.get(runtime_id, set())
             if transition_name == "Disable" and any(
@@ -2091,9 +2157,94 @@ class _Deriver:
             state_name=target_state,
             source_kind="runtime_transition",
             proof_class="runtime_lifecycle_commit",
-            proof_provider="derive",
+            proof_provider=(lifecycle_type.name if lifecycle_type is not None else "derive"),
         )
-        return True
+        return self._validate_runtime_state(
+            runtime_id,
+            target_state,
+            entered_by=lifecycle_transition,
+            args=args,
+            bindings=bindings,
+        )
+
+    def _illegal_runtime_transition(
+        self,
+        runtime_id: str,
+        transition_name: str,
+        current: str | None,
+        span: SourceSpan,
+    ) -> bool:
+        self._record(
+            DerivationStatus.CONTRADICTION,
+            "illegal runtime lifecycle transition: "
+            f"{runtime_id}.Transition::{transition_name} from State::{current}",
+            span,
+            object_name=runtime_id,
+            transition_name=transition_name,
+            state_name=current,
+        )
+        return False
+
+    def _validate_runtime_state(
+        self,
+        runtime_id: str,
+        state_name: str,
+        *,
+        entered_by: TransitionDecl | None = None,
+        args: str | None = None,
+        bindings: dict[str, dict[str, str]] | None = None,
+    ) -> bool:
+        data = self.runtime_instances.get(runtime_id)
+        if data is None:
+            return False
+        declared_type = str(data["declared_type"])
+        lifecycle_type = _type_lifecycle_decl(self.model, declared_type)
+        if lifecycle_type is None:
+            return True
+        state_decl = next(
+            (state for state in lifecycle_type.states if state.name == state_name),
+            None,
+        )
+        if state_decl is None:
+            self._record(
+                DerivationStatus.CONTRADICTION,
+                f"unknown runtime state: {runtime_id}.State::{state_name}",
+                lifecycle_type.span,
+                object_name=runtime_id,
+                state_name=state_name,
+            )
+            return False
+
+        replacements = {"self": runtime_id}
+        bound_transition = None
+        if entered_by is not None:
+            argument_bindings = _process_decl_argument_bindings(entered_by, args)
+            for name, value in argument_bindings.items():
+                replacements[name] = _runtime_binding_value(value, bindings or {})
+            bound_decl = _substitute_transition_bindings(entered_by, replacements)
+            bound_transition = TransitionDef(
+                name=bound_decl.name,
+                object_name=runtime_id,
+                source_state=_type_transition_source_state(
+                    lifecycle_type, entered_by.name
+                ) or state_name,
+                target_state=bound_decl.target_state,
+                decl=bound_decl,
+                lifecycle_owner=lifecycle_type.name,
+            )
+        bound_state_decl = _substitute_state_bindings(state_decl, replacements)
+        state = StateDef(
+            name=state_name,
+            object_name=runtime_id,
+            decl=bound_state_decl,
+            lifecycle_owner=lifecycle_type.name,
+        )
+        return self._verify_blocks(
+            bound_state_decl.invariants,
+            "invariant",
+            state=state,
+            entered_by=bound_transition,
+        )
 
     def _apply_runtime_action_effect(
         self,
@@ -2650,6 +2801,18 @@ class _Deriver:
                 state_name=state_name,
             )
             return False
+
+        if state.lifecycle_owner is not None:
+            bound_decl = _substitute_state_bindings(
+                state.decl, {"self": object_name}
+            )
+            state = StateDef(
+                name=state.name,
+                object_name=state.object_name,
+                decl=bound_decl,
+                transitions=state.transitions,
+                lifecycle_owner=state.lifecycle_owner,
+            )
 
         ok = self._verify_blocks(
             state.decl.invariants,
@@ -3844,7 +4007,7 @@ def _type_process_decl(
     type_name: str,
     process_kind: str,
     process_name: str,
-) -> ProcessDecl | None:
+) -> ProcessDecl | TransitionDecl | None:
     visited: set[str] = set()
     current = type_name
     while current and current not in visited:
@@ -3852,11 +4015,58 @@ def _type_process_decl(
         type_decl = model.types.get(current)
         if type_decl is None:
             return None
+        if process_kind == "Transition":
+            for state in type_decl.states:
+                for transition in state.transitions:
+                    if transition.name == process_name:
+                        return transition
         for process in type_decl.processes:
             if process.kind == process_kind and process.name == process_name:
                 return process
         match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
         current = match.group(1) if match is not None else None
+    return None
+
+
+def _type_lifecycle_decl(
+    model: ObjectModel, type_name: str
+) -> TypeDecl | None:
+    visited: set[str] = set()
+    current: str | None = type_name
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return None
+        if type_decl.initial_state is not None or type_decl.states:
+            return type_decl
+        match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
+        current = match.group(1) if match is not None else None
+    return None
+
+
+def _type_lifecycle_transition(
+    lifecycle_type: TypeDecl | None,
+    source_state: str | None,
+    transition_name: str,
+) -> TransitionDecl | None:
+    if lifecycle_type is None:
+        return None
+    for state in lifecycle_type.states:
+        if source_state is not None and state.name != source_state:
+            continue
+        for transition in state.transitions:
+            if transition.name == transition_name:
+                return transition
+    return None
+
+
+def _type_transition_source_state(
+    lifecycle_type: TypeDecl, transition_name: str
+) -> str | None:
+    for state in lifecycle_type.states:
+        if any(transition.name == transition_name for transition in state.transitions):
+            return state.name
     return None
 
 
@@ -4180,6 +4390,84 @@ def _substitute_body_member_bindings(
         within=within,
         boundary=boundary,
     )
+
+
+def _bind_static_transition(
+    transition: TransitionDef,
+    object_name: str,
+    args: str | None,
+    bindings: dict[str, dict[str, str]],
+) -> TransitionDef:
+    replacements: dict[str, str] = {}
+    if transition.lifecycle_owner is not None:
+        replacements["self"] = object_name
+    for name, value in _process_decl_argument_bindings(transition.decl, args).items():
+        replacements[name] = _runtime_binding_value(value, bindings)
+    if not replacements:
+        return transition
+    decl = _substitute_transition_bindings(transition.decl, replacements)
+    return TransitionDef(
+        name=transition.name,
+        object_name=transition.object_name,
+        source_state=transition.source_state,
+        target_state=transition.target_state,
+        decl=decl,
+        lifecycle_owner=transition.lifecycle_owner,
+    )
+
+
+def _substitute_transition_bindings(
+    transition: TransitionDecl, replacements: dict[str, str]
+) -> TransitionDecl:
+    return TransitionDecl(
+        name=transition.name,
+        target_state=transition.target_state,
+        span=transition.span,
+        parameters=transition.parameters,
+        depends_on=_substitute_blocks(transition.depends_on, replacements),
+        drives=_substitute_blocks(transition.drives, replacements),
+        emits=_substitute_blocks(transition.emits, replacements),
+        within=[
+            _substitute_within_bindings(within, replacements)
+            for within in transition.within
+        ],
+        may_change=_substitute_blocks(transition.may_change, replacements),
+        ensures=_substitute_blocks(transition.ensures, replacements),
+        boundaries=[
+            _substitute_boundary_bindings(boundary, replacements)
+            for boundary in transition.boundaries
+        ],
+        deferred=_substitute_blocks(transition.deferred, replacements),
+        other_blocks=_substitute_blocks(transition.other_blocks, replacements),
+        body_members=[
+            _substitute_body_member_bindings(member, replacements)
+            for member in _ordered_body_members(transition)
+        ],
+    )
+
+
+def _substitute_state_bindings(
+    state: StateDecl, replacements: dict[str, str]
+) -> StateDecl:
+    return StateDecl(
+        name=state.name,
+        span=state.span,
+        invariants=_substitute_blocks(state.invariants, replacements),
+        boundaries=[
+            _substitute_boundary_bindings(boundary, replacements)
+            for boundary in state.boundaries
+        ],
+        deferred=_substitute_blocks(state.deferred, replacements),
+        transitions=state.transitions,
+        processes=state.processes,
+        other_blocks=_substitute_blocks(state.other_blocks, replacements),
+    )
+
+
+def _runtime_binding_value(
+    value: str, bindings: dict[str, dict[str, str]]
+) -> str:
+    return bindings.get(value, {}).get("value", value)
 
 
 def _ordered_body_members(decl) -> list[BodyMember]:

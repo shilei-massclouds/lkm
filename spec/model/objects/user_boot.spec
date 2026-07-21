@@ -2816,6 +2816,8 @@ object SyscallTable: ResourceObject {
                     FilesStruct.Action::SaveParentFdSnapshot(child: child);
                     child.Transition::Setup(
                         parent_task: KernelInitTask,
+                        pid_ns: RootPidNamespace,
+                        scheduler: Scheduler,
                         initial_flow: fork_flow
                     );
                     child.Action::ActivateInitialFlow(flow: fork_flow);

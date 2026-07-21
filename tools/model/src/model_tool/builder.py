@@ -176,7 +176,8 @@ def build_model(
     exclusive_contexts = _build_exclusive_contexts(
         document.exclusive_contexts, locks, diagnostics
     )
-    objects = _build_objects(document.objects, diagnostics)
+    _check_type_lifecycles(types, diagnostics)
+    objects = _build_objects(document.objects, types, diagnostics)
     children = _build_children(objects, diagnostics)
     boundaries, legacy_boundary_count = _build_boundaries(
         document.objects,
@@ -266,6 +267,9 @@ def _collect_declaration_sites(document: SpecDocument) -> tuple[DeclarationSiteD
     for type_decl in document.types:
         for process in type_decl.processes:
             collect_members(process.body_members)
+        for state in type_decl.states:
+            for transition in state.transitions:
+                collect_members(transition.body_members)
     for obj in document.objects:
         for process in obj.processes:
             collect_members(process.body_members)
@@ -650,7 +654,9 @@ def _build_exclusive_contexts(
 
 
 def _build_objects(
-    declarations: list[ObjectDecl], diagnostics: list[Diagnostic]
+    declarations: list[ObjectDecl],
+    types: dict[str, TypeDecl],
+    diagnostics: list[Diagnostic],
 ) -> dict[str, ObjectDef]:
     objects: dict[str, ObjectDef] = {}
     for decl in declarations:
@@ -664,15 +670,73 @@ def _build_objects(
             )
             continue
 
-        _check_object_lifecycle_names(decl, diagnostics)
-        _check_object_event_uniqueness(decl, diagnostics)
-        states = _build_states(decl, diagnostics)
+        lifecycle_type = _nearest_type_lifecycle(types, decl.kind)
+        object_declares_lifecycle = decl.initial_state is not None or bool(decl.states)
+        override_value = decl.properties.get("lifecycle_override")
+        if override_value is not None and override_value != "true":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lifecycle_override on {decl.name} must be true when present",
+                    decl.span,
+                )
+            )
+        if lifecycle_type is not None and object_declares_lifecycle and override_value != "true":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "object lifecycle must not shadow inherited type lifecycle without "
+                    f"lifecycle_override: true: {decl.name} inherits {lifecycle_type.name}",
+                    decl.span,
+                )
+            )
+        if lifecycle_type is not None and not object_declares_lifecycle and override_value == "true":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lifecycle_override on {decl.name} requires a complete object lifecycle",
+                    decl.span,
+                )
+            )
+        if (
+            lifecycle_type is not None
+            and override_value == "true"
+            and object_declares_lifecycle
+            and (decl.initial_state is None or not decl.states)
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lifecycle_override on {decl.name} requires both initial_state and states",
+                    decl.span,
+                )
+            )
+
+        if lifecycle_type is not None and not object_declares_lifecycle:
+            initial_state = lifecycle_type.initial_state
+            state_decls = lifecycle_type.states
+            lifecycle_owner = lifecycle_type.name
+        else:
+            initial_state = decl.initial_state
+            state_decls = decl.states
+            lifecycle_owner = None
+
+        _check_lifecycle_names(
+            decl.name, initial_state, state_decls, diagnostics, decl.span
+        )
+        _check_event_uniqueness(decl.name, state_decls, diagnostics)
+        states = _build_states(
+            decl.name,
+            state_decls,
+            diagnostics,
+            lifecycle_owner=lifecycle_owner,
+        )
         attrs = _extract_attrs(decl, diagnostics)
         objects[decl.name] = ObjectDef(
             name=decl.name,
             kind=decl.kind,
             decl=decl,
-            initial_state=decl.initial_state,
+            initial_state=initial_state,
             parent=decl.parent,
             states=states,
             attrs=attrs,
@@ -680,26 +744,88 @@ def _build_objects(
     return objects
 
 
-def _check_object_lifecycle_names(
-    decl: ObjectDecl, diagnostics: list[Diagnostic]
+def _check_type_lifecycles(
+    types: dict[str, TypeDecl], diagnostics: list[Diagnostic]
+) -> None:
+    for decl in types.values():
+        declares_lifecycle = decl.initial_state is not None or bool(decl.states)
+        if not declares_lifecycle:
+            continue
+        if decl.initial_state is None or not decl.states:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"type lifecycle must declare both initial_state and states: {decl.name}",
+                    decl.span,
+                )
+            )
+        _check_lifecycle_names(
+            decl.name, decl.initial_state, decl.states, diagnostics, decl.span
+        )
+        _check_event_uniqueness(decl.name, decl.states, diagnostics)
+        states = _build_states(decl.name, decl.states, diagnostics)
+        if decl.initial_state is not None and decl.initial_state not in states:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown initial_state on type {decl.name}: State::{decl.initial_state}",
+                    decl.span,
+                )
+            )
+        for state in states.values():
+            for transition in state.transitions.values():
+                if transition.target_state not in states:
+                    diagnostics.append(
+                        Diagnostic(
+                            Severity.ERROR,
+                            "unknown transition target state: "
+                            f"{decl.name}.Transition::{transition.name} -> "
+                            f"State::{transition.target_state}",
+                            transition.decl.span,
+                        )
+                    )
+
+
+def _nearest_type_lifecycle(
+    types: dict[str, TypeDecl], type_name: str
+) -> TypeDecl | None:
+    visited: set[str] = set()
+    current: str | None = type_name
+    while current is not None and current not in visited:
+        visited.add(current)
+        decl = types.get(current)
+        if decl is None:
+            return None
+        if decl.initial_state is not None or decl.states:
+            return decl
+        current = _base_type_name(decl)
+    return None
+
+
+def _check_lifecycle_names(
+    owner_name: str,
+    initial_state: str | None,
+    state_decls: list[StateDecl],
+    diagnostics: list[Diagnostic],
+    owner_span: SourceSpan,
 ) -> None:
     """Enforce SEM-NAME-001: lifecycle names come from controlled vocabularies."""
 
-    if decl.initial_state is not None and decl.initial_state not in _ALLOWED_STATE_NAMES:
+    if initial_state is not None and initial_state not in _ALLOWED_STATE_NAMES:
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                f"unknown lifecycle state name: {decl.name}.initial_state State::{decl.initial_state}",
-                decl.span,
+                f"unknown lifecycle state name: {owner_name}.initial_state State::{initial_state}",
+                owner_span,
             )
         )
 
-    for state_decl in decl.states:
+    for state_decl in state_decls:
         if state_decl.name not in _ALLOWED_STATE_NAMES:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown lifecycle state name: {decl.name}.State::{state_decl.name}",
+                    f"unknown lifecycle state name: {owner_name}.State::{state_decl.name}",
                     state_decl.span,
                 )
             )
@@ -708,7 +834,7 @@ def _check_object_lifecycle_names(
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        f"unknown lifecycle transition name: {decl.name}.Transition::{transition_decl.name}",
+                        f"unknown lifecycle transition name: {owner_name}.Transition::{transition_decl.name}",
                         transition_decl.span,
                     )
                 )
@@ -718,7 +844,7 @@ def _check_object_lifecycle_names(
                     Diagnostic(
                         Severity.ERROR,
                         "invalid lifecycle transition: "
-                        f"{decl.name}.State::{state_decl.name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
+                        f"{owner_name}.State::{state_decl.name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
                         transition_decl.span,
                     )
                 )
@@ -727,19 +853,21 @@ def _check_object_lifecycle_names(
                     Diagnostic(
                         Severity.ERROR,
                         "unknown lifecycle state name: "
-                        f"{decl.name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
+                        f"{owner_name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
                         transition_decl.span,
                     )
                 )
 
 
-def _check_object_event_uniqueness(
-    decl: ObjectDecl, diagnostics: list[Diagnostic]
+def _check_event_uniqueness(
+    owner_name: str,
+    state_decls: list[StateDecl],
+    diagnostics: list[Diagnostic],
 ) -> None:
     """Enforce SEM-TRANSITION-001: transition identity is object-local."""
 
     seen: dict[str, TransitionDecl] = {}
-    for state_decl in decl.states:
+    for state_decl in state_decls:
         for transition_decl in state_decl.transitions:
             existing = seen.get(transition_decl.name)
             if existing is None:
@@ -749,31 +877,44 @@ def _check_object_event_uniqueness(
                 Diagnostic(
                     Severity.ERROR,
                     "duplicate object transition declaration: "
-                    f"{decl.name}.Transition::{transition_decl.name}",
+                    f"{owner_name}.Transition::{transition_decl.name}",
                     transition_decl.span,
                 )
             )
 
 
-def _build_states(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, StateDef]:
+def _build_states(
+    owner_name: str,
+    state_decls: list[StateDecl],
+    diagnostics: list[Diagnostic],
+    *,
+    lifecycle_owner: str | None = None,
+) -> dict[str, StateDef]:
     states: dict[str, StateDef] = {}
-    for state_decl in decl.states:
+    for state_decl in state_decls:
         if state_decl.name in states:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"duplicate state declaration: {decl.name}.State::{state_decl.name}",
+                    f"duplicate state declaration: {owner_name}.State::{state_decl.name}",
                     state_decl.span,
                 )
             )
             continue
 
-        transitions = _build_events(decl.name, state_decl, diagnostics, object_wide=True)
+        transitions = _build_events(
+            owner_name,
+            state_decl,
+            diagnostics,
+            object_wide=True,
+            lifecycle_owner=lifecycle_owner,
+        )
         states[state_decl.name] = StateDef(
             name=state_decl.name,
-            object_name=decl.name,
+            object_name=owner_name,
             decl=state_decl,
             transitions=transitions,
+            lifecycle_owner=lifecycle_owner,
         )
     return states
 
@@ -784,6 +925,7 @@ def _build_events(
     diagnostics: list[Diagnostic],
     *,
     object_wide: bool = False,
+    lifecycle_owner: str | None = None,
 ) -> dict[str, TransitionDef]:
     transitions: dict[str, TransitionDef] = {}
     for transition_decl in state_decl.transitions:
@@ -804,6 +946,7 @@ def _build_events(
             source_state=state_decl.name,
             target_state=transition_decl.target_state,
             decl=transition_decl,
+            lifecycle_owner=lifecycle_owner,
         )
     return transitions
 
@@ -1399,7 +1542,10 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
             for block in state.decl.invariants:
                 _check_state_references(model, block, diagnostics)
             for transition in state.transitions.values():
-                bindings: dict[str, str] = {}
+                bindings: dict[str, str] = {
+                    "self": obj.kind,
+                    **dict(transition.decl.parameters),
+                }
                 _check_body_member_references(
                     model,
                     _ordered_body_members(transition.decl),
@@ -1413,6 +1559,14 @@ def _check_process_references(
     model: ObjectModel, diagnostics: list[Diagnostic]
 ) -> None:
     for type_decl in model.types.values():
+        for state in type_decl.states:
+            for transition in state.transitions:
+                _check_one_process(
+                    model,
+                    transition,
+                    diagnostics,
+                    receiver_type=type_decl.name,
+                )
         for process in type_decl.processes:
             if not _process_contains_declare(process):
                 _check_process_lexical_captures(process, diagnostics)
@@ -2339,7 +2493,19 @@ def _check_drive_transition_entry(
             )
         )
         return True
-    if not object_transition:
+    if object_transition:
+        transition = _transition_def(model, object_name, transition_name)
+        if transition is not None:
+            _check_signature_arguments(
+                model,
+                transition.decl.parameters,
+                f"{object_name}.Transition::{transition_name}",
+                args,
+                diagnostics,
+                span,
+                bindings=bindings,
+            )
+    else:
         _check_process_arguments(
             model,
             obj.kind,
@@ -2557,6 +2723,10 @@ def _type_declares_event(type_decl: TypeDecl, transition_name: str) -> bool:
     return any(
         process.kind == "Transition" and process.name == transition_name
         for process in type_decl.processes
+    ) or any(
+        transition.name == transition_name
+        for state in type_decl.states
+        for transition in state.transitions
     )
 
 
@@ -2769,7 +2939,7 @@ def _type_process_decl(
     type_name: str,
     process_kind: str,
     process_name: str,
-) -> ProcessDecl | None:
+) -> ProcessDecl | TransitionDecl | None:
     visited: set[str] = set()
     current = type_name
     while current and current not in visited:
@@ -2777,6 +2947,11 @@ def _type_process_decl(
         type_decl = model.types.get(current)
         if type_decl is None:
             return None
+        if process_kind == "Transition":
+            for state in type_decl.states:
+                for transition in state.transitions:
+                    if transition.name == process_name:
+                        return transition
         for process in type_decl.processes:
             if process.kind == process_kind and process.name == process_name:
                 return process
@@ -2804,7 +2979,7 @@ def _type_process_return_type(
     process_name: str,
 ) -> str | None:
     process = _type_process_decl(model, type_name, process_kind, process_name)
-    return process.return_type if process is not None else None
+    return getattr(process, "return_type", None) if process is not None else None
 
 
 def _base_type_name(type_decl: TypeDecl) -> str | None:

@@ -93,6 +93,7 @@ class TransitionDecl:
     name: str
     target_state: str
     span: SourceSpan
+    parameters: tuple[tuple[str, str], ...] = ()
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)
     emits: list[Block] = field(default_factory=list)
@@ -174,6 +175,8 @@ class TypeDecl:
     name: str
     header: str
     span: SourceSpan
+    initial_state: str | None = None
+    states: list[StateDecl] = field(default_factory=list)
     blocks: list[Block] = field(default_factory=list)
     processes: list[ProcessDecl] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)

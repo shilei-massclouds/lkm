@@ -21,7 +21,9 @@ drives {
 - `declare name of Type;` 只允许出现在 transition/action 以及其嵌套 `within` 的 `drives` 中；
   不支持顶层动态声明。
 - 声明是有顺序的可执行语句。执行到该语句时才创建一个所属 Type 的 fresh、独立 instance；
-  instance 初始 lifecycle state 是 `Base`。
+  instance 初始 lifecycle state 来自最近声明该状态图的 Type；该 instance 随后使用与继承该 Type
+  的静态 object 相同的完整状态、迁移、ensures 和 invariant。进入初始状态时，invariant 中的
+  `self` 必须替换成这次声明产生的实际 runtime identity。
 - 声明本身不调用 `Preset`，也不隐式调用任何其它 process。同一声明点每次执行都创建不同
   identity，不复用上一次实例，也不共享 lifecycle state、facts、transition commits 或 trace 节点。
 - `declare` 不隐式建立 parent、owner、active binding 或集合成员关系；这些关系必须由后续
@@ -39,6 +41,8 @@ drives {
 - callee 不捕获 caller alias；callee 只能通过显式 typed process 参数接收 instance 引用。
 - 未知 Type、接收者 Type 上不存在的 process、参数 Type 不匹配和非法 lifecycle 迁移都必须
   在检查或推导边界报告错误，不能退化成静态名称查找或字符串分发。
+- object 若需要偏离 Type lifecycle，只能显式声明完整 override；禁止以 object 局部状态或迁移
+  与 Type 状态图合并。运行期 `declare` 不具有 object declaration，因此不能建立实例专用 override。
 
 ## Instance 存活与重新定位
 

@@ -56,6 +56,7 @@ class TransitionDef:
     source_state: str
     target_state: str
     decl: TransitionDecl
+    lifecycle_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ class StateDef:
     object_name: str
     decl: StateDecl
     transitions: dict[str, TransitionDef] = field(default_factory=dict)
+    lifecycle_owner: str | None = None
 
 
 @dataclass(frozen=True)

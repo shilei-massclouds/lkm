@@ -59,6 +59,42 @@ class ParseToolTests(unittest.TestCase):
             line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 
+    def test_type_lifecycle_and_parameterized_transition_are_serialized(self) -> None:
+        source = """
+            type Item {
+            }
+
+            type Carrier {
+                initial_state: State::Base;
+
+                state State::Base {
+                    transitions {
+                        on Transition::Preset(item: Item) -> State::Prepared {
+                            depends_on { item.state == State::Ready; }
+                            ensures { carrier_bound(self, item); }
+                        }
+                    }
+                }
+
+                state State::Prepared {
+                    invariant { carrier_prepared(self); }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "type-lifecycle.spec"
+            output = Path(tmp) / "type-lifecycle.ast.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(main([str(spec), "-o", str(output)]), 0)
+            carrier = read_json(output)["document"]["types"][1]
+            transition = carrier["states"][0]["transitions"][0]
+
+            self.assertEqual(carrier["initial_state"], "Base")
+            self.assertEqual([state["name"] for state in carrier["states"]], ["Base", "Prepared"])
+            self.assertEqual(transition["parameters"], [{"name": "item", "type": "Item"}])
+            self.assertEqual(transition["target_state"], "Prepared")
+
     def test_within_only_once_is_serialized(self) -> None:
         source = """
             context GuardedContext: Context {

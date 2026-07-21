@@ -24,10 +24,20 @@ bindings but its declarations do not escape to its parent or siblings.
 ## Runtime lowering
 
 Derive creates a fresh runtime record only when execution reaches a declaration.
-Each record starts in `Base` and owns independent lifecycle state, facts,
-transition commits and trace nodes. Declaration does not run Preset, establish
+Each record starts in the `initial_state` of the nearest Type that declares its
+lifecycle and owns independent lifecycle state, facts, transition commits and
+trace nodes. Static objects with no local lifecycle and runtime records of the
+same Type must resolve the same complete state graph. On every inherited state
+entry, derive substitutes the concrete static or runtime identity for `self`
+before checking the Type invariant. Declaration does not run Preset, establish
 relationships or register rollback/cleanup. Scope exit only drops the lexical
 alias; it does not destroy the instance.
+
+An object-local state graph is rejected when its Type already supplies one,
+unless the object explicitly requests a complete lifecycle override. Override
+replaces the whole Type graph; partial state, transition, ensure or invariant
+merging is forbidden. Runtime declarations have no object declaration and
+therefore cannot override their Type lifecycle.
 
 Runtime identity is composed from root call path, owner process, owner-local
 declaration ordinal, alias and occurrence under that call path. Physical line

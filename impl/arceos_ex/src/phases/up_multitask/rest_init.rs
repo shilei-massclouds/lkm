@@ -2,7 +2,11 @@ use crate::{
     checkpoint::Checkpoint,
     context::Context,
     objects::{
-        rest_init::{SystemStateValue, TaskSpawnInputs, runtime_services_still_deferred},
+        process_prepare::TaskCopyProcessInputs,
+        rest_init::{
+            KERNEL_INIT_PID, KTHREADD_PID, SystemStateValue, allocate_kernel_stack,
+            kernel_init_entry, kthreadd_entry, runtime_services_still_deferred,
+        },
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::{TaskEntry, TaskKind},
     },
@@ -119,43 +123,13 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.cpu_group,
         &mut ctx.boot_cpu_local_interrupt,
     )?;
-    ctx.kernel_init_task.preset(TaskSpawnInputs {
-        task_creation_core: &ctx.task_creation_core,
-        root_pid_namespace: &ctx.root_pid_namespace,
-        credential_core: &ctx.credential_core,
-        signal_core: &ctx.signal_core,
-        task_file_context: &ctx.task_file_context,
-        security_core: &ctx.security_core,
-        boot_task: &ctx.boot_task,
-    })?;
-    ctx.kernel_init_task.setup(
-        &mut ctx.task_creation_core,
-        &ctx.root_pid_namespace,
-        &ctx.credential_core,
-        &ctx.signal_core,
-        &ctx.task_file_context,
-        &ctx.security_core,
-        &ctx.boot_task,
-        &ctx.scheduler,
-        &ctx.cpu_group,
-        &mut ctx.vmalloc_allocator,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-        &mut ctx.page_table_caches,
-        &ctx.config,
-    )?;
+    preset_kernel_init_task(ctx)?;
+    copy_and_setup_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_flow
         .bind_initial(&mut ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
-    ctx.kernel_init_task.enable(
-        &mut ctx.scheduler,
-        &ctx.cpu_group,
-        &ctx.boot_current_cpu,
-        &mut ctx.boot_cpu_local_interrupt,
-        &ctx.boot_cpu_current_task,
-        &mut ctx.kernel_init_task_pi_lock,
-    )?;
+    wake_and_enable_kernel_init_task(ctx)?;
     ctx.kernel_init_flow.enable_initial(&ctx.kernel_init_task)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
@@ -166,52 +140,15 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
             State::Prepared,
         );
     };
-    ctx.kernel_init_task.pin_to_boot_cpu(
-        boot_cpu.logical_id(),
-        &ctx.root_pid_namespace,
-        ctx.scheduler.boot_idle_rcu_read_side_mut(),
-    )?;
-    ctx.kthreadd_task.preset(TaskSpawnInputs {
-        task_creation_core: &ctx.task_creation_core,
-        root_pid_namespace: &ctx.root_pid_namespace,
-        credential_core: &ctx.credential_core,
-        signal_core: &ctx.signal_core,
-        task_file_context: &ctx.task_file_context,
-        security_core: &ctx.security_core,
-        boot_task: &ctx.boot_task,
-    })?;
-    ctx.kthreadd_task.setup(
-        &mut ctx.task_creation_core,
-        &ctx.root_pid_namespace,
-        &ctx.credential_core,
-        &ctx.signal_core,
-        &ctx.task_file_context,
-        &ctx.security_core,
-        &ctx.boot_task,
-        &ctx.scheduler,
-        &ctx.cpu_group,
-        &mut ctx.vmalloc_allocator,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-        &mut ctx.page_table_caches,
-        &ctx.config,
-    )?;
+    pin_kernel_init_to_boot_cpu(ctx, boot_cpu.logical_id())?;
+    preset_kthreadd_task(ctx)?;
+    copy_and_setup_kthreadd_task(ctx)?;
     ctx.kthreadd_flow.bind_initial(&mut ctx.kthreadd_task)?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
-    ctx.kthreadd_task.enable(
-        &mut ctx.scheduler,
-        &ctx.cpu_group,
-        &ctx.boot_current_cpu,
-        &mut ctx.boot_cpu_local_interrupt,
-        &ctx.boot_cpu_current_task,
-        &mut ctx.kthreadd_task_pi_lock,
-    )?;
+    wake_and_enable_kthreadd_task(ctx)?;
     ctx.kthreadd_flow.enable_initial(&ctx.kthreadd_task)?;
-    ctx.kthreadd_task.bind_global_ref(
-        &ctx.root_pid_namespace,
-        ctx.scheduler.boot_idle_rcu_read_side_mut(),
-    )?;
+    publish_kthreadd_global_ref(ctx)?;
     ctx.system_state.preset()?;
     ctx.system_state
         .setup(&ctx.kernel_init_task, &ctx.kthreadd_task)?;
@@ -228,6 +165,378 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.scheduler,
     )
+}
+
+fn preset_kernel_init_task(ctx: &mut Context) -> EventResult {
+    if ctx.kernel_init_task.state() != State::Base
+        || ctx.task_creation_core.state() != State::Ready
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.credential_core.state() != State::Prepared
+        || ctx.signal_core.state() != State::Prepared
+        || ctx.task_file_context.state() != State::Prepared
+        || ctx.security_core.state() != State::Ready
+        || ctx.boot_task.state() != State::Online
+    {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            ctx.kernel_init_task.state(),
+            State::Base,
+            State::Prepared,
+        );
+    }
+
+    ctx.kernel_init_task.commit_preset_metadata()?;
+    ctx.kernel_init_task
+        .task_mut()
+        .preset(Checkpoint::KernelInitTaskPrepared)
+}
+
+fn copy_and_setup_kernel_init_task(ctx: &mut Context) -> EventResult {
+    if ctx.kernel_init_task.state() != State::Prepared
+        || ctx.task_creation_core.state() != State::Ready
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.scheduler.state() != State::Online
+        || ctx
+            .scheduler
+            .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+            .is_none()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kernel_init_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    let copy_result = ctx.task_creation_core.copy_process(
+        TaskCopyProcessInputs {
+            src_task: &ctx.boot_task,
+            root_pid_namespace: &ctx.root_pid_namespace,
+            credential_core: &ctx.credential_core,
+            signal_core: &ctx.signal_core,
+            task_file_context: &ctx.task_file_context,
+            security_core: &ctx.security_core,
+            scheduler: &ctx.scheduler,
+            cpu_group: &ctx.cpu_group,
+            entry: TaskEntry::KernelInit,
+        },
+        ctx.kernel_init_task.state(),
+        ctx.kernel_init_task.entry(),
+    )?;
+    if copy_result.entry() != TaskEntry::KernelInit
+        || !copy_result.task_struct_allocated()
+        || !copy_result.thread_context_ready()
+        || !copy_result.sched_entity_ready()
+        || !copy_result.task_state_new()
+        || !copy_result.task_not_enqueued()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kernel_init_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    let stack_top = allocate_kernel_stack(
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &mut ctx.page_table_caches,
+        &ctx.config,
+    )?;
+    ctx.kernel_init_task.commit_copy_process_metadata(
+        copy_result.thread_context_ready(),
+        copy_result.sched_entity_ready(),
+        stack_top,
+    )?;
+    ctx.kernel_init_task
+        .task_mut()
+        .init_switch_context(kernel_init_entry, stack_top);
+    ctx.kernel_init_task
+        .task_mut()
+        .setup(Checkpoint::KernelInitTaskReady)
+}
+
+fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
+    if ctx.kernel_init_task.state() != State::Ready
+        || ctx.scheduler.state() != State::Online
+        || ctx
+            .scheduler
+            .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+            .is_none()
+        || ctx.cpu_group.state() != State::Ready
+        || ctx.boot_current_cpu.state() != State::Online
+        || ctx.boot_cpu_local_interrupt.state() != State::Ready
+        || ctx.boot_cpu_current_task.state() != State::Ready
+        || !ctx.boot_cpu_current_task.current_is_boot_task()
+        || ctx.kernel_init_task_pi_lock.state() != State::Ready
+        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
+        || !ctx.kernel_init_task.sched_entity_ready()
+    {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            ctx.kernel_init_task.state(),
+            State::Ready,
+            State::Online,
+        );
+    }
+
+    ctx.kernel_init_task_pi_lock.lock_irqsave(
+        &mut ctx.boot_cpu_local_interrupt,
+        ctx.scheduler.boot_idle_preemption_mut(),
+    )?;
+    let guarded_result: EventResult = (|| {
+        ctx.kernel_init_task.task_mut().set_runtime_running()?;
+        let selected_rq = ctx
+            .scheduler
+            .select_runqueue_for_task(ctx.kernel_init_task.pid(), &ctx.cpu_group)?;
+        if !ctx
+            .kernel_init_task
+            .task_mut()
+            .set_task_cpu(selected_rq.cpu_id())
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                ctx.kernel_init_task.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        ctx.scheduler.enqueue_task_on_runqueue(
+            ctx.kernel_init_task.pid(),
+            ctx.kernel_init_task.task_ref(),
+            selected_rq,
+        )?;
+        ctx.kernel_init_task.task_mut().publish_runqueue_binding()?;
+        ctx.kernel_init_task
+            .task_mut()
+            .enable(Checkpoint::KernelInitTaskOnline)
+    })();
+    let unlock_result = ctx.kernel_init_task_pi_lock.unlock_irqrestore(
+        &mut ctx.boot_cpu_local_interrupt,
+        ctx.scheduler.boot_idle_preemption_mut(),
+    );
+    guarded_result.and(unlock_result)
+}
+
+fn pin_kernel_init_to_boot_cpu(ctx: &mut Context, cpu_id: usize) -> EventResult {
+    if ctx.kernel_init_task.state() != State::Online
+        || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
+        || ctx.kernel_init_task.cpu_id() != cpu_id
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.scheduler.boot_idle_rcu_read_side().state() != State::Prepared
+    {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            ctx.kernel_init_task.state(),
+            State::Online,
+            State::Online,
+        );
+    }
+
+    let locks_before = ctx.scheduler.boot_idle_rcu_read_side().read_lock_count();
+    ctx.scheduler.boot_idle_rcu_read_side_mut().read_lock()?;
+    let entered =
+        ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
+    let guarded_result = ctx
+        .kernel_init_task
+        .task_mut()
+        .pin_to_cpu(cpu_id)
+        .and_then(|()| {
+            ctx.kernel_init_task
+                .commit_boot_cpu_pin_observation(entered)
+        });
+    let unlock_result = ctx.scheduler.boot_idle_rcu_read_side_mut().read_unlock();
+    guarded_result.and(unlock_result)?;
+    let balanced = ctx.scheduler.boot_idle_rcu_read_side().balanced();
+    ctx.kernel_init_task
+        .commit_pid_lookup_guard_balanced(balanced)
+}
+
+fn preset_kthreadd_task(ctx: &mut Context) -> EventResult {
+    if ctx.kthreadd_task.state() != State::Base
+        || ctx.task_creation_core.state() != State::Ready
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.credential_core.state() != State::Prepared
+        || ctx.task_file_context.state() != State::Prepared
+        || ctx.boot_task.state() != State::Online
+    {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            ctx.kthreadd_task.state(),
+            State::Base,
+            State::Prepared,
+        );
+    }
+
+    ctx.kthreadd_task.commit_preset_metadata()?;
+    ctx.kthreadd_task
+        .task_mut()
+        .preset(Checkpoint::KthreaddTaskPrepared)
+}
+
+fn copy_and_setup_kthreadd_task(ctx: &mut Context) -> EventResult {
+    if ctx.kthreadd_task.state() != State::Prepared
+        || ctx.task_creation_core.state() != State::Ready
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.scheduler.state() != State::Online
+        || ctx
+            .scheduler
+            .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+            .is_none()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kthreadd_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    let copy_result = ctx.task_creation_core.copy_process(
+        TaskCopyProcessInputs {
+            src_task: &ctx.boot_task,
+            root_pid_namespace: &ctx.root_pid_namespace,
+            credential_core: &ctx.credential_core,
+            signal_core: &ctx.signal_core,
+            task_file_context: &ctx.task_file_context,
+            security_core: &ctx.security_core,
+            scheduler: &ctx.scheduler,
+            cpu_group: &ctx.cpu_group,
+            entry: TaskEntry::Kthreadd,
+        },
+        ctx.kthreadd_task.state(),
+        ctx.kthreadd_task.entry(),
+    )?;
+    if copy_result.entry() != TaskEntry::Kthreadd
+        || !copy_result.task_struct_allocated()
+        || !copy_result.thread_context_ready()
+        || !copy_result.sched_entity_ready()
+        || !copy_result.task_state_new()
+        || !copy_result.task_not_enqueued()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kthreadd_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
+
+    let stack_top = allocate_kernel_stack(
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &mut ctx.page_table_caches,
+        &ctx.config,
+    )?;
+    ctx.kthreadd_task.commit_copy_process_metadata(
+        copy_result.thread_context_ready(),
+        copy_result.sched_entity_ready(),
+        stack_top,
+    )?;
+    ctx.kthreadd_task
+        .task_mut()
+        .init_switch_context(kthreadd_entry, stack_top);
+    ctx.kthreadd_task
+        .task_mut()
+        .setup(Checkpoint::KthreaddTaskReady)
+}
+
+fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
+    if ctx.kthreadd_task.state() != State::Ready
+        || ctx.scheduler.state() != State::Online
+        || ctx
+            .scheduler
+            .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+            .is_none()
+        || ctx.cpu_group.state() != State::Ready
+        || ctx.boot_current_cpu.state() != State::Online
+        || ctx.boot_cpu_local_interrupt.state() != State::Ready
+        || ctx.boot_cpu_current_task.state() != State::Ready
+        || !ctx.boot_cpu_current_task.current_is_boot_task()
+        || ctx.kthreadd_task_pi_lock.state() != State::Ready
+        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || ctx.kthreadd_task.pid() != KTHREADD_PID
+        || !ctx.kthreadd_task.sched_entity_ready()
+    {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            ctx.kthreadd_task.state(),
+            State::Ready,
+            State::Online,
+        );
+    }
+
+    ctx.kthreadd_task_pi_lock.lock_irqsave(
+        &mut ctx.boot_cpu_local_interrupt,
+        ctx.scheduler.boot_idle_preemption_mut(),
+    )?;
+    let guarded_result: EventResult = (|| {
+        ctx.kthreadd_task.task_mut().set_runtime_running()?;
+        let selected_rq = ctx
+            .scheduler
+            .select_runqueue_for_task(ctx.kthreadd_task.pid(), &ctx.cpu_group)?;
+        if !ctx
+            .kthreadd_task
+            .task_mut()
+            .set_task_cpu(selected_rq.cpu_id())
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                ctx.kthreadd_task.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        ctx.scheduler.enqueue_task_on_runqueue(
+            ctx.kthreadd_task.pid(),
+            ctx.kthreadd_task.task_ref(),
+            selected_rq,
+        )?;
+        ctx.kthreadd_task.task_mut().publish_runqueue_binding()?;
+        ctx.kthreadd_task
+            .task_mut()
+            .enable(Checkpoint::KthreaddTaskOnline)
+    })();
+    let unlock_result = ctx.kthreadd_task_pi_lock.unlock_irqrestore(
+        &mut ctx.boot_cpu_local_interrupt,
+        ctx.scheduler.boot_idle_preemption_mut(),
+    );
+    guarded_result.and(unlock_result)
+}
+
+fn publish_kthreadd_global_ref(ctx: &mut Context) -> EventResult {
+    if ctx.kthreadd_task.state() != State::Online
+        || ctx.kthreadd_task.pid() != KTHREADD_PID
+        || !ctx.kthreadd_task.running()
+        || !ctx.kthreadd_task.enqueued()
+        || ctx.root_pid_namespace.state() != State::Ready
+        || ctx.scheduler.boot_idle_rcu_read_side().state() != State::Prepared
+    {
+        return failed_condition(
+            LifecycleEvent::Enable,
+            ctx.kthreadd_task.state(),
+            State::Online,
+            State::Online,
+        );
+    }
+
+    let locks_before = ctx.scheduler.boot_idle_rcu_read_side().read_lock_count();
+    ctx.scheduler.boot_idle_rcu_read_side_mut().read_lock()?;
+    let entered =
+        ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() == locks_before.wrapping_add(1);
+    let guarded_result = ctx.kthreadd_task.commit_global_ref_metadata(entered);
+    if guarded_result.is_ok() {
+        crate::checkpoint::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
+    }
+    let unlock_result = ctx.scheduler.boot_idle_rcu_read_side_mut().read_unlock();
+    guarded_result.and(unlock_result)?;
+    let balanced = ctx.scheduler.boot_idle_rcu_read_side().balanced();
+    ctx.kthreadd_task.commit_pid_lookup_guard_balanced(balanced)
 }
 
 fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {

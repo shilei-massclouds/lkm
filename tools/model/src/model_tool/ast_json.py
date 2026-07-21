@@ -82,10 +82,15 @@ def _type_from_json(item: Any) -> TypeDecl:
     properties = data.get("properties", {})
     if not isinstance(properties, dict):
         raise ValueError("type.properties must be an object")
+    initial_state = data.get("initial_state")
+    if initial_state is not None and not isinstance(initial_state, str):
+        raise ValueError("type.initial_state must be a string or null")
     return TypeDecl(
         name=_string(data, "name"),
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
+        initial_state=initial_state,
+        states=[_state_from_json(state) for state in data.get("states", [])],
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
         processes=[_process_from_json(process) for process in _list(data, "processes")],
         properties={str(key): str(value) for key, value in properties.items()},
@@ -266,10 +271,15 @@ def _event_from_json(item: Any) -> TransitionDecl:
             *(_block_body_member(block) for block in other_blocks),
         ],
     )
+    parameters = []
+    for parameter in data.get("parameters", []):
+        param = _as_object(parameter, "transition parameter")
+        parameters.append((_string(param, "name"), _string(param, "type")))
     return TransitionDecl(
         name=_string(data, "name"),
         target_state=_string(data, "target_state"),
         span=_span_from_json(data["span"]),
+        parameters=tuple(parameters),
         depends_on=depends_on,
         drives=drives,
         emits=emits,

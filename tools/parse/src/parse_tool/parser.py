@@ -56,7 +56,11 @@ _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
 _STATE_RE = re.compile(rf"\Astate\s+State::({_IDENT})\s*\{{", re.S)
-_TRANSITION_RE = re.compile(rf"\Aon\s+Transition::({_IDENT})\s*->\s*State::({_IDENT})\s*\{{", re.S)
+_TRANSITION_RE = re.compile(
+    rf"\Aon\s+Transition::({_IDENT})"
+    rf"\s*(?:\(([^{{}};]*)\))?\s*->\s*State::({_IDENT})\s*\{{",
+    re.S,
+)
 _PROCESS_RE = re.compile(
     rf"\A(?:on\s+)?(Transition|Action)::({_IDENT})"
     rf"\s*(?:<[^{{}};]*>)?"
@@ -313,6 +317,7 @@ def _enrich_type(t: "TypeDecl", lf: list[str], ll: list[int]) -> "TypeDecl":
     return dc_replace(
         t,
         span=_with_file(t.span, lf, ll),
+        states=[_enrich_state(s, lf, ll) for s in t.states],
         blocks=[_with_file_block(b, lf, ll) for b in t.blocks],
         processes=[_enrich_process(p, lf, ll) for p in t.processes],
     )
@@ -530,10 +535,16 @@ def _parse_type(segment: _Segment) -> TypeDecl:
     )
     blocks: list[Block] = []
     processes: list[ProcessDecl] = []
+    states: list[StateDecl] = []
+    initial_state: str | None = None
     properties: dict[str, str] = {}
     for part in _split_members(body, body_start_line):
         stripped = part.text.strip()
+        state_match = _STATE_RE.match(stripped)
         block_match = _BLOCK_RE.match(stripped)
+        if state_match:
+            states.append(_parse_state(part, owner=match.group(1)))
+            continue
         if block_match:
             block = _to_block(part, block_match.group(1))
             blocks.append(block)
@@ -545,11 +556,17 @@ def _parse_type(segment: _Segment) -> TypeDecl:
             raise ParseError(
                 f"line {part.start_line}: invalid type member: {_preview(part.text)}"
             )
-        properties[prop_match.group(1)] = prop_match.group(2).strip()
+        key = prop_match.group(1)
+        value = prop_match.group(2).strip()
+        properties[key] = value
+        if key == "initial_state":
+            initial_state = _state_name(value)
     return TypeDecl(
         name=match.group(1),
         header=match.group("header").strip(),
         span=segment.span,
+        initial_state=initial_state,
+        states=states,
         blocks=blocks,
         processes=processes,
         properties=properties,
@@ -896,8 +913,9 @@ def _parse_event(segment: _Segment, *, owner: str) -> TransitionDecl:
 
     transition = TransitionDecl(
         name=match.group(1),
-        target_state=match.group(2),
+        target_state=match.group(3),
         span=segment.span,
+        parameters=_parse_process_parameters(match.group(2) or "", segment.start_line),
         depends_on=depends_on,
         drives=drives,
         emits=emits,

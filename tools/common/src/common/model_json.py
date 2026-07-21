@@ -224,6 +224,9 @@ def _state_def_from_json(item: Any) -> StateDef:
         object_name=_string(data, "object_name"),
         decl=decl,
         transitions=transitions,
+        lifecycle_owner=_optional_string(
+            data.get("lifecycle_owner"), "state.lifecycle_owner"
+        ),
     )
 
 
@@ -255,10 +258,15 @@ def _event_def_from_json(item: Any) -> TransitionDef:
             *(_block_body_member(block) for block in other_blocks),
         ],
     )
+    parameters: list[tuple[str, str]] = []
+    for parameter in data.get("parameters", []):
+        param = _as_object(parameter, "transition parameter")
+        parameters.append((_string(param, "name"), _string(param, "type")))
     decl = TransitionDecl(
         name=_string(data, "name"),
         target_state=_string(data, "target_state"),
         span=_span_from_json(data["span"]),
+        parameters=tuple(parameters),
         depends_on=depends_on,
         drives=drives,
         emits=emits,
@@ -276,6 +284,9 @@ def _event_def_from_json(item: Any) -> TransitionDef:
         source_state=_string(data, "source_state"),
         target_state=decl.target_state,
         decl=decl,
+        lifecycle_owner=_optional_string(
+            data.get("lifecycle_owner"), "transition.lifecycle_owner"
+        ),
     )
 
 
@@ -312,13 +323,88 @@ def _type_from_json(item: Any) -> TypeDecl:
     properties = data.get("properties", {})
     if not isinstance(properties, dict):
         raise ValueError("type.properties must be an object")
+    initial_state = data.get("initial_state")
+    if initial_state is not None and not isinstance(initial_state, str):
+        raise ValueError("type.initial_state must be a string or null")
     return TypeDecl(
         name=_string(data, "name"),
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
+        initial_state=initial_state,
+        states=[_type_state_from_json(state) for state in data.get("states", [])],
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
         processes=[_process_from_json(process) for process in _list(data, "processes")],
         properties={str(key): str(value) for key, value in properties.items()},
+    )
+
+
+def _type_state_from_json(item: Any) -> StateDecl:
+    data = _as_object(item, "type state")
+    return StateDecl(
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        invariants=[_block_from_json(block) for block in _list(data, "invariants")],
+        boundaries=[
+            _boundary_decl_from_json(boundary)
+            for boundary in data.get("boundaries", [])
+        ],
+        deferred=[_block_from_json(block) for block in _list(data, "deferred")],
+        transitions=[
+            _type_event_from_json(transition)
+            for transition in _list(data, "transitions")
+        ],
+        processes=[_process_from_json(process) for process in _list(data, "processes")],
+        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+    )
+
+
+def _type_event_from_json(item: Any) -> TransitionDecl:
+    data = _as_object(item, "type transition")
+    depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
+    drives = [_block_from_json(block) for block in _list(data, "drives")]
+    emits = [_block_from_json(block) for block in data.get("emits", [])]
+    within = [_within_from_json(block) for block in _list(data, "within")]
+    may_change = [_block_from_json(block) for block in _list(data, "may_change")]
+    ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    boundaries = [
+        _boundary_decl_from_json(boundary)
+        for boundary in data.get("boundaries", [])
+    ]
+    deferred = [_block_from_json(block) for block in _list(data, "deferred")]
+    other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
+    body_members = _body_members_from_json(
+        data,
+        fallback=[
+            *(_block_body_member(block) for block in depends_on),
+            *(_block_body_member(block) for block in drives),
+            *(_block_body_member(block) for block in emits),
+            *(_within_body_member(block) for block in within),
+            *(_block_body_member(block) for block in may_change),
+            *(_block_body_member(block) for block in ensures),
+            *(_boundary_body_member(boundary) for boundary in boundaries),
+            *(_block_body_member(block) for block in deferred),
+            *(_block_body_member(block) for block in other_blocks),
+        ],
+    )
+    parameters: list[tuple[str, str]] = []
+    for parameter in data.get("parameters", []):
+        param = _as_object(parameter, "type transition parameter")
+        parameters.append((_string(param, "name"), _string(param, "type")))
+    return TransitionDecl(
+        name=_string(data, "name"),
+        target_state=_string(data, "target_state"),
+        span=_span_from_json(data["span"]),
+        parameters=tuple(parameters),
+        depends_on=depends_on,
+        drives=drives,
+        emits=emits,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        boundaries=boundaries,
+        deferred=deferred,
+        other_blocks=other_blocks,
+        body_members=body_members,
     )
 
 

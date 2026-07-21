@@ -212,6 +212,9 @@ pub struct Task {
     kind: TaskKind,
     cpu: TaskCpuState,
     running: bool,
+    runqueue_published: bool,
+    affinity_cpu_id: usize,
+    no_setaffinity: bool,
     switch_ctx: TaskSwitchContext,
     owned_flows: [TaskFlowRef; TASK_OWNED_FLOW_CAPACITY],
     active_flow: TaskFlowRef,
@@ -231,6 +234,9 @@ impl Task {
             kind: TaskKind::None,
             cpu: TaskCpuState::new(),
             running: false,
+            runqueue_published: false,
+            affinity_cpu_id: usize::MAX,
+            no_setaffinity: false,
             switch_ctx: TaskSwitchContext::new(),
             owned_flows: [TaskFlowRef::NONE; TASK_OWNED_FLOW_CAPACITY],
             active_flow: TaskFlowRef::NONE,
@@ -263,6 +269,18 @@ impl Task {
 
     pub const fn running(&self) -> bool {
         self.running
+    }
+
+    pub const fn runqueue_published(&self) -> bool {
+        self.runqueue_published
+    }
+
+    pub const fn affinity_pinned(&self) -> bool {
+        self.affinity_cpu_id != usize::MAX
+    }
+
+    pub const fn no_setaffinity(&self) -> bool {
+        self.no_setaffinity
     }
 
     pub const fn active_flow(&self) -> TaskFlowRef {
@@ -331,6 +349,14 @@ impl Task {
     }
 
     pub fn setup(&mut self, checkpoint: Checkpoint) -> EventResult {
+        if self.runqueue_published {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -345,7 +371,14 @@ impl Task {
     }
 
     pub fn enable(&mut self, checkpoint: Checkpoint) -> EventResult {
-        self.running = true;
+        if !self.running || !self.runqueue_published || !self.active_flow.is_valid() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
@@ -366,6 +399,7 @@ impl Task {
 
     pub fn adopt_enable(&mut self) -> EventResult {
         self.running = true;
+        self.runqueue_published = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
@@ -380,6 +414,7 @@ impl Task {
             );
         }
         self.running = false;
+        self.runqueue_published = false;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Disable, State::Online, State::Offline)
     }
@@ -403,6 +438,65 @@ impl Task {
 
     pub fn set_task_cpu(&mut self, cpu_id: usize) -> bool {
         self.cpu.set_task_cpu(cpu_id)
+    }
+
+    pub fn set_runtime_running(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.running = true;
+        Ok(())
+    }
+
+    pub fn publish_runqueue_binding(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.running
+            || self.cpu.cpu_id() == usize::MAX
+            || !self.active_flow.is_valid()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.runqueue_published = true;
+        Ok(())
+    }
+
+    pub fn pin_to_cpu(&mut self, cpu_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || cpu_id == usize::MAX
+            || self.cpu.cpu_id() != cpu_id
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.affinity_cpu_id = cpu_id;
+        self.no_setaffinity = true;
+        Ok(())
+    }
+
+    pub fn clear_cpu_pin(&mut self) -> bool {
+        if self.lifecycle.state() != State::Online
+            || !self.affinity_pinned()
+            || !self.no_setaffinity
+        {
+            return false;
+        }
+        self.affinity_cpu_id = usize::MAX;
+        self.no_setaffinity = false;
+        true
     }
 
     pub fn set_role_metadata(&mut self, entry: TaskEntry, kind: TaskKind) {

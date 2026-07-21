@@ -61,17 +61,39 @@ class DeriveToolTests(unittest.TestCase):
             }}
 
             type Task {{
-                lifecycle {{
-                    Transition::Preset(initial_flow: UserAppFlow) {{
+                initial_state: State::Base;
+
+                state State::Base {{
+                    transitions {{
+                        on Transition::Preset(initial_flow: UserAppFlow) -> State::Prepared {{
+                        }}
                     }}
-                    Transition::Setup {{
+                }}
+                state State::Prepared {{
+                    transitions {{
+                        on Transition::Setup -> State::Ready {{
+                        }}
                     }}
-                    Transition::Enable {{
+                }}
+                state State::Ready {{
+                    transitions {{
+                        on Transition::Enable -> State::Online {{
+                        }}
                     }}
-                    Transition::Disable {{
+                }}
+                state State::Online {{
+                    transitions {{
+                        on Transition::Disable -> State::Offline {{
+                        }}
                     }}
-                    Transition::Cleanup {{
+                }}
+                state State::Offline {{
+                    transitions {{
+                        on Transition::Cleanup -> State::Destroyed {{
+                        }}
                     }}
+                }}
+                state State::Destroyed {{
                 }}
             }}
 
@@ -1244,6 +1266,169 @@ class DeriveToolTests(unittest.TestCase):
             {item["runtime_instance_id"] for item in tasks},
         )
         self.assertTrue(all(len(item["owned_flows"]) == 1 for item in tasks))
+
+    def test_static_and_runtime_instances_share_type_lifecycle_with_self_substitution(self) -> None:
+        source = """
+            type Token {
+                processes {
+                    Action::Touch {
+                        ensures { token_touched(self); }
+                    }
+                }
+            }
+
+            type Gate {
+            }
+
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset(token: Token) -> State::Prepared {
+                            depends_on { token.state == State::Ready; }
+                            drives {
+                                token.Action::Touch;
+                                GateObject.Action::Open;
+                            }
+                            ensures { carrier_prepared(self); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    invariant { carrier_prepared(self); }
+                    transitions {
+                        on Transition::Setup -> State::Ready {
+                            depends_on { gate_open(GateObject); }
+                            ensures { carrier_ready(self); }
+                        }
+                    }
+                }
+                state State::Ready {
+                    invariant { carrier_ready(self); }
+                }
+            }
+
+            type Factory {
+                processes {
+                    Action::Run {
+                        drives {
+                            StaticCarrier.Transition::Preset(token: TokenObject);
+                            StaticCarrier.Transition::Setup;
+                            declare child of Carrier;
+                            child.Transition::Preset(token: TokenObject);
+                            child.Transition::Setup;
+                        }
+                    }
+                }
+            }
+
+            object TokenObject: Token {
+                initial_state: State::Ready;
+                state State::Ready {}
+            }
+
+            object GateObject: Gate {
+                initial_state: State::Ready;
+                state State::Ready {
+                    actions {
+                        Action::Open {
+                            ensures { gate_open(self); }
+                        }
+                    }
+                }
+            }
+
+            object StaticCarrier: Carrier {
+            }
+
+            object ComputerProject: Factory {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            drives { ComputerProject.Action::Run; }
+                        }
+                    }
+                }
+                state State::Prepared {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), source)
+
+        self.assertTrue(data["summary"]["ok"])
+        child = data["runtime_instances"][0]
+        self.assertEqual(data["states"]["StaticCarrier"], "Ready")
+        self.assertEqual(child["state"], "Ready")
+        invariant_expressions = {
+            record["expression"]
+            for record in data["records"]
+            if record["source_kind"] == "invariant"
+        }
+        self.assertIn("carrier_prepared(StaticCarrier)", invariant_expressions)
+        self.assertIn("carrier_ready(StaticCarrier)", invariant_expressions)
+        self.assertIn(
+            f"carrier_prepared({child['runtime_instance_id']})",
+            invariant_expressions,
+        )
+        self.assertIn(
+            f"carrier_ready({child['runtime_instance_id']})",
+            invariant_expressions,
+        )
+        proved_expressions = {
+            record["expression"]
+            for record in data["records"]
+            if record["status"] == "proved"
+        }
+        self.assertIn("token_touched(TokenObject)", proved_expressions)
+        self.assertIn("gate_open(GateObject)", proved_expressions)
+
+    def test_runtime_type_lifecycle_rejects_transition_from_wrong_state(self) -> None:
+        source = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared {} }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready {} }
+                }
+                state State::Ready {}
+            }
+
+            type Factory {
+                processes {
+                    Action::Run {
+                        drives {
+                            declare child of Carrier;
+                            child.Transition::Setup;
+                        }
+                    }
+                }
+            }
+
+            object ComputerProject: Factory {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            drives { ComputerProject.Action::Run; }
+                        }
+                    }
+                }
+                state State::Prepared {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), source)
+
+        self.assertFalse(data["summary"]["ok"])
+        self.assertTrue(
+            any(
+                "illegal runtime lifecycle transition" in record["message"]
+                for record in data["records"]
+            )
+        )
 
     def test_repeated_exec_keeps_task_identity_and_creates_fresh_flows(self) -> None:
         processes = """

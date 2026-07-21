@@ -718,14 +718,310 @@ object BootInitRestInitPhase: PhaseObject {
 
                 drives {
                     RcuCore.Action::SchedulerStarting;
-                    KernelInitTask.Transition::Preset;
-                    KernelInitTask.Transition::Setup;
-                    KernelInitTask.Transition::Enable;
-                    KernelInitTask.Action::PinToBootCpu(BootCPURef);
-                    KthreaddTask.Transition::Preset;
-                    KthreaddTask.Transition::Setup;
-                    KthreaddTask.Transition::Enable;
-                    KthreaddTask.Action::BindGlobalRef;
+                    KernelInitTask.Transition::Preset(
+                        parent_task: BootTask,
+                        task_ref: KernelInitTaskRef,
+                        initial_flow: KernelInitFlow
+                    );
+                    TaskCreationCore.Action::CopyProcess(
+                        src_task: BootTask,
+                        dst_task: KernelInitTask,
+                        pid_ns: RootPidNamespace,
+                        creds: CredentialCore,
+                        signal: SignalCore,
+                        files: TaskFileContext,
+                        security: SecurityCore,
+                        scheduler: Scheduler,
+                        flow: KernelInitFlow
+                    );
+                    KernelInitTask.Transition::Setup(
+                        parent_task: BootTask,
+                        pid_ns: RootPidNamespace,
+                        scheduler: Scheduler,
+                        initial_flow: KernelInitFlow
+                    );
+                }
+
+                within WakeUpNewTaskContext {
+                    depends_on {
+                        task_ref_ready(KernelInitTaskRef);
+                        runqueue_ref_ready(BootRunQueueRef);
+                        task_state_new(KernelInitTask);
+                        task_not_enqueued(KernelInitTask);
+                        current_task_slot_current(BootCpuCurrentTask, BootTask);
+                        BootRunQueue.state == State::Ready;
+                    }
+
+                    drives {
+                        KernelInitTask.Transition::SetRuntimeState(
+                            TaskRuntimeState::Running
+                        );
+                        let selected_rq: RunQueueRef <-
+                            Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
+                        KernelInitTask.Action::SetTaskCpu(BootCPURef);
+                    }
+
+                    within EnqueueSelectedRunQueueContext {
+                        depends_on {
+                            runqueue_ref_targets(
+                                selected_rq,
+                                BootRunQueue
+                            );
+                            runqueue_ref_cpu_is(
+                                selected_rq,
+                                BootCPURef
+                            );
+                            task_cpu_ref_is(KernelInitTask, BootCPURef);
+                        }
+
+                        drives {
+                            selected_rq.Transition::EnqueueTask(
+                                KernelInitTaskRef
+                            );
+                        }
+
+                        ensures {
+                            raw_spinlock_irqsave_entered(
+                                BootRunQueueLock,
+                                BootCurrentCPU
+                            );
+                            raw_spinlock_irqrestore_exited(
+                                BootRunQueueLock,
+                                BootCurrentCPU
+                            );
+                            runqueue_contains_task(
+                                BootRunQueue,
+                                KernelInitTaskRef
+                            );
+                        }
+                    }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(
+                            KernelInitTaskPiLock,
+                            BootCurrentCPU
+                        );
+                        raw_spinlock_irqrestore_exited(
+                            KernelInitTaskPiLock,
+                            BootCurrentCPU
+                        );
+                        scheduler_select_runqueue_returns(
+                            Scheduler,
+                            KernelInitTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_runqueue_selected(
+                            Scheduler,
+                            KernelInitTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_cpu_ref_is(KernelInitTask, BootCPURef);
+                        task_enqueued_on_runqueue(
+                            KernelInitTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_wakeup_new_rq_clock_updated(
+                            KernelInitTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_initial_util_avg_posted(
+                            KernelInitTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_trace_emitted(KernelInitTask);
+                        task_wakeup_new_preempt_check_done(
+                            KernelInitTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_task_woken_hook_deferred(KernelInitTask);
+                        task_state_running(KernelInitTask);
+                        task_runqueue_publication_committed(KernelInitTask);
+                        task_active_flow_is(KernelInitTask, KernelInitFlow);
+                        task_at_most_one_flow_online(KernelInitTask);
+                        task_flow_active_binding_committed(KernelInitFlow);
+                    }
+                }
+
+                drives {
+                    KernelInitTask.Transition::Enable(
+                        initial_flow: KernelInitFlow
+                    );
+                }
+
+                within KernelInitPidLookupRcuReadSideContext {
+                    drives {
+                        KernelInitTask.Action::PinToBootCpu(BootCPURef);
+                    }
+
+                    ensures {
+                        rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                        rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                        task_pid_lookup_under_rcu_read(
+                            KernelInitTask,
+                            RootPidNamespace,
+                            BootIdleRcuReadSide
+                        );
+                        task_pid_lookup_rcu_guard_used(
+                            KernelInitTask,
+                            BootIdleRcuReadSide
+                        );
+                        kernel_init_pf_no_setaffinity(KernelInitTask);
+                        kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+                    }
+                }
+
+                drives {
+                    KthreaddTask.Transition::Preset(
+                        parent_task: BootTask,
+                        task_ref: KthreaddTaskRef,
+                        initial_flow: KthreaddFlow
+                    );
+                    TaskCreationCore.Action::CopyProcess(
+                        src_task: BootTask,
+                        dst_task: KthreaddTask,
+                        pid_ns: RootPidNamespace,
+                        creds: CredentialCore,
+                        signal: SignalCore,
+                        files: TaskFileContext,
+                        security: SecurityCore,
+                        scheduler: Scheduler,
+                        flow: KthreaddFlow
+                    );
+                    KthreaddTask.Transition::Setup(
+                        parent_task: BootTask,
+                        pid_ns: RootPidNamespace,
+                        scheduler: Scheduler,
+                        initial_flow: KthreaddFlow
+                    );
+                }
+
+                within WakeUpKthreaddTaskContext {
+                    depends_on {
+                        task_ref_ready(KthreaddTaskRef);
+                        runqueue_ref_ready(BootRunQueueRef);
+                        task_state_new(KthreaddTask);
+                        task_not_enqueued(KthreaddTask);
+                        current_task_slot_current(BootCpuCurrentTask, BootTask);
+                        BootRunQueue.state == State::Ready;
+                    }
+
+                    drives {
+                        KthreaddTask.Transition::SetRuntimeState(
+                            TaskRuntimeState::Running
+                        );
+                        let selected_rq: RunQueueRef <-
+                            Scheduler.Action::SelectRunQueue(KthreaddTaskRef);
+                        KthreaddTask.Action::SetTaskCpu(BootCPURef);
+                    }
+
+                    within EnqueueSelectedRunQueueContext {
+                        depends_on {
+                            runqueue_ref_targets(
+                                selected_rq,
+                                BootRunQueue
+                            );
+                            runqueue_ref_cpu_is(selected_rq, BootCPURef);
+                            task_cpu_ref_is(KthreaddTask, BootCPURef);
+                        }
+
+                        drives {
+                            selected_rq.Transition::EnqueueTask(
+                                KthreaddTaskRef
+                            );
+                        }
+
+                        ensures {
+                            raw_spinlock_irqsave_entered(
+                                BootRunQueueLock,
+                                BootCurrentCPU
+                            );
+                            raw_spinlock_irqrestore_exited(
+                                BootRunQueueLock,
+                                BootCurrentCPU
+                            );
+                            runqueue_contains_task(
+                                BootRunQueue,
+                                KthreaddTaskRef
+                            );
+                        }
+                    }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(
+                            KthreaddTaskPiLock,
+                            BootCurrentCPU
+                        );
+                        raw_spinlock_irqrestore_exited(
+                            KthreaddTaskPiLock,
+                            BootCurrentCPU
+                        );
+                        scheduler_select_runqueue_returns(
+                            Scheduler,
+                            KthreaddTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_runqueue_selected(
+                            Scheduler,
+                            KthreaddTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_cpu_ref_is(KthreaddTask, BootCPURef);
+                        task_enqueued_on_runqueue(
+                            KthreaddTaskRef,
+                            BootRunQueueRef
+                        );
+                        task_wakeup_new_rq_clock_updated(
+                            KthreaddTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_initial_util_avg_posted(
+                            KthreaddTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_trace_emitted(KthreaddTask);
+                        task_wakeup_new_preempt_check_done(
+                            KthreaddTask,
+                            BootRunQueue
+                        );
+                        task_wakeup_new_task_woken_hook_deferred(KthreaddTask);
+                        task_state_running(KthreaddTask);
+                        task_runqueue_publication_committed(KthreaddTask);
+                        task_active_flow_is(KthreaddTask, KthreaddFlow);
+                        task_at_most_one_flow_online(KthreaddTask);
+                        task_flow_active_binding_committed(KthreaddFlow);
+                    }
+                }
+
+                drives {
+                    KthreaddTask.Transition::Enable(
+                        initial_flow: KthreaddFlow
+                    );
+                }
+
+                within KthreaddPidLookupRcuReadSideContext {
+                    ensures {
+                        rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                        rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                        task_pid_lookup_under_rcu_read(
+                            KthreaddTask,
+                            RootPidNamespace,
+                            BootIdleRcuReadSide
+                        );
+                        task_pid_lookup_rcu_guard_used(
+                            KthreaddTask,
+                            BootIdleRcuReadSide
+                        );
+                        kthreadd_global_ref_bound(KthreaddTask);
+                        kthreadd_provider_ref_targets(
+                            KthreaddTaskRef,
+                            KthreaddTask
+                        );
+                        kthreadd_provider_ready(KthreaddTask);
+                    }
+                }
+
+                drives {
+                    KthreaddFlow.Action::RunScheduleLoop;
                     SystemState.Transition::Preset;
                     SystemState.Transition::Setup;
                     KthreaddReadyGate.Transition::Setup;
@@ -768,6 +1064,17 @@ object BootInitRestInitPhase: PhaseObject {
                         KthreaddReadyGate
                     );
                     kernel_init_task_created(KernelInitTask);
+                    kernel_init_spawn_spec_ready(KernelInitTask);
+                    kernel_init_entry_selected(KernelInitTask);
+                    kernel_init_clone_fs_flag_set(KernelInitTask);
+                    kernel_init_not_user_mm_yet(KernelInitTask);
+                    kernel_init_task_ready(KernelInitTask);
+                    kernel_init_task_pid_is_one(KernelInitTask);
+                    kernel_init_thread_context_ready(KernelInitTask);
+                    kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    kernel_init_waits_for_kthreadd_done(KernelInitTask);
+                    kernel_init_task_online(KernelInitTask);
+                    kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
@@ -776,9 +1083,25 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
                     kthreadd_task_created(KthreaddTask);
+                    kthreadd_spawn_spec_ready(KthreaddTask);
+                    kthreadd_entry_selected(KthreaddTask);
+                    kthreadd_clone_fs_files_flags_set(KthreaddTask);
+                    kthreadd_clone_vm_flag_set(KthreaddTask);
+                    kthreadd_clone_untraced_flag_set(KthreaddTask);
+                    kthreadd_kernel_thread_flag_set(KthreaddTask);
+                    kthreadd_is_kernel_thread_provider(KthreaddTask);
+                    kthreadd_task_ready(KthreaddTask);
+                    kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
+                    kthreadd_thread_context_ready(KthreaddTask);
+                    kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+                    kthreadd_task_online(KthreaddTask);
+                    kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
+                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
                     kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
                     system_state_scheduling(SystemState);
@@ -823,15 +1146,42 @@ object BootInitRestInitPhase: PhaseObject {
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
                     KernelInitTask.state == State::Online;
+                    kernel_init_spawn_spec_ready(KernelInitTask);
+                    kernel_init_entry_selected(KernelInitTask);
+                    kernel_init_clone_fs_flag_set(KernelInitTask);
+                    kernel_init_not_user_mm_yet(KernelInitTask);
+                    kernel_init_task_ready(KernelInitTask);
+                    kernel_init_task_pid_is_one(KernelInitTask);
+                    kernel_init_thread_context_ready(KernelInitTask);
+                    kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    kernel_init_waits_for_kthreadd_done(KernelInitTask);
+                    kernel_init_task_online(KernelInitTask);
+                    kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     KthreaddTask.state == State::Online;
+                    kthreadd_spawn_spec_ready(KthreaddTask);
+                    kthreadd_entry_selected(KthreaddTask);
+                    kthreadd_clone_fs_files_flags_set(KthreaddTask);
+                    kthreadd_clone_vm_flag_set(KthreaddTask);
+                    kthreadd_clone_untraced_flag_set(KthreaddTask);
+                    kthreadd_kernel_thread_flag_set(KthreaddTask);
+                    kthreadd_is_kernel_thread_provider(KthreaddTask);
+                    kthreadd_task_ready(KthreaddTask);
+                    kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
+                    kthreadd_thread_context_ready(KthreaddTask);
+                    kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+                    kthreadd_task_online(KthreaddTask);
+                    kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
+                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
                     kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     SystemState.state == State::Ready;
                     KthreaddReadyGate.state == State::Online;
@@ -868,15 +1218,43 @@ object BootInitRestInitPhase: PhaseObject {
             rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
             rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
             KernelInitTask.state == State::Online;
+            kernel_init_spawn_spec_ready(KernelInitTask);
+            kernel_init_entry_selected(KernelInitTask);
+            kernel_init_clone_fs_flag_set(KernelInitTask);
+            kernel_init_not_user_mm_yet(KernelInitTask);
+            kernel_init_task_ready(KernelInitTask);
+            kernel_init_task_pid_is_one(KernelInitTask);
+            kernel_init_thread_context_ready(KernelInitTask);
+            kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+            kernel_init_waits_for_kthreadd_done(KernelInitTask);
+            kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
+            kernel_init_task_online(KernelInitTask);
+            kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
             task_owns_flow(KernelInitTask, KernelInitFlow);
             task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
+            kthreadd_spawn_spec_ready(KthreaddTask);
+            kthreadd_entry_selected(KthreaddTask);
+            kthreadd_clone_fs_files_flags_set(KthreaddTask);
+            kthreadd_clone_vm_flag_set(KthreaddTask);
+            kthreadd_clone_untraced_flag_set(KthreaddTask);
+            kthreadd_kernel_thread_flag_set(KthreaddTask);
+            kthreadd_is_kernel_thread_provider(KthreaddTask);
+            kthreadd_task_ready(KthreaddTask);
+            kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
+            kthreadd_thread_context_ready(KthreaddTask);
+            kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
+            kthreadd_task_online(KthreaddTask);
+            kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
             task_owns_flow(KthreaddTask, KthreaddFlow);
+            kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+            kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
             kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
             kthreadd_global_ref_bound(KthreaddTask);
+            kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;

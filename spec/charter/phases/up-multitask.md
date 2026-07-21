@@ -27,6 +27,14 @@ continuation 和 idle continuation。它负责准备 `KernelInitTask` 与 `Kthre
 
 叶子阶段 Online 后只返回 UpMultitask 持有的 continuation，不直接启动 sibling。
 
+`BootInitRestInitPhase` 是两个普通 Task 创建与启用顺序的唯一角色级编排者。对每个 Task，它按
+`Task.Preset -> TaskCreationCore.CopyProcess -> Task.Setup -> pi-lock/runqueue wakeup ->
+Task.Enable` 推进类型级 lifecycle；wakeup 必须在同一编排内完成 stack/context setup、runqueue
+selection、CPU assignment、enqueue 与初始 Flow binding。Kernel-init 的 CPU pin 与 kthreadd 的
+global-ref publication 分别发生在对应 Enable 之后。PID 1、入口、`CLONE_FS`、kthreadd clone flags、
+provider 和 schedule-loop 等角色事实由该 Phase 的 ensures/invariants 提供，不下沉为
+`KernelInitTask` 或 `KthreaddTask` 的实例级 lifecycle。
+
 ## 生命周期
 
 UpMultitaskPhase 与三个直接子阶段均遵循标准阶段生命周期：

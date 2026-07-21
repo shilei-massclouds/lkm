@@ -57,6 +57,25 @@ The implementation must publish explicit object facts for PID 1
 KernelInitTask and KthreaddTask creation, scheduling eligibility and
 kthreadd provider binding.
 
+BootInitRestInitPhase owns the lifecycle-driving sequence for both roles. Its
+private phase flow must call the shared Task core in this order:
+
+```text
+Task::preset
+TaskCreationCore::copy_process
+Task::setup
+pi-lock -> select runqueue -> Task::set_task_cpu -> enqueue
+Task::activate_initial_flow -> Task::enable
+```
+
+KernelInitTask CPU pinning follows its successful enable; KthreaddTask global
+reference publication follows its successful enable. The phase must preserve
+the existing checkpoint IDs, names, Linux markers and fail-stop behavior at
+these boundaries. `KernelInitTask` and `KthreaddTask` Rust role structures must
+not expose `preset`, `setup` or `enable`, including forwarding aliases. They may
+retain role metadata/query APIs, controlled access to the shared `Task` core,
+and metadata-only commit helpers for entry/provider/clone facts.
+
 #### Explicit task entries
 
 KernelInitTask must be created through TaskCreationCore with
@@ -487,10 +506,11 @@ the selected RunQueueRef.
 
 #### KernelInitTask affinity action
 
-PID 1 boot CPU pinning must be implemented as a KernelInitTask
-action that sets the PF_NO_SETAFFINITY-equivalent flag and cpumask
-facts. It must not be used as the wake-up set_task_cpu action and
-must not be represented by an independent
+PID 1 boot CPU pinning must be implemented by BootInitRestInitPhase invoking
+the shared Task-level `pin_to_boot_cpu` action on KernelInitTask's core, then
+committing any role observation as metadata only. The action sets the
+PF_NO_SETAFFINITY-equivalent flag and cpumask facts. It must not be used as the
+wake-up set_task_cpu action and must not be represented by an independent
 KernelInitAffinity lifecycle object. The RCU read-side boundary
 around the Linux pid lookup remains a deferred context-modeling
 question, not a completed resource-exclusive context.

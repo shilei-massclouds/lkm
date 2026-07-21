@@ -2,9 +2,7 @@ use super::{
     boot_task::BootTask,
     completion::Completion,
     config::Config,
-    cpu_control::{
-        BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock, RcuReadSide,
-    },
+    cpu_control::{CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     finalize::{
         AsyncFullSyncDeferred, InitMemoryCleanupDeferred, KernelMappingProtectionDeferred,
@@ -13,10 +11,6 @@ use super::{
     mm_core::{
         GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches,
         VmallocAllocator, VmapAreaFlags,
-    },
-    process_prepare::{
-        CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCopyProcessInputs,
-        TaskCreationCore, TaskFileContext,
     },
     rcu::RcuCore,
     scheduler::Scheduler,
@@ -139,12 +133,9 @@ pub struct KernelInitTask {
     user_mm_created: bool,
     thread_context_ready: bool,
     sched_entity_ready: bool,
-    enqueued: bool,
     waiting_for_kthreadd_done: bool,
     observed_kthreadd_done_release: bool,
     released_for_pre_smp_init: bool,
-    pinned_to_boot_cpu: bool,
-    pf_no_setaffinity: bool,
     pid_lookup_under_rcu_read: bool,
     pid_lookup_rcu_guard_balanced: bool,
     kernel_stack_top: usize,
@@ -163,12 +154,9 @@ impl KernelInitTask {
             user_mm_created: false,
             thread_context_ready: false,
             sched_entity_ready: false,
-            enqueued: false,
             waiting_for_kthreadd_done: false,
             observed_kthreadd_done_release: false,
             released_for_pre_smp_init: false,
-            pinned_to_boot_cpu: false,
-            pf_no_setaffinity: false,
             pid_lookup_under_rcu_read: false,
             pid_lookup_rcu_guard_balanced: false,
             kernel_stack_top: 0,
@@ -212,7 +200,7 @@ impl KernelInitTask {
     }
 
     pub const fn enqueued(&self) -> bool {
-        self.enqueued
+        self.task.runqueue_published()
     }
 
     pub const fn waiting_for_kthreadd_done(&self) -> bool {
@@ -228,11 +216,11 @@ impl KernelInitTask {
     }
 
     pub const fn pinned_to_boot_cpu(&self) -> bool {
-        self.pinned_to_boot_cpu
+        self.task.affinity_pinned()
     }
 
     pub const fn pf_no_setaffinity(&self) -> bool {
-        self.pf_no_setaffinity
+        self.task.no_setaffinity()
     }
 
     pub const fn pid_lookup_under_rcu_read(&self) -> bool {
@@ -346,6 +334,83 @@ impl KernelInitTask {
         &mut self.task
     }
 
+    pub fn commit_preset_metadata(&mut self) -> EventResult {
+        if self.task.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.task.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+        self.task.set_identity_metadata(
+            KERNEL_INIT_PID,
+            TaskEntry::KernelInit,
+            TaskKind::UserModeThread,
+        )?;
+        self.clone_fs = true;
+        self.user_mm_created = false;
+        Ok(())
+    }
+
+    pub fn commit_copy_process_metadata(
+        &mut self,
+        thread_context_ready: bool,
+        sched_entity_ready: bool,
+        kernel_stack_top: usize,
+    ) -> EventResult {
+        if self.task.state() != State::Prepared
+            || !thread_context_ready
+            || !sched_entity_ready
+            || kernel_stack_top == 0
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.task.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+        self.thread_context_ready = thread_context_ready;
+        self.sched_entity_ready = sched_entity_ready;
+        self.waiting_for_kthreadd_done = true;
+        self.kernel_stack_top = kernel_stack_top;
+        Ok(())
+    }
+
+    pub fn commit_boot_cpu_pin_observation(
+        &mut self,
+        pid_lookup_under_rcu_read: bool,
+    ) -> EventResult {
+        if self.task.state() != State::Online
+            || !self.task.affinity_pinned()
+            || !self.task.no_setaffinity()
+            || !pid_lookup_under_rcu_read
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.task.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.pid_lookup_under_rcu_read = pid_lookup_under_rcu_read;
+        Ok(())
+    }
+
+    pub fn commit_pid_lookup_guard_balanced(&mut self, balanced: bool) -> EventResult {
+        if !self.pid_lookup_under_rcu_read || !balanced {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.task.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.pid_lookup_rcu_guard_balanced = true;
+        Ok(())
+    }
+
     pub fn mark_entry_started(&mut self, stack_pointer: usize) -> EventResult {
         if self.task.state() != State::Online
             || self.entry_started_count != 0
@@ -363,199 +428,6 @@ impl KernelInitTask {
         self.entry_stack_pointer = stack_pointer;
         self.entry_stack_verified = true;
         Ok(())
-    }
-
-    pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
-        if self.task.state() != State::Base || !inputs.ready_for_kernel_init() {
-            return self.failed_preset();
-        }
-
-        self.task.set_identity_metadata(
-            KERNEL_INIT_PID,
-            TaskEntry::KernelInit,
-            TaskKind::UserModeThread,
-        )?;
-        self.clone_fs = true;
-        self.user_mm_created = false;
-        self.task.preset(Checkpoint::KernelInitTaskPrepared)
-    }
-
-    // KernelInitTask setup is the specified cross-object task creation transition.
-    #[allow(clippy::too_many_arguments)]
-    pub fn setup(
-        &mut self,
-        task_creation_core: &mut TaskCreationCore,
-        root_pid_namespace: &RootPidNamespace,
-        credential_core: &CredentialCore,
-        signal_core: &SignalCore,
-        task_file_context: &TaskFileContext,
-        security_core: &SecurityCore,
-        boot_task: &BootTask,
-        scheduler: &Scheduler,
-        cpu_group: &CpuGroup,
-        vmalloc_allocator: &mut VmallocAllocator,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-        page_table_caches: &mut PageTableCaches,
-        config: &Config,
-    ) -> EventResult {
-        if self.task.state() != State::Prepared
-            || task_creation_core.state() != State::Ready
-            || root_pid_namespace.state() != State::Ready
-            || scheduler.state() != State::Online
-            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
-        {
-            return self.failed_setup();
-        }
-
-        let copy_result = task_creation_core.copy_process(
-            TaskCopyProcessInputs {
-                src_task: boot_task,
-                root_pid_namespace,
-                credential_core,
-                signal_core,
-                task_file_context,
-                security_core,
-                scheduler,
-                cpu_group,
-                entry: TaskEntry::KernelInit,
-            },
-            self.task.state(),
-            self.task.entry(),
-        )?;
-        if copy_result.entry() != TaskEntry::KernelInit
-            || !copy_result.task_struct_allocated()
-            || !copy_result.thread_context_ready()
-            || !copy_result.sched_entity_ready()
-            || !copy_result.task_state_new()
-            || !copy_result.task_not_enqueued()
-        {
-            return self.failed_setup();
-        }
-
-        self.thread_context_ready = copy_result.thread_context_ready();
-        self.sched_entity_ready = copy_result.sched_entity_ready();
-        self.waiting_for_kthreadd_done = true;
-
-        let stack_top = allocate_kernel_stack(
-            vmalloc_allocator,
-            page_allocator,
-            page_metadata_map,
-            page_table_caches,
-            config,
-        )?;
-        self.kernel_stack_top = stack_top;
-        self.task.init_switch_context(kernel_init_entry, stack_top);
-
-        self.task.setup(Checkpoint::KernelInitTaskReady)
-    }
-
-    pub fn enable(
-        &mut self,
-        scheduler: &mut Scheduler,
-        cpu_group: &CpuGroup,
-        current_cpu: &BootCurrentCpu,
-        local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &CurrentTaskSlot,
-        pi_lock: &mut RawSpinLock,
-    ) -> EventResult {
-        if self.task.state() != State::Ready
-            || scheduler.state() != State::Online
-            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
-            || cpu_group.state() != State::Ready
-            || current_cpu.state() != State::Online
-            || local_interrupt.state() != State::Ready
-            || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_task()
-            || pi_lock.state() != State::Ready
-            || scheduler.boot_idle_preemption().state() != State::Ready
-            || self.task.pid() != KERNEL_INIT_PID
-            || !self.sched_entity_ready
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
-        let guarded_result: EventResult = {
-            let selected_rq = scheduler.select_runqueue_for_task(self.task.pid(), cpu_group)?;
-            self.set_task_cpu(selected_rq.cpu_id())?;
-            scheduler.enqueue_task_on_runqueue(
-                self.task.pid(),
-                self.task.task_ref(),
-                selected_rq,
-            )?;
-            self.enqueued = true;
-            self.task.enable(Checkpoint::KernelInitTaskOnline)
-        };
-        let unlock_result =
-            pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
-        guarded_result.and(unlock_result)
-    }
-
-    pub fn pin_to_boot_cpu(
-        &mut self,
-        cpu_id: usize,
-        root_pid_namespace: &RootPidNamespace,
-        boot_idle_rcu_read_side: &mut RcuReadSide,
-    ) -> EventResult {
-        if self.task.state() != State::Online
-            || self.task.pid() != KERNEL_INIT_PID
-            || self.cpu_id() != cpu_id
-            || root_pid_namespace.state() != State::Ready
-            || boot_idle_rcu_read_side.state() != State::Prepared
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-
-        let locks_before = boot_idle_rcu_read_side.read_lock_count();
-        boot_idle_rcu_read_side.read_lock()?;
-        let guarded_result: EventResult = {
-            self.pid_lookup_under_rcu_read =
-                boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
-            self.pinned_to_boot_cpu = true;
-            self.pf_no_setaffinity = true;
-            Ok(())
-        };
-        let unlock_result = boot_idle_rcu_read_side.read_unlock();
-        if guarded_result.is_ok() && unlock_result.is_ok() {
-            self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
-        }
-        guarded_result.and(unlock_result)
-    }
-
-    fn set_task_cpu(&mut self, cpu_id: usize) -> EventResult {
-        if self.task.state() != State::Ready
-            || self.task.pid() != KERNEL_INIT_PID
-            || cpu_id == usize::MAX
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        if self.task.set_task_cpu(cpu_id) {
-            Ok(())
-        } else {
-            failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            )
-        }
     }
 
     pub fn observe_kthreadd_done_release(
@@ -586,8 +458,8 @@ impl KernelInitTask {
     pub fn release_boot_cpu_affinity(&mut self, cpu_group: &CpuGroup) -> bool {
         if self.task.state() != State::Online
             || self.task.pid() != KERNEL_INIT_PID
-            || !self.pinned_to_boot_cpu
-            || !self.pf_no_setaffinity
+            || !self.task.affinity_pinned()
+            || !self.task.no_setaffinity()
             || self.cpu_id() == usize::MAX
             || !cpu_group.secondary_cpus_online()
             || !cpu_group.smp_concurrency_open()
@@ -595,27 +467,7 @@ impl KernelInitTask {
             return false;
         }
 
-        self.pinned_to_boot_cpu = false;
-        self.pf_no_setaffinity = false;
-        true
-    }
-
-    fn failed_preset(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Preset,
-            self.task.state(),
-            State::Base,
-            State::Prepared,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.task.state(),
-            State::Prepared,
-            State::Ready,
-        )
+        self.task.clear_cpu_pin()
     }
 }
 
@@ -676,7 +528,6 @@ pub struct KthreaddTask {
     pid_lookup_under_rcu_read: bool,
     pid_lookup_rcu_guard_balanced: bool,
     schedule_loop_active: bool,
-    enqueued: bool,
     kernel_stack_top: usize,
 }
 
@@ -697,7 +548,6 @@ impl KthreaddTask {
             pid_lookup_under_rcu_read: false,
             pid_lookup_rcu_guard_balanced: false,
             schedule_loop_active: false,
-            enqueued: false,
             kernel_stack_top: 0,
         }
     }
@@ -767,7 +617,7 @@ impl KthreaddTask {
     }
 
     pub const fn enqueued(&self) -> bool {
-        self.enqueued
+        self.task.runqueue_published()
     }
 
     pub const fn cpu_id(&self) -> usize {
@@ -801,11 +651,15 @@ impl KthreaddTask {
         &mut self.task
     }
 
-    pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
-        if self.task.state() != State::Base || !inputs.ready_for_kthreadd() {
-            return self.failed_preset();
+    pub fn commit_preset_metadata(&mut self) -> EventResult {
+        if self.task.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.task.state(),
+                State::Base,
+                State::Prepared,
+            );
         }
-
         self.task.set_identity_metadata(
             KTHREADD_PID,
             TaskEntry::Kthreadd,
@@ -816,162 +670,39 @@ impl KthreaddTask {
         self.clone_vm = true;
         self.clone_untraced = true;
         self.kernel_thread_flag = true;
-        self.task.preset(Checkpoint::KthreaddTaskPrepared)
+        Ok(())
     }
 
-    // KthreaddTask setup mirrors the specified cross-object task creation transition.
-    #[allow(clippy::too_many_arguments)]
-    pub fn setup(
+    pub fn commit_copy_process_metadata(
         &mut self,
-        task_creation_core: &mut TaskCreationCore,
-        root_pid_namespace: &RootPidNamespace,
-        credential_core: &CredentialCore,
-        signal_core: &SignalCore,
-        task_file_context: &TaskFileContext,
-        security_core: &SecurityCore,
-        boot_task: &BootTask,
-        scheduler: &Scheduler,
-        cpu_group: &CpuGroup,
-        vmalloc_allocator: &mut VmallocAllocator,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-        page_table_caches: &mut PageTableCaches,
-        config: &Config,
+        thread_context_ready: bool,
+        sched_entity_ready: bool,
+        kernel_stack_top: usize,
     ) -> EventResult {
         if self.task.state() != State::Prepared
-            || task_creation_core.state() != State::Ready
-            || root_pid_namespace.state() != State::Ready
-            || scheduler.state() != State::Online
-            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
+            || !thread_context_ready
+            || !sched_entity_ready
+            || kernel_stack_top == 0
         {
-            return self.failed_setup();
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.task.state(),
+                State::Prepared,
+                State::Ready,
+            );
         }
-
-        let copy_result = task_creation_core.copy_process(
-            TaskCopyProcessInputs {
-                src_task: boot_task,
-                root_pid_namespace,
-                credential_core,
-                signal_core,
-                task_file_context,
-                security_core,
-                scheduler,
-                cpu_group,
-                entry: TaskEntry::Kthreadd,
-            },
-            self.task.state(),
-            self.task.entry(),
-        )?;
-        if copy_result.entry() != TaskEntry::Kthreadd
-            || !copy_result.task_struct_allocated()
-            || !copy_result.thread_context_ready()
-            || !copy_result.sched_entity_ready()
-            || !copy_result.task_state_new()
-            || !copy_result.task_not_enqueued()
-        {
-            return self.failed_setup();
-        }
-
-        self.thread_context_ready = copy_result.thread_context_ready();
-        self.sched_entity_ready = copy_result.sched_entity_ready();
-
-        let stack_top = allocate_kernel_stack(
-            vmalloc_allocator,
-            page_allocator,
-            page_metadata_map,
-            page_table_caches,
-            config,
-        )?;
-        self.kernel_stack_top = stack_top;
-        self.task.init_switch_context(kthreadd_entry, stack_top);
+        self.thread_context_ready = thread_context_ready;
+        self.sched_entity_ready = sched_entity_ready;
         self.schedule_loop_active = true;
-
-        self.task.setup(Checkpoint::KthreaddTaskReady)
+        self.kernel_stack_top = kernel_stack_top;
+        Ok(())
     }
 
-    pub fn enable(
-        &mut self,
-        scheduler: &mut Scheduler,
-        cpu_group: &CpuGroup,
-        current_cpu: &BootCurrentCpu,
-        local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &CurrentTaskSlot,
-        pi_lock: &mut RawSpinLock,
-    ) -> EventResult {
-        if self.task.state() != State::Ready
-            || scheduler.state() != State::Online
-            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
-            || cpu_group.state() != State::Ready
-            || current_cpu.state() != State::Online
-            || local_interrupt.state() != State::Ready
-            || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_task()
-            || pi_lock.state() != State::Ready
-            || scheduler.boot_idle_preemption().state() != State::Ready
-            || self.task.pid() != KTHREADD_PID
-            || !self.sched_entity_ready
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
-        let guarded_result: EventResult = {
-            let selected_rq = scheduler.select_runqueue_for_task(self.task.pid(), cpu_group)?;
-            self.set_task_cpu(selected_rq.cpu_id())?;
-            scheduler.enqueue_task_on_runqueue(
-                self.task.pid(),
-                self.task.task_ref(),
-                selected_rq,
-            )?;
-            self.enqueued = true;
-            self.task.enable(Checkpoint::KthreaddTaskOnline)
-        };
-        let unlock_result =
-            pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
-        guarded_result.and(unlock_result)
-    }
-
-    fn set_task_cpu(&mut self, cpu_id: usize) -> EventResult {
-        if self.task.state() != State::Ready
-            || self.task.pid() != KTHREADD_PID
-            || cpu_id == usize::MAX
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        if self.task.set_task_cpu(cpu_id) {
-            Ok(())
-        } else {
-            failed_condition(
-                LifecycleEvent::Enable,
-                self.task.state(),
-                State::Ready,
-                State::Online,
-            )
-        }
-    }
-
-    pub fn bind_global_ref(
-        &mut self,
-        root_pid_namespace: &RootPidNamespace,
-        boot_idle_rcu_read_side: &mut RcuReadSide,
-    ) -> EventResult {
+    pub fn commit_global_ref_metadata(&mut self, pid_lookup_under_rcu_read: bool) -> EventResult {
         if self.task.state() != State::Online
-            || self.task.pid() != KTHREADD_PID
             || !self.task.running()
-            || !self.enqueued
-            || root_pid_namespace.state() != State::Ready
-            || boot_idle_rcu_read_side.state() != State::Prepared
+            || !self.task.runqueue_published()
+            || !pid_lookup_under_rcu_read
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -980,40 +711,23 @@ impl KthreaddTask {
                 State::Online,
             );
         }
+        self.pid_lookup_under_rcu_read = pid_lookup_under_rcu_read;
+        self.global_ref_bound = true;
+        self.provider_ready = true;
+        Ok(())
+    }
 
-        let locks_before = boot_idle_rcu_read_side.read_lock_count();
-        boot_idle_rcu_read_side.read_lock()?;
-        let guarded_result: EventResult = {
-            self.pid_lookup_under_rcu_read =
-                boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
-            self.global_ref_bound = true;
-            self.provider_ready = true;
-            crate::checkpoint::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
-            Ok(())
-        };
-        let unlock_result = boot_idle_rcu_read_side.read_unlock();
-        if guarded_result.is_ok() && unlock_result.is_ok() {
-            self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
+    pub fn commit_pid_lookup_guard_balanced(&mut self, balanced: bool) -> EventResult {
+        if !self.pid_lookup_under_rcu_read || !balanced {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.task.state(),
+                State::Online,
+                State::Online,
+            );
         }
-        guarded_result.and(unlock_result)
-    }
-
-    fn failed_preset(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Preset,
-            self.task.state(),
-            State::Base,
-            State::Prepared,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.task.state(),
-            State::Prepared,
-            State::Ready,
-        )
+        self.pid_lookup_rcu_guard_balanced = true;
+        Ok(())
     }
 }
 
@@ -1149,7 +863,7 @@ impl SystemState {
     }
 }
 
-fn allocate_kernel_stack(
+pub(crate) fn allocate_kernel_stack(
     vmalloc_allocator: &mut VmallocAllocator,
     page_allocator: &mut PageAllocator,
     page_metadata_map: &PageMetadataMap,
@@ -1993,36 +1707,6 @@ impl BootIdleFlow {
     }
 }
 
-pub struct TaskSpawnInputs<'a> {
-    pub task_creation_core: &'a TaskCreationCore,
-    pub root_pid_namespace: &'a RootPidNamespace,
-    pub credential_core: &'a CredentialCore,
-    pub signal_core: &'a SignalCore,
-    pub task_file_context: &'a TaskFileContext,
-    pub security_core: &'a SecurityCore,
-    pub boot_task: &'a BootTask,
-}
-
-impl TaskSpawnInputs<'_> {
-    fn ready_for_kernel_init(&self) -> bool {
-        self.task_creation_core.state() == State::Ready
-            && self.root_pid_namespace.state() == State::Ready
-            && self.credential_core.state() == State::Prepared
-            && self.signal_core.state() == State::Prepared
-            && self.task_file_context.state() == State::Prepared
-            && self.security_core.state() == State::Ready
-            && self.boot_task.state() == State::Online
-    }
-
-    fn ready_for_kthreadd(&self) -> bool {
-        self.task_creation_core.state() == State::Ready
-            && self.root_pid_namespace.state() == State::Ready
-            && self.credential_core.state() == State::Prepared
-            && self.task_file_context.state() == State::Prepared
-            && self.boot_task.state() == State::Online
-    }
-}
-
 pub fn runtime_services_still_deferred(
     workqueue: &Workqueue,
     rcu_core: &RcuCore,
@@ -2038,7 +1722,7 @@ pub fn runtime_services_still_deferred(
 // KernelInit owns the remaining startup phases and selected payload. Kthreadd
 // keeps its minimal deferred loop until its scheduler/runtime slice is added.
 
-extern "C" fn kernel_init_entry() -> ! {
+pub(crate) extern "C" fn kernel_init_entry() -> ! {
     let stack_pointer: usize;
     unsafe {
         core::arch::asm!("mv {}, sp", out(reg) stack_pointer);
@@ -2053,7 +1737,7 @@ extern "C" fn kernel_init_entry() -> ! {
     crate::systems::kernel::enable_after_up_multitask()
 }
 
-extern "C" fn kthreadd_entry() -> ! {
+pub(crate) extern "C" fn kthreadd_entry() -> ! {
     crate::arch::riscv64::sbi::putstr("kthreadd (pid=2) started\n");
     loop {
         let result = crate::context::context().schedule_current();

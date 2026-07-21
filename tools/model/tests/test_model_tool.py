@@ -85,6 +85,95 @@ class ModelToolTests(unittest.TestCase):
             self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
             self.assertGreater(clone["span"]["source_line"], 0)
 
+    def test_empty_object_inherits_type_lifecycle_and_explicit_override_replaces_it(self) -> None:
+        source = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            ensures { carrier_prepared(self); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    invariant { carrier_prepared(self); }
+                }
+            }
+
+            object Inherited: Carrier {
+            }
+
+            object Override: Carrier {
+                lifecycle_override: true;
+                initial_state: State::Online;
+                state State::Online {
+                    invariant { override_online(self); }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 0, stderr)
+            inherited = data["model"]["objects"]["Inherited"]
+            override = data["model"]["objects"]["Override"]
+            self.assertEqual(inherited["initial_state"], "Base")
+            self.assertEqual(set(inherited["states"]), {"Base", "Prepared"})
+            self.assertEqual(inherited["states"]["Base"]["lifecycle_owner"], "Carrier")
+            self.assertEqual(
+                inherited["states"]["Base"]["transitions"]["Preset"]["lifecycle_owner"],
+                "Carrier",
+            )
+            self.assertEqual(override["initial_state"], "Online")
+            self.assertEqual(set(override["states"]), {"Online"})
+            self.assertIsNone(override["states"]["Online"]["lifecycle_owner"])
+
+    def test_object_lifecycle_shadowing_requires_explicit_full_override(self) -> None:
+        source = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared {} }
+                }
+                state State::Prepared {}
+            }
+
+            object Shadow: Carrier {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "object lifecycle must not shadow inherited type lifecycle without lifecycle_override: true",
+                stderr,
+            )
+
+    def test_lifecycle_override_rejects_partial_replacement(self) -> None:
+        source = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+
+            object Partial: Carrier {
+                lifecycle_override: true;
+                initial_state: State::Online;
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "lifecycle_override on Partial requires both initial_state and states",
+                stderr,
+            )
+
     def test_declare_scope_and_explicit_callee_parameter_are_valid(self) -> None:
         source = """
             context GuardedContext: Context {

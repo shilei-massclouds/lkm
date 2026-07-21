@@ -79,6 +79,8 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
         "name": item.name,
         "header": item.header,
         "span": _span_to_json(item.span),
+        "initial_state": item.initial_state,
+        "states": [_state_to_json(state) for state in item.states],
         "blocks": [_block_to_json(block) for block in item.blocks],
         "processes": [_process_to_json(process) for process in item.processes],
         "properties": item.properties,
@@ -155,6 +157,10 @@ def _event_to_json(item: TransitionDecl) -> dict[str, Any]:
         "name": item.name,
         "target_state": item.target_state,
         "span": _span_to_json(item.span),
+        "parameters": [
+            {"name": name, "type": type_name}
+            for name, type_name in item.parameters
+        ],
         "depends_on": [_block_to_json(block) for block in item.depends_on],
         "drives": [_block_to_json(block) for block in item.drives],
         "emits": [_block_to_json(block) for block in item.emits],

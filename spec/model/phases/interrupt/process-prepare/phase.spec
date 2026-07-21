@@ -423,6 +423,8 @@ object TaskCreationCore: KernelObject {
                     task_thread_context_ready(dst_process);
                     task_sched_entity_initialized(dst_process, scheduler);
                     task_state_new(dst_process);
+                    task_state_running(dst_process);
+                    task_runqueue_publication_committed(dst_process);
                     user_child_process_parent_pid1_or_current_child(dst_process, src_process);
                     user_child_process_pid_allocated(dst_process, pid_ns);
                     user_child_process_tgid_equals_pid(dst_process);
