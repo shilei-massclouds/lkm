@@ -20,7 +20,7 @@ def _bootstrap() -> None:
             sys.path.insert(0, source)
 
 
-def _parser() -> argparse.ArgumentParser:
+def _parser(normalize_signal_request) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tools2/bin/pyveri",
         description="Run the tools2 Signal pipeline.",
@@ -28,9 +28,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-t",
         "--trigger",
-        required=True,
+        default=normalize_signal_request("ComputerProject.Startup", option="--trigger"),
+        type=lambda value: normalize_signal_request(value, option="--trigger"),
         metavar="SIGNAL",
-        help="Signal trigger as Target.SignalName",
+        help="Signal trigger as Target.SignalName; default: ComputerProject.Startup",
+    )
+    parser.add_argument(
+        "-u",
+        "--until",
+        type=lambda value: normalize_signal_request(value, option="--until"),
+        metavar="SIGNAL",
+        help="stop immediately before sending Target.SignalName",
     )
     parser.add_argument("-s", "--scenario", type=Path, help="scenario or tools2 snapshot JSON")
     parser.add_argument(
@@ -40,18 +48,22 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_SPEC,
         help="input .spec file; default: spec/model/main.spec",
     )
-    parser.add_argument("--source", default="Environment", help="Signal source; default: Environment")
+    parser.add_argument("--source", default="Human", help="Signal source; default: Human")
     parser.add_argument("--max-depth", default="all", metavar="N|all")
     parser.add_argument("--max-breadth", default="all", metavar="N|all")
     parser.add_argument("--work-dir", type=Path, help="retain stage JSON in this directory")
-    parser.add_argument("--snapshot-out", type=Path, help="write a resumable snapshot on complete")
+    parser.add_argument(
+        "--snapshot-out", type=Path, help="write a resumable snapshot on complete or reached"
+    )
     parser.add_argument("-o", "--output", type=Path, help="write rendered text instead of stdout")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
     _bootstrap()
+    from tools2_common import normalize_signal_request
+
+    args = _parser(normalize_signal_request).parse_args(argv)
     from pyveri.__main__ import main as driver_main
 
     driver_args = [
@@ -67,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if args.scenario is not None:
         driver_args.extend(["--scenario", str(args.scenario)])
+    if args.until is not None:
+        driver_args.extend(["--until", args.until])
     if args.work_dir is not None:
         driver_args.extend(["--work-dir", str(args.work_dir)])
     if args.snapshot_out is not None:

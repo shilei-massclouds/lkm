@@ -30,8 +30,24 @@ def render_text(view: dict[str, Any]) -> str:
         f"Signal derivation: {root['source']} -> {root['target']}.{root['signal']}",
         f"verdict: {view['verdict']}",
         f"budget: depth={view['budget']['max_depth']} breadth={view['budget']['max_breadth']}",
-        "signals:",
     ]
+    until_request = view.get("until_request")
+    if until_request is not None:
+        lines.append(f"until: {until_request['normalized_signal']} (before send)")
+    boundary = view.get("boundary")
+    if boundary is not None:
+        position = boundary["send_position"]
+        coordinate = position["coordinate"]
+        lines.append(
+            f"reached boundary: {boundary['source']} -> {boundary['normalized_signal']} "
+            f"[{position['delivery']}] @ depth={coordinate['depth']},breadth={coordinate['breadth']}"
+        )
+        span = boundary.get("call_span")
+        if span is not None:
+            lines.append(
+                f"boundary call: {span['source_file']}:{span['start_line']}:{span['start_column']}"
+            )
+    lines.append("signals:")
     for signal in view["signals"]:
         indent = "  " * (signal.get("cause_depth", 0) + 1)
         coordinate = signal["coordinate"]

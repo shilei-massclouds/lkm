@@ -13,6 +13,7 @@ from tools2_common import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
     ProtocolError,
+    normalize_signal_request,
     read_json,
     require_protocol,
 )
@@ -20,6 +21,10 @@ from tools2_common import (
 
 class DerivationProblem(ValueError):
     pass
+
+
+class UntilReached(Exception):
+    """Internal non-failure control flow for a matched pre-send boundary."""
 
 
 def parse_budget(value: str) -> int | None:
@@ -93,15 +98,23 @@ def _matches_system_type(model: dict[str, Any], target: str, expected: str) -> b
 
 
 def load_scenario(
-    path: str | Path | None, model: dict[str, Any], initial: dict[str, Any]
+    path: str | Path | None,
+    model: dict[str, Any],
+    initial: dict[str, Any],
+    *,
+    model_fingerprint: str,
 ) -> dict[str, Any]:
     if path is None:
         return _snapshot(initial)
     value = read_json(path)
+    trusted_snapshot = False
     if "schema" in value:
         require_protocol(
             value, schema=SNAPSHOT_SCHEMA, version=SNAPSHOT_VERSION, label="snapshot"
         )
+        if value.get("model_fingerprint") != model_fingerprint:
+            raise ProtocolError("snapshot model fingerprint does not match the loaded model")
+        trusted_snapshot = True
         value = value.get("snapshot", {})
     elif "snapshot" in value:
         value = value["snapshot"]
@@ -112,7 +125,8 @@ def load_scenario(
     for target, state in states.items():
         if target not in model["systems"]:
             raise ProtocolError(f"scenario has unknown system state target {target}")
-        if state not in model["systems"][target]["states"]:
+        system = model["systems"][target]
+        if state != system.get("initial_state") and state not in system["states"]:
             raise ProtocolError(f"scenario has unknown state {target}.State::{state}")
         result["states"][target] = state
     facts = value.get("facts", [])
@@ -132,15 +146,20 @@ def load_scenario(
     for reference, target in references.items():
         if "." not in reference:
             raise ProtocolError(f"scenario reference must be System.field: {reference}")
-        owner, field = reference.split(".", 1)
-        if owner not in model["systems"]:
+        owners = [
+            name for name in model["systems"] if reference.startswith(f"{name}.")
+        ]
+        if not owners:
+            owner, field = reference.split(".", 1)
             raise ProtocolError(f"scenario has unknown reference owner {owner}")
+        owner = max(owners, key=len)
+        field = reference[len(owner) + 1 :]
         if field not in model["systems"][owner]["reference_types"]:
             raise ProtocolError(f"scenario has unknown reference {reference}")
-        if target not in model["systems"]:
+        if target not in model["systems"] and not trusted_snapshot:
             raise ProtocolError(f"scenario has unknown reference target {target}")
         expected = model["systems"][owner]["reference_types"][field]
-        if not _matches_system_type(model, target, expected):
+        if target in model["systems"] and not _matches_system_type(model, target, expected):
             raise ProtocolError(
                 f"scenario reference {reference} expects {expected}, got {target}"
             )
@@ -156,6 +175,8 @@ class Engine:
         source: str,
         root_target: str,
         root_name: str,
+        until_target: str | None,
+        until_name: str | None,
         initial_snapshot: dict[str, Any],
         max_depth: int | None,
         max_breadth: int | None,
@@ -166,6 +187,8 @@ class Engine:
         self.source = source
         self.root_target = root_target
         self.root_name = root_name
+        self.until_target = until_target
+        self.until_name = until_name
         self.initial_snapshot = _snapshot(initial_snapshot)
         self.current = _snapshot(initial_snapshot)
         self.max_depth = max_depth
@@ -175,6 +198,7 @@ class Engine:
         self.events: list[dict[str, Any]] = []
         self.queue: list[dict[str, Any]] = []
         self.frontier: list[dict[str, Any]] = []
+        self.boundary: dict[str, Any] | None = None
         self.failed = False
         self.was_bounded = False
         self.failure_signal_id: str | None = None
@@ -206,7 +230,51 @@ class Engine:
         cause_id: str | None,
         coordinate: dict[str, Any],
         compat_process_kind: str | None,
+        call_span: dict[str, Any] | None = None,
+        fifo_position: int | None = None,
     ) -> dict[str, Any]:
+        if target == self.until_target and name == self.until_name:
+            send_position = {
+                "delivery": delivery,
+                "cause_id": cause_id,
+                "coordinate": {
+                    key: value for key, value in coordinate.items() if not key.startswith("_")
+                },
+            }
+            if fifo_position is not None:
+                send_position["fifo_position"] = fifo_position
+            self.boundary = {
+                "kind": "before_signal_send",
+                "normalized_signal": f"{target}.{name}",
+                "target": target,
+                "signal": name,
+                "source": source,
+                "send_position": send_position,
+                "call_span": deepcopy(call_span),
+                "snapshot": _snapshot(self.current),
+            }
+            self.event(
+                "until_signal_reached",
+                normalized_signal=f"{target}.{name}",
+                source=source,
+                send_position=deepcopy(send_position),
+                call_span=deepcopy(call_span),
+            )
+            for queued in self.queue:
+                if queued["outcome"] != "sent":
+                    continue
+                queued["outcome"] = "stopped"
+                queued["reason"] = "until_signal_reached"
+                queued["before_snapshot"] = _snapshot(self.current)
+                queued["after_snapshot"] = _snapshot(self.current)
+                self.event(
+                    "signal_stopped",
+                    signal_id=queued["id"],
+                    reason="until_signal_reached",
+                    location="fifo",
+                )
+            self.queue.clear()
+            raise UntilReached
         signal_id = f"sig-{self.next_signal:04d}"
         self.next_signal += 1
         signal = {
@@ -1047,6 +1115,7 @@ class Engine:
             cause_id=signal["id"],
             coordinate=coordinate,
             compat_process_kind=call["process_kind"],
+            call_span=call.get("span"),
         )
         child["contexts"] = list(context_stack)
         if receiver_value != target:
@@ -1449,6 +1518,8 @@ class Engine:
                     cause_id=signal["id"],
                     coordinate=coordinate,
                     compat_process_kind=call["process_kind"],
+                    call_span=call.get("span"),
+                    fifo_position=len(self.queue) + 1,
                 )
                 self.queue.append(child)
                 self.event(
@@ -1457,6 +1528,17 @@ class Engine:
                     child_id=child["id"],
                     fifo_position=len(self.queue),
                 )
+        except UntilReached:
+            if signal["outcome"] != "completed":
+                signal["outcome"] = "stopped"
+                signal["reason"] = "until_signal_reached"
+                signal["after_snapshot"] = _snapshot(self.current)
+                self.event(
+                    "response_stopped",
+                    signal_id=signal["id"],
+                    reason="until_signal_reached",
+                )
+            raise
         except DerivationProblem as exc:
             if signal["outcome"] not in {"failed", "rejected", "discarded"}:
                 self.fail(signal, str(exc))
@@ -1464,31 +1546,45 @@ class Engine:
             self.active_requests.discard(request_key)
 
     def run(self) -> dict[str, Any]:
-        root = self.new_signal(
-            source=self.source,
-            target=self.root_target,
-            name=self.root_name,
-            raw_arguments=[],
-            delivery="root",
-            lossy=False,
-            cause_id=None,
-            coordinate={
-                "depth": 0,
-                "breadth": 0,
-                "movement": {"up": 0, "across": 0, "down": 0},
-                "_budget_depth": 0,
-                "_budget_breadth": 0,
-            },
-            compat_process_kind=None,
-        )
-        diagnostics = self.document.get("diagnostics", [])
-        if diagnostics:
-            root["before_snapshot"] = _snapshot(self.current)
-            self.fail(root, "model_has_errors_or_unsupported_syntax")
+        root: dict[str, Any] | None = None
+        try:
+            root = self.new_signal(
+                source=self.source,
+                target=self.root_target,
+                name=self.root_name,
+                raw_arguments=[],
+                delivery="root",
+                lossy=False,
+                cause_id=None,
+                coordinate={
+                    "depth": 0,
+                    "breadth": 0,
+                    "movement": {"up": 0, "across": 0, "down": 0},
+                    "_budget_depth": 0,
+                    "_budget_breadth": 0,
+                },
+                compat_process_kind=None,
+                call_span=None,
+            )
+            diagnostics = self.document.get("diagnostics", [])
+            if diagnostics:
+                root["before_snapshot"] = _snapshot(self.current)
+                self.fail(root, "model_has_errors_or_unsupported_syntax")
+            else:
+                self.deliver(root)
+            self._drain_queue()
+        except UntilReached:
+            pass
+        if self.failed:
+            verdict = "failed"
+        elif self.was_bounded:
+            verdict = "bounded"
+        elif self.boundary is not None:
+            verdict = "reached"
+        elif self.until_target is not None:
+            verdict = "until_signal_not_reached"
         else:
-            self.deliver(root)
-        self._drain_queue()
-        verdict = "failed" if self.failed else "bounded" if self.was_bounded else "complete"
+            verdict = "complete"
         for signal in self.signals:
             signal.pop("_raw_arguments", None)
             signal.pop("_budget_depth", None)
@@ -1500,8 +1596,16 @@ class Engine:
                 "source": self.source,
                 "target": self.root_target,
                 "signal": self.root_name,
-                "signal_id": root["id"],
+                "signal_id": None if root is None else root["id"],
             },
+            "until_request": None
+            if self.until_target is None
+            else {
+                "target": self.until_target,
+                "signal": self.until_name,
+                "normalized_signal": f"{self.until_target}.{self.until_name}",
+            },
+            "boundary": deepcopy(self.boundary),
             "model_fingerprint": self.document["model_fingerprint"],
             "budget": {"max_depth": self.max_depth, "max_breadth": self.max_breadth},
             "verdict": verdict,
@@ -1524,6 +1628,7 @@ class Engine:
                 "rejected": sum(item["outcome"] == "rejected" for item in self.signals),
                 "failed": sum(item["outcome"] == "failed" for item in self.signals),
                 "truncated": sum(item["outcome"] == "truncated" for item in self.signals),
+                "stopped": sum(item["outcome"] == "stopped" for item in self.signals),
                 "pending": 0,
             },
         }
@@ -1603,22 +1708,38 @@ def derive(
     model_document: dict[str, Any],
     *,
     signal: str,
-    source: str = "Environment",
+    source: str = "Human",
+    until: str | None = None,
     scenario: str | Path | None = None,
     max_depth: int | None = 3,
     max_breadth: int | None = 3,
 ) -> dict[str, Any]:
-    if "." not in signal or signal.startswith(".") or signal.endswith("."):
-        raise DerivationProblem("--signal must be Target.SignalName")
-    target, name = signal.rsplit(".", 1)
+    try:
+        canonical_signal = normalize_signal_request(signal, option="--signal")
+        canonical_until = (
+            None if until is None else normalize_signal_request(until, option="--until")
+        )
+    except ValueError as exc:
+        raise DerivationProblem(str(exc)) from exc
+    target, name = canonical_signal.rsplit(".", 1)
+    until_target, until_name = (
+        (None, None) if canonical_until is None else canonical_until.rsplit(".", 1)
+    )
     model = model_document["model"]
     base = initial_snapshot(model)
-    start = load_scenario(scenario, model, base)
+    start = load_scenario(
+        scenario,
+        model,
+        base,
+        model_fingerprint=model_document["model_fingerprint"],
+    )
     return Engine(
         model_document,
         source=source,
         root_target=target,
         root_name=name,
+        until_target=until_target,
+        until_name=until_name,
         initial_snapshot=start,
         max_depth=max_depth,
         max_breadth=max_breadth,

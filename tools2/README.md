@@ -4,7 +4,8 @@ Independent first-stage Signal derivation toolchain. It intentionally does not i
 
 ```bash
 make -C tools2 test
-tools2/bin/pyveri -t ComputerProject.Preset
+tools2/bin/pyveri
+tools2/bin/pyveri -u Kernel.Startup --snapshot-out /tmp/kernel-presend.snapshot.json
 ```
 
 The default spec is `spec/model/main.spec`. Select another spec with `-f SPEC`, apply a scenario with
@@ -17,3 +18,7 @@ Snapshot continuation experiment:
 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Start --snapshot-out /tmp/tools2.snapshot.json
 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Inspect -s /tmp/tools2.snapshot.json
 ```
+
+The shortcut defaults to `Human -> ComputerProject.Preset`; `Startup` is accepted as the external alias for
+`Preset`. Use `-u/--until SIGNAL` to stop immediately before that canonical Signal is sent and export the stable
+pre-send snapshot. All tools2 JSON and snapshots use protocol version 3.

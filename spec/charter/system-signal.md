@@ -78,6 +78,8 @@ Signal 推导工具采用下列兼容边界：
   `Name` Signal，原调用参数成为 payload；目标暂以同名 Transition/Action 作为兼容 handler。
 - `drives` 同步发送并等待目标响应结束；`emits` 只在源响应提交后投递，并按全局 FIFO 处理。
 - `drives` 中的 `A || B` 是按源码顺序选择首个当前可接受的 Signal handler；未被选择的候选不发送 Signal，也不制造 rejected/failed 记录。
+- tools2 外部 Signal 名称中的 `Startup` 是 `Preset` 的保留别名；别名必须在 Signal identity、handler
+  查找和截至匹配前规范化，正式 DSL 和 handler 仍只使用 `Transition::Preset`。
 - 有效 parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
 - 当前里程碑不引入显式 `signal`/`on Signal` 语法，不把 handler 改名为 `OnName`，也不实现等待未来
   Signal 的 continuation；这些都必须作为后续独立模型变更完成。
@@ -90,6 +92,8 @@ Signal 推导工具采用下列兼容边界：
 - `failed`：规格、类型、推导或 invariant 失败，或者 strict Signal 被拒绝导致根请求失败。
 - `truncated`：下一次传播超出显式预算，因此不执行 frontier Signal。
 - `completed`：响应和其同步子响应完成；其异步 Signal 已按规则进入 FIFO。
+- `stopped`：发送前截至边界已到达，当前已接受但尚未提交的祖先响应或已经存在但尚未处理的 FIFO
+  Signal 不再继续；这不是可恢复 continuation。
 - `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但当前工具不得产生它。
 
 条件不成立只表示本次接收被拒绝，不得猜测为临时等待。严格拒绝的诊断必须保留从根 Signal 到拒绝
@@ -101,10 +105,22 @@ Signal 推导工具采用下列兼容边界：
 前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得隐式回溯 emitter、
 运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须显式提供 snapshot/scenario。
 
+为了从真实上游推导得到后续 Signal 的到达前场景，tools2 必须支持发送前截至：调用者指定一个规范化
+后的 `Target.Signal`，推导在第一个实际将发送该 Signal 的位置停止。匹配发生在动态 receiver、目标和
+有序候选已经确定之后，但必须早于 Signal ID 分配、`signal_sent`、入队、接收和 handler 执行。边界
+快照是该发送动作之前的最后稳定状态；目标若是根 Signal，则结果就是模型/scenario 初态。到达边界是
+成功结果 `reached`，可导出带 boundary provenance 的 snapshot；未提交祖先响应和已有未处理 FIFO
+Signal 变为 `stopped`，不得产生 `pending` 或隐式 continuation。若推导先 failed 或被预算截断，则其
+结果优先且不得导出 snapshot；若完整闭包结束仍未遇到目标发送点，则结果为
+`until_signal_not_reached`，同样不得导出 snapshot。
+
 tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/` 的实现或中间协议代码；两套工具
 通过路径、独立 Python import path、producer 和 schema version 隔离。公开快捷入口是
 `tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
-tools2 协议统一为 version 2 并拒绝 version 1、老工具协议和旧 snapshot。老 `tools/` 继续承担默认
+快捷入口的默认请求是 `Human -> ComputerProject.Preset`，`-t/--trigger` 可以覆盖目标，
+`-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，但底层
+`--signal` 保持必填。tools2 协议统一为 version 3 并拒绝 version 1、version 2、老工具协议和旧
+snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
 
 ## 通用分析方法

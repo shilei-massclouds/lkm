@@ -23,6 +23,8 @@ def build_view(derivation: dict[str, Any]) -> dict[str, Any]:
     return {
         "view": "signal-trace",
         "root_request": deepcopy(derivation.get("root_request")),
+        "until_request": deepcopy(derivation.get("until_request")),
+        "boundary": deepcopy(derivation.get("boundary")),
         "model_fingerprint": derivation.get("model_fingerprint"),
         "budget": deepcopy(derivation.get("budget")),
         "verdict": derivation.get("verdict"),

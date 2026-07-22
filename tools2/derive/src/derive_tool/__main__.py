@@ -15,6 +15,7 @@ from tools2_common import (
     PRODUCER,
     ProtocolError,
     read_json,
+    normalize_signal_request,
     require_protocol,
     write_json,
 )
@@ -25,8 +26,19 @@ from .engine import DerivationProblem, derive, parse_budget
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run bounded tools2 Signal derivation.")
     parser.add_argument("model", type=Path)
-    parser.add_argument("--signal", required=True, help="root Signal as Target.SignalName")
-    parser.add_argument("--source", default="Environment")
+    parser.add_argument(
+        "--signal",
+        required=True,
+        type=lambda value: normalize_signal_request(value, option="--signal"),
+        help="root Signal as Target.SignalName",
+    )
+    parser.add_argument(
+        "-u",
+        "--until",
+        type=lambda value: normalize_signal_request(value, option="--until"),
+        help="stop immediately before sending Target.SignalName",
+    )
+    parser.add_argument("--source", default="Human")
     parser.add_argument("--scenario", type=Path)
     parser.add_argument("--max-depth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--max-breadth", type=parse_budget, default=3, metavar="N|all")
@@ -40,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             model,
             signal=args.signal,
             source=args.source,
+            until=args.until,
             scenario=args.scenario,
             max_depth=args.max_depth,
             max_breadth=args.max_breadth,

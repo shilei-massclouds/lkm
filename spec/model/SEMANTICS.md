@@ -436,15 +436,18 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
 ## SEM-SIGNAL-TOOLS2-001: Full-Model Signal Derivation Is An Isolated Compatibility Semantics
 
 本节只约束 `tools2/` Signal 工具链，不修改前述 `tools/` 现行 transition/event 推导语义。
-`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `2` 并带 `producer: "tools2"`；每个阶段必须拒绝
-producer 或 version 不匹配的输入，不能把 tools2 version 1、老工具 JSON 或旧 snapshot 当成兼容输入。
+`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `3` 并带 `producer: "tools2"`；每个阶段必须拒绝
+producer 或 version 不匹配的输入，不能把 tools2 version 1/2、老工具 JSON 或旧 snapshot 当成兼容输入。
 
 ### Normalization and handling
 
 当前折叠调用 `Receiver.Transition::Name(args)` 或 `Receiver.Action::Name(args)` 规范化为一个 Signal
-envelope：source 是当前响应 owner（根请求默认 `Environment`），target 是解析后的 Receiver，name 是
+envelope：source 是当前响应 owner（根请求默认 `Human`），target 是解析后的 Receiver，name 是
 `Name`，payload 是按 handler 形参完成类型检查和规范化的命名值。根 CLI 的
 `--signal Target.Name` 直接建立相同 envelope；根 Signal 不允许用 process kind 替代 target/name。
+tools2 外部请求中的 `Target.Startup` 是 `Target.Preset` 的保留别名。shortcut、driver 和 derive API/CLI
+必须在处理请求前把它规范化为 `Preset`；模型调用、handler 查找、Signal record、ID、事件和 canonical
+JSON 只保留 `Preset`。该别名不扩展受控 transition 集合，DSL 仍必须使用 `Transition::Preset`。
 
 目标对象中同名 Transition 或 Action 是兼容 handler。对象自己的 override 优先，否则按传递类型继承
 解析 Type lifecycle/process。恰好一个 handler 且 owner state 与
@@ -465,6 +468,10 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 完整因果链的 `failed`。derive 不得隐式回溯 emitter、执行上游 transition 或合成前置快照；调用者从
 后续边界继续时必须显式提供真实边界的 snapshot/scenario。
 
+快捷入口未给 `-t/--trigger` 时默认请求 `Human -> ComputerProject.Preset`，其用户可见默认拼写可以是
+`ComputerProject.Startup`，但进入 driver 前必须规范化。快捷入口、driver 和 derive 的 source 默认均为
+`Human`，显式 `--source` 优先；底层 driver/derive 的 `--signal` 仍必填。
+
 ### Ordering, rejection and completion
 
 `drives` 是 source-ordered 同步 Signal：目标响应（包括它的同步子响应）结束后，源 handler 才继续。
@@ -477,6 +484,29 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 拒绝使根推导为 `failed`，lossy emits 被拒绝记录 `discarded` 后继续。条件不满足不得产生
 `pending`；当前工具不建立等待队列、continuation 或未来 Signal 恢复。
 
+### Pre-send until boundary
+
+derive/driver/快捷入口都接受可选 `-u/--until Target.Name`。until request 与根请求
+使用相同的 `Startup` 到 `Preset` 规范化。未给 until 时保持普通完整闭包语义；给出 until 时，工具按
+规范化后的 target/name 精确匹配第一个实际将发送的 Signal。
+
+匹配点必须在动态 receiver、实际 target、source-ordered choice 的唯一被选候选、payload 原始实参和
+hierarchy coordinate 已确定之后，但在下列任何动作之前：分配 Signal ID、记录 `signal_sent`、把 emits
+追加到 FIFO、记录接收、检查该目标的预算/handler/state/depends_on、绑定 payload 或执行 handler。
+因此目标 Signal 在产物中没有 envelope、ID、sent/enqueue/receive/handler 事件。目标是根 Signal 时，
+匹配发生在根 envelope 创建前，boundary snapshot 等于模型初态或显式 scenario。
+
+到达边界后根 verdict 为 `reached`，除非在此之前已经 failed 或产生 truncated frontier；failed 优先于
+bounded，bounded 又优先于 reached。boundary 必须记录规范化目标、发送方、delivery/coordinate/cause
+构成的发送位置、调用 span（根请求为 null）和边界时的稳定 snapshot。正在执行但尚未提交的祖先响应
+标为 `stopped`；已经提交的响应保持 `completed`；已创建、已入 FIFO 但尚未处理的 Signal 标为
+`stopped`。停止后不再执行余下 body、提交 effect、创建后续 emits 或清空 FIFO，不产生 `pending`，也
+不保存隐式 continuation。
+
+`reached` 是 check 成功结果并返回 0。完整闭包自然结束仍未到达 until 发送点时，根 verdict 为
+`until_signal_not_reached`，check 返回 1。failed、bounded 和 until_signal_not_reached 都不得写
+snapshot。until 目标自身的预算、接收条件和 handler 不参与判断，因为该 Signal 尚未发送。
+
 `within` 按 source order 进入/退出已建模 context，并把有效 context 写入事件与 Signal record；局部 action
 result binding 对后续 statement 和嵌套 within 可见。受控提交只更新 lifecycle state、已声明 mutable
 reference/association 和已证明 fact。结构化 deferred/trimmed 只保留 inventory 并在 owner 可达时验证
@@ -484,12 +514,14 @@ evidence，不生成 `blocked`。无限预算下若相同因果请求在完全�
 位置的 `causal_cycle_without_snapshot_progress` failed 结束。
 
 Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、lossy 拒绝后的 `discarded`、响应结束的
-`completed`、预算 frontier 的 `truncated` 和根推导的 `complete`/`failed`/`bounded`。`pending` 是
+`completed`、截至传播的 `stopped`、预算 frontier 的 `truncated` 和根推导的
+`complete`/`reached`/`until_signal_not_reached`/`failed`/`bounded`。`pending` 是
 保留词但当前工具不可产生。`blocked` 不属于 tools2 核心协议，只能出现在老工具兼容报告。
 
 严格拒绝、类型/规格/invariant 错误必须保留根 Signal 到失败点的完整 `cause_id` 链。失败产物保存
 initial snapshot、每个成功响应边界和 last stable snapshot；已经提交的边界不回滚。derive 只要成功
-写出结构化诊断 JSON 就正常退出；check 仅对 `complete` 返回成功，对 `failed` 和 `bounded` 返回失败。
+写出结构化诊断 JSON 就正常退出；check 对 `complete` 和 `reached` 返回成功，对
+`until_signal_not_reached`、`failed` 和 `bounded` 返回失败。
 
 ### Hierarchical propagation budget
 
@@ -511,16 +543,17 @@ initial snapshot、每个成功响应边界和 last stable snapshot；已经提�
 
 ### Required derivation records and resumability
 
-`derive.json` 至少包含 root request、model fingerprint、initial snapshot、last stable snapshot、根 verdict、
+`derive.json` 至少包含 root request、可选 until request/reached boundary、model fingerprint、initial snapshot、last stable snapshot、根 verdict、
 Signal envelopes、resolved handler、typed payload、`drives`/`emits` delivery、hierarchy coordinate、全局事件
 顺序、before/after snapshot、cause/response parent、outcome、拒绝/失败原因和 truncated frontier。Signal
 ID 由根请求和稳定因果路径/同级 ordinal 生成，不使用临时目录、进程号或物理行号；同一输入重复运行
 必须得到相同 ID、顺序和 JSON。
 
-只有 `complete` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario` 的 snapshot 基础。
-`failed` 和 `bounded` 都不得导出可续跑 snapshot。`view.json` 只能整理 derive 的结构化字段，不能重新
+`complete` 和 `reached` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario` 的 snapshot
+基础；reached snapshot 必须携带 boundary provenance。`failed`、`bounded` 和
+`until_signal_not_reached` 都不得导出可续跑 snapshot。`view.json` 只能整理 derive 的结构化字段，不能重新
 执行 guard、改变顺序或从 label 猜 outcome；text renderer 必须展示因果层级、同步等待、异步 FIFO、
-payload、状态/事实变化、拒绝原因、预算 frontier 和完整失败链。
+payload、状态/事实变化、until request/reached boundary、stopped 传播、拒绝原因、预算 frontier 和完整失败链。
 
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 

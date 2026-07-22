@@ -26,20 +26,29 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2` 本轮以完整 `spec/model/main.spec` 和既有最小 fixture 共同验收。独立入口是
 `make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 2、拒绝 tools2 v1/老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 3、拒绝 tools2 v1/v2/老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
 - drives 同步 source order、emits post-commit enqueue 与全局 FIFO 调度记录；
 - drives 有序备选只发送首个当前可接受候选，未选候选不分配 Signal ID，全部不可接受时保留逐候选诊断；
 - strict rejected 导致 failed，lossy rejected 得到 discarded，条件不成立永不产生 pending；
-- failed/bounded 不创建 snapshot-out，complete snapshot 可作为下一 scenario 输入；
+- failed/bounded/until_signal_not_reached 不创建 snapshot-out，complete/reached snapshot 可作为下一 scenario 输入；
 - 同一输入重复运行的 Signal ID、事件序号和 canonical JSON 完全稳定；
 - view 不重新推导，text 能从根 Signal 还原 rejected/failed/truncated 的完整因果链。
 - 主模型 parse/model 零诊断；effective parent 覆盖显式优先、BootTask→Kernel、普通非 Project 默认
   Kernel、ProjectObject 例外、无 Kernel fixture、unknown/self/cycle。
-- `tools2/bin/pyveri -h` usage 以 `tools2/bin/pyveri [-h] -t SIGNAL` 开始，旧 `tools2/pyveri2` 不存在；
-  新入口能从仓库根和其它 cwd 启动，scenario 与高级参数完整透传。
+- `tools2/bin/pyveri -h` usage 显示 `[-t SIGNAL] [-u SIGNAL]` 和 `--until`，旧 `tools2/pyveri2` 不存在；
+  无参数入口使用 `Human -> ComputerProject.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
+  参数完整透传，显式 `--source` 覆盖默认 Human。
+- shortcut、driver、derive API/CLI 都验证 `Target.Startup` 与 `Target.Preset` 规范化后的 request、Signal
+  ID、事件序列和 canonical JSON 完全相同；正式 model transition 仍只有 `Preset`。
+- until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
+  FIFO、未提交祖先和重复目标；目标不得拥有 Signal ID、`signal_sent`、enqueue/receive/handler 事件，
+  boundary snapshot 必须精确等于发送前稳定状态。
+- reached 返回 0并生成带 provenance 的 v3 snapshot；既有 completed response 保持 completed，未提交
+  ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
+  生成 snapshot。
 - 不带 snapshot/scenario 的 `tools2/bin/pyveri -t Kernel.Preset` 必须因前期状态/事实缺失而 failed，且
   不隐式回溯 emitter 或合成快照；`tools2/bin/pyveri -t ComputerProject.Preset` 不带 scenario 必须能从
   模型初态开始真实推导。本轮不要求完整闭包达到 Online；若到达当前尚不满足的规格边界，必须 failed
@@ -47,6 +56,9 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   提供真实到达边界 scenario 后也可从后续 Signal 继续。
 - 显式 `--max-depth 0` 返回 bounded/1、frontier 可见且不生成 snapshot；完整运行 snapshot 可由 `-s`
   续跑。
+- 主模型的 `tools2/bin/pyveri -u Kernel.Startup` 必须从默认 `Human -> ComputerProject.Preset` 开始并在
+  `Kernel.Preset` 发出前 reached；其 snapshot 可用于后续 `-t Kernel.Startup -s SNAPSHOT`，不带 until
+  时仍执行完整可达推导。
 
 focused test 可用于开发，但最终必须依次运行 parser/model/Kernel focused、`make -C tools2 test`、老
 model/view/render、静态 trace/SVG 重新生成与布局评审、`git diff --check`，再从仓库根目录以不包装、

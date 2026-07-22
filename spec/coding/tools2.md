@@ -1,6 +1,6 @@
 # tools2 Signal 工具链 Coding 规格
 
-本文把 [`../model/SEMANTICS.md`](../model/SEMANTICS.md#sem-signal-tools2-001-first-signal-derivation-is-an-isolated-compatibility-semantics)
+本文把 [`../model/SEMANTICS.md`](../model/SEMANTICS.md#sem-signal-tools2-001-full-model-signal-derivation-is-an-isolated-compatibility-semantics)
 映射到完整主模型 Python 工具实现。它只约束 `tools2/`，不得改变或导入 `tools/`。
 
 ## 包与依赖边界
@@ -41,8 +41,8 @@ cyclic parent 矛盾使用 `error`。有 error/unsupported 时后续阶段仍可
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `2`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1 或其它 version。
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `3`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1/2 或其它 version。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
 state、handler、参数、条件、effect 和 call 索引，并输出 source 内容指纹。derive/check/view 字段遵循
@@ -52,32 +52,45 @@ formal semantics；快照统一包含 `states`、有序 `facts` 和 `references`
 ## CLI 与退出码
 
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
-以及 `--signal Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
+以及 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
 接收 derive.json；render 接收 view.json，首期只实现 `--format text`。
 
 driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir` 与文本 `-o`。默认
-source 是虚拟 `Environment`，预算默认 `3/3`；`all` 解析为无限，整数必须非负。未给 work-dir 时使用
+source 是 `Human`，预算默认 `3/3`；`all` 解析为无限，整数必须非负。未给 work-dir 时使用
 临时目录，给出时保留 `ast.json`、`model.json`、`derive.json`、`check.json` 和 `view.json`。只有 check
-verdict 为 complete 才原子写 snapshot-out；failed/bounded 或阶段错误时目标文件不得出现。
+verdict 为 complete 或 reached 才原子写 snapshot-out；reached snapshot 写入 boundary provenance；
+failed/bounded/until_signal_not_reached 或阶段错误时目标文件不得出现。
 
 仓库根可直接执行的唯一便利入口是 `tools2/bin/pyveri`；旧 `tools2/pyveri2` 必须删除。入口不得复制
 阶段逻辑，只负责从自身路径解析仓库根、建立 tools2 独立
-`PYTHONPATH` 并把短参数翻译给 driver：`-t/--trigger` 对应 `--signal`，`-s/--scenario` 对应
-`--scenario`，`-f/--spec` 选择输入规格。帮助 usage 必须以 `tools2/bin/pyveri [-h] -t SIGNAL` 开始，
-`-f` 默认指向 `spec/model/main.spec`，快捷预算默认 `all/all`；显式预算覆盖它们。预算、source、
+`PYTHONPATH` 并把短参数翻译给 driver：可选的 `-t/--trigger` 对应 `--signal`，`-u/--until` 对应
+`--until`，`-s/--scenario` 对应 `--scenario`，`-f/--spec` 选择输入规格。`-t` 的默认值经规范化后是
+`ComputerProject.Preset`，帮助 usage 必须显示 `[-t SIGNAL] [-u SIGNAL]`；`-f` 默认指向
+`spec/model/main.spec`，快捷 source 默认 `Human`、预算默认 `all/all`；显式参数覆盖它们。预算、source、
 work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通用默认仍为 `3/3`。入口从脚本自身
 位置解析仓库和包路径，因此从仓库根或其它当前目录调用的行为一致。
 
-parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 对 complete 返回
-0，对 failed/bounded 返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用
+shortcut、driver 和 derive API/CLI 都调用 common 中同一 Signal request 规范化函数；任何 target 的
+末段 `Startup` 都规范化为 `Preset`，其它名称不变。root/until request 和所有结构化产物只保留
+canonical 名称，使 `Startup` 与 `Preset` 输入得到相同 Signal ID、事件序列和 canonical JSON。
+
+derive 的发送实现必须通过单一 pre-send 函数创建 envelope。该函数接收已解析 source/target/name、
+delivery、cause、coordinate 和 call span，先比较 canonical until request；匹配时记录 boundary 并在
+任何 ID/event/enqueue/handler 操作前终止发送。内部使用专用控制流向上展开：尚未提交的 active response
+写 `stopped` 和稳定 after snapshot，已完成 response 不改写；FIFO 中已有未处理 envelope 统一写
+`stopped`，但不创建目标或余下 emits。该控制流不得被普通 DerivationProblem 捕获为 failed。
+
+parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 对 complete/reached 返回
+0，对 failed/bounded/until_signal_not_reached 返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用
 check 的退出码。所有用户错误写到 stderr，不输出 Python traceback。
 
 ## 展示边界
 
-view 逐字段复制/整理 derive 的 request、verdict、events、signals、snapshots、frontier 和 failure chain；
+view 逐字段复制/整理 derive 的 root/until request、reached boundary、verdict、events、signals、snapshots、frontier 和 failure chain；
 不得重新求值条件或通过名称推断 handler/outcome。text renderer 以 cause depth 缩进 Signal，明确标记
 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、到达时快照来源、
-before/after state/fact/reference delta、discard/reject、truncated coordinate、source span 和完整因果链。
+before/after state/fact/reference delta、reached boundary、stopped propagation、discard/reject、truncated
+coordinate、source span 和完整因果链。
 当前 tools2 不实现 DOT、SVG 或 HTML。
 
 交互 HTML 是后续独立 JavaScript/TypeScript frontend 里程碑；它消费稳定 view schema，不在 Python

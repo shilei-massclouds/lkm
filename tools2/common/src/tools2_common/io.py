@@ -16,6 +16,16 @@ class ProtocolError(ValueError):
     """An intermediate file is not owned by the expected tools2 protocol."""
 
 
+def normalize_signal_request(value: str, *, option: str = "Signal") -> str:
+    """Return the canonical Target.SignalName used by all tools2 entry points."""
+    if "." not in value or value.startswith(".") or value.endswith("."):
+        raise ValueError(f"{option} must be Target.SignalName")
+    target, name = value.rsplit(".", 1)
+    if name == "Startup":
+        name = "Preset"
+    return f"{target}.{name}"
+
+
 def canonical_bytes(value: Any) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(
         "utf-8"

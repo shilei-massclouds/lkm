@@ -30,6 +30,7 @@ from tools2_common import (
     PRODUCER,
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
+    normalize_signal_request,
     read_json,
     write_json,
 )
@@ -49,10 +50,21 @@ def _working_directory(path: Path | None) -> Iterator[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the independent tools2 Signal pipeline.")
     parser.add_argument("spec", type=Path)
-    parser.add_argument("--signal", required=True, help="root Signal as Target.SignalName")
-    parser.add_argument("--source", default="Environment")
+    parser.add_argument(
+        "--signal",
+        required=True,
+        type=lambda value: normalize_signal_request(value, option="--signal"),
+        help="root Signal as Target.SignalName",
+    )
+    parser.add_argument(
+        "-u",
+        "--until",
+        type=lambda value: normalize_signal_request(value, option="--until"),
+        help="stop immediately before sending Target.SignalName",
+    )
+    parser.add_argument("--source", default="Human")
     parser.add_argument("--scenario", type=Path)
-    parser.add_argument("--snapshot-out", type=Path)
+    parser.add_argument("--snapshot-out", type=Path, help="write a snapshot on complete or reached")
     parser.add_argument("--max-depth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--max-breadth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--work-dir", type=Path)
@@ -85,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if args.scenario is not None:
             derive_args.extend(["--scenario", str(args.scenario)])
+        if args.until is not None:
+            derive_args.extend(["--until", args.until])
         if derive_main(derive_args) != 0:
             return 2
         check_exit = check_main([str(derivation), "-o", str(checked)])
@@ -101,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(text, encoding="utf-8")
         check_data = read_json(checked)
-        if check_data["verdict"] == "complete" and args.snapshot_out is not None:
+        if check_data["verdict"] in {"complete", "reached"} and args.snapshot_out is not None:
             derive_data = read_json(derivation)
             snapshot = {
                 "schema": SNAPSHOT_SCHEMA,
@@ -110,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
                 "source": str(args.spec.resolve()),
                 "model_fingerprint": derive_data["model_fingerprint"],
                 "snapshot": derive_data["last_stable_snapshot"],
+                "provenance": {
+                    "verdict": derive_data["verdict"],
+                    "root_request": derive_data["root_request"],
+                    "until_request": derive_data["until_request"],
+                    "boundary": derive_data["boundary"],
+                },
             }
             write_json(args.snapshot_out, snapshot)
         return check_exit

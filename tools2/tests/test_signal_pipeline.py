@@ -13,6 +13,7 @@ import unittest
 
 from check_tool.__main__ import main as check_main
 from derive_tool.__main__ import main as derive_main
+from derive_tool.engine import derive
 from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
 from pyveri.__main__ import main as driver_main
@@ -28,6 +29,7 @@ from tools2_common import (
     MODEL_VERSION,
     PRODUCER,
     SNAPSHOT_SCHEMA,
+    SNAPSHOT_VERSION,
     VIEW_SCHEMA,
     VIEW_VERSION,
     read_json,
@@ -49,6 +51,8 @@ class SignalPipelineTests(unittest.TestCase):
         max_depth: str = "3",
         max_breadth: str = "3",
         scenario: dict | None = None,
+        until: str | None = None,
+        source_name: str | None = None,
     ) -> tuple[dict, dict, str]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -78,6 +82,10 @@ class SignalPipelineTests(unittest.TestCase):
             scenario_path = root / "scenario.json"
             scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
             derive_args.extend(["--scenario", str(scenario_path)])
+        if until is not None:
+            derive_args.extend(["--until", until])
+        if source_name is not None:
+            derive_args.extend(["--source", source_name])
         self.assertEqual(derive_main(derive_args), 0)
         check_exit = check_main([str(derivation), "-o", str(checked)])
         self.assertIn(check_exit, {0, 1})
@@ -94,6 +102,18 @@ class SignalPipelineTests(unittest.TestCase):
                     [str(PIPELINE), "--signal", "Root.Start", "--work-dir", str(work)]
                 )
             self.assertEqual(exit_code, 0)
+            for filename, schema, version in (
+                ("ast.json", AST_SCHEMA, AST_VERSION),
+                ("model.json", MODEL_SCHEMA, MODEL_VERSION),
+                ("derive.json", DERIVE_SCHEMA, DERIVE_VERSION),
+                ("check.json", CHECK_SCHEMA, CHECK_VERSION),
+                ("view.json", VIEW_SCHEMA, VIEW_VERSION),
+            ):
+                document = read_json(work / filename)
+                self.assertEqual(
+                    (document["schema"], document["version"], document["producer"]),
+                    (schema, version, PRODUCER),
+                )
             derivation = read_json(work / "derive.json")
             signals = derivation["signals"]
             self.assertEqual(
@@ -179,45 +199,47 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            old = root / "old.ast.json"
-            old.write_text(
-                json.dumps(
-                    {
-                        "schema": AST_SCHEMA,
-                        "version": 1,
-                        "producer": PRODUCER,
-                        "source": "old",
-                        "document": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-            self.assertIn("version=2", stderr.getvalue())
-
-            old_snapshot = root / "old.snapshot.json"
-            old_snapshot.write_text(
-                json.dumps(
-                    {
-                        "schema": SNAPSHOT_SCHEMA,
-                        "version": 1,
-                        "producer": PRODUCER,
-                        "source": "old",
-                        "snapshot": {"states": {}, "facts": [], "references": {}},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(
-                    driver_main(
-                        [str(PIPELINE), "--signal", "Root.Start", "--scenario", str(old_snapshot)]
+            for old_version in (1, 2):
+                old = root / f"old-v{old_version}.ast.json"
+                old.write_text(
+                    json.dumps(
+                        {
+                            "schema": AST_SCHEMA,
+                            "version": old_version,
+                            "producer": PRODUCER,
+                            "source": "old",
+                            "document": {},
+                        }
                     ),
-                    2,
+                    encoding="utf-8",
                 )
-            self.assertIn("snapshot protocol mismatch", stderr.getvalue())
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
+                self.assertIn("version=3", stderr.getvalue())
+
+                old_snapshot = root / f"old-v{old_version}.snapshot.json"
+                old_snapshot.write_text(
+                    json.dumps(
+                        {
+                            "schema": SNAPSHOT_SCHEMA,
+                            "version": old_version,
+                            "producer": PRODUCER,
+                            "source": "old",
+                            "snapshot": {"states": {}, "facts": [], "references": {}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    self.assertEqual(
+                        driver_main(
+                            [str(PIPELINE), "--signal", "Root.Start", "--scenario", str(old_snapshot)]
+                        ),
+                        2,
+                    )
+                self.assertIn("snapshot protocol mismatch", stderr.getvalue())
 
             environment = os.environ.copy()
             environment["PYTHONPATH"] = os.pathsep.join(
@@ -255,6 +277,33 @@ class SignalPipelineTests(unittest.TestCase):
                     exit_code = entry([str(source), *extra, "-o", str(root / f"out-{index}")])
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
+
+    def test_every_tools2_consumer_rejects_v1_and_v2(self) -> None:
+        cases = [
+            (model_main, AST_SCHEMA, []),
+            (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
+            (check_main, DERIVE_SCHEMA, []),
+            (view_main, DERIVE_SCHEMA, []),
+            (render_main, VIEW_SCHEMA, []),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for old_version in (1, 2):
+                for index, (entry, schema, extra) in enumerate(cases):
+                    source = root / f"input-v{old_version}-{index}.json"
+                    source.write_text(
+                        json.dumps(
+                            {"schema": schema, "version": old_version, "producer": PRODUCER}
+                        ),
+                        encoding="utf-8",
+                    )
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        exit_code = entry(
+                            [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
+                        )
+                    self.assertEqual(exit_code, 2)
+                    self.assertIn("version=3", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -733,6 +782,478 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(view["events"], derivation["events"])
 
+    def test_startup_alias_is_canonical_across_derive_driver_and_shortcut(self) -> None:
+        source = """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Ready {
+                            drives { Child.Transition::Preset; }
+                        }
+                    }
+                }
+                state State::Ready { }
+            }
+            system Child {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "alias.spec"
+            ast = root / "ast.json"
+            model_path = root / "model.json"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model_path)]), 0)
+            model = read_json(model_path)
+
+            api_startup = derive(
+                model,
+                signal="Root.Startup",
+                until="Child.Startup",
+                max_depth=None,
+                max_breadth=None,
+            )
+            api_preset = derive(
+                model,
+                signal="Root.Preset",
+                until="Child.Preset",
+                max_depth=None,
+                max_breadth=None,
+            )
+            self.assertEqual(api_startup, api_preset)
+            self.assertEqual(api_startup["root_request"]["signal"], "Preset")
+            self.assertEqual(api_startup["until_request"]["signal"], "Preset")
+            self.assertEqual(api_startup["root_request"]["source"], "Human")
+
+            cli_outputs = []
+            for spelling in ("Startup", "Preset"):
+                output = root / f"derive-{spelling}.json"
+                self.assertEqual(
+                    derive_main(
+                        [
+                            str(model_path),
+                            "--signal",
+                            f"Root.{spelling}",
+                            "-u" if spelling == "Startup" else "--until",
+                            f"Child.{spelling}",
+                            "--max-depth",
+                            "all",
+                            "--max-breadth",
+                            "all",
+                            "-o",
+                            str(output),
+                        ]
+                    ),
+                    0,
+                )
+                cli_outputs.append(output.read_bytes())
+            self.assertEqual(cli_outputs[0], cli_outputs[1])
+
+            driver_outputs = []
+            for spelling in ("Startup", "Preset"):
+                work = root / f"driver-{spelling}"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        driver_main(
+                            [
+                                str(spec),
+                                "--signal",
+                                f"Root.{spelling}",
+                                "-u" if spelling == "Startup" else "--until",
+                                f"Child.{spelling}",
+                                "--work-dir",
+                                str(work),
+                            ]
+                        ),
+                        0,
+                    )
+                driver_outputs.append((work / "derive.json").read_bytes())
+            self.assertEqual(driver_outputs[0], driver_outputs[1])
+
+            shortcut_outputs = []
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            for spelling in ("Startup", "Preset"):
+                work = root / f"shortcut-{spelling}"
+                result = subprocess.run(
+                    [
+                        str(shortcut),
+                        "-f",
+                        str(spec),
+                        "-t",
+                        f"Root.{spelling}",
+                        "-u",
+                        f"Child.{spelling}",
+                        "--work-dir",
+                        str(work),
+                    ],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                shortcut_outputs.append((work / "derive.json").read_bytes())
+            self.assertEqual(shortcut_outputs[0], shortcut_outputs[1])
+
+    def test_until_root_stops_before_signal_identity_or_handler(self) -> None:
+        derivation, checked, text = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            """,
+            "Root.Startup",
+            until="Root.Startup",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(checked["exit_code"], 0)
+        self.assertEqual(derivation["signals"], [])
+        self.assertIsNone(derivation["root_request"]["signal_id"])
+        self.assertEqual(derivation["boundary"]["normalized_signal"], "Root.Preset")
+        self.assertEqual(
+            derivation["boundary"]["snapshot"], derivation["initial_snapshot"]
+        )
+        self.assertFalse(
+            any(event["kind"] == "signal_sent" for event in derivation["events"])
+        )
+        self.assertIn("reached boundary: Human -> Root.Preset", text)
+
+    def test_until_target_budget_and_handler_are_not_checked(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    actions { on Action::Start { drives { Target.Action::Missing; } } }
+                }
+            }
+            system Target {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { }
+            }
+            """,
+            "Root.Start",
+            until="Target.Missing",
+            max_depth="0",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(derivation["truncated_frontier"], [])
+        self.assertEqual(len(derivation["signals"]), 1)
+        self.assertEqual(derivation["signals"][0]["outcome"], "stopped")
+        self.assertFalse(
+            any(
+                event["kind"] in {"signal_sent", "signal_received", "signal_truncated"}
+                and event.get("target") == "Target"
+                for event in derivation["events"]
+            )
+        )
+
+    def test_until_drives_stops_uncommitted_ancestors_without_target_signal(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Start -> State::Ready {
+                            drives { Middle.Action::Go; }
+                        }
+                    }
+                }
+                state State::Ready { }
+            }
+            system Middle {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base {
+                    actions { on Action::Go { drives { Target.Action::StopHere; } } }
+                }
+            }
+            system Target {
+                parent: Middle;
+                initial_state: State::Base;
+                state State::Base { actions { on Action::StopHere { } } }
+            }
+            """,
+            "Root.Start",
+            until="Target.StopHere",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(
+            [(item["target"], item["name"], item["outcome"]) for item in derivation["signals"]],
+            [("Root", "Start", "stopped"), ("Middle", "Go", "stopped")],
+        )
+        self.assertEqual(derivation["summary"]["stopped"], 2)
+        self.assertEqual(derivation["summary"]["pending"], 0)
+        self.assertFalse(
+            any(
+                item["target"] == "Target" and item["name"] == "StopHere"
+                for item in derivation["signals"]
+            )
+        )
+        self.assertEqual(
+            derivation["last_stable_snapshot"], derivation["boundary"]["snapshot"]
+        )
+
+    def test_until_emits_stops_before_enqueue_and_preserves_completed_responses(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Start -> State::Ready {
+                            drives { Child.Action::Prepare; }
+                            emits { Target.Action::Run; }
+                            ensures { root_ready(self); }
+                        }
+                    }
+                }
+                state State::Ready { invariant { root_ready(self); } }
+            }
+            system Child {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { actions { on Action::Prepare { } } }
+            }
+            system Target {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { actions { on Action::Run { } } }
+            }
+            """,
+            "Root.Start",
+            until="Target.Run",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(
+            [(item["target"], item["outcome"]) for item in derivation["signals"]],
+            [("Root", "completed"), ("Child", "completed")],
+        )
+        self.assertEqual(derivation["last_stable_snapshot"]["states"]["Root"], "Ready")
+        self.assertIn("root_ready(Root)", derivation["last_stable_snapshot"]["facts"])
+        self.assertFalse(
+            any(
+                event["kind"] == "emits_enqueued"
+                and event.get("child_id") not in {item["id"] for item in derivation["signals"]}
+                for event in derivation["events"]
+            )
+        )
+        self.assertFalse(any(item["target"] == "Target" for item in derivation["signals"]))
+
+    def test_until_choice_uses_selected_dynamic_receiver_and_first_repetition(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                references { selected: System = Right; }
+                initial_state: State::Base;
+                state State::Base {
+                    actions {
+                        on Action::Start {
+                            drives {
+                                Left.Action::Go || self.selected.Action::Go;
+                                Right.Action::Go;
+                            }
+                        }
+                    }
+                }
+            }
+            system Left {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { }
+            }
+            system Right {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { actions { on Action::Go { } } }
+            }
+            """,
+            "Root.Start",
+            until="Right.Go",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(len(derivation["signals"]), 1)
+        self.assertEqual(derivation["signals"][0]["outcome"], "stopped")
+        selected = [
+            event for event in derivation["events"] if event["kind"] == "drives_choice_selected"
+        ]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["candidate"], 1)
+        self.assertEqual(derivation["boundary"]["target"], "Right")
+        self.assertEqual(
+            sum(event["kind"] == "until_signal_reached" for event in derivation["events"]),
+            1,
+        )
+
+    def test_until_with_existing_fifo_marks_only_created_signal_stopped(self) -> None:
+        derivation, checked, text = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Start -> State::Ready {
+                            emits {
+                                First.Action::Run;
+                                Boundary.Action::Run;
+                                Last.Action::Run;
+                            }
+                        }
+                    }
+                }
+                state State::Ready { }
+            }
+            system First { parent: Root; initial_state: State::Base; state State::Base { actions { on Action::Run { } } } }
+            system Boundary { parent: Root; initial_state: State::Base; state State::Base { actions { on Action::Run { } } } }
+            system Last { parent: Root; initial_state: State::Base; state State::Base { actions { on Action::Run { } } } }
+            """,
+            "Root.Start",
+            until="Boundary.Run",
+        )
+        self.assertEqual(checked["verdict"], "reached")
+        self.assertEqual(
+            [(item["target"], item["outcome"]) for item in derivation["signals"]],
+            [("Root", "completed"), ("First", "stopped")],
+        )
+        first = derivation["signals"][1]
+        self.assertEqual(first["before_snapshot"], first["after_snapshot"])
+        self.assertTrue(
+            any(
+                event["kind"] == "signal_stopped" and event["signal_id"] == first["id"]
+                for event in derivation["events"]
+            )
+        )
+        self.assertFalse(
+            any(event["kind"] == "emits_dequeued" for event in derivation["events"])
+        )
+        self.assertNotIn("Last.Run", text)
+
+    def test_until_failure_bounded_and_unreached_precedence_do_not_snapshot(self) -> None:
+        source = """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    actions {
+                        on Action::FailFirst {
+                            drives { Missing.Action::Run; Boundary.Action::Run; }
+                        }
+                        on Action::BoundFirst {
+                            drives { Deep.Action::Run; Boundary.Action::Run; }
+                        }
+                        on Action::Complete { }
+                    }
+                }
+            }
+            system Missing { parent: Root; initial_state: State::Base; state State::Base { } }
+            system Deep { parent: Root; initial_state: State::Base; state State::Base { actions { on Action::Run { } } } }
+            system Boundary { parent: Root; initial_state: State::Base; state State::Base { actions { on Action::Run { } } } }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "precedence.spec"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            cases = [
+                ("Root.FailFirst", "Boundary.Run", "all", "failed"),
+                ("Root.BoundFirst", "Boundary.Run", "0", "bounded"),
+                ("Root.Complete", "Boundary.Run", "all", "until_signal_not_reached"),
+            ]
+            for index, (signal, until, depth, verdict) in enumerate(cases):
+                work = root / f"work-{index}"
+                snapshot = root / f"snapshot-{index}.json"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    exit_code = driver_main(
+                        [
+                            str(spec),
+                            "--signal",
+                            signal,
+                            "--until",
+                            until,
+                            "--max-depth",
+                            depth,
+                            "--work-dir",
+                            str(work),
+                            "--snapshot-out",
+                            str(snapshot),
+                        ]
+                    )
+                self.assertEqual(exit_code, 1)
+                data = read_json(work / "derive.json")
+                self.assertEqual(data["verdict"], verdict)
+                self.assertFalse(snapshot.exists())
+            bounded = read_json(root / "work-1" / "derive.json")
+            self.assertIsNotNone(bounded["boundary"])
+            self.assertEqual(bounded["signals"][0]["outcome"], "stopped")
+            unreached_check = read_json(root / "work-2" / "check.json")
+            self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
+
+    def test_reached_snapshot_is_v3_with_boundary_provenance_and_resumes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            snapshot = root / "snapshot.json"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(PIPELINE),
+                            "--signal",
+                            "Root.Start",
+                            "--until",
+                            "Async.Run",
+                            "--work-dir",
+                            str(work),
+                            "--snapshot-out",
+                            str(snapshot),
+                        ]
+                    ),
+                    0,
+                )
+            saved = read_json(snapshot)
+            derivation = read_json(work / "derive.json")
+            checked = read_json(work / "check.json")
+            view = read_json(work / "view.json")
+            self.assertEqual(saved["version"], SNAPSHOT_VERSION)
+            self.assertEqual(saved["provenance"]["verdict"], "reached")
+            self.assertEqual(saved["provenance"]["boundary"], derivation["boundary"])
+            self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
+            self.assertEqual(checked["boundary"], derivation["boundary"])
+            self.assertEqual(view["boundary"], derivation["boundary"])
+            self.assertEqual(view["until_request"], derivation["until_request"])
+
+            resumed = root / "resumed"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(PIPELINE),
+                            "--signal",
+                            "Async.Run",
+                            "--scenario",
+                            str(snapshot),
+                            "--work-dir",
+                            str(resumed),
+                        ]
+                    ),
+                    0,
+                )
+            resumed_data = read_json(resumed / "derive.json")
+            self.assertEqual(resumed_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(resumed_data["signals"][0]["target"], "Async")
+
     def test_pyveri_short_trigger_and_scenario_work_from_any_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -746,9 +1267,12 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(help_result.returncode, 0, help_result.stderr)
             self.assertTrue(
-                help_result.stdout.startswith("usage: tools2/bin/pyveri [-h] -t SIGNAL"),
+                help_result.stdout.startswith(
+                    "usage: tools2/bin/pyveri [-h] [-t SIGNAL] [-u SIGNAL]"
+                ),
                 help_result.stdout,
             )
+            self.assertIn("--until SIGNAL", help_result.stdout)
             self.assertFalse((TOOLS2 / "pyveri2").exists())
 
             snapshot = root / "snapshot.json"
@@ -821,6 +1345,96 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(bounded.returncode, 1)
             self.assertIn("verdict: bounded", bounded.stdout)
+
+    def test_main_model_default_request_reaches_kernel_presend_and_snapshot_resumes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            work = root / "kernel-boundary"
+            snapshot = root / "kernel-boundary.snapshot.json"
+            reached = subprocess.run(
+                [
+                    str(shortcut),
+                    "-u",
+                    "Kernel.Startup",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reached.returncode, 0, reached.stderr)
+            derivation = read_json(work / "derive.json")
+            self.assertEqual(derivation["verdict"], "reached")
+            self.assertEqual(
+                (derivation["root_request"]["source"], derivation["root_request"]["target"], derivation["root_request"]["signal"]),
+                ("Human", "ComputerProject", "Preset"),
+            )
+            self.assertEqual(derivation["boundary"]["normalized_signal"], "Kernel.Preset")
+            self.assertFalse(
+                any(
+                    item["target"] == "Kernel" and item["name"] == "Preset"
+                    for item in derivation["signals"]
+                )
+            )
+            saved = read_json(snapshot)
+            self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
+
+            normal_work = root / "normal-closure"
+            normal = subprocess.run(
+                [
+                    str(shortcut),
+                    "--work-dir",
+                    str(normal_work),
+                    "-o",
+                    str(root / "normal-closure.txt"),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(normal.returncode, {0, 1}, normal.stderr)
+            normal_data = read_json(normal_work / "derive.json")
+            self.assertIsNone(normal_data["until_request"])
+            self.assertIsNone(normal_data["boundary"])
+            self.assertTrue(
+                any(
+                    item["target"] == "Kernel" and item["name"] == "Preset"
+                    for item in normal_data["signals"]
+                )
+            )
+
+            resumed_work = root / "kernel-resumed"
+            resumed = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Kernel.Startup",
+                    "-s",
+                    str(snapshot),
+                    "--max-depth",
+                    "0",
+                    "--work-dir",
+                    str(resumed_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertIn(resumed.returncode, {0, 1}, resumed.stderr)
+            resumed_data = read_json(resumed_work / "derive.json")
+            self.assertEqual(resumed_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(
+                (resumed_data["root_request"]["target"], resumed_data["root_request"]["signal"]),
+                ("Kernel", "Preset"),
+            )
+            self.assertIsNone(resumed_data["until_request"])
 
 
 if __name__ == "__main__":
