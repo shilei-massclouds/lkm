@@ -861,7 +861,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && user_kernel_trap_stack_backing_order() == USER_KERNEL_TRAP_STACK_ORDER
         && user_kernel_trap_overflow_stack_ready()
         && overflow_stack_top == overflow_stack_base + USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE;
-    let valid = process.state() == State::Online
+    let valid = process.active_user_flow_online()
         && process.preserves_kernel_init_task()
         && process.pid1_preserved()
         && process.exec_identity_handoff()
@@ -1117,7 +1117,7 @@ fn run_syscall_table_set_tid_address(
 
     let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
-    let valid = process.state() == State::Online
+    let valid = process.active_user_flow_online()
         && process.runtime_entered()
         && process.syscall_context_bound()
         && table.state() == State::Ready
@@ -1409,13 +1409,21 @@ fn run_user_clone_vfork_child_handoff(
     sink.start_case(total, "", name, checkpoint);
 
     let child = &ctx.user_task_set;
+    let child_task_ref = child.active_task_ref();
+    let current_task_ref = ctx.boot_cpu_current_task.current();
+    let dispatch_task_ref = ctx.boot_dispatch_window.current_task();
+    let child_flow_ref = child.active_flow_ref();
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
         && child.current_child_continuation()
         && child.child_continuation_taken()
         && child.vfork_child_sp() != 0
         && !child.vfork_parent_resumed()
-        && child.parent_clone_return() == 0;
+        && child.parent_clone_return() == 0
+        && child.active_task_state() == State::Online
+        && current_task_ref.same_identity(child_task_ref)
+        && dispatch_task_ref.same_identity(child_task_ref)
+        && child_flow_ref.is_valid();
 
     sink.diag_usize("vfork_child_handoff", child.vfork_child_handoff() as usize);
     sink.diag_usize(
@@ -1426,6 +1434,27 @@ fn run_user_clone_vfork_child_handoff(
     sink.diag_usize(
         "vfork_parent_resumed",
         child.vfork_parent_resumed() as usize,
+    );
+    sink.diag_usize("vfork_child_task_slot", child_task_ref.slot());
+    sink.diag_usize(
+        "vfork_child_task_generation",
+        child_task_ref.generation() as usize,
+    );
+    sink.diag_usize("vfork_current_task_slot", current_task_ref.slot());
+    sink.diag_usize(
+        "vfork_current_task_generation",
+        current_task_ref.generation() as usize,
+    );
+    sink.diag_usize("vfork_dispatch_task_slot", dispatch_task_ref.slot());
+    sink.diag_usize(
+        "vfork_dispatch_task_generation",
+        dispatch_task_ref.generation() as usize,
+    );
+    sink.diag_usize("vfork_child_task_state", child.active_task_state() as usize);
+    sink.diag_usize("vfork_child_flow_slot", child_flow_ref.slot());
+    sink.diag_usize(
+        "vfork_child_flow_generation",
+        child_flow_ref.generation() as usize,
     );
     if valid {
         sink.pass(total, "", name);
@@ -1600,7 +1629,7 @@ fn run_syscall_table_write(
 
     let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
-    let valid = process.state() == State::Online
+    let valid = process.active_user_flow_online()
         && process.runtime_entered()
         && process.syscall_context_bound()
         && process.syscall_dispatch_bound()
@@ -2004,6 +2033,14 @@ fn run_syscall_table_wait4(
     let table = &ctx.syscall_table;
     let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
+    let child_task_ref = child.active_task_ref();
+    let current_task_ref = ctx.boot_cpu_current_task.current();
+    let dispatch_task_ref = ctx.boot_dispatch_window.current_task();
+    let child_flow_ref = child.active_flow_ref();
+    let child_dispatch_valid = child.active_task_state() == State::Online
+        && current_task_ref.same_identity(child_task_ref)
+        && dispatch_task_ref.same_identity(child_task_ref)
+        && child_flow_ref.is_valid();
     let table_ready = table.state() == State::Ready
         && table.wait4_supported()
         && table.wait4_no_child_echild_first_slice()
@@ -2034,7 +2071,8 @@ fn run_syscall_table_wait4(
         && obs.writable_pages_saved != 0
         && obs.writable_pages_count == child.parent_wait_writable_page_count()
         && obs.writable_pages_count != 0
-        && obs.writable_pages_truncated == 0;
+        && obs.writable_pages_truncated == 0
+        && child_dispatch_valid;
     let wnohang_valid = table_ready
         && !child.wait4_parent_wait_observed()
         && !child.child_continuation_taken()
@@ -2082,6 +2120,27 @@ fn run_syscall_table_wait4(
     sink.diag_usize(
         "wait4_parent_writable_snapshot_copied",
         child.parent_wait_writable_page_snapshot_copied() as usize,
+    );
+    sink.diag_usize("wait4_child_task_slot", child_task_ref.slot());
+    sink.diag_usize(
+        "wait4_child_task_generation",
+        child_task_ref.generation() as usize,
+    );
+    sink.diag_usize("wait4_current_task_slot", current_task_ref.slot());
+    sink.diag_usize(
+        "wait4_current_task_generation",
+        current_task_ref.generation() as usize,
+    );
+    sink.diag_usize("wait4_dispatch_task_slot", dispatch_task_ref.slot());
+    sink.diag_usize(
+        "wait4_dispatch_task_generation",
+        dispatch_task_ref.generation() as usize,
+    );
+    sink.diag_usize("wait4_child_task_state", child.active_task_state() as usize);
+    sink.diag_usize("wait4_child_flow_slot", child_flow_ref.slot());
+    sink.diag_usize(
+        "wait4_child_flow_generation",
+        child_flow_ref.generation() as usize,
     );
     if valid {
         sink.pass(total, "", name);
@@ -2458,7 +2517,7 @@ fn run_syscall_table_exit(
 
     let process = &ctx.kernel_init_user_state;
     let table = &ctx.syscall_table;
-    let valid = process.state() == State::Online
+    let valid = process.active_user_flow_online()
         && process.runtime_entered()
         && process.syscall_context_bound()
         && table.state() == State::Ready

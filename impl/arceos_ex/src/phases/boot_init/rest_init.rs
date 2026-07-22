@@ -127,7 +127,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         .bind_initial(&mut ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
     wake_and_enable_kernel_init_task(ctx)?;
-    ctx.kernel_init_flow.enable_initial(&ctx.kernel_init_task)?;
+    ctx.kernel_init_flow
+        .start_initial_on_dispatch(&mut ctx.kernel_init_task, &mut ctx.boot_dispatch_window)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return failed_condition(
@@ -144,7 +145,8 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     wake_and_enable_kthreadd_task(ctx)?;
-    ctx.kthreadd_flow.enable_initial(&ctx.kthreadd_task)?;
+    ctx.kthreadd_flow
+        .start_initial_on_dispatch(&mut ctx.kthreadd_task, &mut ctx.boot_dispatch_window)?;
     publish_kthreadd_global_ref(ctx)?;
     ctx.system_state.preset()?;
     ctx.system_state
@@ -539,6 +541,8 @@ fn publish_kthreadd_global_ref(ctx: &mut Context) -> EventResult {
 fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_flow.setup(
         &mut ctx.boot_task,
+        ctx.boot_init_flow.core_mut(),
+        &ctx.boot_dispatch_window,
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
@@ -548,8 +552,12 @@ fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
 }
 
 fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_flow
-        .prepare_idle_entry(&ctx.scheduler, &ctx.cpu_group)
+    ctx.boot_idle_flow.prepare_idle_entry(
+        &ctx.boot_task,
+        &ctx.boot_dispatch_window,
+        &ctx.scheduler,
+        &ctx.cpu_group,
+    )
 }
 
 fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
@@ -557,9 +565,14 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
         &mut ctx.scheduler,
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
-        &ctx.kthreadd_task,
+        &mut ctx.kernel_init_flow,
+        &mut ctx.kthreadd_task,
+        &mut ctx.kthreadd_flow,
+        &mut ctx.user_task_set,
+        &ctx.boot_task,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
+        &mut ctx.boot_dispatch_window,
     )
 }
 
@@ -568,9 +581,13 @@ fn boot_idle_continuation(ctx: &mut Context) -> ! {
         let result = ctx.scheduler.schedule_idle(
             &ctx.cpu_group,
             &mut ctx.kernel_init_task,
-            &ctx.kthreadd_task,
+            &mut ctx.kernel_init_flow,
+            &mut ctx.kthreadd_task,
+            &mut ctx.kthreadd_flow,
+            &mut ctx.user_task_set,
             &mut ctx.boot_cpu_local_interrupt,
             &mut ctx.boot_cpu_current_task,
+            &mut ctx.boot_dispatch_window,
         );
         crate::phases::shutdown_on_error(result, "boot idle schedule loop failed\n");
     }
@@ -908,7 +925,7 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
             .irqrestore_restored_before_preemption_enabled()
         && ctx.kthreadd_task.global_ref_bound()
         && ctx.kthreadd_task.provider_ready()
-        && ctx.kthreadd_task.schedule_loop_active()
+        && !ctx.kthreadd_task.schedule_loop_active()
         && ctx.kthreadd_task.enqueued()
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling
@@ -1043,7 +1060,7 @@ fn boot_init_rest_init_facts_stable(ctx: &Context) -> bool {
             .irqrestore_restored_before_preemption_enabled()
         && ctx.kthreadd_task.global_ref_bound()
         && ctx.kthreadd_task.provider_ready()
-        && ctx.kthreadd_task.schedule_loop_active()
+        && !ctx.kthreadd_task.schedule_loop_active()
         && ctx.kthreadd_task.enqueued()
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling

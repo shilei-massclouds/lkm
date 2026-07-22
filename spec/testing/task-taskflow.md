@@ -13,10 +13,23 @@ carrier and its independently-lived `TaskFlow` instances.
   EntryPreludePhase.Started` order. Physical and virtual binding happen later,
   do not change BootTask lifecycle, and both must resolve to the same
   linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
+- BootInitFlow must expose `TaskFlowRef::BOOT_INIT`, owner/parent BootTask and
+  `BootTask.initial_flow == BOOT_INIT`; it must not expose a stored guard field.
 - BootInitFlow tests must observe the standard Started/Prepared/Ready/Online
   lifecycle. Online must precede and be adjacent to the first real
   BootTask-to-KernelInitTask switch commit; BootIdleEntry may start only after
   that scheduler call later restores BootTask.
+- Guard-focused coverage must prove that a Flow process proceeds only when its
+  parent Task is Online and the selected DispatchWindow's current TaskRef
+  resolves to that parent. Either mismatch must block without changing Flow
+  lifecycle state.
+- KernelInitTask, KthreaddTask and clone-child Enable must leave their initial
+  Flow in Base when the lossy start signal is emitted while another Task owns
+  the DispatchWindow. The first real switch to that Task must accept the
+  signal and start its initial Flow.
+- Repeated switches to an already-started Task must discard the non-Base
+  initial-flow signal and resume the Task's active continuation; BootTask must
+  resume BootIdleFlow without restarting BootInitFlow.
 - PID 1 tests must keep `KernelInitTask` online across exec while observing
   an explicit fresh-Flow declaration that remains in `Base` before Preset, then
   `KernelInitFlow: Online -> Offline -> Destroyed` and

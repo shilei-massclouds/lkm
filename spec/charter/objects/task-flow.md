@@ -2,18 +2,21 @@
 
 `TaskFlow` 是 Task 当前执行 continuation 的独立生命周期载体。每个 Flow 恰有一个 owner Task，
 而 Task 与 Flow 的 identity、lifecycle state 和 teardown 事实分别保存。exec 只替换 active Flow，
-不替换 Task；fork/clone 则创建新的 Task 和新的初始 Flow。启动编排属于 `BootInitFlow`
-PhaseObject，不建立 boot-init TaskFlow。
+不替换 Task；fork/clone 则创建新的 Task 和新的初始 Flow。`TaskFlow` 是 `PhaseObject` 的子类型，
+并以 typed `parent: Task` 约束每个 Flow 的 owner carrier；`BootInitFlow` 是 `BootTask` 的初始
+TaskFlow，同时继续承担启动阶段编排。
 
 Task carrier、TaskRef、类型级 lifecycle 及 Task teardown 前置条件见 [`Task`](task.md)。
 
 ## 静态与动态 Flow 实例
 
-- `BootIdleFlow` 是 `BootTask` 的首个 TaskFlow。`BootInitFlow.Enable` 在不可逆切换前完成完整预检，
-  直接建立其 owner/active binding；这不是从旧 TaskFlow 的 handoff，也不建立第二个 Task carrier。
-- `KernelInitFlow` 承载 `KernelInitTask` 的 `kernel_init()`、pre-SMP、initcall 和 exec 前内核
+- `BootInitFlow` 是 `BootTask.initial_flow` 指向的初始 TaskFlow，从 `_start` 承载启动编排，直到首次
+  真实 PID 1 switch 的 pre-commit 边界。
+- `BootIdleFlow` 是 `BootTask` 的后继 idle Flow。`BootInitFlow.Enable` 在不可逆切换前完成完整预检，
+  直接建立其 owner/active binding；这不建立第二个 Task carrier，也不改写 `BootTask.initial_flow`。
+- `KernelInitFlow` 是 `KernelInitTask.initial_flow` 指向的初始 Flow，承载 `kernel_init()`、pre-SMP、initcall 和 exec 前内核
   continuation。
-- `KthreaddFlow` 承载 `KthreaddTask` 的服务循环。
+- `KthreaddFlow` 是 `KthreaddTask.initial_flow` 指向的初始 Flow，承载服务循环。
 - PID 1 首次成功 exec 在执行点声明 fresh `UserAppFlow`。每次 fork/clone 为 fresh child Task 声明
   fresh fork-continuation `UserAppFlow`；child 后续每次 exec 再声明另一个 fresh `UserAppFlow`。
 
@@ -23,7 +26,8 @@ PID 1 首个用户 Flow、fork continuation Flow 和 child exec Flow 的临时�
 
 ## 所有权与 active binding
 
-每个 Flow 恰有一个 owner Task。`task_owns_flow(task, flow)` 记录 Task 曾经拥有该 Flow；
+每个 Flow 恰有一个 owner Task。`Task.initial_flow` 是创建时绑定且不随 exec/idle successor 改写的
+typed association；`task_owns_flow(task, flow)` 记录 Task 曾经拥有该 Flow；
 `task_active_flow_is(task, flow)` 记录当前 binding；`task_flow_handoff(task, old, new)` 记录历史。
 一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 owned Flow Online。不同 Task 不得
 共享同一 Flow 实例，应用映像名称也不得被提升为新的 Flow 类型。
@@ -45,10 +49,29 @@ Cleanup。Flow `Disable` 必须清除 active binding，`Cleanup` 只允许从 Of
 Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 Disable Task，存在未
 Destroyed Flow 时不得 Cleanup Task。
 
+## Dispatch guard 与 lossy 启动信号
+
+`TaskFlow` 不保存 guard 字段或 guard 状态，也不声明 `process_guard` 类型块。统一谓词
+`task_flow_dispatch_guard_satisfied(flow, window)` 在每次 lifecycle transition 或执行期 action
+尝试时即时求值，并且只有在以下两个条件同时满足时成立：
+
+1. `flow.parent` 的当前 lifecycle state 是 `Online`；
+2. `window.current_task` 的当前 `TaskRef` 解引用后，其 runtime identity 等于 `flow.parent`。
+
+每个 TaskFlow 推进点必须在自己的 `depends_on` 中显式依赖该谓词；类型继承只复用 parent 类型约束
+和已声明 process，不为 Flow 实例物化 guard。fresh dynamic Flow 的 Base-only structural `Bind` 只
+建立 owner/parent/entry-source，不执行 continuation，因此不受 dispatch guard 阻止。
+
+每个 Task 的初始 Flow 有两个 lossy `Preset` 信号来源：Task 提交 `Online` 后，以及对应
+DispatchWindow 在真实 switch commit 后更新 `current_task` 时。接收方只在自身仍为 `Base` 且即时
+dispatch guard 成立时推进；否则立即记录 discarded，不排队、不重试，也不阻塞发出方。Task 再次
+获得 CPU 时，非 Base 的 initial Flow 丢弃重复启动信号，并从 active Flow 保存的 continuation 恢复。
+
 ## 首个 binding 与 exec replacement
 
-boot idle 首个 binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在首次真实调度切换前直接提交
-owner 和 active binding，并到达 Ready；`BootInitFlow.Online` 随后在真实 BootTask→KernelInitTask
+boot idle successor binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在首次真实调度切换前直接提交
+owner 和 active binding，并到达 Ready；`BootTask.initial_flow` 仍指向 `BootInitFlow`。
+`BootInitFlow.Online` 随后在真实 BootTask→KernelInitTask
 switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时，`BootIdleFlow` continuation 才
 驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以保留 scheduler-owned 的 idle metadata、锁或
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。

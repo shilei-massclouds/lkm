@@ -1,17 +1,22 @@
 # BootInitFlow 编码指引
 
-`BootInitFlow` 是静态 Online `BootTask` 的 `PhaseObject` 子对象，不是 `TaskFlow`。model 来源为
+`BootInitFlow` 是静态 Online `BootTask.initial_flow` 指向的 TaskFlow；它继承 PhaseObject。model 来源为
 [`spec/model/phases/boot-init/phase.spec`](../../model/phases/boot-init/phase.spec)，实现落点为
 `impl/arceos_ex/src/phases/boot_init/mod.rs`。它从 `_start` 开始覆盖入口、Boot、Interrupt、rest_init
 和首次 PID 1 切换的 pre-commit 边界。
+
+`phases::boot_init::BootInitFlow` wrapper 必须内嵌统一 `TaskFlow` core，使用固定
+`TaskFlowRef::BOOT_INIT`，并与 boot-only `Task.initial_flow`/ownership 的 const 初始化保持一致。
+不得另存 `BOOT_INIT_FLOW_STATE` 或 guard bool；状态查询、checkpoint transition 和 owner/FlowRef
+查询都委托该 core。
 
 ## Transition 映射
 
 | Transition | Source -> target | depends / drives / ensures | continuation、checkpoint 与后续 |
 | --- | --- | --- | --- |
-| Preset | Base -> Prepared | `BootTask` 必须已是 Online；驱动 `EntryPreludePhase.Preset` 并要求其 Online | `preset_after_entry_prelude()` 提交 Prepared，发出 `BootInitFlow.Prepared`，返回 Kernel.Preset completion |
-| Setup | Prepared -> Ready | 驱动 `BootPhase.Preset`、随后驱动 `InterruptPhase.Preset` | `setup_after_interrupt()` 检查两棵子树 Online，提交 Ready，发出 `BootInitFlow.Ready`，返回 Kernel.Setup completion |
-| Enable | Ready -> Online | 驱动 `BootInitRestInitPhase.Preset`、`BootInitScheduleHandoffPhase.Preset`；后者只建立 `BootIdleFlow` Ready/owner/active binding 和首次切换预检 | `enable_after_boot_init_schedule_handoff()` 提交 Online，发出 `BootInitFlow.Online`，随后 Kernel.Enable 才调用真实 `Scheduler.schedule()` |
+| Preset | Base -> Prepared | 接受 BootTask Online 后的 lossy initial-flow signal；即时 guard 要求 parent BootTask Online 且 BootDispatchWindow 当前指向 BootTask；驱动 `EntryPreludePhase.Preset` 并要求其 Online | `preset_after_entry_prelude()` 提交 Prepared，发出 `BootInitFlow.Prepared`，返回 Kernel.Preset completion |
+| Setup | Prepared -> Ready | 再次即时检查同一 guard；驱动 `BootPhase.Preset`、随后驱动 `InterruptPhase.Preset` | `setup_after_interrupt()` 检查两棵子树 Online，提交 Ready，发出 `BootInitFlow.Ready`，返回 Kernel.Setup completion |
+| Enable | Ready -> Online | 再次即时检查同一 guard；驱动 `BootInitRestInitPhase.Preset`、`BootInitScheduleHandoffPhase.Preset`；后者只建立 `BootIdleFlow` Ready/owner/active binding 和首次切换预检 | `enable_after_boot_init_schedule_handoff()` 提交 Online，发出 `BootInitFlow.Online`，随后 Kernel.Enable 才调用真实 `Scheduler.schedule()` |
 
 ```text
 _start: Kernel.Started -> BootTask.Online -> BootInitFlow.Started
@@ -50,8 +55,9 @@ stack switch 与 SP 验证。
 
 ## 状态与 checkpoint
 
-`BOOT_INIT_FLOW_STATE` 持久记录四个 Phase 状态。`BootTask` 不由该状态机推进；所有边界都必须静默
-验证 `BootTask` 仍为 Online 且 canonical storage/PID/ref 未变化。
+统一 `TaskFlow` core 持久记录四个 Flow/Phase 状态。`BootTask` 不由该状态机推进；所有边界都必须
+即时验证 `BootTask` 仍为 Online、canonical storage/PID/ref 未变化，且 BootDispatchWindow 当前仍
+解引用到 BootTask。
 
 | 观察点 | owner state | 落点 |
 | --- | --- | --- |

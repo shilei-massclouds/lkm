@@ -48,6 +48,12 @@ boot-idle handoff 保持 Task identity，只替换 active Flow；fork/clone 才�
 创建 fresh Flow。syscall、files、credentials、signal、地址空间等资源归属于实际当前 Task，不能
 因为启动主线最初由 `KernelInitTask`（PID 1）执行就一律归入它。
 
+每个 Task 以 typed `initial_flow` association 固定记录创建时 Flow；BootTask、KernelInitTask 和
+KthreaddTask 分别绑定 `BootInitFlow`、`KernelInitFlow` 和 `KthreaddFlow`。TaskFlow 继承
+PhaseObject 并以 `parent: Task` 约束 owner，但不拥有 guard 字段、guard 状态或 `process_guard`
+类型块。每个 Flow lifecycle/执行 action 在尝试推进时即时检查 parent Task 为 Online，且对应
+DispatchWindow 的当前 TaskRef 解引用后就是该 parent。
+
 `TaskRef` / `TaskFlowRef` 是分别引用 Task / TaskFlow runtime identity 的稳定句柄。引用必须同时
 携带私有 storage slot 和非零 generation；storage 可在对象完整 Cleanup 后回收，但旧 generation
 永远不能重新变为有效。current-task slot、runqueue、scheduler、wait/reap record 和 checkpoint
@@ -191,10 +197,10 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 ### 启动执行阶段 BootInitFlow
 
-`BootInitFlow` 是静态 `BootTask` 的 PhaseObject 子对象，使用标准
+`BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
 `Base -> Prepared -> Ready -> Online` 生命周期。Preset 驱动 `EntryPreludePhase`，Setup 顺序驱动
 `BootPhase` 与 `InterruptPhase`，Enable 顺序驱动 `BootInitRestInitPhase` 与
-`BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` 首个 owner/active binding，并在首次真实 PID 1
+`BootInitScheduleHandoffPhase`，建立后继 `BootIdleFlow` 的 owner/active binding，并在首次真实 PID 1
 切换的 commit 边界到达 Online。
 
 ### 入口前导期EntryPreludePhase
@@ -248,7 +254,8 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 创建具有各自 Task identity
 与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask`，`BootInitScheduleHandoffPhase` 预检并提交首次
-调度事实。`BootIdleFlow` 是 BootTask 的首个 TaskFlow，不是从启动 TaskFlow handoff 得到。
+调度事实。`BootInitFlow` 是 BootTask 的 initial Flow；`BootIdleFlow` 是后继 active continuation，
+且不会改写 `BootTask.initial_flow`。
 
 #### BootInitRestInitPhase
 

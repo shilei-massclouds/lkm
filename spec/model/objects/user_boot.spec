@@ -2788,16 +2788,15 @@ object SyscallTable: ResourceObject {
                     declare child_ref of TaskRef;
                     declare fork_flow of UserAppFlow;
                     child_ref.Action::SetCurrent(task: child);
+                    fork_flow.Action::Bind(
+                        owner_task: child,
+                        entry_source: UserAppFlowEntrySource::ForkContinuation
+                    );
                     child.Transition::Preset(
                         parent_task: KernelInitTask,
                         task_ref: child_ref,
                         initial_flow: fork_flow
                     );
-                    fork_flow.Transition::Preset(
-                        owner_task: child,
-                        entry_source: UserAppFlowEntrySource::ForkContinuation
-                    );
-                    fork_flow.Transition::Setup;
                     UserTaskSet.Action::Insert(task: child, task_ref: child_ref);
                     TaskCreationCore.Action::CopyUserProcess(
                         src_process: KernelInitTask,
@@ -2820,9 +2819,7 @@ object SyscallTable: ResourceObject {
                         scheduler: Scheduler,
                         initial_flow: fork_flow
                     );
-                    child.Action::ActivateInitialFlow(flow: fork_flow);
-                    child.Transition::Enable(initial_flow: fork_flow);
-                    fork_flow.Transition::Enable;
+                    child.Transition::Enable;
                 }
 
                 ensures {
@@ -2851,11 +2848,18 @@ object SyscallTable: ResourceObject {
                     user_task_pid_and_lifecycle_independent(child);
                     task_owns_flow(child, fork_flow);
                     task_flow_owner_is(fork_flow, child);
+                    task_flow_parent_is(fork_flow, child);
                     task_flow_owner_exclusive(fork_flow);
-                    task_active_flow_is(child, fork_flow);
+                    task_initial_flow_is(child, fork_flow);
+                    task_initial_flow_binding_complete(child);
+                    task_initial_flow_binding_consistent(child);
                     task_at_most_one_flow_online(child);
                     child.state == State::Online;
-                    fork_flow.state == State::Online;
+                    fork_flow.state == State::Base;
+                    task_flow_start_signal_discarded(
+                        fork_flow,
+                        BootDispatchWindow
+                    );
                     syscall_clone_returns_task_ref(self, child_ref, child);
                     syscall_table_clone_observed(self);
                 }
@@ -2892,11 +2896,11 @@ object SyscallTable: ResourceObject {
 
                 drives {
                     declare exec_flow of UserAppFlow;
-                    exec_flow.Transition::Preset(
+                    exec_flow.Action::Bind(
                         owner_task: task,
                         entry_source: UserAppFlowEntrySource::ChildExec
                     );
-                    exec_flow.Transition::Setup;
+                    exec_flow.Transition::Preset;
                     UserBootPayload.Action::TryDefaultInitSequence;
                     ElfObject.Transition::Preset;
                     ElfObject.Transition::Setup;
@@ -3330,11 +3334,11 @@ object UserBootPayload: ResourceObject {
                     FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
                     FilesStruct.Action::EnableStdinBlockingWait;
-                    pid1_flow.Transition::Preset(
+                    pid1_flow.Action::Bind(
                         owner_task: KernelInitTask,
                         entry_source: UserAppFlowEntrySource::Pid1Exec
                     );
-                    pid1_flow.Transition::Setup;
+                    pid1_flow.Transition::Preset;
                     KernelInitFlow.Transition::Disable;
                     KernelInitTask.Action::CommitFlowHandoff(
                         from_flow: KernelInitFlow,

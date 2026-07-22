@@ -197,6 +197,10 @@ def _object_def_from_json(item: Any) -> ObjectDef:
             for child in _list(data, "children")
         ],
         attrs={str(key): str(value) for key, value in _object(data, "attrs").items()},
+        associations={
+            str(key): str(value)
+            for key, value in _object(data, "associations").items()
+        },
     )
 
 

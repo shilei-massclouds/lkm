@@ -95,12 +95,8 @@ impl ApIdleTaskRecord {
             .is_ok()
             && self.task.set_task_cpu(logical_id)
             && self.task.adopt_preset().is_ok()
-            && self
-                .flow
-                .preset(&mut self.task, TaskFlowRef::NONE, None)
-                .is_ok()
-            && self.flow.setup(None).is_ok()
-            && self.task.bind_initial_flow(&mut self.flow).is_ok()
+            && self.flow.bind(&mut self.task, TaskFlowRef::NONE).is_ok()
+            && self.task.bind_initial_flow(&self.flow).is_ok()
             && self.task.adopt_setup().is_ok()
     }
 
@@ -112,9 +108,10 @@ impl ApIdleTaskRecord {
             && self.task.entry() == TaskEntry::ApIdle
             && self.task.kind() == TaskKind::Idle
             && self.flow.owner() == self.task.task_ref()
-            && self.flow.state() == State::Ready
-            && self.flow.active()
-            && self.task.active_flow() == self.flow.flow_ref()
+            && self.flow.state() == State::Base
+            && !self.flow.active()
+            && self.task.initial_flow() == self.flow.flow_ref()
+            && !self.task.active_flow().is_valid()
     }
 }
 

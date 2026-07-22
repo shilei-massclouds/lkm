@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 
 from common.defaults import DEFAULT_TARGET
+from common.emits import parse_emit_expression
 from common.derive_types import (
     DerivationRecord,
     DerivationResult,
@@ -84,6 +86,9 @@ _HAS_SLOT_RE = re.compile(
 )
 _NO_SERVICE_RE = re.compile(r"\Ano_service\(\s*([A-Z][A-Za-z0-9_]*)\s*\)\Z")
 _SLOT_ENTRY_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*FixMapSlot(?:Range)?<")
+_ASSOCIATION_UPDATE_RE = re.compile(
+    r"\A(.+)\.([a-z][A-Za-z0-9_]*)\s*=\s*([^\s]+)\Z"
+)
 
 _AUTO_PREDICATES = {
     "aligned": "alignment",
@@ -838,6 +843,7 @@ class _Deriver:
         self.runtime_instances: dict[str, dict[str, object]] = {}
         self.declaration_occurrences: dict[tuple[str, str, int, str], int] = {}
         self.runtime_owned_flows: dict[str, set[str]] = {}
+        self.association_values = _initial_association_values(model)
 
     def run(self) -> DerivationResult:
         target_object, target_transition = self._parse_target()
@@ -1063,31 +1069,56 @@ class _Deriver:
 
 
     def _emit_blocks(self, transition: TransitionDef) -> bool:
-        for block in transition.decl.emits:
+        return self._emit_block_list(
+            transition.decl.emits,
+            transition,
+            default_receiver=transition.object_name,
+            bindings={},
+        )
+
+    def _emit_block_list(
+        self,
+        blocks: list[Block],
+        transition: TransitionDef,
+        *,
+        default_receiver: str,
+        bindings: dict[str, dict[str, str]],
+    ) -> bool:
+        for block in blocks:
             for entry, entry_span in block.entry_spans:
-                match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
-                if match is not None:
-                    emitted_object = transition.object_name
-                    emitted_transition = match.group(1)
-                else:
-                    match = _TARGET_RE.match(entry)
-                    if match is None:
-                        self._record(
-                            DerivationStatus.CONTRADICTION,
-                            f"cannot parse emits entry: {entry}",
-                            entry_span,
-                            object_name=transition.object_name,
-                            transition_name=transition.name,
-                            expression=entry,
-                            source_kind="emits",
-                        )
-                        return False
-                    emitted_object = match.group(1)
-                    emitted_transition = match.group(2)
-                if emitted_object not in self.model.objects:
+                emitted = parse_emit_expression(entry)
+                if emitted is None:
                     self._record(
                         DerivationStatus.CONTRADICTION,
-                        f"unknown emitted object: {emitted_object}",
+                        f"cannot parse emits entry: {entry}",
+                        entry_span,
+                        object_name=transition.object_name,
+                        transition_name=transition.name,
+                        expression=entry,
+                        source_kind="emits",
+                    )
+                    return False
+
+                receiver_expression = emitted.receiver or default_receiver
+                emitted_object = self._resolve_entity_path(
+                    receiver_expression,
+                    default_receiver=default_receiver,
+                    bindings=bindings,
+                )
+                if emitted_object is None:
+                    if emitted.lossy:
+                        self._record_lossy_discard(
+                            transition,
+                            entry,
+                            entry_span,
+                            receiver_expression,
+                            emitted.transition,
+                            "receiver did not resolve",
+                        )
+                        continue
+                    self._record(
+                        DerivationStatus.CONTRADICTION,
+                        f"unknown emitted receiver: {receiver_expression}",
                         entry_span,
                         object_name=transition.object_name,
                         transition_name=transition.name,
@@ -1098,25 +1129,71 @@ class _Deriver:
                 self._record(
                     DerivationStatus.PROVED,
                     "completion event emitted: "
-                    f"{emitted_object}.Transition::{emitted_transition}",
+                    f"{emitted_object}.Transition::{emitted.transition}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,
                     expression=entry,
-                    source_kind="emits",
+                    source_kind="emits_lossy" if emitted.lossy else "emits",
                     proof_class="completion_event",
                     proof_provider="transition_completion",
                 )
-                if self._derive_transition(
-                    emitted_object,
-                    emitted_transition,
-                    edge_kind="emits",
-                ):
+
+                snapshot = self._lossy_snapshot() if emitted.lossy else None
+                if emitted_object in self.runtime_instances:
+                    receiver = {
+                        "type": str(
+                            self.runtime_instances[emitted_object]["declared_type"]
+                        ),
+                        "value": emitted_object,
+                        "runtime_instance_id": emitted_object,
+                    }
+                    committed = self._commit_runtime_transition(
+                        receiver,
+                        emitted.transition,
+                        emitted.args,
+                        bindings,
+                        entry_span,
+                        transition,
+                    )
+                else:
+                    committed = self._derive_transition(
+                        emitted_object,
+                        emitted.transition,
+                        edge_kind="emits_lossy" if emitted.lossy else "emits",
+                        args=emitted.args,
+                        bindings=bindings,
+                    )
+                if committed:
+                    continue
+                if emitted.lossy and snapshot is not None:
+                    attempt_records = self.records[int(snapshot["records_len"]) :]
+                    failure_reason = next(
+                        (
+                            record.message
+                            for record in reversed(attempt_records)
+                            if record.status
+                            in {
+                                DerivationStatus.BLOCKED,
+                                DerivationStatus.CONTRADICTION,
+                            }
+                        ),
+                        "target transition was not enabled",
+                    )
+                    self._restore_lossy_snapshot(snapshot)
+                    self._record_lossy_discard(
+                        transition,
+                        entry,
+                        entry_span,
+                        emitted_object,
+                        emitted.transition,
+                        failure_reason,
+                    )
                     continue
                 self._record(
                     DerivationStatus.BLOCKED,
                     "emitted transition blocked: "
-                    f"{_transition_label(emitted_object, emitted_transition)}",
+                    f"{_transition_label(emitted_object, emitted.transition)}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,
@@ -1125,6 +1202,67 @@ class _Deriver:
                 )
                 return False
         return True
+
+    def _record_lossy_discard(
+        self,
+        transition: TransitionDef,
+        expression: str,
+        span: SourceSpan,
+        receiver: str,
+        emitted_transition: str,
+        reason: str,
+    ) -> None:
+        self._record(
+            DerivationStatus.PROVED,
+            "lossy completion event discarded: "
+            f"{receiver}.Transition::{emitted_transition} ({reason})",
+            span,
+            object_name=transition.object_name,
+            transition_name=transition.name,
+            expression=expression,
+            source_kind="emits_lossy_discarded",
+            proof_class="lossy_completion_event",
+            proof_provider="dynamic_receiver_snapshot",
+        )
+
+    def _lossy_snapshot(self) -> dict[str, object]:
+        trace_children = (
+            len(self.trace_stack[-1].children)
+            if self.trace_stack
+            else len(self.trace)
+        )
+        return {
+            "states": dict(self.states),
+            "records_len": len(self.records),
+            "transitions_len": len(self.transitions),
+            "trace_children": trace_children,
+            "runtime_instances": deepcopy(self.runtime_instances),
+            "runtime_owned_flows": deepcopy(self.runtime_owned_flows),
+            "association_values": deepcopy(self.association_values),
+            "declaration_occurrences": dict(self.declaration_occurrences),
+            "validated_states": set(self.validated_states),
+            "state_validation_transitions": dict(self.state_validation_transitions),
+            "proved_expressions": set(self.proved_expressions),
+        }
+
+    def _restore_lossy_snapshot(self, snapshot: dict[str, object]) -> None:
+        self.states = dict(snapshot["states"])
+        del self.records[int(snapshot["records_len"]) :]
+        del self.transitions[int(snapshot["transitions_len"]) :]
+        trace_children = int(snapshot["trace_children"])
+        if self.trace_stack:
+            del self.trace_stack[-1].children[trace_children:]
+        else:
+            del self.trace[trace_children:]
+        self.runtime_instances = deepcopy(snapshot["runtime_instances"])
+        self.runtime_owned_flows = deepcopy(snapshot["runtime_owned_flows"])
+        self.association_values = deepcopy(snapshot["association_values"])
+        self.declaration_occurrences = dict(snapshot["declaration_occurrences"])
+        self.validated_states = set(snapshot["validated_states"])
+        self.state_validation_transitions = dict(
+            snapshot["state_validation_transitions"]
+        )
+        self.proved_expressions = set(snapshot["proved_expressions"])
 
 
     def _drive_blocks(
@@ -2090,6 +2228,8 @@ class _Deriver:
                     runtime_id, initial_flow, span, transition_name
                 ):
                     return False
+                if initial_flow:
+                    self.runtime_instances[runtime_id]["initial_flow"] = initial_flow
         if _type_is_or_inherits(self.model, declared_type, "TaskFlow"):
             if transition_name == "Preset":
                 owner_task = self._runtime_argument_value(
@@ -2159,13 +2299,22 @@ class _Deriver:
             proof_class="runtime_lifecycle_commit",
             proof_provider=(lifecycle_type.name if lifecycle_type is not None else "derive"),
         )
-        return self._validate_runtime_state(
+        if not self._validate_runtime_state(
             runtime_id,
             target_state,
             entered_by=lifecycle_transition,
             args=args,
             bindings=bindings,
-        )
+        ):
+            return False
+        if lifecycle_transition is not None and not self._emit_block_list(
+            bound_decl.emits,
+            bound_transition,
+            default_receiver=runtime_id,
+            bindings=bindings,
+        ):
+            return False
+        return True
 
     def _illegal_runtime_transition(
         self,
@@ -2444,6 +2593,15 @@ class _Deriver:
                 _substitute_body_member_bindings(member, replacements)
                 for member in process.body_members
             ]
+            guarded_dependencies = _substitute_blocks(
+                process.depends_on, replacements
+            )
+            if not self._verify_dynamic_guard_blocks(
+                guarded_dependencies,
+                transition,
+                bindings=drive_bindings,
+            ):
+                return False
             if not self._execute_body_members(
                 members,
                 transition,
@@ -2451,6 +2609,18 @@ class _Deriver:
                 bindings=drive_bindings,
                 process_parent=process_parent,
                 result_hints=local_result_hints,
+            ):
+                return False
+            emitted_blocks = [
+                member.block
+                for member in members
+                if member.kind == "emits" and member.block is not None
+            ]
+            if emitted_blocks and not self._emit_block_list(
+                emitted_blocks,
+                transition,
+                default_receiver=self_name,
+                bindings=drive_bindings,
             ):
                 return False
         finally:
@@ -2568,6 +2738,14 @@ class _Deriver:
     ) -> bool:
         for member in members:
             if member.block is not None:
+                if member.kind == "updates":
+                    if not self._apply_association_updates(
+                        member.block,
+                        transition,
+                        bindings,
+                    ):
+                        return False
+                    continue
                 if member.kind != "drives":
                     continue
                 if not self._drive_blocks(
@@ -2591,6 +2769,62 @@ class _Deriver:
                 result_hints=result_hints,
             ):
                 return False
+        return True
+
+    def _apply_association_updates(
+        self,
+        block: Block,
+        transition: TransitionDef,
+        bindings: dict[str, dict[str, str]],
+    ) -> bool:
+        for entry, entry_span in block.entry_spans:
+            match = _ASSOCIATION_UPDATE_RE.match(entry)
+            if match is None:
+                self._record(
+                    DerivationStatus.CONTRADICTION,
+                    f"cannot parse association update: {entry}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="updates",
+                )
+                return False
+            receiver_expression, member, value_expression = match.groups()
+            receiver = self._resolve_entity_path(
+                receiver_expression,
+                default_receiver=transition.object_name,
+                bindings=bindings,
+            )
+            value = bindings.get(value_expression, {}).get(
+                "value", value_expression
+            )
+            if receiver is None:
+                self._record(
+                    DerivationStatus.CONTRADICTION,
+                    f"unknown association update receiver: {receiver_expression}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=entry,
+                    source_kind="updates",
+                )
+                return False
+            if receiver in self.runtime_instances:
+                self.runtime_instances[receiver][member] = value
+            else:
+                self.association_values.setdefault(receiver, {})[member] = value
+            self._record(
+                DerivationStatus.PROVED,
+                f"association update: {receiver}.{member} = {value}",
+                entry_span,
+                object_name=transition.object_name,
+                transition_name=transition.name,
+                expression=entry,
+                source_kind="updates",
+                proof_class="association_update",
+                proof_provider="type_process_commit",
+            )
         return True
 
     def _commit_within_boundary(
@@ -2840,7 +3074,16 @@ class _Deriver:
         for block in blocks:
             for entry, entry_span in block.entry_spans:
                 canonical_entry = _canonicalize_ref_aliases(entry, bindings)
-                if _STATE_EXPR_RE.match(entry):
+                guard_result = self._verify_dispatch_guard_expression(
+                    canonical_entry,
+                    entry_span,
+                    kind,
+                    transition,
+                    state,
+                )
+                if guard_result is not None:
+                    ok = guard_result and ok
+                elif _STATE_EXPR_RE.match(entry):
                     ok = (
                         self._verify_state_expression(
                             entry, entry_span, kind, transition, state
@@ -2931,6 +3174,178 @@ class _Deriver:
                     )
         return ok
 
+    def _verify_dynamic_guard_blocks(
+        self,
+        blocks: list[Block],
+        transition: TransitionDef,
+        *,
+        bindings: dict[str, dict[str, str]],
+    ) -> bool:
+        ok = True
+        for block in blocks:
+            for entry, entry_span in block.entry_spans:
+                canonical = _canonicalize_ref_aliases(entry, bindings)
+                result = self._verify_dispatch_guard_expression(
+                    canonical,
+                    entry_span,
+                    "type process depends_on",
+                    transition,
+                    None,
+                )
+                if result is not None:
+                    ok = result and ok
+        return ok
+
+    def _verify_dispatch_guard_expression(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        transition: TransitionDef | None,
+        state: StateDef | None,
+    ) -> bool | None:
+        parsed = _predicate_args(expression)
+        if parsed is None or parsed[0] != "task_flow_dispatch_guard_satisfied":
+            return None
+        args = parsed[1]
+        if len(args) != 2:
+            return False
+        flow, window = args
+        context_object = _context_object(transition, state)
+        if flow == "self":
+            flow = context_object or flow
+        if window == "self":
+            window = context_object or window
+        parent = self._entity_parent(flow)
+        current_ref = self._entity_association_value(window, "current_task")
+        current_task = self._dereference_entity(current_ref)
+        satisfied = (
+            parent is not None
+            and self.states.get(parent) == "Online"
+            and current_task == parent
+        )
+        if satisfied:
+            self._record_builtin_proof(
+                expression,
+                span,
+                kind,
+                transition,
+                state,
+                proof_class="dynamic_dispatch_guard",
+                proof_provider="current_state_snapshot",
+            )
+            return True
+        self._record(
+            DerivationStatus.BLOCKED,
+            "dynamic TaskFlow dispatch guard failed: "
+            f"flow={flow}, parent={parent}, parent_state="
+            f"State::{self.states.get(parent)}, window={window}, "
+            f"current_task={current_task}",
+            span,
+            object_name=context_object,
+            transition_name=transition.name if transition is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate="task_flow_dispatch_guard_satisfied",
+            proof_class="dynamic_dispatch_guard",
+            proof_provider="current_state_snapshot",
+        )
+        return False
+
+    def _resolve_entity_path(
+        self,
+        receiver: str,
+        *,
+        default_receiver: str,
+        bindings: dict[str, dict[str, str]],
+    ) -> str | None:
+        receiver = receiver.strip()
+        if receiver == "self":
+            receiver = default_receiver
+        elif receiver.startswith("self."):
+            receiver = default_receiver + receiver[len("self") :]
+
+        binding = bindings.get(receiver)
+        if binding is not None and binding.get("value"):
+            receiver = binding["value"]
+
+        entities = [
+            *self.runtime_instances,
+            *self.model.objects,
+            *self.association_values,
+        ]
+        root = next(
+            (
+                entity
+                for entity in sorted(set(entities), key=len, reverse=True)
+                if receiver == entity or receiver.startswith(entity + ".")
+            ),
+            None,
+        )
+        if root is None:
+            root, separator, remainder = receiver.partition(".")
+            parts = remainder.split(".") if separator else []
+        else:
+            remainder = receiver[len(root) :].removeprefix(".")
+            parts = remainder.split(".") if remainder else []
+
+        root_binding = bindings.get(root)
+        current = (
+            root_binding.get("value", root)
+            if root_binding is not None
+            else root
+        )
+        for member in parts:
+            current = self._dereference_entity(current)
+            if current is None:
+                return None
+            current = self._entity_association_value(current, member)
+            if current is None:
+                return None
+        return self._dereference_entity(current, only_refs=False)
+
+    def _entity_parent(self, entity: str) -> str | None:
+        if entity in self.runtime_instances:
+            owner = self.runtime_instances[entity].get("owner_task")
+            return str(owner) if owner is not None else None
+        obj = self.model.objects.get(entity)
+        return obj.parent if obj is not None else None
+
+    def _entity_association_value(
+        self, entity: str | None, member: str
+    ) -> str | None:
+        if entity is None:
+            return None
+        runtime = self.runtime_instances.get(entity)
+        if runtime is not None and runtime.get(member) is not None:
+            return str(runtime[member])
+        value = self.association_values.get(entity, {}).get(member)
+        if value is not None:
+            return value
+        if member == "parent":
+            return self._entity_parent(entity)
+        return None
+
+    def _dereference_entity(
+        self, entity: str | None, *, only_refs: bool = True
+    ) -> str | None:
+        if entity is None:
+            return None
+        runtime = self.runtime_instances.get(entity)
+        if runtime is not None:
+            declared_type = str(runtime.get("declared_type", ""))
+            if _type_is_or_inherits(self.model, declared_type, "TaskRef"):
+                target = runtime.get("ref_target")
+                return str(target) if target is not None else None
+            return entity
+        static_target = _ref_value_target_object(self.model, entity)
+        if static_target is not None:
+            return static_target
+        if only_refs and entity not in self.model.objects:
+            return None
+        return entity
+
     def _verify_state_expression(
         self,
         expression: str,
@@ -2977,6 +3392,28 @@ class _Deriver:
         state: StateDef | None,
     ) -> bool:
         stripped = expression.strip()
+        parsed = _predicate_args(stripped)
+        if parsed is not None:
+            predicate, raw_args = parsed
+            context_object = _context_object(transition, state)
+            args = tuple(
+                self._resolve_predicate_entity(arg, context_object)
+                for arg in raw_args
+            )
+            relation_holds = self._structural_relation_holds(
+                predicate, args
+            )
+            if relation_holds:
+                self._record_builtin_proof(
+                    expression,
+                    span,
+                    kind,
+                    transition,
+                    state,
+                    proof_class="structural_association",
+                    proof_provider="model_associations",
+                )
+                return True
         if stripped == "readonly(self)" and state is not None:
             obj = self.model.objects.get(state.object_name)
             if obj is not None and obj.decl.properties.get("access") == "Access::ReadOnly":
@@ -3021,6 +3458,64 @@ class _Deriver:
                 )
                 return True
 
+        return False
+
+    def _resolve_predicate_entity(
+        self, expression: str, context_object: str | None
+    ) -> str:
+        expression = expression.strip()
+        if expression == "self" and context_object is not None:
+            return context_object
+        if "." not in expression:
+            return expression
+        resolved = self._resolve_entity_path(
+            expression,
+            default_receiver=context_object or expression.partition(".")[0],
+            bindings={},
+        )
+        return resolved or expression
+
+    def _structural_relation_holds(
+        self,
+        predicate: str,
+        args: tuple[str, ...],
+    ) -> bool:
+        if predicate == "task_ref_targets" and len(args) == 2:
+            return self._dereference_entity(args[0]) == args[1]
+        if predicate == "dispatch_window_owned_by_scheduler" and len(args) == 2:
+            return self._entity_parent(args[0]) == args[1]
+        if predicate == "dispatch_window_cpu_is" and len(args) == 2:
+            return self._entity_association_value(args[0], "cpu") == args[1]
+        if predicate == "dispatch_window_current_ref_is" and len(args) == 2:
+            return self._entity_association_value(args[0], "current_task") == args[1]
+        if predicate == "dispatch_window_current_task_is" and len(args) == 2:
+            current_ref = self._entity_association_value(args[0], "current_task")
+            return self._dereference_entity(current_ref) == args[1]
+        if predicate == "dispatch_window_has_no_event_queue" and len(args) == 1:
+            obj = self.model.objects.get(args[0])
+            return obj is not None and _type_is_or_inherits(
+                self.model, obj.kind, "DispatchWindowObject"
+            )
+        if predicate in {"task_initial_flow_is", "task_owns_flow"} and len(args) == 2:
+            initial = self._entity_association_value(args[0], "initial_flow")
+            if predicate == "task_initial_flow_is":
+                return initial == args[1]
+            return self._entity_parent(args[1]) == args[0]
+        if predicate in {
+            "task_initial_flow_binding_complete",
+            "task_initial_flow_binding_consistent",
+            "task_initial_flow_owned",
+        } and len(args) == 1:
+            initial = self._entity_association_value(args[0], "initial_flow")
+            return initial is not None and self._entity_parent(initial) == args[0]
+        if predicate in {"task_flow_owner_is", "task_flow_parent_is"} and len(args) == 2:
+            return self._entity_parent(args[0]) == args[1]
+        if predicate == "task_flow_initial_binding_consistent" and len(args) == 1:
+            parent = self._entity_parent(args[0])
+            return (
+                parent is not None
+                and self._entity_association_value(parent, "initial_flow") == args[0]
+            )
         return False
 
     def _try_prove_transition_ensures(
@@ -3883,7 +4378,7 @@ def _ref_process_self_name(
 def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str | None:
     if not ref_value:
         return None
-    if ref_value == "CurrentTaskRef":
+    if ref_value in {"CurrentTaskRef", "BootTaskRef"}:
         return "BootTask"
     if ref_value == "CurrentRunQueueRef":
         return "BootRunQueue"
@@ -3909,6 +4404,16 @@ def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str |
             if match is not None:
                 return match.group(1)
     return None
+
+
+def _initial_association_values(
+    model: ObjectModel,
+) -> dict[str, dict[str, str]]:
+    return {
+        obj.name: dict(obj.associations)
+        for obj in model.objects.values()
+        if obj.associations
+    }
 
 
 def _normalize_ref_process_expression(

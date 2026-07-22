@@ -251,6 +251,10 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
         "arceos_ex prepare event failed\n",
     );
     crate::phases::shutdown_on_error(
+        crate::context::context().boot_task.enable_at_entry(),
+        "arceos_ex boot task enable failed\n",
+    );
+    crate::phases::shutdown_on_error(
         crate::systems::kernel::adopt_head_preset_start(),
         "arceos_ex kernel preset start failed\n",
     );

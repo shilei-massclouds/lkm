@@ -19,6 +19,13 @@ re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需
 这些都是 `arceos_ex` crate 内私有 lowering 调整，不新增 facade、feature、crate 或兼容 alias；
 `spec/compose/main.spec` 已复核，组合语义无需修改。
 
+2026-07-22 TaskFlow initial-flow/dispatch guard 复核：`BootInitFlow` 现在以
+`phases::boot_init::BootInitFlow` 私有 wrapper 内嵌统一 `objects::task_flow::TaskFlow` core，并在既有
+`Context` 中恢复一个模型要求的实例字段；新增的 `DispatchWindow` 仍是既有 scheduler/objects crate
+内部对象。该调整不新增 crate、feature、facade 或 public compatibility API，`spec/compose/main.spec`
+无需改变。上一条删除的是当时语义错误的临时平行 module/field，本条只恢复已确认模型对象的统一
+core lowering，不恢复平行生命周期实现。
+
 `Composition Phase` 位于 `Object Coding Phase` 之后。它不重新定义模型对象、状态、事件、依赖和阶段顺序，而是在对象级编码实现已经满足规格语义的前提下，决定这些对象如何被组合、封装和发布。
 
 ## 阶段目标

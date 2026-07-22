@@ -484,7 +484,7 @@ class ModelToolTests(unittest.TestCase):
                     "PayloadPhase",
                 ],
             )
-            self.assertEqual(objects["BootTask"]["initial_state"], "Online")
+            self.assertEqual(objects["BootTask"]["initial_state"], "Ready")
             self.assertEqual(objects["BootInitFlow"]["parent"], "BootTask")
             self.assertEqual(
                 objects["BootInitFlow"]["children"],
@@ -532,11 +532,12 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertEqual(
                 [entry["text"] for entry in kernel_preset["drives"][0]["entries"]],
-                ["BootInitFlow.Transition::Preset"],
+                ["BootTask.Transition::Enable"],
             )
+            self.assertEqual(kernel_setup["drives"], [])
             self.assertEqual(
-                [entry["text"] for entry in kernel_setup["drives"][0]["entries"]],
-                ["BootInitFlow.Transition::Setup"],
+                [entry["text"] for entry in kernel_setup["emits"][0]["entries"]],
+                ["Transition::Enable"],
             )
             self.assertEqual(
                 [entry["text"] for entry in boot_init_setup["drives"][0]["entries"]],
@@ -703,6 +704,92 @@ class ModelToolTests(unittest.TestCase):
             data = read_json(model)
             emits = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Preset"]["emits"]
             self.assertEqual(emits[0]["entries"][0]["text"], "B.Transition::Setup")
+
+    def test_emits_allows_lossy_association_path_and_task_ref_dereference(self) -> None:
+        source = """
+            type TaskFlow {
+                lifecycle {
+                    Transition::Preset {}
+                }
+            }
+
+            type Task {
+                associations {
+                    initial_flow: TaskFlow;
+                }
+            }
+
+            type TaskRef {}
+
+            type DispatchWindow {
+                associations {
+                    mutable current_task: TaskRef;
+                }
+                processes {
+                    Transition::SwitchTo {
+                        emits {
+                            lossy self.current_task.initial_flow.Transition::Preset;
+                        }
+                    }
+                }
+            }
+
+            object Flow: TaskFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {}
+                    }
+                }
+                state State::Prepared {}
+            }
+
+            object BootTask: Task {
+                initial_state: State::Online;
+                associations {
+                    initial_flow = Flow;
+                }
+                state State::Online {}
+            }
+
+            object BootDispatchWindow: DispatchWindow {
+                initial_state: State::Online;
+                associations {
+                    current_task = BootTaskRef;
+                }
+                state State::Online {}
+            }
+
+            object ComputerProject: Task {
+                initial_state: State::Base;
+                associations {
+                    initial_flow = Flow;
+                }
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            emits {
+                                lossy self.initial_flow.Transition::Preset;
+                            }
+                        }
+                    }
+                }
+                state State::Prepared {}
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+
+        self.assertEqual(exit_code, 0, stderr)
+        self.assertEqual(
+            data["model"]["objects"]["BootTask"]["associations"],
+            {"initial_flow": "Flow"},
+        )
+        entry = data["model"]["objects"]["ComputerProject"]["states"]["Base"][
+            "transitions"
+        ]["Preset"]["emits"][0]["entries"][0]
+        self.assertEqual(entry["text"], "lossy self.initial_flow.Transition::Preset")
 
     def test_emits_must_target_transition_enabled_from_target_state(self) -> None:
         source = """

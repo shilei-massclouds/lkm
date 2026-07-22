@@ -6,14 +6,15 @@ CPU 归属、调度状态、任务资源引用和 `TaskThreadContext`。`BootTas
 process persona 或 idle-task carrier 类型。
 
 Task 当前执行 continuation 的独立生命周期由 [`TaskFlow`](task-flow.md) 承载。exec 可以替换
-active Flow，但不能替换 Task；fork/clone 才创建新的 Task，并为它建立独立 Flow。启动阶段在首个
-TaskFlow 建立前由 `BootTask` 的 `BootInitFlow` PhaseObject 子对象编排，不把阶段伪装成 TaskFlow。
+active Flow，但不能替换 Task；fork/clone 才创建新的 Task，并为它建立独立 Flow。每个 Task 以
+typed `initial_flow` association 固定记录创建时的初始 Flow；`BootInitFlow` 是 `BootTask` 的初始
+TaskFlow，同时因 TaskFlow 继承 PhaseObject 而编排启动阶段。
 
 ## 静态与动态实例的稳定身份
 
 - `BootTask` 对应静态 `init_task` / PID 0 / swapper，在镜像入口前已经存在并从首个内核指令起
-  处于 `Online`。`BootInitFlow` 是它的启动 PhaseObject 子对象，不是 TaskFlow；`sched_init()` 只为
-  同一 Task 建立 idle 角色，`BootIdleFlow` 是该 Task 的首个 owned/active TaskFlow，不建立第二个
+  处于 `Online`。`BootInitFlow` 是它的初始 TaskFlow；`sched_init()` 只为
+  同一 Task 建立 idle 角色，`BootIdleFlow` 是该 Task 的后继 owned/active TaskFlow，不建立第二个
   idle Task carrier。
 - `KernelInitTask` 对应 `copy_process()` 创建的稳定 PID 1。首次成功 exec 只替换 active Flow，Task
   身份仍是 `KernelInitTask`。
@@ -53,10 +54,11 @@ preemption 状态或 active TaskFlow 放入 invariant。boot-only const 初始�
 `tp` 使用物理地址且初始抢占关闭条件已建立，Ready 表示 `EarlyVm` 下的虚拟地址绑定已提交。它不
 建立新的 Task identity/storage/Flow ownership，也不进入公共 Task 或 Context API。
 
-普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、初始 Flow ownership 与 clone
+普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
 context、scheduler entity 和 New/not-enqueued 状态；`Enable` 统一消费 running、runqueue publication
-与初始 Flow binding，并保证恰有一个 active Flow。PID 1 入口、`CLONE_FS`、kthreadd flags、provider
+与初始 Flow binding并提交 Task Online；它发出的初始 Flow `Preset` 是 lossy 信号，不保证 Flow 已经
+启动或 active。PID 1 入口、`CLONE_FS`、kthreadd flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
 ## TaskRef 与身份存储
@@ -76,8 +78,10 @@ exec 顺序拥有多个 Flow，但任一时刻最多一个 owned Flow Online；�
 
 普通 Task `Disable` 前必须保证所有 owned Flow 已退出 Online，且 exit 路径已按序清除 active binding；
 Task `Cleanup` 前必须保证所有 owned Flow 已到达 Destroyed。Flow alias 或内部存储退出词法/表槽范围
-不表示 Flow 已被销毁。`BootTask` 不退出；其首个 TaskFlow binding 在 `BootInitFlow.Enable` 的调度
-切换预检中建立。具体 Flow lifecycle 和 exec replacement 规则见
+不表示 Flow 已被销毁。`BootTask` 不退出；其 initial Flow 是 `BootInitFlow`，后继
+`BootIdleFlow` 的 active binding 在 `BootInitFlow.Enable` 的调度切换预检中建立。TaskFlow 的每次
+推进还必须动态检查 parent Online 与对应 DispatchWindow 当前指向该 parent。具体 Flow lifecycle、
+lossy initial-flow 启动和 exec replacement 规则见
 [`TaskFlow`](task-flow.md)。
 
 ## 当前能力边界

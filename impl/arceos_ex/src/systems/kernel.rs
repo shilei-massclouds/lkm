@@ -61,9 +61,13 @@ pub fn switch_after_boot_init() -> ! {
     let schedule_result = ctx.scheduler.schedule(
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
-        &ctx.kthreadd_task,
+        &mut ctx.kernel_init_flow,
+        &mut ctx.kthreadd_task,
+        &mut ctx.kthreadd_flow,
+        &mut ctx.user_task_set,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
+        &mut ctx.boot_dispatch_window,
     );
     crate::phases::shutdown_on_error(schedule_result, "arceos_ex first schedule failed\n");
     crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);

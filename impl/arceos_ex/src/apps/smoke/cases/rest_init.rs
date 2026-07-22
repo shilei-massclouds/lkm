@@ -13,6 +13,27 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
+    let accepted_before = ctx.boot_dispatch_window.start_signal_accepted_count();
+    let discarded_before = ctx.boot_dispatch_window.start_signal_discarded_count();
+    if ctx
+        .kernel_init_flow
+        .start_initial_on_dispatch(&mut ctx.kernel_init_task, &mut ctx.boot_dispatch_window)
+        .is_err()
+        || ctx
+            .kthreadd_flow
+            .start_initial_on_dispatch(&mut ctx.kthreadd_task, &mut ctx.boot_dispatch_window)
+            .is_err()
+        || ctx.boot_dispatch_window.start_signal_accepted_count() != accepted_before
+        || ctx.boot_dispatch_window.start_signal_discarded_count()
+            != discarded_before.wrapping_add(2)
+        || ctx.kernel_init_flow.state() != State::Online
+        || !ctx.kernel_init_flow.active()
+        || ctx.kthreadd_flow.state() != State::Base
+        || ctx.kthreadd_flow.active()
+    {
+        printk::write_str("task flow lossy dispatch guard facts invalid\n");
+        return SmokeResult::Failed;
+    }
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         printk::write_str("boot CPU facts missing\n");
         return SmokeResult::Failed;
@@ -35,6 +56,7 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_idle_flow.active()
         || ctx.boot_idle_flow.owner() != TaskRef::BOOT
         || ctx.boot_idle_flow.flow_ref() != TaskFlowRef::BOOT_IDLE
+        || ctx.boot_task.task().initial_flow() != TaskFlowRef::BOOT_INIT
         || ctx.boot_task.task().active_flow() != TaskFlowRef::BOOT_IDLE
     {
         printk::write_str("boot task/flow carrier facts invalid\n");
@@ -122,7 +144,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.provider_ready()
         || !ctx.kthreadd_task.pid_lookup_under_rcu_read()
         || !ctx.kthreadd_task.pid_lookup_rcu_guard_balanced()
-        || !ctx.kthreadd_task.schedule_loop_active()
+        || ctx.kthreadd_task.schedule_loop_active()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
         || ctx.kthreadd_task_pi_lock.irqsave_entered_count() == 0
@@ -131,11 +153,12 @@ pub fn run() -> SmokeResult {
             .kthreadd_task_pi_lock
             .irqrestore_restored_before_preemption_enabled()
         || ctx.kthreadd_task.task_ref() != TaskRef::KTHREADD
-        || ctx.kthreadd_flow.state() != State::Online
-        || !ctx.kthreadd_flow.active()
+        || ctx.kthreadd_flow.state() != State::Base
+        || ctx.kthreadd_flow.active()
         || ctx.kthreadd_flow.owner() != TaskRef::KTHREADD
         || ctx.kthreadd_flow.flow_ref() != TaskFlowRef::KTHREADD
-        || ctx.kthreadd_task.task().active_flow() != TaskFlowRef::KTHREADD
+        || ctx.kthreadd_task.task().initial_flow() != TaskFlowRef::KTHREADD
+        || ctx.kthreadd_task.task().active_flow().is_valid()
     {
         printk::write_str("kthreadd task facts invalid\n");
         return SmokeResult::Failed;

@@ -128,6 +128,82 @@ pub enum TaskKind {
     TestOnly,
 }
 
+/// Scheduler-owned per-CPU view committed at the real task-switch boundary.
+///
+/// This is deliberately distinct from `CurrentTaskSlot`: the latter models
+/// the architecture-visible current-task pointer, while this object is the
+/// dispatch predicate input used by TaskFlow lifecycle and action checks.
+pub struct DispatchWindow {
+    current_task: TaskRef,
+    switch_committed_count: usize,
+    start_signal_accepted_count: usize,
+    start_signal_discarded_count: usize,
+}
+
+#[allow(dead_code)]
+impl DispatchWindow {
+    pub const fn new_boot() -> Self {
+        Self {
+            current_task: TaskRef::BOOT,
+            switch_committed_count: 0,
+            start_signal_accepted_count: 0,
+            start_signal_discarded_count: 0,
+        }
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) const fn new_for_task(current_task: TaskRef) -> Self {
+        Self {
+            current_task,
+            switch_committed_count: 1,
+            start_signal_accepted_count: 0,
+            start_signal_discarded_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        State::Online
+    }
+
+    pub const fn current_task(&self) -> TaskRef {
+        self.current_task
+    }
+
+    pub const fn switch_committed_count(&self) -> usize {
+        self.switch_committed_count
+    }
+
+    pub const fn start_signal_accepted_count(&self) -> usize {
+        self.start_signal_accepted_count
+    }
+
+    pub const fn start_signal_discarded_count(&self) -> usize {
+        self.start_signal_discarded_count
+    }
+
+    pub fn commit_switch_to(&mut self, next: TaskRef) -> EventResult {
+        if !next.is_valid() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                State::Online,
+                State::Online,
+                State::Online,
+            );
+        }
+        self.current_task = next;
+        self.switch_committed_count = self.switch_committed_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn record_start_signal(&mut self, accepted: bool) {
+        if accepted {
+            self.start_signal_accepted_count = self.start_signal_accepted_count.wrapping_add(1);
+        } else {
+            self.start_signal_discarded_count = self.start_signal_discarded_count.wrapping_add(1);
+        }
+    }
+}
+
 pub struct TaskCpuState {
     cpu_id: usize,
 }
@@ -166,6 +242,7 @@ pub struct Task {
     affinity_cpu_id: usize,
     no_setaffinity: bool,
     switch_ctx: TaskSwitchContext,
+    initial_flow: TaskFlowRef,
     owned_flows: [TaskFlowRef; TASK_OWNED_FLOW_CAPACITY],
     active_flow: TaskFlowRef,
 }
@@ -188,6 +265,7 @@ impl Task {
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             switch_ctx: TaskSwitchContext::new(),
+            initial_flow: TaskFlowRef::NONE,
             owned_flows: [TaskFlowRef::NONE; TASK_OWNED_FLOW_CAPACITY],
             active_flow: TaskFlowRef::NONE,
         }
@@ -198,9 +276,9 @@ impl Task {
     /// This is deliberately separate from the reusable Task lifecycle: the
     /// linker-visible init task exists before `_start` and never performs
     /// Preset/Setup/Enable.
-    pub(crate) const fn new_boot_online() -> Self {
+    pub(crate) const fn new_boot_ready() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Online),
+            lifecycle: Lifecycle::new(State::Ready),
             task_ref: TaskRef::BOOT,
             entry: TaskEntry::None,
             pid: 0,
@@ -211,7 +289,13 @@ impl Task {
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
             switch_ctx: TaskSwitchContext::new(),
-            owned_flows: [TaskFlowRef::NONE; TASK_OWNED_FLOW_CAPACITY],
+            initial_flow: TaskFlowRef::BOOT_INIT,
+            owned_flows: [
+                TaskFlowRef::BOOT_INIT,
+                TaskFlowRef::NONE,
+                TaskFlowRef::NONE,
+                TaskFlowRef::NONE,
+            ],
             active_flow: TaskFlowRef::NONE,
         }
     }
@@ -258,6 +342,10 @@ impl Task {
 
     pub const fn active_flow(&self) -> TaskFlowRef {
         self.active_flow
+    }
+
+    pub const fn initial_flow(&self) -> TaskFlowRef {
+        self.initial_flow
     }
 
     pub const fn owns_flow(&self, flow_ref: TaskFlowRef) -> bool {
@@ -344,7 +432,7 @@ impl Task {
     }
 
     pub fn enable(&mut self, checkpoint: Checkpoint) -> EventResult {
-        if !self.running || !self.runqueue_published || !self.active_flow.is_valid() {
+        if !self.running || !self.runqueue_published || !self.initial_flow.is_valid() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -363,6 +451,24 @@ impl Task {
     pub fn adopt_enable(&mut self) -> EventResult {
         self.running = true;
         self.runqueue_published = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+    }
+
+    pub(crate) fn adopt_boot_enable(&mut self) -> EventResult {
+        if self.task_ref != TaskRef::BOOT
+            || self.lifecycle.state() != State::Ready
+            || !self.initial_flow.same_identity(TaskFlowRef::BOOT_INIT)
+            || !self.owns_flow(TaskFlowRef::BOOT_INIT)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.running = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
@@ -420,7 +526,7 @@ impl Task {
         if self.lifecycle.state() != State::Ready
             || !self.running
             || self.cpu.cpu_id() == usize::MAX
-            || !self.active_flow.is_valid()
+            || !self.initial_flow.is_valid()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -522,14 +628,32 @@ impl Task {
         Ok(())
     }
 
-    pub fn bind_initial_flow(&mut self, flow: &mut TaskFlow) -> EventResult {
+    pub fn bind_initial_flow(&mut self, flow: &TaskFlow) -> EventResult {
+        if self.initial_flow.is_valid()
+            || flow.owner() != self.task_ref
+            || flow.state() != State::Base
+            || !self.owns_flow(flow.flow_ref())
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+            );
+        }
+        self.initial_flow = flow.flow_ref();
+        Ok(())
+    }
+
+    pub fn activate_initial_flow(&mut self, flow: &mut TaskFlow) -> EventResult {
         if self.active_flow.is_valid()
+            || self.initial_flow != flow.flow_ref()
             || flow.owner() != self.task_ref
             || flow.state() != State::Ready
             || !self.owns_flow(flow.flow_ref())
         {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 self.lifecycle.state(),
                 self.lifecycle.state(),
@@ -557,6 +681,33 @@ impl Task {
                 self.lifecycle.state(),
             );
         }
+        self.active_flow = new.flow_ref();
+        new.commit_active_binding(self.task_ref)
+    }
+
+    pub fn commit_ready_successor_handoff(
+        &mut self,
+        old: &mut TaskFlow,
+        new: &mut TaskFlow,
+    ) -> EventResult {
+        if self.active_flow != old.flow_ref()
+            || old.owner() != self.task_ref
+            || !matches!(old.state(), State::Ready | State::Online)
+            || !old.active()
+            || new.owner() != self.task_ref
+            || new.state() != State::Ready
+            || new.active()
+            || !self.owns_flow(old.flow_ref())
+            || !self.owns_flow(new.flow_ref())
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+                self.lifecycle.state(),
+            );
+        }
+        old.relinquish_active_binding(self.task_ref)?;
         self.active_flow = new.flow_ref();
         new.commit_active_binding(self.task_ref)
     }

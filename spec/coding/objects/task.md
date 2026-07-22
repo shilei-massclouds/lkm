@@ -22,7 +22,7 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
   snapshot 都只是集合 lowering；每次成功 fork/clone 必须分配新的 logical Task identity 和 PID，
   并发布指向该 identity 的 fresh `TaskRef`；不得把存储槽地址或测试字段当作可复用 TaskRef。
 
-Rust `Task` 必须是 lifecycle、identity、PID、CPU、thread/switch context 和 Flow ownership 的唯一
+Rust `Task` 必须是 lifecycle、identity、PID、CPU、thread/switch context、typed `initial_flow` 和 Flow ownership 的唯一
 carrier。Boot/KernelInit/Kthreadd/AP/smoke/user-child 角色结构只能保存角色 metadata 或 continuation
 scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段。linker-visible
 `init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue、current slot 和
@@ -36,11 +36,12 @@ BootTask API 必须解析到该同一地址。
 结构不得定义同名 lifecycle-driving API，也不得保留转发 alias。它们只可暴露角色 metadata、只读
 查询、受控的 `Task` core 访问，以及不推进 lifecycle 的 metadata commit helper。
 
-`Task::preset` 负责 identity/TaskRef/初始 Flow ownership/clone specification；
+`Task::preset` 负责 identity/TaskRef/initial-flow association/初始 Flow ownership/clone specification；
 `Task::setup` 必须在 Phase 或 runtime fork 路径已调用 `TaskCreationCore::copy_process` 后消费其
 copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 New/not-enqueued 状态；
-`Task::enable` 只在调用者已完成 running、runqueue publication 与初始 Flow active binding 后提交
-Online。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
+`Task::enable` 只在调用者已完成 running、runqueue publication 与初始 Flow structural binding 后提交
+Online，并产生一次 lossy initial-flow Preset 尝试；它不要求该 Flow 已 active，窗口不匹配时 Flow
+仍停在 Base。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
 `BootTask` 使用 boot-only const initializer 直接构造 Online `init_task_storage` 和固定
@@ -63,14 +64,15 @@ slot；每次把已回收 slot 重新声明为 Task 时 generation 单调递增�
 
 ## 与 TaskFlow 的受控协作
 
-Task core 只保存 owned Flow refs 与 active Flow ref；Flow lifecycle、generation 和 handoff predecessor
+Task core 分别保存 immutable initial Flow ref、owned Flow refs 与 active Flow ref；Flow lifecycle、generation 和 handoff predecessor
 由独立 `TaskFlow` core 保存。双向协作只能通过 objects 内部的最小 bridge 完成：Flow 注册
 ownership，Task 提交 active binding，Flow exit 时清除 binding。不得公开任一 core 的字段、复制
 lifecycle state，或用角色 wrapper 绕过 owner/ref 校验。
 
-`BootIdleFlow` 是 BootTask 的首个 TaskFlow。BootInitScheduleHandoffPhase 在真实首次切换前直接把
-它建立为 Ready，并提交唯一 owner/active binding；BootInitFlow 期间更早的入口动作不要求 active
-TaskFlow，也不得建立临时 boot-init Flow。
+`BootInitFlow` 是 BootTask 的 initial TaskFlow；BootInitScheduleHandoffPhase 在真实首次切换前直接把
+后继 `BootIdleFlow` 建立为 Ready，并提交唯一 owner/active binding，但不得改写 initial Flow。
+BootInitFlow lifecycle 与 BootIdleFlow active continuation 是两个独立事实，不得建立第二个 boot-init
+Flow 或把 initial ref 当作 active ref。
 
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow

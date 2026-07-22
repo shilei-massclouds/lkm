@@ -378,6 +378,7 @@ object Scheduler: SchedulerObject {
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     BootTask.state == State::Online;
+                    BootDispatchWindow.state == State::Online;
                     InitMM.state == State::Ready;
                     BootIdleRcuReadSide.state == State::Prepared;
                 }
@@ -413,6 +414,11 @@ object Scheduler: SchedulerObject {
                     current_task_slot_current(BootCpuCurrentTask, BootTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootTask);
                     task_cpu_ref_is(BootTask, BootCPURef);
+                    dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
+                    dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
+                    dispatch_window_current_ref_is(BootDispatchWindow, BootTaskRef);
+                    dispatch_window_current_task_is(BootDispatchWindow, BootTask);
+                    dispatch_window_has_no_event_queue(BootDispatchWindow);
                     scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
                         Scheduler,
                         CpuGroup,
@@ -455,6 +461,11 @@ object Scheduler: SchedulerObject {
             current_task_slot_current(BootCpuCurrentTask, BootTask);
             boot_cpu_current_is_idle_task(BootCPU, BootTask);
             task_cpu_ref_is(BootTask, BootCPURef);
+            dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
+            dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
+            dispatch_window_current_ref_is(BootDispatchWindow, BootTaskRef);
+            dispatch_window_current_task_is(BootDispatchWindow, BootTask);
+            dispatch_window_has_no_event_queue(BootDispatchWindow);
             scheduler_schedule_event_available(Scheduler);
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
@@ -492,6 +503,9 @@ object Scheduler: SchedulerObject {
             current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
             current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
             task_cpu_ref_is(BootTask, BootCPURef);
+            dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
+            dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
+            dispatch_window_has_no_event_queue(BootDispatchWindow);
             scheduler_schedule_event_available(Scheduler);
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);

@@ -62,10 +62,11 @@ private phase flow must call the shared Task core in this order:
 
 ```text
 Task::preset
+TaskFlow::bind (structural initial-flow association)
 TaskCreationCore::copy_process
 Task::setup
 pi-lock -> select runqueue -> Task::set_task_cpu -> enqueue
-Task::activate_initial_flow -> Task::enable
+Task::enable -> lossy initial-flow Preset (discarded while BootDispatchWindow still names BootTask)
 ```
 
 KernelInitTask CPU pinning follows its successful enable; KthreaddTask global
@@ -110,7 +111,7 @@ KernelInitTask's wait side.
 
 schedule_preempt_disabled() must be split across the owner boundary:
 BootInitScheduleHandoffPhase performs BootIdlePreemption
-enable_no_resched() and BootIdleFlow binding, BootInitFlow commits Online,
+enable_no_resched() and BootIdleFlow successor binding, BootInitFlow commits Online,
 and Kernel.Enable then calls Scheduler.schedule(); a later restored BootTask
 enters BootIdleEntryPhase's post-schedule BootIdleStartupContext. It must not be
 implemented as a single Scheduler action and must not introduce a
@@ -123,6 +124,15 @@ context save/restore and publish the updated CPU-local current task
 fact. The implementation boundary must pass through the current
 CPU's CurrentTaskSlot; it must not infer or publish the current task
 only from Scheduler counters or BootRunQueue.curr.
+
+The same switch commit must update the separate boot-CPU `DispatchWindow` and
+immediately emit a lossy start signal to the newly current Task's immutable
+initial Flow. The first KernelInitTask switch accepts the signal and advances
+KernelInitFlow from Base through its startup chain before the task entry runs.
+A repeated switch to a Task whose initial Flow is no longer Base records a
+discard and resumes the Task's active Flow. CurrentTaskSlot and DispatchWindow
+must agree after commit, but neither may be implemented as an alias for the
+other.
 
 Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
 Scheduler.Online; the real Scheduler.Action::Schedule is driven by Kernel.Enable only after

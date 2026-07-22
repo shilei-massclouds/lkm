@@ -1438,16 +1438,24 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
         assertions.assert(
             "KernelInitTask user flow preset",
-            ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_ok(),
+            ctx.user_app_flow
+                .preset(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+                .is_ok(),
         );
         assertions.assert(
             "KernelInitTask user flow setup",
-            ctx.user_app_flow.setup(&ctx.kernel_init_user_state).is_ok(),
+            ctx.user_app_flow
+                .setup(
+                    &ctx.kernel_init_task,
+                    &ctx.kernel_init_user_state,
+                    &ctx.boot_dispatch_window,
+                )
+                .is_ok(),
         );
         assertions.assert(
             "kernel init flow disabled for exec",
             ctx.kernel_init_flow
-                .disable_for_exec(&ctx.kernel_init_task)
+                .disable_for_exec(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
                 .is_ok(),
         );
         assertions.assert(
@@ -1465,7 +1473,11 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "KernelInitTask user flow online",
             ctx.user_app_flow
-                .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
+                .enable(
+                    &ctx.kernel_init_task,
+                    &ctx.kernel_init_user_state,
+                    &ctx.boot_dispatch_window,
+                )
                 .is_ok(),
         );
         assertions.assert(
@@ -1477,7 +1489,7 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "kernel init flow cleaned after exec",
             ctx.kernel_init_flow
-                .cleanup_after_handoff(&mut ctx.kernel_init_task)
+                .cleanup_after_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
                 .is_ok(),
         );
         let process = &ctx.kernel_init_user_state;
@@ -1513,12 +1525,12 @@ impl SmokeScenario for UserBootElfScenario {
         let initial_user_flow_ref = ctx.user_app_flow.flow_ref();
         let first_runtime_handoff = ctx
             .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_ok();
         let first_runtime_flow_ref = ctx.user_app_flow.flow_ref();
         let second_runtime_handoff = ctx
             .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_ok();
         let second_runtime_flow_ref = ctx.user_app_flow.flow_ref();
         assertions.assert(
@@ -1759,12 +1771,16 @@ impl SmokeScenario for ChildLifecycleScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert(
-            "user task slots reject ninth live task and invalidate stale generations",
-            context()
-                .user_task_set
-                .smoke_task_slot_generation_contract(),
-        );
+        match context()
+            .user_task_set
+            .smoke_task_slot_generation_contract()
+        {
+            Ok(()) => assertions.assert(
+                "user task slots reject ninth live task and invalidate stale generations",
+                true,
+            ),
+            Err(stage) => assertions.assert(stage, false),
+        }
         exercise_completed_child_record_reuse(assertions);
         exercise_nested_vfork_task_record(assertions);
         exercise_observed_child_plain_fork(assertions);
@@ -2182,6 +2198,14 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         child_frame
     };
     {
+        let ctx = context();
+        let active = ctx.user_task_set.active_task_ref();
+        if ctx.commit_user_dispatch(active).is_err() {
+            assertions.assert("pid1 plain fork dispatch", false);
+            return;
+        }
+    }
+    {
         let child = &context().user_task_set;
         assertions.assert(
             "pid1 plain fork owns outer continuation",
@@ -2478,6 +2502,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         let ctx = context();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
+                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -2497,9 +2522,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             return;
         }
         if ctx
-            .scheduler
-            .replace_user_task_on_runqueue(
-                &ctx.cpu_group,
+            .replace_current_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 parent_pid,
@@ -2683,6 +2706,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     let (outer_parent_frame, outer_exit_pid) = {
         let ctx = context();
         let Some((parent_frame, _, child_pid)) = ctx.user_task_set.child_exit_to_parent_wait(
+            &ctx.boot_dispatch_window,
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -2800,9 +2824,7 @@ fn exercise_builtin_grandchild_wait4_exec(
             .kernel_init_user_state
             .switch_observed_child_process_visible(parent_pid, child_pid)
             || ctx
-                .scheduler
-                .replace_user_task_on_runqueue(
-                    &ctx.cpu_group,
+                .replace_current_user_task(
                     ctx.user_task_set.parent_task_ref(),
                     ctx.user_task_set.active_task_ref(),
                     child_pid,
@@ -2823,6 +2845,7 @@ fn exercise_builtin_grandchild_wait4_exec(
         let ctx = context();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
+                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -2842,9 +2865,7 @@ fn exercise_builtin_grandchild_wait4_exec(
             return false;
         }
         if ctx
-            .scheduler
-            .replace_user_task_on_runqueue(
-                &ctx.cpu_group,
+            .replace_current_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 parent_pid,
@@ -3023,11 +3044,14 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
             true,
             true,
         )?;
+        let child_task = ctx.user_task_set.active_task_ref();
+        ctx.commit_user_dispatch(child_task).ok()?;
     }
 
     let child_pid = {
         let ctx = context();
         let (_parent_frame, child_pid) = ctx.user_task_set.child_exit_to_vfork_parent(
+            &ctx.boot_dispatch_window,
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -3139,9 +3163,7 @@ fn exercise_nested_vfork_task_record(assertions: &mut SmokeAssertions) {
             .kernel_init_user_state
             .observe_nested_child_process_group_visible(parent_pid, child_pid)
             || ctx
-                .scheduler
-                .replace_user_task_on_runqueue(
-                    &ctx.cpu_group,
+                .replace_current_user_task(
                     ctx.user_task_set.parent_task_ref(),
                     ctx.user_task_set.active_task_ref(),
                     child_pid,
@@ -3335,9 +3357,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             .kernel_init_user_state
             .switch_observed_child_process_visible(parent_pid, observed_child_pid)
             || ctx
-                .scheduler
-                .replace_user_task_on_runqueue(
-                    &ctx.cpu_group,
+                .replace_current_user_task(
                     ctx.user_task_set.parent_task_ref(),
                     ctx.user_task_set.active_task_ref(),
                     observed_child_pid,
@@ -3371,6 +3391,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         let ctx = context();
         let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
+                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -3386,9 +3407,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             return;
         };
         if ctx
-            .scheduler
-            .replace_user_task_on_runqueue(
-                &ctx.cpu_group,
+            .replace_current_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 exit_parent_pid,
@@ -3602,6 +3621,8 @@ fn start_active_vfork_child(index: usize) -> Option<usize> {
         {
             return None;
         }
+        let child_task = ctx.user_task_set.active_task_ref();
+        ctx.commit_user_dispatch(child_task).ok()?;
     }
     Some(child_pid)
 }
@@ -3632,14 +3653,12 @@ fn copy_user_process_for_current_slot(allow_nested_vfork: bool) -> bool {
 
 fn replace_runqueue_parent_with_active() -> bool {
     let ctx = context();
-    ctx.scheduler
-        .replace_user_task_on_runqueue(
-            &ctx.cpu_group,
-            ctx.user_task_set.parent_task_ref(),
-            ctx.user_task_set.active_task_ref(),
-            ctx.user_task_set.pid(),
-        )
-        .is_ok()
+    ctx.replace_current_user_task(
+        ctx.user_task_set.parent_task_ref(),
+        ctx.user_task_set.active_task_ref(),
+        ctx.user_task_set.pid(),
+    )
+    .is_ok()
 }
 
 fn mapping_contains(

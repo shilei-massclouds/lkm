@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from common.defaults import DEFAULT_TARGET
+from common.emits import parse_emit_expression
 from common.model_types import (
     BoundaryDef,
     BuildResult,
@@ -732,6 +733,7 @@ def _build_objects(
             lifecycle_owner=lifecycle_owner,
         )
         attrs = _extract_attrs(decl, diagnostics)
+        associations = _extract_associations(decl, diagnostics)
         objects[decl.name] = ObjectDef(
             name=decl.name,
             kind=decl.kind,
@@ -740,6 +742,7 @@ def _build_objects(
             parent=decl.parent,
             states=states,
             attrs=attrs,
+            associations=associations,
         )
     return objects
 
@@ -978,6 +981,41 @@ def _extract_attrs(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str,
                 continue
             attrs[name] = match.group(2).strip()
     return attrs
+
+
+def _extract_associations(
+    decl: ObjectDecl, diagnostics: list[Diagnostic]
+) -> dict[str, str]:
+    associations: dict[str, str] = {}
+    pattern = re.compile(
+        r"\A(?:mutable\s+)?([a-z][A-Za-z0-9_]*)\s*=\s*(\S+)\Z"
+    )
+    for block in decl.other_blocks:
+        if block.kind != "associations":
+            continue
+        for entry, span in block.entry_spans:
+            match = pattern.match(entry)
+            if match is None:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"cannot parse association binding on {decl.name}: {entry}",
+                        span,
+                    )
+                )
+                continue
+            name, value = match.groups()
+            if name in associations:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"duplicate association binding: {decl.name}.{name}",
+                        span,
+                    )
+                )
+                continue
+            associations[name] = value
+    return associations
 
 
 def _build_children(
@@ -1561,6 +1599,12 @@ def _check_process_references(
     for type_decl in model.types.values():
         for state in type_decl.states:
             for transition in state.transitions:
+                _check_process_emit_references(
+                    model,
+                    transition,
+                    diagnostics,
+                    receiver_type=type_decl.name,
+                )
                 _check_one_process(
                     model,
                     transition,
@@ -1568,6 +1612,12 @@ def _check_process_references(
                     receiver_type=type_decl.name,
                 )
         for process in type_decl.processes:
+            _check_process_emit_references(
+                model,
+                process,
+                diagnostics,
+                receiver_type=type_decl.name,
+            )
             if not _process_contains_declare(process):
                 _check_process_lexical_captures(process, diagnostics)
                 continue
@@ -1575,6 +1625,12 @@ def _check_process_references(
     for obj in model.objects.values():
         for state in obj.states.values():
             for process in state.decl.processes:
+                _check_process_emit_references(
+                    model,
+                    process,
+                    diagnostics,
+                    receiver_type=obj.kind,
+                )
                 if not _process_contains_declare(process):
                     _check_process_lexical_captures(process, diagnostics)
                     continue
@@ -1661,6 +1717,29 @@ def _check_one_process(
         model,
         process.body_members,
         diagnostics,
+        bindings=bindings,
+    )
+
+
+def _check_process_emit_references(
+    model: ObjectModel,
+    process: ProcessDecl | TransitionDecl,
+    diagnostics: list[Diagnostic],
+    *,
+    receiver_type: str,
+) -> None:
+    bindings = {"self": receiver_type, **dict(process.parameters)}
+    blocks = [
+        member.block
+        for member in _ordered_body_members(process)
+        if member.kind == "emits" and member.block is not None
+    ]
+    _check_emit_blocks(
+        model,
+        blocks,
+        diagnostics,
+        default_object=None,
+        default_type=receiver_type,
         bindings=bindings,
     )
 
@@ -1800,7 +1879,7 @@ def _ordered_body_members(decl):
         members.append(_block_body_member(block))
     for block in decl.ensures:
         members.append(_block_body_member(block))
-    for block in decl.deferred:
+    for block in getattr(decl, "deferred", []):
         members.append(_block_body_member(block))
     for block in decl.other_blocks:
         members.append(_block_body_member(block))
@@ -1973,54 +2052,147 @@ def _check_emit_references(
     transition: TransitionDef,
     diagnostics: list[Diagnostic],
 ) -> None:
-    for block in transition.decl.emits:
+    _check_emit_blocks(
+        model,
+        transition.decl.emits,
+        diagnostics,
+        default_object=transition.object_name,
+        default_type=model.objects[transition.object_name].kind,
+        bindings={
+            "self": model.objects[transition.object_name].kind,
+            **dict(transition.decl.parameters),
+        },
+        source_transition=transition,
+    )
+
+
+def _check_emit_blocks(
+    model: ObjectModel,
+    blocks: list[Block],
+    diagnostics: list[Diagnostic],
+    *,
+    default_object: str | None,
+    default_type: str,
+    bindings: dict[str, str],
+    source_transition: TransitionDef | None = None,
+) -> None:
+    for block in blocks:
         for entry, entry_span in block.entry_spans:
-            local_match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
-            object_match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
-            if local_match is not None:
-                emitted_object = transition.object_name
-                emitted_name = local_match.group(1)
-            elif object_match is not None:
-                emitted_object = object_match.group(1)
-                emitted_name = object_match.group(2)
-            else:
+            emitted = parse_emit_expression(entry)
+            if emitted is None:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        "emits must reference a transition as Transition::Name "
-                        f"or Object.Transition::Name: {entry}",
+                        "emits must reference a transition through a local, "
+                        f"static, or association-path receiver: {entry}",
                         entry_span,
                     )
                 )
                 continue
 
-            emitted = _transition_def(model, emitted_object, emitted_name)
-            if emitted is None:
+            emitted_object: str | None = None
+            if emitted.receiver is None:
+                emitted_object = default_object
+                emitted_type = default_type
+            elif emitted.receiver in model.objects:
+                emitted_object = emitted.receiver
+                emitted_type = model.objects[emitted.receiver].kind
+            else:
+                emitted_type = _resolve_association_receiver_type(
+                    model, emitted.receiver, bindings
+                )
+
+            target = (
+                _transition_def(model, emitted_object, emitted.transition)
+                if emitted_object is not None
+                else None
+            )
+            if target is None and (
+                emitted_type is None
+                or _type_process_decl(
+                    model, emitted_type, "Transition", emitted.transition
+                )
+                is None
+            ):
+                receiver_label = emitted.receiver or default_object or default_type
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "unknown emitted transition: "
-                        f"{emitted_object}.Transition::{emitted_name}",
+                        f"{receiver_label}.Transition::{emitted.transition}",
                         entry_span,
                     )
                 )
                 continue
 
             if (
-                emitted_object == transition.object_name
-                and emitted.source_state != transition.target_state
+                source_transition is not None
+                and target is not None
+                and emitted_object == source_transition.object_name
+                and target.source_state != source_transition.target_state
             ):
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "emitted transition is not enabled from target state: "
-                        f"{emitted_object}.Transition::{emitted_name} "
-                        f"requires State::{emitted.source_state}, "
-                        f"but {transition.object_name}.Transition::{transition.name} "
-                        f"targets State::{transition.target_state}",
+                        f"{emitted_object}.Transition::{emitted.transition} "
+                        f"requires State::{target.source_state}, "
+                        f"but {source_transition.object_name}.Transition::"
+                        f"{source_transition.name} targets "
+                        f"State::{source_transition.target_state}",
                         entry_span,
                     )
                 )
+
+
+def _resolve_association_receiver_type(
+    model: ObjectModel,
+    receiver: str,
+    bindings: dict[str, str],
+) -> str | None:
+    parts = receiver.split(".")
+    if not parts or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+        return None
+    root = parts.pop(0)
+    if root in bindings:
+        current_type = bindings[root]
+    elif root in model.objects:
+        current_type = model.objects[root].kind
+    else:
+        return None
+
+    for member in parts:
+        current_type = _REF_TARGET_PROCESS_TYPES.get(current_type, current_type)
+        current_type = _association_type(model, current_type, member)
+        if current_type is None:
+            return None
+    return _REF_TARGET_PROCESS_TYPES.get(current_type, current_type)
+
+
+def _association_type(
+    model: ObjectModel, type_name: str, association_name: str
+) -> str | None:
+    visited: set[str] = set()
+    current = type_name
+    pattern = re.compile(
+        r"\A(?:mutable\s+)?"
+        + re.escape(association_name)
+        + r"\s*:\s*([A-Z][A-Za-z0-9_]*)\Z"
+    )
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            return None
+        for block in type_decl.blocks:
+            if block.kind != "associations":
+                continue
+            for entry in block.entries:
+                match = pattern.match(entry)
+                if match is not None:
+                    return match.group(1)
+        current = _base_type_name(type_decl)
+    return None
 
 
 def _check_context_nesting_contribution(

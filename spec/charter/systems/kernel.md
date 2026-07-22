@@ -88,11 +88,13 @@
   `init_task` 并建立初始抢占关闭事实；`EarlyVm` 就绪后，binding 把 `tp` 切换为同一 carrier 的
   虚拟地址。该 binding 不是第二个 Task、TaskRef 或调度实体，也不改变 PID 0 identity。
 
-  `BootInitFlow` 是 `BootTask` 的 PhaseObject 子对象，不是 TaskFlow。`BootTask` 的首个 TaskFlow
-  ownership 直到 `BootIdleFlow.Setup` 才建立。
+  `BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow，并因 TaskFlow 继承 PhaseObject 而编排
+  启动阶段。它的 owner/parent 在入口前已绑定到 BootTask；后继 `BootIdleFlow` 的 ownership 与
+  active binding 在 `BootIdleFlow.Setup` 建立。
 
-  > [model] MUST：向 `BootInitFlow` 同步发送 Preset；它在 `SingleTaskContext` 中驱动
-  > `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
+  > [model] MUST：BootTask 提交 Online 后向 initial Flow 发出 lossy Preset；BootInitFlow 只有在
+  > 自身仍为 Base、parent BootTask 为 Online 且 BootDispatchWindow 当前解引用为 BootTask 时接受。
+  > 接受后在 `SingleTaskContext` 中驱动 `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
 
 * Prepared：内核此时不响应中断，`BootTask` 始终 Online，`BootInitFlow` 已 Prepared。
 

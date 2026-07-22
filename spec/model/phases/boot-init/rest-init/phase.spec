@@ -836,16 +836,19 @@ object BootInitRestInitPhase: PhaseObject {
                         task_wakeup_new_task_woken_hook_deferred(KernelInitTask);
                         task_state_running(KernelInitTask);
                         task_runqueue_publication_committed(KernelInitTask);
-                        task_active_flow_is(KernelInitTask, KernelInitFlow);
                         task_at_most_one_flow_online(KernelInitTask);
-                        task_flow_active_binding_committed(KernelInitFlow);
+                        task_initial_flow_is(KernelInitTask, KernelInitFlow);
+                        task_initial_flow_binding_consistent(KernelInitTask);
+                        KernelInitFlow.state == State::Base;
+                        task_flow_start_signal_discarded(
+                            KernelInitFlow,
+                            BootDispatchWindow
+                        );
                     }
                 }
 
                 drives {
-                    KernelInitTask.Transition::Enable(
-                        initial_flow: KernelInitFlow
-                    );
+                    KernelInitTask.Transition::Enable;
                 }
 
                 within KernelInitPidLookupRcuReadSideContext {
@@ -986,16 +989,19 @@ object BootInitRestInitPhase: PhaseObject {
                         task_wakeup_new_task_woken_hook_deferred(KthreaddTask);
                         task_state_running(KthreaddTask);
                         task_runqueue_publication_committed(KthreaddTask);
-                        task_active_flow_is(KthreaddTask, KthreaddFlow);
                         task_at_most_one_flow_online(KthreaddTask);
-                        task_flow_active_binding_committed(KthreaddFlow);
+                        task_initial_flow_is(KthreaddTask, KthreaddFlow);
+                        task_initial_flow_binding_consistent(KthreaddTask);
+                        KthreaddFlow.state == State::Base;
+                        task_flow_start_signal_discarded(
+                            KthreaddFlow,
+                            BootDispatchWindow
+                        );
                     }
                 }
 
                 drives {
-                    KthreaddTask.Transition::Enable(
-                        initial_flow: KthreaddFlow
-                    );
+                    KthreaddTask.Transition::Enable;
                 }
 
                 within KthreaddPidLookupRcuReadSideContext {
@@ -1021,7 +1027,6 @@ object BootInitRestInitPhase: PhaseObject {
                 }
 
                 drives {
-                    KthreaddFlow.Action::RunScheduleLoop;
                     SystemState.Transition::Preset;
                     SystemState.Transition::Setup;
                     KthreaddReadyGate.Transition::Setup;
@@ -1097,9 +1102,12 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_online(KthreaddTask);
                     kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
-                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
-                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                    KthreaddFlow.state == State::Base;
+                    kthreadd_schedule_loop_deferred_until_dispatch(
+                        KthreaddTask,
+                        KthreaddFlow,
+                        BootDispatchWindow
+                    );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
@@ -1122,7 +1130,7 @@ object BootInitRestInitPhase: PhaseObject {
                 deferred kthreadd.001 {
                     category: DeferredCategory::Feature;
                     summary: "Complete kthreadd request consumption, completion, wait, park, stop and long-running service semantics.";
-                    evidence { kthreadd_schedule_loop_active(KthreaddTask, Scheduler); }
+                    evidence { kthreadd_schedule_loop_deferred_until_dispatch(KthreaddTask, KthreaddFlow, BootDispatchWindow); }
                     close_when: "kthread request creation/consumption, wait/park/stop and sustained service tests pass.";
                 }
 
@@ -1177,9 +1185,12 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_online(KthreaddTask);
                     kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
-                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
-                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                    KthreaddFlow.state == State::Base;
+                    kthreadd_schedule_loop_deferred_until_dispatch(
+                        KthreaddTask,
+                        KthreaddFlow,
+                        BootDispatchWindow
+                    );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
@@ -1250,9 +1261,12 @@ object BootInitRestInitPhase: PhaseObject {
             kthreadd_task_online(KthreaddTask);
             kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
             task_owns_flow(KthreaddTask, KthreaddFlow);
-            kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-            kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
-            kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+            KthreaddFlow.state == State::Base;
+            kthreadd_schedule_loop_deferred_until_dispatch(
+                KthreaddTask,
+                KthreaddFlow,
+                BootDispatchWindow
+            );
             kthreadd_global_ref_bound(KthreaddTask);
             kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
             kthreadd_provider_ready(KthreaddTask);
@@ -1293,7 +1307,12 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     KthreaddTask.state == State::Online;
                     task_owns_flow(KthreaddTask, KthreaddFlow);
-                    kthreadd_schedule_loop_active(KthreaddTask, Scheduler);
+                    KthreaddFlow.state == State::Base;
+                    kthreadd_schedule_loop_deferred_until_dispatch(
+                        KthreaddTask,
+                        KthreaddFlow,
+                        BootDispatchWindow
+                    );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     SystemState.state == State::Ready;

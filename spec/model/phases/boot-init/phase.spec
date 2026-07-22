@@ -1,14 +1,17 @@
 /*
  * Boot Init Flow Phase Specification
  *
- * BootInitFlow is a PhaseObject child of the statically Online BootTask. It
- * spans the kernel entry execution fragment through the pre-commit boundary
- * of the first real BootTask -> KernelInitTask switch. It is not a TaskFlow.
+ * BootInitFlow is the TaskFlow instance initially associated with BootTask.
+ * BootTask becomes Online at `_start`, then its post-commit lossy signal is
+ * accepted because BootDispatchWindow still names BootTaskRef. Because
+ * TaskFlow is a PhaseObject subtype, this flow uses the standard phase lifecycle while spanning the kernel entry
+ * execution fragment through the pre-commit boundary of the first real
+ * BootTask -> KernelInitTask switch.
  */
 
 include "rest-init/main.spec";
 
-object BootInitFlow: PhaseObject {
+object BootInitFlow: TaskFlow {
     initial_state: State::Base;
     parent: BootTask;
 
@@ -17,6 +20,9 @@ object BootInitFlow: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootTask.state == State::Online;
+                    task_initial_flow_is(BootTask, self);
+                    task_flow_initial_binding_consistent(self);
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
                 }
 
                 within SingleTaskContext {
@@ -28,8 +34,15 @@ object BootInitFlow: PhaseObject {
                 ensures {
                     EntryPreludePhase.state == State::Online;
                     BootTask.state == State::Online;
+                    task_flow_started(self);
+                    task_owns_flow(BootTask, self);
+                    task_flow_owner_is(self, BootTask);
+                    task_flow_parent_is(self, BootTask);
                 }
 
+                emits {
+                    Transition::Setup;
+                }
             }
         }
     }
@@ -38,10 +51,15 @@ object BootInitFlow: PhaseObject {
         invariant {
             EntryPreludePhase.state == State::Online;
             BootTask.state == State::Online;
+            task_flow_started(self);
         }
 
         transitions {
             on Transition::Setup -> State::Ready {
+                depends_on {
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                }
+
                 drives {
                     BootPhase.Transition::Preset;
                     InterruptPhase.Transition::Preset;
@@ -53,6 +71,9 @@ object BootInitFlow: PhaseObject {
                     BootTask.state == State::Online;
                 }
 
+                emits {
+                    Transition::Enable;
+                }
             }
         }
     }
@@ -67,6 +88,10 @@ object BootInitFlow: PhaseObject {
 
         transitions {
             on Transition::Enable -> State::Online {
+                depends_on {
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                }
+
                 drives {
                     BootInitRestInitPhase.Transition::Preset;
                     BootInitScheduleHandoffPhase.Transition::Preset;
@@ -78,6 +103,7 @@ object BootInitFlow: PhaseObject {
                     BootIdleFlow.state == State::Ready;
                     task_owns_flow(BootTask, BootIdleFlow);
                     task_flow_owner_is(BootIdleFlow, BootTask);
+                    task_flow_parent_is(BootIdleFlow, BootTask);
                     task_flow_owner_exclusive(BootIdleFlow);
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
@@ -90,6 +116,7 @@ object BootInitFlow: PhaseObject {
                         KernelInitTask
                     );
                     BootTask.state == State::Online;
+                    task_flow_online_on_dispatch(self, BootDispatchWindow);
                 }
             }
         }
@@ -111,6 +138,8 @@ object BootInitFlow: PhaseObject {
                 KernelInitTask
             );
             BootTask.state == State::Online;
+            task_flow_started(self);
+            task_flow_online_on_dispatch(self, BootDispatchWindow);
         }
     }
 }

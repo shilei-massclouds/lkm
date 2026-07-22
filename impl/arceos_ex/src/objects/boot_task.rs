@@ -71,6 +71,10 @@ impl BootTask {
         unsafe { (*Self::task_ptr()).state() }
     }
 
+    pub fn enable_at_entry(&mut self) -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.adopt_boot_enable()
+    }
+
     pub fn switch_context(&self) -> &TaskSwitchContext {
         Self::canonical_switch_context()
     }
@@ -111,4 +115,4 @@ unsafe impl Sync for InitTaskStorage {}
 
 #[unsafe(no_mangle)]
 pub static init_task_storage: InitTaskStorage =
-    InitTaskStorage(UnsafeCell::new(Task::new_boot_online()));
+    InitTaskStorage(UnsafeCell::new(Task::new_boot_ready()));

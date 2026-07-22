@@ -15,8 +15,9 @@ use super::{
     rcu::RcuCore,
     scheduler::Scheduler,
     state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task::{DispatchWindow, Task, TaskEntry, TaskKind, TaskRef},
     task_flow::{TaskFlow, TaskFlowRef},
+    user_boot::UserTaskSet,
     workqueue::Workqueue,
 };
 use crate::arch::riscv64::task_switch::TaskSwitchContext;
@@ -78,17 +79,24 @@ impl KernelInitFlow {
     }
 
     pub fn bind_initial(&mut self, owner: &mut KernelInitTask) -> EventResult {
+        self.flow.bind(owner.task_mut(), TaskFlowRef::NONE)?;
+        owner.task_mut().bind_initial_flow(&self.flow)
+    }
+
+    pub fn start_initial_on_dispatch(
+        &mut self,
+        owner: &mut KernelInitTask,
+        window: &mut DispatchWindow,
+    ) -> EventResult {
         self.flow
-            .preset(owner.task_mut(), TaskFlowRef::NONE, None)?;
-        self.flow.setup(None)?;
-        owner.task_mut().bind_initial_flow(&mut self.flow)
+            .start_initial_lossy(owner.task_mut(), window, None, None)
     }
 
-    pub fn enable_initial(&mut self, owner: &KernelInitTask) -> EventResult {
-        self.flow.enable(owner.task(), None)
-    }
-
-    pub fn disable_for_exec(&mut self, owner: &KernelInitTask) -> EventResult {
+    pub fn disable_for_exec(
+        &mut self,
+        owner: &KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
         if self.flow.state() != State::Online
             || owner.state() != State::Online
             || self.flow.owner() != owner.task_ref()
@@ -102,11 +110,18 @@ impl KernelInitFlow {
                 State::Offline,
             );
         }
-        self.flow
-            .disable(owner.task(), Some(Checkpoint::KernelInitFlowOffline))
+        self.flow.disable(
+            owner.task(),
+            window,
+            Some(Checkpoint::KernelInitFlowOffline),
+        )
     }
 
-    pub fn cleanup_after_handoff(&mut self, owner: &mut KernelInitTask) -> EventResult {
+    pub fn cleanup_after_handoff(
+        &mut self,
+        owner: &mut KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
         if self.flow.state() != State::Offline
             || self.flow.active()
             || owner.task().active_flow() == self.flow.flow_ref()
@@ -118,8 +133,11 @@ impl KernelInitFlow {
                 State::Destroyed,
             );
         }
-        self.flow
-            .cleanup(owner.task(), Some(Checkpoint::KernelInitFlowDestroyed))?;
+        self.flow.cleanup(
+            owner.task(),
+            window,
+            Some(Checkpoint::KernelInitFlowDestroyed),
+        )?;
         owner.task_mut().retire_destroyed_flow(&self.flow)
     }
 
@@ -504,14 +522,21 @@ impl KthreaddFlow {
     }
 
     pub fn bind_initial(&mut self, owner: &mut KthreaddTask) -> EventResult {
-        self.flow
-            .preset(owner.task_mut(), TaskFlowRef::NONE, None)?;
-        self.flow.setup(None)?;
-        owner.task_mut().bind_initial_flow(&mut self.flow)
+        self.flow.bind(owner.task_mut(), TaskFlowRef::NONE)?;
+        owner.task_mut().bind_initial_flow(&self.flow)
     }
 
-    pub fn enable_initial(&mut self, owner: &KthreaddTask) -> EventResult {
-        self.flow.enable(owner.task(), None)
+    pub fn start_initial_on_dispatch(
+        &mut self,
+        owner: &mut KthreaddTask,
+        window: &mut DispatchWindow,
+    ) -> EventResult {
+        self.flow
+            .start_initial_lossy(owner.task_mut(), window, None, None)
+    }
+
+    pub const fn core(&self) -> &TaskFlow {
+        &self.flow
     }
 }
 
@@ -694,8 +719,32 @@ impl KthreaddTask {
         }
         self.thread_context_ready = thread_context_ready;
         self.sched_entity_ready = sched_entity_ready;
-        self.schedule_loop_active = true;
         self.kernel_stack_top = kernel_stack_top;
+        Ok(())
+    }
+
+    pub fn mark_schedule_loop_active(
+        &mut self,
+        flow: &KthreaddFlow,
+        dispatch_window: &DispatchWindow,
+    ) -> EventResult {
+        if self.task.state() != State::Online
+            || flow.state() != State::Online
+            || !flow.active()
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                flow.core(),
+                &self.task,
+                dispatch_window,
+            )
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                flow.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.schedule_loop_active = true;
         Ok(())
     }
 
@@ -1421,6 +1470,8 @@ impl BootIdleFlow {
     pub fn setup(
         &mut self,
         boot_task: &mut BootTask,
+        boot_init_flow: &mut TaskFlow,
+        dispatch_window: &DispatchWindow,
         scheduler: &Scheduler,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
@@ -1431,7 +1482,12 @@ impl BootIdleFlow {
             || boot_task.state() != State::Online
             || boot_task.task_ref() != TaskRef::BOOT
             || boot_task.pid() != 0
-            || boot_task.task().active_flow().is_valid()
+            || !boot_task
+                .task()
+                .active_flow()
+                .same_identity(boot_init_flow.flow_ref())
+            || !boot_init_flow.active()
+            || boot_init_flow.state() != State::Ready
             || scheduler.state() != State::Online
             || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || kernel_init_task.state() != State::Online
@@ -1484,9 +1540,15 @@ impl BootIdleFlow {
         self.secondary_cpus_not_started = true;
         self.kernel_init_task_switch_handoff_ready = true;
         self.flow
-            .preset(boot_task.task_mut(), TaskFlowRef::NONE, None)?;
-        self.flow.setup(Some(Checkpoint::BootIdleFlowReady))?;
-        boot_task.task_mut().bind_initial_flow(&mut self.flow)
+            .bind(boot_task.task_mut(), boot_init_flow.flow_ref())?;
+        self.flow.setup_successor(
+            boot_task.task(),
+            dispatch_window,
+            Some(Checkpoint::BootIdleFlowReady),
+        )?;
+        boot_task
+            .task_mut()
+            .commit_ready_successor_handoff(boot_init_flow, &mut self.flow)
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
@@ -1504,12 +1566,23 @@ impl BootIdleFlow {
         self.flow.active()
     }
 
+    pub(crate) fn core_mut(&mut self) -> &mut TaskFlow {
+        &mut self.flow
+    }
+
     pub fn prepare_idle_entry(
         &mut self,
+        boot_task: &BootTask,
+        dispatch_window: &DispatchWindow,
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.flow.state() != State::Ready
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
             || scheduler.kernel_init_stack_switch_started_count() != 1
@@ -1530,18 +1603,29 @@ impl BootIdleFlow {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_idle_loop(
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
         kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &KthreaddTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
+        boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
         {
             return self.failed_ready_action();
         }
@@ -1550,41 +1634,62 @@ impl BootIdleFlow {
             scheduler,
             cpu_group,
             kernel_init_task,
+            kernel_init_flow,
             kthreadd_task,
+            kthreadd_flow,
+            user_task_set,
+            boot_task,
             local_interrupt,
             current_task_slot,
+            dispatch_window,
         )?;
         self.idle_loop_entered = true;
         self.idle_loop_continues = true;
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn do_idle_cycle(
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
         kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &KthreaddTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
+        boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
         {
             return self.failed_ready_action();
         }
 
         self.nohz_run_idle_balance_done = true;
-        self.wait_while_no_need_resched(local_interrupt)?;
-        self.observe_need_resched()?;
+        self.wait_while_no_need_resched(boot_task, dispatch_window, local_interrupt)?;
+        self.observe_need_resched(boot_task, dispatch_window)?;
         self.schedule_if_need_resched(
             scheduler,
             cpu_group,
             kernel_init_task,
+            kernel_init_flow,
             kthreadd_task,
+            kthreadd_flow,
+            user_task_set,
+            boot_task,
             local_interrupt,
             current_task_slot,
+            dispatch_window,
         )?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
@@ -1594,11 +1699,18 @@ impl BootIdleFlow {
 
     fn wait_while_no_need_resched(
         &mut self,
+        boot_task: &BootTask,
+        dispatch_window: &DispatchWindow,
         local_interrupt: &mut LocalInterruptControl,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
             || local_interrupt.state() != State::Ready
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
         {
             return self.failed_ready_action();
         }
@@ -1632,11 +1744,20 @@ impl BootIdleFlow {
         Ok(())
     }
 
-    fn observe_need_resched(&mut self) -> EventResult {
+    fn observe_need_resched(
+        &mut self,
+        boot_task: &BootTask,
+        dispatch_window: &DispatchWindow,
+    ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
             || !self.idle_wait_committed
             || !self.need_resched_clear_before_wait
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
         {
             return self.failed_ready_action();
         }
@@ -1651,14 +1772,20 @@ impl BootIdleFlow {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn schedule_if_need_resched(
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
         kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &KthreaddTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
+        boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -1668,6 +1795,11 @@ impl BootIdleFlow {
             || scheduler.schedule_passes() == 0
             || current_task_slot.state() != State::Ready
             || !current_task_slot.current_is_boot_task()
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                boot_task.task(),
+                dispatch_window,
+            )
         {
             return self.failed_ready_action();
         }
@@ -1676,9 +1808,13 @@ impl BootIdleFlow {
         scheduler.schedule_idle(
             cpu_group,
             kernel_init_task,
+            kernel_init_flow,
             kthreadd_task,
+            kthreadd_flow,
+            user_task_set,
             local_interrupt,
             current_task_slot,
+            dispatch_window,
         )?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;
@@ -1737,6 +1873,12 @@ pub(crate) extern "C" fn kernel_init_entry() -> ! {
 }
 
 pub(crate) extern "C" fn kthreadd_entry() -> ! {
+    let ctx = crate::context::context();
+    crate::phases::shutdown_on_error(
+        ctx.kthreadd_task
+            .mark_schedule_loop_active(&ctx.kthreadd_flow, &ctx.boot_dispatch_window),
+        "kthreadd dispatch guard failed\n",
+    );
     crate::arch::riscv64::sbi::putstr("kthreadd (pid=2) started\n");
     loop {
         let result = crate::context::context().schedule_current();

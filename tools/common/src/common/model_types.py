@@ -82,6 +82,7 @@ class ObjectDef:
     states: dict[str, StateDef] = field(default_factory=dict)
     children: list[str] = field(default_factory=list)
     attrs: dict[str, str] = field(default_factory=dict)
+    associations: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

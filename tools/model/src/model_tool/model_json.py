@@ -120,6 +120,7 @@ def _object_to_json(item: ObjectDef) -> dict[str, Any]:
         "parent": item.parent,
         "children": item.children,
         "attrs": item.attrs,
+        "associations": item.associations,
         "properties": item.decl.properties,
         "processes": [_process_to_json(process) for process in item.decl.processes],
         "states": {

@@ -1,12 +1,13 @@
 # BootInitFlow 启动执行阶段
 
-`BootInitFlow` 是静态 `BootTask` 的 PhaseObject 子对象，从 `_start` 开始承载启动执行片段。它不是
-TaskFlow，不建立 FlowRef 或 active Flow binding。`BootTask` 在其整个生命周期中始终是 Online、
-PID 0 的同一静态 carrier。
+`BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow 实例。由于 TaskFlow 继承
+PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时拥有独立 FlowRef、lifecycle 与 owner
+关系。`BootTask` 在其整个生命周期中始终是 Online、PID 0 的同一静态 carrier。
 
 ## 边界与职责
 
-- Preset 在 `Kernel.Started -> BootTask.Online -> BootInitFlow.Started` 之后驱动
+- `BootTask` 提交 Online 后发出 initial-flow lossy `Preset`；只有 BootInitFlow 仍为 Base，且
+  `BootDispatchWindow.current_task` 即时解引用为 BootTask 时才接受并记录 Started。随后驱动
   `EntryPreludePhase`；完成后提交 `BootInitFlow.Prepared`。
 - Setup 顺序驱动 `BootPhase` 和 `InterruptPhase`；二者 Online 后提交 `BootInitFlow.Ready`。
 - Enable 顺序驱动 `BootInitRestInitPhase` 和 `BootInitScheduleHandoffPhase`。前者创建并唤醒
@@ -14,6 +15,10 @@ PID 0 的同一静态 carrier。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
   `BootInitFlow.Online` 与 Kernel 的 Prepared switch result，再执行真实 BootTask→KernelInitTask
   task-stack switch。
+
+BootInitFlow 的每个 lifecycle transition 都在执行时重新检查统一 dispatch guard：parent BootTask
+必须仍为 Online，且 BootDispatchWindow 当前必须仍指向 BootTask。该 guard 不是 BootInitFlow 或
+TaskFlow 保存的字段/状态。
 
 `EntryPreludePhase`、`BootPhase`、`InterruptPhase`、`BootInitRestInitPhase` 和
 `BootInitScheduleHandoffPhase` 都以 `BootInitFlow` 为 parent。叶子 Online 后只返回

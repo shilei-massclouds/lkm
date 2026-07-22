@@ -104,6 +104,7 @@ use crate::objects::{
     softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
+    task::DispatchWindow,
     user_boot::{
         ElfObject, KernelInitTaskUserState, UserAddressSpace, UserAppFlow, UserBootPayload,
         UserCloneDeferredBoundaries, UserTaskSet, UserTrapFrame,
@@ -117,6 +118,7 @@ use crate::objects::{
     workqueue::Workqueue,
     zones::Zones,
 };
+use crate::phases::boot_init::BootInitFlow;
 
 pub struct Context {
     pub config: Config,
@@ -128,9 +130,11 @@ pub struct Context {
     pub secondary_cpus: SecondaryCpuStore,
     pub boot_cpu_local_interrupt: LocalInterruptControl,
     pub boot_cpu_current_task: CurrentTaskSlot,
+    pub boot_dispatch_window: DispatchWindow,
     pub kernel_image: KernelImage,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
+    pub boot_init_flow: BootInitFlow,
     pub init_stack: InitStack,
     pub event_stream: EventStream,
     pub exception_stream: ExceptionStream,
@@ -351,9 +355,11 @@ impl Context {
             secondary_cpus: SecondaryCpuStore::new(),
             boot_cpu_local_interrupt: LocalInterruptControl::new(),
             boot_cpu_current_task: CurrentTaskSlot::new(),
+            boot_dispatch_window: DispatchWindow::new_boot(),
             kernel_image: KernelImage::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
+            boot_init_flow: BootInitFlow::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
             exception_stream: ExceptionStream::new(),
@@ -556,7 +562,8 @@ impl Context {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_scheduler_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_scheduler_task()
+        self.scheduler
+            .enqueue_smoke_scheduler_task(&mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -566,7 +573,8 @@ impl Context {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_mutex_task()
+        self.scheduler
+            .enqueue_smoke_mutex_task(&mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -581,7 +589,8 @@ impl Context {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwsem_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_rwsem_task()
+        self.scheduler
+            .enqueue_smoke_rwsem_task(&mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -596,7 +605,8 @@ impl Context {
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn enqueue_smoke_rwlock_task(&mut self) -> EventResult {
-        self.scheduler.enqueue_smoke_rwlock_task()
+        self.scheduler
+            .enqueue_smoke_rwlock_task(&mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -608,10 +618,54 @@ impl Context {
         self.scheduler.schedule(
             &self.cpu_group,
             &mut self.kernel_init_task,
-            &self.kthreadd_task,
+            &mut self.kernel_init_flow,
+            &mut self.kthreadd_task,
+            &mut self.kthreadd_flow,
+            &mut self.user_task_set,
             &mut self.boot_cpu_local_interrupt,
             &mut self.boot_cpu_current_task,
+            &mut self.boot_dispatch_window,
         )
+    }
+
+    pub fn replace_current_user_task(
+        &mut self,
+        previous: crate::objects::task::TaskRef,
+        next: crate::objects::task::TaskRef,
+        next_pid: usize,
+    ) -> EventResult {
+        self.scheduler
+            .replace_user_task_on_runqueue(&self.cpu_group, previous, next, next_pid)?;
+        self.boot_cpu_current_task.commit_switch_to(next)?;
+        self.boot_dispatch_window.commit_switch_to(next)?;
+        self.user_task_set
+            .start_initial_on_dispatch(next, &mut self.boot_dispatch_window)
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub fn commit_user_dispatch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
+        if !next.is_user() {
+            return crate::objects::state::failed_condition(
+                crate::objects::state::LifecycleEvent::Setup,
+                self.boot_dispatch_window.state(),
+                crate::objects::state::State::Online,
+                crate::objects::state::State::Online,
+            );
+        }
+        self.boot_cpu_current_task.commit_switch_to(next)?;
+        self.boot_dispatch_window.commit_switch_to(next)?;
+        self.user_task_set
+            .start_initial_on_dispatch(next, &mut self.boot_dispatch_window)
+    }
+
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub fn commit_kernel_init_dispatch(&mut self) -> EventResult {
+        self.boot_cpu_current_task
+            .commit_switch_to(crate::objects::task::TaskRef::KERNEL_INIT)?;
+        self.boot_dispatch_window
+            .commit_switch_to(crate::objects::task::TaskRef::KERNEL_INIT)?;
+        self.kernel_init_flow
+            .start_initial_on_dispatch(&mut self.kernel_init_task, &mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]

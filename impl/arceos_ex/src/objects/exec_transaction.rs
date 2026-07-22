@@ -1150,10 +1150,11 @@ fn prepare_and_commit(
 #[cfg(any(app_smoke, app_user_boot))]
 fn commit_runtime_flow_handoff(ctx: &mut crate::context::Context) -> bool {
     if ctx.user_task_set.active_task_ref().is_valid() {
-        ctx.user_task_set.commit_active_exec_flow_handoff()
+        ctx.user_task_set
+            .commit_active_exec_flow_handoff(&ctx.boot_dispatch_window)
     } else if ctx.user_app_flow.state() == State::Online {
         ctx.user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_ok()
     } else {
         true

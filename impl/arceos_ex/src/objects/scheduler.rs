@@ -9,14 +9,14 @@ use super::{
     init_mm::InitMm,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
-    rest_init::{KernelInitTask, KthreaddTask},
+    rest_init::{KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddTask},
     state::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
     static_branch::StaticBranch,
-    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task::{DispatchWindow, Task, TaskEntry, TaskKind, TaskRef},
     task_flow::{TaskFlow, TaskFlowRef},
-    user_boot::USER_CHILD_PID,
+    user_boot::{USER_CHILD_PID, UserTaskSet},
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
 use crate::checkpoint::Checkpoint;
@@ -712,13 +712,18 @@ impl Scheduler {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn schedule(
         &mut self,
         cpu_group: &CpuGroup,
         kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &KthreaddTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
@@ -767,7 +772,17 @@ impl Scheduler {
                     self.scheduler_rq_curr_publish_rcu_count.wrapping_add(1);
                 self.scheduler_trace_sched_switch_count =
                     self.scheduler_trace_sched_switch_count.wrapping_add(1);
-                self.switch_to(prev_ref, next_ref, current_task_slot)?;
+                self.switch_to(
+                    prev_ref,
+                    next_ref,
+                    current_task_slot,
+                    dispatch_window,
+                    kernel_init_task,
+                    kernel_init_flow,
+                    kthreadd_task,
+                    kthreadd_flow,
+                    user_task_set,
+                )?;
                 self.schedule_passes = self.schedule_passes.wrapping_add(1);
                 crate::checkpoint::checkpoint(Checkpoint::SchedulerSchedule);
                 Ok(())
@@ -804,13 +819,18 @@ impl Scheduler {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn schedule_idle(
         &mut self,
         cpu_group: &CpuGroup,
         kernel_init_task: &mut KernelInitTask,
-        kthreadd_task: &KthreaddTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
@@ -823,9 +843,13 @@ impl Scheduler {
         self.schedule(
             cpu_group,
             kernel_init_task,
+            kernel_init_flow,
             kthreadd_task,
+            kthreadd_flow,
+            user_task_set,
             local_interrupt,
             current_task_slot,
+            dispatch_window,
         )?;
         self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
         self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
@@ -954,11 +978,18 @@ impl Scheduler {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn switch_to(
         &mut self,
         prev_ref: TaskRef,
         next_ref: TaskRef,
         current_task_slot: &mut CurrentTaskSlot,
+        dispatch_window: &mut DispatchWindow,
+        kernel_init_task: &mut KernelInitTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
     ) -> EventResult {
         if !prev_ref.is_boot_scheduler_ref()
             || !next_ref.is_boot_scheduler_ref()
@@ -966,6 +997,7 @@ impl Scheduler {
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || current_task_slot.state() != State::Ready
             || current_task_slot.current() != prev_ref
+            || dispatch_window.current_task() != prev_ref
         {
             return self.failed_switch_to();
         }
@@ -980,6 +1012,16 @@ impl Scheduler {
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToEntry);
         self.record_core_context_switch(prev_ref, next_ref)?;
         current_task_slot.commit_switch_to(next_ref)?;
+        dispatch_window.commit_switch_to(next_ref)?;
+        self.emit_initial_flow_start(
+            next_ref,
+            dispatch_window,
+            kernel_init_task,
+            kernel_init_flow,
+            kthreadd_task,
+            kthreadd_flow,
+            user_task_set,
+        )?;
         trace_switch_to(prev_ref, next_ref, current_task_slot.current());
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
         if prev_ref == next_ref {
@@ -994,6 +1036,46 @@ impl Scheduler {
             self.scheduler_finish_task_switch_count.wrapping_add(1);
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToExit);
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_initial_flow_start(
+        &mut self,
+        next_ref: TaskRef,
+        dispatch_window: &mut DispatchWindow,
+        kernel_init_task: &mut KernelInitTask,
+        kernel_init_flow: &mut KernelInitFlow,
+        kthreadd_task: &mut KthreaddTask,
+        kthreadd_flow: &mut KthreaddFlow,
+        user_task_set: &mut UserTaskSet,
+    ) -> EventResult {
+        match next_ref {
+            TaskRef::KERNEL_INIT => {
+                kernel_init_flow.start_initial_on_dispatch(kernel_init_task, dispatch_window)
+            }
+            TaskRef::KTHREADD => {
+                kthreadd_flow.start_initial_on_dispatch(kthreadd_task, dispatch_window)
+            }
+            TaskRef::SMOKE_SCHEDULER => self
+                .smoke_scheduler_task
+                .start_initial_on_dispatch(dispatch_window),
+            TaskRef::SMOKE_MUTEX => self
+                .smoke_mutex_task
+                .start_initial_on_dispatch(dispatch_window),
+            TaskRef::SMOKE_RWSEM => self
+                .smoke_rwsem_task
+                .start_initial_on_dispatch(dispatch_window),
+            TaskRef::SMOKE_RWLOCK => self
+                .smoke_rwlock_task
+                .start_initial_on_dispatch(dispatch_window),
+            _ if next_ref.is_user() => {
+                user_task_set.start_initial_on_dispatch(next_ref, dispatch_window)
+            }
+            _ => {
+                dispatch_window.record_start_signal(false);
+                Ok(())
+            }
+        }
     }
 
     fn record_core_context_switch(&mut self, prev_ref: TaskRef, next_ref: TaskRef) -> EventResult {
@@ -1085,7 +1167,10 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn enqueue_smoke_scheduler_task(&mut self) -> EventResult {
+    pub fn enqueue_smoke_scheduler_task(
+        &mut self,
+        dispatch_window: &mut DispatchWindow,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.smoke_scheduler_task.state() != State::Ready
@@ -1098,8 +1183,7 @@ impl Scheduler {
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             TaskRef::SMOKE_SCHEDULER,
         )?;
-        self.smoke_scheduler_task.mark_enqueued();
-        Ok(())
+        self.smoke_scheduler_task.mark_enqueued(dispatch_window)
     }
 
     pub fn setup_smoke_mutex_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
@@ -1115,7 +1199,10 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
+    pub fn enqueue_smoke_mutex_task(
+        &mut self,
+        dispatch_window: &mut DispatchWindow,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.smoke_mutex_task.state() != State::Ready
@@ -1128,14 +1215,13 @@ impl Scheduler {
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             TaskRef::SMOKE_MUTEX,
         )?;
-        self.smoke_mutex_task.mark_enqueued();
-        Ok(())
+        self.smoke_mutex_task.mark_enqueued(dispatch_window)
     }
 
     pub fn dequeue_smoke_mutex_task(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || self.smoke_mutex_task.state() != State::Ready
+            || self.smoke_mutex_task.state() != State::Online
             || !self.smoke_mutex_task.enqueued()
         {
             return Err(self.failed_schedule_condition());
@@ -1162,7 +1248,10 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn enqueue_smoke_rwsem_task(&mut self) -> EventResult {
+    pub fn enqueue_smoke_rwsem_task(
+        &mut self,
+        dispatch_window: &mut DispatchWindow,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.smoke_rwsem_task.state() != State::Ready
@@ -1175,14 +1264,13 @@ impl Scheduler {
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             TaskRef::SMOKE_RWSEM,
         )?;
-        self.smoke_rwsem_task.mark_enqueued();
-        Ok(())
+        self.smoke_rwsem_task.mark_enqueued(dispatch_window)
     }
 
     pub fn dequeue_smoke_rwsem_task(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || self.smoke_rwsem_task.state() != State::Ready
+            || self.smoke_rwsem_task.state() != State::Online
             || !self.smoke_rwsem_task.enqueued()
         {
             return Err(self.failed_schedule_condition());
@@ -1209,7 +1297,10 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn enqueue_smoke_rwlock_task(&mut self) -> EventResult {
+    pub fn enqueue_smoke_rwlock_task(
+        &mut self,
+        dispatch_window: &mut DispatchWindow,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.smoke_rwlock_task.state() != State::Ready
@@ -1222,14 +1313,13 @@ impl Scheduler {
             RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             TaskRef::SMOKE_RWLOCK,
         )?;
-        self.smoke_rwlock_task.mark_enqueued();
-        Ok(())
+        self.smoke_rwlock_task.mark_enqueued(dispatch_window)
     }
 
     pub fn dequeue_smoke_rwlock_task(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || self.smoke_rwlock_task.state() != State::Ready
+            || self.smoke_rwlock_task.state() != State::Online
             || !self.smoke_rwlock_task.enqueued()
         {
             return Err(self.failed_schedule_condition());
@@ -1963,11 +2053,16 @@ impl SmokeSchedulerTask {
     }
 
     pub fn unified_carrier_ready(&self) -> bool {
-        self.task.state() == State::Ready
-            && self.flow.state() == State::Ready
-            && self.flow.active()
-            && self.flow.owner().same_identity(self.task.task_ref())
-            && self.task.active_flow().same_identity(self.flow.flow_ref())
+        self.flow.owner().same_identity(self.task.task_ref())
+            && self.task.initial_flow().same_identity(self.flow.flow_ref())
+            && ((self.task.state() == State::Ready
+                && self.flow.state() == State::Base
+                && !self.flow.active()
+                && !self.task.active_flow().is_valid())
+                || (self.task.state() == State::Online
+                    && self.flow.state() == State::Online
+                    && self.flow.active()
+                    && self.task.active_flow().same_identity(self.flow.flow_ref())))
     }
 
     fn setup(&mut self, entry: extern "C" fn() -> !, cpu_id: usize) -> bool {
@@ -1985,12 +2080,8 @@ impl SmokeSchedulerTask {
             )
             .is_err()
             || self.task.adopt_preset().is_err()
-            || self
-                .flow
-                .preset(&mut self.task, TaskFlowRef::NONE, None)
-                .is_err()
-            || self.flow.setup(None).is_err()
-            || self.task.bind_initial_flow(&mut self.flow).is_err()
+            || self.flow.bind(&mut self.task, TaskFlowRef::NONE).is_err()
+            || self.task.bind_initial_flow(&self.flow).is_err()
             || self.task.adopt_setup().is_err()
         {
             return false;
@@ -2013,8 +2104,13 @@ impl SmokeSchedulerTask {
         }
     }
 
-    fn mark_enqueued(&mut self) {
+    fn mark_enqueued(&mut self, dispatch_window: &mut DispatchWindow) -> EventResult {
         self.enqueued = true;
+        self.task.set_runtime_running()?;
+        self.task.publish_runqueue_binding()?;
+        self.task.adopt_enable()?;
+        self.flow
+            .start_initial_lossy(&mut self.task, dispatch_window, None, None)
     }
 
     fn mark_dequeued(&mut self) {
@@ -2022,7 +2118,10 @@ impl SmokeSchedulerTask {
     }
 
     pub fn mark_entry_ran(&mut self) -> EventResult {
-        if self.task.state() != State::Ready || !self.enqueued {
+        if self.task.state() != State::Online
+            || self.flow.state() != State::Online
+            || !self.enqueued
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.task.state(),
@@ -2036,7 +2135,7 @@ impl SmokeSchedulerTask {
     }
 
     pub fn mark_yielded_back(&mut self) -> EventResult {
-        if self.task.state() != State::Ready || !self.entry_ran {
+        if self.task.state() != State::Online || !self.entry_ran {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.task.state(),
@@ -2050,7 +2149,7 @@ impl SmokeSchedulerTask {
     }
 
     fn save_core_context(&mut self) -> EventResult {
-        if self.task.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.task.state() != State::Online || !self.thread_context.core_register_set() {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.task.state(),
@@ -2064,7 +2163,7 @@ impl SmokeSchedulerTask {
     }
 
     fn restore_core_context(&mut self) -> EventResult {
-        if self.task.state() != State::Ready || !self.thread_context.core_register_set() {
+        if self.task.state() != State::Online || !self.thread_context.core_register_set() {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.task.state(),
@@ -2083,6 +2182,11 @@ impl SmokeSchedulerTask {
 
     fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
         self.task.switch_context_mut()
+    }
+
+    fn start_initial_on_dispatch(&mut self, dispatch_window: &mut DispatchWindow) -> EventResult {
+        self.flow
+            .start_initial_lossy(&mut self.task, dispatch_window, None, None)
     }
 }
 

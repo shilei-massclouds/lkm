@@ -2646,7 +2646,11 @@ impl UserAppFlow {
         Ok(())
     }
 
-    pub fn preset(&mut self, owner: &mut KernelInitTask) -> EventResult {
+    pub fn preset(
+        &mut self,
+        owner: &mut KernelInitTask,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> EventResult {
         let flow = &mut self.flows[self.staging_flow_slot];
         if !self.staging_declared
             || !flow.declared()
@@ -2669,14 +2673,20 @@ impl UserAppFlow {
         self.owner_bound = true;
         self.entry_source_pid1_exec = true;
         self.instance_fresh = true;
+        flow.bind(owner.task_mut(), super::task_flow::TaskFlowRef::KERNEL_INIT)?;
         flow.preset(
-            owner.task_mut(),
-            super::task_flow::TaskFlowRef::KERNEL_INIT,
+            owner.task(),
+            dispatch_window,
             Some(crate::checkpoint::Checkpoint::UserAppFlowPrepared),
         )
     }
 
-    pub fn setup(&mut self, owner_state: &KernelInitTaskUserState) -> EventResult {
+    pub fn setup(
+        &mut self,
+        owner: &KernelInitTask,
+        owner_state: &KernelInitTaskUserState,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> EventResult {
         let flow = &mut self.flows[self.staging_flow_slot];
         if flow.state() != State::Prepared
             || !self.owner_bound
@@ -2695,7 +2705,11 @@ impl UserAppFlow {
         }
 
         self.execution_context_ready = true;
-        flow.setup(Some(crate::checkpoint::Checkpoint::UserAppFlowReady))
+        flow.setup(
+            owner.task(),
+            dispatch_window,
+            Some(crate::checkpoint::Checkpoint::UserAppFlowReady),
+        )
     }
 
     pub fn commit_active_binding(&mut self, owner: &KernelInitTask) -> EventResult {
@@ -2729,6 +2743,7 @@ impl UserAppFlow {
         &mut self,
         owner: &KernelInitTask,
         owner_state: &KernelInitTaskUserState,
+        dispatch_window: &super::task::DispatchWindow,
     ) -> EventResult {
         let flow = &mut self.flows[self.active_flow_slot];
         if flow.state() != State::Ready
@@ -2748,6 +2763,7 @@ impl UserAppFlow {
         self.application_entered = true;
         flow.enable(
             owner.task(),
+            dispatch_window,
             Some(crate::checkpoint::Checkpoint::UserAppFlowOnline),
         )
     }
@@ -2781,7 +2797,11 @@ impl UserAppFlow {
         &mut self.flows[self.staging_flow_slot]
     }
 
-    pub fn commit_runtime_exec_handoff(&mut self, owner: &mut KernelInitTask) -> EventResult {
+    pub fn commit_runtime_exec_handoff(
+        &mut self,
+        owner: &mut KernelInitTask,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> EventResult {
         if !self.has_active_flow
             || self.staging_declared
             || owner.state() != State::Online
@@ -2806,12 +2826,13 @@ impl UserAppFlow {
             let (new_slice, old_slice) = self.flows.split_at_mut(1);
             (&mut old_slice[0], &mut new_slice[0])
         };
-        new.preset(owner.task_mut(), old.flow_ref(), None)?;
-        new.setup(None)?;
-        old.disable(owner.task(), None)?;
+        new.bind(owner.task_mut(), old.flow_ref())?;
+        new.preset(owner.task(), dispatch_window, None)?;
+        new.setup(owner.task(), dispatch_window, None)?;
+        old.disable(owner.task(), dispatch_window, None)?;
         owner.task_mut().commit_flow_handoff(old, new)?;
-        new.enable(owner.task(), None)?;
-        old.cleanup(owner.task(), None)?;
+        new.enable(owner.task(), dispatch_window, None)?;
+        old.cleanup(owner.task(), dispatch_window, None)?;
         owner.task_mut().retire_destroyed_flow(old)?;
 
         self.active_flow_slot = new_index;
@@ -2823,7 +2844,11 @@ impl UserAppFlow {
         Ok(())
     }
 
-    pub fn cleanup_for_shutdown(&mut self, owner: &mut KernelInitTask) -> EventResult {
+    pub fn cleanup_for_shutdown(
+        &mut self,
+        owner: &mut KernelInitTask,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> EventResult {
         if !self.has_active_flow
             || self.staging_declared
             || owner.state() != State::Online
@@ -2838,7 +2863,8 @@ impl UserAppFlow {
             );
         }
 
-        self.flows[self.active_flow_slot].cleanup_active_for_exit(owner.task_mut())?;
+        self.flows[self.active_flow_slot]
+            .cleanup_active_for_exit(owner.task_mut(), dispatch_window)?;
         owner.task_mut().disable()?;
         owner.task_mut().cleanup()?;
         self.has_active_flow = false;
@@ -3520,15 +3546,31 @@ impl UserTaskSet {
 
         let slot = &mut self.task_slots[index];
         let UserTaskStorageSlot { task, flows, .. } = slot;
-        task_event_or_terminate(flows[0].preset(task, TaskFlowRef::NONE, None));
-        task_event_or_terminate(flows[0].setup(None));
-        task_event_or_terminate(task.bind_initial_flow(&mut flows[0]));
+        task_event_or_terminate(flows[0].bind(task, TaskFlowRef::NONE));
+        task_event_or_terminate(task.bind_initial_flow(&flows[0]));
         task_event_or_terminate(task.adopt_enable());
-        task_event_or_terminate(flows[0].enable(task, None));
         Some(task_ref)
     }
 
-    fn destroy_active_user_task(&mut self) -> bool {
+    pub fn start_initial_on_dispatch(
+        &mut self,
+        task_ref: TaskRef,
+        dispatch_window: &mut super::task::DispatchWindow,
+    ) -> EventResult {
+        let Some(index) = task_ref.user_slot() else {
+            dispatch_window.record_start_signal(false);
+            return Ok(());
+        };
+        let slot = &mut self.task_slots[index];
+        if !slot.occupied || !slot.task_ref().same_identity(task_ref) {
+            dispatch_window.record_start_signal(false);
+            return Ok(());
+        }
+        let UserTaskStorageSlot { task, flows, .. } = slot;
+        flows[0].start_initial_lossy(task, dispatch_window, None, None)
+    }
+
+    fn destroy_active_user_task(&mut self, dispatch_window: &super::task::DispatchWindow) -> bool {
         let Some(index) = self.active_task_ref.user_slot() else {
             return false;
         };
@@ -3543,7 +3585,9 @@ impl UserTaskSet {
         let slot = &mut self.task_slots[index];
         let flow_index = slot.active_flow_slot;
         let UserTaskStorageSlot { task, flows, .. } = slot;
-        if flows[flow_index].cleanup_active_for_exit(task).is_err()
+        if flows[flow_index]
+            .cleanup_active_for_exit(task, dispatch_window)
+            .is_err()
             || task.disable().is_err()
             || task.cleanup().is_err()
         {
@@ -3579,7 +3623,10 @@ impl UserTaskSet {
         true
     }
 
-    pub fn commit_active_exec_flow_handoff(&mut self) -> bool {
+    pub fn commit_active_exec_flow_handoff(
+        &mut self,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> bool {
         let Some(index) = self.active_task_ref.user_slot() else {
             return false;
         };
@@ -3599,12 +3646,13 @@ impl UserTaskSet {
         };
 
         if new.declare().is_err()
-            || new.preset(task, old.flow_ref(), None).is_err()
-            || new.setup(None).is_err()
-            || old.disable(task, None).is_err()
+            || new.bind(task, old.flow_ref()).is_err()
+            || new.preset(task, dispatch_window, None).is_err()
+            || new.setup(task, dispatch_window, None).is_err()
+            || old.disable(task, dispatch_window, None).is_err()
             || task.commit_flow_handoff(old, new).is_err()
-            || new.enable(task, None).is_err()
-            || old.cleanup(task, None).is_err()
+            || new.enable(task, dispatch_window, None).is_err()
+            || old.cleanup(task, dispatch_window, None).is_err()
             || task.retire_destroyed_flow(old).is_err()
         {
             return false;
@@ -3613,29 +3661,32 @@ impl UserTaskSet {
         true
     }
 
-    pub fn cleanup_active_task_for_shutdown(&mut self) -> bool {
-        self.destroy_active_user_task()
+    pub fn cleanup_active_task_for_shutdown(
+        &mut self,
+        dispatch_window: &super::task::DispatchWindow,
+    ) -> bool {
+        self.destroy_active_user_task(dispatch_window)
     }
 
     #[cfg(app_smoke)]
-    pub fn smoke_task_slot_generation_contract(&mut self) -> bool {
+    pub fn smoke_task_slot_generation_contract(&mut self) -> Result<(), &'static str> {
         if self.free_task_slot_count() != USER_TASK_SLOT_COUNT
             || self.active_task_ref.is_valid()
             || !self.active_task_record_available
         {
-            return false;
+            return Err("slot contract precondition");
         }
 
         let next_pid_before = self.next_child_pid;
         let mut task_refs = [TaskRef::NONE; USER_TASK_SLOT_COUNT];
-        let mut flow_refs = [TaskFlowRef::NONE; USER_TASK_SLOT_COUNT];
+        let mut initial_flow_refs = [TaskFlowRef::NONE; USER_TASK_SLOT_COUNT];
         let mut index = 0usize;
         while index < USER_TASK_SLOT_COUNT {
             let Some(task_ref) = self.allocate_user_task(10_000 + index, TaskRef::NONE) else {
-                return false;
+                return Err("allocate all user task slots");
             };
             task_refs[index] = task_ref;
-            flow_refs[index] = self.active_flow_ref();
+            initial_flow_refs[index] = self.task_slots[index].task.initial_flow();
             index += 1;
         }
 
@@ -3644,11 +3695,11 @@ impl UserTaskSet {
                 .allocate_user_task(10_000 + USER_TASK_SLOT_COUNT, TaskRef::NONE)
                 .is_some()
             || self.next_child_pid != next_pid_before
-            || !self.task_slots[0].task.disable().is_err()
-            || self.task_slots[1].task.owns_flow(flow_refs[0])
-            || self.flow_ref_valid(task_refs[1], flow_refs[0])
+            || !self.task_slots[0].task.cleanup().is_err()
+            || self.task_slots[1].task.owns_flow(initial_flow_refs[0])
+            || self.flow_ref_valid(task_refs[1], initial_flow_refs[0])
         {
-            return false;
+            return Err("full slot set invariants");
         }
 
         index = 0;
@@ -3656,9 +3707,9 @@ impl UserTaskSet {
             let mut other = index + 1;
             while other < USER_TASK_SLOT_COUNT {
                 if task_refs[index].same_identity(task_refs[other])
-                    || flow_refs[index].same_identity(flow_refs[other])
+                    || initial_flow_refs[index].same_identity(initial_flow_refs[other])
                 {
-                    return false;
+                    return Err("task and initial-flow identities unique");
                 }
                 other += 1;
             }
@@ -3666,11 +3717,17 @@ impl UserTaskSet {
             let slot = &mut self.task_slots[index];
             let flow_index = slot.active_flow_slot;
             let UserTaskStorageSlot { task, flows, .. } = slot;
-            if flows[flow_index].cleanup_active_for_exit(task).is_err()
+            let mut dispatch_window = super::task::DispatchWindow::new_for_task(task.task_ref());
+            if flows[flow_index]
+                .start_initial_lossy(task, &mut dispatch_window, None, None)
+                .is_err()
+                || flows[flow_index]
+                    .cleanup_active_for_exit(task, &dispatch_window)
+                    .is_err()
                 || task.disable().is_err()
                 || task.cleanup().is_err()
             {
-                return false;
+                return Err("dispatched task and flow cleanup");
             }
             index += 1;
         }
@@ -3678,7 +3735,7 @@ impl UserTaskSet {
         index = 0;
         while index < USER_TASK_SLOT_COUNT {
             if !self.release_destroyed_task_ref(task_refs[index]) {
-                return false;
+                return Err("release destroyed task slots");
             }
             index += 1;
         }
@@ -3687,30 +3744,46 @@ impl UserTaskSet {
         self.pending_task_ref = TaskRef::NONE;
         self.last_exited_task_ref = TaskRef::NONE;
 
-        if self.task_ref_valid(task_refs[0]) || self.flow_ref_valid(task_refs[0], flow_refs[0]) {
-            return false;
+        if self.task_ref_valid(task_refs[0])
+            || self.flow_ref_valid(task_refs[0], initial_flow_refs[0])
+        {
+            return Err("stale task and flow refs invalidated");
         }
 
         let Some(recycled_ref) = self.allocate_user_task(20_000, TaskRef::NONE) else {
-            return false;
+            return Err("allocate recycled task slot");
         };
-        let recycled_flow_ref = self.active_flow_ref();
+        let recycled_flow_ref = self
+            .slot_for_ref(recycled_ref)
+            .map(|slot| slot.task.initial_flow())
+            .unwrap_or(TaskFlowRef::NONE);
+        let mut recycled_window = super::task::DispatchWindow::new_for_task(recycled_ref);
+        if self
+            .start_initial_on_dispatch(recycled_ref, &mut recycled_window)
+            .is_err()
+        {
+            return Err("start recycled initial flow");
+        }
         if recycled_ref.slot() != task_refs[0].slot()
             || recycled_ref.generation() == task_refs[0].generation()
-            || recycled_flow_ref.slot() != flow_refs[0].slot()
-            || recycled_flow_ref.generation() == flow_refs[0].generation()
+            || recycled_flow_ref.slot() != initial_flow_refs[0].slot()
+            || recycled_flow_ref.generation() == initial_flow_refs[0].generation()
             || self.task_ref_valid(task_refs[0])
-            || self.flow_ref_valid(recycled_ref, flow_refs[0])
+            || self.flow_ref_valid(recycled_ref, initial_flow_refs[0])
             || !self.task_ref_valid(recycled_ref)
             || !self.flow_ref_valid(recycled_ref, recycled_flow_ref)
-            || !self.destroy_active_user_task()
+            || !self.destroy_active_user_task(&recycled_window)
         {
-            return false;
+            return Err("recycled identities and cleanup");
         }
         let destroyed_ref = self.last_exited_task_ref;
-        self.release_destroyed_task_ref(destroyed_ref)
-            && self.free_task_slot_count() == USER_TASK_SLOT_COUNT
-            && self.next_child_pid == next_pid_before
+        if !self.release_destroyed_task_ref(destroyed_ref)
+            || self.free_task_slot_count() != USER_TASK_SLOT_COUNT
+            || self.next_child_pid != next_pid_before
+        {
+            return Err("recycled slot release and pid stability");
+        }
+        Ok(())
     }
 
     pub const fn prepared(&self) -> bool {
@@ -5419,6 +5492,7 @@ impl UserTaskSet {
 
     pub fn child_exit_to_parent_wait(
         &mut self,
+        dispatch_window: &super::task::DispatchWindow,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
         page_allocator: &mut PageAllocator,
@@ -5446,14 +5520,16 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task(dispatch_window) {
             return None;
         }
         Some((parent_frame, self.parent_wait_status_ptr, self.pid))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn child_exit_to_observed_child_parent_wait(
         &mut self,
+        dispatch_window: &super::task::DispatchWindow,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
         retained_exec_objects: (&mut UserAddressSpace, &mut UserStack),
@@ -5493,7 +5569,7 @@ impl UserTaskSet {
             }
             self.child_exit_status = exit_status;
             self.child_exit_status_observed = true;
-            if !self.destroy_active_user_task() {
+            if !self.destroy_active_user_task(dispatch_window) {
                 return None;
             }
             return Some((
@@ -5528,7 +5604,7 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task(dispatch_window) {
             return None;
         }
         Some((
@@ -5541,6 +5617,7 @@ impl UserTaskSet {
 
     pub fn child_exit_to_vfork_parent(
         &mut self,
+        dispatch_window: &super::task::DispatchWindow,
         address_space: &mut UserAddressSpace,
         stack: &mut UserStack,
         page_allocator: &mut PageAllocator,
@@ -5571,7 +5648,7 @@ impl UserTaskSet {
         }
         self.child_exit_status = exit_status;
         self.child_exit_status_observed = true;
-        if !self.destroy_active_user_task() {
+        if !self.destroy_active_user_task(dispatch_window) {
             return None;
         }
         Some((parent_frame, self.pid))
@@ -8813,14 +8890,21 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
         user_boot_panic("PID 1 syscall context bind failed\n");
     }
     if ctx.user_app_flow.declare().is_err()
-        || ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_err()
         || ctx
             .user_app_flow
-            .setup(&ctx.kernel_init_user_state)
+            .preset(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .is_err()
+        || ctx
+            .user_app_flow
+            .setup(
+                &ctx.kernel_init_task,
+                &ctx.kernel_init_user_state,
+                &ctx.boot_dispatch_window,
+            )
             .is_err()
         || ctx
             .kernel_init_flow
-            .disable_for_exec(&ctx.kernel_init_task)
+            .disable_for_exec(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_err()
         || ctx
             .kernel_init_task
@@ -8832,7 +8916,11 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .user_app_flow
-            .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
+            .enable(
+                &ctx.kernel_init_task,
+                &ctx.kernel_init_user_state,
+                &ctx.boot_dispatch_window,
+            )
             .is_err()
         || ctx
             .kernel_init_user_state
@@ -8840,7 +8928,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .is_err()
         || ctx
             .kernel_init_flow
-            .cleanup_after_handoff(&mut ctx.kernel_init_task)
+            .cleanup_after_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_err()
     {
         user_boot_panic("PID 1 flow handoff failed\n");

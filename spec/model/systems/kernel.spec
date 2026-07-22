@@ -14,7 +14,8 @@ include "../phases/payload/main.spec";
 
 /*
  * Kernel 代表内核运行实例, 由 OpenSBI 交接控制权后启动。
- * 按照内核生命周期驱动 BootInitFlow，并在真实 PID 1 栈入口继续
+ * `_start` 先使静态 BootTask Online；BootTask 的 initial-flow completion
+ * signal 启动并自推进 BootInitFlow，随后在真实 PID 1 栈入口继续
  * 多核运行期以及应用交接期。
  */
 object Kernel: KernelObject {
@@ -40,12 +41,15 @@ object Kernel: KernelObject {
                 }
 
                 drives {
-                    BootInitFlow.Transition::Preset;
+                    BootTask.Transition::Enable;
                 }
 
                 ensures {
-                    BootInitFlow.state == State::Prepared;
+                    BootTask.state == State::Online;
+                    BootInitFlow.state == State::Online;
                     EntryPreludePhase.state == State::Online;
+                    task_flow_started(BootInitFlow);
+                    task_flow_online_on_dispatch(BootInitFlow, BootDispatchWindow);
                 }
 
                 emits {
@@ -61,12 +65,8 @@ object Kernel: KernelObject {
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
-                drives {
-                    BootInitFlow.Transition::Setup;
-                }
-
                 ensures {
-                    BootInitFlow.state == State::Ready;
+                    BootInitFlow.state == State::Online;
                     BootPhase.state == State::Online;
                     InterruptPhase.state == State::Online;
                 }
@@ -85,12 +85,12 @@ object Kernel: KernelObject {
     state State::Ready {
         transitions {
             /*
-             * Enable 先提交 BootInitFlow.Online，再执行真实首次调度切换；
-             * KernelInitTask 的实际入口随后推进 SMP/runtime 和 payload。
+             * BootInitFlow 已由自己的 completion-event 链提交 Online；
+             * Enable 执行真实首次调度切换，KernelInitTask 的实际入口随后
+             * 推进 SMP/runtime 和 payload。
              */
             on Transition::Enable -> State::Online {
                 drives {
-                    BootInitFlow.Transition::Enable;
                     Scheduler.Action::Schedule;
                     SmpRuntimePhase.Transition::Preset;
                     PayloadPhase.Transition::Preset;
