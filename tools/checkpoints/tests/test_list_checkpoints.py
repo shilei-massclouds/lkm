@@ -131,26 +131,24 @@ class ListCheckpointsTests(unittest.TestCase):
         self.assertIn("Kernel.Started", by_name)
         self.assertIn("BootTask.Online", by_name)
         self.assertIn("BootInitFlow.Started", by_name)
-        self.assertIn("BootPhase.Started", by_name)
         self.assertIn("EntryPreludePhase.Started", by_name)
-        self.assertIn("PayloadPhase.Online", by_name)
+        self.assertIn("PayloadPreparePhase.Online", by_name)
+        self.assertIn("PayloadHandoffPreparePhase.Online", by_name)
+        self.assertIn("KernelInitFlow.PayloadHandoffCommitted", by_name)
         self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
         self.assertEqual(by_name["BootTask.Online"].early_byte, "T")
         self.assertEqual(by_name["BootInitFlow.Started"].early_byte, "O")
-        self.assertEqual(by_name["BootPhase.Started"].early_byte, "B")
         self.assertEqual(
             by_name["EntryPreludePhase.Started"].early_byte,
             "A",
         )
 
         for phase in (
-            "BootPhase",
             "EntryPreludePhase",
             "EntrySuccessorPhase",
             "CorePreparePhase",
             "MmCoreInitPhase",
             "SchedInitPhase",
-            "InterruptPhase",
             "IrqTimeInitPhase",
             "LocalIrqEnablePhase",
             "IrqOpenPreparePhase",
@@ -159,7 +157,6 @@ class ListCheckpointsTests(unittest.TestCase):
             "BootInitRestInitPhase",
             "BootInitScheduleHandoffPhase",
             "BootIdleEntryPhase",
-            "SmpRuntimePhase",
             "PreSmpInitPhase",
             "SmpBringupPhase",
             "ApEntryPreludePhase",
@@ -169,173 +166,18 @@ class ListCheckpointsTests(unittest.TestCase):
             "InitcallPhase",
             "RootfsPhase",
             "FinalizePhase",
-            "PayloadPhase",
+            "PayloadPreparePhase",
+            "PayloadHandoffPreparePhase",
         ):
             for boundary in ("Started", "Prepared", "Ready", "Online"):
                 self.assertIn(f"{phase}.{boundary}", by_name)
 
-        stable_interrupt_ids = {
-            "InterruptPhaseStarted": 8,
-            "InterruptPhaseReady": 9,
-            "IrqTimeInitPhaseStarted": 173,
-            "IrqTimeInitPhaseReady": 174,
-            "IrqTimeInitPhaseOnline": 175,
-            "LocalIrqEnablePhaseStarted": 210,
-            "LocalIrqEnablePhaseReady": 211,
-            "IrqOpenPreparePhaseStarted": 213,
-            "IrqOpenPreparePhaseReady": 214,
-            "ProcessPreparePhaseStarted": 232,
-            "ProcessPreparePhaseReady": 233,
-        }
-        boot_init_ids = {
-            "BootTaskOnline": 1,
-            "BootInitFlowStarted": 2,
-            "BootInitFlowPrepared": 267,
-            "BootInitFlowReady": 268,
-            "BootInitRestInitPhaseReady": 269,
-            "BootInitScheduleHandoffPhaseReady": 270,
-            "BootIdleEntryPhaseReady": 271,
-            "BootInitFlowOnline": 449,
-        }
-        stable_smp_runtime_ids = {
-            "PreSmpInitPhaseStarted": 293,
-            "PreSmpInitPhaseReady": 294,
-            "SmpRuntimePhaseStarted": 302,
-            "SmpRuntimePhaseReady": 303,
-            "SmpBringupPhaseStarted": 304,
-            "SmpBringupPhaseReady": 305,
-            "RuntimeCorePhaseStarted": 339,
-            "RuntimeCorePhaseReady": 340,
-            "InitcallPhaseStarted": 347,
-            "InitcallPhaseReady": 348,
-            "RootfsPhaseStarted": 368,
-            "RootfsPhaseReady": 369,
-            "FinalizePhaseStarted": 378,
-            "FinalizePhaseReady": 379,
-        }
-        stable_ap_phase_ids = {
-            "ApEntryPreludePhaseStarted": 320,
-            "ApEntryPreludeBootDataConsumed": 321,
-            "ApEntryPreludeCurrentStackEstablished": 322,
-            "ApEntryPreludePhaseReady": 323,
-            "ApSmpCallinPhaseStarted": 324,
-            "ApSmpCallinCpuRunningProduced": 325,
-            "ApSmpCallinPhaseReady": 326,
-            "ApOnlineIdlePhaseStarted": 327,
-            "ApOnlineIdleDoneUpProduced": 328,
-            "ApOnlineIdlePhaseReady": 329,
-        }
-        appended_smp_runtime_ids = {
-            "SmpRuntimePhasePrepared": 459,
-            "SmpRuntimePhaseOnline": 460,
-            "PreSmpInitPhasePrepared": 461,
-            "PreSmpInitPhaseOnline": 462,
-            "SmpBringupPhasePrepared": 463,
-            "SmpBringupPhaseOnline": 464,
-            "RuntimeCorePhasePrepared": 465,
-            "RuntimeCorePhaseOnline": 466,
-            "InitcallPhasePrepared": 467,
-            "InitcallPhaseOnline": 468,
-            "RootfsPhasePrepared": 469,
-            "RootfsPhaseOnline": 470,
-            "FinalizePhasePrepared": 471,
-            "FinalizePhaseOnline": 472,
-        }
-        appended_ap_phase_ids = {
-            "ApEntryPreludePhasePrepared": 473,
-            "ApEntryPreludePhaseOnline": 474,
-            "ApSmpCallinPhasePrepared": 475,
-            "ApSmpCallinPhaseOnline": 476,
-            "ApOnlineIdlePhasePrepared": 477,
-            "ApOnlineIdlePhaseOnline": 478,
-        }
-        stable_payload_ids = {
-            "PayloadPhaseReady": 431,
-            "PayloadPhaseOnline": 432,
-        }
-        appended_payload_ids = {
-            "PayloadPhaseStarted": 479,
-            "PayloadPhasePrepared": 480,
-        }
-        appended_user_stack_ids = {
-            "UserStackGrowComplete": 481,
-            "UserStackGrowRejected": 482,
-        }
-        appended_task_flow_ids = {
-            "KernelInitFlowOffline": 483,
-            "KernelInitFlowDestroyed": 484,
-            "UserAppFlowPrepared": 485,
-            "UserAppFlowReady": 486,
-            "UserAppFlowOnline": 487,
-        }
-        by_variant = {record.variant: record for record in records}
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in stable_interrupt_ids
-            },
-            stable_interrupt_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in boot_init_ids
-            },
-            boot_init_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in stable_smp_runtime_ids
-            },
-            stable_smp_runtime_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in stable_ap_phase_ids
-            },
-            stable_ap_phase_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in appended_smp_runtime_ids
-            },
-            appended_smp_runtime_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index
-                for variant in appended_ap_phase_ids
-            },
-            appended_ap_phase_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index for variant in stable_payload_ids
-            },
-            stable_payload_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index for variant in appended_payload_ids
-            },
-            appended_payload_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index for variant in appended_user_stack_ids
-            },
-            appended_user_stack_ids,
-        )
-        self.assertEqual(
-            {
-                variant: by_variant[variant].index for variant in appended_task_flow_ids
-            },
-            appended_task_flow_ids,
-        )
-        self.assertEqual(len(records), 488)
+        for removed in ("BootPhase", "InterruptPhase", "SmpRuntimePhase", "PayloadPhase"):
+            for boundary in ("Started", "Prepared", "Ready", "Online"):
+                self.assertNotIn(f"{removed}.{boundary}", by_name)
+
+        self.assertEqual([record.index for record in records], list(range(len(records))))
+        self.assertEqual(len(records), 481)
 
 
 if __name__ == "__main__":

@@ -306,9 +306,12 @@ class EventAndDiffTests(unittest.TestCase):
 
     def test_extracts_checkpoint_user_exit_and_smoke_events(self) -> None:
         events = runner._extract_events(
-            "checkpoint: PayloadPhase.Online\nuser exit status=0\nresult: ok. passed=2 failed=0 total=2\n"
+            "checkpoint: KernelInitFlow.PayloadHandoffCommitted\nuser exit status=0\nresult: ok. passed=2 failed=0 total=2\n"
         )
-        self.assertEqual([event["name"] for event in events], ["PayloadPhase.Online", "UserExitStatus", "SmokeResult"])
+        self.assertEqual(
+            [event["name"] for event in events],
+            ["KernelInitFlow.PayloadHandoffCommitted", "UserExitStatus", "SmokeResult"],
+        )
 
     def test_failure_classifier_precedes_success(self) -> None:
         rules = [

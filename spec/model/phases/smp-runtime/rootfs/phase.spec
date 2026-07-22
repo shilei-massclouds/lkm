@@ -460,7 +460,7 @@ object RootfsBoundary: KernelObject {
  */
 object RootfsPhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpRuntimePhase;
+    parent: KernelInitFlow;
 
     state State::Base {
         transitions {

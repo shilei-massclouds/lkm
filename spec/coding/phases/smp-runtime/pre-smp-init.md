@@ -1,6 +1,6 @@
 # PreSmpInitPhase coding
 
-PreSmpInitPhase 是 SmpRuntimePhase 的第 1 个直接子阶段，由 KernelInitTask 在自己的
+PreSmpInitPhase 是 KernelInitFlow.Preset 的第 1 个直接子阶段，由 KernelInitTask 在自己的
 vmalloc task stack 上执行。model 路径为 `spec/model/phases/smp-runtime/pre-smp-init/`，
 实现落点为 `impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`。
 
@@ -9,7 +9,7 @@ vmalloc task stack 上执行。model 路径为 `spec/model/phases/smp-runtime/pr
 `preset()` 精确检查 Base、BootInitFlow Online、KernelInitTask entry/release/dispatch 与栈事实，
 发出 Started，然后按 model 顺序驱动本阶段全部对象动作并提交 Prepared。`setup()` 只检查对象
 完成事实并提交 Ready；`enable()` 再检查相同 invariant、提交 Online，并且只返回
-`smp_runtime::preset_after_pre_smp_init()`。
+`KernelInitFlow.preset_after_pre_smp_init()`。
 
 | Checkpoint | owner state | 位置 |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ not by BootTask's complete side.
 
 This phase must also consume the TaskCreationCore entry contract:
 KernelInitTask was created with TaskEntry::KernelInit and that entry
-points at the SmpRuntimePhase execution line whose first child is
+points at the KernelInitFlow execution line whose first child is
 PreSmpInitPhase.
 
 #### Allocation and CPU topology

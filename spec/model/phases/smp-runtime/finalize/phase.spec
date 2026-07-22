@@ -1,9 +1,9 @@
 /*
  * Finalize Phase Specification
  *
- * This is SMP Runtime Phase subphase 6. It covers kernel_init() after
+ * This is a KernelInitFlow.Setup leaf. It covers kernel_init() after
  * kernel_init_freeable() returns, from async_synchronize_full() through
- * do_sysctl_args(), before PayloadPhase starts selecting the first payload.
+ * do_sysctl_args(), before PayloadPreparePhase starts selecting the first payload.
  */
 
 /*
@@ -286,7 +286,7 @@ object SysctlArgsDeferred: KernelObject {
 
 /*
  * FinalizeBoundary closes kernel-side startup orchestration and fixes the next
- * entry as PayloadPhase.
+ * entry as PayloadPreparePhase.
  */
 object FinalizeBoundary: KernelObject {
     initial_state: State::Base;
@@ -326,7 +326,7 @@ object FinalizeBoundary: KernelObject {
  */
 object FinalizePhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpRuntimePhase;
+    parent: KernelInitFlow;
 
     state State::Base {
         transitions {

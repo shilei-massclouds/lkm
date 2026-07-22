@@ -280,9 +280,25 @@ object KernelInitFlow: TaskFlow {
                 depends_on {
                     task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
                     task_flow_initial_binding_consistent(self);
+                    BootInitFlow.state == State::Online;
+                    dispatch_window_current_task_is(BootDispatchWindow, KernelInitTask);
+                    kernel_init_entry_reaches_kernel_init_flow(
+                        KernelInitTask,
+                        KernelInitFlow
+                    );
                 }
+
+                drives {
+                    PreSmpInitPhase.Transition::Preset;
+                    SmpBringupPhase.Transition::Preset;
+                }
+
                 ensures {
                     task_flow_started(self);
+                    PreSmpInitPhase.state == State::Online;
+                    SmpBringupPhase.state == State::Online;
+                    kernel_init_flow_first_leaf(self, PreSmpInitPhase);
+                    kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
                 }
                 emits {
                     Transition::Setup;
@@ -294,12 +310,31 @@ object KernelInitFlow: TaskFlow {
     state State::Prepared {
         invariant {
             task_flow_started(self);
+            PreSmpInitPhase.state == State::Online;
+            SmpBringupPhase.state == State::Online;
+            kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
         }
 
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                }
+
+                drives {
+                    RuntimeCorePhase.Transition::Preset;
+                    InitcallPhase.Transition::Preset;
+                    RootfsPhase.Transition::Preset;
+                    FinalizePhase.Transition::Preset;
+                    PayloadPreparePhase.Transition::Preset;
+                }
+
+                ensures {
+                    RuntimeCorePhase.state == State::Online;
+                    InitcallPhase.state == State::Online;
+                    RootfsPhase.state == State::Online;
+                    FinalizePhase.state == State::Online;
+                    PayloadPreparePhase.state == State::Online;
                 }
                 emits {
                     Transition::Enable;
@@ -311,6 +346,13 @@ object KernelInitFlow: TaskFlow {
     state State::Ready {
         invariant {
             task_flow_started(self);
+            PreSmpInitPhase.state == State::Online;
+            SmpBringupPhase.state == State::Online;
+            RuntimeCorePhase.state == State::Online;
+            InitcallPhase.state == State::Online;
+            RootfsPhase.state == State::Online;
+            FinalizePhase.state == State::Online;
+            PayloadPreparePhase.state == State::Online;
         }
 
         transitions {
@@ -318,7 +360,14 @@ object KernelInitFlow: TaskFlow {
                 depends_on {
                     task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
                 }
+
+                drives {
+                    PayloadHandoffPreparePhase.Transition::Preset;
+                }
+
                 ensures {
+                    PayloadHandoffPreparePhase.state == State::Online;
+                    kernel_init_flow_survives_payload_precommit(self);
                     task_active_flow_is(KernelInitTask, self);
                     task_flow_active_binding_committed(self);
                     task_flow_online_on_dispatch(self, BootDispatchWindow);
@@ -330,6 +379,14 @@ object KernelInitFlow: TaskFlow {
     state State::Online {
         invariant {
             task_flow_started(self);
+            PreSmpInitPhase.state == State::Online;
+            SmpBringupPhase.state == State::Online;
+            RuntimeCorePhase.state == State::Online;
+            InitcallPhase.state == State::Online;
+            RootfsPhase.state == State::Online;
+            FinalizePhase.state == State::Online;
+            PayloadPreparePhase.state == State::Online;
+            PayloadHandoffPreparePhase.state == State::Online;
             task_active_flow_is(KernelInitTask, self);
             task_flow_online_on_dispatch(self, BootDispatchWindow);
         }
@@ -403,8 +460,119 @@ object KernelInitFlow: TaskFlow {
                 kernel_init_released_for_pre_smp_init(KernelInitTask);
             }
         }
+
+        Action::CommitPayloadHandoff {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                PayloadHandoffPreparePhase.state == State::Online;
+                SelectedPayloadHandoff.state == State::Online;
+                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+            }
+
+            drives {
+                SelectedPayloadHandoff.Action::CommitSelectedVariant;
+            }
+
+            ensures {
+                selected_payload_no_return_handoff();
+                kernel_init_flow_payload_handoff_committed(self);
+                selected_payload_user_boot_replacement_ordered(
+                    SelectedPayloadHandoff,
+                    self,
+                    KernelInitTask
+                );
+                selected_payload_kernel_mode_keeps_kernel_init_flow(
+                    SelectedPayloadHandoff,
+                    self
+                );
+            }
+        }
     }
 }
+
+/*
+ * The first PID 1 exec uses a fresh UserAppFlow instance backed by the
+ * implementation's dedicated first-user-flow slot. It is structurally bound
+ * and prepared while KernelInitFlow is still Ready; only the later payload
+ * commit makes it active and Online.
+ */
+object Pid1UserAppFlow: UserAppFlow {
+    initial_state: State::Base;
+    parent: KernelInitTask;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    user_app_flow_owner_bound(self);
+                    user_app_flow_entry_source_bound(self);
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                }
+                ensures {
+                    task_flow_started(self);
+                    user_app_flow_instance_fresh(self);
+                }
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                }
+                ensures {
+                    user_app_flow_execution_context_ready(self);
+                    user_app_flow_exec_image_or_fork_continuation_ready(self);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            user_app_flow_instance_fresh(self);
+            user_app_flow_execution_context_ready(self);
+            user_app_flow_exec_image_or_fork_continuation_ready(self);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    task_flow_enable_binding_ready(self);
+                }
+                ensures {
+                    task_flow_active_binding_committed(self);
+                    user_app_flow_online(self);
+                    user_app_flow_is_owner_unique_online_flow(self);
+                    user_application_black_box_entered(self);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            user_app_flow_instance_fresh(self);
+            user_app_flow_online(self);
+            task_active_flow_is(KernelInitTask, self);
+        }
+    }
+
+    state State::Offline { }
+    state State::Destroyed { }
+}
+
+predicate kernel_init_entry_stack_verified<T: Task>(task: T) -> bool;
+predicate kernel_init_flow_first_leaf<F: TaskFlow, P>(flow: F, phase: P) -> bool;
+predicate kernel_init_entry_reaches_kernel_init_flow<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate kernel_init_flow_preset_runs_on_verified_stack<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 
 object KthreaddFlow: KthreaddFlowType {
     initial_state: State::Base;

@@ -96,24 +96,32 @@
   > 自身仍为 Base、parent BootTask 为 Online 且 BootDispatchWindow 当前解引用为 BootTask 时接受。
   > 接受后在 `SingleTaskContext` 中驱动 `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
 
-* Prepared：内核此时不响应中断，`BootTask` 始终 Online，`BootInitFlow` 已 Prepared。
+* Prepared：内核此时不响应中断，`BootTask` 始终 Online，`BootInitFlow` 已 Prepared；
+  `EntryPreludePhase` 已 Online。
 
 * OnSetup：内核收到 Setup 信号，已 Online 的 `BootTask` 继续代表内核完成中期初始化；
   该迁移不再次启动或替换 Task。
 
-  > [model] MUST：向 `BootInitFlow` 同步发送 Setup；它先驱动 `BootPhase`，再驱动
-  > `InterruptPhase`，等待两者到达 `Online` 后提交 Ready。
+  > [model] MUST：向 `BootInitFlow` 同步发送 Setup；它直接顺序驱动
+  > `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
+  > `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
+  > `ProcessPreparePhase`、`BootInitRestInitPhase`，等待最后一个叶子到达 Online 后提交 Ready。
 
 * Ready：内核已经初步具备响应中断信号的能力，等待Enable信号以触发多任务启动。
 
 * OnEnable：内核收到Enable信号，加载并切换到首个用户应用中运行。
 
-  > GAP: 当前 model 的 Kernel.Enable 还顺序驱动 UP 多任务、SMP/runtime 和 selected payload，且 payload 可为内核态 Hello/Smoke，不保证切换到用户应用。
+  > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它只驱动
+  > `BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，并在首次 PID 1 switch
+  > commit 紧邻边界到达 Online。真实切换更新 CurrentTaskSlot 与 DispatchWindow 后重新发出
+  > `KernelInitFlow.Preset`；只有 dynamic guard 成立时才接受。Preset body 必须在
+  > `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 
-  > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它依次驱动
-  > `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，
-  > 并在首次 PID 1 switch commit 紧邻边界到达 Online。真实切换后只能由 KernelInitTask 的实际栈
-  > 入口启动 `SmpRuntimePhase`；其 Online 后再由同一执行线启动 `PayloadPhase`。
+  `KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动
+  `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase`；Enable
+  只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受相同 dispatch guard 约束的
+  `CommitPayloadHandoff`：UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入
+  内核态 no-return entry。
 
 * Online：内核处于正常服务状态，支持应用运行。
 
@@ -130,7 +138,7 @@
 内核直接接收的唯一运行时信号是中断信号，代表内核处理中断的边界是`中断子系统`。
 
 `任务子系统`和`中断子系统`目前是 charter 层的候选系统边界，model 映射暂时 deferred。后续需要
-先确定它们是新的聚合系统对象，还是由现有 Task、Scheduler、InterruptPhase、EventStream、
+先确定它们是新的聚合系统对象，还是由现有 Task、Scheduler、BootInitFlow 直接 interrupt 叶阶段、EventStream、
 InterruptStream 和 IRQ 对象改造形成；在决定前，不把任一现有 phase 或 stream 直接等同于这两个
 子系统。
 

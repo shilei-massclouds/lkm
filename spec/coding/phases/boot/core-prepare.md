@@ -12,7 +12,7 @@
 
 ### 1. depends_on
 
-由 `BootPhase.enable()` 启动，并在 `preset()` 中逐项检查：
+由 `BootInitFlow.setup_after_entry_successor()` 启动，并在 `preset()` 中逐项检查：
 - `EntrySuccessorPhase.state == Online`
 - `Vm.state == Online`、`SwapperVm.state == Online`
 - `MemBlock.state == Online`
@@ -105,12 +105,12 @@
 
 ### 4. emits
 
-→ `BootPhase.enable_after_core_prepare()` 父 continuation
+→ `BootInitFlow.setup_after_core_prepare()` 父 continuation
 
 ## 迁移间调用关系
 
 ```
-preset()  ← 由 BootPhase.enable() 调用
+preset()  ← 由 BootInitFlow.setup_after_entry_successor() 调用
   │
   ├─ preset_objects()  ← 按模型 drives 顺序驱动全部对象 transition
   │
@@ -124,7 +124,7 @@ preset()  ← 由 BootPhase.enable() 调用
   │
   ├─ enable_event()  ← 检查 invariant，标记 Online + checkpoint
   │
-  └─ BootPhase.enable_after_core_prepare()
+  └─ BootInitFlow.setup_after_core_prepare()
 ```
 
 ## Invariant（模型 CorePreparePhase.Ready / Online）

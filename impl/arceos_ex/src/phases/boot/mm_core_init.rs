@@ -157,7 +157,7 @@ fn adopt_ready(ctx: &Context) -> EventResult {
 
 fn enable(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex mm core init enable failed\n");
-    crate::phases::boot::enable_after_mm_core_init()
+    crate::phases::boot_init::setup_after_mm_core_init()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {

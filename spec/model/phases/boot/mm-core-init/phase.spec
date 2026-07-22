@@ -1734,11 +1734,11 @@ object MmStructCache: MemoryObject {
 }
 
 /*
- * MmCoreInitPhase 表示 BootPhase 的第四个子阶段。
+ * MmCoreInitPhase 表示 BootInitFlow.Setup 的第三个 boot 叶阶段。
  */
 object MmCoreInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

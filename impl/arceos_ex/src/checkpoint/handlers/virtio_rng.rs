@@ -14,7 +14,7 @@ use crate::{
 
 const SCOPE: &[Checkpoint] = &[
     Checkpoint::VirtioRngEntropyReady,
-    Checkpoint::PayloadPhaseOnline,
+    Checkpoint::PayloadPreparePhaseOnline,
 ];
 pub const KUNIT_CASE_COUNT: usize = 1;
 
@@ -26,7 +26,7 @@ pub const HANDLER: Handler = Handler {
 };
 
 fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
-    if checkpoint == Checkpoint::PayloadPhaseOnline && real_completion_facts_valid(ctx) {
+    if checkpoint == Checkpoint::PayloadPreparePhaseOnline && real_completion_facts_valid(ctx) {
         return CheckpointOutcome::Continue;
     }
 

@@ -67,8 +67,15 @@ object Kernel: KernelObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     BootInitFlow.state == State::Online;
-                    BootPhase.state == State::Online;
-                    InterruptPhase.state == State::Online;
+                    EntrySuccessorPhase.state == State::Online;
+                    CorePreparePhase.state == State::Online;
+                    MmCoreInitPhase.state == State::Online;
+                    SchedInitPhase.state == State::Online;
+                    IrqTimeInitPhase.state == State::Online;
+                    LocalIrqEnablePhase.state == State::Online;
+                    IrqOpenPreparePhase.state == State::Online;
+                    ProcessPreparePhase.state == State::Online;
+                    BootInitRestInitPhase.state == State::Online;
                 }
 
                 emits {
@@ -92,8 +99,7 @@ object Kernel: KernelObject {
             on Transition::Enable -> State::Online {
                 drives {
                     Scheduler.Action::Schedule;
-                    SmpRuntimePhase.Transition::Preset;
-                    PayloadPhase.Transition::Preset;
+                    KernelInitFlow.Action::CommitPayloadHandoff;
                 }
 
                 ensures {
@@ -103,8 +109,25 @@ object Kernel: KernelObject {
                         BootTask,
                         KernelInitTask
                     );
-                    SmpRuntimePhase.state == State::Online;
-                    PayloadPhase.state == State::Online;
+                    kernel_init_flow_payload_handoff_committed(KernelInitFlow);
+                    selected_payload_user_boot_replacement_ordered(
+                        SelectedPayloadHandoff,
+                        KernelInitFlow,
+                        KernelInitTask
+                    );
+                    selected_payload_kernel_mode_keeps_kernel_init_flow(
+                        SelectedPayloadHandoff,
+                        KernelInitFlow
+                    );
+                    PreSmpInitPhase.state == State::Online;
+                    SmpBringupPhase.state == State::Online;
+                    RuntimeCorePhase.state == State::Online;
+                    InitcallPhase.state == State::Online;
+                    RootfsPhase.state == State::Online;
+                    FinalizePhase.state == State::Online;
+                    PayloadPreparePhase.state == State::Online;
+                    PayloadHandoffPreparePhase.state == State::Online;
+                    kernel_init_flow_payload_handoff_committed(KernelInitFlow);
                 }
             }
         }

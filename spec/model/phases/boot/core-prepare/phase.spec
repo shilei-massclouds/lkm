@@ -1351,7 +1351,7 @@ object ExceptionTable: ResourceObject {
  */
 object CorePreparePhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootPhase;
+    parent: BootInitFlow;
 
     /*
      * Base 表示核心准备期尚未开始，仍处于系统独占上下文。

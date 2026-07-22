@@ -49,7 +49,7 @@ Enable start 检查精确 Ready，并验证 model Online invariant：Interrupt/E
 KernelImage、RawDtb、BootTaskEntryBinding、BootTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
 CpuGroup 和 Soc 必须处于 model 规定状态。成功后提交 Online，发出
 `EntryPreludePhase.Online`，再返回 `BootInitFlow.Preset` completion continuation。该 continuation
-提交 `BootInitFlow.Prepared` 后返回 Kernel.Preset；本阶段不得直接启动 BootPhase 或
+提交 `BootInitFlow.Prepared` 后返回 Kernel.Preset；本阶段不得直接启动 BootInitFlow.Setup 的后续叶阶段或
 EntrySuccessorPhase。
 
 ## 状态与 checkpoint

@@ -1,8 +1,9 @@
 /*
  * First user-mode program bootstrap model.
  *
- * This slice models the shortest Linux-like path from PayloadPhase to the
- * first user-mode program. The selected payload variant is UserBootPayload.
+ * This slice models the shortest Linux-like path from KernelInitFlow's split
+ * payload leaves to the first user-mode program. The selected payload variant
+ * is UserBootPayload.
  * It follows Linux 6.12 init/main.c::kernel_init() after do_sysctl_args(): the
  * ramdisk init branch is trimmed because CONFIG_BLK_DEV_INITRD is disabled;
  * execute_command from init= is a requested-init branch that runs before
@@ -3194,6 +3195,60 @@ object UserBootPayload: ResourceObject {
         }
 
         actions {
+            /*
+             * Reversible precommit preparation. KernelInitFlow is still
+             * Ready and active resources are not replaced here. The fresh
+             * PID 1 UserAppFlow reaches Ready only after its image, address
+             * space, trap frame, syscall context and structural owner binding
+             * have all been prepared.
+             */
+            on Action::PrepareHandoff {
+                depends_on {
+                    KernelInitFlow.state == State::Ready;
+                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    ExceptionStream.state == State::Ready;
+                    SyscallException.state == State::Prepared;
+                    ExecSyncBoundaries.state == State::Ready;
+                }
+
+                drives {
+                    VfsCore.Action::ReadPath(Path, FsStruct);
+                    ElfObject.Transition::Preset;
+                    ElfObject.Transition::Setup;
+                    UserBootPayload.Action::TryDefaultInitSequence;
+                    UserAddressSpace.Transition::Preset;
+                    UserStack.Transition::Setup;
+                    UserAddressSpace.Transition::Setup;
+                    UserTrapFrame.Transition::Setup;
+                    ElfObject.Transition::Enable;
+                    UserAddressSpace.Transition::Enable;
+                    SyscallException.Transition::Setup;
+                    SyscallTable.Transition::Setup;
+                    SyscallException.Transition::Enable;
+                    FilesStruct.Transition::Setup;
+                    FilesStruct.Action::ClearStdinReadyData;
+                    FilesStruct.Action::PrepareDefaultStdinReadyData;
+                    FilesStruct.Action::EnableStdinBlockingWait;
+                    Pid1UserAppFlow.Action::Bind(
+                        owner_task: KernelInitTask,
+                        entry_source: UserAppFlowEntrySource::Pid1Exec
+                    );
+                    Pid1UserAppFlow.Transition::Preset;
+                }
+
+                ensures {
+                    ElfObject.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                    UserTrapFrame.state == State::Ready;
+                    SyscallTable.state == State::Ready;
+                    SyscallException.state == State::Online;
+                    Pid1UserAppFlow.state == State::Ready;
+                    user_app_flow_instance_fresh(Pid1UserAppFlow);
+                    task_active_flow_is(KernelInitTask, KernelInitFlow);
+                    kernel_init_flow_survives_payload_precommit(KernelInitFlow);
+                }
+            }
+
             on Action::TryCandidate(path: UserInitPathRef) {
                 depends_on {
                     VfsCore.state == State::Ready;
@@ -3311,40 +3366,20 @@ object UserBootPayload: ResourceObject {
                     FsStruct.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     ExceptionStream.state == State::Ready;
-                    SyscallException.state == State::Prepared;
+                    SyscallException.state == State::Online;
                     ExecSyncBoundaries.state == State::Ready;
+                    KernelInitFlow.state == State::Online;
+                    Pid1UserAppFlow.state == State::Ready;
+                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
                 }
 
                 drives {
-                    declare pid1_flow of UserAppFlow;
-                    VfsCore.Action::ReadPath(Path, FsStruct);
-                    ElfObject.Transition::Preset;
-                    ElfObject.Transition::Setup;
-                    UserBootPayload.Action::TryDefaultInitSequence;
-                    UserAddressSpace.Transition::Preset;
-                    UserStack.Transition::Setup;
-                    UserAddressSpace.Transition::Setup;
-                    UserTrapFrame.Transition::Setup;
-                    ElfObject.Transition::Enable;
-                    UserAddressSpace.Transition::Enable;
-                    SyscallException.Transition::Setup;
-                    SyscallTable.Transition::Setup;
-                    SyscallException.Transition::Enable;
-                    FilesStruct.Transition::Setup;
-                    FilesStruct.Action::ClearStdinReadyData;
-                    FilesStruct.Action::PrepareDefaultStdinReadyData;
-                    FilesStruct.Action::EnableStdinBlockingWait;
-                    pid1_flow.Action::Bind(
-                        owner_task: KernelInitTask,
-                        entry_source: UserAppFlowEntrySource::Pid1Exec
-                    );
-                    pid1_flow.Transition::Preset;
                     KernelInitFlow.Transition::Disable;
                     KernelInitTask.Action::CommitFlowHandoff(
                         from_flow: KernelInitFlow,
-                        to_flow: pid1_flow
+                        to_flow: Pid1UserAppFlow
                     );
-                    pid1_flow.Transition::Enable;
+                    Pid1UserAppFlow.Transition::Enable;
                     KernelInitFlow.Transition::Cleanup;
                     KernelInitTask.Action::RecordRetiredFlowDestroyed(
                         flow: KernelInitFlow
@@ -3358,21 +3393,21 @@ object UserBootPayload: ResourceObject {
                     SyscallTable.state == State::Ready;
                     SyscallException.state == State::Online;
                     KernelInitTask.state == State::Online;
-                    pid1_flow.state == State::Online;
+                    Pid1UserAppFlow.state == State::Online;
                     KernelInitFlow.state == State::Destroyed;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_owns_flow(KernelInitTask, pid1_flow);
-                    task_flow_owner_is(pid1_flow, KernelInitTask);
-                    task_flow_owner_exclusive(pid1_flow);
-                    task_flow_handoff(KernelInitTask, KernelInitFlow, pid1_flow);
+                    task_owns_flow(KernelInitTask, Pid1UserAppFlow);
+                    task_flow_owner_is(Pid1UserAppFlow, KernelInitTask);
+                    task_flow_owner_exclusive(Pid1UserAppFlow);
+                    task_flow_handoff(KernelInitTask, KernelInitFlow, Pid1UserAppFlow);
                     task_flow_handoff_old_inactive(KernelInitTask, KernelInitFlow);
-                    task_flow_handoff_new_active(KernelInitTask, pid1_flow);
-                    task_active_flow_is(KernelInitTask, pid1_flow);
+                    task_flow_handoff_new_active(KernelInitTask, Pid1UserAppFlow);
+                    task_active_flow_is(KernelInitTask, Pid1UserAppFlow);
                     task_at_most_one_flow_online(KernelInitTask);
-                    task_flow_instances_distinct(KernelInitFlow, pid1_flow);
+                    task_flow_instances_distinct(KernelInitFlow, Pid1UserAppFlow);
                     task_retired_flow_destroyed(KernelInitTask, KernelInitFlow);
                     task_all_prior_owned_flows_destroyed(KernelInitTask);
-                    kernel_init_task_execve_to_pid1_user_app(KernelInitTask, pid1_flow);
+                    kernel_init_task_execve_to_pid1_user_app(KernelInitTask, Pid1UserAppFlow);
                     kernel_init_task_pid1_identity_preserved(KernelInitTask);
                     kernel_init_task_user_app_flow_online(KernelInitTask);
                     kernel_init_task_pid1_exec_flow_handoff_complete(KernelInitTask);

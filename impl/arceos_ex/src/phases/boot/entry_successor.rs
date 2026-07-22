@@ -149,7 +149,7 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex entry successor enable failed\n",
     );
-    crate::phases::boot::setup_after_entry_successor()
+    crate::phases::boot_init::setup_after_entry_successor()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {

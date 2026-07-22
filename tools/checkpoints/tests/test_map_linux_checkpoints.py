@@ -596,8 +596,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=401,
-                variant="PayloadPhaseOnline",
-                name="PayloadPhase.Online",
+                variant="KernelInitFlowPayloadHandoffCommitted",
+                name="KernelInitFlow.PayloadHandoffCommitted",
             ),
         ]
         with tempfile.TemporaryDirectory() as tmp:
@@ -618,10 +618,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(mapped[4].linux_symbol, "run_init_process")
         self.assertIn("definition", mapped[4].linux_anchor)
 
-    def test_interrupt_lifecycle_additions_default_to_unmapped(self) -> None:
+    def test_interrupt_leaf_lifecycle_additions_default_to_unmapped(self) -> None:
         names = [
-            "InterruptPhase.Prepared",
-            "InterruptPhase.Online",
             "IrqTimeInitPhase.Prepared",
             "LocalIrqEnablePhase.Prepared",
             "LocalIrqEnablePhase.Online",
@@ -699,8 +697,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=400,
-                variant="PayloadPhaseReady",
-                name="PayloadPhase.Ready",
+                variant="PayloadPreparePhaseOnline",
+                name="PayloadPreparePhase.Online",
             ),
         ]
 
@@ -722,7 +720,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
             main_text = main_text.replace(
                 "    do_sysctl_args();\n",
-                "    /* LKM_CHECKPOINT name=PayloadPhase.Ready variant=PayloadPhaseReady fingerprint=sha256:demo */\n"
+                "    /* LKM_CHECKPOINT name=PayloadPreparePhase.Online variant=PayloadPreparePhaseOnline fingerprint=sha256:demo */\n"
                 "    do_sysctl_args();\n",
             )
             main_path.write_text(main_text, encoding="utf-8")
@@ -1726,8 +1724,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             },
             {
                 "index": 401,
-                "variant": "PayloadPhaseOnline",
-                "name": "PayloadPhase.Online",
+                "variant": "KernelInitFlowPayloadHandoffCommitted",
+                "name": "KernelInitFlow.PayloadHandoffCommitted",
             },
         ]
 
@@ -1855,8 +1853,14 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertEqual(by_name["RootFS.Online"].linux_symbol, "prepare_namespace")
         self.assertEqual(by_name["IntegrityKeys.DeferredReady"].linux_symbol, "kernel_init_freeable")
         self.assertEqual(by_name["RootfsBoundary.Ready"].confidence, "medium")
-        self.assertEqual(by_name["PayloadPhase.Online"].linux_symbol, "run_init_process")
-        self.assertIn("definition", by_name["PayloadPhase.Online"].linux_anchor)
+        self.assertEqual(
+            by_name["KernelInitFlow.PayloadHandoffCommitted"].linux_symbol,
+            "run_init_process",
+        )
+        self.assertIn(
+            "definition",
+            by_name["KernelInitFlow.PayloadHandoffCommitted"].linux_anchor,
+        )
         self.assertEqual(by_name["SyscallTable.Read"].linux_symbol, "SYSCALL_DEFINE3(read)")
         self.assertEqual(by_name["SyscallTable.Write"].linux_symbol, "SYSCALL_DEFINE3(write)")
         self.assertEqual(by_name["SyscallTable.Clone"].linux_symbol, "kernel_clone")

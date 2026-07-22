@@ -1,7 +1,7 @@
 # EntrySuccessorPhase Coding
 
 入口后继子阶段对应 model `EntrySuccessorPhase`，实现落点为
-`impl/arceos_ex/src/phases/boot/entry_successor.rs`。它只由 BootPhase.Setup 驱动；完成后返回父
+`impl/arceos_ex/src/phases/boot/entry_successor.rs`。它只由 BootInitFlow.Setup 驱动；完成后返回父
 continuation，不拥有 CorePrepare sibling 的启动权。
 
 ## Transition 映射
@@ -27,7 +27,7 @@ Setup 检查精确 Prepared，并验证 EntrySuccessor Ready invariant：入口�
 ### Enable: Ready -> Online
 
 Enable 检查精确 Ready并重新确认 invariant，提交 Online 并发出
-`EntrySuccessorPhase.Online`。随后返回 `boot::setup_after_entry_successor()`；不得直接调用
+`EntrySuccessorPhase.Online`。随后返回 `boot_init::setup_after_entry_successor()`；不得直接调用
 CorePreparePhase。
 
 ## 状态与 checkpoint

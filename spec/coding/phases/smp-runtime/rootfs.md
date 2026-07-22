@@ -1,6 +1,6 @@
 # RootfsPhase coding
 
-RootfsPhase 是 SmpRuntimePhase 的第 5 个直接子阶段，由 KernelInitTask 执行。model 路径为
+RootfsPhase 是 KernelInitFlow.Setup 的第 3 个直接子阶段，由 KernelInitTask 执行。model 路径为
 `spec/model/phases/smp-runtime/rootfs/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。
 
@@ -10,7 +10,7 @@ RootfsPhase 是 SmpRuntimePhase 的第 5 个直接子阶段，由 KernelInitTask
 KUnitRuntimeTrimmed 开始驱动全部对象并提交 Prepared。因此 Started 表示 Rootfs Preset/KUnit
 入口，不再表示 `prepare_namespace()` 前边界。`RamdiskExecuteCommand.EaccessCheckpoint` 继续位于
 RootfsConsole 之后、prepare_namespace 分类与 RootFS.Enable 之前。Setup/Enable 只检查 rootfs
-结果并提交 Ready/Online；Online 只返回 `smp_runtime::enable_after_rootfs()`。
+结果并提交 Ready/Online；Online 只返回 `KernelInitFlow.setup_after_rootfs()`。
 
 #### Entry gate
 

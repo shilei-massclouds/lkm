@@ -1244,8 +1244,6 @@ object Workqueue: KernelObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     KthreaddTask.state == State::Online;
                     PageAllocator.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -1625,8 +1623,6 @@ object TasksRcu: KernelObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     KthreaddTask.state == State::Online;
                 }
 
@@ -1648,11 +1644,11 @@ object TasksRcu: KernelObject {
 }
 
 /*
- * SchedInitPhase 表示 BootPhase 的第四个直接子阶段。
+ * SchedInitPhase 表示 BootInitFlow.Setup 的第四个 boot 叶阶段。
  */
 object SchedInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

@@ -90,7 +90,7 @@ fn enable(ctx: &mut Context) -> ! {
         ),
         "arceos_ex runtime core enable failed\n",
     );
-    crate::phases::smp_runtime::enable_after_runtime_core()
+    crate::phases::smp_runtime::setup_after_runtime_core()
 }
 
 fn transition_if_ready(

@@ -84,7 +84,6 @@
 | `P2` | 延期 | model/derive | 多链独立推导语义 | 为 task/interrupt flow 建立独立推导链，并保持跨链状态交互显式。 | [model semantics](../spec/model/SEMANTICS.md#sem-transition-emits-001-completion-events-are-post-commit-events) |
 | `P1` | 待办 | model/arceos_ex | 抽取 wake_up_new_task 复用模型 | 统一 task wake-up context、runtime state、runqueue selection 与 nested enqueue 约束。 | [model semantics](../spec/model/SEMANTICS.md#sem-exclusive-context-001-guard-and-resource-exclusive-context-are-distinct) |
 | `P1` | 待办 | model/arceos_ex | EventStream per-CPU 归属 | 为每个 live CPU 建立自己的 Event/Interrupt/Exception stream；AP 在 secondary entry 后建立。 | [model semantics](../spec/model/SEMANTICS.md#sem-current-cpu-model-001-currentcpu-is-the-per-cpu-self-identity-entry) |
-| `P1` | 待办 | charter/model/phases/task | `BootInitFlow` / `KernelInitFlow` 子阶段归属复核 | 保留两个 Flow 的现有命名与 Task owner 含义；按实际执行 continuation、首次 dispatch 和任务切换边界复核各子阶段应归属 `BootInitFlow`、`BootIdleFlow` 还是 `KernelInitFlow`，本轮不随 guard 修正重分阶段。 | [TaskFlow charter](../spec/charter/objects/task-flow.md)；[BootInitFlow charter](../spec/charter/phases/boot-init.md) |
 | `P1` | 进行中 | arceos_ex | 整理对象级源码结构 | 继续按 phase/object mapping 拆分源码，并把资源对象收敛到 Context；目录主题化另列 P2。 | [object coverage](../spec/coding/objects/README.md) |
 | `P1` | 待办 | arceos_ex/console | serial8250 RX/TTY/FIFO 补强 | `irq_time.010`–`irq_time.012` | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
 | `P1` | 待办 | arceos_ex/smoke | 类型行为 smoke 双任务场景 | 为 RawSpinLock、Completion 等补最小双任务竞争/等待/唤醒与跨任务可见性。 | [testing 规格](../spec/testing/README.md#测试目标分类) |

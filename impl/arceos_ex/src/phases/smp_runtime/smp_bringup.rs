@@ -141,7 +141,7 @@ fn enable(ctx: &mut Context) -> ! {
         ),
         "arceos_ex smp bringup enable failed\n",
     );
-    crate::phases::smp_runtime::setup_after_smp_bringup()
+    crate::phases::smp_runtime::preset_after_smp_bringup()
 }
 
 fn transition_if_ready(

@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
+const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPreparePhaseOnline];
 pub const KUNIT_CASE_COUNT: usize = 1;
 
 pub const HANDLER: Handler = Handler {
@@ -841,7 +841,7 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.loop_exit_count() != 0
         && ctx.plic.complete_count() == ctx.plic.claim_count()
         // Later devices, such as virtio-blk during rootfs mount, may legally
-        // update PLIC's last claimed/completed source before PayloadPhase.
+        // update PLIC's last claimed/completed source before payload handoff.
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.enable_deferred()
         && ctx.plic_irq_domain.dispatch_ops_ready()

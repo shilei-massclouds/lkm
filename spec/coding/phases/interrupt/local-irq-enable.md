@@ -18,7 +18,7 @@ model 来源为 `spec/model/phases/interrupt/local-irq-enable/phase.spec`，实�
 
 #### Model path
 
-LocalIrqEnablePhase is InterruptPhase subphase 2. Its formal model
+LocalIrqEnablePhase is a direct BootInitFlow.Setup phase. Its formal model
 path is spec/model/phases/interrupt/local-irq-enable/.
 
 #### Code path

@@ -172,7 +172,7 @@ fn adopt_ready(ctx: &Context) -> EventResult {
 
 fn enable(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex irq time init enable failed\n");
-    crate::phases::interrupt::preset_after_irq_time_init()
+    crate::phases::boot_init::setup_after_irq_time_init()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {

@@ -100,7 +100,7 @@ fn enable(ctx: &mut Context) -> ! {
         ),
         "arceos_ex finalize enable failed\n",
     );
-    crate::phases::smp_runtime::enable_after_finalize()
+    crate::phases::smp_runtime::setup_after_finalize()
 }
 
 fn transition_if_ready(

@@ -57,8 +57,12 @@ preemption 状态或 active TaskFlow 放入 invariant。boot-only const 初始�
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
 context、scheduler entity 和 New/not-enqueued 状态；`Enable` 统一消费 running、runqueue publication
-与初始 Flow binding并提交 Task Online；它发出的初始 Flow `Preset` 是 lossy 信号，不保证 Flow 已经
-启动或 active。PID 1 入口、`CLONE_FS`、kthreadd flags、provider
+与初始 Flow binding 并提交 Task Online；它发出的初始 Flow `Preset` 是 lossy 信号，不保证 Flow 已经
+启动或 active。`BootInitRestInitPhase` 必须完整驱动新 Task 的 Preset/Setup/Enable：其中
+Preset/Setup 对应 carrier 创建与 copy-process 收口，Enable 对应 `wake_up_new_task()` 后的 Online
+发布。PID 1 与 kthreadd 的 Enable 发生时 boot DispatchWindow 仍指向 BootTask，因此两次 initial-flow
+信号都必须立即 discarded；不得把 Task Online 误写成 initial Flow 已启动。PID 1 入口、`CLONE_FS`、
+kthreadd flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
 ## TaskRef 与身份存储

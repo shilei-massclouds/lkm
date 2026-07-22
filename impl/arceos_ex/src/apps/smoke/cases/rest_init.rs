@@ -17,7 +17,7 @@ pub fn run() -> SmokeResult {
     let discarded_before = ctx.boot_dispatch_window.start_signal_discarded_count();
     if ctx
         .kernel_init_flow
-        .start_initial_on_dispatch(&mut ctx.kernel_init_task, &mut ctx.boot_dispatch_window)
+        .start_initial_on_dispatch(&ctx.kernel_init_task, &mut ctx.boot_dispatch_window)
         .is_err()
         || ctx
             .kthreadd_flow

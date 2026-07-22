@@ -3,9 +3,13 @@ use crate::{
     objects::{printk, state::EventResult, user_boot},
 };
 
-pub(crate) fn prepare(ctx: &mut Context) -> EventResult {
+pub(crate) fn prepare_handoff(ctx: &mut Context) -> EventResult {
     printk::write_str("arceos_ex user boot start\n");
-    user_boot::prepare_first_user_init(ctx)
+    user_boot::prepare_first_user_init_handoff(ctx)
+}
+
+pub(crate) fn commit_handoff(ctx: &mut Context) -> EventResult {
+    user_boot::commit_first_user_init_handoff(ctx)
 }
 
 pub(crate) fn enter(ctx: &mut Context) -> ! {

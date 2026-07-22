@@ -1,11 +1,12 @@
 /*
  * IRQ and Time Init Phase Specification
  *
- * This is InterruptPhase subphase 1. It starts after
+ * This is the first interrupt-oriented leaf directly driven by
+ * BootInitFlow.Setup. It starts after
  * sched_init/context_tracking_init and ends with IRQ/time infrastructure ready
  * while the boot CPU local interrupt gate remains closed. The following
  * LocalIrqEnablePhase owns the local_irq_enable() boundary, so this phase can
- * remain covered by the outer SingleTaskContext.
+ * remain covered by SingleTaskContext.
  */
 
 context IrqControllerDescInitContext: Context {
@@ -2210,14 +2211,14 @@ object SmpCallFunction: KernelObject {
 }
 
 /*
- * IrqTimeInitPhase 表示 InterruptPhase 的第一个子阶段。它建立
+ * IrqTimeInitPhase 表示 BootInitFlow.Setup 直接驱动的第一个 interrupt 叶阶段。它建立
  * early_irq_init()/init_IRQ()/timer/timekeeping/random/IPI/call-function
  * 基础，但不打开 boot CPU 本地中断总入口；local_irq_enable() 独立由
  * LocalIrqEnablePhase 承载。
  */
 object IrqTimeInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: InterruptPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

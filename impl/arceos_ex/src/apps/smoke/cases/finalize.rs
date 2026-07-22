@@ -8,7 +8,9 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::smp_runtime::finalize::is_online() || !phases::smp_runtime::is_online() {
+    if !phases::smp_runtime::finalize::is_online()
+        || !ctx.kernel_init_flow.payload_handoff_committed()
+    {
         printk::write_str("finalize phase is not ready\n");
         return SmokeResult::Failed;
     }

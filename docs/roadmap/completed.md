@@ -49,6 +49,7 @@
 | arceos_ex/task/mm/arch | Per-task vmalloc 内核栈首轮 | [启动阶段审计历史](boot-audit.md) |
 | model/coding/arceos_ex/trap/mm | RISC-V VMAP trap 栈 early overflow 首片 | [启动阶段审计历史](boot-audit.md#已完成专题risc-v-vmap-trap-栈-early-overflow) |
 | charter/model/coding/arceos_ex | Kernel 阶段范式四层一致性审计与 coding 文档化 | [阶段范式审计](phase-paradigm-audit.md) |
+| charter/model/coding/arceos_ex/phases/task | TaskFlow 直接子阶段归属重构 | [TaskFlow 直接子阶段归属重构](phase-paradigm-audit.md#taskflow-直接子阶段归属重构) |
 | model/coding/arceos_ex/block/fs | Ext2 single-indirect read 支持 | [virtio / block / VFS / Ext2 历史](virtio-block-fs.md) |
 | arceos_ex/irq | PLIC 驱动与 UART 外部中断链首轮 | [IRQ / console / TTY 历史](irq-console-tty.md) |
 | arceos_ex/console | serial8250 interrupt-driven console TX | [IRQ / console / TTY 历史](irq-console-tty.md) |

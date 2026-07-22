@@ -12,7 +12,9 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     };
 
-    if !phases::smp_runtime::runtime_core::is_online() || !phases::smp_runtime::is_online() {
+    if !phases::smp_runtime::runtime_core::is_online()
+        || !ctx.kernel_init_flow.payload_handoff_committed()
+    {
         printk::write_str("runtime core phase is not ready\n");
         return SmokeResult::Failed;
     }

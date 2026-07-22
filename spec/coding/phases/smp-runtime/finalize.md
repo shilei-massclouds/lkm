@@ -1,6 +1,6 @@
 # FinalizePhase coding
 
-FinalizePhase 是 SmpRuntimePhase 的第 6 个直接子阶段，由 KernelInitTask 执行。model 路径为
+FinalizePhase 是 KernelInitFlow.Setup 的第 4 个直接 execution 子阶段，由 KernelInitTask 执行。model 路径为
 `spec/model/phases/smp-runtime/finalize/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。
 
@@ -8,13 +8,13 @@ FinalizePhase 是 SmpRuntimePhase 的第 6 个直接子阶段，由 KernelInitTa
 
 `preset()` 依赖 RootfsPhase 精确 Online，发出 Started，按 model 顺序驱动收尾对象并提交
 Prepared。Setup/Enable 只检查 `finalize_phase_ready()` 与 FinalizeBoundary，分别提交
-Ready/Online。Online 后只能返回 `smp_runtime::enable_after_finalize()`；由父阶段提交
-SmpRuntimePhase.Online 后，才进入 `kernel::enable_after_smp_runtime()` 和 PayloadPhase。
+Ready/Online。Online 后只能返回 `KernelInitFlow.setup_after_finalize()`，随后驱动
+`PayloadPreparePhase`。
 
 #### Entry gate
 
 FinalizePhase must run after RootfsPhase.Online and preserve the
-kernel_init_freeable() return boundary before PayloadPhase.
+kernel_init_freeable() return boundary before PayloadPreparePhase.
 
 #### Deferred cleanup details
 
@@ -51,4 +51,4 @@ without claiming full runtime RCU GP service implementation.
 
 #### Boundary
 
-FinalizeBoundary must mark the next boundary as PayloadPhase.
+FinalizeBoundary must mark the next boundary as PayloadPreparePhase.

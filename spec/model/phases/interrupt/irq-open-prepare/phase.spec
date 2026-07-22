@@ -1,7 +1,8 @@
 /*
  * IRQ-Open Prepare Phase Specification
  *
- * This is InterruptPhase subphase 3. It starts after LocalIrqEnablePhase has
+ * This is the third interrupt-oriented leaf directly driven by
+ * BootInitFlow.Setup. It starts after LocalIrqEnablePhase has
  * opened the boot CPU local interrupt gate and covers the Linux start_kernel()
  * segment from kmem_cache_init_late() through arch_cpu_finalize_init().
  */
@@ -318,13 +319,13 @@ object IrqOpenPrepareTrimmedPaths: KernelObject {
 }
 
 /*
- * IrqOpenPreparePhase 表示 InterruptPhase 的第三个子阶段。它承接已开放
+ * IrqOpenPreparePhase 表示 BootInitFlow.Setup 的第三个 interrupt 叶阶段。它承接已开放
  * boot CPU 本地中断总入口的事实，建立中断开放后到进程准备期前的 late
  * core/platform 准备边界。
  */
 object IrqOpenPreparePhase: PhaseObject {
     initial_state: State::Base;
-    parent: InterruptPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

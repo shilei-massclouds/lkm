@@ -26,6 +26,11 @@ re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需
 无需改变。上一条删除的是当时语义错误的临时平行 module/field，本条只恢复已确认模型对象的统一
 core lowering，不恢复平行生命周期实现。
 
+2026-07-22 TaskFlow 直接子阶段归属复核：Boot/Interrupt/SmpRuntime 目录继续作为 crate 内私有
+namespace，删除其 wrapper lifecycle；payload 拆成两个私有 leaf module，KernelInitFlow commit
+action 仍位于既有 objects/runtime 内部边界。该调整不新增 crate、feature、facade、公开 alias 或
+组件依赖，`spec/compose/main.spec` 无需改变。
+
 `Composition Phase` 位于 `Object Coding Phase` 之后。它不重新定义模型对象、状态、事件、依赖和阶段顺序，而是在对象级编码实现已经满足规格语义的前提下，决定这些对象如何被组合、封装和发布。
 
 ## 阶段目标

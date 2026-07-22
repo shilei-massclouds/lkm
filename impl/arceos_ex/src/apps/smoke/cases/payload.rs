@@ -46,8 +46,32 @@ pub fn run() -> SmokeResult {
     too_long_string[0] = b'/';
     let limits = ctx.config.exec_argument_limits();
 
-    if crate::phases::payload::state() != State::Online
-        || ctx.config.selected_payload_kind() != SelectedPayloadKind::Smoke
+    let payload_prepare_online = crate::phases::payload::prepare::is_online();
+    let payload_handoff_prepare_online = crate::phases::payload::handoff_prepare::is_online();
+    let kernel_init_flow_online = ctx.kernel_init_flow.state() == State::Online;
+    let kernel_init_flow_active = ctx.kernel_init_flow.active();
+    let payload_handoff_committed = ctx.kernel_init_flow.payload_handoff_committed();
+    let task_flow_binding_active = ctx.kernel_init_task.kernel_init_flow_active();
+    if !payload_prepare_online
+        || !payload_handoff_prepare_online
+        || !kernel_init_flow_online
+        || !kernel_init_flow_active
+        || !payload_handoff_committed
+        || !task_flow_binding_active
+    {
+        printk::write_fmt(format_args!(
+            "payload topology invalid prepare_online={} handoff_prepare_online={} flow_online={} flow_active={} handoff_committed={} task_flow_active={}\n",
+            payload_prepare_online,
+            payload_handoff_prepare_online,
+            kernel_init_flow_online,
+            kernel_init_flow_active,
+            payload_handoff_committed,
+            task_flow_binding_active,
+        ));
+        return SmokeResult::Failed;
+    }
+
+    if ctx.config.selected_payload_kind() != SelectedPayloadKind::Smoke
         || ctx.selected_payload_handoff.state() != State::Online
         || ctx.selected_payload_handoff.kind() != SelectedPayloadKind::Smoke
         || !ctx.selected_payload_handoff.kind_bound()

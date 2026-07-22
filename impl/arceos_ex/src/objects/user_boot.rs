@@ -8807,7 +8807,7 @@ impl UserBootPayload {
     }
 }
 #[cfg(app_user_boot)]
-pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult {
+pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> EventResult {
     if ctx.user_boot_payload.state() != State::Ready
         || !ctx.user_boot_payload.driven_by_kernel_init_task()
         || ctx.exec_sync_boundaries.state() != State::Ready
@@ -8902,10 +8902,28 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
                 &ctx.boot_dispatch_window,
             )
             .is_err()
-        || ctx
-            .kernel_init_flow
-            .disable_for_exec(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
-            .is_err()
+    {
+        user_boot_panic("PID 1 flow handoff preparation failed\n");
+    }
+
+    Ok(())
+}
+
+#[cfg(app_user_boot)]
+pub fn commit_first_user_init_handoff(ctx: &mut crate::context::Context) -> EventResult {
+    if ctx.user_app_flow.state() != State::Ready
+        || ctx.kernel_init_flow.state() != State::Online
+        || !ctx.kernel_init_flow.active()
+        || !ctx.kernel_init_task.kernel_init_flow_active()
+        || ctx.selected_payload_handoff.state() != State::Online
+    {
+        user_boot_panic("PID 1 flow handoff precommit failed\n");
+    }
+
+    if ctx
+        .kernel_init_flow
+        .disable_for_exec(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
+        .is_err()
         || ctx
             .kernel_init_task
             .commit_user_flow_handoff(&ctx.kernel_init_flow, ctx.user_app_flow.core_mut())
@@ -8931,7 +8949,7 @@ pub fn prepare_first_user_init(ctx: &mut crate::context::Context) -> EventResult
             .cleanup_after_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
             .is_err()
     {
-        user_boot_panic("PID 1 flow handoff failed\n");
+        user_boot_panic("PID 1 flow handoff commit failed\n");
     }
     if ctx
         .kernel_init_user_state

@@ -1,66 +1,21 @@
-# 引导期阶段
+# BootInitFlow 的引导叶子阶段
 
-负责内核从 OpenSBI 主 hart 入口到中断期开始之前的启动编排。
+本目录保留 boot 命名空间，但不再存在 `BootPhase` 包装对象或 lifecycle。引导期的五个阶段按
+实际 execution continuation 直接归属于 `BootInitFlow`：
 
-> [model] MUST：引导期阶段正式命名是 BootPhase。
+1. `EntryPreludePhase` 由 `BootInitFlow.Preset` 单独驱动；Online 后父 Flow 提交 Prepared。
+2. `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase` 与 `SchedInitPhase` 由
+   `BootInitFlow.Setup` 按该顺序驱动。
 
-BootPhase 固定包含四个直接子阶段：入口后继、核心准备、内存核心初始化和调度初始化。
-入口前导是 Kernel 的直接子阶段；时间与中断控制初始化属于后续 InterruptPhase，也不是
-BootPhase 子阶段。
+`EntryPreludePhase` 负责物理/虚拟 `tp` binding 和最早入口事实。其余四个叶子继续覆盖既有 Linux
+边界与对象动作。每个叶子都遵循标准四态，且 Online 后只能返回 `BootInitFlow` continuation；
+不得调用下一 sibling，也不得提交一个已删除的 wrapper 状态或 checkpoint。
 
-## 边界与交互
-
-1. 入口边界：Kernel.Preset 驱动 EntryPreludePhase 到达 Online 并提交 Kernel.Prepared 后，
-   Kernel.Setup 才驱动 BootPhase.Preset。BootPhase.Preset 接受时 EntryPreludePhase 必须已经
-   Online。
-2. 出口边界：SchedInitPhase 达到 Online 后返回 BootPhase.Enable continuation；BootPhase
-   提交 Online，再返回 Kernel.Setup continuation。BootPhase 不直接启动 InterruptPhase。
-
-## 生命周期
-
-### 范式
-
-符合[阶段范式](../phase-paradigm.md)，初始状态为 Base，启动事件为 Preset，按
-`Preset -> Setup -> Enable` 自动推进到 Online。
-
-> [model] MUST：阶段启动事件对应 Preset 迁移事件。
-
-### 状态与迁移
-
-* Base：BootPhase 已进入模型但尚未接受 Preset。`BootPhase.Started` 只观察 Preset 接受时点，
-  发出时状态仍为 Base。
-
-* Preset：不驱动子阶段；依赖并确认 Kernel 直接拥有的 EntryPreludePhase 已到达 Online。
-
-  > [model] MUST：BootPhase.Preset 仅在 EntryPreludePhase.Online 后触发，并保持该完成事实。
-
-  BootPhase.Preset 提交 BootPhase.Prepared 并触发 BootPhase.Setup。
-
-* Prepared：入口前导完成事实已经确认，BootPhase.Preset 已提交。
-
-* Setup：驱动 EntrySuccessorPhase.Preset，并等待 EntrySuccessorPhase 到达 Online。
-
-  > [model] MUST：驱动 EntrySuccessorPhase.Preset并等待其到达 Online 状态。
-
-  EntrySuccessorPhase.Online 必须返回 BootPhase.Setup continuation；该 continuation 提交
-  BootPhase.Ready 并触发 BootPhase.Enable。
-
-* Ready：入口后继完成，BootPhase.Setup 已提交。
-
-* Enable：依次驱动 CorePreparePhase、MmCoreInitPhase 和 SchedInitPhase 的 Preset，并等待每个
-  子阶段到达 Online。每个子阶段完成后都返回 BootPhase.Enable 的下一 continuation，不建立
-  child-to-sibling 调用边。
-
-  > [model] MUST：依次驱动并等待 CorePreparePhase、MmCoreInitPhase 和 SchedInitPhase 完成。
-
-* Online：四个直接子阶段均为 Online；BootPhase.Enable 已提交，并返回 Kernel.Setup
-  continuation。
+这些叶子的执行 owner 始终是 `BootTask`，对应 DispatchWindow 始终必须指向 BootTask。后续 IRQ/time
+和进程准备叶子与它们处在同一个 `BootInitFlow.Setup` continuation 中，直接父链不因目录分组改变。
 
 ## 引用
 
-* [阶段范式](../phase-paradigm.md)
-* [charter/phases](../phases)
-
-## 映射目标
-
-* [BootPhase model](../../model/phases/boot/phase.spec)
+- [阶段范式](../phase-paradigm.md)
+- [BootInitFlow](boot-init.md)
+- [boot leaf model](../../model/phases/boot/)

@@ -18,7 +18,7 @@ model 来源为 `spec/model/phases/interrupt/irq-open-prepare/phase.spec`，实�
 
 #### Model path
 
-IrqOpenPreparePhase is InterruptPhase subphase 3. Its formal model
+IrqOpenPreparePhase is a direct BootInitFlow.Setup phase. Its formal model
 path is spec/model/phases/interrupt/irq-open-prepare/.
 
 #### Code path

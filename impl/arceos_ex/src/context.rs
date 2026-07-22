@@ -665,7 +665,7 @@ impl Context {
         self.boot_dispatch_window
             .commit_switch_to(crate::objects::task::TaskRef::KERNEL_INIT)?;
         self.kernel_init_flow
-            .start_initial_on_dispatch(&mut self.kernel_init_task, &mut self.boot_dispatch_window)
+            .start_initial_on_dispatch(&self.kernel_init_task, &mut self.boot_dispatch_window)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]

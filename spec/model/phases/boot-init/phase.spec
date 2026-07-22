@@ -1,12 +1,6 @@
 /*
- * Boot Init Flow Phase Specification
- *
- * BootInitFlow is the TaskFlow instance initially associated with BootTask.
- * BootTask becomes Online at `_start`, then its post-commit lossy signal is
- * accepted because BootDispatchWindow still names BootTaskRef. Because
- * TaskFlow is a PhaseObject subtype, this flow uses the standard phase lifecycle while spanning the kernel entry
- * execution fragment through the pre-commit boundary of the first real
- * BootTask -> KernelInitTask switch.
+ * BootInitFlow directly owns the boot execution leaves.  The former
+ * BootPhase and InterruptPhase wrapper lifecycles are intentionally absent.
  */
 
 include "rest-init/main.spec";
@@ -60,14 +54,45 @@ object BootInitFlow: TaskFlow {
                     task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
                 }
 
+                within SingleTaskContext {
+                    drives {
+                        EntrySuccessorPhase.Transition::Preset;
+                        CorePreparePhase.Transition::Preset;
+                        MmCoreInitPhase.Transition::Preset;
+                        SchedInitPhase.Transition::Preset;
+                        IrqTimeInitPhase.Transition::Preset;
+                    }
+                }
+
                 drives {
-                    BootPhase.Transition::Preset;
-                    InterruptPhase.Transition::Preset;
+                    LocalIrqEnablePhase.Transition::Preset;
+                }
+
+                within SingleTaskInterruptStreamContext {
+                    drives {
+                        IrqOpenPreparePhase.Transition::Preset;
+                        ProcessPreparePhase.Transition::Preset;
+                    }
+                }
+
+                drives {
+                    BootInitRestInitPhase.Transition::Preset;
                 }
 
                 ensures {
-                    BootPhase.state == State::Online;
-                    InterruptPhase.state == State::Online;
+                    EntrySuccessorPhase.state == State::Online;
+                    CorePreparePhase.state == State::Online;
+                    MmCoreInitPhase.state == State::Online;
+                    SchedInitPhase.state == State::Online;
+                    IrqTimeInitPhase.state == State::Online;
+                    LocalIrqEnablePhase.state == State::Online;
+                    IrqOpenPreparePhase.state == State::Online;
+                    ProcessPreparePhase.state == State::Online;
+                    BootInitRestInitPhase.state == State::Online;
+                    KernelInitFlow.state == State::Base;
+                    KthreaddFlow.state == State::Base;
+                    task_flow_start_signal_discarded(KernelInitFlow, BootDispatchWindow);
+                    task_flow_start_signal_discarded(KthreaddFlow, BootDispatchWindow);
                     BootTask.state == State::Online;
                 }
 
@@ -81,8 +106,10 @@ object BootInitFlow: TaskFlow {
     state State::Ready {
         invariant {
             EntryPreludePhase.state == State::Online;
-            BootPhase.state == State::Online;
-            InterruptPhase.state == State::Online;
+            ProcessPreparePhase.state == State::Online;
+            BootInitRestInitPhase.state == State::Online;
+            KernelInitFlow.state == State::Base;
+            KthreaddFlow.state == State::Base;
             BootTask.state == State::Online;
         }
 
@@ -93,12 +120,10 @@ object BootInitFlow: TaskFlow {
                 }
 
                 drives {
-                    BootInitRestInitPhase.Transition::Preset;
                     BootInitScheduleHandoffPhase.Transition::Preset;
                 }
 
                 ensures {
-                    BootInitRestInitPhase.state == State::Online;
                     BootInitScheduleHandoffPhase.state == State::Online;
                     BootIdleFlow.state == State::Ready;
                     task_owns_flow(BootTask, BootIdleFlow);
@@ -107,8 +132,8 @@ object BootInitFlow: TaskFlow {
                     task_flow_owner_exclusive(BootIdleFlow);
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     boot_init_flow_switch_precommit_ready(
                         BootInitFlow,
                         Scheduler,
@@ -125,8 +150,7 @@ object BootInitFlow: TaskFlow {
     state State::Online {
         invariant {
             EntryPreludePhase.state == State::Online;
-            BootPhase.state == State::Online;
-            InterruptPhase.state == State::Online;
+            ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;
             BootIdleFlow.state == State::Ready;

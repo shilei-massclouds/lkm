@@ -408,7 +408,7 @@ object RuntimeCoreBoundary: KernelObject {
  */
 object RuntimeCorePhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpRuntimePhase;
+    parent: KernelInitFlow;
 
     state State::Base {
         transitions {

@@ -191,17 +191,17 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 >
 > Preset：接替固件引导计算机系统，驱动 BootInitFlow 的入口前导部分
 >
-> Setup：由 BootInitFlow 接续入口前导期，依次推进引导期和中断期
+> Setup：由 BootInitFlow 接续入口前导期，直接推进 boot/interrupt 叶子并创建、唤醒首批 Task
 >
-> Enable：完成 BootInitFlow、真实切换到 PID 1，推进多核运行期并完成对选中 Payload 的交接
+> Enable：完成 BootInitFlow、真实切换到 PID 1，由 KernelInitFlow 直接推进 runtime 与 payload 交接
 
 ### 启动执行阶段 BootInitFlow
 
 `BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
-`Base -> Prepared -> Ready -> Online` 生命周期。Preset 驱动 `EntryPreludePhase`，Setup 顺序驱动
-`BootPhase` 与 `InterruptPhase`，Enable 顺序驱动 `BootInitRestInitPhase` 与
-`BootInitScheduleHandoffPhase`，建立后继 `BootIdleFlow` 的 owner/active binding，并在首次真实 PID 1
-切换的 commit 边界到达 Online。
+`Base -> Prepared -> Ready -> Online` 生命周期。Preset 驱动 `EntryPreludePhase`；Setup 直接顺序驱动
+`EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
+`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
+`BootInitScheduleHandoffPhase`。不存在 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
 
 ### 入口前导期EntryPreludePhase
 
@@ -210,7 +210,7 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 Online；本阶段只
 验证其稳定 storage、PID 0、`TaskRef::BOOT` 和 canonical identity。
 
-### 引导期BootPhase
+### BootInitFlow 的引导叶子
 
 从入口前导完成到中断期开始之前的阶段。
 
@@ -230,7 +230,7 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 待补充。
 
-### 中断期InterruptPhase
+### BootInitFlow 的中断/进程准备叶子
 
 从中断启动到多任务启动之前。
 
@@ -252,8 +252,9 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 ### BootInitFlow Enable
 
-同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 创建具有各自 Task identity
-与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask`，`BootInitScheduleHandoffPhase` 预检并提交首次
+同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 完整驱动具有各自 Task identity
+与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask` Preset/Setup/Enable；两次 Task Enable 的 initial-flow
+信号因 DispatchWindow 仍指向 BootTask 而 discarded。`BootInitScheduleHandoffPhase` 预检并提交首次
 调度事实。`BootInitFlow` 是 BootTask 的 initial Flow；`BootIdleFlow` 是后继 active continuation，
 且不会改写 `BootTask.initial_flow`。
 
@@ -269,13 +270,16 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 它是 `BootIdleFlow` 的子 Phase，只在调度器未来恢复 BootTask 后执行，不属于 BootInitFlow 的完成链。
 
+### KernelInitFlow 直接叶子
+
+首次 dispatch 更新 CurrentTaskSlot 与 DispatchWindow 后才接受 `KernelInitFlow.Preset`；实际 body 必须在
+`kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
+`SmpBringupPhase`，Setup 驱动 runtime/rootfs/finalize 与 `PayloadPreparePhase`，Enable 只驱动
+`PayloadHandoffPreparePhase`。
+
 #### PreSmpInitPhase
 
 待补充。
-
-### 多核运行期SmpRuntimePhase
-
-启用多核，完成内核初始化并引导进入用户态应用或Unikernel应用。
 
 #### SmpBringupPhase
 
@@ -297,9 +301,11 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 待补充。
 
-### 应用引导期PayloadPhase
+### Payload 准备与 commit
 
-从准备应用启动环境到切换到应用。
+`PayloadPreparePhase.Online` 是原 payload Ready 的 selection boundary；
+`PayloadHandoffPreparePhase.Online` 是可逆 precommit。`KernelInitFlow` Online 后的
+`CommitPayloadHandoff` 才执行 UserBoot Flow replacement；Hello/Smoke 不替换 Flow。
 
 #### PayloadExecSyncBoundaries
 

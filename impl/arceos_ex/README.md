@@ -94,7 +94,8 @@ prepared. `APP ?= smoke` selects the built-in smoke payload.  The Makefile maps 
 `--cfg app_<name>`; additional payloads should live under `src/apps/` and expose
 `run() -> !`.
 
-The current code covers the minimal `EntryPreludePhase`, `EntrySuccessorPhase`,
-`CorePreparePhase`, and final `PayloadPhase` handoff.  The default `smoke`
+The current code covers the direct BootInitFlow and KernelInitFlow leaf-stage
+topologies, including the split `PayloadPreparePhase` and
+`PayloadHandoffPreparePhase` boundaries.  The default `smoke`
 payload runs smoke cases under `src/apps/smoke/cases/` and then shuts down.
 `APP=hello` remains available as the minimal standalone payload.

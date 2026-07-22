@@ -91,7 +91,7 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex local irq enable event failed\n",
     );
-    crate::phases::interrupt::preset_after_local_irq_enable()
+    crate::phases::boot_init::setup_after_local_irq_enable()
 }
 
 fn enable_event(ctx: &Context) -> EventResult {

@@ -44,9 +44,12 @@ coding 自然语言规则使用以下强度：
 
 `startup-timeline` 对应 `main.rs`。`main.rs` 是最顶层启动时间线的承载点，负责建立最小入口边界，并组织一级 Phase 对象的过程调用。它不应吸收普通资源对象的状态和事件实现；这些实现应下沉到 `objects/` 或相应 Phase 过程调用的对象方法中。
 
-Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
+Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的直接 parent 关系形成过程边界；目录
+可以作为 namespace 保留，但不得从目录层次推导不存在的 wrapper lifecycle。当前 BootInitFlow 与
+KernelInitFlow 直接编排叶阶段，不存在 Boot/Interrupt/SmpRuntime/Payload wrapper。Phase 源码只生成
+函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
-EntryPreludePhase 已提升为 Kernel 直接子阶段，但当前物理路径
+EntryPreludePhase 是 BootInitFlow.Preset 的直接子阶段，但当前物理路径
 `phases/boot/entry_prelude.rs` 与 Rust module 名保持不变；这是避免在所有权调整中混入目录迁移的
 显式例外，parent 与 continuation 必须以 model 为准，不能从物理目录反推。
 
@@ -86,11 +89,13 @@ adoption 方式必须由 project/system coding 文件记录，但不能降低普
 `ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
 可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象 transition函数，但阶段编排边界应保留在 runtime 侧。
 
-`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `PayloadPhase` 为止的大部分内核引导过程。当前正式模型中，`InterruptPhase` 位于
-`BootPhase` 之后、`PayloadPhase` 之前；后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
-`EntrySuccessorPhase` 与 `PayloadPhase` 之间的正式阶段树位置，并继续保留模型 checkpoint。
+`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 到 selected payload commit 的内核引导过程。BootInitFlow
+直接编排 boot/interrupt/rest-init 叶阶段，KernelInitFlow 在首次 dispatch 后直接编排 SMP/runtime 与
+payload prepare 叶阶段；后续阶段必须插入正式 TaskFlow parent 的 transition，而不是添加目录 wrapper。
 
-在 ArceOS Unikernel 形态下，`PayloadPhase` 负责把启动编排链移交给 selected payload，而不把该入口固定为传统操作系统的普通用户态进程入口。不同 Unikernel 应用、测试应用或未来的宏内核引导应用，都可以作为 selected payload。未来若增加宏内核形态，相关 payload 可以在 `PayloadPhase.Enable` 后完成切换到用户态并启动首个用户态应用的最后步骤。`PayloadPhase.Enable` 的运行期约定是不返回：payload 要么进入服务循环，要么最终停机。
+在 ArceOS Unikernel 形态下，两个 payload prepare 叶阶段完成可恢复准备，Online KernelInitFlow 的
+`CommitPayloadHandoff` action 才提交 selected payload 交接。UserBoot replacement 与内核态
+Hello/Smoke 的无 replacement 路径必须保持区分；最终 entry 不返回启动编排链。
 
 ## 普通对象
 

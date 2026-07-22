@@ -130,7 +130,7 @@ fn enable(ctx: &mut Context) -> ! {
         ),
         "arceos_ex rootfs enable failed\n",
     );
-    crate::phases::smp_runtime::enable_after_rootfs()
+    crate::phases::smp_runtime::setup_after_rootfs()
 }
 
 fn transition_if_ready(

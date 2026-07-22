@@ -24,6 +24,21 @@
 
 本文不是形式化规格本身。文中可以保留概念定义、设计背景、路径规划、对象解释和参考边界；其中需要被工具检查、推导、生成或实现约束化的内容，应逐步沉淀到对应正式规格层。
 
+## 当前 TaskFlow 直接子阶段拓扑
+
+当前 topology 的权威定义位于 [`objects/task-flow.md`](objects/task-flow.md)、
+[`phases/boot-init.md`](phases/boot-init.md)、[`phases/smp-runtime.md`](phases/smp-runtime.md) 和
+[`phases/payload.md`](phases/payload.md)。`BootPhase`、`InterruptPhase`、`SmpRuntimePhase` 与原
+`PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
+lifecycle 或 checkpoint。
+
+- `BootInitFlow.Preset` 直接驱动 `EntryPreludePhase`；Setup 直接驱动其余 boot/interrupt 叶子以及
+  `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
+- `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、
+  finalize 和 `PayloadPreparePhase`；Enable 只驱动 `PayloadHandoffPreparePhase`。
+- UserBoot replacement 只发生在 `KernelInitFlow` Online 后受 dispatch guard 约束的
+  `CommitPayloadHandoff` action；Hello/Smoke 不替换 Flow。
+
 ## 文档用途
 
 本文档不是只用于人工阅读的设计说明，而是后续验证、构建和测试工作的共同输入。文档中的对象模型、阶段模型、状态迁移和检查项，都应尽量以可验证、可实现、可生成测试的形式表达。

@@ -115,7 +115,7 @@ pub fn preset_after_entry_prelude() -> ! {
     crate::systems::kernel::preset_after_boot_init()
 }
 
-/// Starts BootInitFlow.Setup by driving BootPhase.
+/// Starts BootInitFlow.Setup with its first direct leaf.
 pub fn setup() -> ! {
     crate::phases::shutdown_on_error(
         require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready),
@@ -127,28 +127,79 @@ pub fn setup() -> ! {
             "arceos_ex boot init setup dependency failed\n",
         );
     }
-    crate::phases::boot::preset()
+    crate::phases::boot::entry_successor::preset(crate::context::context())
 }
 
-/// Continues BootInitFlow.Setup from BootPhase to InterruptPhase.
-pub fn setup_after_boot() -> ! {
+pub fn setup_after_entry_successor() -> ! {
     if crate::context::context_ref().boot_init_flow.state() != State::Prepared
         || !boot_task_online_and_canonical()
         || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
+        || !crate::phases::boot::entry_successor::is_online()
     {
-        crate::arch::riscv64::sbi::putstr("arceos_ex boot init after boot invariant failed\n");
+        crate::arch::riscv64::sbi::putstr(
+            "arceos_ex boot init after entry successor invariant failed\n",
+        );
         crate::arch::riscv64::sbi::system_shutdown()
     }
-    crate::phases::interrupt::setup()
+    crate::phases::boot::core_prepare::preset(crate::context::context())
 }
 
-/// Completes BootInitFlow.Setup after InterruptPhase reaches Online.
-pub fn setup_after_interrupt() -> ! {
-    let dependencies_ready = boot_task_online_and_canonical()
-        && crate::phases::boot::entry_prelude::is_online()
-        && crate::phases::boot::is_online()
-        && crate::phases::interrupt::is_online();
+pub fn setup_after_core_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::boot::core_prepare::is_online(),
+        "core prepare",
+    );
+    crate::phases::boot::mm_core_init::preset(crate::context::context())
+}
+
+pub fn setup_after_mm_core_init() -> ! {
+    require_setup_leaf(
+        crate::phases::boot::mm_core_init::is_online(),
+        "mm core init",
+    );
+    crate::phases::boot::sched_init::preset(crate::context::context())
+}
+
+pub fn setup_after_sched_init() -> ! {
+    require_setup_leaf(crate::phases::boot::sched_init::is_online(), "sched init");
+    crate::phases::interrupt::irq_time_init::preset(crate::context::context())
+}
+
+pub fn setup_after_irq_time_init() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::irq_time_init::is_online(),
+        "irq time init",
+    );
+    crate::phases::interrupt::local_irq_enable::preset(crate::context::context())
+}
+
+pub fn setup_after_local_irq_enable() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::local_irq_enable::is_online(),
+        "local irq enable",
+    );
+    crate::phases::interrupt::irq_open_prepare::preset(crate::context::context())
+}
+
+pub fn setup_after_irq_open_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::irq_open_prepare::is_online(),
+        "irq open prepare",
+    );
+    crate::phases::interrupt::process_prepare::preset(crate::context::context())
+}
+
+pub fn setup_after_process_prepare() -> ! {
+    require_setup_leaf(
+        crate::phases::interrupt::process_prepare::is_online(),
+        "process prepare",
+    );
+    rest_init::preset(crate::context::context())
+}
+
+/// Completes BootInitFlow.Setup after the final direct leaf reaches Online.
+pub fn setup_after_boot_init_rest_init() -> ! {
+    let dependencies_ready = setup_leaves_online() && rest_init::boot_init_rest_init_is_online();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         ctx.boot_init_flow.setup_and_activate(
@@ -168,33 +219,17 @@ pub fn setup_after_interrupt() -> ! {
     crate::systems::kernel::setup_after_boot_init()
 }
 
-/// Starts BootInitFlow.Enable with the rest_init creation leaf.
+/// BootInitFlow.Enable drives only the reversible schedule-handoff leaf.
 pub fn enable() -> ! {
     crate::phases::shutdown_on_error(
         require_guarded_state(LifecycleEvent::Enable, State::Ready, State::Online),
         "arceos_ex boot init enable start failed\n",
     );
-    if !boot_task_online_and_canonical()
-        || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
-        || !crate::phases::interrupt::is_online()
-    {
+    if !setup_leaves_online() || !rest_init::boot_init_rest_init_is_online() {
         crate::phases::shutdown_on_error(
             phase_failure(LifecycleEvent::Enable, State::Ready, State::Online),
             "arceos_ex boot init enable dependency failed\n",
         );
-    }
-    rest_init::preset(crate::context::context())
-}
-
-/// Continues BootInitFlow.Enable with the pre-commit handoff leaf.
-pub fn enable_after_boot_init_rest_init() -> ! {
-    if crate::context::context_ref().boot_init_flow.state() != State::Ready
-        || !boot_task_online_and_canonical()
-        || !rest_init::boot_init_rest_init_is_online()
-    {
-        crate::arch::riscv64::sbi::putstr("arceos_ex boot init rest-init invariant failed\n");
-        crate::arch::riscv64::sbi::system_shutdown()
     }
     rest_init::setup(crate::context::context())
 }
@@ -232,7 +267,7 @@ pub fn boot_task_restored() -> ! {
 
 pub fn is_online() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Online
-        && boot_task_online_and_canonical()
+        && setup_leaves_online()
         && rest_init::boot_init_rest_init_is_online()
         && rest_init::boot_init_schedule_handoff_is_online()
 }
@@ -245,10 +280,41 @@ pub fn is_prepared() -> bool {
 
 pub fn is_ready() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Ready
-        && boot_task_online_and_canonical()
+        && setup_leaves_online()
+        && rest_init::boot_init_rest_init_is_online()
+}
+
+fn require_setup_leaf(child_online: bool, child: &str) {
+    let result = if child_online
+        && require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready).is_ok()
+    {
+        Ok(())
+    } else {
+        phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    };
+    let message = match child {
+        "core prepare" => "arceos_ex boot init after core prepare failed\n",
+        "mm core init" => "arceos_ex boot init after mm core init failed\n",
+        "sched init" => "arceos_ex boot init after sched init failed\n",
+        "irq time init" => "arceos_ex boot init after irq time init failed\n",
+        "local irq enable" => "arceos_ex boot init after local irq enable failed\n",
+        "irq open prepare" => "arceos_ex boot init after irq open prepare failed\n",
+        _ => "arceos_ex boot init after process prepare failed\n",
+    };
+    crate::phases::shutdown_on_error(result, message)
+}
+
+fn setup_leaves_online() -> bool {
+    boot_task_online_and_canonical()
         && crate::phases::boot::entry_prelude::is_online()
-        && crate::phases::boot::is_online()
-        && crate::phases::interrupt::is_online()
+        && crate::phases::boot::entry_successor::is_online()
+        && crate::phases::boot::core_prepare::is_online()
+        && crate::phases::boot::mm_core_init::is_online()
+        && crate::phases::boot::sched_init::is_online()
+        && crate::phases::interrupt::irq_time_init::is_online()
+        && crate::phases::interrupt::local_irq_enable::is_online()
+        && crate::phases::interrupt::irq_open_prepare::is_online()
+        && crate::phases::interrupt::process_prepare::is_online()
 }
 
 fn boot_task_online_and_canonical() -> bool {

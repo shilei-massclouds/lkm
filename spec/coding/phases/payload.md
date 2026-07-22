@@ -1,72 +1,56 @@
-# PayloadPhase 编码指引
+# Payload 直接子阶段与交接 action 编码指引
 
-PayloadPhase 是 [Kernel 系统编码](../systems/kernel.md)中 `Kernel.Enable` 的最后一个直接 drive
-目标。model 来源为
-[`spec/model/phases/payload/phase.spec`](../../model/phases/payload/phase.spec)，实现落点为
-`impl/arceos_ex/src/phases/payload.rs`，selected adapter 位于 `impl/arceos_ex/src/apps/`。
+model 来源为 [`phase.spec`](../../model/phases/payload/phase.spec)。旧 `PayloadPhase` wrapper 已删除；
+实现分为两个 KernelInitFlow 直接子阶段和一个 Flow Online action。
 
-## Transition 映射
+## PayloadPreparePhase
 
-| Transition | Source -> target | drives / completion | emits / continuation |
-| --- | --- | --- | --- |
-| Preset | Base -> Prepared | `preset()` 验证 KernelInitTask 主线和 `BinaryFormatRegistry.Ready`，依次 Setup `ExecSyncBoundaries`、`UserCloneDeferredBoundaries` | 提交 Prepared 后调用同对象 `setup()` |
-| Setup | Prepared -> Ready | `setup_selected_payload(ctx)` 确认唯一 build-time kind；仅 user-boot 调用 `UserBootPayload.Setup` | 提交既有 Ready 后调用同对象 `enable()` |
-| Enable | Ready -> Online | `prepare_selected_payload(ctx)`；hello/smoke 绑定内核入口，user-boot 完成 ELF/地址空间/trap/syscall、UserBootPayload.Online 和用户入口准备；随后提交 SelectedPayloadHandoff.Online | 提交 Payload Online、运行该 checkpoint handlers，再返回 `kernel::mark_online()` continuation |
+`KernelInitFlow.Setup` 在 Finalize Online 后驱动本阶段：
 
-`systems::kernel::enable_after_smp_runtime()` 只能调用 Payload.Preset。三个 transition 入口、两个同对象
-continuation 和 Enable 的 Kernel continuation 都验证：当前引用是 KernelInitTask，唯一 stack switch/
-entry count 为 1，既有 entry stack verification 成立，且此刻真实 `sp` 仍位于 KernelInitTask 的
-16 KiB vmalloc stack。
+1. Preset 建立公共 exec-sync、exec-transaction 与 user-clone boundary；
+2. Setup 选择编译期 payload kind，并运行 selected payload 的可恢复 setup；
+3. Enable 只提交 `PayloadPreparePhase.Online`。
 
-## Selected payload adapter
+Linux `do_sysctl_args()` 等旧 `PayloadPhase.Ready` 的精确语义迁移到
+`PayloadPreparePhase.Online`。本阶段不得声明/启用 PID 1 UserAppFlow，也不得替换 active Flow。
 
-Config 通过互斥的 `app_hello`、`app_smoke`、`app_user_boot` cfg 恰好绑定一个
-`SelectedPayloadKind`。Context 持有 `SelectedPayloadHandoff`；adapter 只暴露 crate-internal 三个入口：
+## PayloadHandoffPreparePhase
 
-- `setup_selected_payload(ctx) -> EventResult`
-- `prepare_selected_payload(ctx) -> EventResult`
-- `enter_selected_payload(ctx) -> !`
+`KernelInitFlow.Enable` 只驱动本阶段。它完成 selected payload entry binding、fresh
+`UserAppFlow.Bind/Preset/Setup` 和 replacement precheck。阶段 Online 时：
 
-前两个按编译期 kind 分发，第三个只能在 SelectedPayloadHandoff、PayloadPhase 和 Kernel 都 Online 后
-进入对应不返回入口。hello/smoke 不推进 UserBootPayload；公共阶段也不准备 `UserTaskSet`。smoke
-中的对象级 user-boot case 如需该集合，必须在 case 内建立并消费自己的测试状态。
+- `KernelInitFlow` 仍存活且仍是 KernelInitTask active Flow；
+- UserBoot 的 fresh UserAppFlow 精确为 Ready，尚未 Enable；
+- Hello/Smoke 的内核态 no-return entry 已绑定；
+- 所有会失败的路径、容量和交接条件都已预检。
 
-user-boot prepare 保持 init candidate 选择、失败分类和 panic terminal 行为，然后把 normalized boot
-arguments 交给 `ExecTransaction`；共享管线完成 ELF/interpreter、地址空间、用户栈、trap frame 和提交。
-prepare 再完成 syscall、FilesStruct 与 stable `KernelInitTask` 的 user-resource binding，然后声明
-fresh `UserAppFlow`，按 `new.Preset/Setup -> KernelInitFlow.Disable -> CommitFlowHandoff -> new.Enable
--> KernelInitFlow.Cleanup -> RecordRetiredFlowDestroyed` 完成 `UserBootPayload.Enable`。enter 不再准备
-对象，只发出带 runtime instance identity 的 `UserAppFlow.Online` checkpoint 并执行最终 RISC-V
-U-mode trap return。
+`PayloadHandoffPreparePhase.Online` 是 precommit 边界，默认没有 Linux exact mapping。
 
-runtime `execve` 必须复用同一个 helper 和五步 handoff；它保持当前 TaskRef，并在该 Task 的两个
-UserAppFlow slot 之间建立 fresh generation。child fork/exec/syscall 的资源 owner 是实际当前 child
-TaskRef，不得回退到 KernelInitTask persona。可恢复的 candidate/staging/precheck 失败必须发生在
-Flow declaration 前；声明后的内部 invariant 失败是 terminal。
+## KernelInitFlow.CommitPayloadHandoff
 
-## 提交与 checkpoint 顺序
-
-Enable 的固定顺序是：
+只有 KernelInitFlow 已 Online 且动态 dispatch guard 成立时才能调用 action。UserBoot 必须按固定顺序
+提交：
 
 ```text
-variant prepare
-  -> SelectedPayloadHandoff.Online
-  -> PayloadPhase.Online
-  -> PayloadPhase.Online checkpoint handlers
-  -> Kernel.Online
-  -> selected payload no-return entry
+KernelInitFlow.Disable
+task active-flow handoff
+UserAppFlow.Enable
+KernelInitFlow.Cleanup
+KernelInitFlow.PayloadHandoffCommitted
 ```
 
-因此 PayloadPhase.Online 表示交接条件已经提交，不表示 payload 已经开始执行。user-boot requested-init
-或 default-init 失败发生在 variant prepare 内，失败路径不得发出 SelectedPayloadHandoff.Online、
-PayloadPhase.Online、Kernel.Online 或 dynamic UserAppFlow.Online checkpoint。
+禁止在 HandoffPrepare 中提前 Disable/Cleanup。成功 exec 后旧 `PayloadPhase.Online` 的 Linux
+`run_init_process()` 语义迁移到 `KernelInitFlow.PayloadHandoffCommitted`。
 
-| Checkpoint | stable id | owner state |
-| --- | --- | --- |
-| `PayloadPhase.Started` | 481 | Base，Preset 已接受 |
-| `PayloadPhase.Prepared` | 482 | Prepared，两个公共边界 Ready |
-| `PayloadPhase.Ready` | 432 | Ready，selected setup 完成 |
-| `PayloadPhase.Online` | 433 | Online，selected handoff Online |
+Hello 与 Smoke 不替换 Flow：action 保持 KernelInitFlow Online/active，只进入已绑定的内核态
+no-return entry。Smoke 的 test Task/Flow 生命周期仍由其自身对象管理。
 
-新 checkpoint 只追加且默认 unmapped；既有 Ready/Online Linux exact mapping 和 ID 不变。所有四个
-checkpoint 都由 KernelInitTask 发出。
+## Checkpoint
+
+- `PayloadPreparePhase.Started/Prepared/Ready/Online`
+- `PayloadHandoffPreparePhase.Started/Prepared/Ready/Online`
+- `KernelInitFlow.PayloadHandoffCommitted`
+
+旧 `PayloadPhase.*` checkpoint 全部删除；枚举整体重编号，不保留 tombstone。checkpoint handler 若要
+观察 payload 交接后的稳定事实，UserBoot 使用 committed 边界；通用的可恢复准备观察使用
+`PayloadPreparePhase.Online`，不得把 precommit checkpoint 当成 replacement 已提交。

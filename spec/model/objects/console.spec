@@ -2428,7 +2428,7 @@ object ConsoleHandoff: ConsoleObject {
                     earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
                     earlycon_backend_access_panics_after_handoff(EarlyCon);
                     earlycon_offline_trace_emitted(EarlyCon);
-                    printk_frontend_only_for_payload_smoke(PayloadPhase, ConsoleRegistry);
+                    printk_frontend_only_for_payload_smoke(PayloadHandoffPreparePhase, ConsoleRegistry);
                 }
             }
         }
@@ -2449,7 +2449,7 @@ object ConsoleHandoff: ConsoleObject {
             earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
             earlycon_backend_access_panics_after_handoff(EarlyCon);
             earlycon_offline_trace_emitted(EarlyCon);
-            printk_frontend_only_for_payload_smoke(PayloadPhase, ConsoleRegistry);
+            printk_frontend_only_for_payload_smoke(PayloadHandoffPreparePhase, ConsoleRegistry);
         }
     }
 }

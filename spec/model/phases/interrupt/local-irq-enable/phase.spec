@@ -1,7 +1,8 @@
 /*
  * Local IRQ Enable Phase Specification
  *
- * This is InterruptPhase subphase 2. It starts after IrqTimeInitPhase has
+ * This is the second interrupt-oriented leaf directly driven by
+ * BootInitFlow.Setup. It starts after IrqTimeInitPhase has
  * completed IRQ/time initialization with boot CPU local interrupts still
  * disabled. It covers the start_kernel() boundary that clears
  * early_boot_irqs_disabled and executes local_irq_enable().
@@ -22,7 +23,7 @@
 
 object LocalIrqEnablePhase: PhaseObject {
     initial_state: State::Base;
-    parent: InterruptPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

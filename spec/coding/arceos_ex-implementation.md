@@ -115,14 +115,15 @@ Ext2Driver/Volume/FileSystem，经 `/root` staging mount、mount move 与 Chroot
 切到 ext2 root。当前实现保留 initramfs、device-probe wait、rootwait/initrd/md/NFS/CIFS/devtmpfs 与
 integrity-key 的配置分类事实；未展开路径仍以 model/phase 文档为准。
 
-### FinalizePhase 与 PayloadPhase
+### FinalizePhase 与 payload 交接
 
 权威映射：[`phases/smp-runtime/finalize.md`](phases/smp-runtime/finalize.md) 与
 [`phases/payload.md`](phases/payload.md)。
 
-实现记录 async cleanup boundary、system state、RCU boot-end 和裁剪事实，随后选择 smoke/hello/user
-payload。当前 hello 已在 KernelInitTask vmalloc stack 上完成最终输出；user payload 继续进入下述
-对象链。
+实现记录 async cleanup boundary、system state、RCU boot-end 和裁剪事实，随后由
+`PayloadPreparePhase` 与 `PayloadHandoffPreparePhase` 选择并预备 smoke/hello/user payload；真正
+replacement 由 Online KernelInitFlow 的 commit action 完成。当前 hello 在 KernelInitTask vmalloc
+stack 上完成最终输出；user payload 继续进入下述对象链。
 
 ## 普通对象实现证据
 

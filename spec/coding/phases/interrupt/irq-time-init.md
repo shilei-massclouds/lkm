@@ -19,7 +19,7 @@ model 来源为 `spec/model/phases/interrupt/irq-time-init/phase.spec`，实现�
 
 #### Model path
 
-IrqTimeInitPhase is InterruptPhase subphase 1. Its formal model
+IrqTimeInitPhase is a direct BootInitFlow.Setup phase. Its formal model
 path is spec/model/phases/interrupt/irq-time-init/, not
 spec/model/phases/boot/irq-time-init/.
 

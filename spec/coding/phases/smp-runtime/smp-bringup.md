@@ -1,7 +1,8 @@
 # SmpBringupPhase coding
 
-SmpBringupPhase 是 SmpRuntimePhase 的第 2 个直接子阶段。父级 Preset 与 BP 对象动作由
-KernelInitTask 执行；内部三个 AP phase 继续由目标 AP 执行。model 路径为
+SmpBringupPhase 是 KernelInitFlow.Preset 的第 2 个直接子阶段。父级 transition 与 BP 协调动作由
+KernelInitTask 执行；AP Entry/Callin/OnlineIdle 由目标 AP 执行，不归 KernelInitFlow execution
+ownership，逐 AP TaskFlow 仍为 deferred。model 路径为
 `spec/model/phases/smp-runtime/smp-bringup/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。
 
@@ -12,7 +13,7 @@ HSM 发起。HSM 前由 BP 把三个 replicated family 的 secondary 状态重�
 entry 自行执行三阶段四态。BP 以 Acquire 观察全部目标 Online，再执行 completion wait、ack、
 CpuGroup online publish 和 boundary。全部结果事实成立后提交 Prepared。`setup()`/`enable()`
 只检查结果并分别提交 Ready/Online；Online 只返回
-`smp_runtime::setup_after_smp_bringup()`。
+`KernelInitFlow.preset_after_smp_bringup()`。
 
 | Checkpoint | owner state | owner |
 | --- | --- | --- |

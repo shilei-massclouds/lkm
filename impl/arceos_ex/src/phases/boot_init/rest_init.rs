@@ -41,7 +41,7 @@ pub fn preset(ctx: &mut Context) -> ! {
         mark_boot_init_rest_init_online(ctx),
         "arceos_ex rest init enable failed\n",
     );
-    crate::phases::boot_init::enable_after_boot_init_rest_init()
+    crate::phases::boot_init::setup_after_boot_init_rest_init()
 }
 
 pub fn setup(ctx: &mut Context) -> ! {
@@ -92,7 +92,7 @@ pub fn enable(ctx: &mut Context) -> ! {
 
 fn require_boot_init_rest_init_preset() -> EventResult {
     let state = crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE);
-    if state != State::Base || !crate::phases::interrupt::is_online() {
+    if state != State::Base || !crate::phases::interrupt::process_prepare::is_online() {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
     Ok(())
@@ -121,14 +121,14 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &mut ctx.boot_cpu_local_interrupt,
     )?;
     preset_kernel_init_task(ctx)?;
-    copy_and_setup_kernel_init_task(ctx)?;
+    setup_kernel_init_task(ctx)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_flow
         .bind_initial(&mut ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
     wake_and_enable_kernel_init_task(ctx)?;
     ctx.kernel_init_flow
-        .start_initial_on_dispatch(&mut ctx.kernel_init_task, &mut ctx.boot_dispatch_window)?;
+        .start_initial_on_dispatch(&ctx.kernel_init_task, &mut ctx.boot_dispatch_window)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return failed_condition(
@@ -140,7 +140,7 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     };
     pin_kernel_init_to_boot_cpu(ctx, boot_cpu.logical_id())?;
     preset_kthreadd_task(ctx)?;
-    copy_and_setup_kthreadd_task(ctx)?;
+    setup_kthreadd_task(ctx)?;
     ctx.kthreadd_flow.bind_initial(&mut ctx.kthreadd_task)?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
@@ -187,10 +187,11 @@ fn preset_kernel_init_task(ctx: &mut Context) -> EventResult {
     ctx.kernel_init_task.commit_preset_metadata()?;
     ctx.kernel_init_task
         .task_mut()
-        .preset(Checkpoint::KernelInitTaskPrepared)
+        .preset(Checkpoint::KernelInitTaskPrepared)?;
+    copy_kernel_init_task(ctx)
 }
 
-fn copy_and_setup_kernel_init_task(ctx: &mut Context) -> EventResult {
+fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
     if ctx.kernel_init_task.state() != State::Prepared
         || ctx.task_creation_core.state() != State::Ready
         || ctx.root_pid_namespace.state() != State::Ready
@@ -253,6 +254,22 @@ fn copy_and_setup_kernel_init_task(ctx: &mut Context) -> EventResult {
     ctx.kernel_init_task
         .task_mut()
         .init_switch_context(kernel_init_entry, stack_top);
+    Ok(())
+}
+
+fn setup_kernel_init_task(ctx: &mut Context) -> EventResult {
+    if ctx.kernel_init_task.state() != State::Prepared
+        || !ctx.kernel_init_task.thread_context_ready()
+        || !ctx.kernel_init_task.sched_entity_ready()
+        || ctx.kernel_init_task.kernel_stack_top() == 0
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kernel_init_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
     ctx.kernel_init_task
         .task_mut()
         .setup(Checkpoint::KernelInitTaskReady)
@@ -374,10 +391,11 @@ fn preset_kthreadd_task(ctx: &mut Context) -> EventResult {
     ctx.kthreadd_task.commit_preset_metadata()?;
     ctx.kthreadd_task
         .task_mut()
-        .preset(Checkpoint::KthreaddTaskPrepared)
+        .preset(Checkpoint::KthreaddTaskPrepared)?;
+    copy_kthreadd_task(ctx)
 }
 
-fn copy_and_setup_kthreadd_task(ctx: &mut Context) -> EventResult {
+fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
     if ctx.kthreadd_task.state() != State::Prepared
         || ctx.task_creation_core.state() != State::Ready
         || ctx.root_pid_namespace.state() != State::Ready
@@ -440,6 +458,22 @@ fn copy_and_setup_kthreadd_task(ctx: &mut Context) -> EventResult {
     ctx.kthreadd_task
         .task_mut()
         .init_switch_context(kthreadd_entry, stack_top);
+    Ok(())
+}
+
+fn setup_kthreadd_task(ctx: &mut Context) -> EventResult {
+    if ctx.kthreadd_task.state() != State::Prepared
+        || !ctx.kthreadd_task.thread_context_ready()
+        || !ctx.kthreadd_task.sched_entity_ready()
+        || ctx.kthreadd_task.kernel_stack_top() == 0
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kthreadd_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    }
     ctx.kthreadd_task
         .task_mut()
         .setup(Checkpoint::KthreaddTaskReady)

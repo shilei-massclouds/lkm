@@ -43,9 +43,21 @@ pub(crate) fn prepare_selected_payload(ctx: &mut Context) -> EventResult {
 
 #[cfg(app_user_boot)]
 pub(crate) fn prepare_selected_payload(ctx: &mut Context) -> EventResult {
-    user_boot::prepare(ctx)?;
-    ctx.selected_payload_handoff
-        .enable(&ctx.config, ctx.user_boot_payload.state() == State::Online)
+    user_boot::prepare_handoff(ctx)?;
+    ctx.selected_payload_handoff.enable(
+        &ctx.config,
+        ctx.user_boot_payload.state() == State::Ready && ctx.user_app_flow.state() == State::Ready,
+    )
+}
+
+#[cfg(any(app_hello, app_smoke))]
+pub(crate) fn commit_selected_payload(_ctx: &mut Context) -> EventResult {
+    Ok(())
+}
+
+#[cfg(app_user_boot)]
+pub(crate) fn commit_selected_payload(ctx: &mut Context) -> EventResult {
+    user_boot::commit_handoff(ctx)
 }
 
 #[cfg(app_hello)]
@@ -74,7 +86,9 @@ fn require_selected_entry(ctx: &Context, expected_kind: SelectedPayloadKind) {
         || !ctx.selected_payload_handoff.variant_setup_ready()
         || !ctx.selected_payload_handoff.variant_prepare_ready()
         || !ctx.selected_payload_handoff.no_return_entry_bound()
-        || !crate::phases::payload::is_online()
+        || !crate::phases::payload::prepare::is_online()
+        || !crate::phases::payload::handoff_prepare::is_online()
+        || !ctx.kernel_init_flow.payload_handoff_committed()
         || !crate::systems::kernel::is_online()
     {
         crate::arch::riscv64::sbi::putstr("selected payload entry invariant failed\n");

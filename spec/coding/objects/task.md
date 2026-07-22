@@ -74,6 +74,11 @@ lifecycle state，或用角色 wrapper 绕过 owner/ref 校验。
 BootInitFlow lifecycle 与 BootIdleFlow active continuation 是两个独立事实，不得建立第二个 boot-init
 Flow 或把 initial ref 当作 active ref。
 
+`BootInitRestInitPhase` 必须对 `KernelInitTask` 与 `KthreaddTask` 分别完整执行
+Preset/Setup/Enable：Preset lower 为 `copy_process`，Setup 当前无业务动作，Enable lower 为
+`wake_up_new_task`。每次 Enable 发出的 initial-flow Preset 在仍属于 BootTask 的 dispatch window 下
+都必须 discarded；Task lifecycle 不得借此预执行 KernelInitFlow 或 KthreaddFlow。
+
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow
 均完成 Disable/Cleanup 后，才可 Disable/Cleanup Task；reap 只能消费 Destroyed Task。

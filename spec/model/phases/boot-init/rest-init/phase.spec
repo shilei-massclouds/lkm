@@ -325,20 +325,17 @@ context BootIdleWaitLocalInterruptContext: Context {
  * KernelInitTask 表示 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建的
  * PID 1。它在本阶段变为 Online，但其 kernel_init_freeable() 执行属于下一子阶段。
  *
- * KernelInitTask.Preset 对应 user_mode_thread() 内部构造临时
- * kernel_clone_args 的过程。kernel_clone_args 是栈上传参结构，没有独立
- * 生命周期，因此不建模为对象；Preset 把 fn、fn_arg、clone flags、
- * exit_signal 与 KernelInitFlow 固化为 KernelInitTask.Prepared
- * 上的 facts，并明确尚未分配 task_struct、尚未 attach pid、尚未入队。
- *
- * KernelInitTask.Setup 对应 kernel_clone() 调用 copy_process() 的成功路径。
- * copy_process() 是 TaskCreationCore.Ready 状态内的参数化 action：
+ * KernelInitTask.Preset 对应 user_mode_thread() 构造临时 kernel_clone_args
+ * 并由 kernel_clone() 完成 copy_process() 的成功路径。kernel_clone_args
+ * 是栈上传参结构，没有独立生命周期，因此不建模为对象；Preset 先把
+ * fn、fn_arg、clone flags、exit_signal 与 KernelInitFlow 固化为结构 facts，
+ * 再执行 TaskCreationCore.Ready 状态内的参数化 action：
  * TaskCreationCore.Action::CopyProcess(src_task: BootTask,
  * dst_task: KernelInitTask, flow: KernelInitFlow, ...)。该 action
  * 以 src_task/current 为模板创建 dst_task/task_struct，初始化 pid、凭据、
  * fs/files、signal、安全上下文、thread context、sched entity 与启动入口，
- * 但保持 task_state_new 且 task_not_enqueued。
- * KernelInitTask.Setup 只提交 KernelInitTask Prepared -> Ready 的生命周期结果。
+ * 但保持 task_state_new 且 task_not_enqueued，随后提交 Prepared。
+ * KernelInitTask.Setup 当前没有业务动作，只提交 Prepared -> Ready。
  *
  * KernelInitTask.Enable 对应 wake_up_new_task()。该路径受 p->pi_lock 保护，
  * 因此 Enable 先通过 KernelInitTaskPiLock.LockIrqSave 进入
@@ -427,8 +424,6 @@ object KernelInitKthreaddDoneWait: KernelObject {
                     completion_complete_committed(KthreaddReadyGate);
                     completion_token_available(KthreaddReadyGate);
                     kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                 }
 
                 drives {
@@ -465,8 +460,8 @@ object KernelInitKthreaddDoneWait: KernelObject {
  * KthreaddTask（定义集中在 task.spec）表示
  * kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES)
  * 创建的全局内核线程管理者。它复用 KernelInitTask 的创建/唤醒形态：
- * Preset 固化临时 kernel_clone_args，Setup 驱动 copy_process，Enable
- * 对应 wake_up_new_task。区别在于入口为 kthreadd、flags 包含
+ * Preset 固化临时 kernel_clone_args 并驱动 copy_process，Setup 当前没有
+ * 业务动作，Enable 对应 wake_up_new_task。区别在于入口为 kthreadd、flags 包含
  * kernel_thread 固有的 CLONE_VM | CLONE_UNTRACED 以及传入的
  * CLONE_FS | CLONE_FILES，并且创建和唤醒后还要发布 kthreadd_task
  * 全局 provider 引用。KthreaddTask 的第一执行入口不是 kernel_init 线；
@@ -1081,8 +1076,8 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_task_online(KernelInitTask);
                     kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
@@ -1166,8 +1161,8 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_task_online(KernelInitTask);
                     kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     KthreaddTask.state == State::Online;
@@ -1242,8 +1237,8 @@ object BootInitRestInitPhase: PhaseObject {
             kernel_init_task_online(KernelInitTask);
             kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
             task_owns_flow(KernelInitTask, KernelInitFlow);
-            task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+            kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
@@ -1301,8 +1296,8 @@ object BootInitRestInitPhase: PhaseObject {
                     rest_init_dispatch_ready(BootInitRestInitPhase);
                     KernelInitTask.state == State::Online;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     KthreaddTask.state == State::Online;
@@ -1381,8 +1376,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     task_flow_owner_exclusive(BootIdleFlow);
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     task_concurrency_open();
                     smp_concurrency_closed();
                     secondary_cpus_not_started(CpuGroup);
@@ -1404,8 +1399,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     BootIdleFlow.state == State::Ready;
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     task_concurrency_open();
                     smp_concurrency_closed();
                 }
@@ -1435,8 +1430,8 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     BootIdleFlow.state == State::Ready;
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     task_concurrency_open();
                     smp_concurrency_closed();
                 }
@@ -1514,8 +1509,8 @@ object BootIdleEntryPhase: PhaseObject {
                 ensures {
                     boot_idle_entry_phase_ready(BootIdleEntryPhase);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     boot_idle_runtime_ready(BootIdleFlow, BootTask);
@@ -1611,8 +1606,8 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
                     boot_idle_loop_continues(BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     kernel_init_task_stack_switch_committed(
@@ -1675,8 +1670,8 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
                     boot_idle_loop_continues(BootIdleFlow);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     kernel_init_task_stack_switch_committed(

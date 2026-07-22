@@ -21,8 +21,6 @@ object PageAllocatorFullGfpMask: MemoryObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     PageAllocator.state == State::Ready;
                 }
 
@@ -54,8 +52,6 @@ object PreSmpCpuTopology: HardwareObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     CpuGroup.state == State::Ready;
                     BootCPU.state == State::Online;
                 }
@@ -95,8 +91,6 @@ object VmstatCore: KernelObject {
                     Workqueue.state == State::Ready;
                     PageAllocator.state == State::Ready;
                     PageAllocatorFullGfpMask.state == State::Ready;
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                 }
 
                 ensures {
@@ -130,8 +124,6 @@ object PreSmpInitcallTable: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     RcuCore.state == State::Ready;
                     Softirq.state == State::Ready;
                     Scheduler.state == State::Online;
@@ -172,8 +164,6 @@ object PreSmpInitBoundary: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     PreSmpInitcallTable.state == State::Ready;
                 }
 
@@ -204,17 +194,17 @@ object PreSmpInitBoundary: KernelObject {
 
 /*
  * PreSmpInitPhase 表示 KernelInitTask 在 kernel_init_freeable() 中推进的
- * SMP 启动前初始化段。它是 SmpRuntimePhase 的首个子阶段，先由
+ * SMP 启动前初始化段。它是 KernelInitFlow.Preset 的首个直接叶阶段，先由
  * KernelInitTask 在 kernel_init() 入口通过 wait_for_completion(&kthreadd_done)
  * 观察 KthreaddReadyGate 已被 BootTask complete，然后进入
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
- * 绑定为 KernelInitFlow 并指向 SmpRuntimePhase 入口。该真实任务入口
+ * 绑定为 KernelInitFlow 并指向 KernelInitFlow 入口。该真实任务入口
  * 只在 BootInitFlow.Online 后由 Kernel.Enable continuation 启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpRuntimePhase;
+    parent: KernelInitFlow;
 
     state State::Base {
         transitions {
@@ -223,14 +213,12 @@ object PreSmpInitPhase: PhaseObject {
                     BootInitFlow.state == State::Online;
                     KernelInitTask.state == State::Online;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     KernelInitKthreaddDoneWait.state == State::Ready;
                     KthreaddReadyGate.state == State::Online;
                     completion_complete_committed(KthreaddReadyGate);
                     completion_token_available(KthreaddReadyGate);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
                     PageAllocator.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     Workqueue.state == State::Prepared;
@@ -254,8 +242,8 @@ object PreSmpInitPhase: PhaseObject {
                 ensures {
                     pre_smp_init_ready(PreSmpInitPhase);
                     task_owns_flow(KernelInitTask, KernelInitFlow);
-                    task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+                    kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     KernelInitKthreaddDoneWait.state == State::Online;
                     kernel_init_kthreadd_done_wait_released(
                         KernelInitKthreaddDoneWait,
@@ -312,10 +300,8 @@ object PreSmpInitPhase: PhaseObject {
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
             task_owns_flow(KernelInitTask, KernelInitFlow);
-            task_flow_first_phase(KernelInitTask, SmpRuntimePhase);
-            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
-            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-            scheduler_first_schedule_committed(Scheduler);
+            kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
+            kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
             PageAllocator.state == State::Ready;
             PageAllocatorFullGfpMask.state == State::Ready;
             PreSmpCpuTopology.state == State::Ready;

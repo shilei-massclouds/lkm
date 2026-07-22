@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 488,
+  "total_checkpoints": 481,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 371
+      "count": 364
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 371
+      "count": 364
     },
     {
       "confidence": "medium",
@@ -132,10 +132,6 @@
       "count": 4
     },
     {
-      "family": "BootPhase",
-      "count": 4
-    },
-    {
       "family": "CpuGroup",
       "count": 4
     },
@@ -145,10 +141,6 @@
     },
     {
       "family": "EntrySuccessorPhase",
-      "count": 4
-    },
-    {
-      "family": "InterruptPhase",
       "count": 4
     },
     {
@@ -164,7 +156,7 @@
       "count": 4
     },
     {
-      "family": "SmpRuntimePhase",
+      "family": "PayloadHandoffPreparePhase",
       "count": 4
     },
     {
@@ -201,6 +193,10 @@
     },
     {
       "family": "KernelInitTask",
+      "count": 3
+    },
+    {
+      "family": "PayloadPreparePhase",
       "count": 3
     },
     {
@@ -285,10 +281,6 @@
     },
     {
       "family": "MmCoreInitPhase",
-      "count": 2
-    },
-    {
-      "family": "PayloadPhase",
       "count": 2
     },
     {

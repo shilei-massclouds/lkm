@@ -1,6 +1,6 @@
 # Linux Checkpoint Mapping Coverage
 
-- total checkpoints: 488
+- total checkpoints: 481
 
 ## Mapping Kind Counts
 
@@ -8,13 +8,13 @@
 | --- | ---: |
 | exact | 103 |
 | range | 14 |
-| unmapped | 371 |
+| unmapped | 364 |
 
 ## Confidence Counts
 
 | confidence | count |
 | --- | ---: |
-| none | 371 |
+| none | 364 |
 | medium | 62 |
 | high | 55 |
 
@@ -52,15 +52,13 @@
 | BootIdleEntryPhase | 4 |
 | BootInitFlow | 4 |
 | BootInitScheduleHandoffPhase | 4 |
-| BootPhase | 4 |
 | CpuGroup | 4 |
 | EarlyCon | 4 |
 | EntrySuccessorPhase | 4 |
-| InterruptPhase | 4 |
 | IrqOpenPreparePhase | 4 |
 | KthreaddTask | 4 |
 | MemBlock | 4 |
-| SmpRuntimePhase | 4 |
+| PayloadHandoffPreparePhase | 4 |
 | SyscallTable | 4 |
 | VirtioBlk | 4 |
 | BootCPU | 3 |
@@ -70,6 +68,7 @@
 | InitStack | 3 |
 | InterruptStream | 3 |
 | KernelInitTask | 3 |
+| PayloadPreparePhase | 3 |
 | SlubSubsystem | 3 |
 | UserAppFlow | 3 |
 | UserClone | 3 |
@@ -91,7 +90,6 @@
 | KthreaddReadyGate | 2 |
 | LocalIrqEnablePhase | 2 |
 | MmCoreInitPhase | 2 |
-| PayloadPhase | 2 |
 | PhysicalMemory | 2 |
 | PlatformCpuInfo | 2 |
 | PlicIrqDomain | 2 |

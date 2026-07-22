@@ -1,6 +1,6 @@
 # RuntimeCorePhase coding
 
-RuntimeCorePhase 是 SmpRuntimePhase 的第 3 个直接子阶段，由 KernelInitTask 执行。model 路径为
+RuntimeCorePhase 是 KernelInitFlow.Setup 的第 1 个直接子阶段，由 KernelInitTask 执行。model 路径为
 `spec/model/phases/smp-runtime/runtime-core/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。
 
@@ -10,7 +10,7 @@ RuntimeCorePhase 是 SmpRuntimePhase 的第 3 个直接子阶段，由 KernelIni
 `RuntimeCorePhase.Started`，因此该事件位于 `Scheduler.enable_smp()` / Linux
 `sched_init_smp()` 动作之前；随后驱动全部对象并提交 Prepared。Setup/Enable 只检查
 `runtime_core_ready()` 和 RuntimeCoreBoundary，分别提交 Ready/Online；Online 只返回
-`smp_runtime::enable_after_runtime_core()`。
+`KernelInitFlow.setup_after_runtime_core()`。
 
 四个 checkpoint 依次是 Started、Prepared、Ready、Online；Started/Ready 保持既有 ID，
 Prepared/Online 追加且默认 unmapped。

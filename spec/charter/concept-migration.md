@@ -141,7 +141,7 @@ eventual delivery 要求，以及异步响应是否建立新推导链。上述�
 2. 同一个 Signal 类型是否允许在不同调用点选择同步或异步发送，以及该属性属于类型还是发送实例。
 3. 异步 Signal 的队列、优先级、并发、失败反馈、取消和 eventual delivery 语义。
 4. DSL 是否保留 `object` 作为 System 实例声明关键字，是否需要通用 `System` type。
-5. `任务子系统`、`中断子系统` 与现有 `Task`、`Scheduler`、`InterruptPhase`、`EventStream`、
+5. `任务子系统`、`中断子系统` 与现有 `Task`、`Scheduler`、interrupt leaf phases、`EventStream`、
    `InterruptStream` 和 IRQ 对象的最终映射。
 6. `EventStream`、event checkpoint、trace event 等既有名称迁移后的正式命名。
 

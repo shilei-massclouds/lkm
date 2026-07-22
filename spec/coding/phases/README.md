@@ -6,7 +6,7 @@ by the repository `coding-spec-check` gate.
 
 ## Boot
 
-- [`boot.md`](boot.md) — BootPhase 父 transition 驱动映射
+- [`boot.md`](boot.md) — boot 叶阶段 namespace 与直接 parent 映射
 - `boot/entry-prelude.md`
 - `boot/entry-successor.md`
 - `boot/core-prepare.md`
@@ -15,7 +15,7 @@ by the repository `coding-spec-check` gate.
 
 ## Interrupt
 
-- [`interrupt.md`](interrupt.md) — InterruptPhase 父 transition 驱动映射
+- [`interrupt.md`](interrupt.md) — interrupt 叶阶段 namespace 与直接 parent 映射
 - `interrupt/irq-time-init.md`
 - `interrupt/local-irq-enable.md`
 - `interrupt/irq-open-prepare.md`
@@ -26,9 +26,9 @@ by the repository `coding-spec-check` gate.
 - [`boot-init.md`](boot-init.md) — BootInitFlow Phase 父 transition 驱动映射
 - `boot-init/rest-init.md`
 
-## SmpRuntime
+## KernelInitFlow execution phases
 
-- [`smp-runtime.md`](smp-runtime.md) — SmpRuntimePhase 父 transition 驱动映射
+- [`smp-runtime.md`](smp-runtime.md) — KernelInitFlow 直接子阶段映射
 - `smp-runtime/pre-smp-init.md`
 - `smp-runtime/smp-bringup.md`
 - `smp-runtime/runtime-core.md`
@@ -38,4 +38,4 @@ by the repository `coding-spec-check` gate.
 
 ## Payload
 
-- [`payload.md`](payload.md) — PayloadPhase transition 映射
+- [`payload.md`](payload.md) — 两个 payload 叶阶段与 commit action 映射

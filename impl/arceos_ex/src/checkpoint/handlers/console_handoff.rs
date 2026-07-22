@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
+const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPreparePhaseOnline];
 pub const KUNIT_CASE_COUNT: usize = 1;
 
 pub const HANDLER: Handler = Handler {

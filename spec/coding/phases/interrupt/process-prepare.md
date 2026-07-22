@@ -19,7 +19,7 @@ Online 后提交 Interrupt.Prepared。
 
 #### Model path
 
-ProcessPreparePhase is InterruptPhase subphase 4. Its formal model
+ProcessPreparePhase is a direct BootInitFlow.Setup phase. Its formal model
 path is spec/model/phases/interrupt/process-prepare/.
 
 #### Code path

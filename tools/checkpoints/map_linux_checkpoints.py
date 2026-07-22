@@ -824,15 +824,15 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="Linux kernel_init_freeable() reaches the Rootfs end boundary after integrity_load_keys(), immediately before returning to kernel_init(); this is not an independent Linux object.",
         ),
-        "PayloadPhase.Ready": MappingRule(
+        "PayloadPreparePhase.Online": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
             linux_symbol="kernel_init",
             anchor_pattern=r"\bdo_sysctl_args\s*\(",
             confidence="medium",
-            notes="Linux kernel_init() reaches the post-finalize payload-selection boundary.",
+            notes="Linux kernel_init() reaches the post-finalize payload preparation boundary.",
         ),
-        "PayloadPhase.Online": MappingRule(
+        "KernelInitFlow.PayloadHandoffCommitted": MappingRule(
             mapping_kind="exact",
             linux_file="init/main.c",
             linux_symbol="run_init_process",
@@ -840,7 +840,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             notes=(
                 "Linux run_init_process() is the stable shared init handoff anchor; "
                 "runtime instrumentation passes the kernel_execve() result through "
-                "a recorder that emits the selected payload online boundary only "
+                "a recorder that emits the KernelInitFlow payload-handoff commit boundary only "
                 "on success. The shared path covers ramdisk, requested, "
                 "configured-default, and fallback init variants without recording "
                 "failed candidates."

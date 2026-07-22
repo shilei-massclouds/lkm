@@ -1,7 +1,8 @@
 /*
  * Process Prepare Phase Specification
  *
- * This is InterruptPhase subphase 4. It starts after IrqOpenPreparePhase has
+ * This is the fourth interrupt-oriented leaf directly driven by
+ * BootInitFlow.Setup. It starts after IrqOpenPreparePhase has
  * prepared the interrupt-open late core/platform boundary and covers the Linux
  * start_kernel() segment from pid_idr_init() through kcsan_init(), stopping
  * before rest_init() creates PID 1 and kthreadd.
@@ -966,13 +967,13 @@ object ProcessPrepareTrimmedPaths: KernelObject {
 }
 
 /*
- * ProcessPreparePhase 表示 InterruptPhase 的第四个子阶段。它为
+ * ProcessPreparePhase 表示 BootInitFlow.Setup 的第四个 interrupt 叶阶段。它为
  * rest_init() 创建 kernel_init 和 kthreadd 准备 PID、task、cred、VMA、
  * namespace、key/security 等基础结构，但不创建任务，也不进入调度运行。
  */
 object ProcessPreparePhase: PhaseObject {
     initial_state: State::Base;
-    parent: InterruptPhase;
+    parent: BootInitFlow;
 
     state State::Base {
         transitions {

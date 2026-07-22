@@ -1,67 +1,38 @@
-# 应用交接期阶段
+# KernelInitFlow 的 payload 准备与提交
 
-PayloadPhase 是 KernelInitTask 在内核初始化末尾准备并移交唯一 selected payload 的阶段。构建配置
-必须在 `Hello`、`Smoke` 和 `UserBoot` 三种 payload 中恰好选择一种；本阶段不提供运行期切换或
-插件机制。
+原 `PayloadPhase` 包装 lifecycle 被拆除，payload 边界由两个直接属于 `KernelInitFlow` 的叶子阶段和
+一个 Flow action 表达。构建配置仍必须在 Hello、Smoke、UserBoot 中恰好选择一种 payload。
 
-> [model] MUST：应用交接期阶段正式命名是 PayloadPhase。
+## PayloadPreparePhase
 
-## 边界与职责
+`KernelInitFlow.Setup` 在 `FinalizePhase.Online` 后驱动本阶段。它准备公共
+`ExecSyncBoundaries`、`ExecTransaction`、`UserCloneDeferredBoundaries`，确认唯一 selected payload，
+并完成变种 setup。`PayloadPreparePhase.Online` 继承原 `PayloadPhase.Ready` 的 Linux 对齐语义：
+`do_sysctl_args()` 返回后的 payload-selection boundary。完成后只返回 KernelInitFlow.Setup。
 
-1. 入口边界：SmpRuntimePhase 已经 Online，KernelInitTask 仍运行在自己的 vmalloc stack 上。
-2. Preset 验证 Initcall 已建立 `BinaryFormatRegistry`，并准备所有 payload 共用的
-   `ExecSyncBoundaries` 与 clone deferred 边界。
-3. Setup 确认唯一 selected payload，并完成该变种专属的 setup；只有 UserBoot 变种推进
-   UserBootPayload.Setup。
-4. Enable 准备不可返回入口；UserBoot 变种只选择 requested/default/fallback 候选并调用共享
-   `ExecTransaction`，由 registry/ELF/address-space 管线完成映像准备，再提交 UserBootPayload.Online 和
-   `KernelInitTask: KernelInitFlow -> UserAppFlow` handoff；Hello/Smoke 只确认对应内核态入口。
-5. 出口边界：PayloadPhase Online 已提交，返回 Kernel.Enable continuation；Kernel Online 提交后
-   才进入 selected payload 的不返回入口。
+## PayloadHandoffPreparePhase
 
-PayloadPhase.Online、Kernel.Online 和 selected payload no-return entry 是三个独立边界。任何变种在
-handoff 准备阶段失败时都不得伪造前两个 Online；UserBoot 的 requested/default init 失败继续保持
-既有 panic terminal 语义。
+`KernelInitFlow.Enable` 只驱动本阶段。该阶段完成 selected payload、no-return entry binding、
+UserBoot 映像/地址空间准备、fresh `UserAppFlow.Preset/Setup` 以及 replacement 的完整可逆预检。
+阶段 Online 时 `KernelInitFlow` 必须仍存活且未 Disable；`UserAppFlow` 最多为 Ready，active binding
+仍指向 KernelInitFlow。该 Online 是 precommit 边界，默认不做 Linux exact mapping。
 
-## 生命周期
+## CommitPayloadHandoff
 
-### 范式
+`KernelInitFlow` 提交 Online 后才能执行 `CommitPayloadHandoff` action，且 action 必须再次检查 parent
+`KernelInitTask.Online` 与 DispatchWindow 当前指向 PID 1。
 
-阶段遵循标准 `Base -> Prepared -> Ready -> Online` 生命周期。Preset、Setup 和 Enable 成功提交后，
-前两个 transition 分别发出同对象 Setup 和 Enable；Enable 完成后返回 Kernel continuation。
+- UserBoot 固定执行 `KernelInitFlow.Disable -> KernelInitTask.CommitFlowHandoff ->
+  UserAppFlow.Enable -> KernelInitFlow.Cleanup`，再提交用户 payload Online 和用户态 no-return entry。
+- Hello/Smoke 不替换 Flow，只进入已经绑定的内核态 no-return entry，KernelInitFlow 保持 Online。
 
-### 状态与迁移
-
-* Base：阶段尚未准备公共 payload 边界。
-
-* Preset：驱动 ExecSyncBoundaries.Setup 和 UserCloneDeferredBoundaries.Setup，等待两者 Ready，并验证
-  BinaryFormatRegistry.Ready，提交 Prepared 并发出 Setup。
-
-* Setup：驱动 SelectedPayloadHandoff.Setup，确认 Config 中恰好一种 selected kind；只有 UserBoot
-  分支要求 UserBootPayload.Ready，随后提交 Ready 并发出 Enable。
-
-* Enable：驱动 SelectedPayloadHandoff.Enable。Hello/Smoke 绑定内核态 no-return entry；UserBoot
-  完成用户映像与入口准备，依次建立 fresh `UserAppFlow`、Disable `KernelInitFlow`、提交 stable
-  `KernelInitTask` 的 active handoff、Enable 新 Flow、Cleanup 旧 Flow，并提交 UserBootPayload.Online。
-  selected handoff Online 后提交
-  PayloadPhase.Online，并返回 Kernel.Enable continuation。
-
-* Online：selected payload 的交接条件已经提交，但 payload 尚不必已经进入；Kernel.Online 与实际
-  no-return entry 仍是后续独立边界。
-
-三个 transition 和它们驱动的对象动作都由 KernelInitTask 执行，并持续验证唯一 task handoff、
-entry 事实及真实 SP 位于 KernelInitTask vmalloc stack。
-
-成功 exec 不替换 `KernelInitTask`（PID 1）。首次 exec 的用户地址空间、files、credentials、signal 和 trap
-frame 直接关联 `KernelInitTask`；runtime child fork/exec 后同类资源关联实际当前 child Task，不能
-一律回指 `KernelInitTask`。`UserAppFlow` 只保存本次应用 continuation 的独立 lifecycle。用户应用内部是
-黑盒，syscall/trap 仍由当前 Task 和相应内核对象处理。
+`KernelInitFlow.PayloadHandoffCommitted` 继承原成功 exec 后 `PayloadPhase.Online` 的 Linux 对齐语义。
+任何候选、映像或 precheck 失败都不得伪造该 checkpoint；requested/default init 失败继续保持既有
+panic terminal 规则。
 
 ## 引用
 
-* [阶段范式](../phase-paradigm.md)
-* [PayloadPhase model](../../model/phases/payload/phase.spec)
-* [ExecTransaction](../objects/exec-transaction.md)
-* [BinaryFormatRegistry](../objects/binary-format-registry.md)
-* [ExecSyncBoundaries](../objects/exec-sync-boundaries.md)
-* [ElfObject](../objects/elf-object.md)
+- [阶段范式](../phase-paradigm.md)
+- [TaskFlow](../objects/task-flow.md)
+- [ExecTransaction](../objects/exec-transaction.md)
+- [ExecSyncBoundaries](../objects/exec-sync-boundaries.md)

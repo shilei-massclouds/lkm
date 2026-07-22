@@ -26,7 +26,7 @@ stdin_steps = [
 ]
 
 [expect]
-markers = ["PayloadPhase.Online"]
+markers = ["KernelInitFlow.PayloadHandoffCommitted"]
 forbidden_markers = ["overflow=1", "Kernel panic"]
 marker_counts = [
   { marker = "lost+found", at_least = 2 },

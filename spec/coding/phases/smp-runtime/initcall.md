@@ -2,9 +2,9 @@
 
 本阶段还拥有 exec 格式注册边界：`InitcallTable` Ready 后调用 Context-owned
 `BinaryFormatRegistry.setup()`，固定注册唯一 `ElfBinaryFormat` entry，并在 InitcallPhase Prepared/Ready/
-Online 检查 registry 保持 Ready。handler 表不从 PayloadPhase 或 syscall 路径动态修改。
+Online 检查 registry 保持 Ready。handler 表不从 payload handoff 或 syscall 路径动态修改。
 
-InitcallPhase 是 SmpRuntimePhase 的第 4 个直接子阶段，由 KernelInitTask 执行。model 路径为
+InitcallPhase 是 KernelInitFlow.Setup 的第 2 个直接子阶段，由 KernelInitTask 执行。model 路径为
 `spec/model/phases/smp-runtime/initcall/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。
 
@@ -13,7 +13,7 @@ InitcallPhase 是 SmpRuntimePhase 的第 4 个直接子阶段，由 KernelInitTa
 `preset()` 依赖 RuntimeCorePhase 精确 Online，接受 Preset 后发出 Started，按 model 顺序驱动
 全部对象并提交 Prepared。现有 structured diagnostic 必须继续标识首个失败对象/谓词；生命周期
 source/target 调整为 Base/Prepared。Setup/Enable 不再驱动对象，只复用 diagnostic ready check，
-分别提交 Ready/Online；Online 只返回 `smp_runtime::enable_after_initcall()`。
+分别提交 Ready/Online；Online 只返回 `KernelInitFlow.setup_after_initcall()`。
 
 四个 checkpoint 依次是 Started、Prepared、Ready、Online；既有 Started/Ready ID 和 stress scope
 名称保持不变。

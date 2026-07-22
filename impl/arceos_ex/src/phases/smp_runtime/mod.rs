@@ -1,3 +1,5 @@
+//! KernelInitFlow direct execution-phase namespace.
+
 pub mod ap_entry_prelude;
 pub mod ap_online_idle;
 pub mod ap_smp_callin;
@@ -8,159 +10,160 @@ pub mod rootfs;
 pub mod runtime_core;
 pub mod smp_bringup;
 
-use crate::{
-    checkpoint::Checkpoint,
-    context::Context,
-    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
-};
-use core::sync::atomic::AtomicU8;
+use crate::objects::state::{EventResult, LifecycleEvent, State, failed_condition};
 
-#[unsafe(link_section = ".data.phase")]
-static SMP_RUNTIME_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
-
-pub fn setup() -> ! {
-    let ctx = crate::context::context();
-    crate::phases::shutdown_on_error(
-        require_mainline(ctx, LifecycleEvent::Preset, State::Base, State::Prepared),
-        "arceos_ex smp runtime preset start failed\n",
-    );
-    crate::checkpoint::checkpoint(Checkpoint::SmpRuntimePhaseStarted);
-    pre_smp_init::preset(ctx)
+/// Entered only from `kernel_init_entry()` after its actual stack check.
+pub fn start_kernel_init_flow() -> ! {
+    let ctx = crate::context::context_ref();
+    if ctx.kernel_init_flow.state() != State::Base
+        || !ctx.kernel_init_flow.initial_start_accepted()
+        || !mainline_ready(ctx)
+    {
+        crate::phases::shutdown_on_error(
+            flow_failure(LifecycleEvent::Preset, State::Base, State::Prepared),
+            "arceos_ex kernel init flow preset start failed\n",
+        );
+    }
+    pre_smp_init::preset(crate::context::context())
 }
 
 pub fn preset_after_pre_smp_init() -> ! {
-    let ctx = crate::context::context();
-    let result = if pre_smp_init::is_online()
-        && mainline_ready(ctx)
-        && crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Base
-    {
-        crate::phases::state::mark_checked(
-            &SMP_RUNTIME_PHASE_STATE,
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::SmpRuntimePhasePrepared,
-        )
-    } else {
-        phase_failure(LifecycleEvent::Preset, State::Base, State::Prepared)
-    };
-    crate::phases::shutdown_on_error(result, "arceos_ex smp runtime preset failed\n");
-    smp_bringup::preset(ctx)
+    require_flow_continuation(
+        pre_smp_init::is_online(),
+        LifecycleEvent::Preset,
+        State::Base,
+        State::Prepared,
+        "arceos_ex kernel init flow after pre-smp init failed\n",
+    );
+    smp_bringup::preset(crate::context::context())
 }
 
-pub fn setup_after_smp_bringup() -> ! {
+pub fn preset_after_smp_bringup() -> ! {
     let ctx = crate::context::context();
-    let result = if pre_smp_init::is_online()
-        && smp_bringup::is_online()
-        && mainline_ready(ctx)
-        && crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Prepared
-    {
-        crate::phases::state::mark_checked(
-            &SMP_RUNTIME_PHASE_STATE,
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            Checkpoint::SmpRuntimePhaseReady,
-        )
+    let result = if pre_smp_init::is_online() && smp_bringup::is_online() && mainline_ready(ctx) {
+        ctx.kernel_init_flow
+            .commit_preset_after_children(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
     } else {
-        phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+        flow_failure(LifecycleEvent::Preset, State::Base, State::Prepared)
     };
-    crate::phases::shutdown_on_error(result, "arceos_ex smp runtime setup failed\n");
+    crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow preset failed\n");
     runtime_core::preset(ctx)
 }
 
-pub fn enable_after_runtime_core() -> ! {
-    require_enable_continuation(runtime_core::is_online(), "runtime core");
+pub fn setup_after_runtime_core() -> ! {
+    require_flow_continuation(
+        runtime_core::is_online(),
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+        "arceos_ex kernel init flow after runtime core failed\n",
+    );
     initcall::preset(crate::context::context())
 }
 
-pub fn enable_after_initcall() -> ! {
-    require_enable_continuation(initcall::is_online(), "initcall");
+pub fn setup_after_initcall() -> ! {
+    require_flow_continuation(
+        initcall::is_online(),
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+        "arceos_ex kernel init flow after initcall failed\n",
+    );
     rootfs::preset(crate::context::context())
 }
 
-pub fn enable_after_rootfs() -> ! {
-    require_enable_continuation(rootfs::is_online(), "rootfs");
+pub fn setup_after_rootfs() -> ! {
+    require_flow_continuation(
+        rootfs::is_online(),
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+        "arceos_ex kernel init flow after rootfs failed\n",
+    );
     finalize::preset(crate::context::context())
 }
 
-pub fn enable_after_finalize() -> ! {
-    let ctx = crate::context::context_ref();
-    let result = if children_online()
-        && mainline_ready(ctx)
-        && crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Ready
-    {
-        crate::phases::state::mark_checked(
-            &SMP_RUNTIME_PHASE_STATE,
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::SmpRuntimePhaseOnline,
-        )
-    } else {
-        phase_failure(LifecycleEvent::Enable, State::Ready, State::Online)
-    };
-    crate::phases::shutdown_on_error(result, "arceos_ex smp runtime enable failed\n");
-    crate::systems::kernel::enable_after_smp_runtime()
+pub fn setup_after_finalize() -> ! {
+    require_flow_continuation(
+        finalize::is_online(),
+        LifecycleEvent::Setup,
+        State::Prepared,
+        State::Ready,
+        "arceos_ex kernel init flow after finalize failed\n",
+    );
+    crate::phases::payload::prepare::preset()
 }
 
-fn require_enable_continuation(child_online: bool, child: &str) {
+pub fn setup_after_payload_prepare() -> ! {
+    let ctx = crate::context::context();
+    let result = if setup_children_online() && mainline_ready(ctx) {
+        ctx.kernel_init_flow
+            .commit_setup_after_children(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
+    } else {
+        flow_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow setup failed\n");
+    crate::phases::payload::handoff_prepare::preset()
+}
+
+pub fn enable_after_payload_handoff_prepare() -> ! {
+    let ctx = crate::context::context();
+    let result = if crate::phases::payload::handoff_prepare::is_online() && mainline_ready(ctx) {
+        ctx.kernel_init_flow
+            .commit_enable_after_children(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+    } else {
+        flow_failure(LifecycleEvent::Enable, State::Ready, State::Online)
+    };
+    crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow enable failed\n");
+    crate::systems::kernel::commit_payload_handoff()
+}
+
+pub fn direct_children_online() -> bool {
+    pre_smp_init::is_online()
+        && smp_bringup::is_online()
+        && setup_children_online()
+        && crate::phases::payload::handoff_prepare::is_online()
+}
+
+fn setup_children_online() -> bool {
+    runtime_core::is_online()
+        && initcall::is_online()
+        && rootfs::is_online()
+        && finalize::is_online()
+        && crate::phases::payload::prepare::is_online()
+}
+
+fn require_flow_continuation(
+    child_online: bool,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+    message: &'static str,
+) {
     let ctx = crate::context::context_ref();
-    let result = if child_online
-        && mainline_ready(ctx)
-        && crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Ready
+    let result = if child_online && ctx.kernel_init_flow.state() == expected && mainline_ready(ctx)
     {
         Ok(())
     } else {
-        phase_failure(LifecycleEvent::Enable, State::Ready, State::Online)
-    };
-    let message = match child {
-        "runtime core" => "arceos_ex smp runtime after runtime core failed\n",
-        "initcall" => "arceos_ex smp runtime after initcall failed\n",
-        _ => "arceos_ex smp runtime after rootfs failed\n",
+        flow_failure(event, expected, target)
     };
     crate::phases::shutdown_on_error(result, message)
 }
 
-pub fn is_online() -> bool {
-    crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Online && children_online()
-}
-
-fn children_online() -> bool {
-    pre_smp_init::is_online()
-        && smp_bringup::is_online()
-        && runtime_core::is_online()
-        && initcall::is_online()
-        && rootfs::is_online()
-        && finalize::is_online()
-}
-
-fn require_mainline(
-    ctx: &Context,
-    event: LifecycleEvent,
-    expected: State,
-    target: State,
-) -> EventResult {
-    let actual = crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE);
-    if actual != expected || !crate::phases::boot_init::is_online() || !mainline_ready(ctx) {
-        return failed_condition(event, actual, expected, target);
-    }
-    Ok(())
-}
-
-fn mainline_ready(ctx: &Context) -> bool {
+fn mainline_ready(ctx: &crate::context::Context) -> bool {
     ctx.kernel_init_task.state() == State::Online
         && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.boot_dispatch_window.current_task() == ctx.kernel_init_task.task_ref()
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()
         && ctx.kernel_init_task.current_stack_pointer_in_range()
 }
 
-fn phase_failure(event: LifecycleEvent, expected: State, target: State) -> EventResult {
+fn flow_failure(event: LifecycleEvent, expected: State, target: State) -> EventResult {
     failed_condition(
         event,
-        crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE),
+        crate::context::context_ref().kernel_init_flow.state(),
         expected,
         target,
     )

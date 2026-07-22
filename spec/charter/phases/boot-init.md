@@ -9,9 +9,15 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - `BootTask` 提交 Online 后发出 initial-flow lossy `Preset`；只有 BootInitFlow 仍为 Base，且
   `BootDispatchWindow.current_task` 即时解引用为 BootTask 时才接受并记录 Started。随后驱动
   `EntryPreludePhase`；完成后提交 `BootInitFlow.Prepared`。
-- Setup 顺序驱动 `BootPhase` 和 `InterruptPhase`；二者 Online 后提交 `BootInitFlow.Ready`。
-- Enable 顺序驱动 `BootInitRestInitPhase` 和 `BootInitScheduleHandoffPhase`。前者创建并唤醒
-  KernelInitTask/KthreaddTask，后者完成首次调度的可逆预检与 dispatch 事实。
+- Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
+  `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
+  `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
+  `BootInitFlow.Ready`；不建立 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
+- `BootInitRestInitPhase` 完整驱动 `KernelInitTask` 与 `KthreaddTask` 的 Preset/Setup/Enable。
+  Task Enable 对应 `wake_up_new_task()`，其 initial-flow lossy Preset 因 DispatchWindow 仍指向
+  BootTask 而立即 discarded。
+- Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
+  `BootIdleFlow` owner/active binding。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
   `BootInitFlow.Online` 与 Kernel 的 Prepared switch result，再执行真实 BootTask→KernelInitTask
   task-stack switch。
@@ -20,9 +26,8 @@ BootInitFlow 的每个 lifecycle transition 都在执行时重新检查统一 di
 必须仍为 Online，且 BootDispatchWindow 当前必须仍指向 BootTask。该 guard 不是 BootInitFlow 或
 TaskFlow 保存的字段/状态。
 
-`EntryPreludePhase`、`BootPhase`、`InterruptPhase`、`BootInitRestInitPhase` 和
-`BootInitScheduleHandoffPhase` 都以 `BootInitFlow` 为 parent。叶子 Online 后只返回
-`BootInitFlow` continuation，不直接启动 sibling。
+以上全部 boot execution 叶子都直接以 `BootInitFlow` 为 parent。叶子 Online 后只返回
+`BootInitFlow` 当前 transition 的 continuation，不直接启动 sibling。
 
 ## 生命周期与执行主体边界
 

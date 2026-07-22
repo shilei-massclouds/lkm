@@ -42,7 +42,8 @@ use crate::objects::{
 };
 
 const SCOPE: &[Checkpoint] = &[
-    Checkpoint::PayloadPhaseOnline,
+    Checkpoint::PayloadHandoffPreparePhaseOnline,
+    Checkpoint::KernelInitFlowPayloadHandoffCommitted,
     #[cfg(app_user_boot)]
     Checkpoint::UserBootMainElfReady,
     #[cfg(app_user_boot)]
@@ -125,9 +126,9 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::UserStackGrowRejected,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 37;
+pub const KUNIT_CASE_COUNT: usize = 38;
 #[cfg(not(app_user_boot))]
-pub const KUNIT_CASE_COUNT: usize = 6;
+pub const KUNIT_CASE_COUNT: usize = 7;
 
 #[cfg(app_user_boot)]
 static SYSCALL_SET_TID_ADDRESS_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -195,13 +196,16 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
 
     let total = super::kunit_case_count();
     match checkpoint {
-        Checkpoint::PayloadPhaseOnline => {
+        Checkpoint::PayloadHandoffPreparePhaseOnline => {
             run_selected_payload_handoff(checkpoint, ctx, sink, total);
             run_valid_fixture(checkpoint, sink, total);
             run_bad_magic(checkpoint, sink, total);
             run_wrong_machine(checkpoint, sink, total);
             run_invalid_segment(checkpoint, sink, total);
             run_bss_plan(checkpoint, sink, total);
+        }
+        Checkpoint::KernelInitFlowPayloadHandoffCommitted => {
+            run_payload_handoff_committed(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
         Checkpoint::UserBootMainElfReady
@@ -409,8 +413,11 @@ fn run_selected_payload_handoff(
     sink.start_case(total, "", name, checkpoint);
 
     let handoff = &ctx.selected_payload_handoff;
-    let valid = crate::phases::payload::state() == State::Online
+    let valid = crate::phases::payload::prepare::is_online()
+        && crate::phases::payload::handoff_prepare::is_online()
         && !crate::systems::kernel::is_online()
+        && ctx.kernel_init_flow.state() == State::Ready
+        && !ctx.kernel_init_flow.released()
         && handoff.state() == State::Online
         && handoff.kind() == ctx.config.selected_payload_kind()
         && handoff.kind_bound()
@@ -430,14 +437,49 @@ fn run_selected_payload_handoff(
 
 #[cfg(app_user_boot)]
 fn selected_variant_state_ready(ctx: &Context) -> bool {
-    ctx.user_boot_payload.state() == State::Online
-        && ctx.user_boot_payload.enters_user_mode()
-        && ctx.user_boot_payload.no_return_handoff()
+    ctx.user_boot_payload.state() == State::Ready
+        && ctx.user_app_flow.state() == State::Ready
+        && !ctx.user_boot_payload.enters_user_mode()
+        && !ctx.user_boot_payload.no_return_handoff()
 }
 
 #[cfg(not(app_user_boot))]
 fn selected_variant_state_ready(ctx: &Context) -> bool {
     ctx.user_boot_payload.state() == State::Base
+}
+
+fn run_payload_handoff_committed(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "kernel_init_flow.payload_handoff_committed";
+    sink.start_case(total, "", name, checkpoint);
+    if ctx.kernel_init_flow.payload_handoff_committed() && committed_variant_state_valid(ctx) {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "payload handoff commit order invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn committed_variant_state_valid(ctx: &Context) -> bool {
+    ctx.kernel_init_flow.state() == State::Destroyed
+        && ctx.kernel_init_flow.released()
+        && ctx.user_app_flow.state() == State::Online
+        && ctx.user_app_flow.active_binding_committed()
+        && ctx.kernel_init_task.user_flow_active()
+        && ctx.kernel_init_task.flow_handoff_committed()
+        && ctx.user_boot_payload.state() == State::Online
+}
+
+#[cfg(not(app_user_boot))]
+fn committed_variant_state_valid(ctx: &Context) -> bool {
+    ctx.kernel_init_flow.state() == State::Online
+        && ctx.kernel_init_flow.active()
+        && ctx.kernel_init_task.kernel_init_flow_active()
+        && !ctx.kernel_init_flow.released()
 }
 
 #[cfg(app_user_boot)]

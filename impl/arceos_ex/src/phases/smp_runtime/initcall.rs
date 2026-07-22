@@ -422,7 +422,7 @@ fn enable(ctx: &mut Context) -> ! {
         ),
         "arceos_ex initcall enable failed\n",
     );
-    crate::phases::smp_runtime::enable_after_initcall()
+    crate::phases::smp_runtime::setup_after_initcall()
 }
 
 fn transition_if_ready(

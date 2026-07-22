@@ -50,34 +50,40 @@ model -> coding -> impl；不得先改 impl 再反向解释规格。
 BootTask (Online)
 ├── BootInitFlow
 │   ├── EntryPreludePhase
-│   ├── BootPhase
-│   │   ├── EntrySuccessorPhase
-│   │   ├── CorePreparePhase
-│   │   ├── MmCoreInitPhase
-│   │   └── SchedInitPhase
-│   ├── InterruptPhase
-│   │   ├── IrqTimeInitPhase
-│   │   ├── LocalIrqEnablePhase
-│   │   ├── IrqOpenPreparePhase
-│   │   └── ProcessPreparePhase
+│   ├── EntrySuccessorPhase
+│   ├── CorePreparePhase
+│   ├── MmCoreInitPhase
+│   ├── SchedInitPhase
+│   ├── IrqTimeInitPhase
+│   ├── LocalIrqEnablePhase
+│   ├── IrqOpenPreparePhase
+│   ├── ProcessPreparePhase
 │   ├── BootInitRestInitPhase
 │   └── BootInitScheduleHandoffPhase
 └── BootIdleFlow
     └── BootIdleEntryPhase
 
-Kernel
-├── SmpRuntimePhase
-│   ├── PreSmpInitPhase
-│   ├── SmpBringupPhase
-│   │   ├── ApEntryPreludePhase
-│   │   ├── ApSmpCallinPhase
-│   │   └── ApOnlineIdlePhase
-│   ├── RuntimeCorePhase
-│   ├── InitcallPhase
-│   ├── RootfsPhase
-│   └── FinalizePhase
-└── PayloadPhase
+KernelInitTask
+└── KernelInitFlow
+    ├── PreSmpInitPhase
+    ├── SmpBringupPhase (BP coordination only)
+    ├── RuntimeCorePhase
+    ├── InitcallPhase
+    ├── RootfsPhase
+    ├── FinalizePhase
+    ├── PayloadPreparePhase
+    └── PayloadHandoffPreparePhase
+
+KthreaddTask
+└── KthreaddFlow (direct service loop)
+
+User task occurrence
+└── UserAppFlow (direct application continuation / black box)
 ```
+
+AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；其正式父链等待逐 AP
+`TaskFlow` 建模。下文旧批次名和矩阵是当时审计快照，若与本树冲突，以本树及文末
+“TaskFlow 直接子阶段归属重构”为准。
 
 ## 执行批次
 
@@ -231,3 +237,47 @@ Kernel
 - coding `.spec` 退场批次通过 `make coding-spec-check`；根目录直接 `make test` 为 169/169；
   默认 ordinary-path stress 三个 case 各 30/30，总计 90/90；默认 rc-local difftest 为 1/1，
   103 个 Linux markers 为 0 missing / 0 stale / 0 mismatch。
+
+## TaskFlow 直接子阶段归属重构
+
+本轮以 `f5162f9c` 为基线并采用 charter-first，先固定 Task carrier 与 TaskFlow execution
+continuation 的职责，再按 charter -> model -> coding -> impl/testing 向下闭合。上面的直接阶段树
+取代本文历史批次中的 `BootPhase`、`InterruptPhase`、`SmpRuntimePhase` 和 `PayloadPhase`
+包装拓扑；这些名字可以保留为源码 namespace 或历史叙述，但不再是 lifecycle object，也不保留
+兼容 checkpoint 墓碑。
+
+`BootInitFlow.Preset` 只驱动 `EntryPreludePhase`；`Setup` 依次驱动 EntrySuccessor、CorePrepare、
+MmCoreInit、SchedInit、IrqTimeInit、LocalIrqEnable、IrqOpenPrepare、ProcessPrepare 和
+BootInitRestInit；`Enable` 只驱动 BootInitScheduleHandoff。RestInit 内两个新 task 的 `Preset`
+对应结构事实与 `copy_process`，`Setup` 无业务动作，`Enable` 对应 `wake_up_new_task` 并发出
+initial-flow lossy Preset。此时 dispatch window 仍指向 BootTask，所以 PID 1 和 kthreadd 的首次
+信号都被 discarded；首次真实 dispatch 更新 CurrentTaskSlot 和 DispatchWindow 后才重新发信号。
+
+`KernelInitFlow` 的 phase code 只在 `kernel_init_entry()` 验证 PID 1 vmalloc kernel stack 后执行，
+不会在 BootTask 栈预执行。其 `Preset` 只完成 PreSmpInit 与 SmpBringup 的 BP 协调，`Setup` 只完成
+RuntimeCore、Initcall、Rootfs、Finalize 和 PayloadPrepare，`Enable` 只完成
+PayloadHandoffPrepare；任一 current task、active flow、dispatch generation 或 owner guard 失效时，
+transition/action 都不可执行。BootIdleFlow 直接拥有 BootIdleEntry；KthreaddFlow 直接承载服务循环；
+UserAppFlow 直接承载应用 continuation。AP 三阶段不纳入 KernelInitFlow 所有权，继续等待逐 AP
+TaskFlow 正式化。
+
+PayloadPrepare 保留公共选择与准备边界；PayloadHandoffPrepare 完成 selected payload、entry binding、
+fresh Pid1UserAppFlow 的 Preset/Setup 和 replacement precheck，但不销毁 KernelInitFlow。真正提交是
+KernelInitFlow Online 下的 `CommitPayloadHandoff` action：UserBoot 严格执行 KernelInitFlow Disable
+-> active Flow handoff -> UserAppFlow Enable -> KernelInitFlow Cleanup；Hello/Smoke 不替换 flow，
+只进入已经绑定的 kernel-mode no-return entry。模型对失败 guard、完整 replacement 顺序和两类
+非 replacement 分支分别保留可验证条件。
+
+checkpoint inventory 重新稠密编号为 481，Linux mapping 为 exact 103 / range 14 / unmapped 364。
+两个新标准 phase checkpoint 取代旧 wrapper：Linux 原 `PayloadPhase.Ready` 语义迁移到
+`PayloadPreparePhase.Online`，成功 exec 后原 `PayloadPhase.Online` 语义迁移到
+`KernelInitFlow.PayloadHandoffCommitted`；`PayloadHandoffPreparePhase.Online` 是默认 unmapped 的
+precommit 边界。sibling Linux 的 103 个 marker 与生成 header 已同步，检查为 0 missing / 0 stale /
+0 mismatch。
+
+严格模型验证结果为 318 objects、798 states、476 transitions，且 0 obligation、0 blocked、
+0 contradiction。focused checkpoint tests 为 43/43，stress runner unit tests 为 21/21；根目录
+直接 `make test` 为 182/182（KUnit native/linux-object 各 25/25，smoke 各 55/55）。默认
+`make stress-test` 的三个 ordinary-path case 各 10/10，总计 30/30；默认 `make difftest` 的
+`rc-local-difftest` 为 1/1，并实际重编译同步后的 sibling Linux。两个工作树的
+`git diff --check` 均通过。

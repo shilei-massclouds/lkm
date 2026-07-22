@@ -10,18 +10,22 @@ Task carrier、TaskRef、类型级 lifecycle 及 Task teardown 前置条件见 [
 
 ## 静态与动态 Flow 实例
 
-- `BootInitFlow` 是 `BootTask.initial_flow` 指向的初始 TaskFlow，从 `_start` 承载启动编排，直到首次
-  真实 PID 1 switch 的 pre-commit 边界。
+- `BootInitFlow` 是 `BootTask.initial_flow` 指向的初始 TaskFlow，从 `_start` 直接编排 boot execution
+  continuation 的叶子阶段，直到首次真实 PID 1 switch 的 pre-commit 边界。
 - `BootIdleFlow` 是 `BootTask` 的后继 idle Flow。`BootInitFlow.Enable` 在不可逆切换前完成完整预检，
   直接建立其 owner/active binding；这不建立第二个 Task carrier，也不改写 `BootTask.initial_flow`。
-- `KernelInitFlow` 是 `KernelInitTask.initial_flow` 指向的初始 Flow，承载 `kernel_init()`、pre-SMP、initcall 和 exec 前内核
-  continuation。
+- `KernelInitFlow` 是 `KernelInitTask.initial_flow` 指向的初始 Flow，直接编排 `kernel_init()`、
+  pre-SMP、initcall、payload prepare 和 exec 前内核 continuation；不经 `SmpRuntimePhase` 或
+  `PayloadPhase` 包装 lifecycle。
 - `KthreaddFlow` 是 `KthreaddTask.initial_flow` 指向的初始 Flow，承载服务循环。
-- PID 1 首次成功 exec 在执行点声明 fresh `UserAppFlow`。每次 fork/clone 为 fresh child Task 声明
-  fresh fork-continuation `UserAppFlow`；child 后续每次 exec 再声明另一个 fresh `UserAppFlow`。
+- PID 1 首次成功 exec 在执行点建立 fresh `UserAppFlow` occurrence；formal model 以唯一具体实例
+  `Pid1UserAppFlow` 表示这个首个 occurrence，implementation 仍须在专用 storage slot 上执行
+  `declare()`/`bind()`。每次 fork/clone 为 fresh child Task 声明 fresh fork-continuation
+  `UserAppFlow`；child 后续每次 exec 再声明另一个 fresh `UserAppFlow`。
 
-PID 1 首个用户 Flow、fork continuation Flow 和 child exec Flow 的临时具名见证不再是正式静态
-对象，也不保留 compatibility alias。运行期实例 declaration/identity 规则由
+`Pid1UserAppFlow` 是首个 exec occurrence 的正式身份，不是 persona/wrapper 或 compatibility alias；
+fork continuation Flow 和 child exec Flow 的临时具名见证不再是正式静态对象。运行期实例
+declaration/identity 规则由
 [运行期实例声明](dynamic-instance-declaration.md)统一定义。
 
 ## 所有权与 active binding
@@ -67,6 +71,11 @@ DispatchWindow 在真实 switch commit 后更新 `current_task` 时。接收方�
 dispatch guard 成立时推进；否则立即记录 discarded，不排队、不重试，也不阻塞发出方。Task 再次
 获得 CPU 时，非 Base 的 initial Flow 丢弃重复启动信号，并从 active Flow 保存的 continuation 恢复。
 
+PID 1 的首次 dispatch 是跨栈 continuation：scheduler 在 switch commit 更新 CurrentTaskSlot 与
+DispatchWindow 后接受 `KernelInitFlow.Preset`，但 runtime lowering 必须把 Preset body 及其叶子阶段
+代码放到 `kernel_init_entry()` 验证 PID 1 vmalloc stack 之后执行。不得为了同步实现 signal 而在
+BootTask 栈上预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
+
 ## 首个 binding 与 exec replacement
 
 boot idle successor binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在首次真实调度切换前直接提交
@@ -76,13 +85,19 @@ switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时
 驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以保留 scheduler-owned 的 idle metadata、锁或
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。
 
-successful exec 同样保持 owner Task identity，并使用固定顺序：
+successful exec 同样保持 owner Task identity。`KernelInitFlow.Enable` 只完成
+`PayloadHandoffPreparePhase` 的可逆 precommit；真正 replacement 是 `KernelInitFlow` 已 Online 时、
+仍受 dynamic dispatch guard 约束的 `CommitPayloadHandoff` action，并使用固定顺序：
 
 1. fresh `UserAppFlow.Preset/Setup`；
 2. 旧 Flow `Disable`；
 3. Task 提交 old -> new active handoff；
 4. 新 Flow `Enable` 并进入用户应用黑盒；
 5. 旧 Flow `Cleanup`。
+
+Hello/Smoke 不执行 Flow replacement：`KernelInitFlow` 保持 Online，action 只进入已经绑定的内核态
+no-return entry。UserBoot 完成上述顺序后提交 `KernelInitFlow.PayloadHandoffCommitted`；该 checkpoint
+是成功 exec 的 commit 边界，不能由 precommit 阶段伪造。
 
 应用内部指令不进入 `UserAppFlow` 状态机。syscall、trap、files、credentials、signal 和地址空间
 操作由发生该操作时的实际当前 Task 及相应内核资源对象承载；PID 1 路径的 owner 是

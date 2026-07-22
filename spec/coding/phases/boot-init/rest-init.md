@@ -58,7 +58,9 @@ KernelInitTask and KthreaddTask creation, scheduling eligibility and
 kthreadd provider binding.
 
 BootInitRestInitPhase owns the lifecycle-driving sequence for both roles. Its
-private phase flow must call the shared Task core in this order:
+private phase flow must call the shared Task core in this order; the structural
+`Task::preset`/flow binding and `copy_process` together lower the Task Preset
+operation, while `Task::setup` has no current business action:
 
 ```text
 Task::preset
@@ -542,7 +544,7 @@ cooperative context transfer from BootTask to KernelInitTask. The
 handoff saves BootTask's `ra/sp/tp/s0..s11`, restores the initialized
 KernelInitTask context on its vmalloc stack, and enters `kernel_init_entry()`.
 That entry must call the named Kernel.Enable continuation, which validates
-the owner and stack facts before driving SmpRuntimePhase and PayloadPhase. If a later
+the owner and stack facts before driving KernelInitFlow's direct execution phases. If a later
 schedule restores the BootIdle continuation, it remains in its active idle
 schedule loop. If KthreaddTask is selected, it remains in its temporary active
 schedule loop. Neither continuation may execute the selected payload.
@@ -552,8 +554,8 @@ schedule loop. Neither continuation may execute the selected payload.
 Once the real BootTask to KernelInitTask handoff is enabled and the
 KernelInit entry verifies that it is running on its own 16 KiB vmalloc stack,
 the generated boot stack must use the codegen profile's 16 KiB size. This
-reduction is valid only while SmpRuntimePhase and PayloadPhase remain owned by
-KernelInitTask; moving either path back to the boot stack requires re-auditing
+reduction is valid only while KernelInitFlow's execution phases remain owned by
+KernelInitTask; moving that path back to the boot stack requires re-auditing
 the boot stack bound before changing the linker profile.
 
 #### Deferred runtime

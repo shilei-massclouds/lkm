@@ -14,7 +14,9 @@ pub fn run() -> SmokeResult {
     let platform_bus_root_device = &ctx.platform_bus_root_device;
     let platform_bus = &ctx.platform_bus;
 
-    if !phases::smp_runtime::initcall::is_online() || !phases::smp_runtime::is_online() {
+    if !phases::smp_runtime::initcall::is_online()
+        || !ctx.kernel_init_flow.payload_handoff_committed()
+    {
         printk::write_str("initcall phase is not ready\n");
         return SmokeResult::Failed;
     }

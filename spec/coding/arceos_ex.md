@@ -12,8 +12,8 @@
    [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
 2. [`projects/kernel.md`](projects/kernel.md)：KernelProject 映射。
 3. [`systems/kernel.md`](systems/kernel.md)：Kernel 生命周期和顶层阶段树映射。
-4. 编排阶段：BootInitFlow（EntryPrelude -> Boot -> Interrupt -> rest_init/handoff）
-   -> SmpRuntime -> Payload。
+4. 编排阶段：BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow 直接叶阶段 ->
+   payload commit。
 5. 对应叶子阶段和普通对象主题。
 6. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
 
@@ -22,27 +22,27 @@
 | Scope | Coding 映射 |
 | --- | --- |
 | Kernel system/startup | [`systems/kernel.md`](systems/kernel.md) |
-| Boot orchestration | [`phases/boot.md`](phases/boot.md) |
+| Boot leaf namespace | [`phases/boot.md`](phases/boot.md) |
 | Boot `entry-prelude` | [`phases/boot/entry-prelude.md`](phases/boot/entry-prelude.md) |
 | Boot `entry-successor` | [`phases/boot/entry-successor.md`](phases/boot/entry-successor.md) |
 | Boot `core-prepare` | [`phases/boot/core-prepare.md`](phases/boot/core-prepare.md) |
 | Boot `mm-core-init` | [`phases/boot/mm-core-init.md`](phases/boot/mm-core-init.md) |
 | Boot `sched-init` | [`phases/boot/sched-init.md`](phases/boot/sched-init.md) |
-| Interrupt orchestration | [`phases/interrupt.md`](phases/interrupt.md) |
+| Interrupt leaf namespace | [`phases/interrupt.md`](phases/interrupt.md) |
 | Interrupt `irq-time-init` | [`phases/interrupt/irq-time-init.md`](phases/interrupt/irq-time-init.md) |
 | Interrupt `local-irq-enable` | [`phases/interrupt/local-irq-enable.md`](phases/interrupt/local-irq-enable.md) |
 | Interrupt `irq-open-prepare` | [`phases/interrupt/irq-open-prepare.md`](phases/interrupt/irq-open-prepare.md) |
 | Interrupt `process-prepare` | [`phases/interrupt/process-prepare.md`](phases/interrupt/process-prepare.md) |
 | BootInitFlow orchestration | [`phases/boot-init.md`](phases/boot-init.md) |
 | BootInitFlow `rest-init` | [`phases/boot-init/rest-init.md`](phases/boot-init/rest-init.md) |
-| SMP runtime orchestration | [`phases/smp-runtime.md`](phases/smp-runtime.md) |
+| KernelInitFlow execution phases | [`phases/smp-runtime.md`](phases/smp-runtime.md) |
 | SMP runtime `pre-smp-init` | [`phases/smp-runtime/pre-smp-init.md`](phases/smp-runtime/pre-smp-init.md) |
 | SMP runtime `smp-bringup` | [`phases/smp-runtime/smp-bringup.md`](phases/smp-runtime/smp-bringup.md) |
 | SMP runtime `runtime-core` | [`phases/smp-runtime/runtime-core.md`](phases/smp-runtime/runtime-core.md) |
 | SMP runtime `initcall` | [`phases/smp-runtime/initcall.md`](phases/smp-runtime/initcall.md) |
 | SMP runtime `rootfs` | [`phases/smp-runtime/rootfs.md`](phases/smp-runtime/rootfs.md) |
 | SMP runtime `finalize` | [`phases/smp-runtime/finalize.md`](phases/smp-runtime/finalize.md) |
-| Payload | [`phases/payload.md`](phases/payload.md) |
+| Payload prepare/commit | [`phases/payload.md`](phases/payload.md) |
 
 ## Object 索引
 

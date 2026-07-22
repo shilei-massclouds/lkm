@@ -47,6 +47,8 @@ pub enum SystemStateValue {
 #[cfg_attr(not(app_smoke), allow(dead_code))]
 pub struct KernelInitFlow {
     flow: TaskFlow,
+    initial_start_accepted: bool,
+    payload_handoff_committed: bool,
 }
 
 #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -54,6 +56,8 @@ impl KernelInitFlow {
     pub const fn new() -> Self {
         Self {
             flow: TaskFlow::new_static(TaskFlowRef::KERNEL_INIT),
+            initial_start_accepted: false,
+            payload_handoff_committed: false,
         }
     }
 
@@ -73,6 +77,14 @@ impl KernelInitFlow {
         self.flow.cleaned()
     }
 
+    pub const fn initial_start_accepted(&self) -> bool {
+        self.initial_start_accepted
+    }
+
+    pub const fn payload_handoff_committed(&self) -> bool {
+        self.payload_handoff_committed
+    }
+
     #[cfg_attr(app_smoke, allow(dead_code))]
     pub const fn flow_ref(&self) -> TaskFlowRef {
         self.flow.flow_ref()
@@ -85,11 +97,95 @@ impl KernelInitFlow {
 
     pub fn start_initial_on_dispatch(
         &mut self,
-        owner: &mut KernelInitTask,
+        owner: &KernelInitTask,
         window: &mut DispatchWindow,
     ) -> EventResult {
-        self.flow
-            .start_initial_lossy(owner.task_mut(), window, None, None)
+        let accepted = self.flow.state() == State::Base
+            && owner
+                .task()
+                .initial_flow()
+                .same_identity(self.flow.flow_ref())
+            && owner.task().owns_flow(self.flow.flow_ref())
+            && super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                owner.task(),
+                window,
+            );
+        window.record_start_signal(accepted);
+        if accepted {
+            self.initial_start_accepted = true;
+        }
+        Ok(())
+    }
+
+    pub fn commit_preset_after_children(
+        &mut self,
+        owner: &KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
+        if !self.initial_start_accepted
+            || !owner.entry_stack_verified()
+            || !owner.current_stack_pointer_in_range()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.flow.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+        self.flow.preset(owner.task(), window, None)
+    }
+
+    pub fn commit_setup_after_children(
+        &mut self,
+        owner: &KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
+        self.flow.setup(owner.task(), window, None)
+    }
+
+    pub fn commit_enable_after_children(
+        &mut self,
+        owner: &mut KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
+        if self.flow.state() != State::Ready || owner.task().active_flow().is_valid() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.flow.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        owner.task_mut().activate_initial_flow(&mut self.flow)?;
+        self.flow.enable(owner.task(), window, None)
+    }
+
+    pub fn require_payload_handoff_action(
+        &self,
+        owner: &KernelInitTask,
+        window: &DispatchWindow,
+    ) -> EventResult {
+        if self.flow.state() != State::Online
+            || !super::task_flow::task_flow_dispatch_guard_satisfied(
+                &self.flow,
+                owner.task(),
+                window,
+            )
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.flow.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn mark_payload_handoff_committed(&mut self) {
+        self.payload_handoff_committed = true;
     }
 
     pub fn disable_for_exec(

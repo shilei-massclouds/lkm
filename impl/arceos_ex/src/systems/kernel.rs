@@ -38,8 +38,6 @@ pub fn setup_after_boot_init() -> ! {
         || !crate::phases::prepare::is_online()
         || !crate::phases::boot_init::is_ready()
         || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
-        || !crate::phases::interrupt::is_online()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel setup invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
@@ -82,29 +80,14 @@ pub fn switch_after_boot_init() -> ! {
     crate::phases::boot_init::boot_task_restored()
 }
 
-pub fn enable_after_smp_runtime() -> ! {
-    if !crate::phases::prepare::is_online()
-        || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
-        || !crate::phases::interrupt::is_online()
-        || !crate::phases::boot_init::is_online()
-        || !crate::phases::smp_runtime::is_online()
-    {
-        crate::arch::riscv64::sbi::putstr("arceos_ex kernel enable invariant failed\n");
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
-
-    crate::phases::payload::preset()
-}
-
 pub fn enable_after_boot_init() -> ! {
     let ctx = crate::context::context_ref();
     if crate::phases::state::load(&KERNEL_STATE) != State::Ready
         || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
-        || !crate::phases::interrupt::is_online()
         || !crate::phases::boot_init::is_online()
         || ctx.kernel_init_task.state() != State::Online
+        || ctx.boot_dispatch_window.current_task() != ctx.kernel_init_task.task_ref()
+        || !ctx.kernel_init_flow.initial_start_accepted()
         || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
@@ -115,7 +98,25 @@ pub fn enable_after_boot_init() -> ! {
         crate::arch::riscv64::sbi::system_shutdown()
     }
 
-    crate::phases::smp_runtime::setup()
+    crate::phases::smp_runtime::start_kernel_init_flow()
+}
+
+pub fn commit_payload_handoff() -> ! {
+    let ctx = crate::context::context();
+    crate::phases::shutdown_on_error(
+        ctx.kernel_init_flow
+            .require_payload_handoff_action(&ctx.kernel_init_task, &ctx.boot_dispatch_window),
+        "arceos_ex kernel init payload handoff guard failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        crate::apps::commit_selected_payload(ctx),
+        "arceos_ex selected payload handoff commit failed\n",
+    );
+    ctx.kernel_init_flow.mark_payload_handoff_committed();
+    crate::checkpoint::checkpoint(Checkpoint::KernelInitFlowPayloadHandoffCommitted);
+    crate::checkpoint::dispatch_after_trace(Checkpoint::KernelInitFlowPayloadHandoffCommitted, ctx);
+    crate::phases::shutdown_on_error(mark_online(), "arceos_ex kernel enable failed\n");
+    crate::apps::enter_selected_payload(ctx)
 }
 
 fn mark_prepared() -> EventResult {
@@ -139,11 +140,11 @@ fn mark_ready() -> EventResult {
 pub fn mark_online() -> EventResult {
     if !crate::phases::prepare::is_online()
         || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot::is_online()
-        || !crate::phases::interrupt::is_online()
         || !crate::phases::boot_init::is_online()
-        || !crate::phases::smp_runtime::is_online()
-        || !crate::phases::payload::is_online()
+        || !crate::phases::smp_runtime::direct_children_online()
+        || !crate::context::context_ref()
+            .kernel_init_flow
+            .payload_handoff_committed()
     {
         return failed_condition(
             LifecycleEvent::Enable,
@@ -164,8 +165,4 @@ pub fn mark_online() -> EventResult {
 
 pub fn is_online() -> bool {
     crate::phases::state::load(&KERNEL_STATE) == State::Online
-}
-
-pub fn is_prepared() -> bool {
-    crate::phases::state::load(&KERNEL_STATE) == State::Prepared
 }
