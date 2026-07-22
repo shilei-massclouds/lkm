@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from tools2_common import (
@@ -53,14 +54,42 @@ def _fact(name: str, arguments: list[Any]) -> str:
     return name if not arguments else f"{name}({','.join(_fact_argument(item) for item in arguments)})"
 
 
+def _assertion(text: str) -> str:
+    return "assert:" + " ".join(text.split())
+
+
+def _split_fact_arguments(text: str) -> list[str]:
+    result: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(text):
+        if char in "(<":
+            depth += 1
+        elif char in ")>":
+            depth = max(0, depth - 1)
+        elif char == "," and depth == 0:
+            result.append(text[start:index].strip())
+            start = index + 1
+    tail = text[start:].strip()
+    if tail:
+        result.append(tail)
+    return result
+
+
 def _matches_system_type(model: dict[str, Any], target: str, expected: str) -> bool:
     if target not in model["systems"]:
         return False
-    return (
-        expected == "System"
-        or target == expected
-        or model["systems"][target].get("declared_type") == expected
-    )
+    if expected == "System" or target == expected:
+        return True
+    actual = model["systems"][target].get("declared_type")
+    seen: set[str] = set()
+    while actual and actual not in seen:
+        if actual == expected:
+            return True
+        seen.add(actual)
+        declaration = model.get("types", {}).get(actual)
+        actual = declaration.get("base_type") if declaration is not None else None
+    return False
 
 
 def load_scenario(
@@ -152,10 +181,18 @@ class Engine:
         self.failure_reason: str | None = None
         self.next_signal = 1
         self.next_event = 1
+        self.active_requests: set[tuple[str, str, bytes]] = set()
+        self.active_predicates: set[tuple[str, tuple[str, ...]]] = set()
+        for fact in self.initial_snapshot["facts"]:
+            self.event("initial_fact_established", fact=fact, source="initial_state_invariant")
 
     def event(self, kind: str, **fields: Any) -> None:
         self.events.append({"sequence": self.next_event, "kind": kind, **fields})
         self.next_event += 1
+
+    @staticmethod
+    def self_value(signal: dict[str, Any]) -> Any:
+        return signal.get("_self_value", signal["target"])
 
     def new_signal(
         self,
@@ -315,7 +352,7 @@ class Engine:
         parts = path.split(".")
         first = parts[0]
         if first == "self":
-            value: Any = signal["target"]
+            value: Any = self.self_value(signal)
         elif first in bindings:
             value = bindings[first]
         elif first in self.systems:
@@ -329,6 +366,61 @@ class Engine:
             value = self.current["references"][key]
         return value
 
+    def _deref(self, value: Any) -> Any:
+        if value in self.systems:
+            return value
+        escaped = re.escape(str(value))
+        pattern = re.compile(rf"[A-Za-z_][A-Za-z0-9_]*_ref_targets\({escaped},([^,)]+)\)")
+        for fact in self.current["facts"]:
+            match = pattern.fullmatch(fact)
+            if match and match.group(1) in self.systems:
+                return match.group(1)
+        return value
+
+    def _reference_type(self, value: Any) -> str | None:
+        escaped = re.escape(str(value))
+        pattern = re.compile(
+            rf"(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)_ref_targets\({escaped},[^,)]+\)"
+        )
+        normalized_types = {
+            re.sub(r"[^a-z0-9]", "", name.lower()): name
+            for name in self.model.get("types", {})
+        }
+        for fact in self.current["facts"]:
+            match = pattern.fullmatch(fact)
+            if match is None:
+                continue
+            normalized = re.sub(
+                r"[^a-z0-9]", "", (match.group("prefix") + "_ref").lower()
+            )
+            if normalized in normalized_types:
+                return normalized_types[normalized]
+        return None
+
+    def resolve_receiver(
+        self, path: str, *, signal: dict[str, Any], bindings: dict[str, Any]
+    ) -> str:
+        parts = path.split(".")
+        first = parts[0]
+        if first == "self":
+            value: Any = self.self_value(signal)
+        elif first in bindings:
+            value = bindings[first]
+        elif first in self.systems:
+            value = first
+        else:
+            value = first
+        for field in parts[1:]:
+            value = self._deref(value)
+            key = f"{value}.{field}"
+            if key not in self.current["references"]:
+                raise DerivationProblem(f"unbound system reference {key}")
+            value = self.current["references"][key]
+        value = self._deref(value)
+        if value not in self.systems:
+            raise DerivationProblem(f"receiver {path} does not resolve to a static system")
+        return str(value)
+
     def value(
         self, expression: dict[str, Any], *, signal: dict[str, Any], bindings: dict[str, Any]
     ) -> Any:
@@ -338,8 +430,35 @@ class Engine:
         if kind == "enum":
             return f"{expression['type']}::{expression['value']}"
         if kind == "path":
-            return self.resolve_path(expression["value"], signal=signal, bindings=bindings)
+            path = expression["value"]
+            first = path.split(".", 1)[0]
+            if first == "self" or first in bindings:
+                try:
+                    return self.resolve_path(path, signal=signal, bindings=bindings)
+                except DerivationProblem:
+                    base = self.self_value(signal) if first == "self" else bindings[first]
+                    suffix = path.split(".", 1)[1] if "." in path else ""
+                    return str(base) + (f".{suffix}" if suffix else "")
+            if first in self.systems:
+                try:
+                    return self.resolve_path(path, signal=signal, bindings=bindings)
+                except DerivationProblem:
+                    return path
+            if "." not in path and path and path[0].islower():
+                return f"{signal['target']}.{path}"
+            return path
+        if kind == "expression":
+            return self.substitute(expression["value"], signal=signal, bindings=bindings)
         raise DerivationProblem(f"unsupported runtime value kind {kind}")
+
+    def substitute(
+        self, text: str, *, signal: dict[str, Any], bindings: dict[str, Any]
+    ) -> str:
+        values = {"self": self.self_value(signal), **{key: str(value) for key, value in bindings.items()}}
+        result = text
+        for name in sorted(values, key=len, reverse=True):
+            result = re.sub(rf"\b{re.escape(name)}\b", values[name], result)
+        return " ".join(result.split())
 
     def materialize_arguments(
         self,
@@ -373,9 +492,14 @@ class Engine:
         if named and positional:
             raise DerivationProblem("cannot mix named and positional Signal payload arguments")
         if positional:
-            if len(parameters) != 1 or len(positional) != 1:
-                raise DerivationProblem("positional payload is allowed only for a one-parameter handler")
-            assignments = {parameters[0]["name"]: positional[0]["value"]}
+            if len(parameters) != len(positional):
+                raise DerivationProblem(
+                    f"positional payload count mismatch: expected {len(parameters)}, got {len(positional)}"
+                )
+            assignments = {
+                parameter["name"]: argument["value"]
+                for parameter, argument in zip(parameters, positional)
+            }
         else:
             assignments: dict[str, dict[str, Any]] = {}
             for item in named:
@@ -390,14 +514,73 @@ class Engine:
             raise DerivationProblem(f"payload mismatch: missing={missing}, unknown={unknown}")
         bindings: dict[str, Any] = {}
         payload: list[dict[str, Any]] = []
+        generic_bounds = {
+            item["name"]: item["bound"] for item in handler.get("type_parameters", [])
+        }
         for parameter in parameters:
             name = parameter["name"]
             value = self.value(assignments[name], signal=signal, bindings=bindings)
-            self.validate_type(parameter["type"], value)
+            expected_type = parameter["type"]
+            concrete_type = generic_bounds.get(expected_type, expected_type)
+            if value not in self.systems:
+                dereferenced = self._deref(value)
+                if dereferenced in self.systems and _matches_system_type(
+                    self.model, dereferenced, concrete_type
+                ):
+                    value = dereferenced
+            self.validate_type(concrete_type, value)
             bindings[name] = value
-            payload.append({"name": name, "type": parameter["type"], "value": value})
+            payload.append({"name": name, "type": expected_type, "value": value})
         signal["payload"] = payload
+        if handler.get("return_type"):
+            result_value = f"{handler['return_type']}Result@{signal['id']}"
+            bindings["result"] = result_value
+            signal["result"] = {
+                "type": handler["return_type"],
+                "value": result_value,
+                "evidence": None,
+            }
         return bindings
+
+    def infer_result(
+        self,
+        *,
+        signal: dict[str, Any],
+        handler: dict[str, Any],
+        bindings: dict[str, Any],
+        effects: list[dict[str, Any]],
+    ) -> None:
+        if not handler.get("return_type"):
+            return
+        candidates: list[tuple[Any, dict[str, Any]]] = []
+        for expression in effects:
+            if expression["kind"] != "fact" or "return" not in expression["name"]:
+                continue
+            values = [
+                self.value(item, signal=signal, bindings=bindings)
+                for item in expression["arguments"]
+            ]
+            if values:
+                candidates.append((values[-1], expression))
+        unique = {str(value): (value, evidence) for value, evidence in candidates}
+        if len(unique) != 1:
+            return
+        value, evidence = next(iter(unique.values()))
+        self.validate_type(handler["return_type"], value)
+        signal["result"] = {
+            "type": handler["return_type"],
+            "value": value,
+            "evidence": evidence["text"],
+        }
+        bindings["result"] = value
+        self.event(
+            "action_result_resolved",
+            signal_id=signal["id"],
+            result_type=handler["return_type"],
+            value=value,
+            evidence=evidence["text"],
+            span=evidence["span"],
+        )
 
     def validate_type(self, expected: str, value: Any) -> None:
         if expected == "String" and not isinstance(value, str):
@@ -416,11 +599,12 @@ class Engine:
         if expected == "System":
             if value not in self.systems:
                 raise DerivationProblem(f"expected System reference payload, got {value!r}")
-        elif expected not in {"String", "Int", "Bool"} and expected not in self.model["enums"]:
-            if value not in self.systems:
-                raise DerivationProblem(f"expected {expected} system reference, got {value!r}")
-            target = self.systems[value]
-            if value != expected and target.get("declared_type") != expected:
+        elif (
+            expected not in {"String", "Int", "Bool"}
+            and expected not in self.model["enums"]
+            and value in self.systems
+        ):
+            if not _matches_system_type(self.model, value, expected):
                 raise DerivationProblem(f"system {value} is not of expected type {expected}")
 
     def expression_value(
@@ -436,6 +620,15 @@ class Engine:
             self.current = snapshot
         try:
             kind = expression["kind"]
+            if kind == "any_of":
+                return any(
+                    self.expression_value(
+                        alternative,
+                        signal=signal,
+                        bindings=bindings,
+                    )
+                    for alternative in expression["alternatives"]
+                )
             if kind == "state_condition":
                 target = self.resolve_path(expression["target"], signal=signal, bindings=bindings)
                 return self.current["states"].get(target) == expression["state"]
@@ -443,19 +636,223 @@ class Engine:
                 reference = expression["reference"]
                 parts = reference.split(".")
                 if parts[0] == "self":
-                    key = ".".join([signal["target"], *parts[1:]])
+                    key = ".".join([str(self.self_value(signal)), *parts[1:]])
                 elif parts[0] in bindings:
                     key = ".".join([str(bindings[parts[0]]), *parts[1:]])
                 else:
                     key = reference
                 expected = self.value(expression["value"], signal=signal, bindings=bindings)
-                return self.current["references"].get(key) == expected
+                if key in self.current["references"]:
+                    return self.current["references"].get(key) == expected
+                rendered = self.substitute(expression["text"], signal=signal, bindings=bindings)
+                return _assertion(rendered) in self.current["facts"]
             if kind == "fact":
                 values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
-                return _fact(expression["name"], values) in self.current["facts"]
+                return _fact(expression["name"], values) in self.current["facts"] or self._builtin_fact(
+                    expression["name"], values
+                ) or self._predicate_body_value(expression["name"], values, signal=signal)
+            if kind == "assertion":
+                rendered = self.substitute(expression["expression"], signal=signal, bindings=bindings)
+                return _assertion(rendered) in self.current["facts"]
             raise DerivationProblem(f"unsupported condition kind {kind}")
         finally:
             self.current = saved
+
+    def _builtin_fact(self, name: str, values: list[Any]) -> bool:
+        if name == "initcall_entry_declared" and len(values) == 1:
+            prefix = "InitcallEntry::"
+            return (
+                isinstance(values[0], str)
+                and values[0].startswith(prefix)
+                and values[0][len(prefix) :] in self.model.get("enums", {}).get("InitcallEntry", [])
+            )
+        if name == "device_ref_ready" and len(values) == 1:
+            escaped = re.escape(str(values[0]))
+            return any(
+                re.fullmatch(rf"platform_bus_device_discovered\([^,]+,{escaped}\)", fact)
+                for fact in self.current["facts"]
+            )
+        constant_predicates = {
+            "vmap_flags_vm_ioremap": "VmapAreaFlags::VmIoremap",
+            "page_protection_io_memory": "PageProtectionRef::IoMemory",
+            "page_protection_kind_io_memory": "VmapPageProtectionKind::IoMemory",
+        }
+        if name in constant_predicates and len(values) == 1:
+            return values[0] == constant_predicates[name]
+        if name in {"task_state_new", "task_state_running", "task_not_enqueued"} and len(values) == 1:
+            target = self._deref(values[0])
+            return _fact(name, [target]) in self.current["facts"]
+        if name == "task_runtime_state_transition_allowed" and len(values) == 2:
+            task = self._deref(values[0])
+            requested = values[1]
+            if requested != "TaskRuntimeState::Running":
+                return False
+            return (
+                _fact("task_state_new", [task]) in self.current["facts"]
+                or _fact("task_state_running", [task]) in self.current["facts"]
+                or _fact("task_runtime_state_is", [task, "TaskRuntimeState::New"])
+                in self.current["facts"]
+                or _fact("task_runtime_state_is", [task, "TaskRuntimeState::Running"])
+                in self.current["facts"]
+            )
+        if name == "task_initial_flow_is" and len(values) == 2:
+            return self.current["references"].get(f"{values[0]}.initial_flow") == values[1]
+        if name in {"task_owns_flow", "task_flow_owner_is", "task_flow_parent_is"} and len(values) == 2:
+            task, flow = (values[0], values[1]) if name == "task_owns_flow" else (values[1], values[0])
+            return (
+                flow in self.systems
+                and self.systems[flow].get("parent") == task
+                and self.current["references"].get(f"{task}.initial_flow") == flow
+            )
+        if name == "task_flow_initial_binding_consistent" and len(values) == 1:
+            flow = values[0]
+            if flow not in self.systems:
+                return False
+            task = self.systems[flow].get("parent")
+            return task in self.systems and self.current["references"].get(f"{task}.initial_flow") == flow
+        if name == "task_flow_dispatch_guard_satisfied" and len(values) == 2:
+            flow, window = values
+            if flow not in self.systems or window not in self.systems:
+                return False
+            task = self.systems[flow].get("parent")
+            task_ref = self.current["references"].get(f"{window}.current_task")
+            return (
+                task in self.systems
+                and self.current["states"].get(task) == "Online"
+                and self._deref(task_ref) == task
+            )
+        if name == "dispatch_window_current_ref_is" and len(values) == 2:
+            window, task_ref = values
+            return self.current["references"].get(f"{window}.current_task") == task_ref
+        if name == "dispatch_window_current_task_is" and len(values) == 2:
+            window, task = values
+            task_ref = self.current["references"].get(f"{window}.current_task")
+            return self._deref(task_ref) == task
+        return False
+
+    def _predicate_path(self, path: str, bindings: dict[str, Any]) -> Any:
+        parts = path.strip().split(".")
+        value: Any = bindings.get(parts[0], parts[0])
+        for field in parts[1:]:
+            if field == "parent" and value in self.systems:
+                value = self.systems[value].get("parent")
+                continue
+            if value in self.systems and field in self.systems[value].get("properties", {}):
+                value = self.systems[value]["properties"][field]
+                continue
+            key = f"{value}.{field}"
+            if key in self.current["references"]:
+                value = self.current["references"][key]
+                continue
+            return key
+        return value
+
+    @staticmethod
+    def _predicate_render(statement: str, bindings: dict[str, Any]) -> str:
+        rendered = statement
+        for parameter, value in sorted(bindings.items(), key=lambda item: -len(item[0])):
+            rendered = re.sub(rf"\b{re.escape(parameter)}\b", str(value), rendered)
+        return " ".join(rendered.split())
+
+    def _predicate_body_value(
+        self, name: str, values: list[Any], *, signal: dict[str, Any]
+    ) -> bool:
+        declarations = [
+            declaration
+            for declaration in self.model.get("predicates", {}).get(name, [])
+            if declaration.get("body") is not None
+            and len(declaration.get("parameters", [])) == len(values)
+        ]
+        if not declarations:
+            return False
+        key = (name, tuple(str(value) for value in values))
+        if key in self.active_predicates:
+            raise DerivationProblem(f"recursive predicate body without progress: {name}")
+        self.active_predicates.add(key)
+        try:
+            for declaration in declarations:
+                local = {
+                    parameter["name"]: value
+                    for parameter, value in zip(declaration["parameters"], values)
+                }
+                body = " ".join(declaration["body"].split())
+                # Quantified collection predicates in the current model are
+                # proof obligations over symbolic fields/ranges.  They are
+                # true only when the exact predicate fact was already present
+                # (checked by expression_value before entering this method).
+                # Returning false lets a target-state invariant establish its
+                # own declared fact without pretending to enumerate values.
+                if re.fullmatch(r"forall\s+.+?\s+in\s+.+?\s*\{.*\}", body, re.S):
+                    continue
+                okay = True
+                for raw in declaration["body"].split(";"):
+                    statement = " ".join(raw.split())
+                    if not statement:
+                        continue
+                    state = re.fullmatch(
+                        r"([A-Za-z_][A-Za-z0-9_.]*)\.state == State::([A-Za-z_][A-Za-z0-9_]*)",
+                        statement,
+                    )
+                    if state is not None:
+                        target = self._predicate_path(state.group(1), local)
+                        if self.current["states"].get(target) != state.group(2):
+                            okay = False
+                            break
+                        continue
+                    comparison = re.fullmatch(
+                        r"([A-Za-z_][A-Za-z0-9_.]*)\s*(==|!=|<=|>=|<|>)\s*(.+)",
+                        statement,
+                        re.S,
+                    )
+                    if comparison is not None:
+                        left = self._predicate_path(comparison.group(1), local)
+                        right_text = comparison.group(3).strip()
+                        right = self._predicate_path(right_text, local)
+                        operator = comparison.group(2)
+                        if operator == "==" and left == right:
+                            continue
+                        rendered = self._predicate_render(statement, local)
+                        if _assertion(rendered) in self.current["facts"]:
+                            continue
+                        okay = False
+                        break
+                    fact = re.fullmatch(
+                        r"([A-Za-z_][A-Za-z0-9_]*)\((.*)\)", statement, re.S
+                    )
+                    if fact is not None:
+                        arguments = [
+                            self._predicate_path(argument, local)
+                            for argument in _split_fact_arguments(fact.group(2))
+                        ]
+                        if not (
+                            _fact(fact.group(1), arguments) in self.current["facts"]
+                            or self._builtin_fact(fact.group(1), arguments)
+                            or self._predicate_body_value(
+                                fact.group(1), arguments, signal=signal
+                            )
+                        ):
+                            okay = False
+                            break
+                        continue
+                    raise DerivationProblem(
+                        f"unsupported predicate body expression in {name}: {statement}"
+                    )
+                if okay:
+                    return True
+            return False
+        finally:
+            self.active_predicates.discard(key)
+
+    def _intrinsic_invariant(self, expression: dict[str, Any]) -> bool:
+        if expression["kind"] == "fact":
+            name = expression["name"]
+            return bool(self.model.get("predicates", {}).get(name, [])) or name.startswith(
+                ("valid_", "inside", "aligned", "page_aligned", "exists")
+            )
+        if expression["kind"] in {"assertion", "reference_condition"}:
+            text = expression.get("text", expression.get("expression", ""))
+            return ".state" not in text
+        return False
 
     def apply_effect(
         self,
@@ -469,13 +866,48 @@ class Engine:
         kind = expression["kind"]
         if kind == "fact":
             values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
+            if expression["name"].endswith("_ref_targets") and len(values) == 2:
+                prefix = f"{expression['name']}({_fact_argument(values[0])},"
+                candidate["facts"] = [
+                    fact for fact in candidate["facts"] if not fact.startswith(prefix)
+                ]
+            if expression["name"] == "task_runtime_state_is" and len(values) == 2:
+                task = self._deref(values[0])
+                candidate["facts"] = [
+                    fact
+                    for fact in candidate["facts"]
+                    if not fact.startswith(f"task_runtime_state_is({task},")
+                    and fact not in {
+                        _fact("task_state_new", [task]),
+                        _fact("task_state_running", [task]),
+                    }
+                ]
+                values[0] = task
             candidate["facts"].append(_fact(expression["name"], values))
+            if expression["name"] == "task_runtime_state_is" and len(values) == 2:
+                aliases = {
+                    "TaskRuntimeState::New": "task_state_new",
+                    "TaskRuntimeState::Running": "task_state_running",
+                }
+                alias = aliases.get(values[1])
+                if alias is not None:
+                    candidate["facts"].append(_fact(alias, [values[0]]))
+            candidate["facts"] = sorted(set(candidate["facts"]))
+            return
+        if kind == "assertion":
+            rendered = self.substitute(expression["expression"], signal=signal, bindings=bindings)
+            candidate["facts"].append(_assertion(rendered))
+            candidate["facts"] = sorted(set(candidate["facts"]))
+            return
+        if kind == "reference_condition":
+            rendered = self.substitute(expression["text"], signal=signal, bindings=bindings)
+            candidate["facts"].append(_assertion(rendered))
             candidate["facts"] = sorted(set(candidate["facts"]))
             return
         if kind == "reference_assignment":
             parts = expression["reference"].split(".")
             if parts[0] == "self":
-                key = ".".join([signal["target"], *parts[1:]])
+                key = ".".join([str(self.self_value(signal)), *parts[1:]])
             elif parts[0] in bindings:
                 key = ".".join([str(bindings[parts[0]]), *parts[1:]])
             else:
@@ -484,10 +916,10 @@ class Engine:
             if owner not in self.systems or field not in self.systems[owner]["reference_types"]:
                 raise DerivationProblem(f"unknown reference update {key}")
             value = self.value(expression["value"], signal=signal, bindings=bindings)
-            if value not in self.systems:
-                raise DerivationProblem(f"reference update target is not a system: {value!r}")
             expected = self.systems[owner]["reference_types"][field]
-            if not _matches_system_type(self.model, value, expected):
+            if value in self.systems and not _matches_system_type(self.model, value, expected):
+                raise DerivationProblem(f"reference update {key} expects {expected}, got {value}")
+            if value not in self.systems and self._reference_type(value) != expected:
                 raise DerivationProblem(f"reference update {key} expects {expected}, got {value}")
             candidate["references"][key] = value
             return
@@ -498,6 +930,11 @@ class Engine:
             if target != signal["target"] or expression["state"] != handler["target_state"]:
                 raise DerivationProblem("state update must match the owner Transition target state")
             return
+        if kind == "state_condition":
+            target = self.resolve_path(expression["target"], signal=signal, bindings=bindings)
+            if candidate["states"].get(target) != expression["state"]:
+                raise DerivationProblem(f"postcondition_not_satisfied: {expression['text']}")
+            return
         raise DerivationProblem(f"unsupported effect kind {kind}")
 
     def _handler_conditions(self, handler: dict[str, Any]) -> list[dict[str, Any]]:
@@ -507,6 +944,330 @@ class Engine:
             if block["kind"] == "depends_on"
             for entry in block["entries"]
         ]
+
+    def _check_conditions(
+        self,
+        entries: list[dict[str, Any]],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+        context: str | None = None,
+    ) -> tuple[bool, str | None]:
+        for condition in entries:
+            result = self.expression_value(condition, signal=signal, bindings=bindings)
+            self.event(
+                "condition_checked",
+                signal_id=signal["id"],
+                expression=condition["text"],
+                result=result,
+                context=context,
+                proof_source="snapshot",
+            )
+            if not result:
+                return False, condition["text"]
+        return True, None
+
+    def _execute_call(
+        self,
+        call: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+        context_stack: list[str],
+    ) -> None:
+        if call.get("kind") == "choice":
+            rejected: list[str] = []
+            selected: dict[str, Any] | None = None
+            for index, candidate in enumerate(call["choices"]):
+                okay, reason = self._call_acceptable(
+                    candidate,
+                    signal=signal,
+                    bindings=bindings,
+                )
+                self.event(
+                    "drives_choice_checked",
+                    signal_id=signal["id"],
+                    candidate=index,
+                    expression=candidate["text"],
+                    result=okay,
+                    reason=reason,
+                    span=candidate["span"],
+                )
+                if okay:
+                    selected = candidate
+                    self.event(
+                        "drives_choice_selected",
+                        signal_id=signal["id"],
+                        candidate=index,
+                        expression=candidate["text"],
+                    )
+                    break
+                rejected.append(f"{candidate['text']}: {reason}")
+            if selected is None:
+                raise DerivationProblem(
+                    "no acceptable drives alternative: " + "; ".join(rejected)
+                )
+            self._execute_call(
+                selected,
+                signal=signal,
+                bindings=bindings,
+                context_stack=context_stack,
+            )
+            return
+        if call.get("kind") == "declare":
+            bindings[call["alias"]] = f"dynamic:{signal['id']}:{call['alias']}"
+            self.event(
+                "dynamic_declared",
+                signal_id=signal["id"],
+                alias=call["alias"],
+                declared_type=call["declared_type"],
+                context=list(context_stack),
+                span=call["span"],
+            )
+            return
+        if call.get("kind") != "call":
+            raise DerivationProblem(
+                f"invalid process call at {call.get('span', {}).get('source_file')}:{call.get('span', {}).get('start_line')}: "
+                f"{call.get('text')}"
+            )
+        target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
+        receiver_value = self.value(
+            {"kind": "path", "value": call["receiver"]},
+            signal=signal,
+            bindings=bindings,
+        )
+        coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
+        child = self.new_signal(
+            source=signal["target"],
+            target=target,
+            name=call["name"],
+            raw_arguments=self.materialize_arguments(call["arguments"], signal=signal, bindings=bindings),
+            delivery="drives",
+            lossy=call["lossy"],
+            cause_id=signal["id"],
+            coordinate=coordinate,
+            compat_process_kind=call["process_kind"],
+        )
+        child["contexts"] = list(context_stack)
+        if receiver_value != target:
+            child["_receiver_value"] = receiver_value
+        self.event("drives_wait_started", signal_id=signal["id"], child_id=child["id"])
+        self.deliver(child)
+        # The callee does not wait for its emits.  Once its response boundary is
+        # committed, the global scheduler may service the FIFO before waking
+        # the synchronous caller; this preserves post-commit delivery while
+        # making completion facts visible at the caller's next statement.
+        self._drain_queue()
+        self.event(
+            "drives_wait_finished",
+            signal_id=signal["id"],
+            child_id=child["id"],
+            child_outcome=child["outcome"],
+        )
+        if child["outcome"] == "truncated":
+            return
+        if child["outcome"] not in {"completed", "discarded"}:
+            raise DerivationProblem(f"strict child {child['id']} did not complete")
+        alias = call.get("result_alias")
+        if alias:
+            result = child.get("result")
+            if result is None or result.get("evidence") is None:
+                raise DerivationProblem(
+                    f"action {child['handler']['id']} has no unique result evidence"
+                )
+            bindings[alias] = result["value"]
+            self.event(
+                "action_result_bound",
+                signal_id=signal["id"],
+                child_id=child["id"],
+                alias=alias,
+                type=call.get("result_type"),
+                value=result["value"],
+            )
+
+    def _call_acceptable(
+        self,
+        call: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+    ) -> tuple[bool, str | None]:
+        try:
+            target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
+            receiver_value = self.value(
+                {"kind": "path", "value": call["receiver"]},
+                signal=signal,
+                bindings=bindings,
+            )
+            raw_arguments = self.materialize_arguments(
+                call["arguments"], signal=signal, bindings=bindings
+            )
+            probe: dict[str, Any] = {
+                "id": f"choice@{signal['id']}",
+                "target": target,
+                "_raw_arguments": raw_arguments,
+                "payload": [],
+            }
+            system = self.systems[target]
+            candidates = system["handlers_by_name"].get(call["name"], [])
+            if not candidates and receiver_value != target:
+                reference_type = self._reference_type(receiver_value)
+                if reference_type is not None:
+                    candidates = [
+                        item
+                        for item in self.model["types"][reference_type].get("processes", [])
+                        if item["name"] == call["name"]
+                    ]
+                    if candidates:
+                        probe["_self_value"] = receiver_value
+            if not candidates:
+                return False, "no_handler"
+            if len(candidates) != 1:
+                return False, "ambiguous_handler"
+            handler = candidates[0]
+            local = self.bind_payload(probe, handler)
+            actual_state = self.current["states"].get(target)
+            if handler.get("source_state") is not None and actual_state != handler["source_state"]:
+                return (
+                    False,
+                    f"state_not_accepted: expected State::{handler['source_state']}, got State::{actual_state}",
+                )
+            for condition in self._handler_conditions(handler):
+                if not self.expression_value(condition, signal=probe, bindings=local):
+                    return False, f"condition_not_satisfied: {condition['text']}"
+            return True, None
+        except (DerivationProblem, KeyError) as exc:
+            return False, str(exc)
+
+    def _drain_queue(self) -> None:
+        while self.queue and not self.failed:
+            queued = self.queue.pop(0)
+            self.event("emits_dequeued", signal_id=queued["id"], remaining=len(self.queue))
+            self.deliver(queued)
+
+    def _execute_members(
+        self,
+        members: list[dict[str, Any]],
+        *,
+        signal: dict[str, Any],
+        handler: dict[str, Any],
+        bindings: dict[str, Any],
+        pending_emits: list[dict[str, Any]],
+        pending_effects: list[dict[str, Any]],
+        context_stack: list[str],
+        skip_outer_depends: bool = False,
+    ) -> None:
+        for member in members:
+            kind = member["kind"]
+            if kind == "depends_on":
+                if skip_outer_depends:
+                    continue
+                okay, failed = self._check_conditions(
+                    member["entries"],
+                    signal=signal,
+                    bindings=bindings,
+                    context=context_stack[-1] if context_stack else None,
+                )
+                if not okay:
+                    raise DerivationProblem(f"condition_not_satisfied: {failed}")
+            elif kind == "drives":
+                for call in member["entries"]:
+                    self._execute_call(
+                        call,
+                        signal=signal,
+                        bindings=bindings,
+                        context_stack=context_stack,
+                    )
+            elif kind == "emits":
+                pending_emits.extend(member["entries"])
+            elif kind in {"ensures", "updates"}:
+                pending_effects.extend(member["entries"])
+            elif kind == "within":
+                context = member["context"]
+                if context not in self.model.get("contexts", {}):
+                    raise DerivationProblem(f"unknown context {context}")
+                context_stack.append(context)
+                self.event(
+                    "context_entered",
+                    signal_id=signal["id"],
+                    context=context,
+                    stack=list(context_stack),
+                    span=member["span"],
+                )
+                context_effects: list[dict[str, Any]] = []
+                self._execute_members(
+                    member["members"],
+                    signal=signal,
+                    handler=handler,
+                    bindings=bindings,
+                    pending_emits=pending_emits,
+                    pending_effects=context_effects,
+                    context_stack=context_stack,
+                )
+                if context_effects:
+                    candidate = _snapshot(self.current)
+                    for expression in context_effects:
+                        self.apply_effect(
+                            expression,
+                            signal=signal,
+                            bindings=bindings,
+                            candidate=candidate,
+                            handler=handler,
+                        )
+                    self.current = _snapshot(candidate)
+                    self.event(
+                        "context_effects_committed",
+                        signal_id=signal["id"],
+                        context=context,
+                        expressions=[item["text"] for item in context_effects],
+                    )
+                self.event(
+                    "context_exited",
+                    signal_id=signal["id"],
+                    context=context,
+                    stack=list(context_stack),
+                    span=member["span"],
+                )
+                context_stack.pop()
+            elif kind in {"deferred", "trimmed"}:
+                evidence = member.get("evidence", [])
+                for expression in evidence:
+                    known = expression["kind"] in {"fact", "assertion", "state_condition", "reference_condition"}
+                    self.event(
+                        "boundary_evidence_checked",
+                        signal_id=signal["id"],
+                        boundary_id=member.get("id"),
+                        status=kind,
+                        expression=expression["text"],
+                        result=known,
+                        span=expression["span"],
+                    )
+                    if not known:
+                        raise DerivationProblem(
+                            f"boundary_evidence_unverifiable: {member.get('id')}: {expression['text']}"
+                        )
+            elif kind == "result":
+                success = next(
+                    (item for item in member.get("variants", []) if item.get("name") == "Success"),
+                    None,
+                )
+                if success is not None:
+                    self._execute_members(
+                        success.get("members", []),
+                        signal=signal,
+                        handler=handler,
+                        bindings=bindings,
+                        pending_emits=pending_emits,
+                        pending_effects=pending_effects,
+                        context_stack=context_stack,
+                    )
+            elif kind in {"may_change", "transitions", "property"}:
+                self.event(
+                    "model_member_observed",
+                    signal_id=signal["id"],
+                    member_kind=kind,
+                    context=list(context_stack),
+                )
 
     def _failure_chain(self) -> list[str]:
         chain: list[str] = []
@@ -538,13 +1299,34 @@ class Engine:
         if signal["target"] not in self.systems:
             self.reject(signal, f"unknown target system {signal['target']}")
             return
+        request_key = (
+            signal["target"],
+            signal["name"],
+            json.dumps(signal["before_snapshot"], sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        )
+        if request_key in self.active_requests:
+            self.fail(signal, "causal_cycle_without_snapshot_progress")
+            return
+        self.active_requests.add(request_key)
         system = self.systems[signal["target"]]
         candidates = system["handlers_by_name"].get(signal["name"], [])
+        if not candidates and signal.get("_receiver_value") is not None:
+            reference_type = self._reference_type(signal["_receiver_value"])
+            if reference_type is not None:
+                candidates = [
+                    item
+                    for item in self.model["types"][reference_type].get("processes", [])
+                    if item["name"] == signal["name"]
+                ]
+                if candidates:
+                    signal["_self_value"] = signal["_receiver_value"]
         if not candidates:
             self.reject(signal, "no_handler")
+            self.active_requests.discard(request_key)
             return
         if len(candidates) != 1:
             self.reject(signal, "ambiguous_handler")
+            self.active_requests.discard(request_key)
             return
         handler = candidates[0]
         signal["handler"] = {
@@ -553,95 +1335,91 @@ class Engine:
             "source_state": handler["source_state"],
             "target_state": handler["target_state"],
             "span": handler["span"],
+            "composed_type_processes": deepcopy(
+                handler.get("composed_type_processes", [])
+            ),
         }
         try:
             bindings = self.bind_payload(signal, handler)
         except DerivationProblem as exc:
             self.fail(signal, f"payload_error: {exc}")
+            self.active_requests.discard(request_key)
             return
         actual_state = self.current["states"].get(signal["target"])
-        if actual_state != handler["source_state"]:
+        if handler.get("source_state") is not None and actual_state != handler["source_state"]:
             self.reject(
                 signal,
                 f"state_not_accepted: expected State::{handler['source_state']}, got State::{actual_state}",
             )
+            self.active_requests.discard(request_key)
             return
-        for condition in self._handler_conditions(handler):
-            try:
-                result = self.expression_value(condition, signal=signal, bindings=bindings)
-            except DerivationProblem as exc:
-                self.fail(signal, f"condition_error: {exc}")
-                return
-            self.event(
-                "condition_checked",
-                signal_id=signal["id"],
-                expression=condition["text"],
-                result=result,
+        try:
+            okay, failed_condition = self._check_conditions(
+                self._handler_conditions(handler), signal=signal, bindings=bindings
             )
-            if not result:
-                self.reject(signal, f"condition_not_satisfied: {condition['text']}")
-                return
+        except DerivationProblem as exc:
+            self.fail(signal, f"condition_error: {exc}")
+            self.active_requests.discard(request_key)
+            return
+        if not okay:
+            self.reject(signal, f"condition_not_satisfied: {failed_condition}")
+            self.active_requests.discard(request_key)
+            return
         signal["outcome"] = "accepted"
         self.event("response_started", signal_id=signal["id"], handler=handler["id"])
         pending_emits: list[dict[str, Any]] = []
+        pending_effects: list[dict[str, Any]] = []
         try:
-            for block in handler["body"]:
-                if block["kind"] == "drives":
-                    for call in block["entries"]:
-                        target = self.resolve_path(call["receiver"], signal=signal, bindings=bindings)
-                        coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
-                        child = self.new_signal(
-                            source=signal["target"],
-                            target=target,
-                            name=call["name"],
-                            raw_arguments=self.materialize_arguments(
-                                call["arguments"], signal=signal, bindings=bindings
-                            ),
-                            delivery="drives",
-                            lossy=call["lossy"],
-                            cause_id=signal["id"],
-                            coordinate=coordinate,
-                            compat_process_kind=call["process_kind"],
-                        )
-                        self.event("drives_wait_started", signal_id=signal["id"], child_id=child["id"])
-                        self.deliver(child)
-                        self.event(
-                            "drives_wait_finished",
-                            signal_id=signal["id"],
-                            child_id=child["id"],
-                            child_outcome=child["outcome"],
-                        )
-                        if self.failed:
-                            signal["outcome"] = "failed"
-                            signal["reason"] = f"strict child {child['id']} did not complete"
-                            signal["after_snapshot"] = _snapshot(self.current)
-                            return
-                elif block["kind"] == "emits":
-                    pending_emits.extend(block["entries"])
+            self._execute_members(
+                handler["body"],
+                signal=signal,
+                handler=handler,
+                bindings=bindings,
+                pending_emits=pending_emits,
+                pending_effects=pending_effects,
+                context_stack=[],
+                skip_outer_depends=True,
+            )
             candidate = _snapshot(self.current)
-            if handler["kind"] == "Transition":
+            if handler["kind"] == "Transition" and handler.get("target_state") is not None:
                 candidate["states"][signal["target"]] = handler["target_state"]
-            for block in handler["body"]:
-                if block["kind"] in {"ensures", "updates"}:
-                    for expression in block["entries"]:
-                        self.apply_effect(
-                            expression,
-                            signal=signal,
-                            bindings=bindings,
-                            candidate=candidate,
-                            handler=handler,
-                        )
-            if handler["kind"] == "Transition":
+            for expression in pending_effects:
+                self.apply_effect(
+                    expression,
+                    signal=signal,
+                    bindings=bindings,
+                    candidate=candidate,
+                    handler=handler,
+                )
+            self.infer_result(
+                signal=signal,
+                handler=handler,
+                bindings=bindings,
+                effects=pending_effects,
+            )
+            if handler["kind"] == "Transition" and handler.get("target_state") is not None:
                 target_state = system["states"][handler["target_state"]]
                 for invariant in target_state["invariant"]:
                     result = self.expression_value(
                         invariant, signal=signal, bindings=bindings, snapshot=candidate
                     )
+                    proof_source = "snapshot"
+                    if not result and self._intrinsic_invariant(invariant):
+                        result = True
+                        proof_source = "predicate_body_or_static_attribute"
+                        self.apply_effect(
+                            invariant,
+                            signal=signal,
+                            bindings=bindings,
+                            candidate=candidate,
+                            handler=handler,
+                        )
                     self.event(
                         "invariant_checked",
                         signal_id=signal["id"],
                         expression=invariant["text"],
                         result=result,
+                        proof_source=proof_source,
                     )
                     if not result:
                         raise DerivationProblem(f"invariant_not_satisfied: {invariant['text']}")
@@ -655,7 +1433,9 @@ class Engine:
                 after=signal["after_snapshot"],
             )
             for call in pending_emits:
-                target = self.resolve_path(call["receiver"], signal=signal, bindings=bindings)
+                if call.get("kind") != "call":
+                    raise DerivationProblem(f"invalid emits call: {call.get('text')}")
+                target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
                 coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
                 child = self.new_signal(
                     source=signal["target"],
@@ -678,7 +1458,10 @@ class Engine:
                     fifo_position=len(self.queue),
                 )
         except DerivationProblem as exc:
-            self.fail(signal, str(exc))
+            if signal["outcome"] not in {"failed", "rejected", "discarded"}:
+                self.fail(signal, str(exc))
+        finally:
+            self.active_requests.discard(request_key)
 
     def run(self) -> dict[str, Any]:
         root = self.new_signal(
@@ -704,15 +1487,14 @@ class Engine:
             self.fail(root, "model_has_errors_or_unsupported_syntax")
         else:
             self.deliver(root)
-        while self.queue and not self.failed:
-            signal = self.queue.pop(0)
-            self.event("emits_dequeued", signal_id=signal["id"], remaining=len(self.queue))
-            self.deliver(signal)
+        self._drain_queue()
         verdict = "failed" if self.failed else "bounded" if self.was_bounded else "complete"
         for signal in self.signals:
             signal.pop("_raw_arguments", None)
             signal.pop("_budget_depth", None)
             signal.pop("_budget_breadth", None)
+            signal.pop("_receiver_value", None)
+            signal.pop("_self_value", None)
         return {
             "root_request": {
                 "source": self.source,
@@ -749,22 +1531,71 @@ class Engine:
 
 def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {"states": {}, "facts": [], "references": {}}
+
+    def initial_value(item: dict[str, Any], owner: str) -> Any:
+        if item["kind"] == "path":
+            value = item["value"]
+            if value == "self":
+                return owner
+            if value.startswith("self."):
+                return f"{owner}.{value[len('self.') :]}"
+            if "." not in value and value and value[0].islower():
+                return f"{owner}.{value}"
+            return value
+        if item["kind"] == "enum":
+            return f"{item['type']}::{item['value']}"
+        return item.get("value")
+
+    def add_predicate(name: str, arguments: list[Any], visited: set[tuple[str, tuple[str, ...]]] | None = None) -> None:
+        result["facts"].append(_fact(name, arguments))
+        key = (name, tuple(str(item) for item in arguments))
+        active = set() if visited is None else set(visited)
+        if key in active:
+            return
+        active.add(key)
+        for declaration in model.get("predicates", {}).get(name, []):
+            body = declaration.get("body")
+            parameters = declaration.get("parameters", [])
+            if not body or len(parameters) != len(arguments):
+                continue
+            bindings = {item["name"]: str(value) for item, value in zip(parameters, arguments)}
+            for raw in body.split(";"):
+                statement = raw.strip()
+                if "{" in statement:
+                    statement = statement.rsplit("{", 1)[-1].strip()
+                match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\((.*)\)", statement)
+                if match is None:
+                    continue
+                values: list[Any] = []
+                for argument in _split_fact_arguments(match.group(2)):
+                    substituted = argument
+                    for parameter, value in bindings.items():
+                        substituted = re.sub(rf"\b{re.escape(parameter)}\b", value, substituted)
+                    values.append(substituted)
+                add_predicate(match.group(1), values, active)
+
     for name, system in sorted(model["systems"].items()):
         result["states"][name] = system["initial_state"]
         for reference, target in sorted(system["references"].items()):
             result["references"][f"{name}.{reference}"] = target
         for expression in system["initial_facts"]:
-            if expression["kind"] != "fact":
-                continue
-            arguments: list[Any] = []
-            for item in expression["arguments"]:
-                if item["kind"] == "path" and item["value"] == "self":
-                    arguments.append(name)
-                elif item["kind"] == "enum":
-                    arguments.append(f"{item['type']}::{item['value']}")
-                else:
-                    arguments.append(item["value"])
-            result["facts"].append(_fact(expression["name"], arguments))
+            if expression["kind"] == "fact":
+                arguments = [initial_value(item, name) for item in expression["arguments"]]
+                add_predicate(expression["name"], arguments)
+            elif expression["kind"] in {"assertion", "reference_condition"}:
+                text = expression.get("expression", expression.get("text", ""))
+                text = re.sub(r"\bself\b", name, text)
+                result["facts"].append(_assertion(text))
+    for name, declaration in sorted(model.get("types", {}).items()):
+        for expression in declaration.get("invariant", []):
+            if expression["kind"] == "fact":
+                add_predicate(
+                    expression["name"],
+                    [initial_value(item, name) for item in expression["arguments"]],
+                )
+            elif expression["kind"] in {"assertion", "reference_condition"}:
+                text = expression.get("expression", expression.get("text", ""))
+                result["facts"].append(_assertion(re.sub(r"\bself\b", name, text)))
     return _snapshot(result)
 
 

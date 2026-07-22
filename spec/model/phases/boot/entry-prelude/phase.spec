@@ -901,6 +901,7 @@ object KernelImage: ImageObject {
                 ensures {
                     phys_start == phys_addr(Lds.kernel_start);
                     memory_zeroed(segments.bss.range);
+                    fits_in_kernel_image_map(self, KernelImageMap);
                 }
             }
         }
@@ -916,6 +917,7 @@ object KernelImage: ImageObject {
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == phys_addr(Lds.kernel_start);
             memory_zeroed(segments.bss.range);
+            fits_in_kernel_image_map(self, KernelImageMap);
         }
 
         transitions {
@@ -1034,6 +1036,7 @@ object RawDtb: ResourceObject {
                     range.start == BootArgs.dtb_pa;
                     range.end == BootArgs.dtb_pa + header.total_size;
                     firmware_dtb_range_accessible(range);
+                    fits_in_fixmap_slot(range, FixMap.fdt_slot, Config.page_size);
                 }
             }
         }

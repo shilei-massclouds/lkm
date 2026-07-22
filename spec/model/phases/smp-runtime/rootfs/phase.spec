@@ -317,9 +317,11 @@ object RootFS: KernelObject {
 
                 drives {
                     Ext2FileSystem.Transition::Enable;
-                    VfsCore.Action::MountExt2At;
-                    VfsCore.Action::MoveMountToRoot;
-                    FsStruct.Action::Chdir;
+                    VfsCore.Action::MoveMountToRoot(
+                        mount: Mount,
+                        root_dentry: Dentry
+                    );
+                    FsStruct.Action::Chdir(dentry: Dentry);
                     FsStruct.Action::ChrootDot;
                 }
 

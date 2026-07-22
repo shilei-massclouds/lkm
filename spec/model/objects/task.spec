@@ -196,6 +196,8 @@ type Task: ResourceObject {
                     task_clone_spec_ready(self);
                     task_pid_allocated(self, pid_ns);
                     task_thread_context_ready(self);
+                    task_thread_context_owned(self, self.thread_context);
+                    task_thread_context_core_register_set(self.thread_context);
                     task_sched_entity_initialized(self, scheduler);
                     task_state_new(self);
                     task_not_enqueued(self);
@@ -214,6 +216,9 @@ type Task: ResourceObject {
             task_initial_flow_binding_complete(self);
             task_initial_flow_binding_consistent(self);
             task_clone_spec_ready(self);
+            task_thread_context_ready(self);
+            task_thread_context_owned(self, self.thread_context);
+            task_thread_context_core_register_set(self.thread_context);
             task_state_new(self);
             task_not_enqueued(self);
             task_has_no_prior_active_flow(self);
@@ -238,6 +243,9 @@ type Task: ResourceObject {
                     task_initial_flow_binding_complete(self);
                     task_initial_flow_binding_consistent(self);
                     task_clone_spec_ready(self);
+                    task_thread_context_ready(self);
+                    task_thread_context_owned(self, self.thread_context);
+                    task_thread_context_core_register_set(self.thread_context);
                     task_state_running(self);
                     task_runqueue_publication_committed(self);
                     task_owns_flow(self, self.initial_flow);
@@ -263,6 +271,9 @@ type Task: ResourceObject {
             task_initial_flow_binding_complete(self);
             task_initial_flow_binding_consistent(self);
             task_clone_spec_ready(self);
+            task_thread_context_ready(self);
+            task_thread_context_owned(self, self.thread_context);
+            task_thread_context_core_register_set(self.thread_context);
             task_state_running(self);
             task_runqueue_publication_committed(self);
             task_at_most_one_flow_online(self);
@@ -494,6 +505,7 @@ object UserTaskSet: TaskSet {
 object BootTask: Task {
     lifecycle_override: true;
     initial_state: State::Ready;
+    parent: Kernel;
     source: static::linux_6_12;
 
     associations {

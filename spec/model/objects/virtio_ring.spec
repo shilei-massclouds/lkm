@@ -193,6 +193,19 @@ object VirtQueue: ResourceObject {
                 }
             }
 
+            Action::PollUsed {
+                state_effect: StateEffect::None;
+                depends_on {
+                    self.state == State::Ready;
+                    virtqueue_kick_recorded(self);
+                    virtqueue_notify_after_avail_publish(self);
+                }
+                ensures {
+                    virtqueue_real_used_completion_observed(self);
+                    virtqueue_used_index_advanced(self);
+                }
+            }
+
             Action::GetBuf {
                 state_effect: StateEffect::None;
                 depends_on {

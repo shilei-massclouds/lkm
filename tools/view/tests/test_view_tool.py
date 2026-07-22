@@ -67,7 +67,7 @@ class ViewToolTests(unittest.TestCase):
                 )
             )
             declaration_sites = data["metadata"]["declaration_sites"]
-            self.assertEqual(len(declaration_sites), 5)
+            self.assertEqual(len(declaration_sites), 4)
             self.assertTrue(
                 all(data["nodes"][site["id"]]["kind"] == "DeclarationSite" for site in declaration_sites)
             )
@@ -147,8 +147,10 @@ class ViewToolTests(unittest.TestCase):
             rows = data["metadata"]["timeline_rows"]
             self.assertFalse(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
-            self.assertTrue(any(row["phase"] == "InterruptPhase" for row in rows))
-            self.assertTrue(any(row["phase"] == "PayloadPhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
+            self.assertFalse(any(row["phase"] == "InterruptPhase" for row in rows))
+            self.assertFalse(any(row["phase"] == "PayloadPhase" for row in rows))
 
     def test_trace_view_contains_cell_layout_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,7 +208,7 @@ class ViewToolTests(unittest.TestCase):
                 for cell in metadata["trace_cells"]
                 if cell["label"] == "BootTask.State::Online"
             )
-            self.assertGreater(boot_task_cell["column"], riscv64_cell["column"])
+            self.assertEqual(boot_task_cell["column"], riscv64_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"
@@ -268,7 +270,7 @@ class ViewToolTests(unittest.TestCase):
                 "transition_span", "Kernel.Transition::Preset"
             )
             boot_setup_cell = trace_cell(
-                "transition_span", "BootPhase.Transition::Setup"
+                "transition_span", "EntrySuccessorPhase.Transition::Setup"
             )
             kernel_setup_emit_cell = trace_cell(
                 "emit_event", "Kernel.Transition::Setup"
@@ -277,7 +279,7 @@ class ViewToolTests(unittest.TestCase):
                 "transition_span", "Kernel.Transition::Setup"
             )
             interrupt_setup_cell = trace_cell(
-                "transition_span", "InterruptPhase.Transition::Setup"
+                "transition_span", "IrqTimeInitPhase.Transition::Setup"
             )
             kernel_enable_emit_cell = trace_cell(
                 "emit_event", "Kernel.Transition::Enable"

@@ -55,6 +55,82 @@ class ModelToolTests(unittest.TestCase):
             self.assertIn("OpenSBI", data["model"]["objects"])
             self.assertNotIn("OpenSbi" + "Firmware", data["model"]["objects"])
 
+    def test_effective_parent_normalization_and_validation(self) -> None:
+        source = """
+            type ProjectObject {}
+            type ProjectLeaf: ProjectObject {}
+            type KernelObject {}
+
+            object ComputerProject: ProjectObject {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+            object KernelProject: ProjectObject {
+                parent: ComputerProject;
+                initial_state: State::Base;
+                state State::Base {}
+            }
+            object Kernel: KernelObject {
+                parent: KernelProject;
+                initial_state: State::Base;
+                state State::Base {}
+            }
+            object DefaultChild: KernelObject {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+            object ExplicitChild: KernelObject {
+                parent: ComputerProject;
+                initial_state: State::Base;
+                state State::Base {}
+            }
+            object ProjectRoot: ProjectLeaf {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 0, stderr)
+            objects = data["model"]["objects"]
+            self.assertEqual(objects["DefaultChild"]["parent"], "Kernel")
+            self.assertEqual(objects["ExplicitChild"]["parent"], "ComputerProject")
+            self.assertIsNone(objects["ProjectRoot"]["parent"])
+
+        without_kernel = """
+            type Plain {}
+            object Root: Plain {
+                initial_state: State::Base;
+                state State::Base {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), without_kernel)
+            self.assertEqual(exit_code, 0, stderr)
+            self.assertIsNone(data["model"]["objects"]["Root"]["parent"])
+
+        invalid_cases = {
+            "unknown parent object for Child: Missing": """
+                type Plain {}
+                object Child: Plain { parent: Missing; initial_state: State::Base; state State::Base {} }
+            """,
+            "self parent object for Child: Child": """
+                type Plain {}
+                object Child: Plain { parent: Child; initial_state: State::Base; state State::Base {} }
+            """,
+            "parent cycle contains objects: Left -> Right -> Left": """
+                type Plain {}
+                object Left: Plain { parent: Right; initial_state: State::Base; state State::Base {} }
+                object Right: Plain { parent: Left; initial_state: State::Base; state State::Base {} }
+            """,
+        }
+        for expected, invalid_source in invalid_cases.items():
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                exit_code, stderr, _data = self._run_model_source(Path(tmp), invalid_source)
+                self.assertEqual(exit_code, 1)
+                self.assertIn(expected, stderr)
+
     def test_model_json_contains_stable_structured_boundary_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ast = Path(tmp) / "model-main.ast.json"
@@ -477,35 +553,29 @@ class ModelToolTests(unittest.TestCase):
                 opensbi["states"]["Ready"]["transitions"]["Enable"]["target_state"],
                 "Online",
             )
-            self.assertEqual(
-                kernel["children"],
-                [
-                    "SmpRuntimePhase",
-                    "PayloadPhase",
-                ],
-            )
+            self.assertIn("BootTask", kernel["children"])
             self.assertEqual(objects["BootTask"]["initial_state"], "Ready")
+            self.assertEqual(objects["BootTask"]["parent"], "Kernel")
             self.assertEqual(objects["BootInitFlow"]["parent"], "BootTask")
             self.assertEqual(
                 objects["BootInitFlow"]["children"],
                 [
                     "EntryPreludePhase",
-                    "BootPhase",
-                    "InterruptPhase",
+                    "EntrySuccessorPhase",
+                    "CorePreparePhase",
+                    "MmCoreInitPhase",
+                    "SchedInitPhase",
+                    "IrqTimeInitPhase",
+                    "LocalIrqEnablePhase",
+                    "IrqOpenPreparePhase",
+                    "ProcessPreparePhase",
                     "BootInitRestInitPhase",
                     "BootInitScheduleHandoffPhase",
                 ],
             )
             self.assertEqual(objects["EntryPreludePhase"]["parent"], "BootInitFlow")
-            self.assertEqual(
-                objects["BootPhase"]["children"],
-                [
-                    "EntrySuccessorPhase",
-                    "CorePreparePhase",
-                    "MmCoreInitPhase",
-                    "SchedInitPhase",
-                ],
-            )
+            self.assertNotIn("BootPhase", objects)
+            self.assertNotIn("InterruptPhase", objects)
             kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
             kernel_setup = kernel["states"]["Prepared"]["transitions"]["Setup"]
             boot_init_preset = objects["BootInitFlow"]["states"]["Base"][
@@ -514,9 +584,6 @@ class ModelToolTests(unittest.TestCase):
             boot_init_setup = objects["BootInitFlow"]["states"]["Prepared"][
                 "transitions"
             ]["Setup"]
-            boot_preset = objects["BootPhase"]["states"]["Base"]["transitions"][
-                "Preset"
-            ]
             self.assertEqual(
                 boot_init_preset["body_members"][1]["within"]["context"],
                 "SingleTaskContext",
@@ -540,24 +607,52 @@ class ModelToolTests(unittest.TestCase):
                 ["Transition::Enable"],
             )
             self.assertEqual(
-                [entry["text"] for entry in boot_init_setup["drives"][0]["entries"]],
                 [
-                    "BootPhase.Transition::Preset",
-                    "InterruptPhase.Transition::Preset",
+                    entry["text"]
+                    for block in boot_init_setup["drives"]
+                    for entry in block["entries"]
+                ],
+                [
+                    "LocalIrqEnablePhase.Transition::Preset",
+                    "BootInitRestInitPhase.Transition::Preset",
+                ],
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for member in boot_init_setup["body_members"]
+                    if member["kind"] == "within"
+                    for block in member["within"]["drives"]
+                    for entry in block["entries"]
+                ],
+                [
+                    "EntrySuccessorPhase.Transition::Preset",
+                    "CorePreparePhase.Transition::Preset",
+                    "MmCoreInitPhase.Transition::Preset",
+                    "SchedInitPhase.Transition::Preset",
+                    "IrqTimeInitPhase.Transition::Preset",
+                    "IrqOpenPreparePhase.Transition::Preset",
+                    "ProcessPreparePhase.Transition::Preset",
                 ],
             )
             self.assertEqual(
                 [entry["text"] for entry in boot_init_setup["ensures"][0]["entries"]],
                 [
-                    "BootPhase.state == State::Online",
-                    "InterruptPhase.state == State::Online",
+                    "EntrySuccessorPhase.state == State::Online",
+                    "CorePreparePhase.state == State::Online",
+                    "MmCoreInitPhase.state == State::Online",
+                    "SchedInitPhase.state == State::Online",
+                    "IrqTimeInitPhase.state == State::Online",
+                    "LocalIrqEnablePhase.state == State::Online",
+                    "IrqOpenPreparePhase.state == State::Online",
+                    "ProcessPreparePhase.state == State::Online",
+                    "BootInitRestInitPhase.state == State::Online",
+                    "KernelInitFlow.state == State::Base",
+                    "KthreaddFlow.state == State::Base",
+                    "task_flow_start_signal_discarded(KernelInitFlow, BootDispatchWindow)",
+                    "task_flow_start_signal_discarded(KthreaddFlow, BootDispatchWindow)",
                     "BootTask.state == State::Online",
                 ],
-            )
-            self.assertEqual(boot_preset["drives"], [])
-            self.assertEqual(
-                [entry["text"] for entry in boot_preset["depends_on"][0]["entries"]],
-                ["EntryPreludePhase.state == State::Online"],
             )
             self.assertEqual(preset["source_state"], "Base")
             self.assertEqual(preset["target_state"], "Prepared")

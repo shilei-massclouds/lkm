@@ -162,6 +162,9 @@ object VirtioDevice: Device {
                 depends_on {
                     virtio_device_transport_bound(self, VirtioMmioTransportDevice);
                 }
+                drives {
+                    VirtioMmioTransportDevice.Action::ResetStatus;
+                }
                 ensures {
                     virtio_device_status_reset(self);
                 }
@@ -171,6 +174,9 @@ object VirtioDevice: Device {
                 state_effect: StateEffect::None;
                 depends_on {
                     virtio_device_status_reset(self);
+                }
+                drives {
+                    VirtioMmioTransportDevice.Action::SetupDriverStatus;
                 }
                 ensures {
                     virtio_device_status_acknowledged(self);
@@ -182,6 +188,9 @@ object VirtioDevice: Device {
                 state_effect: StateEffect::None;
                 depends_on {
                     virtio_device_status_driver_seen(self);
+                }
+                drives {
+                    VirtioMmioTransportDevice.Action::NegotiateFeatures;
                 }
                 ensures {
                     virtio_device_features_read(self);
@@ -197,6 +206,9 @@ object VirtioDevice: Device {
                     virtio_device_config_access_ready(self);
                     virtio_device_feature_negotiation_done(self);
                 }
+                drives {
+                    VirtioMmioTransportDevice.Action::ReadConfig;
+                }
                 ensures {
                     virtio_device_config_capacity_read(self);
                     virtio_device_config_read_deferred(self);
@@ -208,6 +220,9 @@ object VirtioDevice: Device {
                 depends_on {
                     virtio_device_feature_negotiation_done(self);
                     VirtQueue.state == State::Ready;
+                }
+                drives {
+                    VirtioMmioTransportDevice.Action::SetupQueue;
                 }
                 ensures {
                     virtio_device_single_queue_discovered(self);
@@ -221,6 +236,9 @@ object VirtioDevice: Device {
                 depends_on {
                     virtio_device_queue_setup_done(self);
                 }
+                drives {
+                    VirtioMmioTransportDevice.Action::SetDriverOk;
+                }
                 ensures {
                     virtio_device_status_driver_ok(self);
                 }
@@ -231,6 +249,9 @@ object VirtioDevice: Device {
                 depends_on {
                     virtio_device_status_driver_ok(self);
                     virtqueue_avail_index_advanced(VirtQueue);
+                }
+                drives {
+                    VirtioMmioTransportDevice.Action::NotifyQueue;
                 }
                 ensures {
                     virtio_device_queue_notify_done(self);

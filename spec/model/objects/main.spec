@@ -1243,11 +1243,11 @@ type RunQueue: ResourceObject {
                 task_ref_ready(prev_ref);
             }
             ensures {
-                runqueue_pick_next_task_returns(CurrentRunQueueRef, prev_ref, CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, KernelInitTask);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets_online_task(CurrentTaskRef);
-                scheduler_pick_next_task_selects_runnable(Scheduler, self, CurrentTaskRef);
+                runqueue_pick_next_task_returns(CurrentRunQueueRef, prev_ref, KernelInitTaskRef);
+                task_ref_targets(KernelInitTaskRef, KernelInitTask);
+                task_ref_ready(KernelInitTaskRef);
+                task_ref_targets_online_task(KernelInitTaskRef);
+                scheduler_pick_next_task_selects_runnable(Scheduler, self, KernelInitTaskRef);
             }
         }
     }
@@ -1351,7 +1351,7 @@ type LocalInterruptControl {
 
 type CurrentTaskSlot {
     processes {
-        Action::SetCurrent {
+        Action::SetCurrent(task: Task) {
             state_effect: StateEffect::None;
             ensures {
                 current_task_slot_current(self, task);

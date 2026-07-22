@@ -124,6 +124,53 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn("synchronous: sender waits", stdout.getvalue())
             self.assertIn("asynchronous FIFO", stdout.getvalue())
 
+    def test_type_lifecycle_process_is_composed_with_object_wrapper(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            type Child {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Setup -> State::Ready { ensures { child_ready(self); } } }
+                }
+                state State::Ready { invariant { child_ready(self); } }
+            }
+            type Wrapper {
+                owned { child: Child; }
+                lifecycle {
+                    Transition::Setup {
+                        state_effect: StateEffect::Always;
+                        drives { self.child.Transition::Setup; }
+                        ensures { wrapper_type_ready(self); }
+                    }
+                }
+            }
+            object Root: Wrapper {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
+                            ensures { wrapper_instance_ready(self); }
+                        }
+                    }
+                }
+                state State::Ready {
+                    invariant {
+                        wrapper_type_ready(self);
+                        wrapper_instance_ready(self);
+                    }
+                }
+            }
+            """,
+            "Root.Setup",
+        )
+        self.assertEqual(checked["verdict"], "complete")
+        self.assertEqual(derivation["signals"][1]["target"], "Root.child")
+        self.assertEqual(
+            derivation["signals"][0]["handler"]["composed_type_processes"][0]["id"],
+            "Wrapper.Transition::Setup@process",
+        )
+        self.assertEqual(derivation["last_stable_snapshot"]["states"]["Root.child"], "Ready")
+
     def test_protocol_identity_and_old_protocol_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -134,13 +181,43 @@ class SignalPipelineTests(unittest.TestCase):
 
             old = root / "old.ast.json"
             old.write_text(
-                json.dumps({"schema": AST_SCHEMA, "version": 4, "source": "old", "document": {}}),
+                json.dumps(
+                    {
+                        "schema": AST_SCHEMA,
+                        "version": 1,
+                        "producer": PRODUCER,
+                        "source": "old",
+                        "document": {},
+                    }
+                ),
                 encoding="utf-8",
             )
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
                 self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-            self.assertIn("producer='tools2'", stderr.getvalue())
+            self.assertIn("version=2", stderr.getvalue())
+
+            old_snapshot = root / "old.snapshot.json"
+            old_snapshot.write_text(
+                json.dumps(
+                    {
+                        "schema": SNAPSHOT_SCHEMA,
+                        "version": 1,
+                        "producer": PRODUCER,
+                        "source": "old",
+                        "snapshot": {"states": {}, "facts": [], "references": {}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(
+                    driver_main(
+                        [str(PIPELINE), "--signal", "Root.Start", "--scenario", str(old_snapshot)]
+                    ),
+                    2,
+                )
+            self.assertIn("snapshot protocol mismatch", stderr.getvalue())
 
             environment = os.environ.copy()
             environment["PYTHONPATH"] = os.pathsep.join(
@@ -205,7 +282,7 @@ class SignalPipelineTests(unittest.TestCase):
                 state State::Base {
                     transitions {
                         on Transition::Start -> State::Ready {
-                            within SomeContext { }
+                            unknown_handler_member { }
                         }
                     }
                 }
@@ -656,16 +733,35 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(view["events"], derivation["events"])
 
-    def test_pyveri2_short_trigger_and_scenario_work_from_any_directory(self) -> None:
+    def test_pyveri_short_trigger_and_scenario_work_from_any_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            help_result = subprocess.run(
+                [str(shortcut), "-h"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(help_result.returncode, 0, help_result.stderr)
+            self.assertTrue(
+                help_result.stdout.startswith("usage: tools2/bin/pyveri [-h] -t SIGNAL"),
+                help_result.stdout,
+            )
+            self.assertFalse((TOOLS2 / "pyveri2").exists())
+
             snapshot = root / "snapshot.json"
             first_work = root / "first-work"
             first = subprocess.run(
                 [
-                    str(TOOLS2 / "pyveri2"),
+                    str(shortcut),
                     "-t",
                     "Root.Start",
+                    "-f",
+                    str(PIPELINE),
+                    "--source",
+                    "TestHarness",
                     "--snapshot-out",
                     str(snapshot),
                     "--work-dir",
@@ -678,16 +774,21 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertIn("verdict: complete", first.stdout)
-            self.assertEqual(read_json(first_work / "derive.json")["verdict"], "complete")
+            first_derivation = read_json(first_work / "derive.json")
+            self.assertEqual(first_derivation["verdict"], "complete")
+            self.assertEqual(first_derivation["budget"], {"max_breadth": None, "max_depth": None})
+            self.assertEqual(first_derivation["signals"][0]["source"], "TestHarness")
             self.assertTrue(snapshot.exists())
 
             resumed_text = root / "resumed.txt"
             resumed_work = root / "resumed-work"
             resumed = subprocess.run(
                 [
-                    str(TOOLS2 / "pyveri2"),
+                    str(shortcut),
                     "-t",
                     "Root.Inspect",
+                    "-f",
+                    str(PIPELINE),
                     "-s",
                     str(snapshot),
                     "--work-dir",
@@ -704,7 +805,15 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn("inspected(Root)", resumed_text.read_text(encoding="utf-8"))
 
             bounded = subprocess.run(
-                [str(TOOLS2 / "pyveri2"), "-t", "Root.Start", "--max-depth", "0"],
+                [
+                    str(shortcut),
+                    "-t",
+                    "Root.Start",
+                    "-f",
+                    str(PIPELINE),
+                    "--max-depth",
+                    "0",
+                ],
                 cwd=root,
                 text=True,
                 capture_output=True,

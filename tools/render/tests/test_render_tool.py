@@ -127,7 +127,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("ComputerProject.Preset", text)
             self.assertIn("ComputerProject.Setup", text)
             self.assertIn("Kernel.Preset", text)
-            self.assertIn("BootPhase.Setup", text)
+            self.assertIn("EntrySuccessorPhase.Setup", text)
             self.assertIn("<title>emits Kernel.Transition::Setup</title>", text)
             self.assertIn(">emits</tspan>", text)
             self.assertNotIn(">emits Kernel</tspan>", text)

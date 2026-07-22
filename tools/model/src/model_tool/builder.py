@@ -660,6 +660,7 @@ def _build_objects(
     diagnostics: list[Diagnostic],
 ) -> dict[str, ObjectDef]:
     objects: dict[str, ObjectDef] = {}
+    has_kernel = any(decl.name == "Kernel" for decl in declarations)
     for decl in declarations:
         if decl.name in objects:
             diagnostics.append(
@@ -734,12 +735,20 @@ def _build_objects(
         )
         attrs = _extract_attrs(decl, diagnostics)
         associations = _extract_associations(decl, diagnostics)
+        effective_parent = decl.parent
+        if (
+            effective_parent is None
+            and has_kernel
+            and decl.name != "Kernel"
+            and not _type_is_or_extends(types, decl.kind, "ProjectObject")
+        ):
+            effective_parent = "Kernel"
         objects[decl.name] = ObjectDef(
             name=decl.name,
             kind=decl.kind,
             decl=decl,
             initial_state=initial_state,
-            parent=decl.parent,
+            parent=effective_parent,
             states=states,
             attrs=attrs,
             associations=associations,
@@ -1025,6 +1034,15 @@ def _build_children(
     for obj in objects.values():
         if obj.parent is None:
             continue
+        if obj.parent == obj.name:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"self parent object for {obj.name}: {obj.parent}",
+                    obj.decl.span,
+                )
+            )
+            continue
         if obj.parent not in objects:
             diagnostics.append(
                 Diagnostic(
@@ -1035,7 +1053,37 @@ def _build_children(
             )
             continue
         children[obj.parent].append(obj.name)
+
+    reported_cycles: set[tuple[str, ...]] = set()
+    for obj in objects.values():
+        path: list[str] = []
+        positions: dict[str, int] = {}
+        current: str | None = obj.name
+        while current is not None and current in objects:
+            if current in positions:
+                cycle = path[positions[current] :]
+                canonical = _canonical_cycle(cycle)
+                if canonical not in reported_cycles:
+                    reported_cycles.add(canonical)
+                    diagnostics.append(
+                        Diagnostic(
+                            Severity.ERROR,
+                            "parent cycle contains objects: " + " -> ".join([*canonical, canonical[0]]),
+                            objects[current].decl.span,
+                        )
+                    )
+                break
+            positions[current] = len(path)
+            path.append(current)
+            current = objects[current].parent
     return children
+
+
+def _canonical_cycle(cycle: list[str]) -> tuple[str, ...]:
+    if not cycle:
+        return ()
+    variants = [tuple(cycle[index:] + cycle[:index]) for index in range(len(cycle))]
+    return min(variants)
 
 
 def _check_initial_states(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
@@ -3157,6 +3205,20 @@ def _type_process_return_type(
 def _base_type_name(type_decl: TypeDecl) -> str | None:
     match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
     return match.group(1) if match is not None else None
+
+
+def _type_is_or_extends(
+    types: dict[str, TypeDecl], actual: str, expected: str
+) -> bool:
+    visited: set[str] = set()
+    current: str | None = actual
+    while current is not None and current not in visited:
+        if current == expected:
+            return True
+        visited.add(current)
+        declaration = types.get(current)
+        current = None if declaration is None else _base_type_name(declaration)
+    return False
 
 
 def _split_process_args(args: str) -> list[str]:

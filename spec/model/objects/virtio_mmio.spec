@@ -178,6 +178,7 @@ object VirtioMmioTransportDevice: ResourceObject {
                 ensures {
                     virtio_mmio_transport_device_features_read(self);
                     virtio_mmio_transport_driver_features_written(self);
+                    virtio_mmio_transport_status_features_ok_written(self);
                     virtio_mmio_transport_feature_negotiation_done(self);
                 }
             }

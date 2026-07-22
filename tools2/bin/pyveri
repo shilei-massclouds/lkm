@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Short command-line entry for the isolated tools2 Signal driver."""
+"""Repository-relative convenience entry for the tools2 Signal driver."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from pathlib import Path
 import sys
 
 
-TOOLS2_ROOT = Path(__file__).resolve().parent
-DEFAULT_SPEC = TOOLS2_ROOT / "tests" / "fixtures" / "pipeline.spec"
+TOOLS2_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = TOOLS2_ROOT.parent
+DEFAULT_SPEC = REPOSITORY_ROOT / "spec" / "model" / "main.spec"
 
 
 def _bootstrap() -> None:
@@ -21,21 +22,27 @@ def _bootstrap() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="tools2/pyveri2",
-        description="Run the tools2 Signal pipeline with short experiment options.",
+        prog="tools2/bin/pyveri",
+        description="Run the tools2 Signal pipeline.",
     )
-    parser.add_argument("-t", "--trigger", required=True, help="Signal trigger as Target.SignalName")
+    parser.add_argument(
+        "-t",
+        "--trigger",
+        required=True,
+        metavar="SIGNAL",
+        help="Signal trigger as Target.SignalName",
+    )
     parser.add_argument("-s", "--scenario", type=Path, help="scenario or tools2 snapshot JSON")
     parser.add_argument(
         "-f",
         "--spec",
         type=Path,
         default=DEFAULT_SPEC,
-        help=f"input .spec file; default: {DEFAULT_SPEC.relative_to(TOOLS2_ROOT.parent)}",
+        help="input .spec file; default: spec/model/main.spec",
     )
     parser.add_argument("--source", default="Environment", help="Signal source; default: Environment")
-    parser.add_argument("--max-depth", default="3", metavar="N|all")
-    parser.add_argument("--max-breadth", default="3", metavar="N|all")
+    parser.add_argument("--max-depth", default="all", metavar="N|all")
+    parser.add_argument("--max-breadth", default="all", metavar="N|all")
     parser.add_argument("--work-dir", type=Path, help="retain stage JSON in this directory")
     parser.add_argument("--snapshot-out", type=Path, help="write a resumable snapshot on complete")
     parser.add_argument("-o", "--output", type=Path, help="write rendered text instead of stdout")

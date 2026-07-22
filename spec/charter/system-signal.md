@@ -25,6 +25,13 @@
 系统层级不改变信号的明确目标。发送给某个子系统的信号只触发该子系统，不会因为 parent/child
 关系自动向上冒泡并触发父系统；父系统是否收到信号，只由信号目标是否为父系统决定。
 
+完整内核模型采用一棵稳定、可复核的有效系统层级。源规格中的显式 `parent` 始终优先；当组合后的
+模型包含 `Kernel` 时，没有显式 parent 且不是 `ProjectObject` 或其子类型的静态系统默认属于
+`Kernel`。项目对象保留工程层级，当前根是 `ComputerProject`，其下是 `KernelProject`，再下是
+`Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，工具不得为了凑齐主模型层级而虚构 Kernel。
+有效层级只用于结构展示、Signal 坐标和预算；它仍不产生隐式冒泡、广播或 handler 继承。未知
+parent、自引用和 parent 环都是模型错误，所有静态 view 与 Signal 工具必须消费同一份归一化层级。
+
 ## 信号Signal
 
 系统与外部环境交互本质上是与其它系统的交互，必须通过发送和接收信号的方式，在边界发生。
@@ -57,7 +64,7 @@ formal semantics 和工具更新前直接按新语法解释。异步发送的交
 
 每种类型信号可以定义自己的附加信息，随着信号发送。目标系统决定如何处理附加信息。
 
-## Signal 响应与首期工具边界
+## Signal 响应与完整主模型工具边界
 
 一次 Signal 响应从目标系统接收具名 Signal 开始，到该系统的 handler 完成、拒绝或因推导错误失败
 为止。Signal envelope 与响应过程是不同对象：envelope 保存稳定身份、源、目标、名称、类型化
@@ -65,13 +72,14 @@ payload、严格性和因果关系；handler 才是目标系统内部执行的 `
 handler 可以提交生命周期状态，Action handler 只能提交规格允许的事实，不能借 Signal 调用伪造状态
 迁移。
 
-首期 Signal 推导工具采用下列兼容边界：
+Signal 推导工具采用下列兼容边界：
 
 - 当前 `Target.Transition::Name(...)` 和 `Target.Action::Name(...)` 规范化为发往 `Target` 的隐式
   `Name` Signal，原调用参数成为 payload；目标暂以同名 Transition/Action 作为兼容 handler。
 - `drives` 同步发送并等待目标响应结束；`emits` 只在源响应提交后投递，并按全局 FIFO 处理。
-- parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
-- 首期不引入显式 `signal`/`on Signal` 语法，不把 handler 改名为 `OnName`，也不实现等待未来
+- `drives` 中的 `A || B` 是按源码顺序选择首个当前可接受的 Signal handler；未被选择的候选不发送 Signal，也不制造 rejected/failed 记录。
+- 有效 parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
+- 当前里程碑不引入显式 `signal`/`on Signal` 语法，不把 handler 改名为 `OnName`，也不实现等待未来
   Signal 的 continuation；这些都必须作为后续独立模型变更完成。
 
 响应结果必须使用明确分类：
@@ -82,16 +90,22 @@ handler 可以提交生命周期状态，Action handler 只能提交规格允许
 - `failed`：规格、类型、推导或 invariant 失败，或者 strict Signal 被拒绝导致根请求失败。
 - `truncated`：下一次传播超出显式预算，因此不执行 frontier Signal。
 - `completed`：响应和其同步子响应完成；其异步 Signal 已按规则进入 FIFO。
-- `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但首期工具不得产生它。
+- `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但当前工具不得产生它。
 
 条件不成立只表示本次接收被拒绝，不得猜测为临时等待。严格拒绝的诊断必须保留从根 Signal 到拒绝
 点的完整因果链；lossy 丢弃和预算截断也必须是 trace 中可见的事实，而不是展示层推断。
 
-首期 `tools2/` 是验证上述目标语义的独立实验工具链。它可以复用老工具的阶段名称和 CLI 外壳，
-但不导入 `tools/` 的实现或中间协议代码；两套工具通过路径、独立 Python import path、producer 和
-schema version 隔离。老 `tools/` 继续承担默认 `make test`、当前主模型推导和静态 trace/SVG，
-`tools2/` 只提供手动入口。老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认，
-不得由首期实现自动触发。
+`tools2/` 是验证上述目标语义的独立工具链。本轮里程碑要求它完整加载 `spec/model/main.spec`，并能从
+真实 Signal 到达边界推导其可达闭包。完整模型只有 `ComputerProject.Preset` 是无需预制条件的起点；
+根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它后续 Signal 若因
+前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得隐式回溯 emitter、
+运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须显式提供 snapshot/scenario。
+
+tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/` 的实现或中间协议代码；两套工具
+通过路径、独立 Python import path、producer 和 schema version 隔离。公开快捷入口是
+`tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
+tools2 协议统一为 version 2 并拒绝 version 1、老工具协议和旧 snapshot。老 `tools/` 继续承担默认
+`make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
 
 ## 通用分析方法
 

@@ -558,6 +558,21 @@ object BootConsole: ConsoleObject {
 object Uart8250Port: DeviceObject {
     initial_state: State::Base;
 
+    processes {
+        Action::TriggerInterrupt(cause: InterruptCauseRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_gate_open(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                irq_gate_open(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            }
+            ensures {
+                uart8250_port_interrupt_triggered(self, cause);
+                plic_source_pending(Plic, HwirqRef::PlicUart0);
+            }
+        }
+    }
+
     state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {

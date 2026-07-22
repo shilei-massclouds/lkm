@@ -19,6 +19,10 @@ object SelectedPayloadHandoff: ResourceObject {
                     UserCloneDeferredBoundaries.state == State::Ready;
                 }
 
+                drives {
+                    UserBootPayload.Transition::Setup;
+                }
+
                 ensures {
                     selected_payload_variant_setup_ready(self, Config, UserBootPayload);
                 }

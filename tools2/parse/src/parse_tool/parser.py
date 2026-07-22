@@ -585,6 +585,12 @@ def _parse_call(tokens: list[Token]) -> dict[str, Any]:
 
 
 def parse_spec(path: str | Path) -> dict[str, Any]:
+    from .full_parser import parse_full_spec
+
+    return parse_full_spec(path)
+
+
+def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
     root = Path(path).resolve()
     diagnostics: list[dict[str, Any]] = []
     enums: list[dict[str, Any]] = []

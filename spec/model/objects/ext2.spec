@@ -288,7 +288,10 @@ object Ext2FileSystem: ResourceObject {
                     ext2_filesystem_root_dentry_bound(self);
                 }
                 drives {
-                    VfsCore.Action::MountExt2At;
+                    VfsCore.Action::MountExt2At(
+                        mount_point: Dentry,
+                        fs: Ext2FileSystem
+                    );
                 }
                 ensures {
                     ext2_filesystem_mount_boundary_recorded(self);

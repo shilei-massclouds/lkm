@@ -3212,6 +3212,7 @@ object UserBootPayload: ResourceObject {
                 }
 
                 drives {
+                    Path.Transition::Setup;
                     VfsCore.Action::ReadPath(Path, FsStruct);
                     ElfObject.Transition::Preset;
                     ElfObject.Transition::Setup;

@@ -56,6 +56,7 @@ object PlatformIrqResource: ResourceObject {
                     platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
                     platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
                     platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+                    platform_irq_resource_raw_specifier_ready(PlatformIrqResourceRef::Ns16550aSerial);
                     platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
                 }
             }
@@ -68,6 +69,7 @@ object PlatformIrqResource: ResourceObject {
             platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
             platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
             platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+            platform_irq_resource_raw_specifier_ready(PlatformIrqResourceRef::Ns16550aSerial);
             platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
         }
 
@@ -101,6 +103,7 @@ object PlatformIrqResource: ResourceObject {
             platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
             platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
             platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+            platform_irq_resource_raw_specifier_ready(PlatformIrqResourceRef::Ns16550aSerial);
             platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
             platform_irq_resource_translated_by_domain(PlatformIrqResource, PlicIrqDomain);
             platform_irq_resource_hwirq_bound(PlatformIrqResource, HwirqRef::PlicUart0);

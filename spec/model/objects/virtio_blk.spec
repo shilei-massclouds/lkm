@@ -177,6 +177,7 @@ object VirtioBlkDevice: DeviceObject {
                     block_io_irq_completion_failed_checkpoint_defined(self);
                     block_io_completion_source_contract_ready(self);
                     virtio_blk_completion_single_consumer(self);
+                    virtio_blk_no_inherited_pending_before_submit(self);
                 }
             }
         }
@@ -200,6 +201,7 @@ object VirtioBlkDevice: DeviceObject {
             block_io_irq_completion_failed_checkpoint_defined(self);
             block_io_completion_source_contract_ready(self);
             virtio_blk_completion_single_consumer(self);
+            virtio_blk_no_inherited_pending_before_submit(self);
         }
 
         processes {
@@ -212,7 +214,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_no_inherited_pending_before_submit(self);
                 }
                 drives {
-                    VirtQueue.Action::AddDescriptorChain;
+                    VirtQueue.Action::AddChain;
                     VirtQueue.Action::Kick;
                     VirtioDevice.Action::NotifyQueue;
                 }
@@ -263,6 +265,7 @@ object VirtioBlkDevice: DeviceObject {
                     VirtQueue.state == State::Ready;
                 }
                 drives {
+                    VirtQueue.Action::PollUsed;
                     VirtQueue.Action::GetBuf;
                 }
                 ensures {

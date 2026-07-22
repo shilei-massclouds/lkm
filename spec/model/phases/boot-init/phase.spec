@@ -140,6 +140,12 @@ object BootInitFlow: TaskFlow {
                         BootTask,
                         KernelInitTask
                     );
+                    scheduler_switch_to_prepared(
+                        Scheduler,
+                        BootRunQueue,
+                        CurrentTaskRef,
+                        KernelInitTaskRef
+                    );
                     BootTask.state == State::Online;
                     task_flow_online_on_dispatch(self, BootDispatchWindow);
                 }
@@ -160,6 +166,12 @@ object BootInitFlow: TaskFlow {
                 Scheduler,
                 BootTask,
                 KernelInitTask
+            );
+            scheduler_switch_to_prepared(
+                Scheduler,
+                BootRunQueue,
+                CurrentTaskRef,
+                KernelInitTaskRef
             );
             BootTask.state == State::Online;
             task_flow_started(self);

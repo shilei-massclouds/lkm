@@ -395,6 +395,21 @@ object RiscvIntc: InterruptObject {
     parent: IrqController;
 
     processes {
+        Action::HandleExternalInput(cause: InterruptCauseRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                riscv_intc_external_irq_named_cause(self, cause);
+                irq_gate_open(self, IrqGateRef::RootSupervisorExternalInput);
+                riscv_intc_external_input_enabled(self, IrqGateRef::RootSupervisorExternalInput, cause);
+                riscv_intc_external_irq_forwards_to_plic(self, Plic);
+                plic_source_pending(Plic, HwirqRef::PlicUart0);
+            }
+            ensures {
+                riscv_intc_external_input_observed(self, cause);
+            }
+        }
+
         Action::EnableExternalInput(gate: IrqGateRef) -> IrqGateRef {
             state_effect: StateEffect::Conditional;
             depends_on {
@@ -728,6 +743,7 @@ predicate plic_chained_handler_completes_each_claimed_source<T>(plic: T) -> bool
 predicate plic_claim_before_generic_irq_dispatch<T>(plic: T) -> bool;
 predicate plic_complete_after_irq_action_handler<T>(plic: T) -> bool;
 predicate plic_source_observation_counters_ready<T>(plic: T) -> bool;
+predicate plic_source_pending<T, H>(plic: T, source: H) -> bool;
 predicate plic_source_claim_observable<T, H>(plic: T, source: H) -> bool;
 predicate plic_source_dispatch_observable<T, H>(plic: T, source: H) -> bool;
 predicate plic_source_complete_observable<T, H>(plic: T, source: H) -> bool;
@@ -736,6 +752,8 @@ predicate uart_external_irq_enable_opens_plic_source_gate<T, D, G>(enable: T, do
 predicate uart_external_irq_enable_opens_root_input_gate<T, R, G>(enable: T, riscv_intc: R, gate: G) -> bool;
 predicate uart_external_irq_enable_requires_registered_handler<T, A>(enable: T, action: A) -> bool;
 predicate uart_external_irq_enable_keeps_uart_trigger_deferred<T, P>(enable: T, plic: P) -> bool;
+predicate uart8250_port_interrupt_triggered<T, C>(port: T, cause: C) -> bool;
+predicate riscv_intc_external_input_observed<T, C>(intc: T, cause: C) -> bool;
 predicate uart_interrupt_chain_probe_ready<T>(probe: T) -> bool;
 predicate uart_interrupt_chain_probe_triggers_uart_once<T, U>(probe: T, uart: U) -> bool;
 predicate uart_interrupt_chain_probe_observes_plic_claim<T, P>(probe: T, plic: P) -> bool;
@@ -906,6 +924,22 @@ object IrqHandlerRegistry: InterruptObject {
 object IrqAction: InterruptObject {
     initial_state: State::Base;
     parent: IrqHandlerRegistry;
+
+    processes {
+        Action::Handle(action: IrqActionRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_handler_registry_registered_action(IrqHandlerRegistry, action);
+                irq_action_dispatch_ready(self);
+                plic_source_claim_observable(Plic, HwirqRef::PlicUart0);
+            }
+            ensures {
+                irq_action_handler_runs_after_plic_claim(self, Plic);
+                irq_action_handler_runs_before_plic_complete(self, Plic);
+            }
+        }
+    }
 
     state State::Base {
         transitions {
@@ -1186,6 +1220,21 @@ object UartInterruptChainProbe: InterruptObject {
 object PlicIrqDomain: IrqDomain {
     initial_state: State::Base;
     parent: Plic;
+
+    processes {
+        Action::Dispatch(logical_irq: LogicalIrqRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                logical_irq_ref_ready(logical_irq);
+                plic_irq_domain_dispatch_ops_ready(self);
+                plic_source_claim_observable(Plic, HwirqRef::PlicUart0);
+            }
+            ensures {
+                plic_source_dispatch_observable(Plic, HwirqRef::PlicUart0);
+            }
+        }
+    }
 
     state State::Base {
         transitions {
@@ -2075,6 +2124,37 @@ object PlicDriver: InterruptObject {
 object Plic: InterruptObject {
     initial_state: State::Base;
     parent: RiscvIntc;
+
+    processes {
+        Action::Claim(source: HwirqRef) -> HwirqRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                plic_claim_action_ready(self);
+                plic_claim_reads_claim_register(self);
+                plic_irq_mapping_source_enabled(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                plic_source_pending(self, source);
+            }
+            ensures {
+                plic_source_claim_observable(self, source);
+                plic_claim_before_generic_irq_dispatch(self);
+            }
+        }
+
+        Action::Complete(source: HwirqRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                plic_complete_action_ready(self);
+                plic_source_claim_observable(self, source);
+                irq_action_handler_runs_before_plic_complete(IrqAction, self);
+            }
+            ensures {
+                plic_source_complete_observable(self, source);
+                plic_complete_after_irq_action_handler(self);
+            }
+        }
+    }
 
     state State::Base {
         transitions {

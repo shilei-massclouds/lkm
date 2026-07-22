@@ -4,6 +4,10 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-22 tools2 完整主模型与 effective parent 复核：本轮只统一规格模型消费者的层级解释、独立
+Signal 工具协议和仓库内 CLI 入口，不新增或调整内核 crate、module、facade、feature、公开 API 或
+组件依赖。`spec/compose/main.spec` 已复核，组合语义无需修改。
+
 2026-07-21 Task / TaskFlow 内部 module 对齐审查：本轮在既有 objects crate 内把
 `objects::task_flow::{TaskFlow, TaskFlowRef}` 建立为独立规范路径，并由 `objects::task` 仅承载 Task
 core/identity。该路径调整不新增 crate、facade、build feature 或外部兼容 API，不保留旧 module

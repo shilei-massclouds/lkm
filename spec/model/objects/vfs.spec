@@ -285,12 +285,8 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    SuperBlock.Transition::Setup;
-                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -318,12 +314,8 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    SuperBlock.Transition::Setup;
-                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -354,12 +346,8 @@ object VfsCore: ResourceObject {
                     ext2_inode_is_root_dir(fs, Ext2InodeRef::Root);
                 }
                 drives {
-                    SuperBlock.Transition::Setup;
-                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -420,8 +408,8 @@ object VfsCore: ResourceObject {
                 drives {
                     PathWalk.Transition::Setup;
                     VfsCore.Action::Lookup;
-                    VfsCore.Action::FollowMount;
-                    VfsCore.Action::FollowSymlink;
+                    VfsCore.Action::FollowMount(mount_point: Dentry);
+                    VfsCore.Action::LookupExt2ReadOnly;
                 }
                 ensures {
                     vfs_path_walk_resolves(VfsCore, Dentry);
@@ -441,7 +429,7 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     VfsCore.Action::Lookup;
-                    VfsCore.Action::FollowMount;
+                    VfsCore.Action::FollowMount(mount_point: Dentry);
                 }
                 ensures {
                     vfs_stat_final_symlink_nofollow_supported(VfsCore, Dentry);
@@ -490,9 +478,7 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     Ext2FileSystem.Action::LookupRootName;
-                    Inode.Transition::Setup;
                     Inode.Action::CreateFile;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -516,9 +502,7 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     Ext2FileSystem.Action::LookupRootName;
-                    Inode.Transition::Setup;
                     Inode.Action::CreateSymlink;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -539,9 +523,7 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Transition::Setup;
                     Inode.Action::CreateDirectory;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -558,9 +540,7 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Transition::Setup;
                     Inode.Action::CreateFile;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -577,9 +557,7 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Transition::Setup;
                     Inode.Action::CreateDeviceNode;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -596,9 +574,7 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Transition::Setup;
                     Inode.Action::CreateSymlink;
-                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -635,7 +611,6 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                 }
                 drives {
-                    VfsCore.Action::WalkPath(path, fs);
                     File.Transition::Setup;
                 }
                 ensures {
@@ -695,13 +670,10 @@ object VfsCore: ResourceObject {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     vfs_path_absolute(path);
-                    vfs_path_walk_resolves(VfsCore, Dentry);
-                    file_allocated(File);
                 }
                 drives {
                     VfsCore.Action::WalkPath(path, fs);
                     VfsCore.Action::OpenPath(path, fs);
-                    VfsCore.Action::ReadFile;
                     VfsCore.Action::ReadExt2File;
                 }
                 ensures {
@@ -722,7 +694,7 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     VfsCore.Action::Lookup;
-                    VfsCore.Action::FollowMount;
+                    VfsCore.Action::FollowMount(mount_point: Dentry);
                 }
                 ensures {
                     vfs_readlink_final_symlink_not_followed(VfsCore, Dentry);
@@ -929,7 +901,9 @@ object Inode: ResourceObject {
                 }
             }
         }
+    }
 
+    state State::Ready {
         actions {
             Action::CreateRootDirectory {
                 state_effect: StateEffect::None;
@@ -985,9 +959,7 @@ object Inode: ResourceObject {
                 }
             }
         }
-    }
 
-    state State::Ready {
         invariant {
             inode_allocated(Inode);
             inode_superblock_bound(Inode, SuperBlock);
@@ -1012,7 +984,9 @@ object Dentry: ResourceObject {
                 }
             }
         }
+    }
 
+    state State::Ready {
         actions {
             Action::CreateRoot {
                 state_effect: StateEffect::None;
@@ -1038,9 +1012,7 @@ object Dentry: ResourceObject {
                 }
             }
         }
-    }
 
-    state State::Ready {
         invariant {
             dentry_allocated(Dentry);
             dentry_name_bound(Dentry);

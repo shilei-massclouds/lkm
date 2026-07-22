@@ -170,14 +170,14 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
                 source = _transition_node_id(obj.name, transition.name)
                 _add_transition_node(nodes, source, obj.name, transition.name)
 
-                for target_obj, target_transition in _driven_transitions(transition):
+                for target_obj, target_transition in _driven_transitions(model, transition):
                     if target_obj not in model.objects:
                         continue
                     target = _transition_node_id(target_obj, target_transition)
                     _add_transition_node(nodes, target, target_obj, target_transition)
                     edges.append(ViewEdge(source=source, target=target, kind="drives"))
 
-                for target_obj, target_transition in _emitted_transitions(transition):
+                for target_obj, target_transition in _emitted_transitions(model, transition):
                     if target_obj not in model.objects:
                         continue
                     target = _transition_node_id(target_obj, target_transition)
@@ -226,7 +226,7 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
                     )
                 )
 
-                for target_obj, target_transition in _driven_transitions(transition):
+                for target_obj, target_transition in _driven_transitions(model, transition):
                     if target_obj not in phase_objects:
                         continue
                     target = _transition_node_id(target_obj, target_transition)
@@ -238,7 +238,7 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
                             kind="drives",
                         )
                     )
-                for target_obj, target_transition in _emitted_transitions(transition):
+                for target_obj, target_transition in _emitted_transitions(model, transition):
                     if target_obj not in phase_objects:
                         continue
                     target = _transition_node_id(target_obj, target_transition)
@@ -1097,7 +1097,7 @@ def _build_timeline_rows(
             next_phase = current_phase
             next_phase_state = current_phase_state
 
-        for target_obj, target_transition in _driven_transitions(transition):
+        for target_obj, target_transition in _driven_transitions(model, transition):
             process_transition(target_obj, target_transition, next_phase, next_phase_state)
 
         states[object_name] = transition.target_state
@@ -1115,7 +1115,7 @@ def _build_timeline_rows(
                 )
             )
 
-        for target_obj, target_transition in _emitted_transitions(transition):
+        for target_obj, target_transition in _emitted_transitions(model, transition):
             process_transition(target_obj, target_transition, next_phase, next_phase_state)
 
     root = _default_transition_target()
@@ -1229,37 +1229,77 @@ def _find_transition(obj, transition_name: str, current_state: str | None) -> Tr
     return None
 
 
-def _driven_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
-    return _driven_transitions_from_body_members(_ordered_body_members(transition.decl))
+def _driven_transitions(
+    model: ObjectModel, transition: TransitionDef
+) -> list[tuple[str, str]]:
+    return _driven_transitions_from_body_members(
+        model, transition, _ordered_body_members(transition.decl)
+    )
 
 
-def _driven_transitions_from_body_members(members) -> list[tuple[str, str]]:
+def _driven_transitions_from_body_members(
+    model: ObjectModel, transition: TransitionDef, members
+) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
     for member in members:
         if member.block is not None and member.kind == "drives":
             driven.extend(_OBJECT_TRANSITION_RE.findall(member.block.body))
+            driven.extend(
+                _resolved_association_transitions(model, transition, member.block.body)
+            )
             continue
         if member.within is not None:
             driven.extend(
                 _driven_transitions_from_body_members(
-                    _ordered_body_members(member.within)
+                    model, transition, _ordered_body_members(member.within)
                 )
             )
     return driven
 
 
-def _emitted_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
+def _emitted_transitions(
+    model: ObjectModel, transition: TransitionDef
+) -> list[tuple[str, str]]:
     emitted: list[tuple[str, str]] = []
     for block in transition.decl.emits:
         for entry, _span in block.entry_spans:
-            match = _LOCAL_TRANSITION_EXPR_RE.match(entry)
+            expression = entry.removeprefix("lossy ").strip()
+            match = _LOCAL_TRANSITION_EXPR_RE.match(expression)
             if match is not None:
                 emitted.append((transition.object_name, match.group(1)))
                 continue
-            match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
+            match = _OBJECT_TRANSITION_EXPR_RE.match(expression)
             if match is not None:
                 emitted.append((match.group(1), match.group(2)))
+                continue
+            emitted.extend(
+                _resolved_association_transitions(model, transition, expression)
+            )
     return emitted
+
+
+_ASSOCIATION_TRANSITION_RE = re.compile(
+    r"\b(self(?:\.[a-z_][A-Za-z0-9_]*)+)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b"
+)
+
+
+def _resolved_association_transitions(
+    model: ObjectModel, transition: TransitionDef, text: str
+) -> list[tuple[str, str]]:
+    resolved: list[tuple[str, str]] = []
+    for receiver, transition_name in _ASSOCIATION_TRANSITION_RE.findall(text):
+        target = transition.object_name
+        for member in receiver.split(".")[1:]:
+            obj = model.objects.get(target)
+            if obj is None:
+                target = ""
+                break
+            target = obj.associations.get(member, "")
+            if not target:
+                break
+        if target in model.objects:
+            resolved.append((target, transition_name))
+    return resolved
 
 
 def _driven_actions(transition: TransitionDef) -> list[tuple[str, str]]:
