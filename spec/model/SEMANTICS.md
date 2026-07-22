@@ -418,6 +418,78 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
 通过 `emits` completion-event 链或显式 `drives` 表达，不得依赖工具隐式补齐
 `Setup`/`Enable`。
 
+## SEM-SIGNAL-TOOLS2-001: First Signal Derivation Is An Isolated Compatibility Semantics
+
+本节只约束 `tools2/` 首期 Signal 工具链，不修改前述 `tools/` 现行 transition/event 推导语义。
+`tools2` 的 `lkm.spec.*` 中间协议必须使用独立 version 并带 `producer: "tools2"`；每个阶段必须拒绝
+producer 或 version 不匹配的输入，不能把老工具 JSON 当成兼容输入。
+
+### Normalization and handling
+
+当前折叠调用 `Receiver.Transition::Name(args)` 或 `Receiver.Action::Name(args)` 规范化为一个 Signal
+envelope：source 是当前响应 owner（根请求默认 `Environment`），target 是解析后的 Receiver，name 是
+`Name`，payload 是按 handler 形参完成类型检查和规范化的命名值。根 CLI 的
+`--signal Target.Name` 直接建立相同 envelope；根 Signal 不允许用 process kind 替代 target/name。
+
+目标对象中同名 Transition 或 Action 是首期兼容 handler。恰好一个 handler 且 owner state 与
+`depends_on` 均满足时才接受 Signal；没有 handler、同名 handler 歧义、owner state 不匹配或任一前提
+不成立均得到 `rejected`。参数缺失、未知参数、重复参数、值类型不匹配、非法引用、规格矛盾或
+invariant 失败属于 `failed`，不能降级为 rejected。Transition handler 成功时提交 target state；
+Action handler 不改变 lifecycle state，只提交其 `ensures` 事实。
+
+首期事实语义只要求精确支持 state equality、受控 fact predicate 和系统引用；scenario 可以在模型
+初态上覆盖 state、fact 和 reference。未实现语法必须在 parse/model 诊断中以 `unsupported` 和
+source span 报告，不能静默删除、按名称猜测或留给 view/render 修正。
+
+### Ordering, rejection and completion
+
+`drives` 是 source-ordered 同步 Signal：目标响应（包括它的同步子响应）结束后，源 handler 才继续。
+任一 strict drives 被拒绝，根推导为 `failed`；lossy drives 被拒绝则记录 `discarded` 并继续。
+
+`emits` 只有在源 handler 的 state/fact 提交并通过 invariant 后，才按 source order 追加到全局 FIFO。
+源响应完成后由调度器逐项取出；每次 enqueue/dequeue 和调度选择都必须写入 trace。strict emits 被
+拒绝使根推导为 `failed`，lossy emits 被拒绝记录 `discarded` 后继续。条件不满足不得产生
+`pending`；首期不建立等待队列、continuation 或未来 Signal 恢复。
+
+Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、lossy 拒绝后的 `discarded`、响应结束的
+`completed`、预算 frontier 的 `truncated` 和根推导的 `complete`/`failed`/`bounded`。`pending` 是
+保留词但首期不可产生。`blocked` 不属于 tools2 核心协议，只能出现在老工具兼容报告。
+
+严格拒绝、类型/规格/invariant 错误必须保留根 Signal 到失败点的完整 `cause_id` 链。失败产物保存
+initial snapshot、每个成功响应边界和 last stable snapshot；已经提交的边界不回滚。derive 只要成功
+写出结构化诊断 JSON 就正常退出；check 仅对 `complete` 返回成功，对 `failed` 和 `bounded` 返回失败。
+
+### Hierarchical propagation budget
+
+每个 Signal envelope 都保存相对根目标的 hierarchy coordinate `(depth, breadth)`。根目标是 `(0, 0)`；
+预算由 `--max-depth` 和 `--max-breadth` 独立限制，默认都是 `3`，显式非负整数表示上限，`all` 表示
+无限。预算在执行目标 handler 前检查；越界 Signal 不执行，记录 `truncated` frontier，根结果为
+`bounded`。failed 优先于 bounded。
+
+坐标从当前 source target 到下一个 target 按 parent 树更新：
+
+- self Signal 不消耗预算；向后代沿每条 parent 边增加 depth，breadth 在换层后重置为 `0`。
+- 向祖先沿 parent 边回退 depth，breadth 在换层后重置为 `0`。
+- 同一 parent 下换到 sibling 增加一次 breadth，depth 不变。
+- 跨分支先退到最近公共祖先，再横移一次进入目标分支，最后沿 parent 边下钻；最终 depth 等于目标
+  相对根目标的 parent 坐标，横移计入该层 breadth，下钻到新层时 breadth 重置。
+- breadth 沿每条因果链独立继承；不同 drives 子调用或 FIFO entries 不争抢全局额度。
+
+目标不在根目标所在 parent 树、parent 缺失或 parent 成环属于模型 `failed`，不能用预算截断掩盖。
+
+### Required derivation records and resumability
+
+`derive.json` 至少包含 root request、model fingerprint、initial snapshot、last stable snapshot、根 verdict、
+Signal envelopes、resolved handler、typed payload、`drives`/`emits` delivery、hierarchy coordinate、全局事件
+顺序、before/after snapshot、cause/response parent、outcome、拒绝/失败原因和 truncated frontier。Signal
+ID 由根请求和稳定因果路径/同级 ordinal 生成，不使用临时目录、进程号或物理行号；同一输入重复运行
+必须得到相同 ID、顺序和 JSON。
+
+只有 `complete` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario` 的 snapshot 基础。
+`failed` 和 `bounded` 都不得导出可续跑 snapshot。`view.json` 只能整理 derive 的结构化字段，不能重新
+执行 guard、改变顺序或从 label 猜 outcome；text renderer 必须展示因果层级、同步等待、异步 FIFO、
+payload、状态/事实变化、拒绝原因、预算 frontier 和完整失败链。
+
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 
 `type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Transition::Setup`、`X.Transition::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”；其中 `Transition::Setup` / `Transition::Enable` 是 lifecycle transition 的迁移期语法，不是外部事件。

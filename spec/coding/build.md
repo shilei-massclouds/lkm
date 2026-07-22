@@ -109,6 +109,11 @@ Targets must remain composable:
 
 A helper script may improve reporting, for example by aggregating test summaries, but it must not make a hidden validation stage impossible to rerun directly.
 
+`tools2` 具有独立的手动入口 `make -C tools2 test`。它不加入仓库根 `make test`、`make verify`、
+`REPORT=graph` 或老 trace/SVG 生成依赖，也不改变根 Makefile 的默认工具选择。首期 tools2 产物只写入
+调用者指定的 work/output path、临时目录或 `tools2/build`/`tools2/out`；老 `tools/build` 和
+`tools/out` 的所有权保持不变。
+
 Checkpoint synchronization is an explicit reviewed workflow: change the mapping or semantic specification, review and update the sibling Linux instrumentation, run `make checkpoints`, then run `make checkpoints-linux-check` before `make difftest`. The read-only `make difftest` entry point must never rewrite source, regenerate tracked checkpoint artifacts or emit/apply a Linux patch.
 
 ## Basic-test configuration boundary

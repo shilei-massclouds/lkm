@@ -1,0 +1,119 @@
+"""tools2 driver: parse -> model -> derive -> check -> view -> render."""
+
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+import sys
+import tempfile
+from pathlib import Path
+from typing import Iterator
+
+
+def _bootstrap() -> None:
+    root = Path(__file__).resolve().parents[3]
+    for name in ("common", "parse", "model", "derive", "check", "view", "render"):
+        source = str(root / name / "src")
+        if source not in sys.path:
+            sys.path.insert(0, source)
+
+
+_bootstrap()
+
+from check_tool.__main__ import main as check_main
+from derive_tool.__main__ import main as derive_main
+from derive_tool.engine import parse_budget
+from model_tool.__main__ import main as model_main
+from parse_tool.__main__ import main as parse_main
+from render_tool.__main__ import main as render_main
+from tools2_common import (
+    PRODUCER,
+    SNAPSHOT_SCHEMA,
+    SNAPSHOT_VERSION,
+    read_json,
+    write_json,
+)
+from view_tool.__main__ import main as view_main
+
+
+@contextmanager
+def _working_directory(path: Path | None) -> Iterator[Path]:
+    if path is not None:
+        path.mkdir(parents=True, exist_ok=True)
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix="lkm-tools2-") as temporary:
+        yield Path(temporary)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the independent tools2 Signal pipeline.")
+    parser.add_argument("spec", type=Path)
+    parser.add_argument("--signal", required=True, help="root Signal as Target.SignalName")
+    parser.add_argument("--source", default="Environment")
+    parser.add_argument("--scenario", type=Path)
+    parser.add_argument("--snapshot-out", type=Path)
+    parser.add_argument("--max-depth", type=parse_budget, default=3, metavar="N|all")
+    parser.add_argument("--max-breadth", type=parse_budget, default=3, metavar="N|all")
+    parser.add_argument("--work-dir", type=Path)
+    parser.add_argument("-o", "--output", type=Path, help="write rendered text")
+    args = parser.parse_args(argv)
+
+    with _working_directory(args.work_dir) as work:
+        ast = work / "ast.json"
+        model = work / "model.json"
+        derivation = work / "derive.json"
+        checked = work / "check.json"
+        view = work / "view.json"
+        rendered = work / "trace.txt"
+        if parse_main([str(args.spec), "-o", str(ast)]) != 0:
+            return 2
+        if model_main([str(ast), "-o", str(model)]) != 0:
+            return 2
+        derive_args = [
+            str(model),
+            "--signal",
+            args.signal,
+            "--source",
+            args.source,
+            "--max-depth",
+            "all" if args.max_depth is None else str(args.max_depth),
+            "--max-breadth",
+            "all" if args.max_breadth is None else str(args.max_breadth),
+            "-o",
+            str(derivation),
+        ]
+        if args.scenario is not None:
+            derive_args.extend(["--scenario", str(args.scenario)])
+        if derive_main(derive_args) != 0:
+            return 2
+        check_exit = check_main([str(derivation), "-o", str(checked)])
+        if check_exit not in {0, 1}:
+            return 2
+        if view_main([str(derivation), "-o", str(view)]) != 0:
+            return 2
+        if render_main([str(view), "--format", "text", "-o", str(rendered)]) != 0:
+            return 2
+        text = rendered.read_text(encoding="utf-8")
+        if args.output is None:
+            sys.stdout.write(text)
+        else:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text, encoding="utf-8")
+        check_data = read_json(checked)
+        if check_data["verdict"] == "complete" and args.snapshot_out is not None:
+            derive_data = read_json(derivation)
+            snapshot = {
+                "schema": SNAPSHOT_SCHEMA,
+                "version": SNAPSHOT_VERSION,
+                "producer": PRODUCER,
+                "source": str(args.spec.resolve()),
+                "model_fingerprint": derive_data["model_fingerprint"],
+                "snapshot": derive_data["last_stable_snapshot"],
+            }
+            write_json(args.snapshot_out, snapshot)
+        return check_exit
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

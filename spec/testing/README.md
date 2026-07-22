@@ -21,6 +21,25 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 单轮 kernel/QEMU 基本测试的配置、七阶段流水线、脚本隔离、退出和结构化结果规则见
 [`basic-tests.md`](basic-tests.md)。
 
+## tools2 Signal 工具链测试
+
+首期 `tools2` 只使用 `tools2/tests/fixtures/` 的最小纵切，不以完整解析 `spec/model/main.spec` 为
+验收条件。独立入口是 `make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
+
+- 每类 schema/version/producer 校验，含 tools2 拒绝老工具协议和老工具不被 tools2 产物误用的边界；
+- Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
+- self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
+- drives 同步 source order、emits post-commit enqueue 与全局 FIFO 调度记录；
+- strict rejected 导致 failed，lossy rejected 得到 discarded，条件不成立永不产生 pending；
+- failed/bounded 不创建 snapshot-out，complete snapshot 可作为下一 scenario 输入；
+- 同一输入重复运行的 Signal ID、事件序号和 canonical JSON 完全稳定；
+- view 不重新推导，text 能从根 Signal 还原 rejected/failed/truncated 的完整因果链。
+- `tools2/pyveri2 -t` 能从仓库根和其它当前目录启动默认 fixture，`-s` 能把 complete snapshot 作为
+  scenario 续跑，且退出码与底层 driver 一致。
+
+focused test 可用于开发，但最终必须依次运行 tools2 focused、`make -C tools2 test`、老工具静态 trace/SVG
+生成和 `git diff --check`，再从仓库根目录以不包装、不重定向的直接 `make test` 完成回归门禁。
+
 ## 测试生成元规则
 
 测试用例生成还受 [`../guidance/main.spec`](../guidance/main.spec) 的上层元规则约束。AI 或其它代码生成器生成测试用例时必须按三步执行：

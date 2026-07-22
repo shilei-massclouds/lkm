@@ -25,7 +25,7 @@ Markdown 中用于评审追踪，但不再是 pyveri predicate。根目录 `make
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
 2. `mapping.md`：对象、状态、事件、checkpoint 和源码落点的通用映射规则。
 3. `phase-paradigm.md`：Phase 的四状态、父子 continuation、`emits` 和 checkpoint 映射。
-4. `build.md`、`riscv64.md`、`rust.md`：构建、架构和语言映射规则。
+4. `build.md`、`tools2.md`、`riscv64.md`、`rust.md`：构建、独立 Signal 工具链、架构和语言映射规则。
 5. `projects/kernel.md`、`systems/kernel.md`：project/system 层级映射。
 6. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
 7. `arceos_ex.md`：当前目标内核的 coding 索引。
@@ -145,6 +145,7 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的权威映射规则。
 - `phase-paradigm.md`：阶段 model 到状态、continuation、迁移链和 checkpoint 的专用映射规则。
 - `build.md`：构建入口、`make disk`、QEMU 设备、payload 选择、外部工具和脚本失败行为的说明性约束。
+- `tools2.md`：首期独立 Signal 工具链的包边界、中间协议、CLI 和实现责任。
 - `arceos_ex.md`：`arceos_ex` coding 索引入口，链接 system、phase、object 和实现说明。
 - `objects/README.md`：`spec/model/objects/*.spec` 的逐文件 coding 覆盖表；共享专题必须在表中明确归属。
 - `projects/rootfs-image.md`：rootfs 镜像构造与 fixture overlay 的权威项目规则。

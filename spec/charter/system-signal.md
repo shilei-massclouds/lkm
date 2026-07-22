@@ -57,6 +57,42 @@ formal semantics 和工具更新前直接按新语法解释。异步发送的交
 
 每种类型信号可以定义自己的附加信息，随着信号发送。目标系统决定如何处理附加信息。
 
+## Signal 响应与首期工具边界
+
+一次 Signal 响应从目标系统接收具名 Signal 开始，到该系统的 handler 完成、拒绝或因推导错误失败
+为止。Signal envelope 与响应过程是不同对象：envelope 保存稳定身份、源、目标、名称、类型化
+payload、严格性和因果关系；handler 才是目标系统内部执行的 `Transition` 或 `Action`。Transition
+handler 可以提交生命周期状态，Action handler 只能提交规格允许的事实，不能借 Signal 调用伪造状态
+迁移。
+
+首期 Signal 推导工具采用下列兼容边界：
+
+- 当前 `Target.Transition::Name(...)` 和 `Target.Action::Name(...)` 规范化为发往 `Target` 的隐式
+  `Name` Signal，原调用参数成为 payload；目标暂以同名 Transition/Action 作为兼容 handler。
+- `drives` 同步发送并等待目标响应结束；`emits` 只在源响应提交后投递，并按全局 FIFO 处理。
+- parent 只定义推导传播的层级坐标和预算，不产生隐式冒泡、广播或 handler 继承。
+- 首期不引入显式 `signal`/`on Signal` 语法，不把 handler 改名为 `OnName`，也不实现等待未来
+  Signal 的 continuation；这些都必须作为后续独立模型变更完成。
+
+响应结果必须使用明确分类：
+
+- `rejected`：目标在当前稳定快照不接受 Signal，包括没有 handler、handler 歧义、状态不匹配或
+  接收条件不成立。
+- `discarded`：lossy Signal 被拒绝后立即丢弃，不重试，也不等待未来状态。
+- `failed`：规格、类型、推导或 invariant 失败，或者 strict Signal 被拒绝导致根请求失败。
+- `truncated`：下一次传播超出显式预算，因此不执行 frontier Signal。
+- `completed`：响应和其同步子响应完成；其异步 Signal 已按规则进入 FIFO。
+- `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但首期工具不得产生它。
+
+条件不成立只表示本次接收被拒绝，不得猜测为临时等待。严格拒绝的诊断必须保留从根 Signal 到拒绝
+点的完整因果链；lossy 丢弃和预算截断也必须是 trace 中可见的事实，而不是展示层推断。
+
+首期 `tools2/` 是验证上述目标语义的独立实验工具链。它可以复用老工具的阶段名称和 CLI 外壳，
+但不导入 `tools/` 的实现或中间协议代码；两套工具通过路径、独立 Python import path、producer 和
+schema version 隔离。老 `tools/` 继续承担默认 `make test`、当前主模型推导和静态 trace/SVG，
+`tools2/` 只提供手动入口。老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认，
+不得由首期实现自动触发。
+
 ## 通用分析方法
 
 按照信号的传导顺序分析和建立系统模型，具体顺序：

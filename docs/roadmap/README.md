@@ -16,3 +16,4 @@
 - [IRQ / console / TTY 历史](irq-console-tty.md)
 - [阶段范式四层一致性审计](phase-paradigm-audit.md)
 - [Deferred / Trimmed 结构化治理审计](deferred-trimmed-audit.md)
+- [Signal-driven tools2 独立工具链](signal-driven-tools2.md)

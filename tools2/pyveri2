@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Short command-line entry for the isolated tools2 Signal driver."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+
+TOOLS2_ROOT = Path(__file__).resolve().parent
+DEFAULT_SPEC = TOOLS2_ROOT / "tests" / "fixtures" / "pipeline.spec"
+
+
+def _bootstrap() -> None:
+    for name in ("common", "parse", "model", "derive", "check", "view", "render", "pyveri"):
+        source = str(TOOLS2_ROOT / name / "src")
+        if source not in sys.path:
+            sys.path.insert(0, source)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="tools2/pyveri2",
+        description="Run the tools2 Signal pipeline with short experiment options.",
+    )
+    parser.add_argument("-t", "--trigger", required=True, help="Signal trigger as Target.SignalName")
+    parser.add_argument("-s", "--scenario", type=Path, help="scenario or tools2 snapshot JSON")
+    parser.add_argument(
+        "-f",
+        "--spec",
+        type=Path,
+        default=DEFAULT_SPEC,
+        help=f"input .spec file; default: {DEFAULT_SPEC.relative_to(TOOLS2_ROOT.parent)}",
+    )
+    parser.add_argument("--source", default="Environment", help="Signal source; default: Environment")
+    parser.add_argument("--max-depth", default="3", metavar="N|all")
+    parser.add_argument("--max-breadth", default="3", metavar="N|all")
+    parser.add_argument("--work-dir", type=Path, help="retain stage JSON in this directory")
+    parser.add_argument("--snapshot-out", type=Path, help="write a resumable snapshot on complete")
+    parser.add_argument("-o", "--output", type=Path, help="write rendered text instead of stdout")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    _bootstrap()
+    from pyveri.__main__ import main as driver_main
+
+    driver_args = [
+        str(args.spec),
+        "--signal",
+        args.trigger,
+        "--source",
+        args.source,
+        "--max-depth",
+        args.max_depth,
+        "--max-breadth",
+        args.max_breadth,
+    ]
+    if args.scenario is not None:
+        driver_args.extend(["--scenario", str(args.scenario)])
+    if args.work_dir is not None:
+        driver_args.extend(["--work-dir", str(args.work_dir)])
+    if args.snapshot_out is not None:
+        driver_args.extend(["--snapshot-out", str(args.snapshot_out)])
+    if args.output is not None:
+        driver_args.extend(["-o", str(args.output)])
+    return driver_main(driver_args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
