@@ -3797,15 +3797,18 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 子 Project 分别建立平台、OpenSBI、Kernel 规格并构造各自产物，最终停在 Ready，不执行 Enable。
 
 静态归属如下：`Riscv64.parent = HardwareProject`；`SbiSpec`、`BootArgs.parent = FirmwareProject`；
-`Config`、`Lds.parent = KernelProject`。`BootHartContext` 虽由 HardwareProject.Setup 构造，却是
-`Riscv64Platform` 的运行子系统。Riscv64 只保存外部 ISA 能力；boot hart 的可变 GPR/CSR 全部属于
-BootHartContext。BootArgs 是 FirmwareProject 决定的只读 ABI 产物，不由入口寄存器反向定义。
+`Config`、`Lds.parent = KernelProject`。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
+启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
+HardwareProject 构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
+FirmwareProject 决定的只读 ABI 产物，不由入口寄存器反向定义。
 
 ComputerProject.Setup 在三个子 Project Ready 后建立 `Computer` 已由 `Riscv64Platform`、`OpenSBI`、
 `Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Preset`；其 Online
 表示启动已经交接，不表示异步下游已经全部 Online。
 
-系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`，其中
-`BootHartContext.parent = Riscv64Platform`。Computer 自身三阶段完成后 emits Riscv64Platform.Preset；
-平台三阶段同步推进 BootHartContext 后 emits OpenSBI.Preset；OpenSBI 三阶段完成并令 handoff 寄存器
-与 BootArgs 一致后 emits Kernel.Preset。Kernel 保持现有到 BootInitFlow 的后续语义。
+系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；Kernel 下的启动 CPU 局部层级为
+`BootCurrentCPU -> BootCPU -> BootCpuRegisters`。Computer 自身三阶段完成后 emits
+Riscv64Platform.Preset；平台独立完成 Preset、Setup、Enable 自连锁后 emits OpenSBI.Preset；
+OpenSBI.Enable 精确建立 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
+`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Preset。其余启动相关寄存器由 Kernel 入口阶段
+逐步更新；Kernel 保持现有到 BootInitFlow 的后续语义。

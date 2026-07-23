@@ -12,8 +12,8 @@
 只读静态 ABI 产物，parent 同样是 `FirmwareProject`；`boot_hartid` 与 `dtb_pa` 在工程 Setup 时决定，
 不由 `Riscv64.a0/a1` 或 Kernel 入口反向定义。
 
-运行时 `OpenSBI.Enable` 负责使 `BootHartContext.a0/a1` 与已 Online 的 `BootArgs` 一致，再向 Kernel
-发送启动信号。
+运行时 `OpenSBI.Enable` 负责使 `BootCpuRegisters.a0/a1` 与已 Online 的 `BootArgs` 一致，再向
+Kernel 发送启动信号；它不承诺其它启动相关寄存器已经准备完成。
 
 ## Mapping
 

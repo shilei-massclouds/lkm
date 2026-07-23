@@ -560,12 +560,12 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertIsNone(objects["Computer"]["parent"])
             self.assertEqual(kernel["parent"], "Computer")
-            self.assertEqual(
-                objects["Riscv64Platform"]["children"], ["BootHartContext"]
-            )
+            self.assertEqual(objects["Riscv64Platform"]["children"], [])
             self.assertEqual(objects["Riscv64"]["attrs"], {})
+            self.assertEqual(objects["BootCpuRegisters"]["parent"], "BootCPU")
+            self.assertEqual(objects["BootCpuRegisters"]["initial_state"], "Online")
             self.assertEqual(
-                set(objects["BootHartContext"]["attrs"]),
+                set(objects["BootCpuRegisters"]["attrs"]),
                 {
                     "a0",
                     "a1",
@@ -594,13 +594,38 @@ class ModelToolTests(unittest.TestCase):
                     entry["text"]
                     for block in opensbi["states"]["Ready"]["transitions"][
                         "Enable"
+                    ]["may_change"]
+                    for entry in block["entries"]
+                ],
+                ["BootCpuRegisters.a0", "BootCpuRegisters.a1"],
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in opensbi["states"]["Ready"]["transitions"][
+                        "Enable"
                     ]["ensures"]
                     for entry in block["entries"][:2]
                 ],
                 [
-                    "BootHartContext.a0 == BootArgs.boot_hartid",
-                    "BootHartContext.a1 == BootArgs.dtb_pa",
+                    "BootCpuRegisters.a0 == BootArgs.boot_hartid",
+                    "BootCpuRegisters.a1 == BootArgs.dtb_pa",
                 ],
+            )
+            for state_name in ("Base", "Prepared", "Ready"):
+                for transition in objects["Riscv64Platform"]["states"][state_name][
+                    "transitions"
+                ].values():
+                    self.assertFalse(transition["drives"])
+            hardware_setup = objects["HardwareProject"]["states"]["Prepared"][
+                "transitions"
+            ]["Setup"]
+            self.assertFalse(
+                any(
+                    "BootCpuRegisters" in entry["text"]
+                    for block in hardware_setup["ensures"]
+                    for entry in block["entries"]
+                )
             )
             self.assertIn("BootTask", kernel["children"])
             self.assertEqual(objects["BootTask"]["initial_state"], "Ready")
@@ -626,6 +651,20 @@ class ModelToolTests(unittest.TestCase):
             self.assertNotIn("BootPhase", objects)
             self.assertNotIn("InterruptPhase", objects)
             kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
+            kernel_dependencies = [
+                entry["text"]
+                for block in kernel_preset["depends_on"]
+                for entry in block["entries"]
+            ]
+            self.assertIn(
+                "BootCpuRegisters.a0 == BootArgs.boot_hartid", kernel_dependencies
+            )
+            self.assertIn(
+                "BootCpuRegisters.a1 == BootArgs.dtb_pa", kernel_dependencies
+            )
+            self.assertNotIn(
+                "BootCpuRegisters.state == State::Online", kernel_dependencies
+            )
             kernel_setup = kernel["states"]["Prepared"]["transitions"]["Setup"]
             boot_init_preset = objects["BootInitFlow"]["states"]["Base"][
                 "transitions"
@@ -718,7 +757,7 @@ class ModelToolTests(unittest.TestCase):
                 ["Transition::Setup"],
             )
             self.assertIn(
-                "BootHartContext.stvec == phys_addr(EventStream.early_event_entry)",
+                "BootCpuRegisters.stvec == phys_addr(EventStream.early_event_entry)",
                 [
                     entry["text"]
                     for block in event_preset["ensures"]

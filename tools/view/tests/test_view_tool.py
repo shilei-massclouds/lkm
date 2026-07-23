@@ -80,7 +80,8 @@ class ViewToolTests(unittest.TestCase):
                         ("Computer", "Riscv64Platform"),
                         ("Computer", "OpenSBI"),
                         ("Computer", "Kernel"),
-                        ("Riscv64Platform", "BootHartContext"),
+                        ("BootCurrentCPU", "BootCPU"),
+                        ("BootCPU", "BootCpuRegisters"),
                     )
                 )
             )
@@ -197,11 +198,10 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "FirmwareProject" for row in rows))
             self.assertTrue(any(row["phase"] == "KernelProject" for row in rows))
-            self.assertTrue(any(row["phase"] == "Riscv64Platform" for row in rows))
-            self.assertTrue(
+            self.assertFalse(any(row["phase"] == "Riscv64Platform" for row in rows))
+            self.assertFalse(
                 any(
-                    item["object_name"] == "BootHartContext"
-                    and item["detail"] == "State::Online"
+                    item["object_name"] == "BootCpuRegisters"
                     for row in rows
                     for item in row["items"]
                 )
@@ -265,17 +265,21 @@ class ViewToolTests(unittest.TestCase):
                 for cell in metadata["trace_cells"]
                 if cell["label"] == "BootTask.State::Online"
             )
-            boot_hart_context_cell = next(
+            boot_cpu_registers_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["label"] == "BootHartContext.State::Online"
+                if cell["label"] == "BootCpuRegisters.State::Online"
+            )
+            boot_cpu_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["label"] == "BootCPU.State::Online"
             )
             self.assertEqual(
-                boot_hart_context_cell["column"], riscv64_cell["column"]
+                boot_cpu_registers_cell["column"], boot_cpu_cell["column"]
             )
-            self.assertEqual(
-                boot_task_cell["column"], boot_hart_context_cell["column"]
-            )
+            self.assertNotEqual(boot_task_cell["column"], boot_cpu_registers_cell["column"])
+            self.assertNotEqual(riscv64_cell["column"], boot_cpu_registers_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"

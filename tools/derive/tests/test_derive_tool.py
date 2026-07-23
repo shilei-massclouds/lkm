@@ -322,8 +322,17 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["states"]["Lds"], "Online")
             self.assertEqual(data["states"]["Computer"], "Online")
             self.assertEqual(data["states"]["Riscv64Platform"], "Online")
-            self.assertEqual(data["states"]["BootHartContext"], "Online")
+            self.assertEqual(data["states"]["BootCpuRegisters"], "Online")
             self.assertEqual(data["states"]["OpenSBI"], "Online")
+            self.assertTrue(
+                any(
+                    record["expression"] == "attrs_accessible(self)"
+                    and record.get("object") == "BootCpuRegisters"
+                    and record["proof_class"] == "architecture_register_file"
+                    and record["proof_provider"] == "boot_cpu_register_subset"
+                    for record in data["records"]
+                )
+            )
             self.assertNotIn("OpenSbi" + "Firmware", data["states"])
             self.assertEqual(data["states"]["Kernel"], "Online")
             self.assertIn("locks", data["model"])
@@ -764,7 +773,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
+                    == "BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -772,7 +781,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
+                    record["expression"] == "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -780,7 +789,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
+                    record["expression"] == "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -788,7 +797,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
+                    record["expression"] == "BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -1221,7 +1230,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)"
+                    == "inside(BootCpuRegisters.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)"
                     and record["proof_class"] == "stack_layout"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved

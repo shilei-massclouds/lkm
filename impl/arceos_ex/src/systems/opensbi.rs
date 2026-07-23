@@ -1,4 +1,7 @@
 //! Metadata-only mapping for the runtime `OpenSBI` system.
+//!
+//! Its handoff determines only `BootCpuRegisters.a0/a1`; the remaining entry
+//! registers are updated by the kernel's existing assembly path.
 
 use super::{MappingStatus, SpecPath, SystemMapping};
 

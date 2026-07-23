@@ -5,13 +5,14 @@
 ## Lifecycle and products
 
 - Preset 采纳外部 RISC-V ISA 标准 `Riscv64`，建立 `Riscv64Platform` 系统规格，然后停在 Prepared。
-- Setup 构造 `Riscv64Platform` 及其处于 Base 的 `BootHartContext`，然后停在 Ready。
+- Setup 构造 `Riscv64Platform`，然后停在 Ready。
 
 `Riscv64` 是只读的外部 ISA 规格，parent 是 `HardwareProject`。它只描述 ISA 能力，不保存某个 hart
 启动过程中的 `a0/a1/sp/tp/gp` 或 supervisor CSR。
 
-`BootHartContext` 保存 boot hart 的可变 GPR/CSR，parent 是运行系统 `Riscv64Platform`；它由
-`HardwareProject.Setup` 构造，但只在平台收到启动信号后随平台三个阶段推进。
+`BootCpuRegisters` 表示 boot CPU 天然存在的启动相关 GPR/CSR 子集，parent 是 `BootCPU`，初态直接为
+Online。HardwareProject 不构造或推进该对象；Online 只保证寄存器属性可访问，不为尚未由固件或内核
+确定的寄存器合成值。
 
 ## Mapping
 

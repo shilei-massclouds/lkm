@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
   <title id="title">独立的工程树与运行系统树</title>
-  <desc id="desc">ComputerProject 拥有三个 Project；Computer 拥有三个运行系统，BootHartContext 属于 Riscv64Platform。</desc>
+  <desc id="desc">ComputerProject 拥有三个 Project；Computer 拥有三个运行系统；BootCpuRegisters 属于 Kernel 下的 BootCPU。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
@@ -66,18 +66,23 @@
   <rect class="system" x="995" y="255" width="160" height="64" rx="12"/>
   <text class="label" x="1075" y="287">Kernel</text>
 
-  <path class="edge" d="M725 319 V385"/>
-  <rect class="artifact" x="645" y="385" width="160" height="52" rx="10"/>
-  <text class="label" x="725" y="411">BootHartContext</text>
+  <path class="edge" d="M1075 319 V350"/>
+  <rect class="system" x="995" y="350" width="160" height="46" rx="10"/>
+  <text class="label" x="1075" y="373">BootCurrentCPU</text>
+  <path class="edge" d="M1075 396 V420"/>
+  <rect class="system" x="995" y="420" width="160" height="46" rx="10"/>
+  <text class="label" x="1075" y="443">BootCPU</text>
+  <path class="edge" d="M1075 466 V490"/>
+  <rect class="artifact" x="995" y="490" width="160" height="46" rx="10"/>
+  <text class="label" x="1075" y="513">BootCpuRegisters</text>
 
-  <path class="assembly" d="M725 470 H900"/>
-  <path class="assembly" d="M900 470 H1075"/>
-  <text class="handoff" x="900" y="458">异步 Startup FIFO</text>
-  <text class="note" x="900" y="505">Computer → Riscv64Platform → OpenSBI → Kernel</text>
-  <text class="note" x="900" y="533">平台三个阶段同步推进 BootHartContext</text>
-  <text class="note" x="900" y="561">Kernel.Startup canonicalize 为 Kernel.Preset</text>
+  <path class="assembly" d="M725 565 H900"/>
+  <path class="assembly" d="M900 565 H1075"/>
+  <text class="handoff" x="900" y="553">异步 Startup FIFO</text>
+  <text class="note" x="900" y="600">Computer → Riscv64Platform → OpenSBI → Kernel</text>
+  <text class="note" x="900" y="628">平台独立推进；OpenSBI 只确定交接 a0/a1</text>
 
-  <path class="assembly" d="M475 437 C560 585, 650 585, 725 437"/>
+  <path class="assembly" d="M125 437 C390 585, 570 535, 725 319"/>
   <path class="assembly" d="M300 437 C500 630, 745 630, 900 319"/>
   <path class="assembly" d="M475 437 C650 600, 900 600, 1075 319"/>
   <text class="handoff" x="600" y="654">静态规格/构造映射；不是运行时 ownership</text>

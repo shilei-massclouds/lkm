@@ -43,13 +43,15 @@ class ModelBuilderTests(unittest.TestCase):
                 "Kernel",
             ],
         )
-        self.assertEqual(result.model.children["Riscv64Platform"], ["BootHartContext"])
+        self.assertEqual(result.model.children["Riscv64Platform"], [])
         self.assertEqual(result.model.children["KernelProject"], ["Config", "Lds"])
         self.assertEqual(result.model.objects["Kernel"].parent, "Computer")
         self.assertEqual(result.model.objects["Computer"].parent, None)
         self.assertEqual(result.model.objects["Riscv64"].attrs, {})
+        self.assertEqual(result.model.objects["BootCpuRegisters"].parent, "BootCPU")
+        self.assertEqual(result.model.objects["BootCpuRegisters"].initial_state, "Online")
         self.assertEqual(
-            list(result.model.objects["BootHartContext"].attrs),
+            list(result.model.objects["BootCpuRegisters"].attrs),
             ["a0", "a1", "sp", "tp", "gp", "sstatus", "sie", "sip", "stvec", "sscratch", "satp"],
         )
         self.assertEqual(
@@ -89,7 +91,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Computer -> Riscv64Platform [parent]", text)
         self.assertIn("Computer -> OpenSBI [parent]", text)
         self.assertIn("Computer -> Kernel [parent]", text)
-        self.assertIn("Riscv64Platform -> BootHartContext [parent]", text)
+        self.assertIn("BootCurrentCPU -> BootCPU [parent]", text)
+        self.assertIn("BootCPU -> BootCpuRegisters [parent]", text)
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
         self.assertIn("BootInitFlow -> EntryPreludePhase [parent]", text)
         self.assertNotIn("drives", text)
@@ -125,6 +128,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  -> Riscv64Platform.Preset [emits]", text)
         self.assertIn("Riscv64Platform.Enable", text)
         self.assertIn("  -> OpenSBI.Preset [emits]", text)
+        self.assertNotIn("-> BootCpuRegisters.", text)
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Preset [emits]", text)
         self.assertIn("Kernel.Preset", text)
@@ -176,8 +180,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("KernelProject: ready (State::Ready)", text)
         self.assertIn("  - Config.State::Online", text)
         self.assertIn("  - Lds.State::Online", text)
-        self.assertIn("Riscv64Platform: online (State::Online)", text)
-        self.assertIn("  - BootHartContext.State::Online", text)
         self.assertIn("Kernel: prepared (State::Prepared)", text)
         self.assertNotIn("Kernel: ready", text)
         self.assertIn("<svg", svg)
@@ -188,8 +190,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("PayloadPreparePhase", svg)
         self.assertIn("FirmwareProject", svg)
         self.assertIn("KernelProject", svg)
-        self.assertIn("Riscv64Platform", svg)
-        self.assertIn("BootHartContext", svg)
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
         document = parse_text(

@@ -108,7 +108,7 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "BootArgs": ("firmware_boot_abi", "firmware_project_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
     "Riscv64": ("architecture_capabilities", "riscv_isa_spec_candidate"),
-    "BootHartContext": ("architecture_register_file", "platform_context_candidate"),
+    "BootCpuRegisters": ("architecture_register_file", "boot_cpu_register_subset"),
     "BootTask": ("static_object_binding", "linker_symbol_candidate"),
     "EventStream": ("static_entry_symbol_binding", "linker_symbol_candidate"),
     "TrampolineVm": ("static_page_table_binding", "linker_symbol_candidate"),
@@ -303,6 +303,14 @@ _EXTERNAL_SOURCE_PROOFS = {
     ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
         "architecture_capabilities",
         "riscv_isa_spec",
+    ),
+    (
+        "BootCpuRegisters",
+        "hardware::boot_cpu_registers",
+        "attrs_accessible(self)",
+    ): (
+        "architecture_register_file",
+        "boot_cpu_register_subset",
     ),
     (
         "Riscv64",
@@ -667,11 +675,11 @@ _RELATION_PROOFS = {
         "stack_layout",
         "config_and_linker_candidate",
     ),
-    "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+    "inside(BootCpuRegisters.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
         "stack_layout",
         "prior_derivation_facts",
     ),
-    "inside(BootHartContext.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
         "stack_layout",
         "prior_derivation_facts",
     ),
@@ -695,55 +703,55 @@ _RELATION_PROOFS = {
         "fixmap_layout",
         "config_source_candidate",
     ),
-    "BootHartContext.sie == 0": (
+    "BootCpuRegisters.sie == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.sip == 0": (
+    "BootCpuRegisters.sip == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.stvec == phys_addr(EventStream.early_event_entry)": (
+    "BootCpuRegisters.stvec == phys_addr(EventStream.early_event_entry)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.sscratch == 0": (
+    "BootCpuRegisters.sscratch == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.tp == phys_addr(BootTask.storage)": (
+    "BootCpuRegisters.tp == phys_addr(BootTask.storage)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)": (
+    "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.gp == phys_addr(Lds.global_pointer)": (
+    "BootCpuRegisters.gp == phys_addr(Lds.global_pointer)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)": (
+    "BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode)": (
+    "BootCpuRegisters.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -5557,11 +5565,11 @@ _PRIOR_FACT_PROOFS = {
             "trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)",
         },
     ),
-    "valid_task_ref(BootHartContext.tp)": (
+    "valid_task_ref(BootCpuRegisters.tp)": (
         "object_storage",
         {
-            "BootHartContext.tp == phys_addr(BootTask.storage)",
-            "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.tp == phys_addr(BootTask.storage)",
+            "BootCpuRegisters.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
         },
     ),
     "valid_task_storage(BootTask.storage)": (
@@ -5570,23 +5578,23 @@ _PRIOR_FACT_PROOFS = {
             "valid_object_storage(storage)",
         },
     ),
-    "valid_stack_pointer(BootHartContext.sp)": (
+    "valid_stack_pointer(BootCpuRegisters.sp)": (
         "architecture_state",
         {
-            "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
-            "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
         },
     ),
-    "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+    "inside(BootCpuRegisters.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
         "stack_layout",
         {
-            "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+            "BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
         },
     ),
-    "inside(BootHartContext.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootCpuRegisters.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
         "stack_layout",
         {
-            "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootCpuRegisters.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
         },
     ),
 }

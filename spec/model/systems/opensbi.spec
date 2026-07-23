@@ -52,7 +52,6 @@ object OpenSBI: FirmwareObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64Platform.state == State::Online;
-                    BootHartContext.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     kernel_image_constructed();
@@ -68,9 +67,14 @@ object OpenSBI: FirmwareObject {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
+                may_change {
+                    BootCpuRegisters.a0;
+                    BootCpuRegisters.a1;
+                }
+
                 ensures {
-                    BootHartContext.a0 == BootArgs.boot_hartid;
-                    BootHartContext.a1 == BootArgs.dtb_pa;
+                    BootCpuRegisters.a0 == BootArgs.boot_hartid;
+                    BootCpuRegisters.a1 == BootArgs.dtb_pa;
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
                 }
@@ -86,7 +90,8 @@ object OpenSBI: FirmwareObject {
         invariant {
             SbiSpec.state == State::Online;
             BootArgs.state == State::Online;
-            BootHartContext.state == State::Online;
+            BootCpuRegisters.a0 == BootArgs.boot_hartid;
+            BootCpuRegisters.a1 == BootArgs.dtb_pa;
             Lds.state == State::Online;
             Config.state == State::Online;
             ordered_booting_enabled();

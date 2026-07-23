@@ -30,7 +30,8 @@
 属于 `Kernel`，但具名 `Computer` 是系统树显式根，绝不能应用该默认。
 
 工程树是 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`；系统树是
-`Computer -> {Riscv64Platform, OpenSBI, Kernel}`，且 `BootHartContext.parent = Riscv64Platform`。
+`Computer -> {Riscv64Platform, OpenSBI, Kernel}`。启动 CPU 的局部层级片段是
+`BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器对象不属于 `Riscv64Platform`。
 工程产物通过显式 parent 归属对应 Project，运行系统不挂在 Project 下。不包含 `Kernel` 的独立规格
 片段保持自己的根，工具不得为了凑齐主模型层级而虚构 Kernel。
 有效层级只用于结构展示、Signal 坐标和预算；它仍不产生隐式冒泡、广播或 handler 继承。未知

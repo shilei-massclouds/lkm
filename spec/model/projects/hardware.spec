@@ -3,7 +3,6 @@
 predicate riscv64_isa_capabilities_available() -> bool;
 predicate riscv64_platform_system_spec_established() -> bool;
 predicate riscv64_platform_constructed() -> bool;
-predicate boot_hart_context_constructed() -> bool;
 
 object Riscv64: IsaObject {
     initial_state: State::Online;
@@ -46,7 +45,6 @@ object HardwareProject: ProjectObject {
             on Transition::Setup -> State::Ready {
                 ensures {
                     riscv64_platform_constructed();
-                    boot_hart_context_constructed();
                 }
             }
         }
@@ -57,7 +55,6 @@ object HardwareProject: ProjectObject {
             Riscv64.state == State::Online;
             riscv64_platform_system_spec_established();
             riscv64_platform_constructed();
-            boot_hart_context_constructed();
         }
     }
 }

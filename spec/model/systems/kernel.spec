@@ -37,8 +37,9 @@ object Kernel: KernelObject {
                     SbiSpec.state == State::Online;
                     BootArgs.state == State::Online;
                     Riscv64Platform.state == State::Online;
-                    BootHartContext.state == State::Online;
                     OpenSBI.state == State::Online;
+                    BootCpuRegisters.a0 == BootArgs.boot_hartid;
+                    BootCpuRegisters.a1 == BootArgs.dtb_pa;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                 }

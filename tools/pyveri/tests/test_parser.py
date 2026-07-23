@@ -387,7 +387,8 @@ class ParserTests(unittest.TestCase):
         self.assertIn("Riscv64Platform", object_names)
         self.assertIn("OpenSBI", object_names)
         self.assertIn("Kernel", object_names)
-        self.assertIn("BootHartContext", object_names)
+        self.assertIn("BootCpuRegisters", object_names)
+        self.assertNotIn("Boot" + "HartContext", object_names)
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
 

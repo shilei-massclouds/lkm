@@ -1,4 +1,7 @@
 //! Metadata-only mapping for the runtime `Riscv64Platform` system.
+//!
+//! The platform lifecycle is independent of the BootCPU-owned
+//! `BootCpuRegisters`; register updates remain in the real entry path.
 
 use super::{MappingStatus, SpecPath, SystemMapping};
 

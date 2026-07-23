@@ -567,7 +567,7 @@ class DerivationTests(unittest.TestCase):
         self.assertEqual(derivation.states["Lds"], "Online")
         self.assertEqual(derivation.states["Computer"], "Online")
         self.assertEqual(derivation.states["Riscv64Platform"], "Online")
-        self.assertEqual(derivation.states["BootHartContext"], "Online")
+        self.assertEqual(derivation.states["BootCpuRegisters"], "Online")
         self.assertEqual(derivation.states["OpenSBI"], "Online")
         self.assertNotIn("OpenSbi" + "Firmware", derivation.states)
         self.assertEqual(derivation.states["Kernel"], "Online")

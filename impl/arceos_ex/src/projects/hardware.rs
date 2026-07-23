@@ -1,4 +1,7 @@
 //! Metadata mapping for the `HardwareProject` engineering product.
+//!
+//! `BootCpuRegisters` is naturally present under `BootCPU`; this project does
+//! not construct or own that CPU-local register object.
 
 use super::{MappingStatus, ProjectMapping, SpecPath};
 

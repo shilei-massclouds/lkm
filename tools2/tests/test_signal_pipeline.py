@@ -1710,11 +1710,8 @@ class SignalPipelineTests(unittest.TestCase):
                     ("Computer", "Computer", "Setup"),
                     ("Computer", "Computer", "Enable"),
                     ("Computer", "Riscv64Platform", "Preset"),
-                    ("Riscv64Platform", "BootHartContext", "Preset"),
                     ("Riscv64Platform", "Riscv64Platform", "Setup"),
-                    ("Riscv64Platform", "BootHartContext", "Setup"),
                     ("Riscv64Platform", "Riscv64Platform", "Enable"),
-                    ("Riscv64Platform", "BootHartContext", "Enable"),
                     ("Riscv64Platform", "OpenSBI", "Preset"),
                     ("OpenSBI", "OpenSBI", "Setup"),
                     ("OpenSBI", "OpenSBI", "Enable"),
@@ -1739,7 +1736,7 @@ class SignalPipelineTests(unittest.TestCase):
                         "Lds",
                         "Computer",
                         "Riscv64Platform",
-                        "BootHartContext",
+                        "BootCpuRegisters",
                         "OpenSBI",
                         "Kernel",
                     )
@@ -1753,13 +1750,21 @@ class SignalPipelineTests(unittest.TestCase):
                     "Lds": "Online",
                     "Computer": "Online",
                     "Riscv64Platform": "Online",
-                    "BootHartContext": "Online",
+                    "BootCpuRegisters": "Online",
                     "OpenSBI": "Online",
                     "Kernel": "Base",
                 },
             )
             self.assertIn(
                 "computer_assembled_from(Riscv64Platform,OpenSBI,Kernel)",
+                derivation["boundary"]["snapshot"]["facts"],
+            )
+            self.assertIn(
+                "assert:BootCpuRegisters.a0 == BootArgs.boot_hartid",
+                derivation["boundary"]["snapshot"]["facts"],
+            )
+            self.assertIn(
+                "assert:BootCpuRegisters.a1 == BootArgs.dtb_pa",
                 derivation["boundary"]["snapshot"]["facts"],
             )
             saved = read_json(snapshot)
@@ -1805,7 +1810,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(normal_states["Lds"], "Online")
             self.assertEqual(normal_states["Computer"], "Online")
             self.assertEqual(normal_states["Riscv64Platform"], "Online")
-            self.assertEqual(normal_states["BootHartContext"], "Online")
+            self.assertEqual(normal_states["BootCpuRegisters"], "Online")
             self.assertEqual(normal_states["OpenSBI"], "Online")
 
             resumed_work = root / "kernel-resumed"

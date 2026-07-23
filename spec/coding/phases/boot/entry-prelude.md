@@ -13,7 +13,9 @@
 
 进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel、BootTask、BootInitFlow 和
 EntryPrelude 的入口边界。EntryPrelude adoption 必须检查自身精确 Base 以及 model 的
-Riscv64、SbiSpec、BootArgs、BootHartContext、OpenSBI、Lds、Config 依赖；不得再次输出早期 checkpoint。
+Riscv64、SbiSpec、BootArgs、OpenSBI、Lds、Config 依赖、只表示属性可访问的
+`BootCpuRegisters.Online` 和 `a0/a1` 的精确交接事实；不得要求整组寄存器已经具有 Kernel 最终值，也
+不得再次输出早期 checkpoint。
 
 ## Preset: Base -> Prepared
 
@@ -47,7 +49,8 @@ Ready，读回并发出 `EntryPreludePhase.Ready`，随后按 emits 调用 Enabl
 
 Enable start 检查精确 Ready，并验证 model Online invariant：Interrupt/Exception/Event streams、
 KernelImage、RawDtb、BootTaskEntryBinding、BootTask、BootInitStack、Vm/TrampolineVm/EarlyVm、BootCurrentCPU/BootCPU/
-CpuGroup 和 Soc 必须处于 model 规定状态。成功后提交 Online，发出
+BootCpuRegisters、CpuGroup 和 Soc 必须处于 model 规定状态。这里 `BootCpuRegisters.Online` 只表示
+寄存器属性可访问；具体寄存器值仍以入口各阶段已提交的事实为准。成功后提交 Online，发出
 `EntryPreludePhase.Online`，再返回 `BootInitFlow.Preset` completion continuation。该 continuation
 提交 `BootInitFlow.Prepared` 后返回 Kernel.Preset；本阶段不得直接启动 BootInitFlow.Setup 的后续叶阶段或
 EntrySuccessorPhase。

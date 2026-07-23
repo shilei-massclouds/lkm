@@ -92,7 +92,8 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 顶层工程根是 `ComputerProject`，它有三个相互独立的直接子工程：`HardwareProject`、
 `FirmwareProject`、`KernelProject`。运行系统使用另一棵独立树，以 `Computer` 为根，直接包含
-`Riscv64Platform`、`OpenSBI` 和 `Kernel`；`BootHartContext` 是平台子系统。
+`Riscv64Platform`、`OpenSBI` 和 `Kernel`。Kernel 下的启动 CPU 局部层级是
+`BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器对象不属于平台。
 
 Project 负责规格建立和构造，System 负责运行期启动。两棵树通过明确的静态规格/产物映射和
 `Computer` assembly fact 关联，不用 parent 混合表达工程归属与运行归属。
@@ -162,7 +163,7 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 >
 > Preset：顺序驱动 HardwareProject、FirmwareProject、KernelProject 建立三份系统规格
 >
-> Setup：按同序构造 BootHartContext、BootArgs、Config/Lds，并建立 Computer assembly fact
+> Setup：按同序构造 Riscv64Platform、BootArgs、Config/Lds，并建立 Computer assembly fact
 >
 > Enable：只驱动 Computer.Preset
 

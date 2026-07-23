@@ -80,8 +80,9 @@
 
 * Base：内核处于等待状态，等待引导信号startup触发它启动，引导信号是Preset信号的别名。
 
-  > [model] MUST：确保 `Riscv64`、`SbiSpec`、`BootArgs`、`BootHartContext`、`OpenSBI`、`Lds` 和
-  > `Config` 都处于 `Online` 状态，并且 boot-hart handoff 寄存器与 BootArgs 一致。
+  > [model] MUST：确保 `Riscv64`、`SbiSpec`、`BootArgs`、`Riscv64Platform`、`OpenSBI`、`Lds` 和
+  > `Config` 都处于 `Online` 状态，并精确检查 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
+  > `BootCpuRegisters.a1 == BootArgs.dtb_pa`。不得把整组寄存器已准备完成作为 Kernel 启动前置。
 
 * OnPreset：内核收到引导信号 startup，由静态且已经 Online 的 `BootTask` 执行早期初始化。
   `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
