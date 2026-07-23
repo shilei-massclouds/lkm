@@ -24,7 +24,7 @@ object InitMM: AddressSpaceObject {
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     Lds.state == State::Online;
                 }
 
@@ -1054,7 +1054,7 @@ object EntrySuccessorPhase: PhaseObject {
                     EntryPreludePhase.state == State::Online;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Online;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     BootInitStack.state == State::Ready;
                     InterruptStream.state == State::Prepared;
                     RawDtb.state == State::Ready;

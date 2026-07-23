@@ -23,7 +23,8 @@ model.json；check/view 只消费 derive.json；render 只消费 view.json。dri
 parser/model 必须让 `spec/model/main.spec` 通过零 error、零 unsupported，并支持 include、嵌套泛型、
 enum、type/object/system 与传递继承、属性、owned、association/reference、predicate/function、context/
 lock、state、Type lifecycle/process、对象 lifecycle override、命名形参/result、`within`、结构化
-`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`drives`、`emits` 和 `lossy`。
+`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`drives` 和 `emits`。v4 不接受
+`lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
 state/fact/reference 求值至少包括：
@@ -44,8 +45,9 @@ cyclic parent 矛盾使用 `error`。有 error/unsupported 时后续阶段仍可
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `3`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1/2 或其它 version。
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `4`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1/2/3 或其它 version。Signal/model/view JSON
+不包含 `lossy`/`strict` 字段，outcome 不包含 `discarded`。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
 state、handler、参数、条件、effect 和 call 索引，并输出 source 内容指纹。derive/check/view 字段遵循
@@ -83,6 +85,11 @@ delivery、cause、coordinate 和 call span，先比较 canonical until request�
 写 `stopped` 和稳定 after snapshot，已完成 response 不改写；FIFO 中已有未处理 envelope 统一写
 `stopped`，但不创建目标或余下 emits。该控制流不得被普通 DerivationProblem 捕获为 failed。
 
+`drives` 同步子 Signal 和 `emits` FIFO Signal 使用相同严格处理：receiver、handler、payload、source
+state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败，都必须传播为最终 failed。
+不得静默忽略、重试或转换为 discarded。`drives A || B` 只在发送前选择第一个可接受候选；未选候选
+不创建 Signal。预算导致的 `truncated` 与显式 until 导致的 `stopped` 仍是独立非丢失结果。
+
 parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 对 complete/reached 返回
 0，对 failed/bounded/until_signal_not_reached 返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用
 check 的退出码。所有用户错误写到 stderr，不输出 Python traceback。
@@ -105,7 +112,7 @@ Signal before/after snapshot 中的实际值。Signal 文本名 `Preset` 显示�
 verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名称，以 cause depth 缩进 Signal，
 明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
 到达时快照来源、before/after state/fact/reference delta、reached boundary、stopped propagation、
-discard/reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 3 view 已包含两种
+reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 4 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 不实现 DOT、SVG 或 HTML。
 

@@ -4,13 +4,13 @@ use crate::{
     checkpoint::Checkpoint,
     objects::{
         state::{EventResult, LifecycleEvent, State, failed_condition},
-        task::{DispatchWindow, Task, TaskEntry, TaskKind, TaskRef},
-        task_flow::{TaskFlow, TaskFlowRef, task_flow_dispatch_guard_satisfied},
+        task::{Task, TaskEntry, TaskKind, TaskRef},
+        task_flow::{TaskFlow, TaskFlowRef, task_flow_execution_guard_satisfied},
     },
 };
 
-/// BootTask's immutable initial continuation.  Guard state is not stored here:
-/// every lifecycle advance reads the current Task and DispatchWindow.
+/// BootTask's immutable initial continuation. Every execution boundary reads
+/// the owning Task's Task-only OnCpu projection.
 pub struct BootInitFlow {
     flow: TaskFlow,
 }
@@ -30,47 +30,39 @@ impl BootInitFlow {
         &mut self.flow
     }
 
-    pub fn accept_initial_start_signal(
-        &self,
-        owner: &Task,
-        window: &mut DispatchWindow,
-    ) -> EventResult {
-        let accepted = self.flow.state() == State::Base
-            && owner.initial_flow().same_identity(self.flow.flow_ref())
-            && owner.owns_flow(self.flow.flow_ref())
-            && task_flow_dispatch_guard_satisfied(&self.flow, owner, window);
-        window.record_start_signal(accepted);
+    pub fn accept_initial_start_signal(&self, owner: &Task) -> EventResult {
+        if self.flow.state() != State::Base
+            || !owner.initial_flow().same_identity(self.flow.flow_ref())
+            || !owner.owns_flow(self.flow.flow_ref())
+            || !task_flow_execution_guard_satisfied(&self.flow, owner)
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.flow.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
         Ok(())
     }
 
-    pub fn preset(
-        &mut self,
-        owner: &Task,
-        window: &DispatchWindow,
-        checkpoint: Checkpoint,
-    ) -> EventResult {
-        self.flow.preset(owner, window, Some(checkpoint))
+    pub fn preset(&mut self, owner: &Task, checkpoint: Checkpoint) -> EventResult {
+        self.flow.preset(owner, Some(checkpoint))
     }
 
-    pub fn setup_and_activate(
-        &mut self,
-        owner: &mut Task,
-        window: &DispatchWindow,
-        checkpoint: Checkpoint,
-    ) -> EventResult {
-        self.flow.setup(owner, window, Some(checkpoint))?;
+    pub fn setup_and_activate(&mut self, owner: &mut Task, checkpoint: Checkpoint) -> EventResult {
+        self.flow.setup(owner, Some(checkpoint))?;
         owner.activate_initial_flow(&mut self.flow)
     }
 
     pub fn enable_with_successor(
         &mut self,
         owner: &mut Task,
-        window: &DispatchWindow,
         successor: &mut TaskFlow,
         checkpoint: Checkpoint,
     ) -> EventResult {
         self.flow
-            .enable_after_successor_handoff(owner, window, successor, checkpoint)
+            .enable_after_successor_handoff(owner, successor, checkpoint)
     }
 }
 
@@ -79,7 +71,7 @@ pub fn adopt_head_preset_start() -> EventResult {
     let ctx = crate::context::context();
     let state = ctx.boot_init_flow.state();
     if state != State::Base
-        || ctx.boot_task.state() != State::Online
+        || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task_ref() != TaskRef::BOOT
         || ctx.boot_task.pid() != 0
         || ctx.boot_task.task().entry() != TaskEntry::None
@@ -89,20 +81,17 @@ pub fn adopt_head_preset_start() -> EventResult {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
     ctx.boot_init_flow
-        .accept_initial_start_signal(ctx.boot_task.task(), &mut ctx.boot_dispatch_window)
+        .accept_initial_start_signal(ctx.boot_task.task())
 }
 
 /// Completes BootInitFlow.Preset after EntryPreludePhase reaches Online.
 pub fn preset_after_entry_prelude() -> ! {
     let dependencies_ready =
-        boot_task_online_and_canonical() && crate::phases::boot::entry_prelude::is_online();
+        boot_task_on_cpu_and_canonical() && crate::phases::boot::entry_prelude::is_online();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
-        ctx.boot_init_flow.preset(
-            ctx.boot_task.task(),
-            &ctx.boot_dispatch_window,
-            Checkpoint::BootInitFlowPrepared,
-        )
+        ctx.boot_init_flow
+            .preset(ctx.boot_task.task(), Checkpoint::BootInitFlowPrepared)
     } else {
         failed_condition(
             LifecycleEvent::Preset,
@@ -121,7 +110,7 @@ pub fn setup() -> ! {
         require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready),
         "arceos_ex boot init setup start failed\n",
     );
-    if !boot_task_online_and_canonical() || !crate::phases::boot::entry_prelude::is_online() {
+    if !boot_task_on_cpu_and_canonical() || !crate::phases::boot::entry_prelude::is_online() {
         crate::phases::shutdown_on_error(
             phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready),
             "arceos_ex boot init setup dependency failed\n",
@@ -132,7 +121,7 @@ pub fn setup() -> ! {
 
 pub fn setup_after_entry_successor() -> ! {
     if crate::context::context_ref().boot_init_flow.state() != State::Prepared
-        || !boot_task_online_and_canonical()
+        || !boot_task_on_cpu_and_canonical()
         || !crate::phases::boot::entry_prelude::is_online()
         || !crate::phases::boot::entry_successor::is_online()
     {
@@ -202,11 +191,8 @@ pub fn setup_after_boot_init_rest_init() -> ! {
     let dependencies_ready = setup_leaves_online() && rest_init::boot_init_rest_init_is_online();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
-        ctx.boot_init_flow.setup_and_activate(
-            ctx.boot_task.task_mut(),
-            &ctx.boot_dispatch_window,
-            Checkpoint::BootInitFlowReady,
-        )
+        ctx.boot_init_flow
+            .setup_and_activate(ctx.boot_task.task_mut(), Checkpoint::BootInitFlowReady)
     } else {
         failed_condition(
             LifecycleEvent::Setup,
@@ -236,7 +222,7 @@ pub fn enable() -> ! {
 
 /// Commits BootInitFlow.Online at the last reversible boundary.
 pub fn enable_after_boot_init_schedule_handoff() -> ! {
-    let dependencies_ready = boot_task_online_and_canonical()
+    let dependencies_ready = boot_task_on_cpu_and_canonical()
         && rest_init::boot_init_rest_init_is_online()
         && rest_init::boot_init_schedule_handoff_is_online()
         && rest_init::precommit_ready();
@@ -244,7 +230,6 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     let result = if dependencies_ready {
         ctx.boot_init_flow.enable_with_successor(
             ctx.boot_task.task_mut(),
-            &ctx.boot_dispatch_window,
             ctx.boot_idle_flow.core_mut(),
             Checkpoint::BootInitFlowOnline,
         )
@@ -274,12 +259,13 @@ pub fn is_online() -> bool {
 
 pub fn is_prepared() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Prepared
-        && boot_task_online_and_canonical()
+        && boot_task_on_cpu_and_canonical()
         && crate::phases::boot::entry_prelude::is_online()
 }
 
 pub fn is_ready() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Ready
+        && boot_task_on_cpu_and_canonical()
         && setup_leaves_online()
         && rest_init::boot_init_rest_init_is_online()
 }
@@ -305,8 +291,7 @@ fn require_setup_leaf(child_online: bool, child: &str) {
 }
 
 fn setup_leaves_online() -> bool {
-    boot_task_online_and_canonical()
-        && crate::phases::boot::entry_prelude::is_online()
+    crate::phases::boot::entry_prelude::is_online()
         && crate::phases::boot::entry_successor::is_online()
         && crate::phases::boot::core_prepare::is_online()
         && crate::phases::boot::mm_core_init::is_online()
@@ -317,9 +302,9 @@ fn setup_leaves_online() -> bool {
         && crate::phases::interrupt::process_prepare::is_online()
 }
 
-fn boot_task_online_and_canonical() -> bool {
+fn boot_task_on_cpu_and_canonical() -> bool {
     let ctx = crate::context::context_ref();
-    ctx.boot_task.state() == State::Online
+    ctx.boot_task.state() == State::OnCpu
         && ctx.boot_task.task_ref() == TaskRef::BOOT
         && ctx.boot_task.task().task_ref() == TaskRef::BOOT
         && ctx.boot_task.pid() == 0
@@ -329,11 +314,7 @@ fn require_guarded_state(event: LifecycleEvent, expected: State, target: State) 
     let ctx = crate::context::context_ref();
     let actual = ctx.boot_init_flow.state();
     if actual != expected
-        || !task_flow_dispatch_guard_satisfied(
-            &ctx.boot_init_flow.flow,
-            ctx.boot_task.task(),
-            &ctx.boot_dispatch_window,
-        )
+        || !task_flow_execution_guard_satisfied(&ctx.boot_init_flow.flow, ctx.boot_task.task())
     {
         return failed_condition(event, actual, expected, target);
     }

@@ -60,16 +60,20 @@ those completions.
 
 #### Per-AP idle task and stack
 
-Each secondary CPU must have its own inactive IdleTask and dedicated
-stack/pt_regs pointer prepared before hart_start. BootCPU's idle
-task/stack must not be reused for AP boot data.
+Each secondary CPU must have its own inactive, Online IdleTask and dedicated
+stack/pt_regs pointer prepared before hart_start. Online makes the task
+selectable as `rq->idle`; it does not publish it in a normal runnable-class
+queue. BootCPU's idle task/stack must not be reused for AP boot data.
 
 The inactive IdleTask storage is the same unified `Task` core used by
 all other task families, and its initial idle continuation uses the
 unified `TaskFlow` core. `task_ptr` in HSM boot data points to that
 Task carrier. Concrete AP TaskRef/TaskFlowRef slots are internal
 lowering under `SecondaryIdleTaskSet`; they do not complete the model-
-deferred AP object topology.
+deferred AP object topology. After boot-data and real `tp` validation, the
+secondary architecture entry directly adopts that Task as OnCpu and strictly
+starts its initial idle TaskFlow. This first execution is not a Scheduler
+Continue; later scheduling remains Scheduler-owned.
 
 #### SBI HSM start path
 

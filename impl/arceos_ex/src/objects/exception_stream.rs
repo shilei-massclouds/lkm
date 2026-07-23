@@ -7028,15 +7028,7 @@ fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) {
 }
 
 fn cleanup_current_task_for_shutdown() -> bool {
-    let ctx = crate::context::context();
-    if ctx.user_task_set.active_task_ref().is_valid() {
-        ctx.user_task_set
-            .cleanup_active_task_for_shutdown(&ctx.boot_dispatch_window)
-    } else {
-        ctx.user_app_flow
-            .cleanup_for_shutdown(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
-            .is_ok()
-    }
+    crate::context::context().cleanup_current_task_for_shutdown()
 }
 
 #[cfg(app_user_boot)]
@@ -7053,7 +7045,6 @@ fn complete_observed_child_exit_to_parent_wait(
         let ctx = crate::context::context();
         let Some((parent_frame, status_ptr, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
-                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -7281,7 +7272,6 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
     let (mut parent_frame, child_pid, parent_satp) = {
         let ctx = crate::context::context();
         let Some((parent_frame, child_pid)) = ctx.user_task_set.child_exit_to_vfork_parent(
-            &ctx.boot_dispatch_window,
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -7408,7 +7398,6 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         let ctx = crate::context::context();
         let Some((parent_frame, status_ptr, child_pid)) =
             ctx.user_task_set.child_exit_to_parent_wait(
-                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 &mut ctx.page_allocator,

@@ -431,7 +431,7 @@ impl PreemptionControl {
         disable_depth: usize,
         checkpoint: Checkpoint,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base || boot_task.state() != State::Online {
+        if self.lifecycle.state() != State::Base || !boot_task.online() {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

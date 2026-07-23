@@ -8,8 +8,9 @@
 - Setup 依次驱动 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`，随后进入
   `PayloadPreparePhase`；后者 Online 后提交 `KernelInitFlow.Ready`。
 
-首次真实 dispatch 更新 CurrentTaskSlot 与 DispatchWindow 后才接受 `KernelInitFlow.Preset`。
-runtime lowering 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行 Preset body 和所有
+首次真实 dispatch 先同步驱动 BootTask.Suspend；完成栈切换后，`KernelInitTask.Continue` 在 PID 1
+真实获得 CPU 的入口提交 OnCpu 并严格启动 `KernelInitFlow.Preset`。runtime lowering 必须在
+`kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行 Preset body 和所有
 叶子代码；不得在 BootTask 栈上预执行。
 
 SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePhase`、

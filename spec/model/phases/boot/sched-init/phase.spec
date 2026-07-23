@@ -377,8 +377,7 @@ object Scheduler: SchedulerObject {
                 depends_on {
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
-                    BootTask.state == State::Online;
-                    BootDispatchWindow.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     InitMM.state == State::Ready;
                     BootIdleRcuReadSide.state == State::Prepared;
                 }
@@ -414,11 +413,7 @@ object Scheduler: SchedulerObject {
                     current_task_slot_current(BootCpuCurrentTask, BootTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootTask);
                     task_cpu_ref_is(BootTask, BootCPURef);
-                    dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
-                    dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
-                    dispatch_window_current_ref_is(BootDispatchWindow, BootTaskRef);
-                    dispatch_window_current_task_is(BootDispatchWindow, BootTask);
-                    dispatch_window_has_no_event_queue(BootDispatchWindow);
+                    current_task_slot_matches_on_cpu_task(BootCpuCurrentTask, BootTask);
                     scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
                         Scheduler,
                         CpuGroup,
@@ -461,11 +456,7 @@ object Scheduler: SchedulerObject {
             current_task_slot_current(BootCpuCurrentTask, BootTask);
             boot_cpu_current_is_idle_task(BootCPU, BootTask);
             task_cpu_ref_is(BootTask, BootCPURef);
-            dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
-            dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
-            dispatch_window_current_ref_is(BootDispatchWindow, BootTaskRef);
-            dispatch_window_current_task_is(BootDispatchWindow, BootTask);
-            dispatch_window_has_no_event_queue(BootDispatchWindow);
+            current_task_slot_matches_on_cpu_task(BootCpuCurrentTask, BootTask);
             scheduler_schedule_event_available(Scheduler);
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
@@ -503,9 +494,6 @@ object Scheduler: SchedulerObject {
             current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
             current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootTask, BootCPURef);
             task_cpu_ref_is(BootTask, BootCPURef);
-            dispatch_window_owned_by_scheduler(BootDispatchWindow, Scheduler);
-            dispatch_window_cpu_is(BootDispatchWindow, BootCPURef);
-            dispatch_window_has_no_event_queue(BootDispatchWindow);
             scheduler_schedule_event_available(Scheduler);
             rcu_read_side_ready(BootIdleRcuReadSide);
             rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
@@ -677,7 +665,7 @@ object BootRunQueue: RunQueue {
                     DefaultSchedRootDomain.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -777,7 +765,7 @@ object BootIdleSetup: KernelObject {
                 depends_on {
                     BootRunQueue.state == State::Ready;
                     BootCpuCurrentTask.state == State::Ready;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     InitMM.state == State::Ready;
                     raw_spinlock_ready(BootRunQueueLock);
                 }
@@ -860,6 +848,7 @@ object BootIdleSetup: KernelObject {
                     boot_idle_task_cpu_set_under_rcu_read(BootTask, BootCPURef);
                     boot_runqueue_current_published_with_rcu(BootRunQueue, BootTask);
                     current_task_slot_current(BootCpuCurrentTask, BootTask);
+                    current_task_slot_matches_on_cpu_task(BootCpuCurrentTask, BootTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootTask);
                     task_cpu_ref_is(BootTask, BootCPURef);
                 }
@@ -890,6 +879,7 @@ object BootIdleSetup: KernelObject {
             boot_idle_task_cpu_set_under_rcu_read(BootTask, BootCPURef);
             boot_runqueue_current_published_with_rcu(BootRunQueue, BootTask);
             current_task_slot_current(BootCpuCurrentTask, BootTask);
+            current_task_slot_matches_on_cpu_task(BootCpuCurrentTask, BootTask);
             boot_cpu_current_is_idle_task(BootCPU, BootTask);
             task_cpu_ref_is(BootTask, BootCPURef);
         }
@@ -1117,7 +1107,7 @@ object Workqueue: KernelObject {
                     KmallocCaches.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     task_ref_ready(BootTaskRef);
                 }
 

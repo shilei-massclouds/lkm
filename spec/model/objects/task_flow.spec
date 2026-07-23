@@ -11,12 +11,26 @@ type TaskFlow: PhaseObject {
     /* Every TaskFlow parent is structurally constrained to Task. */
     parent: Task;
 
+    processes {
+        Action::Continue {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                self.parent.state == State::OnCpu;
+                task_active_flow_is(self.parent, self);
+            }
+            ensures {
+                task_flow_resume_active_continuation(self);
+            }
+        }
+    }
+
     lifecycle {
         Transition::Preset {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Base;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
                 task_flow_initial_binding_consistent(self);
             }
             ensures {
@@ -31,7 +45,7 @@ type TaskFlow: PhaseObject {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Prepared;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             emits {
                 Transition::Enable;
@@ -42,11 +56,11 @@ type TaskFlow: PhaseObject {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Ready;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 task_flow_active_binding_committed(self);
-                task_flow_online_on_dispatch(self, BootDispatchWindow);
+                task_flow_online_on_cpu(self);
             }
         }
     }
@@ -57,7 +71,7 @@ type KthreaddFlowType: TaskFlow {
         Transition::Disable {
             state_effect: StateEffect::Always;
             depends_on {
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 task_flow_no_longer_active(self);
@@ -69,7 +83,7 @@ type KthreaddFlowType: TaskFlow {
             depends_on {
                 self.state == State::Offline;
                 task_flow_no_longer_active(self);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 task_flow_instance_released(self);
@@ -118,7 +132,7 @@ type UserAppFlow: TaskFlow {
                 self.state == State::Base;
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 task_flow_started(self);
@@ -134,14 +148,14 @@ type UserAppFlow: TaskFlow {
                 self.state == State::Prepared;
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 user_app_flow_execution_context_ready(self);
                 user_app_flow_exec_image_or_fork_continuation_ready(self);
             }
             emits {
-                lossy Transition::Enable;
+                Transition::Enable;
             }
         }
 
@@ -150,7 +164,7 @@ type UserAppFlow: TaskFlow {
             depends_on {
                 self.state == State::Ready;
                 user_app_flow_execution_context_ready(self);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
                 task_flow_enable_binding_ready(self);
             }
             ensures {
@@ -165,7 +179,7 @@ type UserAppFlow: TaskFlow {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Online;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 user_app_flow_disable_reason_is_exit_exit_group_or_successful_exec(self);
@@ -179,7 +193,7 @@ type UserAppFlow: TaskFlow {
             depends_on {
                 self.state == State::Offline;
                 task_flow_no_longer_active(self);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 task_flow_instance_released(self);
@@ -194,19 +208,11 @@ predicate task_owns_flow<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_flow_owner_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_parent_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_owner_exclusive<F: TaskFlow>(flow: F) -> bool;
-predicate task_flow_dispatch_guard_satisfied<
-    F: TaskFlow,
-    W: DispatchWindowObject
->(flow: F, window: W) -> bool {
-    flow.parent.state == State::Online;
-    task_ref_targets(window.current_task, flow.parent);
-}
 predicate task_flow_initial_binding_consistent<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_enable_binding_ready<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_started<F: TaskFlow>(flow: F) -> bool;
-predicate task_flow_online_on_dispatch<F: TaskFlow, W>(flow: F, window: W) -> bool;
-predicate task_flow_start_signal_discarded<F: TaskFlow, W>(flow: F, window: W) -> bool;
-predicate task_flow_resume_active_continuation<F: TaskFlow, W>(flow: F, window: W) -> bool;
+predicate task_flow_online_on_cpu<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_resume_active_continuation<F: TaskFlow>(flow: F) -> bool;
 predicate task_active_flow_is<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
 predicate task_at_most_one_flow_online<T: Task>(task: T) -> bool;
 predicate task_flow_no_longer_active<F: TaskFlow>(flow: F) -> bool;
@@ -257,11 +263,10 @@ predicate boot_task_idle_flow_entered<T: Task, F: BootIdleFlowType>(
     task: T,
     flow: F
 ) -> bool;
-predicate kthreadd_schedule_loop_deferred_until_dispatch<
+predicate kthreadd_schedule_loop_deferred_until_on_cpu<
     T: Task,
-    F: TaskFlow,
-    W
->(task: T, flow: F, window: W) -> bool;
+    F: TaskFlow
+>(task: T, flow: F) -> bool;
 
 object KernelInitFlow: TaskFlow {
     initial_state: State::Base;
@@ -278,10 +283,9 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                     task_flow_initial_binding_consistent(self);
                     BootInitFlow.state == State::Online;
-                    dispatch_window_current_task_is(BootDispatchWindow, KernelInitTask);
                     kernel_init_entry_reaches_kernel_init_flow(
                         KernelInitTask,
                         KernelInitFlow
@@ -318,7 +322,7 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
 
                 drives {
@@ -358,7 +362,7 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
 
                 drives {
@@ -370,7 +374,11 @@ object KernelInitFlow: TaskFlow {
                     kernel_init_flow_survives_payload_precommit(self);
                     task_active_flow_is(KernelInitTask, self);
                     task_flow_active_binding_committed(self);
-                    task_flow_online_on_dispatch(self, BootDispatchWindow);
+                    task_flow_online_on_cpu(self);
+                }
+
+                emits {
+                    self.Action::CommitPayloadHandoff;
                 }
             }
         }
@@ -388,13 +396,13 @@ object KernelInitFlow: TaskFlow {
             PayloadPreparePhase.state == State::Online;
             PayloadHandoffPreparePhase.state == State::Online;
             task_active_flow_is(KernelInitTask, self);
-            task_flow_online_on_dispatch(self, BootDispatchWindow);
+            task_flow_online_on_cpu(self);
         }
 
         transitions {
             on Transition::Disable -> State::Offline {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 ensures {
                     task_flow_no_longer_active(self);
@@ -415,7 +423,7 @@ object KernelInitFlow: TaskFlow {
             on Transition::Cleanup -> State::Destroyed {
                 depends_on {
                     task_flow_no_longer_active(self);
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 ensures {
                     task_flow_instance_released(self);
@@ -446,7 +454,7 @@ object KernelInitFlow: TaskFlow {
                 completion_complete_committed(KthreaddReadyGate);
                 completion_token_available(KthreaddReadyGate);
                 kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
 
             drives {
@@ -467,7 +475,7 @@ object KernelInitFlow: TaskFlow {
                 self.state == State::Online;
                 PayloadHandoffPreparePhase.state == State::Online;
                 SelectedPayloadHandoff.state == State::Online;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
 
             drives {
@@ -507,7 +515,7 @@ object Pid1UserAppFlow: UserAppFlow {
                 depends_on {
                     user_app_flow_owner_bound(self);
                     user_app_flow_entry_source_bound(self);
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 ensures {
                     task_flow_started(self);
@@ -524,7 +532,7 @@ object Pid1UserAppFlow: UserAppFlow {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 ensures {
                     user_app_flow_execution_context_ready(self);
@@ -544,7 +552,7 @@ object Pid1UserAppFlow: UserAppFlow {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                     task_flow_enable_binding_ready(self);
                 }
                 ensures {
@@ -589,7 +597,7 @@ object KthreaddFlow: KthreaddFlowType {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                     task_flow_initial_binding_consistent(self);
                 }
                 ensures {
@@ -606,7 +614,7 @@ object KthreaddFlow: KthreaddFlowType {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 emits {
                     Transition::Enable;
@@ -619,12 +627,12 @@ object KthreaddFlow: KthreaddFlowType {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    self.parent.state == State::OnCpu;
                 }
                 ensures {
                     task_active_flow_is(KthreaddTask, self);
                     task_flow_active_binding_committed(self);
-                    task_flow_online_on_dispatch(self, BootDispatchWindow);
+                    task_flow_online_on_cpu(self);
                 }
             }
         }
@@ -634,7 +642,7 @@ object KthreaddFlow: KthreaddFlowType {
         invariant {
             task_flow_started(self);
             task_active_flow_is(KthreaddTask, self);
-            task_flow_online_on_dispatch(self, BootDispatchWindow);
+            task_flow_online_on_cpu(self);
         }
     }
 
@@ -668,7 +676,7 @@ object KthreaddFlow: KthreaddFlowType {
                 task_state_running(KthreaddTask);
                 kthreadd_provider_ready(KthreaddTask);
                 Scheduler.state == State::Online;
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
@@ -700,11 +708,11 @@ type BootIdleFlowType: TaskFlow {
                 scheduler_first_schedule_committed(Scheduler);
                 task_ref_ready(CurrentTaskRef);
                 task_ref_targets(CurrentTaskRef, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 boot_idle_entry_prepared(self, BootTask);
-                task_flow_resume_active_continuation(self, BootDispatchWindow);
+                task_flow_resume_active_continuation(self);
                 boot_task_idle_flow_entered(BootTask, BootIdleFlow);
                 boot_idle_task_pf_idle(BootTask);
                 boot_idle_arch_cpu_idle_prepare_done(self, BootCPU);
@@ -718,7 +726,7 @@ type BootIdleFlowType: TaskFlow {
             state_effect: StateEffect::None;
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             drives {
                 self.Action::DoIdleCycle;
@@ -733,7 +741,7 @@ type BootIdleFlowType: TaskFlow {
             state_effect: StateEffect::None;
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             drives {
                 self.Action::WaitWhileNoNeedResched;
@@ -752,7 +760,7 @@ type BootIdleFlowType: TaskFlow {
             state_effect: StateEffect::None;
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             within BootIdleWaitLocalInterruptContext {
                 ensures {
@@ -786,7 +794,7 @@ type BootIdleFlowType: TaskFlow {
             state_effect: StateEffect::None;
             depends_on {
                 boot_idle_runtime_waiting(self, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             ensures {
                 boot_idle_need_resched_set_for_schedule(BootTask);
@@ -805,7 +813,7 @@ type BootIdleFlowType: TaskFlow {
                 boot_idle_need_resched_set_for_schedule(BootTask);
                 task_ref_ready(CurrentTaskRef);
                 task_ref_targets(CurrentTaskRef, BootTask);
-                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                self.parent.state == State::OnCpu;
             }
             drives {
                 Scheduler.Action::ScheduleIdle;
@@ -844,7 +852,7 @@ object BootIdleFlow: BootIdleFlowType {
                     KthreaddTask.state == State::Online;
                     KthreaddReadyGate.state == State::Online;
                     CpuGroup.state == State::Ready;
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    BootTask.state == State::OnCpu;
                 }
 
                 ensures {
@@ -874,6 +882,25 @@ object BootIdleFlow: BootIdleFlowType {
             task_flow_owner_exclusive(BootIdleFlow);
             task_active_flow_is(BootTask, BootIdleFlow);
             secondary_cpus_not_started(CpuGroup);
+        }
+    }
+
+    actions {
+        Action::Continue {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                self.parent.state == State::OnCpu;
+                task_active_flow_is(BootTask, self);
+            }
+            drives {
+                self.Action::PrepareIdleEntry;
+                self.Action::RunIdleLoop;
+            }
+            ensures {
+                task_flow_resume_active_continuation(self);
+                boot_task_idle_flow_entered(BootTask, self);
+            }
         }
     }
 

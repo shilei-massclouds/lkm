@@ -1566,7 +1566,7 @@ object TimerWheel: KernelObject {
                     PerCpuStorage.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     Softirq.state == State::Prepared;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 within TimerBaseInitContext {

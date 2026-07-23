@@ -20,7 +20,7 @@ UserBoot 映像/地址空间准备、fresh `UserAppFlow.Preset/Setup` 以及 rep
 ## CommitPayloadHandoff
 
 `KernelInitFlow` 提交 Online 后才能执行 `CommitPayloadHandoff` action，且 action 必须再次检查 parent
-`KernelInitTask.Online` 与 DispatchWindow 当前指向 PID 1。
+`KernelInitTask.OnCpu`。
 
 - UserBoot 固定执行 `KernelInitFlow.Disable -> KernelInitTask.CommitFlowHandoff ->
   UserAppFlow.Enable -> KernelInitFlow.Cleanup`，再提交用户 payload Online 和用户态 no-return entry。

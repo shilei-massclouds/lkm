@@ -127,7 +127,7 @@ class SignalPipelineTests(unittest.TestCase):
                     ("Root", "Start", "root", "completed"),
                     ("Child", "Configure", "drives", "completed"),
                     ("Async", "Run", "emits", "completed"),
-                    ("Sink", "Missing", "emits", "discarded"),
+                    ("Sink", "Observe", "emits", "completed"),
                 ],
             )
             self.assertEqual(signals[1]["handler"]["kind"], "Action")
@@ -152,7 +152,7 @@ class SignalPipelineTests(unittest.TestCase):
                 "Human -- Start --> Root[Base:Ready]\n"
                 "  Root -- Configure --> Child\n"
                 "  Root -- Run --> Async[Base:Ready]\n"
-                "  Root -- Missing --> Sink !! discarded: no_handler\n",
+                "  Root -- Observe --> Sink\n",
             )
 
     def test_compact_renderer_uses_hierarchy_depth_order_and_actual_states(self) -> None:
@@ -195,7 +195,6 @@ class SignalPipelineTests(unittest.TestCase):
                     "target": "Child",
                     "name": "Preset",
                     "delivery": "root",
-                    "lossy": False,
                     "outcome": "completed",
                     "reason": None,
                     "handler": transition,
@@ -210,7 +209,6 @@ class SignalPipelineTests(unittest.TestCase):
                     "target": "Parent",
                     "name": "Inspect",
                     "delivery": "drives",
-                    "lossy": False,
                     "outcome": "completed",
                     "reason": None,
                     "handler": action,
@@ -225,7 +223,6 @@ class SignalPipelineTests(unittest.TestCase):
                     "target": "Unknown",
                     "name": "Missing",
                     "delivery": "emits",
-                    "lossy": False,
                     "outcome": "rejected",
                     "reason": "no_handler",
                     "handler": None,
@@ -241,7 +238,6 @@ class SignalPipelineTests(unittest.TestCase):
                     "target": "Child",
                     "name": "Preset",
                     "delivery": "drives",
-                    "lossy": False,
                     "outcome": "stopped",
                     "reason": "until_signal_reached",
                     "handler": transition,
@@ -437,7 +433,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2):
+            for old_version in (1, 2, 3):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -454,7 +450,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=3", stderr.getvalue())
+                self.assertIn("version=4", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -492,7 +488,7 @@ class SignalPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("expected version 4", result.stderr)
+            self.assertIn("error:", result.stderr)
 
     def test_every_tools2_consumer_rejects_wrong_producer(self) -> None:
         cases = [
@@ -516,7 +512,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_v1_and_v2(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v4_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -526,7 +522,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2):
+            for old_version in (1, 2, 3):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -541,7 +537,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=3", stderr.getvalue())
+                    self.assertIn("version=4", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -695,7 +691,7 @@ class SignalPipelineTests(unittest.TestCase):
             "state_not_accepted: expected State::Base, got State::Ready",
         )
 
-    def test_lossy_condition_rejection_is_discarded_and_never_pending(self) -> None:
+    def test_async_condition_rejection_fails_root_and_never_stays_pending(self) -> None:
         derivation, checked, text = self.run_source(
             """
             system Root {
@@ -703,7 +699,7 @@ class SignalPipelineTests(unittest.TestCase):
                 state State::Base {
                     transitions {
                         on Transition::Start -> State::Ready {
-                            emits { lossy Child.Action::Try; }
+                            emits { Child.Action::Try; }
                         }
                     }
                 }
@@ -721,12 +717,84 @@ class SignalPipelineTests(unittest.TestCase):
             """,
             "Root.Start",
         )
-        self.assertEqual(checked["verdict"], "complete")
-        self.assertEqual(derivation["signals"][1]["outcome"], "discarded")
+        self.assertEqual(checked["verdict"], "failed")
+        self.assertEqual(derivation["signals"][1]["outcome"], "rejected")
         self.assertIn("condition_not_satisfied", derivation["signals"][1]["reason"])
         self.assertEqual(derivation["summary"]["pending"], 0)
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
-        self.assertIn("!! discarded: condition_not_satisfied", text)
+        self.assertIn("!! rejected: condition_not_satisfied", text)
+
+    def test_lossy_signal_syntax_is_rejected_by_v4_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "input.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(
+                textwrap.dedent(
+                    """
+                    system Root {
+                        initial_state: State::Base;
+                        state State::Base {
+                            actions { on Action::Start { emits { lossy Root.Action::Start; } } }
+                        }
+                    }
+                    """
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            diagnostics = read_json(model)["diagnostics"]
+            self.assertTrue(diagnostics)
+            self.assertTrue(any("invalid process call" in item["message"] for item in diagnostics))
+
+    def test_on_cpu_lifecycle_is_task_only(self) -> None:
+        def diagnostics_for(source: str) -> list[dict]:
+            temporary = tempfile.TemporaryDirectory()
+            self.addCleanup(temporary.cleanup)
+            root = Path(temporary.name)
+            spec = root / "input.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            return read_json(model)["diagnostics"]
+
+        valid = diagnostics_for(
+            """
+            type Task { }
+            object Worker: Task {
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    transitions { on Transition::Suspend -> State::Online { } }
+                }
+                state State::Online {
+                    transitions { on Transition::Continue -> State::OnCpu { } }
+                }
+            }
+            """
+        )
+        self.assertFalse(valid)
+
+        invalid = diagnostics_for(
+            """
+            type PhaseObject { }
+            object Phase: PhaseObject {
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    transitions { on Transition::Suspend -> State::Online { } }
+                }
+                state State::Online {
+                    transitions { on Transition::Continue -> State::OnCpu { } }
+                }
+            }
+            """
+        )
+        messages = [item["message"] for item in invalid]
+        self.assertTrue(any("Task-only lifecycle state on non-Task" in item for item in messages))
+        self.assertTrue(any("Task-only lifecycle transition on non-Task" in item for item in messages))
 
     def test_strict_emits_rejection_preserves_committed_stable_snapshot(self) -> None:
         derivation, _, _ = self.run_source(
@@ -1475,7 +1543,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v3_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v4_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"

@@ -13,25 +13,20 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let accepted_before = ctx.boot_dispatch_window.start_signal_accepted_count();
-    let discarded_before = ctx.boot_dispatch_window.start_signal_discarded_count();
     if ctx
         .kernel_init_flow
-        .start_initial_on_dispatch(&ctx.kernel_init_task, &mut ctx.boot_dispatch_window)
-        .is_err()
+        .start_initial(&ctx.kernel_init_task)
+        .is_ok()
         || ctx
             .kthreadd_flow
-            .start_initial_on_dispatch(&mut ctx.kthreadd_task, &mut ctx.boot_dispatch_window)
-            .is_err()
-        || ctx.boot_dispatch_window.start_signal_accepted_count() != accepted_before
-        || ctx.boot_dispatch_window.start_signal_discarded_count()
-            != discarded_before.wrapping_add(2)
+            .start_initial(&mut ctx.kthreadd_task)
+            .is_ok()
         || ctx.kernel_init_flow.state() != State::Online
         || !ctx.kernel_init_flow.active()
         || ctx.kthreadd_flow.state() != State::Base
         || ctx.kthreadd_flow.active()
     {
-        printk::write_str("task flow lossy dispatch guard facts invalid\n");
+        printk::write_str("task flow strict dispatch facts invalid\n");
         return SmokeResult::Failed;
     }
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
@@ -86,7 +81,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.kernel_init_task.state() != State::Online
+    if ctx.kernel_init_task.state() != State::OnCpu
         || ctx.kernel_init_task.pid() != 1
         || !ctx.task_creation_core.entry_contract_ready()
         || !ctx.task_creation_core.kernel_init_created()

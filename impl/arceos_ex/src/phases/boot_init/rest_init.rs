@@ -7,7 +7,7 @@ use crate::{
             KERNEL_INIT_PID, KTHREADD_PID, SystemStateValue, allocate_kernel_stack,
             kernel_init_entry, kthreadd_entry, runtime_services_still_deferred,
         },
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{EventResult, FailureDiagnostic, LifecycleEvent, State, failed_condition},
         task::{TaskEntry, TaskKind},
     },
 };
@@ -127,8 +127,6 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         .bind_initial(&mut ctx.kernel_init_task)?;
     ctx.kernel_init_task_pi_lock.setup()?;
     wake_and_enable_kernel_init_task(ctx)?;
-    ctx.kernel_init_flow
-        .start_initial_on_dispatch(&ctx.kernel_init_task, &mut ctx.boot_dispatch_window)?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return failed_condition(
@@ -145,8 +143,6 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     wake_and_enable_kthreadd_task(ctx)?;
-    ctx.kthreadd_flow
-        .start_initial_on_dispatch(&mut ctx.kthreadd_task, &mut ctx.boot_dispatch_window)?;
     publish_kthreadd_global_ref(ctx)?;
     ctx.system_state.preset()?;
     ctx.system_state
@@ -174,7 +170,7 @@ fn preset_kernel_init_task(ctx: &mut Context) -> EventResult {
         || ctx.signal_core.state() != State::Prepared
         || ctx.task_file_context.state() != State::Prepared
         || ctx.security_core.state() != State::Ready
-        || ctx.boot_task.state() != State::Online
+        || ctx.boot_task.state() != State::OnCpu
     {
         return failed_condition(
             LifecycleEvent::Preset,
@@ -209,21 +205,32 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
         );
     }
 
-    let copy_result = ctx.task_creation_core.copy_process(
-        TaskCopyProcessInputs {
-            src_task: &ctx.boot_task,
-            root_pid_namespace: &ctx.root_pid_namespace,
-            credential_core: &ctx.credential_core,
-            signal_core: &ctx.signal_core,
-            task_file_context: &ctx.task_file_context,
-            security_core: &ctx.security_core,
-            scheduler: &ctx.scheduler,
-            cpu_group: &ctx.cpu_group,
-            entry: TaskEntry::KernelInit,
-        },
-        ctx.kernel_init_task.state(),
-        ctx.kernel_init_task.entry(),
-    )?;
+    let copy_result = ctx
+        .task_creation_core
+        .copy_process(
+            TaskCopyProcessInputs {
+                src_task: &ctx.boot_task,
+                root_pid_namespace: &ctx.root_pid_namespace,
+                credential_core: &ctx.credential_core,
+                signal_core: &ctx.signal_core,
+                task_file_context: &ctx.task_file_context,
+                security_core: &ctx.security_core,
+                scheduler: &ctx.scheduler,
+                cpu_group: &ctx.cpu_group,
+                entry: TaskEntry::KernelInit,
+            },
+            ctx.kernel_init_task.state(),
+            ctx.kernel_init_task.entry(),
+        )
+        .map_err(|error| {
+            error.with_diagnostic_if_absent(FailureDiagnostic::new(
+                "BootInitRestInitPhase",
+                "copy_kernel_init_task",
+                "KernelInitTask",
+                "copy_process",
+                "TaskCreationCore.copy_process",
+            ))
+        })?;
     if copy_result.entry() != TaskEntry::KernelInit
         || !copy_result.task_struct_allocated()
         || !copy_result.thread_context_ready()
@@ -245,7 +252,16 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
         &ctx.page_metadata_map,
         &mut ctx.page_table_caches,
         &ctx.config,
-    )?;
+    )
+    .map_err(|error| {
+        error.with_diagnostic_if_absent(FailureDiagnostic::new(
+            "BootInitRestInitPhase",
+            "copy_kernel_init_task",
+            "KernelInitTask",
+            "kernel_stack",
+            "allocate_kernel_stack",
+        ))
+    })?;
     ctx.kernel_init_task.commit_copy_process_metadata(
         copy_result.thread_context_ready(),
         copy_result.sched_entity_ready(),
@@ -378,7 +394,7 @@ fn preset_kthreadd_task(ctx: &mut Context) -> EventResult {
         || ctx.root_pid_namespace.state() != State::Ready
         || ctx.credential_core.state() != State::Prepared
         || ctx.task_file_context.state() != State::Prepared
-        || ctx.boot_task.state() != State::Online
+        || ctx.boot_task.state() != State::OnCpu
     {
         return failed_condition(
             LifecycleEvent::Preset,
@@ -576,7 +592,6 @@ fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_flow.setup(
         &mut ctx.boot_task,
         ctx.boot_init_flow.core_mut(),
-        &ctx.boot_dispatch_window,
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
@@ -586,12 +601,8 @@ fn setup_boot_idle_flow(ctx: &mut Context) -> EventResult {
 }
 
 fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_flow.prepare_idle_entry(
-        &ctx.boot_task,
-        &ctx.boot_dispatch_window,
-        &ctx.scheduler,
-        &ctx.cpu_group,
-    )
+    ctx.boot_idle_flow
+        .prepare_idle_entry(&ctx.boot_task, &ctx.scheduler, &ctx.cpu_group)
 }
 
 fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
@@ -600,13 +611,13 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
         &mut ctx.kernel_init_flow,
+        &ctx.user_app_flow,
         &mut ctx.kthreadd_task,
         &mut ctx.kthreadd_flow,
         &mut ctx.user_task_set,
         &ctx.boot_task,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
-        &mut ctx.boot_dispatch_window,
     )
 }
 
@@ -616,12 +627,13 @@ fn boot_idle_continuation(ctx: &mut Context) -> ! {
             &ctx.cpu_group,
             &mut ctx.kernel_init_task,
             &mut ctx.kernel_init_flow,
+            &ctx.user_app_flow,
             &mut ctx.kthreadd_task,
             &mut ctx.kthreadd_flow,
+            &ctx.boot_idle_flow,
             &mut ctx.user_task_set,
             &mut ctx.boot_cpu_local_interrupt,
             &mut ctx.boot_cpu_current_task,
-            &mut ctx.boot_dispatch_window,
         );
         crate::phases::shutdown_on_error(result, "boot idle schedule loop failed\n");
     }

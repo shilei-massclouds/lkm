@@ -128,82 +128,6 @@ pub enum TaskKind {
     TestOnly,
 }
 
-/// Scheduler-owned per-CPU view committed at the real task-switch boundary.
-///
-/// This is deliberately distinct from `CurrentTaskSlot`: the latter models
-/// the architecture-visible current-task pointer, while this object is the
-/// dispatch predicate input used by TaskFlow lifecycle and action checks.
-pub struct DispatchWindow {
-    current_task: TaskRef,
-    switch_committed_count: usize,
-    start_signal_accepted_count: usize,
-    start_signal_discarded_count: usize,
-}
-
-#[allow(dead_code)]
-impl DispatchWindow {
-    pub const fn new_boot() -> Self {
-        Self {
-            current_task: TaskRef::BOOT,
-            switch_committed_count: 0,
-            start_signal_accepted_count: 0,
-            start_signal_discarded_count: 0,
-        }
-    }
-
-    #[cfg(app_smoke)]
-    pub(crate) const fn new_for_task(current_task: TaskRef) -> Self {
-        Self {
-            current_task,
-            switch_committed_count: 1,
-            start_signal_accepted_count: 0,
-            start_signal_discarded_count: 0,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        State::Online
-    }
-
-    pub const fn current_task(&self) -> TaskRef {
-        self.current_task
-    }
-
-    pub const fn switch_committed_count(&self) -> usize {
-        self.switch_committed_count
-    }
-
-    pub const fn start_signal_accepted_count(&self) -> usize {
-        self.start_signal_accepted_count
-    }
-
-    pub const fn start_signal_discarded_count(&self) -> usize {
-        self.start_signal_discarded_count
-    }
-
-    pub fn commit_switch_to(&mut self, next: TaskRef) -> EventResult {
-        if !next.is_valid() {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                State::Online,
-                State::Online,
-                State::Online,
-            );
-        }
-        self.current_task = next;
-        self.switch_committed_count = self.switch_committed_count.wrapping_add(1);
-        Ok(())
-    }
-
-    pub fn record_start_signal(&mut self, accepted: bool) {
-        if accepted {
-            self.start_signal_accepted_count = self.start_signal_accepted_count.wrapping_add(1);
-        } else {
-            self.start_signal_discarded_count = self.start_signal_discarded_count.wrapping_add(1);
-        }
-    }
-}
-
 pub struct TaskCpuState {
     cpu_id: usize,
 }
@@ -232,6 +156,7 @@ const TASK_OWNED_FLOW_CAPACITY: usize = 4;
 /// The one lifecycle/identity/PID/CPU/context/Flow-ownership carrier.
 pub struct Task {
     lifecycle: Lifecycle,
+    on_cpu: bool,
     task_ref: TaskRef,
     entry: TaskEntry,
     pid: usize,
@@ -255,6 +180,7 @@ impl Task {
     pub const fn with_ref(task_ref: TaskRef) -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            on_cpu: false,
             task_ref,
             entry: TaskEntry::None,
             pid: 0,
@@ -276,15 +202,16 @@ impl Task {
     /// This is deliberately separate from the reusable Task lifecycle: the
     /// linker-visible init task exists before `_start` and never performs
     /// Preset/Setup/Enable.
-    pub(crate) const fn new_boot_ready() -> Self {
+    pub(crate) const fn new_boot_on_cpu() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Ready),
+            lifecycle: Lifecycle::new(State::Online),
+            on_cpu: true,
             task_ref: TaskRef::BOOT,
             entry: TaskEntry::None,
             pid: 0,
             kind: TaskKind::None,
             cpu: TaskCpuState::new(),
-            running: false,
+            running: true,
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
@@ -301,7 +228,17 @@ impl Task {
     }
 
     pub const fn state(&self) -> State {
-        self.lifecycle.state()
+        if self.on_cpu {
+            State::OnCpu
+        } else {
+            self.lifecycle.state()
+        }
+    }
+
+    /// True for the persistent scheduler-visible lifecycle, including while
+    /// the Task owns a CPU through the Task-only OnCpu projection.
+    pub const fn online(&self) -> bool {
+        matches!(self.lifecycle.state(), State::Online)
     }
 
     pub const fn task_ref(&self) -> TaskRef {
@@ -455,15 +392,21 @@ impl Task {
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 
-    pub(crate) fn adopt_boot_enable(&mut self) -> EventResult {
-        if self.task_ref != TaskRef::BOOT
-            || self.lifecycle.state() != State::Ready
-            || !self.initial_flow.same_identity(TaskFlowRef::BOOT_INIT)
-            || !self.owns_flow(TaskFlowRef::BOOT_INIT)
+    /// Publish a secondary CPU's pre-created idle task as its `rq->idle`
+    /// candidate without inserting it into a normal runnable-class queue.
+    pub(crate) fn adopt_ap_idle_enable(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.entry != TaskEntry::ApIdle
+            || self.kind != TaskKind::Idle
+            || self.cpu.cpu_id() == usize::MAX
+            || !self.initial_flow.is_valid()
+            || self.running
+            || self.runqueue_published
+            || self.on_cpu
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.lifecycle.state(),
+                self.state(),
                 State::Ready,
                 State::Online,
             );
@@ -473,8 +416,63 @@ impl Task {
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 
+    /// Adopt the initial execution authority delivered by the RISC-V
+    /// secondary-hart entry. This is deliberately not Task.Continue: no
+    /// scheduler has dispatched the CPU's pre-created idle task.
+    pub(crate) fn adopt_ap_entry_on_cpu(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || self.on_cpu
+            || self.entry != TaskEntry::ApIdle
+            || self.kind != TaskKind::Idle
+            || self.cpu.cpu_id() == usize::MAX
+            || !self.running
+            || self.runqueue_published
+            || !self.initial_flow.is_valid()
+        {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::Online,
+                State::OnCpu,
+            );
+        }
+        self.on_cpu = true;
+        Ok(())
+    }
+
+    /// Scheduler-only acceptance of `Task.Continue`. The caller must invoke
+    /// this from the new task's real entry/resume point, after the physical
+    /// context switch has transferred execution.
+    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online || self.on_cpu {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::Online,
+                State::OnCpu,
+            );
+        }
+        self.on_cpu = true;
+        Ok(())
+    }
+
+    /// Scheduler-only acceptance of `Task.Suspend`, committed before saving
+    /// the old task's context.
+    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online || !self.on_cpu {
+            return failed_condition(
+                LifecycleEvent::Suspend,
+                self.state(),
+                State::OnCpu,
+                State::Online,
+            );
+        }
+        self.on_cpu = false;
+        Ok(())
+    }
+
     pub fn disable(&mut self) -> EventResult {
-        if self.active_flow.is_valid() {
+        if self.active_flow.is_valid() || self.on_cpu {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),

@@ -22,7 +22,7 @@ stack-switch committed 只能由随后真实 `Scheduler.schedule()` 发布。
 
 BootInitFlow 提交 Online 后，Kernel.Enable 立即调用真实 scheduler handoff。
 `kernel_init_entry()` 验证真实 `sp` 后调用具名 `kernel::enable_after_boot_init()`；该 continuation
-检查 Kernel Ready、BootInitFlow Online、KernelInitTask Online、唯一 entry count 与 SP
+检查 Kernel Ready、BootInitFlow Online、KernelInitTask OnCpu、唯一 entry count 与 SP
 verification，再启动 SmpRuntime。真实 schedule 调用将来返回到 BootTask 时才启动
 BootIdleEntryPhase；线性模型中的 current TaskRef 标签不构成物理 Rust stack 归属证据。
 
@@ -68,7 +68,7 @@ TaskFlow::bind (structural initial-flow association)
 TaskCreationCore::copy_process
 Task::setup
 pi-lock -> select runqueue -> Task::set_task_cpu -> enqueue
-Task::enable -> lossy initial-flow Preset (discarded while BootDispatchWindow still names BootTask)
+Task::enable (initial Flow remains Base until the Task first runs)
 ```
 
 KernelInitTask CPU pinning follows its successful enable; KthreaddTask global
@@ -127,14 +127,13 @@ fact. The implementation boundary must pass through the current
 CPU's CurrentTaskSlot; it must not infer or publish the current task
 only from Scheduler counters or BootRunQueue.curr.
 
-The same switch commit must update the separate boot-CPU `DispatchWindow` and
-immediately emit a lossy start signal to the newly current Task's immutable
-initial Flow. The first KernelInitTask switch accepts the signal and advances
-KernelInitFlow from Base through its startup chain before the task entry runs.
-A repeated switch to a Task whose initial Flow is no longer Base records a
-discard and resumes the Task's active Flow. CurrentTaskSlot and DispatchWindow
-must agree after commit, but neither may be implemented as an alias for the
-other.
+SwitchTo must synchronously send `prev.Suspend`, save the old context, commit
+CurrentTaskSlot/context facts and perform the physical stack switch. Only the
+new Task's entry/resume point may handle `next.Continue`: a Base initial Flow
+accepts strict Startup, otherwise the Online active Flow accepts strict
+Continue. Exactly one handler must accept; rejection or handler failure fails
+the root execution. CurrentTaskSlot must agree with the unique OnCpu Task after
+it has been established.
 
 Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
 Scheduler.Online; the real Scheduler.Action::Schedule is driven by Kernel.Enable only after

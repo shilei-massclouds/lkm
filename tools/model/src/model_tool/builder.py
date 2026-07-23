@@ -87,6 +87,7 @@ _ALLOWED_STATE_NAMES = frozenset(
         "Prepared",
         "Ready",
         "Online",
+        "OnCpu",
         "Offline",
         "Destroyed",
     }
@@ -98,6 +99,8 @@ _ALLOWED_TRANSITION_NAMES = frozenset(
         "Enable",
         "Disable",
         "Cleanup",
+        "Continue",
+        "Suspend",
     }
 )
 _ALLOWED_TRANSITIONS = frozenset(
@@ -111,6 +114,8 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Ready", "Cleanup", "Destroyed"),
         ("Online", "Disable", "Offline"),
         ("Online", "Cleanup", "Destroyed"),
+        ("Online", "Continue", "OnCpu"),
+        ("OnCpu", "Suspend", "Online"),
         ("Offline", "Cleanup", "Destroyed"),
     }
 )
@@ -724,7 +729,12 @@ def _build_objects(
             lifecycle_owner = None
 
         _check_lifecycle_names(
-            decl.name, initial_state, state_decls, diagnostics, decl.span
+            decl.name,
+            initial_state,
+            state_decls,
+            diagnostics,
+            decl.span,
+            task_lifecycle=_type_is_or_extends(types, decl.kind, "Task"),
         )
         _check_event_uniqueness(decl.name, state_decls, diagnostics)
         states = _build_states(
@@ -772,7 +782,12 @@ def _check_type_lifecycles(
                 )
             )
         _check_lifecycle_names(
-            decl.name, decl.initial_state, decl.states, diagnostics, decl.span
+            decl.name,
+            decl.initial_state,
+            decl.states,
+            diagnostics,
+            decl.span,
+            task_lifecycle=_type_is_or_extends(types, decl.name, "Task"),
         )
         _check_event_uniqueness(decl.name, decl.states, diagnostics)
         states = _build_states(decl.name, decl.states, diagnostics)
@@ -820,6 +835,8 @@ def _check_lifecycle_names(
     state_decls: list[StateDecl],
     diagnostics: list[Diagnostic],
     owner_span: SourceSpan,
+    *,
+    task_lifecycle: bool,
 ) -> None:
     """Enforce SEM-NAME-001: lifecycle names come from controlled vocabularies."""
 
@@ -828,6 +845,14 @@ def _check_lifecycle_names(
             Diagnostic(
                 Severity.ERROR,
                 f"unknown lifecycle state name: {owner_name}.initial_state State::{initial_state}",
+                owner_span,
+            )
+        )
+    if initial_state == "OnCpu" and not task_lifecycle:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"Task-only lifecycle state on non-Task: {owner_name}.initial_state State::OnCpu",
                 owner_span,
             )
         )
@@ -841,12 +866,29 @@ def _check_lifecycle_names(
                     state_decl.span,
                 )
             )
+        if state_decl.name == "OnCpu" and not task_lifecycle:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"Task-only lifecycle state on non-Task: {owner_name}.State::OnCpu",
+                    state_decl.span,
+                )
+            )
         for transition_decl in state_decl.transitions:
             if transition_decl.name not in _ALLOWED_TRANSITION_NAMES:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         f"unknown lifecycle transition name: {owner_name}.Transition::{transition_decl.name}",
+                        transition_decl.span,
+                    )
+                )
+            if transition_decl.name in {"Continue", "Suspend"} and not task_lifecycle:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "Task-only lifecycle transition on non-Task: "
+                        f"{owner_name}.Transition::{transition_decl.name}",
                         transition_decl.span,
                     )
                 )
@@ -2131,7 +2173,7 @@ def _check_emit_blocks(
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        "emits must reference a transition through a local, "
+                        "emits must reference a Signal through a local, "
                         f"static, or association-path receiver: {entry}",
                         entry_span,
                     )
@@ -2139,7 +2181,7 @@ def _check_emit_blocks(
                 continue
 
             emitted_object: str | None = None
-            if emitted.receiver is None:
+            if emitted.receiver is None or emitted.receiver == "self":
                 emitted_object = default_object
                 emitted_type = default_type
             elif emitted.receiver in model.objects:
@@ -2150,24 +2192,27 @@ def _check_emit_blocks(
                     model, emitted.receiver, bindings
                 )
 
-            target = (
-                _transition_def(model, emitted_object, emitted.transition)
-                if emitted_object is not None
+            target = None
+            object_process = None
+            if emitted_object is not None:
+                if emitted.kind == "Transition":
+                    target = _transition_def(model, emitted_object, emitted.name)
+                else:
+                    object_process = _object_process_decl(
+                        model.objects[emitted_object], emitted.kind, emitted.name
+                    )
+            type_process = (
+                _type_process_decl(model, emitted_type, emitted.kind, emitted.name)
+                if emitted_type is not None
                 else None
             )
-            if target is None and (
-                emitted_type is None
-                or _type_process_decl(
-                    model, emitted_type, "Transition", emitted.transition
-                )
-                is None
-            ):
+            if target is None and object_process is None and type_process is None:
                 receiver_label = emitted.receiver or default_object or default_type
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        "unknown emitted transition: "
-                        f"{receiver_label}.Transition::{emitted.transition}",
+                        "unknown emitted Signal: "
+                        f"{receiver_label}.{emitted.kind}::{emitted.name}",
                         entry_span,
                     )
                 )
@@ -2175,6 +2220,7 @@ def _check_emit_blocks(
 
             if (
                 source_transition is not None
+                and emitted.kind == "Transition"
                 and target is not None
                 and emitted_object == source_transition.object_name
                 and target.source_state != source_transition.target_state
@@ -2183,7 +2229,7 @@ def _check_emit_blocks(
                     Diagnostic(
                         Severity.ERROR,
                         "emitted transition is not enabled from target state: "
-                        f"{emitted_object}.Transition::{emitted.transition} "
+                        f"{emitted_object}.Transition::{emitted.name} "
                         f"requires State::{target.source_state}, "
                         f"but {source_transition.object_name}.Transition::"
                         f"{source_transition.name} targets "

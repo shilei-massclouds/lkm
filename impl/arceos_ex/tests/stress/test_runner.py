@@ -286,12 +286,12 @@ class EventAndDiffTests(unittest.TestCase):
             names[:4],
             [
                 "Kernel.Started",
-                "BootTask.Online",
+                "BootTask.OnCpu",
                 "BootInitFlow.Started",
                 "EntryPreludePhase.Started",
             ],
         )
-        self.assertEqual(names.count("BootTask.Online"), 1)
+        self.assertEqual(names.count("BootTask.OnCpu"), 1)
 
     def test_complete_stress_record_is_decoded_but_partial_is_not(self) -> None:
         text = "checkpoint: SyscallTable.Wait4\n"

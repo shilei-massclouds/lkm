@@ -73,7 +73,8 @@ formal semantics 和工具更新前直接按新语法解释。异步发送的交
 
 一次 Signal 响应从目标系统接收具名 Signal 开始，到该系统的 handler 完成、拒绝或因推导错误失败
 为止。Signal envelope 与响应过程是不同对象：envelope 保存稳定身份、源、目标、名称、类型化
-payload、严格性和因果关系；handler 才是目标系统内部执行的 `Transition` 或 `Action`。Transition
+payload 和因果关系；handler 才是目标系统内部执行的 `Transition` 或 `Action`。所有 Signal 都是
+不可丢弃的严格 Signal。Transition
 handler 可以提交生命周期状态，Action handler 只能提交规格允许的事实，不能借 Signal 调用伪造状态
 迁移。
 
@@ -93,16 +94,16 @@ Signal 推导工具采用下列兼容边界：
 
 - `rejected`：目标在当前稳定快照不接受 Signal，包括没有 handler、handler 歧义、状态不匹配或
   接收条件不成立。
-- `discarded`：lossy Signal 被拒绝后立即丢弃，不重试，也不等待未来状态。
-- `failed`：规格、类型、推导或 invariant 失败，或者 strict Signal 被拒绝导致根请求失败。
+- `failed`：规格、类型、推导或 invariant 失败，或者任一已发送 Signal 被拒绝导致根请求失败。
 - `truncated`：下一次传播超出显式预算，因此不执行 frontier Signal。
 - `completed`：响应和其同步子响应完成；其异步 Signal 已按规则进入 FIFO。
 - `stopped`：发送前截至边界已到达，当前已接受但尚未提交的祖先响应或已经存在但尚未处理的 FIFO
   Signal 不再继续；这不是可恢复 continuation。
 - `pending`：Signal 已接受但等待未来 Signal 才能继续。该概念保留，但当前工具不得产生它。
 
-条件不成立只表示本次接收被拒绝，不得猜测为临时等待。严格拒绝的诊断必须保留从根 Signal 到拒绝
-点的完整因果链；lossy 丢弃和预算截断也必须是 trace 中可见的事实，而不是展示层推断。
+条件不成立只表示本次接收被拒绝，不得猜测为临时等待。拒绝诊断必须保留从根 Signal 到拒绝点的
+完整因果链；异步 `emits` 的目标处理失败也必须传播为最终根执行失败，不得静默忽略、排队重试或
+降级为其它 outcome。预算截断必须是 trace 中可见的事实，而不是展示层推断。
 
 `tools2/` 是验证上述目标语义的独立工具链。本轮里程碑要求它完整加载 `spec/model/main.spec`，并能从
 真实 Signal 到达边界推导其可达闭包。完整模型只有 `ComputerProject.Preset` 是无需预制条件的起点；
@@ -130,7 +131,8 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 `tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
 快捷入口的默认请求是 `Human -> ComputerProject.Preset`，`-t/--trigger` 可以覆盖目标，
 `-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，但底层
-`--signal` 保持必填。tools2 协议统一为 version 3 并拒绝 version 1、version 2、老工具协议和旧
+`--signal` 保持必填。tools2 协议统一为 version 4，移除 `lossy` 字段与 `discarded` outcome，并拒绝
+version 1、version 2、version 3、老工具协议和旧
 snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
 

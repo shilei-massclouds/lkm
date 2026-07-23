@@ -9,7 +9,8 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
 
 ## 统一 Task carrier
 
-- 静态 `init_task` 只映射为 `BootTask`。该对象从镜像入口前起就是 Online，并只保存稳定的
+- 静态 `init_task` 只映射为 `BootTask`。该对象从模型入口起就在 boot CPU 上执行，初态为 Task
+  专属 `OnCpu`，并只保存稳定的
   storage/PID 0/`TaskRef::BOOT`/canonical identity 事实；Scheduler
   内部可以保存 boot-task scheduling metadata、pi lock、CPU ref 和 switch context，但该结构必须
   命名为 metadata/setup/view，不得拥有第二套 Task identity 或对外生命周期。
@@ -30,8 +31,8 @@ BootTask API 必须解析到该同一地址。
 
 ## Task 类型级 lifecycle lowering
 
-普通 Task 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 状态和
-`preset/setup/enable/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
+普通 Task 的 `Base/Prepared/Ready/Online/OnCpu/Offline/Destroyed` 状态和
+`preset/setup/enable/continue_on_cpu/suspend_from_cpu/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
 `KernelInitTask`、`KthreaddTask` 与 `UserTaskSet` 创建的 child 都通过 core 的同一组方法推进；角色
 结构不得定义同名 lifecycle-driving API，也不得保留转发 alias。它们只可暴露角色 metadata、只读
 查询、受控的 `Task` core 访问，以及不推进 lifecycle 的 metadata commit helper。
@@ -40,15 +41,17 @@ BootTask API 必须解析到该同一地址。
 `Task::setup` 必须在 Phase 或 runtime fork 路径已调用 `TaskCreationCore::copy_process` 后消费其
 copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 New/not-enqueued 状态；
 `Task::enable` 只在调用者已完成 running、runqueue publication 与初始 Flow structural binding 后提交
-Online，并产生一次 lossy initial-flow Preset 尝试；它不要求该 Flow 已 active，窗口不匹配时 Flow
-仍停在 Base。`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
+Online；它不启动 Flow。Scheduler 是 `continue_on_cpu`/`suspend_from_cpu` 的唯一调用者：真实切入后的
+入口或恢复点先提交 `Online -> OnCpu`，再严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
+的 `Continue`，两者必须恰有一个可接受。真实切出前同步提交 `OnCpu -> Online`。
+`disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
-`BootTask` 使用 boot-only const initializer 直接构造 Online `init_task_storage` 和固定
+`BootTask` 使用 boot-only const initializer 直接构造 OnCpu `init_task_storage` 和固定
 `TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
 早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有
-`BootTaskEntryBinding` lower，不得写入 BootTask 的稳定 Online invariant。各阶段只能静默验证该
-carrier 仍为 Online/canonical。
+`BootTaskEntryBinding` lower；OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的 runqueue
+或 current slot。各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
 
 ## TaskRef 与 storage
 
@@ -76,8 +79,8 @@ Flow 或把 initial ref 当作 active ref。
 
 `BootInitRestInitPhase` 必须对 `KernelInitTask` 与 `KthreaddTask` 分别完整执行
 Preset/Setup/Enable：Preset lower 为 `copy_process`，Setup 当前无业务动作，Enable lower 为
-`wake_up_new_task`。每次 Enable 发出的 initial-flow Preset 在仍属于 BootTask 的 dispatch window 下
-都必须 discarded；Task lifecycle 不得借此预执行 KernelInitFlow 或 KthreaddFlow。
+`wake_up_new_task`。Enable 后 initial Flow 保持 Base；只有 Scheduler 真实切入相应 Task 后才发送严格
+continuation Signal，启动 `KernelInitFlow` 或 `KthreaddFlow`。
 
 fork 的 Task 侧提交顺序固定为 `fresh Task -> fresh fork UserAppFlow -> publish TaskRef ->
 owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有在当前及 prior owned Flow
@@ -85,7 +88,7 @@ owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有�
 
 ## 测试与诊断
 
-- checkpoint 使用 `BootTask.Online`、`BootIdleSetup.Ready` 和既有 Linux marker，不通过改名编码
+- checkpoint 使用 `BootTask.OnCpu`、`BootIdleSetup.Ready` 和既有 Linux marker，不通过改名编码
   TaskRef generation。
 - 动态 checkpoint observation 至少包含 TaskRef slot/generation；名称、PID 与角色只能在 ref lookup
   成功后读取。
@@ -98,3 +101,9 @@ owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有�
 AP boot-data 的 `task_ptr` 指向统一 `Task` core；`SecondaryIdleTaskSet` 只保存 model-deferred AP family
 的聚合 metadata。smoke scheduler/mutex/rwsem/rwlock 的 test-only role metadata 同样委托统一 Task，
 不能拥有平行 lifecycle、CPU 或 switch-context carrier。
+
+AP idle Task 在 `hart_start` 前按普通 Task 生命周期发布到 Online，但保持
+`runqueue_published == false`，因为 `rq->idle` 不属于普通 runnable class queue。真实 secondary
+entry 验证 boot-data/`tp` 后，必须通过 AP-entry 专用 adoption 将该 Task 置为 OnCpu，并在同一边界
+严格启动 initial idle TaskFlow；不得伪造 Scheduler Continue。后续 Suspend/Continue 仍只允许
+Scheduler 驱动。

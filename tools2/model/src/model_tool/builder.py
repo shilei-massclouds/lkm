@@ -203,11 +203,13 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             "kind": "invalid_call",
             "text": entry["text"],
             "span": entry["span"],
-            "lossy": False,
         }
-    lossy = text.startswith("lossy ")
-    if lossy:
-        text = text[len("lossy ") :].strip()
+    if text.startswith("lossy "):
+        return {
+            "kind": "invalid_call",
+            "text": entry["text"],
+            "span": entry["span"],
+        }
     declaration = re.fullmatch(r"declare\s+([a-z][A-Za-z0-9_]*)\s+of\s+(.+)", text, re.S)
     if declaration:
         return {
@@ -230,7 +232,6 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             "kind": "invalid_call",
             "text": entry["text"],
             "span": entry["span"],
-            "lossy": lossy,
         }
     arguments: list[dict[str, Any]] = []
     for raw in _split_top(match.group("args") or ""):
@@ -243,7 +244,6 @@ def _call(entry: dict[str, Any]) -> dict[str, Any]:
             )
     return {
         "kind": "call",
-        "lossy": lossy,
         "receiver": match.group("receiver") or "self",
         "process_kind": match.group("kind"),
         "name": match.group("name"),
@@ -371,6 +371,45 @@ def _is_subtype(types: dict[str, dict[str, Any]], actual: str | None, expected: 
     return actual == expected or any(item["name"] == expected for item in _type_chain(types, actual))
 
 
+def _check_task_only_lifecycle(
+    *,
+    owner: str,
+    initial_state: str | None,
+    states: list[dict[str, Any]],
+    task_lifecycle: bool,
+    diagnostics: list[dict[str, Any]],
+    owner_span: dict[str, Any],
+) -> None:
+    if initial_state == "OnCpu" and not task_lifecycle:
+        _diagnostic(
+            diagnostics,
+            "error",
+            f"Task-only lifecycle state on non-Task: {owner}.initial_state State::OnCpu",
+            owner_span,
+        )
+    for state in states:
+        if state["name"] == "OnCpu" and not task_lifecycle:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"Task-only lifecycle state on non-Task: {owner}.State::OnCpu",
+                state["span"],
+            )
+        for handler in state.get("handlers", []):
+            if (
+                handler.get("kind") == "Transition"
+                and handler.get("name") in {"Continue", "Suspend"}
+                and not task_lifecycle
+            ):
+                _diagnostic(
+                    diagnostics,
+                    "error",
+                    "Task-only lifecycle transition on non-Task: "
+                    f"{owner}.Transition::{handler['name']}",
+                    handler["span"],
+                )
+
+
 def _type_fields(
     types: dict[str, dict[str, Any]], declared_type: str | None, field_kind: str
 ) -> list[dict[str, Any]]:
@@ -460,6 +499,15 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         enum_spans[name] = declaration["span"]
 
     types = _index_types(document.get("types", []), diagnostics)
+    for declaration in types.values():
+        _check_task_only_lifecycle(
+            owner=declaration["name"],
+            initial_state=declaration.get("initial_state"),
+            states=list(declaration.get("states", {}).values()),
+            task_lifecycle=_is_subtype(types, declaration["name"], "Task"),
+            diagnostics=diagnostics,
+            owner_span=declaration["span"],
+        )
     predicates: dict[str, list[dict[str, Any]]] = {}
     for declaration in document.get("predicates", []):
         predicates.setdefault(declaration["name"], []).append(deepcopy(declaration))
@@ -484,6 +532,14 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         lifecycle = _nearest_lifecycle(types, declared_type)
         declares_lifecycle = declaration.get("initial_state") is not None or bool(declaration.get("states"))
         override = declaration.get("properties", {}).get("lifecycle_override") == "true"
+        _check_task_only_lifecycle(
+            owner=name,
+            initial_state=declaration.get("initial_state"),
+            states=declaration.get("states", []),
+            task_lifecycle=_is_subtype(types, declared_type, "Task"),
+            diagnostics=diagnostics,
+            owner_span=declaration["span"],
+        )
         if lifecycle is not None and not declares_lifecycle:
             initial_state = lifecycle.get("initial_state")
             raw_states = list(lifecycle.get("states", {}).values())
@@ -724,6 +780,38 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             "parent cycle contains systems: " + " -> ".join([*cycle, cycle[0]]),
             systems[cycle[0]]["span"],
         )
+
+    def report_invalid_calls(members: list[dict[str, Any]]) -> None:
+        for member in members:
+            for entry in member.get("entries", []):
+                if entry.get("kind") == "invalid_call":
+                    _diagnostic(
+                        diagnostics,
+                        "unsupported",
+                        f"invalid process call: {entry.get('text')}",
+                        entry["span"],
+                    )
+                elif entry.get("kind") == "choice":
+                    for choice in entry.get("choices", []):
+                        if choice.get("kind") == "invalid_call":
+                            _diagnostic(
+                                diagnostics,
+                                "unsupported",
+                                f"invalid process call: {choice.get('text')}",
+                                choice["span"],
+                            )
+            report_invalid_calls(member.get("members", []))
+            for variant in member.get("variants", []):
+                report_invalid_calls(variant.get("members", []))
+
+    seen_handlers: set[str] = set()
+    for system in systems.values():
+        for handlers in system["handlers_by_name"].values():
+            for handler in handlers:
+                if handler["id"] in seen_handlers:
+                    continue
+                seen_handlers.add(handler["id"])
+                report_invalid_calls(handler.get("body", []))
 
     core = {
         "enums": enums,

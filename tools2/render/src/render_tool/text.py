@@ -112,9 +112,8 @@ def _render_verbose(view: dict[str, Any]) -> str:
         indent = "  " * (signal.get("cause_depth", 0) + 1)
         coordinate = signal["coordinate"]
         delivery = signal["delivery"]
-        mode = "lossy" if signal["lossy"] else "strict"
         lines.append(
-            f"{indent}{signal['id']} [{delivery} {mode}] {signal['source']} -> "
+            f"{indent}{signal['id']} [{delivery}] {signal['source']} -> "
             f"{signal['target']}.{signal['name']} @ depth={coordinate['depth']},breadth={coordinate['breadth']} "
             f"=> {signal['outcome']}"
         )

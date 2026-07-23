@@ -13,10 +13,9 @@ object BootInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     task_initial_flow_is(BootTask, self);
                     task_flow_initial_binding_consistent(self);
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
                 }
 
                 within SingleTaskContext {
@@ -27,7 +26,7 @@ object BootInitFlow: TaskFlow {
 
                 ensures {
                     EntryPreludePhase.state == State::Online;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     task_flow_started(self);
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
@@ -44,14 +43,14 @@ object BootInitFlow: TaskFlow {
     state State::Prepared {
         invariant {
             EntryPreludePhase.state == State::Online;
-            BootTask.state == State::Online;
+            BootTask.state == State::OnCpu;
             task_flow_started(self);
         }
 
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    BootTask.state == State::OnCpu;
                 }
 
                 within SingleTaskContext {
@@ -91,9 +90,7 @@ object BootInitFlow: TaskFlow {
                     BootInitRestInitPhase.state == State::Online;
                     KernelInitFlow.state == State::Base;
                     KthreaddFlow.state == State::Base;
-                    task_flow_start_signal_discarded(KernelInitFlow, BootDispatchWindow);
-                    task_flow_start_signal_discarded(KthreaddFlow, BootDispatchWindow);
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 emits {
@@ -110,13 +107,13 @@ object BootInitFlow: TaskFlow {
             BootInitRestInitPhase.state == State::Online;
             KernelInitFlow.state == State::Base;
             KthreaddFlow.state == State::Base;
-            BootTask.state == State::Online;
+            BootTask.state == State::OnCpu;
         }
 
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
+                    BootTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -146,8 +143,12 @@ object BootInitFlow: TaskFlow {
                         CurrentTaskRef,
                         KernelInitTaskRef
                     );
-                    BootTask.state == State::Online;
-                    task_flow_online_on_dispatch(self, BootDispatchWindow);
+                    BootTask.state == State::OnCpu;
+                    task_flow_online_on_cpu(self);
+                }
+
+                emits {
+                    Kernel.Transition::Setup;
                 }
             }
         }
@@ -173,9 +174,9 @@ object BootInitFlow: TaskFlow {
                 CurrentTaskRef,
                 KernelInitTaskRef
             );
-            BootTask.state == State::Online;
+            BootTask.state == State::OnCpu;
             task_flow_started(self);
-            task_flow_online_on_dispatch(self, BootDispatchWindow);
+            task_flow_online_on_cpu(self);
         }
     }
 }

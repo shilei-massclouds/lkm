@@ -448,7 +448,7 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "payload kernel init",
             ctx.user_boot_payload.driven_by_kernel_init_task()
-                && ctx.kernel_init_task.state() == State::Online,
+                && ctx.kernel_init_task.state() == State::OnCpu,
         );
 
         let space = &ctx.user_address_space;
@@ -459,7 +459,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "address space kernel init binding",
-            space.bound_to_kernel_init_task() && ctx.kernel_init_task.state() == State::Online,
+            space.bound_to_kernel_init_task() && ctx.kernel_init_task.state() == State::OnCpu,
         );
         assertions.assert(
             "address space halves",
@@ -1438,24 +1438,18 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
         assertions.assert(
             "KernelInitTask user flow preset",
-            ctx.user_app_flow
-                .preset(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
-                .is_ok(),
+            ctx.user_app_flow.preset(&mut ctx.kernel_init_task).is_ok(),
         );
         assertions.assert(
             "KernelInitTask user flow setup",
             ctx.user_app_flow
-                .setup(
-                    &ctx.kernel_init_task,
-                    &ctx.kernel_init_user_state,
-                    &ctx.boot_dispatch_window,
-                )
+                .setup(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
             "kernel init flow disabled for exec",
             ctx.kernel_init_flow
-                .disable_for_exec(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
+                .disable_for_exec(&ctx.kernel_init_task)
                 .is_ok(),
         );
         assertions.assert(
@@ -1473,11 +1467,7 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "KernelInitTask user flow online",
             ctx.user_app_flow
-                .enable(
-                    &ctx.kernel_init_task,
-                    &ctx.kernel_init_user_state,
-                    &ctx.boot_dispatch_window,
-                )
+                .enable(&ctx.kernel_init_task, &ctx.kernel_init_user_state)
                 .is_ok(),
         );
         assertions.assert(
@@ -1489,7 +1479,7 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "kernel init flow cleaned after exec",
             ctx.kernel_init_flow
-                .cleanup_after_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+                .cleanup_after_handoff(&mut ctx.kernel_init_task)
                 .is_ok(),
         );
         let process = &ctx.kernel_init_user_state;
@@ -1507,7 +1497,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.kernel_init_flow.owner_bound()
                 && !ctx.kernel_init_flow.active()
                 && ctx.kernel_init_flow.released()
-                && ctx.kernel_init_task.state() == State::Online
+                && ctx.kernel_init_task.state() == State::OnCpu
                 && !ctx.kernel_init_task.kernel_init_flow_owned()
                 && ctx.kernel_init_task.user_flow_owned()
                 && ctx.user_app_flow.task_ref_owner() == ctx.kernel_init_task.task_ref()
@@ -1525,12 +1515,12 @@ impl SmokeScenario for UserBootElfScenario {
         let initial_user_flow_ref = ctx.user_app_flow.flow_ref();
         let first_runtime_handoff = ctx
             .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
             .is_ok();
         let first_runtime_flow_ref = ctx.user_app_flow.flow_ref();
         let second_runtime_handoff = ctx
             .user_app_flow
-            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .commit_runtime_exec_handoff(&mut ctx.kernel_init_task)
             .is_ok();
         let second_runtime_flow_ref = ctx.user_app_flow.flow_ref();
         assertions.assert(
@@ -2502,7 +2492,6 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
         let ctx = context();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
-                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -2706,7 +2695,6 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
     let (outer_parent_frame, outer_exit_pid) = {
         let ctx = context();
         let Some((parent_frame, _, child_pid)) = ctx.user_task_set.child_exit_to_parent_wait(
-            &ctx.boot_dispatch_window,
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -2740,6 +2728,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 .user_task_set
                 .restore_parent_fd_snapshot(&mut ctx.files_struct)
             || !ctx.user_task_set.mark_parent_wait_resumed(true)
+            || ctx.commit_kernel_init_dispatch().is_err()
             || ctx
                 .scheduler
                 .dequeue_user_child_from_runqueue(
@@ -2845,7 +2834,6 @@ fn exercise_builtin_grandchild_wait4_exec(
         let ctx = context();
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
-                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -3051,7 +3039,6 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
     let child_pid = {
         let ctx = context();
         let (_parent_frame, child_pid) = ctx.user_task_set.child_exit_to_vfork_parent(
-            &ctx.boot_dispatch_window,
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
             &mut ctx.page_allocator,
@@ -3063,6 +3050,9 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
 
     {
         let ctx = context();
+        if ctx.commit_kernel_init_dispatch().is_err() {
+            return None;
+        }
         if !ctx
             .user_task_set
             .restore_parent_wait_writable_page_snapshot(
@@ -3391,7 +3381,6 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         let ctx = context();
         let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
-                &ctx.boot_dispatch_window,
                 &mut ctx.user_address_space,
                 &mut ctx.user_stack,
                 (
@@ -3488,7 +3477,7 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
         );
         assertions.assert(
             "observed plain fork preserves shell identity",
-            ctx.user_task_set.active_task_state() == State::Online
+            ctx.user_task_set.active_task_state() == State::OnCpu
                 && ctx.user_task_set.pid() == shell_pid
                 && ctx.user_task_set.parent_pid() == shell_parent_pid
                 && ctx.user_task_set.tgid() == shell_tgid,

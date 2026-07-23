@@ -13,6 +13,9 @@ pub enum State {
     Online,
     Offline,
     Destroyed,
+    /// Task-only execution projection. Generic object lifecycles never enter
+    /// this state; `Task` derives it from its scheduler-owned execution bit.
+    OnCpu,
 }
 
 #[allow(dead_code)]
@@ -24,6 +27,8 @@ pub enum LifecycleEvent {
     Enable,
     Disable,
     Cleanup,
+    Continue,
+    Suspend,
 }
 
 impl LifecycleEvent {
@@ -38,6 +43,8 @@ impl LifecycleEvent {
             Self::Enable => b'E',
             Self::Disable => b'D',
             Self::Cleanup => b'C',
+            Self::Continue => b'R',
+            Self::Suspend => b'U',
         }
     }
 }
@@ -209,6 +216,7 @@ impl State {
             Self::Online => b'O',
             Self::Offline => b'F',
             Self::Destroyed => b'D',
+            Self::OnCpu => b'C',
         }
     }
 }

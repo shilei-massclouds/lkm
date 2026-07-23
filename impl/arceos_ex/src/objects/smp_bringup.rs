@@ -98,20 +98,43 @@ impl ApIdleTaskRecord {
             && self.flow.bind(&mut self.task, TaskFlowRef::NONE).is_ok()
             && self.task.bind_initial_flow(&self.flow).is_ok()
             && self.task.adopt_setup().is_ok()
+            && self.task.adopt_ap_idle_enable().is_ok()
     }
 
     fn unified_carrier_ready(&self, logical_id: usize) -> bool {
         self.logical_id == logical_id
             && self.task.task_ref() == TaskRef::ap_idle(logical_id)
-            && self.task.state() == State::Ready
+            && self.task.state() == State::OnCpu
+            && self.task.online()
             && self.task.cpu_id() == logical_id
             && self.task.entry() == TaskEntry::ApIdle
             && self.task.kind() == TaskKind::Idle
+            && self.task.running()
+            && !self.task.runqueue_published()
             && self.flow.owner() == self.task.task_ref()
-            && self.flow.state() == State::Base
-            && !self.flow.active()
+            && self.flow.state() == State::Online
+            && self.flow.active()
             && self.task.initial_flow() == self.flow.flow_ref()
-            && !self.task.active_flow().is_valid()
+            && self.task.active_flow() == self.flow.flow_ref()
+    }
+
+    fn adopt_entry_execution(&mut self, logical_id: usize) -> EventResult {
+        if self.logical_id != logical_id
+            || self.task.task_ref() != TaskRef::ap_idle(logical_id)
+            || self.task.state() != State::Online
+            || self.flow.state() != State::Base
+            || self.flow.active()
+            || self.task.active_flow().is_valid()
+        {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.task.state(),
+                State::Online,
+                State::OnCpu,
+            );
+        }
+        self.task.adopt_ap_entry_on_cpu()?;
+        self.flow.start_initial(&mut self.task, None, None)
     }
 }
 
@@ -302,6 +325,18 @@ fn ap_idle_task_virt(logical_id: usize) -> Option<usize> {
         return None;
     }
     Some(unsafe { core::ptr::addr_of!(AP_IDLE_TASKS[logical_id].task) as usize })
+}
+
+pub(crate) fn adopt_ap_idle_entry_execution(logical_id: usize) -> EventResult {
+    if logical_id == 0 || logical_id >= MAX_CPUS {
+        return failed_condition(
+            LifecycleEvent::Continue,
+            State::Base,
+            State::Online,
+            State::OnCpu,
+        );
+    }
+    unsafe { AP_IDLE_TASKS[logical_id].adopt_entry_execution(logical_id) }
 }
 
 fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {
@@ -1120,7 +1155,7 @@ pub fn smp_bringup_runtime_ready(
     online_ack: &SecondaryCpuOnlineAck,
     boundary: &SmpBringupBoundary,
 ) -> bool {
-    kernel_init_task.state() == State::Online
+    kernel_init_task.state() == State::OnCpu
         && cpu_group.state() == State::Ready
         && cpu_group.secondary_cpus_online()
         && cpu_group.smp_concurrency_open()

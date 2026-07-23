@@ -8,7 +8,7 @@ use core::sync::atomic::AtomicU8;
 
 use crate::{
     checkpoint::Checkpoint,
-    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
+    objects::state::{EventResult, FailureDiagnostic, LifecycleEvent, State, failed_condition},
 };
 
 pub const KERNEL_SYSTEM_MAPPING: SystemMapping = SystemMapping {
@@ -82,52 +82,73 @@ pub fn switch_after_boot_init() -> ! {
         &ctx.cpu_group,
         &mut ctx.kernel_init_task,
         &mut ctx.kernel_init_flow,
+        &ctx.user_app_flow,
         &mut ctx.kthreadd_task,
         &mut ctx.kthreadd_flow,
+        &ctx.boot_idle_flow,
         &mut ctx.user_task_set,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
-        &mut ctx.boot_dispatch_window,
     );
     crate::phases::shutdown_on_error(schedule_result, "arceos_ex first schedule failed\n");
-    crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToEntry, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToExit, ctx);
-    crate::checkpoint::dispatch(Checkpoint::SchedulerScheduleExit, ctx);
-    crate::phases::shutdown_on_error(
-        ctx.scheduler
-            .handoff_boot_idle_to_kernel_init(&ctx.kernel_init_task, &ctx.boot_cpu_current_task),
-        "arceos_ex kernel_init task handoff failed\n",
-    );
     crate::phases::boot_init::boot_task_restored()
 }
 
 pub fn enable_after_boot_init() -> ! {
     let ctx = crate::context::context_ref();
-    if crate::phases::state::load(&KERNEL_STATE) != State::Ready
-        || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot_init::is_online()
-        || ctx.kernel_init_task.state() != State::Online
-        || ctx.boot_dispatch_window.current_task() != ctx.kernel_init_task.task_ref()
-        || !ctx.kernel_init_flow.initial_start_accepted()
-        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
-        || ctx.kernel_init_task.entry_started_count() != 1
-        || !ctx.kernel_init_task.entry_stack_verified()
-    {
-        crate::arch::riscv64::sbi::putstr(
-            "arceos_ex kernel enable after boot init invariant failed\n",
-        );
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
+    crate::phases::shutdown_on_error(
+        require_kernel_init_continue_boundary(ctx),
+        "arceos_ex kernel enable after boot init invariant failed\n",
+    );
 
     crate::phases::smp_runtime::start_kernel_init_flow()
+}
+
+fn require_kernel_init_continue_boundary(ctx: &crate::context::Context) -> EventResult {
+    let first_failed = if crate::phases::state::load(&KERNEL_STATE) != State::Ready {
+        "Kernel.Ready"
+    } else if !crate::phases::boot::entry_prelude::is_online() {
+        "EntryPreludePhase.Online"
+    } else if !crate::phases::boot_init::is_online() {
+        "BootInitFlow.Online"
+    } else if ctx.kernel_init_task.state() != State::OnCpu {
+        "KernelInitTask.OnCpu"
+    } else if ctx.boot_cpu_current_task.current() != ctx.kernel_init_task.task_ref() {
+        "CurrentTaskSlot.KernelInitTask"
+    } else if !ctx.kernel_init_flow.initial_start_accepted() {
+        "KernelInitFlow.Startup"
+    } else if ctx.scheduler.kernel_init_stack_switch_started_count() != 1 {
+        "Scheduler.PhysicalSwitchStarted"
+    } else if ctx.kernel_init_task.entry_started_count() != 1 {
+        "KernelInitTask.EntryStarted"
+    } else if !ctx.kernel_init_task.entry_stack_verified() {
+        "KernelInitTask.EntryStackVerified"
+    } else {
+        return Ok(());
+    };
+
+    failed_condition(
+        LifecycleEvent::Continue,
+        ctx.kernel_init_task.state(),
+        State::OnCpu,
+        State::OnCpu,
+    )
+    .map_err(|error| {
+        error.with_diagnostic(FailureDiagnostic::new(
+            "Kernel",
+            "enable_after_boot_init",
+            "KernelInitTask",
+            "continue_boundary",
+            first_failed,
+        ))
+    })
 }
 
 pub fn commit_payload_handoff() -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
         ctx.kernel_init_flow
-            .require_payload_handoff_action(&ctx.kernel_init_task, &ctx.boot_dispatch_window),
+            .require_payload_handoff_action(&ctx.kernel_init_task),
         "arceos_ex kernel init payload handoff guard failed\n",
     );
     crate::phases::shutdown_on_error(

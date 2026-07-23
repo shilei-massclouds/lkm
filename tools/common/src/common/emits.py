@@ -1,4 +1,4 @@
-"""Shared parsing for transition completion-event expressions."""
+"""Shared parsing for asynchronous Signal expressions."""
 
 from __future__ import annotations
 
@@ -14,38 +14,46 @@ _TRANSITION_SUFFIX_RE = re.compile(
 
 @dataclass(frozen=True)
 class EmitExpression:
-    """One strict or lossy completion event and its receiver expression."""
+    """One strict asynchronous Signal and its receiver expression."""
 
-    lossy: bool
     receiver: str | None
-    transition: str
+    kind: str
+    name: str
     args: str | None = None
 
+    @property
+    def transition(self) -> str:
+        """Compatibility alias for transition-only consumers."""
+
+        return self.name
 
 def parse_emit_expression(expression: str) -> EmitExpression | None:
-    """Parse local, static, or association-path transition emission syntax."""
+    """Parse local, static, or association-path strict Signal syntax."""
 
     text = expression.strip()
-    lossy = False
     if text.startswith("lossy "):
-        lossy = True
-        text = text[len("lossy ") :].strip()
+        return None
 
-    if text.startswith("Transition::"):
-        receiver = None
-        suffix = text[len("Transition::") :]
+    for kind in ("Transition", "Action"):
+        local_marker = f"{kind}::"
+        path_marker = f".{kind}::"
+        if text.startswith(local_marker):
+            receiver = None
+            suffix = text[len(local_marker) :]
+            break
+        receiver, marker, suffix = text.rpartition(path_marker)
+        if marker and receiver.strip():
+            receiver = receiver.strip()
+            break
     else:
-        receiver, marker, suffix = text.rpartition(".Transition::")
-        if not marker or not receiver.strip():
-            return None
-        receiver = receiver.strip()
+        return None
 
     match = _TRANSITION_SUFFIX_RE.match(suffix.strip())
     if match is None:
         return None
     return EmitExpression(
-        lossy=lossy,
         receiver=receiver,
-        transition=match.group(1),
+        kind=kind,
+        name=match.group(1),
         args=match.group(2),
     )

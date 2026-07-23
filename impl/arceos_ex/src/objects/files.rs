@@ -2187,7 +2187,7 @@ impl FilesStruct {
 
     pub fn setup(&mut self, kernel_init_task: &KernelInitTask) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || !super::printk::is_ready()
             || !super::printk::console_handoff_complete()
         {

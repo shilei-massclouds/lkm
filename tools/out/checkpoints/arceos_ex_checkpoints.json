@@ -8,8 +8,8 @@
   },
   {
     "index": 1,
-    "variant": "BootTaskOnline",
-    "name": "BootTask.Online",
+    "variant": "BootTaskOnCpu",
+    "name": "BootTask.OnCpu",
     "early_byte": "T",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },

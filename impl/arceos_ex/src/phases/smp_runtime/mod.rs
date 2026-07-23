@@ -42,7 +42,7 @@ pub fn preset_after_smp_bringup() -> ! {
     let ctx = crate::context::context();
     let result = if pre_smp_init::is_online() && smp_bringup::is_online() && mainline_ready(ctx) {
         ctx.kernel_init_flow
-            .commit_preset_after_children(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .commit_preset_after_children(&ctx.kernel_init_task)
     } else {
         flow_failure(LifecycleEvent::Preset, State::Base, State::Prepared)
     };
@@ -98,7 +98,7 @@ pub fn setup_after_payload_prepare() -> ! {
     let ctx = crate::context::context();
     let result = if setup_children_online() && mainline_ready(ctx) {
         ctx.kernel_init_flow
-            .commit_setup_after_children(&ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .commit_setup_after_children(&ctx.kernel_init_task)
     } else {
         flow_failure(LifecycleEvent::Setup, State::Prepared, State::Ready)
     };
@@ -110,7 +110,7 @@ pub fn enable_after_payload_handoff_prepare() -> ! {
     let ctx = crate::context::context();
     let result = if crate::phases::payload::handoff_prepare::is_online() && mainline_ready(ctx) {
         ctx.kernel_init_flow
-            .commit_enable_after_children(&mut ctx.kernel_init_task, &ctx.boot_dispatch_window)
+            .commit_enable_after_children(&mut ctx.kernel_init_task)
     } else {
         flow_failure(LifecycleEvent::Enable, State::Ready, State::Online)
     };
@@ -151,9 +151,9 @@ fn require_flow_continuation(
 }
 
 fn mainline_ready(ctx: &crate::context::Context) -> bool {
-    ctx.kernel_init_task.state() == State::Online
+    ctx.kernel_init_task.state() == State::OnCpu
         && ctx.boot_cpu_current_task.current_is_kernel_init()
-        && ctx.boot_dispatch_window.current_task() == ctx.kernel_init_task.task_ref()
+        && ctx.boot_cpu_current_task.current() == ctx.kernel_init_task.task_ref()
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()

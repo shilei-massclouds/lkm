@@ -1453,7 +1453,7 @@ fn run_user_clone_vfork_child_handoff(
     let child = &ctx.user_task_set;
     let child_task_ref = child.active_task_ref();
     let current_task_ref = ctx.boot_cpu_current_task.current();
-    let dispatch_task_ref = ctx.boot_dispatch_window.current_task();
+    let dispatch_task_ref = ctx.boot_cpu_current_task.current();
     let child_flow_ref = child.active_flow_ref();
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
@@ -1462,7 +1462,7 @@ fn run_user_clone_vfork_child_handoff(
         && child.vfork_child_sp() != 0
         && !child.vfork_parent_resumed()
         && child.parent_clone_return() == 0
-        && child.active_task_state() == State::Online
+        && child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)
         && dispatch_task_ref.same_identity(child_task_ref)
         && child_flow_ref.is_valid();
@@ -2077,9 +2077,9 @@ fn run_syscall_table_wait4(
     let obs = wait4_checkpoint_observation();
     let child_task_ref = child.active_task_ref();
     let current_task_ref = ctx.boot_cpu_current_task.current();
-    let dispatch_task_ref = ctx.boot_dispatch_window.current_task();
+    let dispatch_task_ref = ctx.boot_cpu_current_task.current();
     let child_flow_ref = child.active_flow_ref();
-    let child_dispatch_valid = child.active_task_state() == State::Online
+    let child_dispatch_valid = child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)
         && dispatch_task_ref.same_identity(child_task_ref)
         && child_flow_ref.is_valid();

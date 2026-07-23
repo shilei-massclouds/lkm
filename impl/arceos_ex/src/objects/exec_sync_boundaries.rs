@@ -225,7 +225,7 @@ impl ExecSyncBoundaries {
         registry: &BinaryFormatRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || system_state.state() != State::Online
             || system_state.value() != SystemStateValue::Running
             || registry.state() != State::Ready

@@ -234,7 +234,7 @@ impl Workqueue {
             || slub_subsystem.state() != State::Ready
             || cpu_group.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
-            || boot_task.state() != State::Online
+            || boot_task.state() != State::OnCpu
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -326,7 +326,7 @@ impl Workqueue {
             || !page_allocator.full_gfp_mask_open()
             || cpu_group.state() != State::Ready
             || !cpu_group.pre_smp_topology_ready()
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || !kernel_init_task.released_for_pre_smp_init()
         {
             return failed_condition(

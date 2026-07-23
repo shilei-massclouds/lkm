@@ -68,14 +68,15 @@ predicate task_has_unique_active_flow<T: Task>(task: T) -> bool;
 predicate task_online_schedulable<T: Task>(task: T) -> bool;
 predicate task_online_does_not_imply_dispatched<T: Task>(task: T) -> bool;
 predicate task_ref_targets_online_task<R: TaskRef>(task_ref: R) -> bool;
-
-predicate dispatch_window_current_ref_is<W, R: TaskRef>(window: W, task_ref: R) -> bool;
-predicate dispatch_window_current_task_is<W, T: Task>(window: W, task: T) -> bool;
-predicate dispatch_window_owned_by_scheduler<W, S>(window: W, scheduler: S) -> bool;
-predicate dispatch_window_cpu_is<W, C: CpuRef>(window: W, cpu_ref: C) -> bool;
-predicate dispatch_window_has_no_event_queue<W>(window: W) -> bool;
-predicate dispatch_window_switch_committed<W, R: TaskRef>(window: W, next_ref: R) -> bool;
-predicate dispatch_window_start_signal_emitted<W, R: TaskRef>(window: W, task_ref: R) -> bool;
+predicate task_on_cpu<T: Task>(task: T) -> bool;
+predicate task_not_on_cpu<T: Task>(task: T) -> bool;
+predicate task_dispatch_continuation_pending<T: Task>(task: T) -> bool;
+predicate task_dispatch_continuation_consumed<T: Task>(task: T) -> bool;
+predicate task_continue_sent_only_by_scheduler<T: Task>(task: T) -> bool;
+predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
+predicate task_on_cpu_matches_current_slot<T: Task>(task: T) -> bool;
+predicate current_task_slot_matches_on_cpu_task<S, T: Task>(slot: S, task: T) -> bool;
+predicate scheduler_continue_signal_pending<S, R: TaskRef>(scheduler: S, task_ref: R) -> bool;
 
 predicate boot_task_idle_role_ready<T: Task, R>(
     task: T,
@@ -123,6 +124,7 @@ type Task: ResourceObject {
 
     associations {
         initial_flow: TaskFlow;
+        mutable active_flow: TaskFlow;
     }
 
     owned {
@@ -137,7 +139,7 @@ type Task: ResourceObject {
                 initial_flow: TaskFlow
             ) -> State::Prepared {
                 depends_on {
-                    parent_task.state == State::Online;
+                    parent_task.state == State::OnCpu;
                 }
                 ensures {
                     task_fresh_identity(self);
@@ -154,6 +156,9 @@ type Task: ResourceObject {
                     task_flow_owner_is(initial_flow, self);
                     task_flow_parent_is(initial_flow, self);
                     task_flow_owner_exclusive(initial_flow);
+                }
+                updates {
+                    self.active_flow = initial_flow;
                 }
             }
         }
@@ -178,7 +183,7 @@ type Task: ResourceObject {
                 initial_flow: TaskFlow
             ) -> State::Ready {
                 depends_on {
-                    parent_task.state == State::Online;
+                    parent_task.state == State::OnCpu;
                     task_creation_copy_process_committed(
                         TaskCreationCore,
                         parent_task,
@@ -256,9 +261,6 @@ type Task: ResourceObject {
                     task_online_does_not_imply_dispatched(self);
                 }
 
-                emits {
-                    lossy self.initial_flow.Transition::Preset;
-                }
             }
         }
     }
@@ -282,6 +284,19 @@ type Task: ResourceObject {
         }
 
         transitions {
+            on Transition::Continue -> State::OnCpu {
+                ensures {
+                    task_on_cpu(self);
+                    task_on_cpu_matches_current_slot(self);
+                    task_dispatch_continuation_pending(self);
+                    task_continue_sent_only_by_scheduler(self);
+                }
+
+                emits {
+                    self.Action::DispatchContinuation;
+                }
+            }
+
             on Transition::Disable -> State::Offline {
                 depends_on {
                     task_all_owned_flows_inactive(self);
@@ -291,6 +306,32 @@ type Task: ResourceObject {
                     task_all_owned_flows_inactive(self);
                     task_exit_flow_disable_cleanup_ordered(self);
                     task_no_owned_flow_online(self);
+                }
+            }
+        }
+    }
+
+    state State::OnCpu {
+        invariant {
+            task_fresh_identity(self);
+            task_initial_ref_ready(self);
+            task_initial_flow_owned(self);
+            task_initial_flow_binding_complete(self);
+            task_initial_flow_binding_consistent(self);
+            task_clone_spec_ready(self);
+            task_thread_context_ready(self);
+            task_thread_context_owned(self, self.thread_context);
+            task_thread_context_core_register_set(self.thread_context);
+            task_state_running(self);
+            task_runqueue_publication_committed(self);
+            task_at_most_one_flow_online(self);
+        }
+
+        transitions {
+            on Transition::Suspend -> State::Online {
+                ensures {
+                    task_not_on_cpu(self);
+                    task_suspend_sent_only_by_scheduler(self);
                 }
             }
         }
@@ -327,6 +368,21 @@ type Task: ResourceObject {
     }
 
     processes {
+        Action::DispatchContinuation {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_on_cpu(self);
+                task_dispatch_continuation_pending(self);
+            }
+            drives {
+                self.initial_flow.Transition::Preset || self.active_flow.Action::Continue;
+            }
+            ensures {
+                task_dispatch_continuation_consumed(self);
+            }
+        }
+
         Transition::SetRuntimeState(state: TaskRuntimeState) {
             state_effect: StateEffect::Conditional;
             depends_on {
@@ -407,6 +463,9 @@ type Task: ResourceObject {
                 task_at_most_one_flow_online(self);
                 task_flow_active_binding_committed(to_flow);
                 task_flow_instances_distinct(from_flow, to_flow);
+            }
+            updates {
+                self.active_flow = to_flow;
             }
         }
 
@@ -497,19 +556,19 @@ object UserTaskSet: TaskSet {
  */
 
 /*
- * Static init_task carrier. The image contains its stable identity before
- * `_start`, but Ready is distinct from schedulable Online. `_start` performs
- * the single Enable transition; because BootDispatchWindow initially names
- * BootTaskRef, the post-commit lossy signal starts BootInitFlow.
+ * Static init_task carrier. Firmware/architecture entry has already granted
+ * the boot CPU to this Task before the model begins. Its initial execution is
+ * therefore OnCpu and does not pass through Scheduler.Continue.
  */
 object BootTask: Task {
     lifecycle_override: true;
-    initial_state: State::Ready;
+    initial_state: State::OnCpu;
     parent: Kernel;
     source: static::linux_6_12;
 
     associations {
         initial_flow = BootInitFlow;
+        active_flow = BootIdleFlow;
     }
 
     attrs {
@@ -522,7 +581,7 @@ object BootTask: Task {
         storage = symbol("init_task");
     }
 
-    state State::Ready {
+    state State::OnCpu {
         invariant {
             attrs_accessible(self);
             valid_object_storage(storage);
@@ -533,12 +592,10 @@ object BootTask: Task {
             task_owns_flow(self, BootInitFlow);
             task_flow_owner_is(BootInitFlow, self);
             task_flow_parent_is(BootInitFlow, self);
-            dispatch_window_current_ref_is(BootDispatchWindow, BootTaskRef);
-            dispatch_window_current_task_is(BootDispatchWindow, self);
         }
 
         transitions {
-            on Transition::Enable -> State::Online {
+            on Transition::Suspend -> State::Online {
                 ensures {
                     attrs_accessible(self);
                     valid_object_storage(storage);
@@ -549,12 +606,8 @@ object BootTask: Task {
                     task_owns_flow(self, BootInitFlow);
                     task_flow_owner_is(BootInitFlow, self);
                     task_flow_parent_is(BootInitFlow, self);
-                    task_online_schedulable(self);
-                    task_online_does_not_imply_dispatched(self);
-                }
-
-                emits {
-                    lossy self.initial_flow.Transition::Preset;
+                    task_not_on_cpu(self);
+                    task_suspend_sent_only_by_scheduler(self);
                 }
             }
         }
@@ -573,6 +626,21 @@ object BootTask: Task {
             task_flow_parent_is(BootInitFlow, self);
             task_online_schedulable(self);
             task_online_does_not_imply_dispatched(self);
+            task_not_on_cpu(self);
+        }
+
+        transitions {
+            on Transition::Continue -> State::OnCpu {
+                ensures {
+                    task_on_cpu(self);
+                    task_on_cpu_matches_current_slot(self);
+                    task_dispatch_continuation_pending(self);
+                    task_continue_sent_only_by_scheduler(self);
+                }
+                emits {
+                    self.Action::DispatchContinuation;
+                }
+            }
         }
     }
 }
@@ -584,6 +652,7 @@ object BootTask: Task {
 object KernelInitTask: Task {
     associations {
         initial_flow = KernelInitFlow;
+        active_flow = KernelInitFlow;
     }
 }
 
@@ -594,65 +663,10 @@ object KernelInitTask: Task {
 object KthreaddTask: Task {
     associations {
         initial_flow = KthreaddFlow;
+        active_flow = KthreaddFlow;
     }
 }
 
-/*
- * DispatchWindow is the scheduler-owned per-CPU view of the Task that has
- * actually crossed the switch commit boundary. It stores one TaskRef and no
- * pending start events. The boot-CPU instance is statically bound to
- * BootTaskRef before `_start`; SMP will add one instance per CPU.
- */
-type DispatchWindowObject: ResourceObject {
-    associations {
-        cpu: CpuRef;
-        mutable current_task: TaskRef;
-    }
-
-    processes {
-        Transition::SwitchTo(next_ref: TaskRef) {
-            state_effect: StateEffect::Conditional;
-            depends_on {
-                task_ref_ready(next_ref);
-                task_ref_targets_online_task(next_ref);
-            }
-            updates {
-                self.current_task = next_ref;
-            }
-            ensures {
-                dispatch_window_current_ref_is(self, next_ref);
-                dispatch_window_switch_committed(self, next_ref);
-                dispatch_window_start_signal_emitted(self, next_ref);
-                dispatch_window_has_no_event_queue(self);
-            }
-
-            emits {
-                lossy self.current_task.initial_flow.Transition::Preset;
-            }
-        }
-    }
-}
-
-object BootDispatchWindow: DispatchWindowObject {
-    initial_state: State::Online;
-    parent: Scheduler;
-
-    associations {
-        cpu = BootCPURef;
-        current_task = BootTaskRef;
-    }
-
-    state State::Online {
-        invariant {
-            dispatch_window_owned_by_scheduler(self, Scheduler);
-            dispatch_window_cpu_is(self, BootCPURef);
-            task_ref_targets(BootTaskRef, BootTask);
-            dispatch_window_has_no_event_queue(self);
-        }
-    }
-}
-
-/*
 /*
  * Appendix: current boundaries and deferred refinements
  *

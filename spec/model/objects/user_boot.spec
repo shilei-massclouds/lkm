@@ -2857,10 +2857,6 @@ object SyscallTable: ResourceObject {
                     task_at_most_one_flow_online(child);
                     child.state == State::Online;
                     fork_flow.state == State::Base;
-                    task_flow_start_signal_discarded(
-                        fork_flow,
-                        BootDispatchWindow
-                    );
                     syscall_clone_returns_task_ref(self, child_ref, child);
                     syscall_table_clone_observed(self);
                 }
@@ -3205,7 +3201,7 @@ object UserBootPayload: ResourceObject {
             on Action::PrepareHandoff {
                 depends_on {
                     KernelInitFlow.state == State::Ready;
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                     ExceptionStream.state == State::Ready;
                     SyscallException.state == State::Prepared;
                     ExecSyncBoundaries.state == State::Ready;
@@ -3365,13 +3361,12 @@ object UserBootPayload: ResourceObject {
                     RootFS.state == State::Online;
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
                     ExceptionStream.state == State::Ready;
                     SyscallException.state == State::Online;
                     ExecSyncBoundaries.state == State::Ready;
                     KernelInitFlow.state == State::Online;
                     Pid1UserAppFlow.state == State::Ready;
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
                 }
 
                 drives {

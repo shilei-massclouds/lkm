@@ -40,169 +40,6 @@ class DeriveToolTests(unittest.TestCase):
         return read_json(derive)
 
     @staticmethod
-    def _dynamic_emit_fixture(*, strict_initial_emit: bool = False) -> str:
-        initial_prefix = "" if strict_initial_emit else "lossy "
-        return f"""
-            type PhaseObject {{}}
-
-            type TaskFlow: PhaseObject {{
-                parent: Task;
-                initial_state: State::Base;
-
-                state State::Base {{
-                    transitions {{
-                        on Transition::Preset -> State::Prepared {{
-                            depends_on {{
-                                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
-                            }}
-                            emits {{ Transition::Setup; }}
-                        }}
-                    }}
-                }}
-                state State::Prepared {{
-                    transitions {{
-                        on Transition::Setup -> State::Ready {{
-                            depends_on {{
-                                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
-                            }}
-                            emits {{ Transition::Enable; }}
-                        }}
-                    }}
-                }}
-                state State::Ready {{
-                    transitions {{
-                        on Transition::Enable -> State::Online {{
-                            depends_on {{
-                                task_flow_dispatch_guard_satisfied(self, BootDispatchWindow);
-                            }}
-                        }}
-                    }}
-                }}
-                state State::Online {{}}
-            }}
-
-            type Task {{
-                associations {{ initial_flow: TaskFlow; }}
-            }}
-
-            type TaskRef {{}}
-
-            type DispatchWindowObject {{
-                associations {{ mutable current_task: TaskRef; }}
-                processes {{
-                    Transition::SwitchTo(next_ref: TaskRef) {{
-                        updates {{ self.current_task = next_ref; }}
-                        emits {{
-                            lossy self.current_task.initial_flow.Transition::Preset;
-                        }}
-                    }}
-                }}
-            }}
-
-            object BootTask: Task {{
-                initial_state: State::Online;
-                associations {{ initial_flow = BootInitFlow; }}
-                state State::Online {{}}
-            }}
-
-            object KernelInitTask: Task {{
-                initial_state: State::Online;
-                state State::Online {{}}
-            }}
-
-            object BootInitFlow: TaskFlow {{
-                parent: BootTask;
-            }}
-
-            object BootDispatchWindow: DispatchWindowObject {{
-                initial_state: State::Online;
-                associations {{ current_task = KernelInitTaskRef; }}
-                state State::Online {{}}
-            }}
-
-            object ComputerProject: Task {{
-                initial_state: State::Base;
-                state State::Base {{
-                    transitions {{
-                        on Transition::Preset -> State::Prepared {{
-                            emits {{
-                                {initial_prefix}BootTask.initial_flow.Transition::Preset;
-                                Transition::Setup;
-                            }}
-                        }}
-                    }}
-                }}
-                state State::Prepared {{
-                    transitions {{
-                        on Transition::Setup -> State::Ready {{
-                            drives {{
-                                BootDispatchWindow.Transition::SwitchTo(BootTaskRef);
-                            }}
-                            emits {{ Transition::Enable; }}
-                        }}
-                    }}
-                }}
-                state State::Ready {{
-                    transitions {{
-                        on Transition::Enable -> State::Online {{
-                            emits {{
-                                lossy BootTask.initial_flow.Transition::Preset;
-                            }}
-                        }}
-                    }}
-                }}
-                state State::Online {{}}
-            }}
-        """
-
-    def test_dynamic_lossy_emit_uses_current_window_and_dereferences_task_ref(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            data = self._derive_source(
-                Path(tmp), self._dynamic_emit_fixture()
-            )
-
-        self.assertEqual(data["summary"]["blocked"], 0)
-        self.assertEqual(data["summary"]["contradiction"], 0)
-        self.assertEqual(data["states"]["BootInitFlow"], "Online")
-        flow_transitions = [
-            item["transition"]
-            for item in data["transitions"]
-            if item["object"] == "BootInitFlow"
-        ]
-        self.assertEqual(flow_transitions, ["Preset", "Setup", "Enable"])
-        discarded = [
-            record
-            for record in data["records"]
-            if record["source_kind"] == "emits_lossy_discarded"
-        ]
-        self.assertEqual(len(discarded), 2)
-        self.assertIn("current_task=KernelInitTask", discarded[0]["message"])
-        self.assertIn("not enabled", discarded[1]["message"])
-        self.assertTrue(
-            any(
-                record["source_kind"] == "updates"
-                and "BootDispatchWindow.current_task = BootTaskRef"
-                in record["message"]
-                for record in data["records"]
-            )
-        )
-    def test_strict_emit_blocks_when_dynamic_guard_is_false(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            data = self._derive_source(
-                Path(tmp),
-                self._dynamic_emit_fixture(strict_initial_emit=True),
-            )
-
-        self.assertGreater(data["summary"]["blocked"], 0)
-        self.assertEqual(data["states"]["BootInitFlow"], "Base")
-        self.assertFalse(
-            any(
-                record["source_kind"] == "emits_lossy_discarded"
-                for record in data["records"]
-            )
-        )
-
-    @staticmethod
     def _dynamic_fixture(factory_processes: str) -> str:
         return f"""
             type TaskFlow {{
@@ -354,13 +191,13 @@ class DeriveToolTests(unittest.TestCase):
                 data["summary"]["trimmed"],
                 sum(item["status"] == "trimmed" for item in boundaries),
             )
-            clone = next(item for item in boundaries if item["boundary_id"] == "user_clone.001")
+            clone = next(item for item in boundaries if item["boundary_id"] == "kthreadd.001")
             self.assertEqual(clone["boundary_category"], "Feature")
             self.assertEqual(
                 clone["boundary_owner"],
-                "UserCloneDeferredBoundaries.Transition::Setup",
+                "BootInitRestInitPhase.Transition::Preset",
             )
-            self.assertTrue(clone["span"]["source_file"].endswith("objects/user_boot.spec"))
+            self.assertTrue(clone["span"]["source_file"].endswith("boot-init/rest-init/phase.spec"))
             self.assertGreater(clone["span"]["source_line"], 0)
 
     def test_unproved_boundary_evidence_creates_obligation(self) -> None:
@@ -1169,7 +1006,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_object_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_provider"] == "linux_static_object_binding"
                     for record in proved
                 )
             )
@@ -1207,7 +1044,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_task_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_provider"] == "linux_static_object_binding"
                     for record in proved
                 )
             )
@@ -1390,7 +1227,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["object"] == "BootTask"
                     and record["predicate"] == "attrs_accessible"
                     and record["proof_class"] == "static_object_binding"
-                    and record["proof_provider"] == "transition_ensures"
+                    and record["proof_provider"] == "linux_static_object_binding"
                     for record in proved
                 )
             )

@@ -34,7 +34,7 @@ const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
-const TRACE_BOOT_TASK_ONLINE: usize = Checkpoint::BootTaskOnline.early_byte() as usize;
+const TRACE_BOOT_TASK_ON_CPU: usize = Checkpoint::BootTaskOnCpu.early_byte() as usize;
 const TRACE_BOOT_INIT_FLOW_STARTED: usize = Checkpoint::BootInitFlowStarted.early_byte() as usize;
 const TRACE_ENTRY_PRELUDE_STARTED: usize =
     Checkpoint::EntryPreludePhaseStarted.early_byte() as usize;
@@ -72,7 +72,7 @@ _start:
     call {head_checkpoint}
 
     # The linker-visible PID 0 carrier already has its only state: Online.
-    li a0, {trace_boot_task_online}
+    li a0, {trace_boot_task_on_cpu}
     call {head_checkpoint}
 
     # BootInitFlow.Preset starts before EntryPreludePhase.Preset.
@@ -159,7 +159,7 @@ _start:
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
     trace_boot_init_flow_started = const TRACE_BOOT_INIT_FLOW_STARTED,
-    trace_boot_task_online = const TRACE_BOOT_TASK_ONLINE,
+    trace_boot_task_on_cpu = const TRACE_BOOT_TASK_ON_CPU,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
@@ -249,10 +249,6 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     crate::phases::shutdown_on_error(
         crate::phases::prepare::adopt_head_prefix(&boot_args),
         "arceos_ex prepare event failed\n",
-    );
-    crate::phases::shutdown_on_error(
-        crate::context::context().boot_task.enable_at_entry(),
-        "arceos_ex boot task enable failed\n",
     );
     crate::phases::shutdown_on_error(
         crate::systems::kernel::adopt_head_preset_start(),
@@ -402,7 +398,7 @@ fn adopt_boot_task_entry_binding_physical(ctx: &Context) -> EventResult {
 
     if binding_state != State::Base
         || ctx.kernel_image.state() != State::Ready
-        || ctx.boot_task.state() != State::Online
+        || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
         || ctx.boot_task.task().active_flow().is_valid()
@@ -451,7 +447,7 @@ fn setup_boot_task_entry_binding_virtual(ctx: &Context) -> EventResult {
 
     if binding_state != State::Prepared
         || !boot_task_entry_preemption_initialized()
-        || ctx.boot_task.state() != State::Online
+        || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
         || ctx.boot_task.task().active_flow().is_valid()
@@ -487,14 +483,14 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
         return failed_condition(
             LifecycleEvent::Setup,
             task_state,
-            State::Online,
-            State::Online,
+            State::OnCpu,
+            State::OnCpu,
         );
     };
 
     if boot_task_entry_binding_state() != State::Ready
         || !boot_task_entry_preemption_initialized()
-        || task_state != State::Online
+        || task_state != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
         || ctx.boot_task.task().active_flow().is_valid()
@@ -506,8 +502,8 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
         return failed_condition(
             LifecycleEvent::Setup,
             task_state,
-            State::Online,
-            State::Online,
+            State::OnCpu,
+            State::OnCpu,
         );
     }
     Ok(())
@@ -589,7 +585,7 @@ fn entry_prelude_phase_ready(ctx: &Context) -> bool {
         && ctx.raw_dtb.state() == State::Ready
         && boot_task_entry_binding_state() == State::Ready
         && boot_task_entry_preemption_initialized()
-        && ctx.boot_task.state() == State::Online
+        && ctx.boot_task.state() == State::OnCpu
         && ctx.boot_task.task().task_ref() == TaskRef::BOOT
         && ctx.boot_task.task().pid() == 0
         && !ctx.boot_task.task().active_flow().is_valid()

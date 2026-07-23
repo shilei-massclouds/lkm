@@ -153,7 +153,7 @@ impl RootfsConsoleDeferred {
         if self.lifecycle.state() != State::Base
             || initramfs_sync.state() != State::Ready
             || !initramfs_sync.wait_deferred()
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || kernel_init_task.pid() != KERNEL_INIT_PID
         {
             return failed_condition(
@@ -520,7 +520,7 @@ impl RootFS {
             || !namespace_paths.arceos_ext2_driver_substitutes_linux_ext4_for_ext2()
             || !namespace_paths.devfs_not_remounted_after_root_switch()
             || saved_command_line.state() != State::Ready
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || kernel_init_task.pid() != KERNEL_INIT_PID
             || vfs_core.state() != State::Ready
             || !vfs_core.rootfs_mount_created()

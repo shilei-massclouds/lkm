@@ -156,7 +156,7 @@ impl Mutex {
     }
 
     pub fn lock_boot_init_task(&mut self, boot_task: &BootTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready || boot_task.state() != State::Online {
+        if self.lifecycle.state() != State::Ready || boot_task.state() != State::OnCpu {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -177,7 +177,7 @@ impl Mutex {
     }
 
     pub fn unlock_boot_init_task(&mut self, boot_task: &BootTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready || boot_task.state() != State::Online {
+        if self.lifecycle.state() != State::Ready || boot_task.state() != State::OnCpu {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),

@@ -114,7 +114,7 @@ fn checkpoint_reentry_shutdown() -> ! {
 #[allow(clippy::enum_variant_names)]
 pub enum Checkpoint {
     KernelStarted,
-    BootTaskOnline,
+    BootTaskOnCpu,
     BootInitFlowStarted,
     #[allow(dead_code)]
     KernelOnline,
@@ -613,7 +613,7 @@ impl Checkpoint {
     pub(crate) const fn early_byte(self) -> u8 {
         match self {
             Self::KernelStarted => b'R',
-            Self::BootTaskOnline => b'T',
+            Self::BootTaskOnCpu => b'T',
             Self::BootInitFlowStarted => b'O',
             Self::EntryPreludePhaseStarted => b'A',
             Self::InterruptStreamPrepared => b'I',
@@ -639,7 +639,7 @@ impl Checkpoint {
     pub const fn name(self) -> &'static str {
         match self {
             Self::KernelStarted => "Kernel.Started",
-            Self::BootTaskOnline => "BootTask.Online",
+            Self::BootTaskOnCpu => "BootTask.OnCpu",
             Self::BootInitFlowStarted => "BootInitFlow.Started",
             Self::KernelOnline => "Kernel.Online",
             Self::PreparePhaseReady => "PreparePhase.Ready",

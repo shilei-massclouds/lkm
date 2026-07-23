@@ -62,7 +62,7 @@ impl VmstatCore {
             || !workqueue.worker_creation_open()
             || page_allocator.state() != State::Ready
             || !page_allocator.full_gfp_mask_open()
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || !kernel_init_task.released_for_pre_smp_init()
             || scheduler.schedule_passes() == 0
         {
@@ -158,7 +158,7 @@ impl PreSmpInitcallTable {
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || !kernel_init_task.released_for_pre_smp_init()
             || rcu_core.state() != State::Ready
             || !rcu_core.tasks_rcu().gp_threads_ready()
@@ -250,7 +250,7 @@ impl PreSmpInitBoundary {
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || kernel_init_task.state() != State::Online
+            || kernel_init_task.state() != State::OnCpu
             || !kernel_init_task.released_for_pre_smp_init()
             || initcalls.state() != State::Ready
             || scheduler.schedule_passes() == 0
@@ -297,7 +297,7 @@ pub fn pre_smp_runtime_ready(
     initcalls: &PreSmpInitcallTable,
     boundary: &PreSmpInitBoundary,
 ) -> bool {
-    kernel_init_task.state() == State::Online
+    kernel_init_task.state() == State::OnCpu
         && kernel_init_task.released_for_pre_smp_init()
         && kthreadd_task.state() == State::Online
         && scheduler.schedule_passes() != 0

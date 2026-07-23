@@ -84,10 +84,11 @@
   > `Config` 都处于 `Online` 状态，并精确检查 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
   > `BootCpuRegisters.a1 == BootArgs.dtb_pa`。不得把整组寄存器已准备完成作为 Kernel 启动前置。
 
-* OnPreset：内核收到引导信号 startup，由静态且已经 Online 的 `BootTask` 执行早期初始化。
+* OnPreset：内核收到引导信号 startup，由静态且已经 OnCpu 的 `BootTask` 执行早期初始化。
   `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
 
-  `BootTask.Online` 在 `_start` 紧随 `Kernel.Started` 观察且只观察一次。随后 `BootInitFlow.Started`
+  `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 `Kernel.Started` 观察且只观察一次。
+  随后 `BootInitFlow.Started`
   启动标准阶段生命周期，并由其 Preset 驱动 `EntryPreludePhase`。入口协议由
   `EntryPreludePhase` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp` 绑定到静态
   `init_task` 并建立初始抢占关闭事实；`EarlyVm` 就绪后，binding 把 `tp` 切换为同一 carrier 的
@@ -97,14 +98,14 @@
   启动阶段。它的 owner/parent 在入口前已绑定到 BootTask；后继 `BootIdleFlow` 的 ownership 与
   active binding 在 `BootIdleFlow.Setup` 建立。
 
-  > [model] MUST：BootTask 提交 Online 后向 initial Flow 发出 lossy Preset；BootInitFlow 只有在
-  > 自身仍为 Base、parent BootTask 为 Online 且 BootDispatchWindow 当前解引用为 BootTask 时接受。
-  > 接受后在 `SingleTaskContext` 中驱动 `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
+  > [model] MUST：Kernel 接受 OpenSBI 发出的 Startup 后直接异步发出严格 BootInitFlow.Startup；
+  > BootInitFlow 只有在自身仍为 Base、parent BootTask 为 OnCpu 时接受。接受后在
+  > `SingleTaskContext` 中驱动 `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
 
-* Prepared：内核此时不响应中断，`BootTask` 始终 Online，`BootInitFlow` 已 Prepared；
+* Prepared：内核此时不响应中断，`BootTask` 仍为 OnCpu，`BootInitFlow` 已 Prepared；
   `EntryPreludePhase` 已 Online。
 
-* OnSetup：内核收到 Setup 信号，已 Online 的 `BootTask` 继续代表内核完成中期初始化；
+* OnSetup：内核收到 Setup 信号，OnCpu 的 `BootTask` 继续代表内核完成中期初始化；
   该迁移不再次启动或替换 Task。
 
   > [model] MUST：向 `BootInitFlow` 同步发送 Setup；它直接顺序驱动
@@ -118,13 +119,14 @@
 
   > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它只驱动
   > `BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，并在首次 PID 1 switch
-  > commit 紧邻边界到达 Online。真实切换更新 CurrentTaskSlot 与 DispatchWindow 后重新发出
-  > `KernelInitFlow.Preset`；只有 dynamic guard 成立时才接受。Preset body 必须在
-  > `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
+  > commit 紧邻边界到达 Online。真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与
+  > context-switch 事实并完成物理栈切换；`KernelInitTask.Continue` 必须在 PID 1 真正获得 CPU 的入口
+  > 提交 OnCpu，并严格启动 `KernelInitFlow.Preset`。Preset body 必须在 `kernel_init_entry()` 验证
+  > PID 1 vmalloc stack 后执行。
 
   `KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动
   `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase`；Enable
-  只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受相同 dispatch guard 约束的
+  只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受 parent Task OnCpu 约束的
   `CommitPayloadHandoff`：UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入
   内核态 no-return entry。
 

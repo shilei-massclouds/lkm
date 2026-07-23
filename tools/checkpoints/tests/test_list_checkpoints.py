@@ -129,14 +129,14 @@ class ListCheckpointsTests(unittest.TestCase):
         by_name = {record.name: record for record in records}
 
         self.assertIn("Kernel.Started", by_name)
-        self.assertIn("BootTask.Online", by_name)
+        self.assertIn("BootTask.OnCpu", by_name)
         self.assertIn("BootInitFlow.Started", by_name)
         self.assertIn("EntryPreludePhase.Started", by_name)
         self.assertIn("PayloadPreparePhase.Online", by_name)
         self.assertIn("PayloadHandoffPreparePhase.Online", by_name)
         self.assertIn("KernelInitFlow.PayloadHandoffCommitted", by_name)
         self.assertEqual(by_name["Kernel.Started"].variant, "KernelStarted")
-        self.assertEqual(by_name["BootTask.Online"].early_byte, "T")
+        self.assertEqual(by_name["BootTask.OnCpu"].early_byte, "T")
         self.assertEqual(by_name["BootInitFlow.Started"].early_byte, "O")
         self.assertEqual(
             by_name["EntryPreludePhase.Started"].early_byte,

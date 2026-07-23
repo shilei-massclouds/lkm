@@ -43,7 +43,7 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::boot::entry_prelude::is_online()
         && ctx.vm.state() == State::Ready
         && ctx.vm.entry_prelude_ready()
-        && ctx.boot_task.state() == State::Online
+        && ctx.boot_task.state() == State::OnCpu
         && ctx.init_stack.state() == State::Ready
         && ctx.interrupt_stream.state() == State::Prepared
         && ctx.raw_dtb.state() == State::Ready

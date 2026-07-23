@@ -14,7 +14,7 @@ system Root {
                 }
                 emits {
                     Async.Transition::Run;
-                    lossy Sink.Action::Missing;
+                    Sink.Action::Observe;
                 }
                 ensures {
                     started(self);
@@ -83,5 +83,6 @@ system Sink {
     parent: Root;
     initial_state: State::Base;
     state State::Base {
+        actions { on Action::Observe { ensures { observed(self); } } }
     }
 }

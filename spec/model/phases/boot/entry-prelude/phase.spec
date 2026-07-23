@@ -26,7 +26,7 @@ object BootTaskEntryBinding: KernelObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 may_change {
@@ -58,7 +58,7 @@ object BootTaskEntryBinding: KernelObject {
             /* Setup 在 EarlyVm 就绪后切换到同一 carrier 的虚拟地址。 */
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     Vm.state == State::Ready;
                 }
 
@@ -2205,7 +2205,7 @@ object EntryPreludePhase: PhaseObject {
                 ensures {
                     kernel_fpu_disabled(BootCpuRegisters.sstatus);
                     kernel_vector_disabled(BootCpuRegisters.sstatus);
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 emits {
@@ -2255,7 +2255,7 @@ object EntryPreludePhase: PhaseObject {
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
             BootTaskEntryBinding.state == State::Ready;
-            BootTask.state == State::Online;
+            BootTask.state == State::OnCpu;
             BootInitStack.state == State::Ready;
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;

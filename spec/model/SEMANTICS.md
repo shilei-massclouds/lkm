@@ -73,6 +73,7 @@ trimmed mm_core.001 {
 - `Prepared`
 - `Ready`
 - `Online`
+- `OnCpu`（仅限 `Task` 类型及其实例）
 - `Offline`
 - `Destroyed`
 
@@ -83,6 +84,8 @@ trimmed mm_core.001 {
 - `Enable`
 - `Disable`
 - `Cleanup`
+- `Continue`（仅限 `Task`）
+- `Suspend`（仅限 `Task`）
 
 语义约定：
 
@@ -90,6 +93,7 @@ trimmed mm_core.001 {
 - `Prepared` 的别名包括：预置态、前置条件已建立。
 - `Ready` 的别名包括：就绪态、主要构建已完成。
 - `Online` 的别名包括：在线态、已启用、可服务。
+- `OnCpu` 表示 Task 当前实际占有 CPU；它不是通用对象或 Phase 状态。
 - `Offline` 的别名包括：离线态、已退出主要服务、资源已交接、`handoff`。`Handoff` 不是正式状态名。
 - `Destroyed` 的别名包括：已销毁、已退出服务、已清理、已预留、`reserved`。`Reserved` 不是正式状态名。
 - `Preset` 表示建立进入主要构建流程前的早期前置条件，通常推进到 `Prepared` 或 `Ready`。
@@ -97,6 +101,7 @@ trimmed mm_core.001 {
 - `Enable` 表示让已经构建完成的对象进入服务状态，通常推进到 `Online`。别名包括：启用、上线、进入服务、保护、`guard`。当语义是建立栈边界保护或 guard 这类运行约束时，仍使用 `Enable` 作为正式 transition 名；单纯刷新对象属性的动作不因此升级为生命周期 transition。
 - `Disable` 表示对象退出主要服务路径或完成资源所有权交接，但对象元数据仍保留给诊断、引用收尾或后续销毁。
 - `Cleanup` 表示对象退出服务或释放阶段性抽象，通常推进到 `Destroyed`。
+- `Continue` / `Suspend` 只表达 Task 的 `Online <-> OnCpu` 调度往返。
 
 检查点：
 
@@ -120,6 +125,8 @@ trimmed mm_core.001 {
 - `Online --Disable--> Offline`
 - `Online --Cleanup--> Destroyed`
 - `Offline --Cleanup--> Destroyed`
+- `Online --Continue--> OnCpu`（仅限 `Task`）
+- `OnCpu --Suspend--> Online`（仅限 `Task`）
 
 检查点：
 
@@ -371,33 +378,16 @@ on Transition::Preset -> State::Prepared {
   当前状态出发，由目标 transition 自身的 source state 和 `depends_on` 约束判定是否
   可执行。
 
-`emits` 默认是 strict completion event。strict event 的目标 transition 若因 source
-state 或 `depends_on` 不满足而不能接受，发出该 event 的 source transition 也不能完成；
-这保持了既有 `emits` 的阻塞语义。只有显式写出 `lossy` qualifier 的条目才采用
-drop-if-blocked 语义：
-
-```text
-emits {
-    lossy self.initial_flow.Transition::Preset;
-    lossy self.current_task.initial_flow.Transition::Preset;
-}
-```
-
-lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定目标 transition
-成功。目标能接受时，它与 strict event 一样执行目标 transition；目标不能接受时，
-该 event 立即记录为 discarded，source transition 继续完成。discarded event 不进入
-队列、不重试，也不能被后续状态变化重新解释为 accepted。同一 source transition 的
-其它 strict/lossy entries 仍按 source order 处理。
+所有 `emits` 都是严格 completion event。目标 transition 若因 source state 或
+`depends_on` 不满足而不能接受，或者异步 handler 后续失败，整个根执行必须失败。已经发送的事件
+不得静默忽略、排队等待未来状态或重试。
 
 `emits` 的约束：
 
-- strict `emits` 条目可以写成 `Transition::Name` 或
-  `OtherObject.Transition::Name`；lossy 条目在相同 receiver 前写 `lossy`。
+- `emits` 条目可以写成 `Transition::Name`、`Action::Name` 或带 receiver 的相同形式。
 - receiver 也可以是具有静态类型的 association path，例如
   `self.initial_flow.Transition::Preset`。当 association path 穿过 `TaskRef` 时，
-  先按该引用当前绑定的 `Task` 解引用，再访问 Task association；因此 boot CPU
-  `DispatchWindow` 可以在提交 `current_task` 后使用
-  `self.current_task.initial_flow.Transition::Preset`。每一级 association 和最终
+  先按该引用当前绑定的 `Task` 解引用，再访问 Task association。每一级 association 和最终
   transition 都必须能由静态类型唯一解析；动态 receiver 不能绕过类型检查。
 - 被发出的 transition 必须存在。
 - 当 `emits` 使用本对象 transition 时，被发出的 transition source state 必须等于
@@ -409,9 +399,8 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
   创建语义。
 - `emits` 不是 `drives` 的别名；`drives` 表达当前迁移过程中的外部驱动，
   `emits` 表达当前迁移已经提交并通过目标状态 invariant 后的 completion event。
-- `emits` 覆盖 lifecycle transition 与显式 state-changing runtime
-  `Transition::Name` process 的 completion event；本轮 DispatchWindow switch
-  使用后者。`Action::Name` 不产生 completion event，不能声明 `emits`。
+- `emits` 覆盖 lifecycle transition、显式 state-changing runtime Transition 与 Action Signal；
+  后两者不改变 `emits` 必须在 source commit 后才投递的规则。
 
 默认推导入口是 `ComputerProject.Transition::Preset`。该入口表示唯一外部工程启动
 事件 `PRESET`；它先以固定顺序 `drives` 三个直接子 Project 的规格与构造，再交接给
@@ -439,8 +428,8 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
 ## SEM-SIGNAL-TOOLS2-001: Full-Model Signal Derivation Is An Isolated Compatibility Semantics
 
 本节只约束 `tools2/` Signal 工具链，不修改前述 `tools/` 现行 transition/event 推导语义。
-`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `3` 并带 `producer: "tools2"`；每个阶段必须拒绝
-producer 或 version 不匹配的输入，不能把 tools2 version 1/2、老工具 JSON 或旧 snapshot 当成兼容输入。
+`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `4` 并带 `producer: "tools2"`；每个阶段必须拒绝
+producer 或 version 不匹配的输入，不能把 tools2 version 1/2/3、老工具 JSON 或旧 snapshot 当成兼容输入。
 
 ### Normalization and handling
 
@@ -482,13 +471,12 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 ### Ordering, rejection and completion
 
 `drives` 是 source-ordered 同步 Signal：目标响应（包括它的同步子响应）结束后，源 handler 才继续。
-任一 strict drives 被拒绝，根推导为 `failed`；lossy drives 被拒绝则记录 `discarded` 并继续。
-`drives` statement 写成 `A || B` 时表示有序备选：工具在同一到达前快照上按源码顺序检查 receiver、handler、payload、source state 和 `depends_on`，只发送首个可接受候选。未选候选只产生 choice-check 证据，不分配 Signal ID；若没有候选可接受，当前 strict drives 失败并报告每个候选的拒绝原因。候选一旦发送并开始响应，后续同步子响应失败不得回滚并改选另一个候选。
+任一 drives 被拒绝，根推导为 `failed`。`drives` statement 写成 `A || B` 时表示有序备选：工具在同一到达前快照上按源码顺序检查 receiver、handler、payload、source state 和 `depends_on`，只发送首个可接受候选。未选候选只产生 choice-check 证据，不分配 Signal ID；若没有候选可接受，当前 drives 失败并报告每个候选的拒绝原因。候选一旦发送并开始响应，后续同步子响应失败不得回滚并改选另一个候选。
 条件或 invariant 中的 `P || Q` 是短路逻辑析取，并与 drives 的有序 Signal 备选保持不同的规范化节点；它只读取当前快照，不发送 Signal。
 
 `emits` 只有在源 handler 的 state/fact 提交并通过 invariant 后，才按 source order 追加到全局 FIFO。
-源响应完成后由调度器逐项取出；每次 enqueue/dequeue 和调度选择都必须写入 trace。strict emits 被
-拒绝使根推导为 `failed`，lossy emits 被拒绝记录 `discarded` 后继续。条件不满足不得产生
+源响应完成后由调度器逐项取出；每次 enqueue/dequeue 和调度选择都必须写入 trace。emits 被拒绝或
+异步处理失败使根推导为 `failed`。条件不满足不得产生
 `pending`；当前工具不建立等待队列、continuation 或未来 Signal 恢复。
 
 ### Pre-send until boundary
@@ -520,7 +508,7 @@ reference/association 和已证明 fact。结构化 deferred/trimmed 只保留 i
 evidence，不生成 `blocked`。无限预算下若相同因果请求在完全相同快照再次出现，derive 必须以带调用
 位置的 `causal_cycle_without_snapshot_progress` failed 结束。
 
-Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、lossy 拒绝后的 `discarded`、响应结束的
+Signal/响应 outcome 使用：envelope 接收判定的 `rejected`、响应结束的
 `completed`、截至传播的 `stopped`、预算 frontier 的 `truncated` 和根推导的
 `complete`/`reached`/`until_signal_not_reached`/`failed`/`bounded`。`pending` 是
 保留词但当前工具不可产生。`blocked` 不属于 tools2 核心协议，只能出现在老工具兼容报告。
@@ -571,7 +559,7 @@ depth 时以本次 trace 的最小 depth 整体平移。已解析 Transition 显
 异步 FIFO、payload、状态/事实/reference 变化、until request/reached boundary、stopped 传播、拒绝
 原因、预算 frontier、source span 和完整失败链，并保留 canonical `Preset` 拼写。未设置、空值、`0`
 或其它值均选择简化视图。这个渲染选择不得改变 derive/view JSON、snapshot、Signal 顺序、verdict 或
-退出码，不需要升级 version 3 协议。
+退出码。
 
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 
@@ -618,9 +606,19 @@ Completion 也说明了 transition/action factoring 的边界：`Completion.Setu
 
 Flow 关系分为四类，不能混用：`initial_flow` association 只记录创建时 Flow，`task_owns_flow(task, flow)` 记录 Task 曾经拥有的历史集合，`task_active_flow_is(task, flow)` 记录当前可恢复 continuation，`task_flow_handoff(task, from, to)` 记录 handoff 历史。每个 Flow 只有一个 owner；一个 Task 可以按 exec 顺序拥有多个 Flow，但任一时刻最多一个 Flow Online。`BootInitFlow` 是 BootTask 的 initial TaskFlow，`BootIdleFlow` 是其后继 idle TaskFlow；正式 replacement handoff 包括稳定 `KernelInitTask: KernelInitFlow -> fresh Pid1UserAppFlow`（首个 exec 的专用实例），以及每个动态 child 从 declared fork-continuation Flow 到每次 exec 新声明 Flow。不同 Task 绝不共享同一 `UserAppFlow` 实例。
 
-`DispatchWindow` 是 Scheduler-owned、按 CPU 区分的“当前实际执行 Task”窗口，不是事件队列。当前首版只物化 boot CPU 的 `BootDispatchWindow`，其静态初值是 `BootTaskRef`；未来 SMP 为每个 CPU 建立独立窗口。`SchedulerObject.Action::SwitchTo(prev_ref, next_ref)` 只有在真实 switch commit 边界才把窗口更新为 `next_ref`。统一谓词 `task_flow_dispatch_guard_satisfied(flow, window)` 在每次推进点动态求值，并且当且仅当 `flow.parent` 为 `Online`、`window.current_task` 解引用后的 Task runtime identity 等于 `flow.parent` 时成立。TaskFlow 的每个 lifecycle transition 和执行期 action 都必须在自己的 `depends_on` 中显式依赖该谓词；仅有 Task.Online 或 runqueue membership 不足以执行 Flow。`TaskFlow` 的类型继承只保证 parent 类型约束和已声明 process 适用于其子类型，不为实例引入 guard 字段、guard 状态或 `process_guard` 类型块。fresh dynamic Flow 在 Base 中建立 owner/parent/entry-source 的 structural `Bind` 不是 lifecycle 推进或执行期 action，因此可以先于 parent 首次 dispatch；binding 本身不得推进 Flow lifecycle 或执行 continuation。
+`Task.Online` 只表示该 carrier 已发布且可由 Scheduler 派发，不承诺普通 runnable queue membership；
+idle task 可以只由 `rq->idle/rq->curr` 表达。`Task.OnCpu` 表示 Task 当前实际占有 CPU。TaskFlow 的每个
+lifecycle transition 和执行期 action 都必须显式依赖 parent Task 为 OnCpu；仅有 Task.Online 或 runqueue
+membership 不足以执行 Flow。`TaskFlow` 的类型继承只保证 parent 类型约束和已声明 process 适用于其
+子类型，不引入另一套 guard。fresh dynamic Flow 在 Base 中建立 owner/parent/entry-source 的 structural
+`Bind` 不是 lifecycle 推进或执行期 action，因此可以先于 parent 首次 dispatch。
 
-每个 initial Flow 有两个 lossy 启动信号来源。`Task.Transition::Enable` 提交 Online 后发出 `self.initial_flow.Transition::Preset`；DispatchWindow 提交新 current TaskRef 后发出 `self.current_task.initial_flow.Transition::Preset`。目标只有在 Flow 为 Base、`task_flow_dispatch_guard_satisfied(flow, window)` 成立且 initial/owner/parent bindings 一致时才接受；其它情况立即记录 discarded，不能阻塞 source transition，也不能排队或重试。通常 BootTask 的 Enable 信号启动 BootInitFlow；KernelInitTask、KthreaddTask 和普通 clone child 的 Enable 信号因窗口仍属于当前 creator 而丢弃，它们在首次真正被调度时由窗口信号启动。已启动 Task 再次获得窗口时，initial Flow 已非 Base，信号丢弃，执行从 `task_active_flow_is` 指向的保存 continuation 恢复；因此 BootTask 返回时继续 BootIdleFlow，而不会重新启动 BootInitFlow。
+`BootTask` 的模型初态是 OnCpu，表示固件/架构入口已经交付 boot CPU；其首次执行不经过 Scheduler。
+Kernel 接受 OpenSBI Startup 后直接异步发出严格 `BootInitFlow.Preset`。普通 Task 的 `Enable` 只提交
+Online；Scheduler 在真实切换后严格发出 Task.Continue。Task 提交 OnCpu 后通过
+`DispatchContinuation` 的 `drives initial.Preset || active.Continue` 选择唯一可接受 handler：initial
+Flow 仍为 Base 时严格启动它，否则恢复唯一 active Flow。没有候选、候选歧义或处理失败都使根执行
+失败。Scheduler 是 Task.Continue 与 Task.Suspend 的唯一发送者。
 
 `UserAppFlow` 的统一 lifecycle 是：Base 中的结构 `Bind` 建立唯一 owner/parent、入口来源和 fresh/独占关系但不推进 lifecycle；Preset 启动已绑定 Flow；Setup 准备 exec 映像或 fork continuation 的执行上下文；Enable 成为 owner 唯一 Online Flow 并跨入用户应用黑盒；Disable 处理 exit、exit_group 或 successful-exec replacement；Cleanup 释放实例并保证它不再 active。用户应用内部不声明 action 或 transition；syscall、trap、files 和其它内核资源操作仍属于相应内核对象。successful exec 不替换 Task：新 Flow 先 Bind/Preset/Setup，旧 Flow 再 Disable，随后提交 active binding handoff、新 Flow Enable，最后旧 Flow Cleanup。
 
@@ -634,9 +632,9 @@ Flow 关系分为四类，不能混用：`initial_flow` association 只记录创
 
 正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。`CurrentTaskRef` 是当前 CPU 视角下只属于本 CPU 的任务引用对象；规格不引入 `CurrentTask` 这种描述性对象，也不把 `CurrentTaskRef` 建模为全局 singleton。BP 规格中的 `CurrentTaskRef` 属于 `BootCurrentCPU` 的 current-task 视图，当前最小路径绑定到 `BootTask`；未来 AP 规格应建立各自 CPU 视角下的私有 current-task 引用，而不是复用 BP 的引用。`CurrentRunQueueRef` 是当前 CPU 视角下只属于本 CPU 的当前 runqueue 引用对象；BP 最小路径中它指向 `BootRunQueue`，CPU 归属是 `BootCPURef`，并由本 CPU 的 `CurrentTaskRef` 指向任务的 CPU 归属间接确定。规格不引入描述性 current-runqueue 对象，也不把 `CurrentRunQueueRef` 建模为全局 singleton。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)` 或 `let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文直接使用该词法可见绑定，不通过 `within` 传参或重命名。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Transition::EnqueueTask(...)`、`prev_ref.Action::SaveCoreContext`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootTask.Action`。任务记录的当前 CPU 归属是 `Task` 类型的公共属性，正式更新形态是 `Task.Action::SetTaskCpu(cpu_ref)`，调用点使用具体 task 对象 receiver，例如 `KernelInitTask.Action::SetTaskCpu(BootCPURef)`。
 
-Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型也可以声明“引用自身”的 process，例如 `TaskRef.Action::SetCurrent(task)` 更新引用目标本身；这类 process 不分发到目标 `Task`，其 `self` 是引用对象。typed association path 允许引用目标的 association 透明访问；本轮正式使用 `TaskRef.initial_flow` 支持 DispatchWindow 的动态 emits receiver。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`runqueue_ref_targets(...)`、`runqueue_ref_cpu_is(...)` 等 fact 承载。
+Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值，且 `XXXRef` 的目标对象类型 `XXX` 声明了 `Transition::E` 或 `Action::A`，则 `R.Transition::E(...)` / `R.Action::A(...)` 表示通过引用对目标对象执行 `XXX` 类型定义的 process；process 内部的 `self` 绑定到引用当前指向的目标对象。引用类型也可以声明“引用自身”的 process，例如 `TaskRef.Action::SetCurrent(task)` 更新引用目标本身；这类 process 不分发到目标 `Task`，其 `self` 是引用对象。typed association path 允许引用目标的 association 透明访问，例如 Task 的 `initial_flow` 与 `active_flow`。普通 attribute 与 owned child 的通用 `Ref.attr` / `Ref.child` 仍未开放；其它引用关系继续使用 `task_ref_targets(...)`、`runqueue_ref_targets(...)`、`runqueue_ref_cpu_is(...)` 等 fact 承载。
 
-`CurrentTaskRef` 的正式语义是 CPU 视角私有的 current-task 引用：它由本 CPU 的 current-task 机制产生，可能由实现通过私有寄存器组、CPU-local 存储或其它架构设施承载，但模型层不把这些实现承载方式称为 `CurrentTaskRef` 的本体。发生本 CPU 任务切换时，`SchedulerObject.Action::SwitchTo(prev_ref, next_ref)` 必须提交 `next_ref` 成为本 CPU current-task 引用目标的事实，并在同一真实 commit boundary 更新该 CPU 的 DispatchWindow。其它 CPU 的 current-task 进展对本 CPU 规格来说只能作为可观察环境事实进入，而不是由本 CPU 的 `CurrentTaskRef` 直接表达。
+`CurrentTaskRef` 的正式语义是 CPU 视角私有的 current-task 引用：它由本 CPU 的 current-task 机制产生，可能由实现通过私有寄存器组、CPU-local 存储或其它架构设施承载，但模型层不把这些实现承载方式称为 `CurrentTaskRef` 的本体。发生本 CPU 任务切换时，`SchedulerObject.Action::SwitchTo(prev_ref, next_ref)` 必须提交 `next_ref` 成为本 CPU current-task 引用目标，并更新 `CurrentTaskSlot` 投影视图；next 入口处理 Continue 后该投影必须与唯一 OnCpu Task 一致。其它 CPU 的 current-task 进展对本 CPU 规格来说只能作为可观察环境事实进入，而不是由本 CPU 的 `CurrentTaskRef` 直接表达。
 
 `CurrentRunQueueRef` 的正式语义是 CPU 视角私有的 current-runqueue 引用：它不是全局 runqueue 单例，也不是 `BootRunQueue` 的别名。调度路径应先从本 CPU `CurrentTaskRef` 得到当前 task，再读取该 task 记录的 CPU logical-id / `cpu_ref`，最后通过 `CpuGroup.Cpu[id].RunQueue` 与 scheduler runqueue metadata 解析当前 runqueue 引用。BP 当前最小路径中这个解析固定为 `CurrentRunQueueRef -> BootRunQueue` 和 `CurrentRunQueueRef -> BootCPURef`，但原因是 `CurrentTaskRef -> BootTask` 且 `task_cpu_ref_is(BootTask, BootCPURef)`，不是因为 current runqueue 解析以 `CpuGroup.boot_cpu()` 为起点。未来 SMP 泛化时，AP 视角应拥有自己的 `CurrentRunQueueRef`，并由对应 CPU 的 current task 与 CPUGroup/runqueue topology 解析目标 runqueue。
 
@@ -667,19 +665,12 @@ key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间�
 最后进入 `SchedulerObject.Action::SwitchTo(CurrentTaskRef, next)`。
 
 `SwitchTo` 对应 Linux `context_switch()` 中 `prepare_task_switch()` 和
-`finish_task_switch()` 之间的 `switch_to(prev, next, last)` 核心位置。RISC-V
-实现中 `switch_to` 先处理 `thread.prev_cpu`、FPU/vector/icache 等架构钩子，
-再由 `__switch_to` 保存 `prev->thread` 并恢复 `next->thread` 的核心寄存器。
-正式规格当前只覆盖 `__switch_to` 的核心寄存器组：`ra`、`sp` 和
-callee-saved `s0..s11`。这些寄存器不属于 `Scheduler`，而属于每个 `Task`
-拥有的 `TaskThreadContext` 内嵌结构。`SwitchTo(prev_ref, next_ref)` 内部通过
-`prev_ref.Action::SaveCoreContext` 和 `next_ref.Action::RestoreCoreContext`
-提交保存/恢复事实；完成后 next 必须成为本 CPU current-task 引用目标。当前 UP
-最小路径允许 `prev == next == CurrentTaskRef`，该引用目标是 `BootTask`，
-因此 `SwitchTo` 只提交 identity switch 框架事实和核心上下文保存/恢复事实，
-不执行真实 task stack switch。完整 `prev != next` 切换、`last` 返回值、MM 切换、FPU/vector、
-`prepare_task_switch()`/`finish_task_switch()` 钩子、`sched_submit_work()`、
-worker sleep/running hook、RCU context switch 和 scheduler class pick 细节后续按对象展开。
+`finish_task_switch()` 之间的 `switch_to(prev, next, last)` 核心位置。固定顺序是：同步驱动
+`prev_ref.Suspend` 并确认 prev 离开 OnCpu；保存 prev context；提交 CurrentTaskRef/CurrentTaskSlot 和
+context-switch 事实并通过 `__switch_to` 恢复 next 的 `ra`、`sp`、callee-saved `s0..s11`；最后异步
+发出 `next_ref.Continue`。Continue 只能在 next 已真实获得 CPU 的入口/恢复点处理并提交 OnCpu，不能在
+物理 context switch 前预提交。MM、FPU/vector、`last` 返回值、完整 prepare/finish hooks、worker 与
+scheduler-class 细节继续按对象展开。
 
 `RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Transition::EnqueueTask(task_ref: TaskRef)` 是运行期 transition，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。该 transition 的基础成员事实统一表达为 `runqueue_contains_task(self, task_ref)`；阶段级或跨对象派生事实可以继续使用 `task_enqueued_on_runqueue(task_ref, runqueue_ref)` 表示已经经过 `SelectRunQueue`、`Task.SetTaskCpu` 和入队的整体结果。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，确认或更新 `task_ref` 的 CPU id，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Transition::EnqueueTask(...)` 提交入队。
 

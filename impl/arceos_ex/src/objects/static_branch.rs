@@ -101,7 +101,7 @@ impl StaticBranch {
             || !vm.entry_successor_ready()
             || !cpu_hotplug_lock.ready()
             || !jump_label_mutex.ready()
-            || boot_task.state() != State::Online
+            || boot_task.state() != State::OnCpu
         {
             return self.failed_setup();
         }

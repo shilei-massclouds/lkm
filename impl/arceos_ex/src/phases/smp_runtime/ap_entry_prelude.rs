@@ -63,6 +63,9 @@ pub(crate) fn preset(adoption: ApEntryAdoption) -> ! {
     if !adoption.task_pointer_matches_target() {
         fail(logical_id, "task-pointer");
     }
+    if crate::objects::smp_bringup::adopt_ap_idle_entry_execution(logical_id).is_err() {
+        fail(logical_id, "idle-task-entry-execution");
+    }
 
     ADOPTION_FACTS[logical_id].store(ALL_ADOPTION_FACTS, Ordering::Release);
     crate::checkpoint::ap_checkpoint(Checkpoint::ApEntryPreludeBootDataConsumed, logical_id);

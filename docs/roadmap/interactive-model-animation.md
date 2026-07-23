@@ -10,7 +10,7 @@
 
 - `.spec` 仍是唯一规格源。
 - `model.json` 表达静态对象、状态、transition 和关系。
-- `derive.json` 表达一次实际推导中的当前状态、guard 求值、状态推进、接受、丢弃和阻塞结果。
+- `derive.json` 表达一次实际推导中的当前状态、guard 求值、状态推进、接受和失败结果。
 - `view.json` 是自动生成的展示中间文件，可包含交互动画需要的结构化步骤；它不是人工维护的语义来源。
 - 保留现有静态 `svg` 输出。
 - 新增交互式 `html` 输出，HTML 内部使用 SVG 绘图和 JavaScript 控制。
@@ -35,7 +35,7 @@ view.json（包含 signal transaction steps）
 交互式 HTML
 ```
 
-静态结构视图可以由 `model.json` 生成。需要展示动态 guard、lossy discard、blocked 和实际状态推进的交互 trace 必须由 `derive.json` 生成。
+静态结构视图可以由 `model.json` 生成。需要展示动态 guard、严格 Signal 失败和实际状态推进的交互 trace 必须由 `derive.json` 生成。
 
 ## 交互步骤语义
 
@@ -49,7 +49,7 @@ view.json（包含 signal transaction steps）
   -> 执行 transition 或 action
   -> 应用 updates/ensures
   -> 处理该响应中的嵌套 drives/emits
-  -> 目标响应以 accepted、discarded 或 blocked 结束
+  -> 目标响应以 accepted 或 failed 结束
 ```
 
 默认情况下，响应期间产生的嵌套信号属于当前顶层 signal transaction，并在该步骤内部按顺序展示。后续如有需要，可以增加“展开子步骤”模式，但不得改变顶层一步的事务边界。
@@ -57,8 +57,7 @@ view.json（包含 signal transaction steps）
 步骤结果至少包括：
 
 - `accepted`：guard 成立，目标 transition/action 完成，状态可能推进。
-- `lossy_discarded`：信号已发出但目标当前不能接受，记录丢弃，目标状态不变。
-- `strict_blocked`：严格信号不能完成，展示阻塞位置和失败条件。
+- `failed`：目标拒绝、缺少 handler 或同步/异步嵌套处理失败；根执行结果失败并展示失败条件。
 - `completed_no_state_change`：响应完成但没有 lifecycle 状态变化。
 
 ## Animation View 中间结构
@@ -83,15 +82,11 @@ view.json（包含 signal transaction steps）
     },
     {
       "kind": "guard_check",
-      "predicate": "task_flow_dispatch_guard_satisfied",
+      "predicate": "parent_task_on_cpu",
       "result": true,
       "conditions": [
         {
-          "expression": "BootTask.state == Online",
-          "result": true
-        },
-        {
-          "expression": "BootDispatchWindow.current_task -> BootTask",
+          "expression": "BootTask.state == OnCpu",
           "result": true
         }
       ]
@@ -189,10 +184,9 @@ text | dot | svg | html
 - 现有静态 SVG 输出保持不变或只有明确接受的变更。
 - 同一 derive trace 可同时生成静态 SVG 和交互 HTML。
 - accepted signal 能从发出展示到目标响应完成。
-- parent Task Online 且 DispatchWindow 指向 parent 时，TaskFlow guard 显示为通过并允许推进。
+- parent Task OnCpu 时，TaskFlow execution guard 显示为通过并允许推进。
 - guard 任一条件失败时，明确高亮失败条件且不推进目标状态。
-- lossy signal 显示为 discarded，一步完成后状态不变。
-- strict signal 显示为 blocked，步骤停止在确定边界。
+- 目标拒绝、缺失 handler 或异步处理失败都显示为 failed，根步骤停止在确定边界。
 - 动态 receiver 和 TaskRef 解引用后的实际目标显示正确。
 - nested emits 的显示顺序和顶层事务完成边界正确。
 - 向前、向后、重复往返均恢复相同状态。

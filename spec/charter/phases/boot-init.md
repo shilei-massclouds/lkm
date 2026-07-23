@@ -2,29 +2,29 @@
 
 `BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow 实例。由于 TaskFlow 继承
 PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时拥有独立 FlowRef、lifecycle 与 owner
-关系。`BootTask` 在其整个生命周期中始终是 Online、PID 0 的同一静态 carrier。
+关系。`BootTask` 从模型入口起已经 OnCpu，并在后续真实调度中通过 Suspend/Continue 与 Online 往返；
+它始终是 PID 0 的同一静态 carrier。
 
 ## 边界与职责
 
-- `BootTask` 提交 Online 后发出 initial-flow lossy `Preset`；只有 BootInitFlow 仍为 Base，且
-  `BootDispatchWindow.current_task` 即时解引用为 BootTask 时才接受并记录 Started。随后驱动
-  `EntryPreludePhase`；完成后提交 `BootInitFlow.Prepared`。
+- OpenSBI 发出 `Kernel.Startup` 后，Kernel 直接异步发出严格 `BootInitFlow.Startup`（canonical
+  `Preset`）；BootInitFlow 必须仍为 Base 且 parent BootTask 必须为 OnCpu。接受并记录 Started 后驱动
+  `EntryPreludePhase`；完成后提交 `BootInitFlow.Prepared`。重复启动或执行权不匹配使根执行失败。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
   `BootInitFlow.Ready`；不建立 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
 - `BootInitRestInitPhase` 完整驱动 `KernelInitTask` 与 `KthreaddTask` 的 Preset/Setup/Enable。
-  Task Enable 对应 `wake_up_new_task()`，其 initial-flow lossy Preset 因 DispatchWindow 仍指向
-  BootTask 而立即 discarded。
+  Task Enable 对应 `wake_up_new_task()` 并只发布 Online；initial Flow 必须等 Task 首次真实获得 CPU、
+  接受 Scheduler 发出的 Continue 并提交 OnCpu 后严格启动。
 - Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
   `BootIdleFlow` owner/active binding。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
   `BootInitFlow.Online` 与 Kernel 的 Prepared switch result，再执行真实 BootTask→KernelInitTask
   task-stack switch。
 
-BootInitFlow 的每个 lifecycle transition 都在执行时重新检查统一 dispatch guard：parent BootTask
-必须仍为 Online，且 BootDispatchWindow 当前必须仍指向 BootTask。该 guard 不是 BootInitFlow 或
-TaskFlow 保存的字段/状态。
+BootInitFlow 的每个 lifecycle transition 都在执行时重新检查 parent BootTask 必须为 OnCpu；不存在
+另一个 dispatch guard 字段、状态或镜像对象。
 
 以上全部 boot execution 叶子都直接以 `BootInitFlow` 为 parent。叶子 Online 后只返回
 `BootInitFlow` 当前 transition 的 continuation，不直接启动 sibling。

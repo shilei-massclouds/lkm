@@ -640,7 +640,7 @@ class ModelToolTests(unittest.TestCase):
                 )
             )
             self.assertIn("BootTask", kernel["children"])
-            self.assertEqual(objects["BootTask"]["initial_state"], "Ready")
+            self.assertEqual(objects["BootTask"]["initial_state"], "OnCpu")
             self.assertEqual(objects["BootTask"]["parent"], "Kernel")
             self.assertEqual(objects["BootInitFlow"]["parent"], "BootTask")
             self.assertEqual(
@@ -697,9 +697,10 @@ class ModelToolTests(unittest.TestCase):
                 ],
                 ["EntryPreludePhase.Transition::Preset"],
             )
+            self.assertEqual(kernel_preset["drives"], [])
             self.assertEqual(
-                [entry["text"] for entry in kernel_preset["drives"][0]["entries"]],
-                ["BootTask.Transition::Enable"],
+                [entry["text"] for entry in kernel_preset["emits"][0]["entries"]],
+                ["BootInitFlow.Transition::Preset"],
             )
             self.assertEqual(kernel_setup["drives"], [])
             self.assertEqual(
@@ -749,9 +750,7 @@ class ModelToolTests(unittest.TestCase):
                     "BootInitRestInitPhase.state == State::Online",
                     "KernelInitFlow.state == State::Base",
                     "KthreaddFlow.state == State::Base",
-                    "task_flow_start_signal_discarded(KernelInitFlow, BootDispatchWindow)",
-                    "task_flow_start_signal_discarded(KthreaddFlow, BootDispatchWindow)",
-                    "BootTask.state == State::Online",
+                    "BootTask.state == State::OnCpu",
                 ],
             )
             self.assertEqual(preset["source_state"], "Base")
@@ -908,7 +907,7 @@ class ModelToolTests(unittest.TestCase):
             emits = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Preset"]["emits"]
             self.assertEqual(emits[0]["entries"][0]["text"], "B.Transition::Setup")
 
-    def test_emits_allows_lossy_association_path_and_task_ref_dereference(self) -> None:
+    def test_emits_allows_strict_association_path_and_task_ref_dereference(self) -> None:
         source = """
             type TaskFlow {
                 lifecycle {
@@ -924,14 +923,14 @@ class ModelToolTests(unittest.TestCase):
 
             type TaskRef {}
 
-            type DispatchWindow {
+            type DispatchRouter {
                 associations {
                     mutable current_task: TaskRef;
                 }
                 processes {
                     Transition::SwitchTo {
                         emits {
-                            lossy self.current_task.initial_flow.Transition::Preset;
+                            self.current_task.initial_flow.Transition::Preset;
                         }
                     }
                 }
@@ -955,7 +954,7 @@ class ModelToolTests(unittest.TestCase):
                 state State::Online {}
             }
 
-            object BootDispatchWindow: DispatchWindow {
+            object BootDispatchRouter: DispatchRouter {
                 initial_state: State::Online;
                 associations {
                     current_task = BootTaskRef;
@@ -972,7 +971,7 @@ class ModelToolTests(unittest.TestCase):
                     transitions {
                         on Transition::Preset -> State::Prepared {
                             emits {
-                                lossy self.initial_flow.Transition::Preset;
+                                self.initial_flow.Transition::Preset;
                             }
                         }
                     }
@@ -992,7 +991,29 @@ class ModelToolTests(unittest.TestCase):
         entry = data["model"]["objects"]["ComputerProject"]["states"]["Base"][
             "transitions"
         ]["Preset"]["emits"][0]["entries"][0]
-        self.assertEqual(entry["text"], "lossy self.initial_flow.Transition::Preset")
+        self.assertEqual(entry["text"], "self.initial_flow.Transition::Preset")
+
+    def test_lossy_emit_is_rejected(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            emits { lossy Transition::Setup; }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready {} }
+                }
+                state State::Ready {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), source)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("emits must reference a Signal", stderr)
 
     def test_emits_must_target_transition_enabled_from_target_state(self) -> None:
         source = """
@@ -1160,6 +1181,41 @@ class ModelToolTests(unittest.TestCase):
                 "invalid lifecycle transition: A.State::Base.Transition::Enable -> State::Online",
                 stderr.getvalue(),
             )
+
+    def test_on_cpu_lifecycle_is_task_only(self) -> None:
+        valid = """
+            type Task {}
+            object Worker: Task {
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    transitions { on Transition::Suspend -> State::Online {} }
+                }
+                state State::Online {
+                    transitions { on Transition::Continue -> State::OnCpu {} }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), valid)
+        self.assertEqual(exit_code, 0, stderr)
+
+        invalid = """
+            type PhaseObject {}
+            object Phase: PhaseObject {
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    transitions { on Transition::Suspend -> State::Online {} }
+                }
+                state State::Online {
+                    transitions { on Transition::Continue -> State::OnCpu {} }
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), invalid)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Task-only lifecycle state on non-Task", stderr)
+        self.assertIn("Task-only lifecycle transition on non-Task", stderr)
 
     def test_disable_from_base_to_offline_fails_model_stage(self) -> None:
         source = """

@@ -8,8 +8,8 @@ carrier and its independently-lived `TaskFlow` instances.
 - Boot and scheduler tests must observe one `BootTask` identity. The
   `BootIdleSetup` scheduling record is an internal projection and must not be
   reported as a second Task or own a second Task lifecycle.
-- Entry tests must observe `BootTask.Online` exactly once with the `T` early
-  marker, in `Kernel.Started -> BootTask.Online -> BootInitFlow.Started ->
+- Entry tests must observe `BootTask.OnCpu` exactly once with the `T` early
+  marker, in `Kernel.Started -> BootTask.OnCpu -> BootInitFlow.Started ->
   EntryPreludePhase.Started` order. Physical and virtual binding happen later,
   do not change BootTask lifecycle, and both must resolve to the same
   linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
@@ -19,16 +19,14 @@ carrier and its independently-lived `TaskFlow` instances.
   lifecycle. Online must precede and be adjacent to the first real
   BootTask-to-KernelInitTask switch commit; BootIdleEntry may start only after
   that scheduler call later restores BootTask.
-- Guard-focused coverage must prove that a Flow process proceeds only when its
-  parent Task is Online and the selected DispatchWindow's current TaskRef
-  resolves to that parent. Either mismatch must block without changing Flow
-  lifecycle state.
+- Execution-boundary coverage must prove that a Flow process proceeds only
+  when its parent Task is OnCpu. A mismatch must fail without changing Flow
+  lifecycle state, and CurrentTaskSlot must agree with the OnCpu Task once set.
 - KernelInitTask, KthreaddTask and clone-child Enable must leave their initial
-  Flow in Base when the lossy start signal is emitted while another Task owns
-  the DispatchWindow. The first real switch to that Task must accept the
-  signal and start its initial Flow.
-- Repeated switches to an already-started Task must discard the non-Base
-  initial-flow signal and resume the Task's active continuation; BootTask must
+  Flow in Base without sending a startup Signal. The first real switch to that
+  Task must accept strict Continue and start its initial Flow.
+- Repeated switches to an already-started Task must select the active Flow's
+  strict Continue handler without resending initial-flow Startup; BootTask must
   resume BootIdleFlow without restarting BootInitFlow.
 - PID 1 tests must keep `KernelInitTask` online across exec while observing
   an explicit fresh-Flow declaration that remains in `Base` before Preset, then

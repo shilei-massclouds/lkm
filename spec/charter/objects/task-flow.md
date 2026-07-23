@@ -53,28 +53,27 @@ Cleanup。Flow `Disable` 必须清除 active binding，`Cleanup` 只允许从 Of
 Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 Disable Task，存在未
 Destroyed Flow 时不得 Cleanup Task。
 
-## Dispatch guard 与 lossy 启动信号
+## OnCpu 执行边界与严格启动信号
 
-`TaskFlow` 不保存 guard 字段或 guard 状态，也不声明 `process_guard` 类型块。统一谓词
-`task_flow_dispatch_guard_satisfied(flow, window)` 在每次 lifecycle transition 或执行期 action
-尝试时即时求值，并且只有在以下两个条件同时满足时成立：
+`TaskFlow` 不保存 guard 字段或 guard 状态，也不声明 `process_guard` 类型块。每次 lifecycle transition
+或执行期 action 都即时要求 `flow.parent` 的 Task lifecycle state 为 `OnCpu`。这条要求只表达真实
+执行权，不依赖 current-task 镜像或窗口对象。类型继承只复用 parent 类型约束和已声明 process，不为
+Flow 实例物化 guard。fresh dynamic Flow 的 Base-only structural `Bind` 只建立 owner/parent/entry-source，
+不执行 continuation，因此不受 OnCpu 执行边界阻止。
 
-1. `flow.parent` 的当前 lifecycle state 是 `Online`；
-2. `window.current_task` 的当前 `TaskRef` 解引用后，其 runtime identity 等于 `flow.parent`。
+普通 Task 的 initial Flow 只有一个严格 Startup 来源：Scheduler 在 Task 首次真实获得 CPU 后向 Task
+发出 Continue，Task 提交 OnCpu 后选择仍为 Base 的 initial Flow，并向它发出 Startup（canonical
+Preset）。Task 再次获得 CPU 时 initial Flow 已非 Base，Task 必须改向唯一 active Flow 发出 Continue。
+两条候选必须恰有一条可接受；任何已发送 Signal 被拒绝或处理失败都会使根执行失败，不排队、不重试。
 
-每个 TaskFlow 推进点必须在自己的 `depends_on` 中显式依赖该谓词；类型继承只复用 parent 类型约束
-和已声明 process，不为 Flow 实例物化 guard。fresh dynamic Flow 的 Base-only structural `Bind` 只
-建立 owner/parent/entry-source，不执行 continuation，因此不受 dispatch guard 阻止。
+BootTask 是入口特例：它从模型初态已经 OnCpu，因此首次执行不经过 Scheduler 或 Task.Continue。
+OpenSBI 发出 Kernel.Startup 后，Kernel 直接异步发出 BootInitFlow.Startup；接收方必须仍为 Base且
+parent BootTask 必须为 OnCpu，重复启动或执行权不匹配立即失败。
 
-每个 Task 的初始 Flow 有两个 lossy `Preset` 信号来源：Task 提交 `Online` 后，以及对应
-DispatchWindow 在真实 switch commit 后更新 `current_task` 时。接收方只在自身仍为 `Base` 且即时
-dispatch guard 成立时推进；否则立即记录 discarded，不排队、不重试，也不阻塞发出方。Task 再次
-获得 CPU 时，非 Base 的 initial Flow 丢弃重复启动信号，并从 active Flow 保存的 continuation 恢复。
-
-PID 1 的首次 dispatch 是跨栈 continuation：scheduler 在 switch commit 更新 CurrentTaskSlot 与
-DispatchWindow 后接受 `KernelInitFlow.Preset`，但 runtime lowering 必须把 Preset body 及其叶子阶段
-代码放到 `kernel_init_entry()` 验证 PID 1 vmalloc stack 之后执行。不得为了同步实现 signal 而在
-BootTask 栈上预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
+PID 1 的首次 dispatch 是跨栈 continuation：scheduler 先同步完成 BootTask.Suspend，在 switch commit
+更新 CurrentTaskSlot 并完成真实栈切换，再在 `kernel_init_entry()` 验证 PID 1 vmalloc stack后处理
+KernelInitTask.Continue 及其严格 KernelInitFlow.Startup。不得在 BootTask 栈上预提交 PID 1 OnCpu，
+也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
 
 ## 首个 binding 与 exec replacement
 
@@ -82,12 +81,13 @@ boot idle successor binding 保持 `BootTask` 身份。`BootIdleFlow.Setup` 在�
 owner 和 active binding，并到达 Ready；`BootTask.initial_flow` 仍指向 `BootInitFlow`。
 `BootInitFlow.Online` 随后在真实 BootTask→KernelInitTask
 switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时，`BootIdleFlow` continuation 才
-驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以保留 scheduler-owned 的 idle metadata、锁或
+在 Task.Continue 提交 OnCpu 后收到 Continue，驱动 `BootIdleEntryPhase` 并进入 idle loop。实现可以
+保留 scheduler-owned 的 idle metadata、锁或
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。
 
 successful exec 同样保持 owner Task identity。`KernelInitFlow.Enable` 只完成
 `PayloadHandoffPreparePhase` 的可逆 precommit；真正 replacement 是 `KernelInitFlow` 已 Online 时、
-仍受 dynamic dispatch guard 约束的 `CommitPayloadHandoff` action，并使用固定顺序：
+仍受 parent Task OnCpu 约束的 `CommitPayloadHandoff` action，并使用固定顺序：
 
 1. fresh `UserAppFlow.Preset/Setup`；
 2. 旧 Flow `Disable`；

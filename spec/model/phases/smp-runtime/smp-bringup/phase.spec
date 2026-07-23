@@ -246,8 +246,10 @@ context DoneUpCompletionWaitLockContext: ResourceExclusiveContext {
  * SecondaryIdleTaskSet 表示 idle_threads_init() 为 possible non-boot CPU
  * 准备 inactive idle task。每个 secondary CPU 都有自己的 idle task 和
  * 对应 kernel stack / pt_regs 栈顶；这些对象是 CPU 关联的 per-CPU
- * task/stack 事实，不是 CpuGroup 拥有的 CPU 本体。它不启动 CPU，也不让
- * idle task 进入运行。
+ * task/stack 事实，不是 CpuGroup 拥有的 CPU 本体。它不启动 CPU；各 idle
+ * Task 在 hart_start 前已为 Online/rq->idle 候选，但不属于普通 runnable
+ * class queue。只有 AP 真实进入 secondary entry 后，架构入口才提交该 Task
+ * OnCpu 并启动 initial idle Flow。
  */
 object SecondaryIdleTaskSet: TaskSet {
     initial_state: State::Base;
@@ -444,7 +446,9 @@ object CpuStartProvider: HardwareObject {
  * 执行的 AP 专属入口先导期。它不同于 BP EntryPreludePhase：不建立
  * BootCurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
  * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
- * SwapperVm，并安装正式 trap vector。该对象是以 secondary logical_id
+ * SwapperVm，并安装正式 trap vector。boot-data/tp 验证后，同一入口直接
+ * 建立该 idle Task 的 OnCpu 与 initial idle Flow Startup，不发送 Scheduler
+ * Continue。该对象是以 secondary logical_id
  * 为 target key 的 replicated phase family；每个 AP 有独立四态。
  */
 object ApEntryPreludePhase: PhaseObject {

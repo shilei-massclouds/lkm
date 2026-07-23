@@ -6,9 +6,9 @@
 
 ## 入口例外与 adoption
 
-`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R`、`BootTask.Online` 的 `T`、
+`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R`、`BootTask.OnCpu` 的 `T`、
 `BootInitFlow.Started` 的 `O` 和 `EntryPreludePhase.Started` 的 `A`。BootTask marker 观察镜像内
-已存在的 Online carrier；其余 Started checkpoint 是各自 Preset 接受事件。汇编随后完成必须发生
+已拥有执行权的 OnCpu carrier；其余 Started checkpoint 是各自 Preset 接受事件。汇编随后完成必须发生
 在 Rust 前的 CSR/GPR/BSS 操作。
 
 进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel、BootTask、BootInitFlow 和
@@ -23,9 +23,9 @@ Preset 横跨三个物理实现段，但仍是一个 model transition：
 
 | 段 | model drives 与实现 |
 | --- | --- |
-| `_start` head | `InterruptStream.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；EntryPrelude 私有入口动作禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart；建立 `BootTaskEntryBinding` 物理 binding，并静默验证 BootTask Online；adopt init stack |
+| `_start` head | `InterruptStream.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；EntryPrelude 私有入口动作禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart；建立 `BootTaskEntryBinding` 物理 binding，并静默验证 BootTask OnCpu；adopt init stack |
 | `preset_until_vm_switch()` | adoption head 对象事实；驱动 `BootCurrentCPU.Setup -> CpuGroup.Preset -> BootCurrentCPU.Enable`、`EventStream.Preset`、`ExceptionStream.Preset` 和 `Vm.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootTaskEntryBinding.Setup` 虚拟 binding、静默验证 BootTask Online、`BootInitStack.Setup` 和 `Soc.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootTaskEntryBinding.Setup` 虚拟 binding、静默验证 BootTask OnCpu、`BootInitStack.Setup` 和 `Soc.Preset` |
 
 `Vm.Setup` 必须在同一个 Preset 内完成 TrampolineVm 到 EarlyVm 的切换，并通过
 `after_vm_setup_continuation()` 回到 EntryPrelude owner。所有 drives 成功后检查 Preset 后置对象
@@ -36,7 +36,7 @@ Preset 横跨三个物理实现段，但仍是一个 model transition：
 一次性验证 binding、BootTask、VM/KernelImage、`TaskRef::BOOT` 和预期 `tp` 地址；提交后失败沿既有
 shutdown 路径终止，不能返回可继续执行的半提交状态。binding 本身不发 checkpoint。
 
-`BootTask.Online` 的 `T` 只在 `_start` 观察一次；物理/虚拟 binding 都不得推进 BootTask lifecycle
+`BootTask.OnCpu` 的 `T` 只在 `_start` 观察一次；物理/虚拟 binding 都不得推进 BootTask lifecycle
 或重复该 marker。两次 binding 必须解析到同一 `init_task_storage`/`TaskRef::BOOT` carrier，期间不
 建立 TaskFlow ownership。
 

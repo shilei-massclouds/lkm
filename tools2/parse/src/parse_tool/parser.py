@@ -542,9 +542,8 @@ def _parse_expression(tokens: list[Token], *, assignment: bool) -> dict[str, Any
 
 
 def _parse_call(tokens: list[Token]) -> dict[str, Any]:
-    lossy = bool(tokens and tokens[0].value == "lossy")
-    if lossy:
-        tokens = tokens[1:]
+    if tokens and tokens[0].value == "lossy":
+        raise ParseFailure("lossy Signal syntax was removed in protocol v4", tokens[0])
     process_position = next(
         (
             index
@@ -576,7 +575,6 @@ def _parse_call(tokens: list[Token]) -> dict[str, Any]:
                     raise ParseFailure("named argument must be name: value", part[0])
                 arguments.append({"name": part[0].value, "value": _path_value(part[colon + 1 :])})
     return {
-        "lossy": lossy,
         "receiver": receiver,
         "process_kind": process_kind,
         "name": name,

@@ -14,7 +14,7 @@
 ## 里程碑
 
 1. 首期最小闭环（已完成）：独立包和 producer/version 隔离；必要 DSL 子集；Transition/Action 隐式 Signal；
-   drives 同步、emits post-commit FIFO；strict/lossy 分类；层级预算；scenario/snapshot；结构化
+   drives 同步、emits post-commit FIFO；严格 Signal；层级预算；scenario/snapshot；结构化
    derive/view JSON 和 text renderer；稳定性及端到端测试。
 2. 显式 Signal DSL：在单独的 charter/model-first 决策中引入 `signal` 声明和 `on Signal` 语法，
    停止依赖调用表达式的隐式规范化。首期不得提前接受该语法。
@@ -33,7 +33,7 @@
 
 - `make -C tools2 test-focused`：1 项同步/异步纵切通过。
 - `make -C tools2 test`：22 项通过，覆盖协议互拒、include/span、隐式 handler、payload/reference 类型、
-  strict/lossy、invariant、层级坐标和预算、FIFO、快照续跑、稳定 JSON、view 投影、文本失败链和
+  严格 Signal、invariant、层级坐标和预算、FIFO、快照续跑、稳定 JSON、view 投影、文本失败链和
   `pyveri2` 短参数入口。
 - `tools/pyveri/bin/pyveri spec/model/main.spec -T /tmp/lkm-tools2-legacy.trace.svg
   --trace-annotations state,transition --strict`：老静态 SVG 生成成功；主模型 `obligation=0`、
@@ -44,3 +44,6 @@
 
 首期已闭环；主 Roadmap 保持“进行中”只表示里程碑 2–6 仍需未来独立决策和实施，不表示首期缺少
 验收责任。
+
+2026-07-23 协议升级到 v4：删除 Signal 的 lossy 字段和 discarded outcome；所有已发送 Signal
+都必须被接受并处理，异步 emits 失败同样传播为根执行 failed。

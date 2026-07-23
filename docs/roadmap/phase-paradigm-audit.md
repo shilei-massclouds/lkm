@@ -249,9 +249,10 @@ continuation 的职责，再按 charter -> model -> coding -> impl/testing 向�
 `BootInitFlow.Preset` 只驱动 `EntryPreludePhase`；`Setup` 依次驱动 EntrySuccessor、CorePrepare、
 MmCoreInit、SchedInit、IrqTimeInit、LocalIrqEnable、IrqOpenPrepare、ProcessPrepare 和
 BootInitRestInit；`Enable` 只驱动 BootInitScheduleHandoff。RestInit 内两个新 task 的 `Preset`
-对应结构事实与 `copy_process`，`Setup` 无业务动作，`Enable` 对应 `wake_up_new_task` 并发出
-initial-flow lossy Preset。此时 dispatch window 仍指向 BootTask，所以 PID 1 和 kthreadd 的首次
-信号都被 discarded；首次真实 dispatch 更新 CurrentTaskSlot 和 DispatchWindow 后才重新发信号。
+对应结构事实与 `copy_process`，`Setup` 无业务动作，`Enable` 对应 `wake_up_new_task`，只把新 Task
+发布为 Online，不提前启动 initial Flow。PID 1 和 kthreadd 首次真实获得 CPU、接受 Scheduler
+Continue 并提交 OnCpu 后，才严格向 Base initial Flow 发出 Startup；后续调度只严格恢复 active
+Flow。CurrentTaskSlot 是切换完成后的投影视图，不承担 Flow execution guard。
 
 `KernelInitFlow` 的 phase code 只在 `kernel_init_entry()` 验证 PID 1 vmalloc kernel stack 后执行，
 不会在 BootTask 栈预执行。其 `Preset` 只完成 PreSmpInit 与 SmpBringup 的 BP 协调，`Setup` 只完成

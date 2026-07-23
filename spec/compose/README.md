@@ -33,12 +33,11 @@ re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需
 这些都是 `arceos_ex` crate 内私有 lowering 调整，不新增 facade、feature、crate 或兼容 alias；
 `spec/compose/main.spec` 已复核，组合语义无需修改。
 
-2026-07-22 TaskFlow initial-flow/dispatch guard 复核：`BootInitFlow` 现在以
+2026-07-23 Task 执行权重构复核：`BootInitFlow` 继续以
 `phases::boot_init::BootInitFlow` 私有 wrapper 内嵌统一 `objects::task_flow::TaskFlow` core，并在既有
-`Context` 中恢复一个模型要求的实例字段；新增的 `DispatchWindow` 仍是既有 scheduler/objects crate
-内部对象。该调整不新增 crate、feature、facade 或 public compatibility API，`spec/compose/main.spec`
-无需改变。上一条删除的是当时语义错误的临时平行 module/field，本条只恢复已确认模型对象的统一
-core lowering，不恢复平行生命周期实现。
+`Context`/scheduler/objects module 内完成 Task OnCpu 与严格 continuation lowering；删除内部
+`DispatchWindow`，保留 CPU-local `CurrentTaskSlot` 投影。该调整不新增 crate、feature、facade 或
+public compatibility API，`spec/compose/main.spec` 无需改变。
 
 2026-07-22 TaskFlow 直接子阶段归属复核：Boot/Interrupt/SmpRuntime 目录继续作为 crate 内私有
 namespace，删除其 wrapper lifecycle；payload 拆成两个私有 leaf module，KernelInitFlow commit

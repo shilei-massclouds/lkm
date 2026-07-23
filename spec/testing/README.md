@@ -26,13 +26,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2` 本轮以完整 `spec/model/main.spec` 和既有最小 fixture 共同验收。独立入口是
 `make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 3、拒绝 tools2 v1/v2/老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 4、拒绝 tools2 v1/v2/v3/老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
 - drives 同步 source order、emits post-commit enqueue 与全局 FIFO 调度记录；
 - drives 有序备选只发送首个当前可接受候选，未选候选不分配 Signal ID，全部不可接受时保留逐候选诊断；
-- strict rejected 导致 failed，lossy rejected 得到 discarded，条件不成立永不产生 pending；
+- 所有 rejected 或 handler failure 都导致 failed，异步失败同样传播，条件不成立永不产生 pending；
 - failed/bounded/until_signal_not_reached 不创建 snapshot-out，complete/reached snapshot 可作为下一 scenario 输入；
 - 同一输入重复运行的 Signal ID、事件序号和 canonical JSON 完全稳定；
 - view 不重新推导，text 能从根 Signal 还原 rejected/failed/truncated 的完整因果链。
@@ -49,7 +49,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
   FIFO、未提交祖先和重复目标；目标不得拥有 Signal ID、`signal_sent`、enqueue/receive/handler 事件，
   boundary snapshot 必须精确等于发送前稳定状态。
-- reached 返回 0并生成带 provenance 的 v3 snapshot；既有 completed response 保持 completed，未提交
+- reached 返回 0并生成带 provenance 的 v4 snapshot；既有 completed response 保持 completed，未提交
   ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
   生成 snapshot。
 - 不带 snapshot/scenario 的 `tools2/bin/pyveri -t Kernel.Preset` 必须因前期状态/事实缺失而 failed，且
@@ -70,7 +70,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 默认文本覆盖 Transition/Action 两种行、`Preset` 到 `Startup` 的显示别名、每层两空格的 hierarchy
   depth 缩进、负 depth 整体平移以及 Signal 创建顺序不被 depth 重排；Transition 状态必须来自 target
   的 before/after snapshot，stopped 未提交时显示相同状态，未解析 handler 不得猜类型或显示状态。
-- stopped/rejected/discarded/truncated/failed 必须在各自 Signal 同行显示 outcome/reason；reached 的
+- stopped/rejected/truncated/failed 必须在各自 Signal 同行显示 outcome/reason；reached 的
   before-send boundary、failed 的 failure chain/reason 和空 Signal trace 都必须保持简洁且可辨识。
 - 未设置 `VERBOSE`、`VERBOSE=0` 和其它非 `1` 值均选择 compact；只有 `VERBOSE=1` 逐字恢复既有详细
   文本和 canonical `Preset`。直接 renderer、render CLI、driver、shortcut、stdout 与 `-o` 都使用同一

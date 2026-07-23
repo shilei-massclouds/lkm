@@ -58,7 +58,7 @@ object SelectedPayloadHandoff: ResourceObject {
             on Action::PrepareSelectedVariant {
                 depends_on {
                     KernelInitFlow.state == State::Ready;
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -107,7 +107,7 @@ object SelectedPayloadHandoff: ResourceObject {
             on Action::CommitSelectedVariant {
                 depends_on {
                     KernelInitFlow.state == State::Online;
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                     selected_payload_replacement_precheck_complete(self, Config);
                 }
 
@@ -146,7 +146,7 @@ object PayloadPreparePhase: PhaseObject {
                     SystemState.state == State::Online;
                     KernelInitTask.state == State::Online;
                     system_state_running(SystemState);
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                     BinaryFormatRegistry.state == State::Ready;
                 }
 
@@ -174,7 +174,7 @@ object PayloadPreparePhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -197,7 +197,7 @@ object PayloadPreparePhase: PhaseObject {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                     SelectedPayloadHandoff.state == State::Ready;
                 }
                 ensures {
@@ -232,7 +232,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
                 depends_on {
                     PayloadPreparePhase.state == State::Online;
                     KernelInitFlow.state == State::Ready;
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -259,7 +259,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                 }
                 ensures {
                     KernelInitFlow.state == State::Ready;
@@ -276,7 +276,7 @@ object PayloadHandoffPreparePhase: PhaseObject {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    task_flow_dispatch_guard_satisfied(KernelInitFlow, BootDispatchWindow);
+                    KernelInitTask.state == State::OnCpu;
                 }
                 ensures {
                     KernelInitFlow.state == State::Ready;

@@ -7,7 +7,7 @@
 | checkpoint_index | checkpoint_name | checkpoint_variant | mapping_kind | confidence | linux_file | linux_symbol | linux_anchor | notes |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | Kernel.Started | KernelStarted | exact | high | init/main.c | start_kernel | start_kernel() definition line 903 | Linux C kernel entry anchor. |
-| 1 | BootTask.Online | BootTaskOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 1 | BootTask.OnCpu | BootTaskOnCpu | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 2 | BootInitFlow.Started | BootInitFlowStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 3 | Kernel.Online | KernelOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 4 | PreparePhase.Ready | PreparePhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

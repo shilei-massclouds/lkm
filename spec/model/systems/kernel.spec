@@ -14,8 +14,8 @@ include "../phases/payload/main.spec";
 
 /*
  * Kernel 代表内核运行实例, 由 OpenSBI 交接控制权后启动。
- * `_start` 先使静态 BootTask Online；BootTask 的 initial-flow completion
- * signal 启动并自推进 BootInitFlow，随后在真实 PID 1 栈入口继续
+ * BootTask 从模型入口起已经 OnCpu；Kernel 直接异步启动 BootInitFlow，
+ * 随后在真实 PID 1 栈入口继续
  * 多核运行期以及应用交接期。
  */
 object Kernel: KernelObject {
@@ -42,22 +42,16 @@ object Kernel: KernelObject {
                     BootCpuRegisters.a1 == BootArgs.dtb_pa;
                     Lds.state == State::Online;
                     Config.state == State::Online;
-                }
-
-                drives {
-                    BootTask.Transition::Enable;
+                    BootTask.state == State::OnCpu;
                 }
 
                 ensures {
-                    BootTask.state == State::Online;
-                    BootInitFlow.state == State::Online;
-                    EntryPreludePhase.state == State::Online;
-                    task_flow_started(BootInitFlow);
-                    task_flow_online_on_dispatch(BootInitFlow, BootDispatchWindow);
+                    BootTask.state == State::OnCpu;
+                    BootInitFlow.state == State::Base;
                 }
 
                 emits {
-                    Transition::Setup;
+                    BootInitFlow.Transition::Preset;
                 }
             }
         }
@@ -69,6 +63,10 @@ object Kernel: KernelObject {
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
+                depends_on {
+                    BootInitFlow.state == State::Online;
+                    BootTask.state == State::OnCpu;
+                }
                 ensures {
                     BootInitFlow.state == State::Online;
                     EntrySuccessorPhase.state == State::Online;
@@ -103,7 +101,6 @@ object Kernel: KernelObject {
             on Transition::Enable -> State::Online {
                 drives {
                     Scheduler.Action::Schedule;
-                    KernelInitFlow.Action::CommitPayloadHandoff;
                 }
 
                 ensures {
@@ -113,25 +110,9 @@ object Kernel: KernelObject {
                         BootTask,
                         KernelInitTask
                     );
-                    kernel_init_flow_payload_handoff_committed(KernelInitFlow);
-                    selected_payload_user_boot_replacement_ordered(
-                        SelectedPayloadHandoff,
-                        KernelInitFlow,
-                        KernelInitTask
-                    );
-                    selected_payload_kernel_mode_keeps_kernel_init_flow(
-                        SelectedPayloadHandoff,
-                        KernelInitFlow
-                    );
-                    PreSmpInitPhase.state == State::Online;
-                    SmpBringupPhase.state == State::Online;
-                    RuntimeCorePhase.state == State::Online;
-                    InitcallPhase.state == State::Online;
-                    RootfsPhase.state == State::Online;
-                    FinalizePhase.state == State::Online;
-                    PayloadPreparePhase.state == State::Online;
-                    PayloadHandoffPreparePhase.state == State::Online;
-                    kernel_init_flow_payload_handoff_committed(KernelInitFlow);
+                    BootTask.state == State::Online;
+                    KernelInitTask.state == State::Online;
+                    current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                 }
             }
         }

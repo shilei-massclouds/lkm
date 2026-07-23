@@ -220,7 +220,7 @@ object TaskCreationCore: KernelObject {
                     CpuGroup.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                 }
 
                 drives {
@@ -993,7 +993,7 @@ object ProcessPreparePhase: PhaseObject {
                     MmStructCache.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
-                    BootTask.state == State::Online;
+                    BootTask.state == State::OnCpu;
                     ExceptionStream.state == State::Ready;
                 }
 

@@ -835,10 +835,6 @@ object BootInitRestInitPhase: PhaseObject {
                         task_initial_flow_is(KernelInitTask, KernelInitFlow);
                         task_initial_flow_binding_consistent(KernelInitTask);
                         KernelInitFlow.state == State::Base;
-                        task_flow_start_signal_discarded(
-                            KernelInitFlow,
-                            BootDispatchWindow
-                        );
                     }
                 }
 
@@ -988,10 +984,6 @@ object BootInitRestInitPhase: PhaseObject {
                         task_initial_flow_is(KthreaddTask, KthreaddFlow);
                         task_initial_flow_binding_consistent(KthreaddTask);
                         KthreaddFlow.state == State::Base;
-                        task_flow_start_signal_discarded(
-                            KthreaddFlow,
-                            BootDispatchWindow
-                        );
                     }
                 }
 
@@ -1098,10 +1090,9 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
                     KthreaddFlow.state == State::Base;
-                    kthreadd_schedule_loop_deferred_until_dispatch(
+                    kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
-                        KthreaddFlow,
-                        BootDispatchWindow
+                        KthreaddFlow
                     );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
@@ -1125,7 +1116,7 @@ object BootInitRestInitPhase: PhaseObject {
                 deferred kthreadd.001 {
                     category: DeferredCategory::Feature;
                     summary: "Complete kthreadd request consumption, completion, wait, park, stop and long-running service semantics.";
-                    evidence { kthreadd_schedule_loop_deferred_until_dispatch(KthreaddTask, KthreaddFlow, BootDispatchWindow); }
+                    evidence { kthreadd_schedule_loop_deferred_until_on_cpu(KthreaddTask, KthreaddFlow); }
                     close_when: "kthread request creation/consumption, wait/park/stop and sustained service tests pass.";
                 }
 
@@ -1181,10 +1172,9 @@ object BootInitRestInitPhase: PhaseObject {
                     kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                     task_owns_flow(KthreaddTask, KthreaddFlow);
                     KthreaddFlow.state == State::Base;
-                    kthreadd_schedule_loop_deferred_until_dispatch(
+                    kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
-                        KthreaddFlow,
-                        BootDispatchWindow
+                        KthreaddFlow
                     );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
@@ -1257,10 +1247,9 @@ object BootInitRestInitPhase: PhaseObject {
             kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
             task_owns_flow(KthreaddTask, KthreaddFlow);
             KthreaddFlow.state == State::Base;
-            kthreadd_schedule_loop_deferred_until_dispatch(
+            kthreadd_schedule_loop_deferred_until_on_cpu(
                 KthreaddTask,
-                KthreaddFlow,
-                BootDispatchWindow
+                KthreaddFlow
             );
             kthreadd_global_ref_bound(KthreaddTask);
             kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
@@ -1303,10 +1292,9 @@ object BootInitRestInitPhase: PhaseObject {
                     KthreaddTask.state == State::Online;
                     task_owns_flow(KthreaddTask, KthreaddFlow);
                     KthreaddFlow.state == State::Base;
-                    kthreadd_schedule_loop_deferred_until_dispatch(
+                    kthreadd_schedule_loop_deferred_until_on_cpu(
                         KthreaddTask,
-                        KthreaddFlow,
-                        BootDispatchWindow
+                        KthreaddFlow
                     );
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);

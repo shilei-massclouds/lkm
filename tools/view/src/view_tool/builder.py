@@ -1274,7 +1274,7 @@ def _emitted_transitions(
     emitted: list[tuple[str, str]] = []
     for block in transition.decl.emits:
         for entry, _span in block.entry_spans:
-            expression = entry.removeprefix("lossy ").strip()
+            expression = entry.strip()
             match = _LOCAL_TRANSITION_EXPR_RE.match(expression)
             if match is not None:
                 emitted.append((transition.object_name, match.group(1)))

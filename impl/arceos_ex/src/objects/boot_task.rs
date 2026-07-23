@@ -49,7 +49,7 @@ impl BootTask {
 
     pub fn bind_idle_metadata(&mut self, cpu_id: usize) -> EventResult {
         let task = unsafe { &mut *Self::task_ptr() };
-        if task.state() != State::Online
+        if task.state() != State::OnCpu
             || task.task_ref() != TaskRef::BOOT
             || task.pid() != 0
             || !task.set_task_cpu(cpu_id)
@@ -57,8 +57,8 @@ impl BootTask {
             return failed_condition(
                 LifecycleEvent::Setup,
                 task.state(),
-                State::Online,
-                State::Online,
+                State::OnCpu,
+                State::OnCpu,
             );
         }
         task.set_role_metadata(TaskEntry::BootIdle, TaskKind::Idle);
@@ -71,8 +71,28 @@ impl BootTask {
         unsafe { (*Self::task_ptr()).state() }
     }
 
-    pub fn enable_at_entry(&mut self) -> EventResult {
-        unsafe { &mut *Self::task_ptr() }.adopt_boot_enable()
+    pub fn online(&self) -> bool {
+        unsafe { (*Self::task_ptr()).online() }
+    }
+
+    pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.suspend_from_cpu()
+    }
+
+    pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.continue_on_cpu()
+    }
+
+    pub(crate) fn suspend_canonical() -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.suspend_from_cpu()
+    }
+
+    pub(crate) fn continue_canonical() -> EventResult {
+        unsafe { &mut *Self::task_ptr() }.continue_on_cpu()
+    }
+
+    pub(crate) fn canonical_task() -> &'static Task {
+        unsafe { &*Self::task_ptr() }
     }
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
@@ -115,4 +135,4 @@ unsafe impl Sync for InitTaskStorage {}
 
 #[unsafe(no_mangle)]
 pub static init_task_storage: InitTaskStorage =
-    InitTaskStorage(UnsafeCell::new(Task::new_boot_ready()));
+    InitTaskStorage(UnsafeCell::new(Task::new_boot_on_cpu()));

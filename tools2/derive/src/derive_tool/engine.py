@@ -237,7 +237,6 @@ class Engine:
         name: str,
         raw_arguments: list[dict[str, Any]],
         delivery: str,
-        lossy: bool,
         cause_id: str | None,
         coordinate: dict[str, Any],
         compat_process_kind: str | None,
@@ -294,8 +293,6 @@ class Engine:
             "target": target,
             "name": name,
             "delivery": delivery,
-            "strict": not lossy,
-            "lossy": lossy,
             "cause_id": cause_id,
             "response_parent_id": cause_id,
             "compat_process_kind": compat_process_kind,
@@ -319,7 +316,6 @@ class Engine:
             target=target,
             signal=name,
             delivery=delivery,
-            lossy=lossy,
             cause_id=cause_id,
             coordinate=signal["coordinate"],
         )
@@ -415,15 +411,11 @@ class Engine:
         signal["reason"] = reason
         signal["after_snapshot"] = _snapshot(self.current)
         self.event("signal_rejected", signal_id=signal["id"], reason=reason)
-        if signal["lossy"]:
-            signal["outcome"] = "discarded"
-            self.event("signal_discarded", signal_id=signal["id"], reason=reason)
-        else:
-            signal["outcome"] = "rejected"
-            self.failed = True
-            if self.failure_signal_id is None:
-                self.failure_signal_id = signal["id"]
-                self.failure_reason = reason
+        signal["outcome"] = "rejected"
+        self.failed = True
+        if self.failure_signal_id is None:
+            self.failure_signal_id = signal["id"]
+            self.failure_reason = reason
 
     def resolve_path(
         self, path: str, *, signal: dict[str, Any], bindings: dict[str, Any]
@@ -439,6 +431,12 @@ class Engine:
         else:
             raise DerivationProblem(f"unresolved system/reference path {path}")
         for field in parts[1:]:
+            if field == "parent" and value in self.systems:
+                parent = self.systems[value].get("parent")
+                if parent is None:
+                    raise DerivationProblem(f"unbound system parent {value}.parent")
+                value = parent
+                continue
             key = f"{value}.{field}"
             if key not in self.current["references"]:
                 raise DerivationProblem(f"unbound system reference {key}")
@@ -890,24 +888,6 @@ class Engine:
                 return False
             task = self.systems[flow].get("parent")
             return task in self.systems and self.current["references"].get(f"{task}.initial_flow") == flow
-        if name == "task_flow_dispatch_guard_satisfied" and len(values) == 2:
-            flow, window = values
-            if flow not in self.systems or window not in self.systems:
-                return False
-            task = self.systems[flow].get("parent")
-            task_ref = self.current["references"].get(f"{window}.current_task")
-            return (
-                task in self.systems
-                and self.current["states"].get(task) == "Online"
-                and self._deref(task_ref) == task
-            )
-        if name == "dispatch_window_current_ref_is" and len(values) == 2:
-            window, task_ref = values
-            return self.current["references"].get(f"{window}.current_task") == task_ref
-        if name == "dispatch_window_current_task_is" and len(values) == 2:
-            window, task = values
-            task_ref = self.current["references"].get(f"{window}.current_task")
-            return self._deref(task_ref) == task
         return False
 
     def _predicate_path(self, path: str, bindings: dict[str, Any]) -> Any:
@@ -1244,7 +1224,6 @@ class Engine:
             name=call["name"],
             raw_arguments=self.materialize_arguments(call["arguments"], signal=signal, bindings=bindings),
             delivery="drives",
-            lossy=call["lossy"],
             cause_id=signal["id"],
             coordinate=coordinate,
             compat_process_kind=call["process_kind"],
@@ -1268,7 +1247,7 @@ class Engine:
         )
         if child["outcome"] == "truncated":
             return
-        if child["outcome"] not in {"completed", "discarded"}:
+        if child["outcome"] != "completed":
             raise DerivationProblem(f"strict child {child['id']} did not complete")
         alias = call.get("result_alias")
         if alias:
@@ -1342,7 +1321,7 @@ class Engine:
             return False, str(exc)
 
     def _drain_queue(self) -> None:
-        while self.queue and not self.failed:
+        while self.queue:
             queued = self.queue.pop(0)
             self.event("emits_dequeued", signal_id=queued["id"], remaining=len(self.queue))
             self.deliver(queued)
@@ -1647,7 +1626,6 @@ class Engine:
                         call["arguments"], signal=signal, bindings=bindings
                     ),
                     delivery="emits",
-                    lossy=call["lossy"],
                     cause_id=signal["id"],
                     coordinate=coordinate,
                     compat_process_kind=call["process_kind"],
@@ -1673,7 +1651,7 @@ class Engine:
                 )
             raise
         except DerivationProblem as exc:
-            if signal["outcome"] not in {"failed", "rejected", "discarded"}:
+            if signal["outcome"] not in {"failed", "rejected"}:
                 self.fail(signal, str(exc))
         finally:
             self.active_requests.discard(request_key)
@@ -1687,7 +1665,6 @@ class Engine:
                 name=self.root_name,
                 raw_arguments=[],
                 delivery="root",
-                lossy=False,
                 cause_id=None,
                 coordinate={
                     "depth": 0,
@@ -1757,7 +1734,6 @@ class Engine:
             "summary": {
                 "signals": len(self.signals),
                 "completed": sum(item["outcome"] == "completed" for item in self.signals),
-                "discarded": sum(item["outcome"] == "discarded" for item in self.signals),
                 "rejected": sum(item["outcome"] == "rejected" for item in self.signals),
                 "failed": sum(item["outcome"] == "failed" for item in self.signals),
                 "truncated": sum(item["outcome"] == "truncated" for item in self.signals),

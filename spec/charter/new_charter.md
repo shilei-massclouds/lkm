@@ -51,8 +51,7 @@ boot-idle handoff 保持 Task identity，只替换 active Flow；fork/clone 才�
 每个 Task 以 typed `initial_flow` association 固定记录创建时 Flow；BootTask、KernelInitTask 和
 KthreaddTask 分别绑定 `BootInitFlow`、`KernelInitFlow` 和 `KthreaddFlow`。TaskFlow 继承
 PhaseObject 并以 `parent: Task` 约束 owner，但不拥有 guard 字段、guard 状态或 `process_guard`
-类型块。每个 Flow lifecycle/执行 action 在尝试推进时即时检查 parent Task 为 Online，且对应
-DispatchWindow 的当前 TaskRef 解引用后就是该 parent。
+类型块。每个 Flow lifecycle/执行 action 在尝试推进时即时检查 parent Task 为 OnCpu。
 
 `TaskRef` / `TaskFlowRef` 是分别引用 Task / TaskFlow runtime identity 的稳定句柄。引用必须同时
 携带私有 storage slot 和非零 generation；storage 可在对象完整 Cleanup 后回收，但旧 generation
@@ -208,7 +207,7 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 
 `EntryPreludePhase` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
 VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef
-或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 Online；本阶段只
+或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 OnCpu；本阶段只
 验证其稳定 storage、PID 0、`TaskRef::BOOT` 和 canonical identity。
 
 ### BootInitFlow 的引导叶子
@@ -254,9 +253,9 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 ### BootInitFlow Enable
 
 同一 `BootTask` 保持 PID 0 与 Task identity；`BootInitRestInitPhase` 完整驱动具有各自 Task identity
-与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask` Preset/Setup/Enable；两次 Task Enable 的 initial-flow
-信号因 DispatchWindow 仍指向 BootTask 而 discarded。`BootInitScheduleHandoffPhase` 预检并提交首次
-调度事实。`BootInitFlow` 是 BootTask 的 initial Flow；`BootIdleFlow` 是后继 active continuation，
+与初始 Flow 的 `KernelInitTask` 和 `KthreaddTask` Preset/Setup/Enable；Task Enable 只发布 Online，
+不启动 Flow。`BootInitScheduleHandoffPhase` 预检并提交首次调度事实。`BootInitFlow` 是 BootTask 的
+initial Flow；`BootIdleFlow` 是后继 active continuation，
 且不会改写 `BootTask.initial_flow`。
 
 #### BootInitRestInitPhase
@@ -273,8 +272,9 @@ VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭
 
 ### KernelInitFlow 直接叶子
 
-首次 dispatch 更新 CurrentTaskSlot 与 DispatchWindow 后才接受 `KernelInitFlow.Preset`；实际 body 必须在
-`kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
+首次 dispatch 必须先同步提交 `BootTask.Suspend`，在真实栈切换后才由 `KernelInitTask.Continue`
+提交 OnCpu 并严格启动 `KernelInitFlow.Preset`；实际 body 必须在 `kernel_init_entry()` 验证 PID 1
+vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
 `SmpBringupPhase`，Setup 驱动 runtime/rootfs/finalize 与 `PayloadPreparePhase`，Enable 只驱动
 `PayloadHandoffPreparePhase`。
 

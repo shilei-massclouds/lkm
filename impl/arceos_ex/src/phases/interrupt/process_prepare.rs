@@ -60,7 +60,7 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
-        && ctx.boot_task.state() == State::Online
+        && ctx.boot_task.state() == State::OnCpu
         && ctx.exception_stream.state() == State::Ready
 }
 
@@ -229,7 +229,7 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
-        && ctx.boot_task.state() == State::Online
+        && ctx.boot_task.state() == State::OnCpu
         && ctx.exception_stream.state() == State::Ready
         && ctx.root_pid_namespace.state() == State::Ready
         && ctx.root_pid_namespace.idr_ready()

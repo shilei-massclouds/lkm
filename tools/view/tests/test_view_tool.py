@@ -195,7 +195,10 @@ class ViewToolTests(unittest.TestCase):
             self.assertFalse(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
-            self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
+            self.assertTrue(
+                any(row["phase"] == "BootInitScheduleHandoffPhase" for row in rows)
+            )
+            self.assertFalse(any(row["phase"] == "PayloadPreparePhase" for row in rows))
             self.assertFalse(any(row["phase"] == "FirmwareProject" for row in rows))
             self.assertTrue(any(row["phase"] == "KernelProject" for row in rows))
             self.assertFalse(any(row["phase"] == "Riscv64Platform" for row in rows))
@@ -263,7 +266,7 @@ class ViewToolTests(unittest.TestCase):
             boot_task_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["label"] == "BootTask.State::Online"
+                if cell["label"] == "BootTask.State::OnCpu"
             )
             boot_cpu_registers_cell = next(
                 cell
@@ -278,8 +281,8 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(
                 boot_cpu_registers_cell["column"], boot_cpu_cell["column"]
             )
-            self.assertNotEqual(boot_task_cell["column"], boot_cpu_registers_cell["column"])
-            self.assertNotEqual(riscv64_cell["column"], boot_cpu_registers_cell["column"])
+            self.assertEqual(boot_task_cell["column"], boot_cpu_registers_cell["column"])
+            self.assertEqual(riscv64_cell["column"], boot_cpu_registers_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"
@@ -379,6 +382,12 @@ class ViewToolTests(unittest.TestCase):
             kernel_preset_cell = trace_cell(
                 "transition_span", "Kernel.Transition::Preset"
             )
+            boot_init_preset_emit_cell = trace_cell(
+                "emit_event", "BootInitFlow.Transition::Preset"
+            )
+            boot_init_enable_cell = trace_cell(
+                "transition_span", "BootInitFlow.Transition::Enable"
+            )
             boot_setup_cell = trace_cell(
                 "transition_span", "EntrySuccessorPhase.Transition::Setup"
             )
@@ -472,15 +481,18 @@ class ViewToolTests(unittest.TestCase):
             self.assertGreater(opensbi_preset_cell["column"], platform_preset_cell["column"])
             self.assertLess(kernel_preset_cell["row"], boot_task_cell["row"])
             self.assertEqual(boot_setup_cell["column"], kernel_preset_cell["column"] + 1)
-            self.assertEqual(kernel_setup_emit_cell["column"], kernel_preset_cell["column"])
+            self.assertEqual(
+                kernel_setup_emit_cell["column"], kernel_preset_cell["column"] + 1
+            )
             self.assertGreater(
                 kernel_setup_cell["row"],
                 kernel_preset_cell["row"] + kernel_preset_cell["row_span"],
             )
-            self.assertEqual(kernel_setup_cell["column"], kernel_preset_cell["column"])
-            self.assertEqual(interrupt_setup_cell["column"], kernel_setup_cell["column"] + 1)
+            self.assertEqual(kernel_setup_cell["column"], kernel_setup_emit_cell["column"])
+            self.assertEqual(interrupt_setup_cell["column"], kernel_setup_cell["column"])
             self.assertEqual(kernel_enable_emit_cell["column"], kernel_setup_cell["column"])
-            assert_emit_at_transition_end(kernel_preset_cell, kernel_setup_emit_cell)
+            assert_emit_at_transition_end(kernel_preset_cell, boot_init_preset_emit_cell)
+            assert_emit_at_transition_end(boot_init_enable_cell, kernel_setup_emit_cell)
             assert_emit_at_transition_end(kernel_setup_cell, kernel_enable_emit_cell)
             self.assertEqual(entry_prelude_setup_cell["column"], boot_setup_cell["column"])
             self.assertTrue(

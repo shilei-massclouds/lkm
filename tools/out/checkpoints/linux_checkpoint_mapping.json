@@ -12,8 +12,8 @@
   },
   {
     "checkpoint_index": 1,
-    "checkpoint_name": "BootTask.Online",
-    "checkpoint_variant": "BootTaskOnline",
+    "checkpoint_name": "BootTask.OnCpu",
+    "checkpoint_variant": "BootTaskOnCpu",
     "linux_file": null,
     "linux_symbol": null,
     "linux_anchor": null,

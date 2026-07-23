@@ -16,8 +16,8 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 - active binding 与 handoff predecessor；
 - Disable/Cleanup 完成事实。
 
-实现不得保存 guard bool、guard lifecycle 或 `process_guard` 等平行状态。dispatch guard 必须由每次
-process 调用时传入的 parent Task 与 CPU-owned `DispatchWindow` 即时计算。
+实现不得保存 guard bool、guard lifecycle 或 `process_guard` 等平行状态。所有执行边界必须即时验证
+parent Task 处于 `OnCpu`；结构性 `bind()` 不执行 continuation，因此不要求 OnCpu。
 
 `BootInitFlow` 使用固定 `TaskFlowRef::BOOT_INIT`，是 `BootTask.initial_flow`；它的 core lifecycle
 由 `phases::boot_init` 驱动。`BootIdleFlow` 是 BootTask 的后继 idle Flow，其 metadata 归
@@ -54,27 +54,23 @@ Flow `Disable`/exit 清除该 binding。bridge 只能使用经过 generation 校
 TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 nonzero generation 递增 helper
 可以保留为 `objects` 内部共享实现，但不得成为公开 identity API。
 
-## DispatchWindow 与即时 guard
+## OnCpu 执行边界
 
-`BootDispatchWindow` lower 为 Scheduler-owned、boot-CPU scoped 对象，保存当前实际跨过 switch commit
-边界的 generation-checked `TaskRef`。它与 CPU-local `CurrentTaskSlot` 是两个模型视图；首次静态值都
-指向 BootTask，真实 switch 必须在同一 commit boundary 同步更新二者。不得以 scheduler counter、
-runqueue membership 或 Task.Online 代替 DispatchWindow。
+`TaskFlow` transition/action 在修改状态或执行 body 前，必须通过 owner bridge 解析 parent Task 并检查
+其状态为 `OnCpu`。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
+成员。`CurrentTaskSlot` 保留为 CPU 当前 TaskRef 的投影视图；建立以后必须与唯一 OnCpu Task 一致。
 
-`TaskFlow::dispatch_guard_satisfied(parent, window)` 是纯即时查询：检查 Flow 保存的 parent identity
-等于传入 Task、该 Task 当前为 Online，且 `window.current()` 等于该 TaskRef。每个 lifecycle 方法及
-每个执行期 Flow action 都必须在修改状态/事实前调用它；方法返回后不缓存结果。structural `bind()`
-是唯一例外，因为它只建立 Base 结构关系。
+Scheduler 切换按 `prev.Suspend -> save -> current/context commit -> physical stack switch ->
+next.Continue` 排序。`next.Continue` 必须在下一 Task 已真实获得 CPU 的入口/恢复点处理，不能由旧 Task
+栈在切换前提前提交 OnCpu。
 
-Task Online 与 DispatchWindow switch 分别发出一次 lossy initial-flow start signal。实现以明确的
-`Accepted`/`Discarded` 结果记录该次尝试：只有目标 Flow 为 Base 且即时 guard 成立时才能接受；
-discard 不改变 Flow、不排队、不重试。窗口再次切回已启动 Task 时，initial Flow 因非 Base 被丢弃，
-随后从 Task 的 active Flow continuation 恢复。
+Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
+active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
 
-KernelInitTask 首次 switch 的 signal acceptance 与 Flow body lowering 必须分开：switch commit 更新
-`CurrentTaskSlot` 与 `BootDispatchWindow` 后记录 KernelInitFlow signal accepted；叶阶段代码只能在
+KernelInitTask 首次 switch 的 Signal acceptance 与 Flow body lowering 必须分开：物理 switch 后的
+PID 1 入口提交 `CurrentTaskSlot`/OnCpu 一致事实并接受 KernelInitFlow Startup；叶阶段代码只能在
 `kernel_init_entry()` 验证实际 SP 属于 PID 1 vmalloc stack 后运行。任何通用
-`start_initial_lossy()` 都不得让 scheduler 在 BootTask 调用栈上同步跑完整 KernelInitFlow。
+continuation helper 都不得让 scheduler 在 BootTask 调用栈上同步跑完整 KernelInitFlow。
 
 ## Handoff lowering
 
@@ -120,8 +116,8 @@ Flow 类型内复制这些内核 actions。实现字段名、SyscallTable route 
   不通过改 checkpoint 名编码 generation。
 - smoke 必须验证 Flow lifecycle 独立、exec 前后 owner Task identity 不变，以及 fork continuation 与
   每次 exec 使用不同 generation。
-- guard 专题必须覆盖 parent Online/window 匹配时允许推进、任一条件不成立时拒绝，以及 lossy
-  Enable discard、首次 switch 启动、非 Base 防重复启动和 active continuation 恢复。
+- 执行权专题必须覆盖 parent OnCpu 时允许推进、执行权不匹配时严格失败、首次 switch 启动、非 Base
+  initial Flow 不重复启动和 active continuation 恢复。
 - model/trace 与测试不得重新引入 `KernelInitTask` 首个用户 Flow、child Task、fork continuation Flow
   或 child exec Flow 的临时具名 compatibility alias。
 - Task 与 TaskFlow 的 KUnit/smoke 专题可继续合并，因为它验证 owner/binding/handoff 跨对象协议。

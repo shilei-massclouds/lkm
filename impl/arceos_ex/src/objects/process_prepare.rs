@@ -518,7 +518,7 @@ impl TaskCreationCore {
             || inputs.cpu_group.state() != State::Ready
             || inputs.cpu_capabilities.state() != State::Ready
             || inputs.slub_subsystem.state() != State::Ready
-            || inputs.boot_task.state() != State::Online
+            || !inputs.boot_task.online()
             || inputs.exception_stream.state() != State::Ready
         {
             return self.failed_setup();
@@ -577,7 +577,7 @@ impl TaskCreationCore {
             || inputs.entry == TaskEntry::None
             || inputs.entry == TaskEntry::UserChild
             || inputs.entry == TaskEntry::SmokeScheduler
-            || inputs.src_task.state() != State::Online
+            || !inputs.src_task.online()
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.credential_core.state() != State::Prepared
             || inputs.signal_core.state() != State::Prepared
@@ -628,7 +628,7 @@ impl TaskCreationCore {
             && inputs.dst_process.active_task_state() == State::Prepared
             && inputs.dst_process.prepared();
         let dst_nested_vfork_record = inputs.allow_nested_vfork
-            && dst_state == State::Online
+            && dst_state == State::OnCpu
             && inputs.dst_process.nested_vfork_copy_ready();
         if self.lifecycle.state() != State::Ready
             || !self.entry_contract_ready
