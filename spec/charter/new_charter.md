@@ -163,7 +163,8 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 >
 > Preset：顺序驱动 HardwareProject、FirmwareProject、KernelProject 建立三份系统规格
 >
-> Setup：按同序构造 Riscv64Platform、BootArgs、Config/Lds，并建立 Computer assembly fact
+> Setup：按同序构造 Riscv64Platform、OpenSBI 固件、Config/Lds，并建立 Computer assembly fact；
+> 初态 Online 的 BootArgs 不由 Setup 构造或推进
 >
 > Enable：只驱动 Computer.Preset
 

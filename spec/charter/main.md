@@ -3800,7 +3800,9 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 `Config`、`Lds.parent = KernelProject`。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
 HardwareProject 构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
-FirmwareProject 决定的只读 ABI 产物，不由入口寄存器反向定义。
+从模型观察起点就已存在的只读启动 ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；
+FirmwareProject 规定或采纳参数的类型和含义，但不通过生命周期构造其实例。其初态 `Online` 只表示
+不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接，也不由入口寄存器反向定义。
 
 ComputerProject.Setup 在三个子 Project Ready 后建立 `Computer` 已由 `Riscv64Platform`、`OpenSBI`、
 `Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Preset`；其 Online

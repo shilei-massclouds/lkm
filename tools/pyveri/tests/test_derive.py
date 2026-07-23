@@ -540,6 +540,28 @@ class DerivationTests(unittest.TestCase):
         self.assertNotIn("providers:", text)
         self.assertIn("proved:", text)
         self.assertIn("obligation: 0", text)
+        boot_args_invariants = {
+            record.predicate
+            for record in derivation.records
+            if record.object_name == "BootArgs"
+            and record.state_name == "Online"
+            and record.proof_class == "firmware_boot_abi"
+            and record.proof_provider == "firmware_project_boot_abi"
+        }
+        self.assertEqual(
+            boot_args_invariants,
+            {
+                "attrs_accessible",
+                "firmware_boot_args_defined",
+                "boot_args_read_only",
+            },
+        )
+        self.assertFalse(
+            any(
+                transition.object_name == "BootArgs"
+                for transition in derivation.transitions
+            )
+        )
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED

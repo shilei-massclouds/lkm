@@ -1319,14 +1319,20 @@ class DeriveToolTests(unittest.TestCase):
                 if record["predicate"] == "attrs_accessible"
             }
             self.assertNotIn("BootArgs", attrs_providers)
-            self.assertTrue(
-                any(
-                    record["object"] == "BootArgs"
-                    and record["predicate"] == "attrs_accessible"
+            self.assertEqual(
+                {
+                    record["predicate"]
+                    for record in proved
+                    if record["object"] == "BootArgs"
+                    and record["state"] == "Online"
                     and record["proof_class"] == "firmware_boot_abi"
                     and record["proof_provider"] == "firmware_project_boot_abi"
-                    for record in proved
-                )
+                },
+                {
+                    "attrs_accessible",
+                    "firmware_boot_args_defined",
+                    "boot_args_read_only",
+                },
             )
             self.assertNotIn("Config", attrs_providers)
             self.assertTrue(

@@ -6,7 +6,7 @@
 
 Kernel 是 `Computer` 的直接运行子系统，不属于 KernelProject。`systems/kernel.rs` 保留真实 lifecycle
 实现并附带四层规格链 metadata；Computer、Riscv64Platform、OpenSBI 的本轮 module 仅为 metadata。
-入口处 `BootArgs::new(a0, a1)` 是对 FirmwareProject 静态 ABI 产物的本地物化，不改变模型所有权。
+入口处 `BootArgs::new(a0, a1)` 是对模型初态已存在的启动 ABI 实参对象的本地物化，不改变模型所有权。
 
 ## Preset 与 Setup
 

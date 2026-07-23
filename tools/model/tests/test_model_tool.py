@@ -580,6 +580,18 @@ class ModelToolTests(unittest.TestCase):
                     "tp",
                 },
             )
+            boot_args = objects["BootArgs"]
+            self.assertEqual(boot_args["initial_state"], "Online")
+            self.assertEqual(boot_args["parent"], "FirmwareProject")
+            self.assertEqual(
+                boot_args["properties"]["source"], "firmware_project::boot_abi"
+            )
+            self.assertEqual(
+                boot_args["attrs"],
+                {"boot_hartid": "HartId", "dtb_pa": "PhysAddr<Dtb>"},
+            )
+            self.assertEqual(list(boot_args["states"]), ["Online"])
+            self.assertFalse(boot_args["states"]["Online"]["transitions"])
             self.assertEqual(opensbi["initial_state"], "Base")
             self.assertEqual(
                 opensbi["states"]["Base"]["transitions"]["Preset"]["target_state"],

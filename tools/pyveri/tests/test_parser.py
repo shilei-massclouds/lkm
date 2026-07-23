@@ -388,6 +388,16 @@ class ParserTests(unittest.TestCase):
         self.assertIn("OpenSBI", object_names)
         self.assertIn("Kernel", object_names)
         self.assertIn("BootCpuRegisters", object_names)
+        boot_args = next(obj for obj in document.objects if obj.name == "BootArgs")
+        self.assertEqual(boot_args.initial_state, "Online")
+        self.assertEqual(boot_args.parent, "FirmwareProject")
+        self.assertEqual(boot_args.properties["source"], "firmware_project::boot_abi")
+        self.assertEqual(
+            [entry for block in boot_args.attrs for entry in block.entries],
+            ["boot_hartid: HartId", "dtb_pa: PhysAddr<Dtb>"],
+        )
+        self.assertEqual([state.name for state in boot_args.states], ["Online"])
+        self.assertFalse(boot_args.states[0].transitions)
         self.assertNotIn("Boot" + "HartContext", object_names)
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)

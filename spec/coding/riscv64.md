@@ -14,8 +14,8 @@
 
 - 内核入口应显式接收并保存启动 ABI 传入的 `a0` 和 `a1`；可变寄存器在模型中属于
   `BootCPU.BootCpuRegisters`，其寄存器文件由硬件天然提供而不是由工程或平台生命周期构造。
-- OpenSBI 交接时 `BootCpuRegisters.a0` 必须等于 FirmwareProject 已构造的 `BootArgs.boot_hartid`。
-- OpenSBI 交接时 `BootCpuRegisters.a1` 必须等于 FirmwareProject 已构造的 `BootArgs.dtb_pa`。
+- OpenSBI 交接时 `BootCpuRegisters.a0` 必须等于初态已存在的 `BootArgs.boot_hartid`。
+- OpenSBI 交接时 `BootCpuRegisters.a1` 必须等于初态已存在的 `BootArgs.dtb_pa`。
 - OpenSBI 只确定上述两个交接寄存器；`sp/tp/gp` 和 supervisor CSR 继续由真实入口汇编按阶段更新。
 - 入口代码不得跳过 `BootArgs` 抽象直接让后续对象长期依赖裸寄存器值。
 - `Riscv64` 只表示外部 ISA 能力，不作为 live GPR/CSR 容器。

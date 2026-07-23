@@ -18,38 +18,13 @@ object SbiSpec: PrepareObject {
 }
 
 object BootArgs: PrepareObject {
-    initial_state: State::Base;
+    initial_state: State::Online;
     parent: FirmwareProject;
     source: firmware_project::boot_abi;
 
     attrs {
         boot_hartid: HartId;
         dtb_pa: PhysAddr<Dtb>;
-    }
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    attrs_accessible(self);
-                    firmware_boot_args_defined(self);
-                    boot_args_read_only(self);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            attrs_accessible(self);
-            firmware_boot_args_defined(self);
-            boot_args_read_only(self);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-            }
-        }
     }
 
     state State::Online {
@@ -87,11 +62,6 @@ object FirmwareProject: ProjectObject {
 
         transitions {
             on Transition::Setup -> State::Ready {
-                drives {
-                    BootArgs.Transition::Setup;
-                    BootArgs.Transition::Enable;
-                }
-
                 ensures {
                     opensbi_firmware_constructed();
                 }

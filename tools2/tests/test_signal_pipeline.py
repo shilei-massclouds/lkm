@@ -1696,8 +1696,6 @@ class SignalPipelineTests(unittest.TestCase):
                     ("ComputerProject", "ComputerProject", "Setup"),
                     ("ComputerProject", "HardwareProject", "Setup"),
                     ("ComputerProject", "FirmwareProject", "Setup"),
-                    ("FirmwareProject", "BootArgs", "Setup"),
-                    ("FirmwareProject", "BootArgs", "Enable"),
                     ("ComputerProject", "KernelProject", "Setup"),
                     ("KernelProject", "Config", "Preset"),
                     ("Config", "Config", "Setup"),
@@ -1720,6 +1718,12 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertFalse(
                 any(
                     item["target"] == "Kernel" and item["name"] == "Preset"
+                    for item in derivation["signals"]
+                )
+            )
+            self.assertFalse(
+                any(
+                    item["target"] in {"BootArgs", "BootCpuRegisters"}
                     for item in derivation["signals"]
                 )
             )

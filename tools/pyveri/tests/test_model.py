@@ -54,6 +54,16 @@ class ModelBuilderTests(unittest.TestCase):
             list(result.model.objects["BootCpuRegisters"].attrs),
             ["a0", "a1", "sp", "tp", "gp", "sstatus", "sie", "sip", "stvec", "sscratch", "satp"],
         )
+        boot_args = result.model.objects["BootArgs"]
+        self.assertEqual(boot_args.initial_state, "Online")
+        self.assertEqual(boot_args.parent, "FirmwareProject")
+        self.assertEqual(boot_args.decl.properties["source"], "firmware_project::boot_abi")
+        self.assertEqual(
+            boot_args.attrs,
+            {"boot_hartid": "HartId", "dtb_pa": "PhysAddr<Dtb>"},
+        )
+        self.assertEqual(list(boot_args.states), ["Online"])
+        self.assertFalse(boot_args.states["Online"].transitions)
         self.assertEqual(
             result.model.objects["OpenSBI"].states["Ready"].transitions["Enable"].target_state,
             "Online",
@@ -175,8 +185,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
         self.assertIn("  - MemBlock.State::Offline", text)
-        self.assertIn("FirmwareProject: ready (State::Ready)", text)
-        self.assertIn("  - BootArgs.State::Online", text)
+        self.assertNotIn("FirmwareProject:", text)
+        self.assertNotIn("BootArgs.State::", text)
         self.assertIn("KernelProject: ready (State::Ready)", text)
         self.assertIn("  - Config.State::Online", text)
         self.assertIn("  - Lds.State::Online", text)
@@ -188,8 +198,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPreparePhase", svg)
-        self.assertIn("FirmwareProject", svg)
+        self.assertNotIn("FirmwareProject", svg)
         self.assertIn("KernelProject", svg)
+        self.assertNotIn("BootArgs", svg)
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
         document = parse_text(

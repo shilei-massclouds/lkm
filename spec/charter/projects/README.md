@@ -13,5 +13,5 @@ ComputerProject
 
 - [`computer.md`](computer.md)：总工程的编排、组装事实与启动交接。
 - [`hardware.md`](hardware.md)：RISC-V 平台规格与 boot-hart context 构造。
-- [`firmware.md`](firmware.md)：SBI/OpenSBI 规格与 BootArgs 构造。
+- [`firmware.md`](firmware.md)：SBI/OpenSBI 规格与初态 BootArgs 启动 ABI 实参。
 - [`kernel.md`](kernel.md)：Config、Lds 和 kernel image 构造。

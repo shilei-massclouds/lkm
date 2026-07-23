@@ -117,6 +117,14 @@ _ATTRS_ACCESSIBLE_PROOFS = {
 }
 _FIRMWARE_PROJECT_PROOFS = {
     "attrs_accessible(self)": ("firmware_boot_abi", "firmware_project_boot_abi"),
+    "firmware_boot_args_defined(self)": (
+        "firmware_boot_abi",
+        "firmware_project_boot_abi",
+    ),
+    "boot_args_read_only(self)": (
+        "firmware_boot_abi",
+        "firmware_project_boot_abi",
+    ),
 }
 _CONFIG_SOURCE_PROOFS = {
     "attrs_accessible(self)": ("config_attributes", "config_source"),

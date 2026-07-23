@@ -196,12 +196,12 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
-            self.assertTrue(any(row["phase"] == "FirmwareProject" for row in rows))
+            self.assertFalse(any(row["phase"] == "FirmwareProject" for row in rows))
             self.assertTrue(any(row["phase"] == "KernelProject" for row in rows))
             self.assertFalse(any(row["phase"] == "Riscv64Platform" for row in rows))
             self.assertFalse(
                 any(
-                    item["object_name"] == "BootCpuRegisters"
+                    item["object_name"] in {"BootArgs", "BootCpuRegisters"}
                     for row in rows
                     for item in row["items"]
                 )
