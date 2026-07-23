@@ -404,9 +404,10 @@ on Transition::Preset -> State::Prepared {
 
 默认推导入口是 `ComputerProject.Transition::Preset`。该入口表示唯一外部工程启动
 事件 `PRESET`；它先以固定顺序 `drives` 三个直接子 Project 的规格与构造，再交接给
-系统根 `Computer`。后续 `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的运行
-启动通过 completion-event 链表达；各对象自己的 `Setup`/`Enable` 也必须由显式
-`emits` 或 `drives` 产生，不得依赖工具隐式补齐。
+初态 Ready 的系统根 `Computer`。后续运行启动固定为
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Preset` 的
+completion-event 链；`Config` 与 `Lds` 初态 Online 且不接收生命周期事件。所有实际 Signal
+仍必须由显式 `emits` 或 `drives` 产生，不得依赖工具隐式补齐。
 
 ## SEM-SYSTEM-PARENT-001: Effective Parent Is Shared Across Model Consumers
 
@@ -459,7 +460,9 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 `model_structure`，与来自当前快照的精确事实区分。未知新语法必须在 parse/model 诊断中以
 `unsupported` 和 source span 报告，不能静默删除、按名称猜测或留给 view/render 修正。
 
-根 Signal 没有 scenario 时从模型初态接收。完整主模型只有 `ComputerProject.Preset` 是无预制条件的
+根 Signal 没有 scenario 时从模型初态接收。完整主模型的初态包含 Online 的静态 `Config`/`Lds` 与
+Ready 的 `Computer`/`Riscv64Platform`/`OpenSBI`；Ready 只表示已组装且可启动，不表示已经运行。
+完整主模型只有 `ComputerProject.Preset` 是无预制条件的
 起点；`Kernel.Preset` 或其它后续 Signal 若因前期状态或事实未建立而被拒绝，必须直接得到列出缺项和
 完整因果链的 `failed`。derive 不得隐式回溯 emitter、执行上游 transition 或合成前置快照；调用者从
 后续边界继续时必须显式提供真实边界的 snapshot/scenario。
@@ -467,6 +470,9 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 快捷入口未给 `-t/--trigger` 时默认请求 `Human -> ComputerProject.Preset`，其用户可见默认拼写可以是
 `ComputerProject.Startup`，但进入 driver 前必须规范化。快捷入口、driver 和 derive 的 source 默认均为
 `Human`，显式 `--source` 优先；底层 driver/derive 的 `--signal` 仍必填。
+
+`Startup -> Preset` 规范化规则不因运行系统改为 Enable 启动而改变；`Startup` 不是 `Enable` 的别名。
+因此 `Computer.Startup` 等请求会规范化为不存在的 Preset handler 并严格失败，不能绕过唯一 Enable 链。
 
 ### Ordering, rejection and completion
 

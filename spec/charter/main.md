@@ -3797,7 +3797,8 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 子 Project 分别建立平台、OpenSBI、Kernel 规格并构造各自产物，最终停在 Ready，不执行 Enable。
 
 静态归属如下：`Riscv64.parent = HardwareProject`；`SbiSpec`、`BootArgs.parent = FirmwareProject`；
-`Config`、`Lds.parent = KernelProject`。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
+`Config`、`Lds.parent = KernelProject`。二者是构建时已经确定的静态输入，完整模型的初态直接为
+`Online`；`Lds` 依赖已 Online 的 `Config`，但 KernelProject 不驱动二者的生命周期。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
 HardwareProject 构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
 从模型观察起点就已存在的只读启动 ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；
@@ -3805,12 +3806,14 @@ FirmwareProject 规定或采纳参数的类型和含义，但不通过生命周�
 不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接，也不由入口寄存器反向定义。
 
 ComputerProject.Setup 在三个子 Project Ready 后建立 `Computer` 已由 `Riscv64Platform`、`OpenSBI`、
-`Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Preset`；其 Online
+`Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Enable`；其 Online
 表示启动已经交接，不表示异步下游已经全部 Online。
 
 系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；Kernel 下的启动 CPU 局部层级为
-`BootCurrentCPU -> BootCPU -> BootCpuRegisters`。Computer 自身三阶段完成后 emits
-Riscv64Platform.Preset；平台独立完成 Preset、Setup、Enable 自连锁后 emits OpenSBI.Preset；
-OpenSBI.Enable 精确建立 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
+`BootCurrentCPU -> BootCPU -> BootCpuRegisters`。Computer、Riscv64Platform 与 OpenSBI 在完整模型的
+初始观察点已经组装且可启动，初态为 Ready；Ready 不表示已经运行。Computer.Enable emits
+Riscv64Platform.Enable；平台 Enable emits OpenSBI.Enable；OpenSBI.Enable 精确建立
+`BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
 `BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Preset。其余启动相关寄存器由 Kernel 入口阶段
-逐步更新；Kernel 保持现有到 BootInitFlow 的后续语义。
+逐步更新；Kernel 保持 Base 初态及现有到 BootInitFlow 的后续语义。全局 `Startup` 仍规范化为
+`Preset`，不重绑定为 `Enable`。

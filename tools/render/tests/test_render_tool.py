@@ -96,7 +96,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("PreparePhase", text)
             self.assertIn("BootPhase", text)
             self.assertNotIn("FirmwareProject", text)
-            self.assertIn("KernelProject", text)
+            self.assertNotIn("KernelProject", text)
             self.assertNotIn("BootArgs", text)
 
     def test_render_text_from_trace_view(self) -> None:

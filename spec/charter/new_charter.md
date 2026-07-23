@@ -105,29 +105,33 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 
 1. `Preset` 按固定顺序驱动三个子 Project 的 `Preset`，分别建立平台、OpenSBI 和 Kernel 规格。
 2. `Setup` 按相同顺序驱动三个子 Project 的构造；三者完成后都停在 `Ready`，并建立 `Computer` 已由三个运行系统组装的事实。
-3. `Enable` 只启动 `Computer`。`ComputerProject.Online` 表示启动已交接，不等待异步下游全部 Online。
+3. `Enable` 只向初态 Ready 的 `Computer` 发送 `Enable`。`ComputerProject.Online` 表示启动已交接，
+   不等待异步下游全部 Online。
 
 <img src=".\pic\计算机和内核建模.svg" alt="计算机和内核建模" style="zoom:50%;" />
 
 计算机工程的自迁移使用 completion event 串联；子 Project 构造使用同步 `drives`。交接后，运行系统按
-`Computer -> Riscv64Platform -> OpenSBI -> Kernel` 异步启动。
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Preset` 异步启动。
+前三个运行系统在完整模型的初始观察点已经组装且可启动，初态为 Ready；Ready 不表示已经运行。
 
 > MUST[model]：计算机工程模型
 >
 > 1. 外部事件：唯一的工程启动事件PRESET，作用于Base状态，触发preset迁移
 > 2. Preset/Setup 必须按声明顺序驱动 Hardware/Firmware/KernelProject
-> 3. Enable 只驱动 Computer.Preset
+> 3. Enable 只驱动 Computer.Enable
 
 ### 内核工程模型
 
-`KernelProject` 是 `ComputerProject` 的直接子工程。它的 `Preset` 建立 Kernel 系统规格；`Setup` 先完整
-构造 `Config`，再构造 `Lds`，两者都到 `Online`。`KernelProject` 随后停在 `Ready`，没有 Enable 阶段，
-也不拥有或启动运行系统 `Kernel`。
+`KernelProject` 是 `ComputerProject` 的直接子工程。`Config` 与 `Lds` 是构建时已经确定的静态输入，
+在完整模型的初始观察点直接为 Online，且 `Lds` 依赖 `Config`；它们不通过内核运行期生命周期构造。
+`KernelProject.Preset` 建立 Kernel 系统规格；`Setup` 要求并验证二者 Online，再构造 kernel image。
+`KernelProject` 随后停在 `Ready`，没有 Enable 阶段，也不拥有或启动运行系统 `Kernel`。
 
 > MUST[model]：内核工程模型
 >
 > 1. KernelProject 只由 ComputerProject 的 Preset/Setup 同步驱动
-> 2. KernelProject.Setup 完成时 Config 与 Lds 必须均为 Online，KernelProject 为 Ready
+> 2. KernelProject.Setup 不驱动 Config/Lds；完成时二者必须均为 Online，kernel image 已构造，
+>    KernelProject 为 Ready
 
 ### 内核系统模型 - 本项目核心模型
 
@@ -162,22 +166,23 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 >
 > Preset：顺序驱动 HardwareProject、FirmwareProject、KernelProject 建立三份系统规格
 >
-> Setup：按同序构造 Riscv64Platform、OpenSBI 固件、Config/Lds，并建立 Computer assembly fact；
-> 初态 Online 的 BootArgs 不由 Setup 构造或推进
+> Setup：按同序构造 Riscv64Platform、OpenSBI 固件与 kernel image，验证初态 Online 的静态
+> Config/Lds，并建立 Computer assembly fact；初态 Online 的 BootArgs 同样不由 Setup 构造或推进
 >
-> Enable：只驱动 Computer.Preset
+> Enable：只驱动 Computer.Enable
 
 
 
 ## 内核工程规格
 
-构造内核系统的工程过程约束包括建立 Kernel 规格以及构造 Config/Lds；运行启动不属于本 Project。
+构造内核系统的工程过程约束包括建立 Kernel 规格、验证静态 Config/Lds 输入并构造 kernel image；
+运行启动不属于本 Project。
 
 > MUST[model]：内核工程规格，遵循''标准状态和迁移''和“内核工程模型”
 >
 > Preset：建立内核规格charter、model和coding
 >
-> Setup：定义Lds和Config，构造产生内核映像
+> Setup：要求并验证初态 Online 的 Lds 和 Config，构造产生内核映像，不驱动二者的 lifecycle
 >
 > 完成：KernelProject 停在 Ready；Kernel 由 OpenSBI.Enable 异步启动
 

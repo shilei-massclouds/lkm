@@ -26,10 +26,11 @@ paths that define the project object before later behavior is added.
 
 Rule ID: `kernel_project_coding_uses_model_lds_and_config_inputs` (MUST).
 
-Project-level construction must build model Config completely before Lds, then
-establish the kernel-image fact. Architecture/firmware/platform specifications
-and build configuration facts are inputs; Config and Lds are KernelProject-owned
-products.
+Model `Config` and `Lds` are build-time static inputs whose initial observed
+state is Online; `Lds` retains its dependency on `Config`. KernelProject Setup
+must validate both inputs without driving Preset/Setup/Enable on either object,
+then establish the kernel-image fact. Architecture/firmware/platform
+specifications and build configuration facts remain project-owned inputs.
 
 #### Runtime separation
 

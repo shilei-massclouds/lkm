@@ -3922,14 +3922,14 @@ class _Deriver:
             return False
 
         if expression == "interrupt_concurrency_closed()":
-            self._validate_state("OpenSBI", "Base")
+            self._validate_state("OpenSBI", "Ready")
             if "primary_hart_sie_clear_at_kernel_entry()" not in self.proved_expressions:
                 return False
             proof_class = "system_exclusive_context"
             proof_provider = "prior_derivation_facts"
         elif expression == "task_concurrency_closed()":
             self._validate_state("SbiSpec", "Online")
-            self._validate_state("OpenSBI", "Base")
+            self._validate_state("OpenSBI", "Ready")
             if not {
                 "sbi_hsm_available()",
                 "ordered_booting_enabled()",

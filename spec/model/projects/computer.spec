@@ -73,7 +73,7 @@ object ComputerProject: ProjectObject {
         transitions {
             on Transition::Enable -> State::Online {
                 drives {
-                    Computer.Transition::Preset;
+                    Computer.Transition::Enable;
                 }
             }
         }

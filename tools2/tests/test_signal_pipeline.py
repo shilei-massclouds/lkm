@@ -1765,23 +1765,14 @@ class SignalPipelineTests(unittest.TestCase):
                     ("ComputerProject", "HardwareProject", "Setup"),
                     ("ComputerProject", "FirmwareProject", "Setup"),
                     ("ComputerProject", "KernelProject", "Setup"),
-                    ("KernelProject", "Config", "Preset"),
-                    ("Config", "Config", "Setup"),
-                    ("Config", "Config", "Enable"),
-                    ("KernelProject", "Lds", "Preset"),
-                    ("Lds", "Lds", "Setup"),
-                    ("Lds", "Lds", "Enable"),
                     ("ComputerProject", "ComputerProject", "Enable"),
-                    ("ComputerProject", "Computer", "Preset"),
-                    ("Computer", "Computer", "Setup"),
-                    ("Computer", "Computer", "Enable"),
-                    ("Computer", "Riscv64Platform", "Preset"),
-                    ("Riscv64Platform", "Riscv64Platform", "Setup"),
-                    ("Riscv64Platform", "Riscv64Platform", "Enable"),
-                    ("Riscv64Platform", "OpenSBI", "Preset"),
-                    ("OpenSBI", "OpenSBI", "Setup"),
-                    ("OpenSBI", "OpenSBI", "Enable"),
+                    ("ComputerProject", "Computer", "Enable"),
+                    ("Computer", "Riscv64Platform", "Enable"),
+                    ("Riscv64Platform", "OpenSBI", "Enable"),
                 ],
+            )
+            self.assertFalse(
+                any(item["target"] in {"Config", "Lds"} for item in derivation["signals"])
             )
             self.assertFalse(
                 any(
@@ -1911,6 +1902,93 @@ class SignalPipelineTests(unittest.TestCase):
                 ("Kernel", "Preset"),
             )
             self.assertIsNone(resumed_data["until_request"])
+
+    def test_main_model_enable_chain_rejects_missing_prerequisites_strictly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            cases = [
+                (
+                    "Computer.Enable",
+                    {
+                        "states": {
+                            "HardwareProject": "Ready",
+                            "FirmwareProject": "Ready",
+                            "KernelProject": "Ready",
+                            "Computer": "Ready",
+                        }
+                    },
+                    "computer_assembled_from(Riscv64Platform, OpenSBI, Kernel)",
+                ),
+                (
+                    "Riscv64Platform.Enable",
+                    {
+                        "states": {
+                            "HardwareProject": "Ready",
+                            "Riscv64Platform": "Ready",
+                        },
+                    },
+                    "riscv64_platform_system_spec_established()",
+                ),
+                (
+                    "OpenSBI.Enable",
+                    {
+                        "states": {
+                            "FirmwareProject": "Ready",
+                            "Riscv64Platform": "Online",
+                            "OpenSBI": "Ready",
+                        },
+                    },
+                    "opensbi_system_spec_established()",
+                ),
+            ]
+            for index, (signal, scenario, missing) in enumerate(cases):
+                with self.subTest(signal=signal):
+                    scenario_path = root / f"scenario-{index}.json"
+                    work = root / f"work-{index}"
+                    scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+                    result = subprocess.run(
+                        [
+                            str(shortcut),
+                            "-t",
+                            signal,
+                            "-s",
+                            str(scenario_path),
+                            "--work-dir",
+                            str(work),
+                        ],
+                        cwd=root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    data = read_json(work / "derive.json")
+                    self.assertEqual(data["verdict"], "failed")
+                    self.assertEqual(data["signals"][0]["outcome"], "rejected")
+                    self.assertEqual(
+                        data["signals"][0]["reason"],
+                        f"condition_not_satisfied: {missing}",
+                    )
+
+            alias_work = root / "startup-alias"
+            alias = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Computer.Startup",
+                    "--work-dir",
+                    str(alias_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(alias.returncode, 1, alias.stderr)
+            alias_data = read_json(alias_work / "derive.json")
+            self.assertEqual(alias_data["root_request"]["signal"], "Preset")
+            self.assertEqual(alias_data["signals"][0]["reason"], "no_handler")
 
 
 if __name__ == "__main__":

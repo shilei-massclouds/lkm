@@ -809,7 +809,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "firmware_dtb_blob_in_ram_at_kernel_entry"
                     and record["proof_class"] == "firmware_entry_state"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -818,7 +818,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"]
                     == "firmware_dtb_blob_complete_at_kernel_entry"
                     and record["proof_class"] == "firmware_entry_state"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["proof_provider"] == "transition_ensures"
                     and record["expression"]
                     == "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)"
                     for record in proved
@@ -829,7 +829,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"]
                     == "firmware_dtb_blob_accessible_at_kernel_entry"
                     and record["proof_class"] == "firmware_entry_state"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["proof_provider"] == "transition_ensures"
                     and record["expression"]
                     == "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)"
                     for record in proved

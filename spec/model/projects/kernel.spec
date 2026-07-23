@@ -1,12 +1,13 @@
 /*
  * Kernel Project Specification
  *
- * KernelProject establishes the Kernel system specification, constructs Config
- * completely, then constructs Lds and the kernel image. It stops at Ready.
+ * Config and Lds are build-time static inputs observed initially Online.
+ * KernelProject establishes the Kernel system specification, validates those
+ * inputs, and constructs the kernel image. It stops at Ready.
  */
 
 object Config: PrepareObject {
-    initial_state: State::Base;
+    initial_state: State::Online;
     parent: KernelProject;
     source: config::entry_prelude;
 
@@ -21,29 +22,6 @@ object Config: PrepareObject {
         fixmap: FixMapConfig;
         selected_payload_kind: SelectedPayloadKind;
         exec_argument_limits: ExecArgumentLimits;
-    }
-
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                emits { Transition::Setup; }
-            }
-        }
-    }
-
-    state State::Prepared {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                emits { Transition::Enable; }
-            }
-        }
-    }
-
-    state State::Ready {
-        transitions {
-            on Transition::Enable -> State::Online {
-            }
-        }
     }
 
     state State::Online {
@@ -73,7 +51,7 @@ object Config: PrepareObject {
 }
 
 object Lds: PrepareObject {
-    initial_state: State::Base;
+    initial_state: State::Online;
     parent: KernelProject;
     source: linker::linux_6_12;
 
@@ -99,33 +77,6 @@ object Lds: PrepareObject {
         boot_stack_size: Size;
         kernel_start: SymbolAddr;
         kernel_end: SymbolAddr;
-    }
-
-    state State::Base {
-        transitions {
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    Config.state == State::Online;
-                }
-
-                emits { Transition::Setup; }
-            }
-        }
-    }
-
-    state State::Prepared {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                emits { Transition::Enable; }
-            }
-        }
-    }
-
-    state State::Ready {
-        transitions {
-            on Transition::Enable -> State::Online {
-            }
-        }
     }
 
     state State::Online {
@@ -217,14 +168,12 @@ object KernelProject: ProjectObject {
 
         transitions {
             on Transition::Setup -> State::Ready {
-                drives {
-                    Config.Transition::Preset;
-                    Lds.Transition::Preset;
+                depends_on {
+                    Config.state == State::Online;
+                    Lds.state == State::Online;
                 }
 
                 ensures {
-                    Config.state == State::Online;
-                    Lds.state == State::Online;
                     kernel_image_constructed();
                 }
             }

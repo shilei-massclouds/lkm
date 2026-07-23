@@ -4,6 +4,11 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-23 静态输入与 Enable 启动链复核：Config/Lds 改为构建时初态 Online 输入，Computer、
+Riscv64Platform、OpenSBI 改为初态 Ready 的 metadata-only system，并把形式启动链压缩为显式
+Enable 交接。这些调整不新增 crate、module、facade、feature、公开 API 或真实启动入口；既有 OpenSBI、
+汇编入口、Kernel Rust 入口和 checkpoint 顺序保持不变。`spec/compose/main.spec` 无需修改。
+
 2026-07-23 tools2 声明结构事实复核：`has_slot` 的实例属性类型解析只发生在独立 Python derive 包内，
 消费既有 model protocol 的字段/类型信息；不新增或调整内核 crate、Rust module、facade、feature、
 公开 API 或组件依赖。`spec/compose/main.spec` 已复核，组合语义无需修改。

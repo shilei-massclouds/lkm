@@ -119,7 +119,7 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     edge["source"] == "ComputerProject.Enable"
-                    and edge["target"] == "Computer.Preset"
+                    and edge["target"] == "Computer.Enable"
                     and edge["kind"] == "drives"
                     for edge in data["edges"]
                 )
@@ -146,8 +146,8 @@ class ViewToolTests(unittest.TestCase):
                         for edge in data["edges"]
                     )
                     for source, target in (
-                        ("Computer.Enable", "Riscv64Platform.Preset"),
-                        ("Riscv64Platform.Enable", "OpenSBI.Preset"),
+                        ("Computer.Enable", "Riscv64Platform.Enable"),
+                        ("Riscv64Platform.Enable", "OpenSBI.Enable"),
                         ("OpenSBI.Enable", "Kernel.Preset"),
                     )
                 )
@@ -200,7 +200,7 @@ class ViewToolTests(unittest.TestCase):
             )
             self.assertFalse(any(row["phase"] == "PayloadPreparePhase" for row in rows))
             self.assertFalse(any(row["phase"] == "FirmwareProject" for row in rows))
-            self.assertTrue(any(row["phase"] == "KernelProject" for row in rows))
+            self.assertFalse(any(row["phase"] == "KernelProject" for row in rows))
             self.assertFalse(any(row["phase"] == "Riscv64Platform" for row in rows))
             self.assertFalse(
                 any(
@@ -328,32 +328,8 @@ class ViewToolTests(unittest.TestCase):
             kernel_project_setup_cell = trace_cell(
                 "transition_span", "KernelProject.Transition::Setup"
             )
-            computer_system_preset_cell = trace_cell(
-                "transition_span", "Computer.Transition::Preset"
-            )
-            computer_system_setup_emit_cell = trace_cell(
-                "emit_event", "Computer.Transition::Setup"
-            )
-            computer_system_setup_cell = trace_cell(
-                "transition_span", "Computer.Transition::Setup"
-            )
-            computer_system_enable_emit_cell = trace_cell(
-                "emit_event", "Computer.Transition::Enable"
-            )
             computer_system_enable_cell = trace_cell(
                 "transition_span", "Computer.Transition::Enable"
-            )
-            platform_preset_emit_cell = trace_cell(
-                "emit_event", "Riscv64Platform.Transition::Preset"
-            )
-            platform_preset_cell = trace_cell(
-                "transition_span", "Riscv64Platform.Transition::Preset"
-            )
-            platform_setup_emit_cell = trace_cell(
-                "emit_event", "Riscv64Platform.Transition::Setup"
-            )
-            platform_setup_cell = trace_cell(
-                "transition_span", "Riscv64Platform.Transition::Setup"
             )
             platform_enable_emit_cell = trace_cell(
                 "emit_event", "Riscv64Platform.Transition::Enable"
@@ -361,23 +337,14 @@ class ViewToolTests(unittest.TestCase):
             platform_enable_cell = trace_cell(
                 "transition_span", "Riscv64Platform.Transition::Enable"
             )
-            opensbi_preset_emit_cell = trace_cell(
-                "emit_event", "OpenSBI.Transition::Preset"
-            )
-            opensbi_preset_cell = trace_cell(
-                "transition_span", "OpenSBI.Transition::Preset"
-            )
-            opensbi_setup_emit_cell = trace_cell(
-                "emit_event", "OpenSBI.Transition::Setup"
-            )
-            opensbi_setup_cell = trace_cell(
-                "transition_span", "OpenSBI.Transition::Setup"
-            )
             opensbi_enable_emit_cell = trace_cell(
                 "emit_event", "OpenSBI.Transition::Enable"
             )
             opensbi_enable_cell = trace_cell(
                 "transition_span", "OpenSBI.Transition::Enable"
+            )
+            kernel_preset_emit_cell = trace_cell(
+                "emit_event", "Kernel.Transition::Preset"
             )
             kernel_preset_cell = trace_cell(
                 "transition_span", "Kernel.Transition::Preset"
@@ -444,41 +411,17 @@ class ViewToolTests(unittest.TestCase):
                 )
             )
             self.assertEqual(
-                computer_system_setup_emit_cell["column"],
-                computer_system_preset_cell["column"],
+                platform_enable_emit_cell["column"], platform_enable_cell["column"]
             )
             self.assertEqual(
-                computer_system_setup_cell["column"],
-                computer_system_preset_cell["column"],
+                opensbi_enable_emit_cell["column"], opensbi_enable_cell["column"]
             )
-            self.assertEqual(
-                computer_system_enable_emit_cell["column"],
-                computer_system_preset_cell["column"],
-            )
-            self.assertEqual(
-                computer_system_enable_cell["column"],
-                computer_system_preset_cell["column"],
-            )
-            assert_emit_at_transition_end(
-                computer_system_preset_cell, computer_system_setup_emit_cell
-            )
-            assert_emit_at_transition_end(
-                computer_system_setup_cell, computer_system_enable_emit_cell
-            )
-            self.assertEqual(
-                platform_preset_emit_cell["column"], platform_preset_cell["column"]
-            )
-            self.assertEqual(platform_setup_cell["column"], platform_preset_cell["column"])
-            self.assertEqual(platform_enable_cell["column"], platform_preset_cell["column"])
-            assert_emit_at_transition_end(platform_preset_cell, platform_setup_emit_cell)
-            assert_emit_at_transition_end(platform_setup_cell, platform_enable_emit_cell)
-            self.assertEqual(opensbi_preset_emit_cell["column"], opensbi_preset_cell["column"])
-            self.assertEqual(opensbi_setup_cell["column"], opensbi_preset_cell["column"])
-            self.assertEqual(opensbi_enable_cell["column"], opensbi_preset_cell["column"])
-            assert_emit_at_transition_end(opensbi_preset_cell, opensbi_setup_emit_cell)
-            assert_emit_at_transition_end(opensbi_setup_cell, opensbi_enable_emit_cell)
-            self.assertGreater(platform_preset_cell["column"], computer_system_preset_cell["column"])
-            self.assertGreater(opensbi_preset_cell["column"], platform_preset_cell["column"])
+            self.assertEqual(kernel_preset_emit_cell["column"], kernel_preset_cell["column"])
+            assert_emit_at_transition_end(computer_system_enable_cell, platform_enable_emit_cell)
+            assert_emit_at_transition_end(platform_enable_cell, opensbi_enable_emit_cell)
+            assert_emit_at_transition_end(opensbi_enable_cell, kernel_preset_emit_cell)
+            self.assertGreater(platform_enable_cell["column"], computer_system_enable_cell["column"])
+            self.assertGreater(opensbi_enable_cell["column"], platform_enable_cell["column"])
             self.assertLess(kernel_preset_cell["row"], boot_task_cell["row"])
             self.assertEqual(boot_setup_cell["column"], kernel_preset_cell["column"] + 1)
             self.assertEqual(

@@ -26,8 +26,10 @@ pre-send snapshot. All tools2 JSON and snapshots use protocol version 4. Every
 sent Signal is strict: rejection or handler failure makes the root result fail.
 
 For the main model, the default request constructs `HardwareProject`, `FirmwareProject`, and `KernelProject` in
-declaration order, then hands off to `Computer -> Riscv64Platform -> OpenSBI -> Kernel`. Project construction drives
-are synchronous; runtime startup sends retain FIFO creation order.
+declaration order. `Config` and `Lds` are initially Online static inputs and receive no Signal. The handoff then uses
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Preset`; the first three systems are initially
+Ready, and Ready does not mean running. Project construction drives are synchronous; runtime startup sends retain
+FIFO creation order. `Startup` remains only the external alias for `Preset`, never for `Enable`.
 
 Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
 as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;
