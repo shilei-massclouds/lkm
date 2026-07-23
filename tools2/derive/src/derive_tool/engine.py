@@ -97,6 +97,17 @@ def _matches_system_type(model: dict[str, Any], target: str, expected: str) -> b
     return False
 
 
+def _nominal_type(type_expression: str | None) -> str | None:
+    if type_expression is None:
+        return None
+    match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", type_expression)
+    return match.group(0) if match is not None else None
+
+
+def _slot_field_name(member: str) -> str:
+    return member[:1].lower() + member[1:]
+
+
 def load_scenario(
     path: str | Path | None,
     model: dict[str, Any],
@@ -465,6 +476,105 @@ class Engine:
                 return normalized_types[normalized]
         return None
 
+    @staticmethod
+    def _field_in_groups(
+        fields: dict[str, list[dict[str, Any]]], field_name: str
+    ) -> dict[str, Any] | None:
+        for group in fields.values():
+            for field in group:
+                if field["name"] == field_name:
+                    return field
+        return None
+
+    def _type_chain(self, type_name: str | None) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        current = _nominal_type(type_name)
+        while current is not None and current not in seen:
+            declaration = self.model.get("types", {}).get(current)
+            if declaration is None:
+                break
+            seen.add(current)
+            result.append(declaration)
+            current = _nominal_type(declaration.get("base_type"))
+        return result
+
+    def _type_field(self, type_name: str, field_name: str) -> dict[str, Any] | None:
+        for declaration in self._type_chain(type_name):
+            field = self._field_in_groups(declaration.get("fields", {}), field_name)
+            if field is not None:
+                return field
+        return None
+
+    def _structural_value_owner(self, value: Any) -> tuple[str, str] | None:
+        """Resolve a symbolic instance path to its final system or declared type."""
+
+        text = str(value)
+        if text in self.systems:
+            return ("system", text)
+        if text in self.model.get("types", {}):
+            return ("type", text)
+
+        owners = [name for name in self.systems if text.startswith(f"{name}.")]
+        if owners:
+            owner = max(owners, key=len)
+            remaining = text[len(owner) + 1 :].split(".")
+            owner_kind = "system"
+            owner_name = owner
+        else:
+            type_names = [
+                name
+                for name in self.model.get("types", {})
+                if text.startswith(f"{name}.")
+            ]
+            if not type_names:
+                return None
+            owner_name = max(type_names, key=len)
+            remaining = text[len(owner_name) + 1 :].split(".")
+            owner_kind = "type"
+
+        for field_name in remaining:
+            if owner_kind == "system":
+                field = self._field_in_groups(
+                    self.systems[owner_name].get("fields", {}), field_name
+                )
+            else:
+                field = self._type_field(owner_name, field_name)
+            if field is None:
+                return None
+            field_type = _nominal_type(field.get("type"))
+            if field_type is None or field_type not in self.model.get("types", {}):
+                return None
+            owner_kind = "type"
+            owner_name = field_type
+        return (owner_kind, owner_name)
+
+    def _declares_slot(self, value: Any, slot: Any) -> bool:
+        slot_match = re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*::([A-Za-z_][A-Za-z0-9_]*)", str(slot)
+        )
+        if slot_match is None:
+            return False
+        expected = _slot_field_name(slot_match.group(1))
+        owner = self._structural_value_owner(value)
+        if owner is None:
+            return False
+        owner_kind, owner_name = owner
+        if owner_kind == "system":
+            if any(
+                field["name"] == expected
+                for field in self.systems[owner_name].get("fields", {}).get("slots", [])
+            ):
+                return True
+            type_name = self.systems[owner_name].get("declared_type")
+        else:
+            type_name = owner_name
+        return any(
+            field["name"] == expected
+            for declaration in self._type_chain(type_name)
+            for field in declaration.get("fields", {}).get("slots", [])
+        )
+
     def resolve_receiver(
         self, path: str, *, signal: dict[str, Any], bindings: dict[str, Any]
     ) -> str:
@@ -727,6 +837,8 @@ class Engine:
             self.current = saved
 
     def _builtin_fact(self, name: str, values: list[Any]) -> bool:
+        if name == "has_slot" and len(values) == 2:
+            return self._declares_slot(values[0], values[1])
         if name == "initcall_entry_declared" and len(values) == 1:
             prefix = "InitcallEntry::"
             return (
@@ -1013,6 +1125,25 @@ class Engine:
             for entry in block["entries"]
         ]
 
+    def _condition_proof_source(
+        self,
+        condition: dict[str, Any],
+        *,
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+    ) -> str:
+        if condition["kind"] != "fact" or condition["name"] != "has_slot":
+            return "snapshot"
+        values = [
+            self.value(item, signal=signal, bindings=bindings)
+            for item in condition["arguments"]
+        ]
+        if _fact(condition["name"], values) in self.current["facts"]:
+            return "snapshot"
+        if len(values) == 2 and self._declares_slot(values[0], values[1]):
+            return "model_structure"
+        return "snapshot"
+
     def _check_conditions(
         self,
         entries: list[dict[str, Any]],
@@ -1029,7 +1160,9 @@ class Engine:
                 expression=condition["text"],
                 result=result,
                 context=context,
-                proof_source="snapshot",
+                proof_source=self._condition_proof_source(
+                    condition, signal=signal, bindings=bindings
+                ),
             )
             if not result:
                 return False, condition["text"]

@@ -384,6 +384,51 @@ class SignalPipelineTests(unittest.TestCase):
         )
         self.assertEqual(derivation["last_stable_snapshot"]["states"]["Root.child"], "Ready")
 
+    def test_has_slot_uses_instance_field_declared_type_structure(self) -> None:
+        source = """
+            type BaseFixMapConfig {
+                slots { fdt: FixMapSlotRange<Fdt>; }
+            }
+            type PlatformFixMapConfig: BaseFixMapConfig { }
+            object Config {
+                initial_state: State::Base;
+                attrs { fixmap: PlatformFixMapConfig; }
+                state State::Base {
+                    actions {
+                        on Action::CheckFdt {
+                            depends_on { has_slot(Config.fixmap, FixMapSlot::Fdt); }
+                            ensures { fdt_slot_checked(); }
+                        }
+                        on Action::CheckMissing {
+                            depends_on { has_slot(Config.fixmap, FixMapSlot::Missing); }
+                        }
+                    }
+                }
+            }
+        """
+        derivation, checked, _ = self.run_source(source, "Config.CheckFdt")
+        self.assertEqual(checked["verdict"], "complete")
+        self.assertNotIn(
+            "has_slot(\"Config.fixmap\",FixMapSlot::Fdt)",
+            derivation["initial_snapshot"]["facts"],
+        )
+        condition = next(
+            event
+            for event in derivation["events"]
+            if event["kind"] == "condition_checked"
+        )
+        self.assertEqual(condition["expression"], "has_slot(Config.fixmap, FixMapSlot::Fdt)")
+        self.assertTrue(condition["result"])
+        self.assertEqual(condition["proof_source"], "model_structure")
+
+        missing, missing_checked, _ = self.run_source(source, "Config.CheckMissing")
+        self.assertEqual(missing_checked["verdict"], "failed")
+        self.assertEqual(missing["signals"][0]["outcome"], "rejected")
+        self.assertEqual(
+            missing["signals"][0]["reason"],
+            "condition_not_satisfied: has_slot(Config.fixmap, FixMapSlot::Missing)",
+        )
+
     def test_protocol_identity_and_old_protocol_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1744,6 +1789,12 @@ class SignalPipelineTests(unittest.TestCase):
                     for item in normal_data["signals"]
                 )
             )
+            fixmap = next(
+                item
+                for item in normal_data["signals"]
+                if item["target"] == "FixMap" and item["name"] == "Preset"
+            )
+            self.assertEqual(fixmap["outcome"], "completed")
             normal_states = normal_data["last_stable_snapshot"]["states"]
             self.assertEqual(normal_states["ComputerProject"], "Online")
             self.assertEqual(normal_states["HardwareProject"], "Ready")

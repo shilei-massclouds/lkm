@@ -462,8 +462,12 @@ Action handler 不改变 lifecycle state，只提交其 `ensures` 事实。
 lock、Type process、对象 override、局部 action result binding、`within`、`deferred`/`trimmed` evidence
 以及当前主模型中的 state/fact/reference 表达式。scenario 可以在模型初态上覆盖 state、fact 和
 reference。初态 state invariant 建立带来源的初始事实；有 body 的 predicate 按实参替换后在当前快照
-求值。未知新语法必须在 parse/model 诊断中以 `unsupported` 和 source span 报告，不能静默删除、
-按名称猜测或留给 view/render 修正。
+求值。`has_slot(value, SlotKind::Member)` 还可以消费 model protocol 中的声明结构：derive 必须先把
+`value` 的实例属性路径解析到声明类型，再在该类型及其基类型的 `slots` 字段中查找 `Member` 对应的
+槽位。只有实际声明存在时条件才成立；实现不得把 `has_slot(TypeName, ...)` 的事实按字符串替换成
+`has_slot(instance.field, ...)`，也不得对特定对象或枚举成员硬编码。条件事件应把这种证明标记为
+`model_structure`，与来自当前快照的精确事实区分。未知新语法必须在 parse/model 诊断中以
+`unsupported` 和 source span 报告，不能静默删除、按名称猜测或留给 view/render 修正。
 
 根 Signal 没有 scenario 时从模型初态接收。完整主模型只有 `ComputerProject.Preset` 是无预制条件的
 起点；`Kernel.Preset` 或其它后续 Signal 若因前期状态或事实未建立而被拒绝，必须直接得到列出缺项和

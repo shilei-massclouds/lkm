@@ -30,6 +30,9 @@ state/fact/reference 求值至少包括：
 
 - `Target.state == State::Name` 与 state assignment；
 - `predicate(arg, ...)` 的布尔事实和 predicate body 参数替换；
+- `has_slot(instance.field, SlotKind::Member)` 按 model 中对象字段的声明类型逐段解析，并在该类型及其
+  基类型的 `slots` 字段中验证对应槽位；该路径必须通用处理对象名、字段名和枚举成员，不使用主模型
+  专用字符串表，成功的 condition event 使用 `proof_source: "model_structure"`；
 - `Target.ref == Other` 与 reference assignment；
 - enum literal、字符串、整数、布尔和系统引用 payload。
 

@@ -109,6 +109,12 @@ Signal 推导工具采用下列兼容边界：
 前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得隐式回溯 emitter、
 运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须显式提供 snapshot/scenario。
 
+模型声明本身也是稳定快照可使用的结构事实。若 `has_slot(instance.field, SlotKind::Member)` 的第一个
+实参能沿对象字段类型解析到含 `slots` 块的声明类型，且该类型或其基类型声明了与 `Member` 对应的槽位，
+tools2 必须据此证明条件成立。证明必须从 model 中的字段类型和槽位声明通用推导，不能把类型占位符
+事实误当成实例路径事实，也不能硬编码 `Config.fixmap`、`FixMapSlot::Fdt` 或某个主模型对象。不存在的
+槽位仍应使本次 Signal 被拒绝；结构证明不得合成 lifecycle state、运行时 fact 或上游 Signal。
+
 为了从真实上游推导得到后续 Signal 的到达前场景，tools2 必须支持发送前截至：调用者指定一个规范化
 后的 `Target.Signal`，推导在第一个实际将发送该 Signal 的位置停止。匹配发生在动态 receiver、目标和
 有序候选已经确定之后，但必须早于 Signal ID 分配、`signal_sent`、入队、接收和 handler 执行。边界

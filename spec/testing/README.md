@@ -38,6 +38,9 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - view 不重新推导，text 能从根 Signal 还原 rejected/failed/truncated 的完整因果链。
 - 主模型 parse/model 零诊断；effective parent 覆盖显式优先、BootTask→Kernel、普通非 Project 默认
   Kernel、ProjectObject 例外、无 Kernel fixture、unknown/self/cycle。
+- tools2 结构事实 fixture 必须覆盖实例属性类型声明的 `slots`：已声明成员可证明
+  `has_slot(instance.field, SlotKind::Member)` 并记录 `model_structure` proof source，未声明成员保持 rejected；主模型默认推导中的
+  `FixMap.Preset` 不得再因 `Config.fixmap` 已声明的 FDT 槽位而拒绝。
 - `tools2/bin/pyveri -h` usage 显示 `[-t SIGNAL] [-u SIGNAL]` 和 `--until`，旧 `tools2/pyveri2` 不存在；
   无参数入口使用 `Human -> ComputerProject.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
   参数完整透传，显式 `--source` 覆盖默认 Human。

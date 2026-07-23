@@ -4,6 +4,10 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-23 tools2 声明结构事实复核：`has_slot` 的实例属性类型解析只发生在独立 Python derive 包内，
+消费既有 model protocol 的字段/类型信息；不新增或调整内核 crate、Rust module、facade、feature、
+公开 API 或组件依赖。`spec/compose/main.spec` 已复核，组合语义无需修改。
+
 2026-07-23 双树启动链复核：Project metadata module 与 System metadata module 分别镜像工程树和运行
 系统树。`Computer` 由 Riscv64Platform/OpenSBI/Kernel 静态组装；运行时启动则由显式异步
 Computer -> Riscv64Platform -> OpenSBI -> Kernel Signal 链表达。静态 parent/assembly 不生成调用，
