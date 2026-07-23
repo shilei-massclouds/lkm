@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 
-from tools2_common import AST_SCHEMA, AST_VERSION, PRODUCER, write_json
+from tools2_common import AST_SCHEMA, AST_VERSION, PRODUCER, stable_source_path, write_json
 
 from .parser import parse_spec
 
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
             "schema": AST_SCHEMA,
             "version": AST_VERSION,
             "producer": PRODUCER,
-            "source": str(args.spec.resolve()),
+            "source": stable_source_path(args.spec),
             "document": document,
             "summary": {
                 "systems": len(document["systems"]),

@@ -13,6 +13,12 @@ The default spec is `spec/model/main.spec`. Select another spec with `-f SPEC`, 
 `-s SCENARIO`, and use `--work-dir tools2/build` to retain stage JSON. The shortcut uses unbounded depth and
 breadth unless either budget is supplied explicitly. Long-lived explicit output belongs below `tools2/out/`.
 
+When `-t/--trigger` is explicit and `-s/--scenario` is omitted, the shortcut loads
+`tools2/scenarios/<CanonicalSignal>.snapshot.json`. An explicit scenario always wins. `Startup` normalizes to
+`Preset`, so both spellings share one file. A missing or unsafe default path is a usage error; omit `-t` to run the
+default `ComputerProject.Preset` request from the model initial state. The committed `Kernel.Preset` scenario is the
+canonical output of the pre-send command shown above, not an implicit derive rollback or synthesized state.
+
 Snapshot continuation experiment:
 
 ```bash
@@ -24,6 +30,8 @@ The shortcut defaults to `Human -> ComputerProject.Preset`; `Startup` is accepte
 `Preset`. Use `-u/--until SIGNAL` to stop immediately before that canonical Signal is sent and export the stable
 pre-send snapshot. All tools2 JSON and snapshots use protocol version 4. Every
 sent Signal is strict: rejection or handler failure makes the root result fail.
+Repository source paths in tools2 JSON are checkout-relative, so model fingerprints and snapshots remain stable
+across working directories and equivalent checkout locations.
 
 For the main model, the default request constructs `HardwareProject`, `FirmwareProject`, and `KernelProject` in
 declaration order. `Config` and `Lds` are initially Online static inputs and receive no Signal. The handoff then uses

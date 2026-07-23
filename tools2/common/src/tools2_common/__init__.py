@@ -7,6 +7,7 @@ from .io import (
     normalize_signal_request,
     read_json,
     require_protocol,
+    stable_source_path,
     write_json,
 )
 from .schemas import (
@@ -45,5 +46,6 @@ __all__ = [
     "normalize_signal_request",
     "read_json",
     "require_protocol",
+    "stable_source_path",
     "write_json",
 ]

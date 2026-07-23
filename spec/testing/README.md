@@ -44,6 +44,11 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - `tools2/bin/pyveri -h` usage 显示 `[-t SIGNAL] [-u SIGNAL]` 和 `--until`，旧 `tools2/pyveri2` 不存在；
   无参数入口使用 `Human -> ComputerProject.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
   参数完整透传，显式 `--source` 覆盖默认 Human。
+- shortcut 只有在显式 `-t` 且没有 `-s` 时按 canonical signal 加载
+  `tools2/scenarios/<CanonicalSignal>.snapshot.json`；覆盖 `Startup`/`Preset` 同文件、显式 scenario 优先、
+  缺失文件在 derive 前返回 2 并报告 canonical signal/预期路径，以及 target/name、绝对路径、`..`、
+  symlink 均不能越出 scenarios 目录。省略 `-t` 的默认入口和 `-u Kernel.Startup` 必须继续从模型初态
+  推导；driver/derive 无 scenario 时也继续使用模型初态。
 - shortcut、driver、derive API/CLI 都验证 `Target.Startup` 与 `Target.Preset` 规范化后的 request、Signal
   ID、事件序列和 canonical JSON 完全相同；正式 model transition 仍只有 `Preset`。
 - until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
@@ -52,11 +57,16 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - reached 返回 0并生成带 provenance 的 v4 snapshot；既有 completed response 保持 completed，未提交
   ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
   生成 snapshot。
-- 不带 snapshot/scenario 的 `tools2/bin/pyveri -t Kernel.Preset` 必须因前期状态/事实缺失而 failed，且
-  不隐式回溯 emitter 或合成快照；`tools2/bin/pyveri -t ComputerProject.Preset` 不带 scenario 必须能从
-  模型初态开始真实推导。本轮不要求完整闭包达到 Online；若到达当前尚不满足的规格边界，必须 failed
-  并报告缺项和完整因果链。重复运行已有可达部分的 Signal ID、顺序和 canonical JSON 必须稳定。显式
-  提供真实到达边界 scenario 后也可从后续 Signal 继续。
+- 提交的 `tools2/scenarios/Kernel.Preset.snapshot.json` 必须与从仓库根运行
+  `tools2/bin/pyveri -u Kernel.Startup --snapshot-out /tmp/kernel-presend.snapshot.json` 得到的 canonical
+  bytes 逐字节一致，并验证 v4、稳定 model fingerprint、发送前 boundary provenance、关键状态、a0/a1
+  事实和 BootTaskRef 事实。`tools2/bin/pyveri -t Kernel.Startup` 与 `-t Kernel.Preset` 必须自动使用该
+  snapshot，derive `initial_snapshot` 与 golden 完全一致且 Kernel.Preset 被 handler 接受；其后完整闭包
+  当前允许传播独立 modeled failure/退出码 1。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须
+  拒绝。显式 `-s` 仍可覆盖默认 golden。
+- `tools2/bin/pyveri -t ComputerProject.Preset` 在没有对应默认文件时必须返回 2；只有省略 `-t` 的默认
+  `ComputerProject.Preset` 请求从模型初态真实推导。底层 driver/derive 直接请求 `Kernel.Preset` 且不带
+  snapshot/scenario 时仍必须因前期状态/事实缺失而 failed，并且不得隐式回溯 emitter 或合成快照。
 - 显式 `--max-depth 0` 返回 bounded/1、frontier 可见且不生成 snapshot；完整运行 snapshot 可由 `-s`
   续跑。
 - 主模型的 `tools2/bin/pyveri -u Kernel.Startup` 必须从默认 `Human -> ComputerProject.Preset` 开始并在

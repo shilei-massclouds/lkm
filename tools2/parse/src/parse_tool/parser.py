@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tools2_common import stable_source_path
+
 
 @dataclass(frozen=True)
 class Token:
@@ -599,8 +601,9 @@ def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
 
     def visit(current: Path) -> None:
         resolved = current.resolve()
+        source_file = stable_source_path(resolved)
         if resolved in active:
-            token = Token(str(resolved), str(resolved), 1, 1)
+            token = Token(source_file, source_file, 1, 1)
             diagnostics.append(
                 {"category": "error", "message": "include cycle detected", "span": token.span()}
             )
@@ -609,7 +612,7 @@ def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
             return
         try:
             text = resolved.read_text(encoding="utf-8")
-            tokens = _tokenize(text, resolved)
+            tokens = _tokenize(text, Path(source_file))
         except (OSError, UnicodeError, ParseFailure) as exc:
             if isinstance(exc, ParseFailure):
                 diagnostics.append(
@@ -620,7 +623,7 @@ def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
                     {
                         "category": "error",
                         "message": str(exc),
-                        "span": Token(str(resolved), str(resolved), 1, 1).span(),
+                        "span": Token(source_file, source_file, 1, 1).span(),
                     }
                 )
             return
@@ -636,7 +639,7 @@ def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
                         raise ParseFailure("include requires a string path", literal)
                     parser.expect(";")
                     child = (resolved.parent / json.loads(literal.value)).resolve()
-                    includes.append({"path": str(child), "span": start.span()})
+                    includes.append({"path": stable_source_path(child), "span": start.span()})
                     visit(child)
                 elif parser.at("enum"):
                     enums.append(parser.parse_enum())
@@ -653,7 +656,7 @@ def _parse_subset_spec(path: str | Path) -> dict[str, Any]:
 
     visit(root)
     return {
-        "root": str(root),
+        "root": stable_source_path(root),
         "includes": includes,
         "enums": enums,
         "systems": systems,

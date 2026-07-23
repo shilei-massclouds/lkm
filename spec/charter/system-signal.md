@@ -107,9 +107,12 @@ Signal 推导工具采用下列兼容边界：
 
 `tools2/` 是验证上述目标语义的独立工具链。本轮里程碑要求它完整加载 `spec/model/main.spec`，并能从
 真实 Signal 到达边界推导其可达闭包。完整模型只有 `ComputerProject.Preset` 是无需预制条件的起点；
-根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它后续 Signal 若因
-前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得隐式回溯 emitter、
-运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须显式提供 snapshot/scenario。
+底层 driver/derive 根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它
+后续 Signal 若因前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得
+隐式回溯 emitter、运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须提供外部
+snapshot/scenario。仓库可以提交从真实上游发送前截至推导得到的 canonical snapshot，并由公开快捷
+入口把它作为后续 Signal 的默认外部输入；这仍是显式、可审计的场景选择，不改变 derive 的初态或
+可达性语义，也不授权 derive 合成或回溯状态。
 
 模型声明本身也是稳定快照可使用的结构事实。若 `has_slot(instance.field, SlotKind::Member)` 的第一个
 实参能沿对象字段类型解析到含 `slots` 块的声明类型，且该类型或其基类型声明了与 `Member` 对应的槽位，
@@ -131,7 +134,12 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 `tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
 快捷入口的默认请求是 `Human -> ComputerProject.Preset`，`-t/--trigger` 可以覆盖目标，
 `-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，但底层
-`--signal` 保持必填。tools2 协议统一为 version 4，移除 `lossy` 字段与 `discarded` outcome，并拒绝
+`--signal` 保持必填。仅当调用者显式给出 `-t/--trigger` 且没有给出 `-s/--scenario` 时，快捷入口按
+规范化后的 Signal 查找 `tools2/scenarios/<CanonicalSignal>.snapshot.json`；显式 scenario 优先，
+`Startup` 与 `Preset` 因而选择同一 canonical 文件。缺少默认文件或规范化名称不能安全落在 scenarios
+目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行默认
+`ComputerProject.Preset`，包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
+version 4，移除 `lossy` 字段与 `discarded` outcome，并拒绝
 version 1、version 2、version 3、老工具协议和旧
 snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。

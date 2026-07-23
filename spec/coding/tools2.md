@@ -52,7 +52,11 @@ cyclic parent 矛盾使用 `error`。有 error/unsupported 时后续阶段仍可
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
 state、handler、参数、条件、effect 和 call 索引，并输出 source 内容指纹。derive/check/view 字段遵循
 formal semantics；快照统一包含 `states`、有序 `facts` 和 `references`，JSON 输出使用排序 key 和稳定
-列表顺序。
+列表顺序。仓库内输入的顶层 `source`、include 路径和 span `source_file` 必须写为使用 `/` 的仓库
+相对路径，仓库外输入保留绝对路径；model fingerprint 必须消费这些稳定路径以及完整 model 语义和
+source span 内容，不得包含 checkout 绝对路径前缀。snapshot 继续使用 v4 既有字段，顶层 `source` 和
+boundary provenance 内的 `source_file` 同样遵循该稳定路径规则，使同一 checkout 从不同 cwd 运行以及
+不同绝对路径下的等价 checkout 产生相同 canonical bytes。
 
 ## CLI 与退出码
 
@@ -74,6 +78,15 @@ failed/bounded/until_signal_not_reached 或阶段错误时目标文件不得出�
 `spec/model/main.spec`，快捷 source 默认 `Human`、预算默认 `all/all`；显式参数覆盖它们。预算、source、
 work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通用默认仍为 `3/3`。入口从脚本自身
 位置解析仓库和包路径，因此从仓库根或其它当前目录调用的行为一致。
+
+快捷入口必须保留 `-t` 是否由调用者显式给出的信息。只有显式 `-t/--trigger` 且没有显式
+`-s/--scenario` 时，才以 common 规范化后的完整 Signal 名称查找
+`tools2/scenarios/<CanonicalSignal>.snapshot.json` 并把该路径作为 `--scenario` 传给 driver；显式 `-s`
+拥有最高优先级。候选路径 resolve 后必须仍位于 `tools2/scenarios/` 内，不能用 target/name、绝对路径、
+`..` 或 symlink 越界。安全的候选不存在时，入口在启动 driver/derive 前返回 2，stderr 同时报告
+canonical signal 和预期路径。`Target.Startup` 与 `Target.Preset` 选择同一文件。调用者省略 `-t` 时
+不做默认场景查找，而从模型初态执行默认 `ComputerProject.Preset`；因此 `-u Kernel.Startup` 仍从完整
+上游链生成 snapshot。该查找只属于 shortcut，driver、derive CLI/API 和 scenario loader 不得复制它。
 
 shortcut、driver 和 derive API/CLI 都调用 common 中同一 Signal request 规范化函数；任何 target 的
 末段 `Startup` 都规范化为 `Preset`，其它名称不变。root/until request 和所有结构化产物只保留

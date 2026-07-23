@@ -13,6 +13,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from tools2_common import stable_source_path
+
 
 _IDENT = r"[A-Za-z_][A-Za-z0-9_-]*"
 _TOP_RE = re.compile(rf"^\s*({_IDENT})")
@@ -712,7 +714,7 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
     root = Path(path).resolve()
     diagnostics: list[dict[str, Any]] = []
     document: dict[str, Any] = {
-        "root": str(root),
+        "root": stable_source_path(root),
         "includes": [],
         "enums": [],
         "types": [],
@@ -728,20 +730,21 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
 
     def visit(current: Path) -> None:
         resolved = current.resolve()
+        source_file = stable_source_path(resolved)
         if resolved in active:
-            segment = Segment(str(resolved), str(resolved), 1, 1)
+            segment = Segment(source_file, source_file, 1, 1)
             diagnostics.append(_diagnostic("error", "include cycle detected", segment))
             return
         if resolved in seen:
             return
         try:
             text = _strip_comments(resolved.read_text(encoding="utf-8"))
-            members = _split_members(text, path=str(resolved), start_line=1)
+            members = _split_members(text, path=source_file, start_line=1)
         except (OSError, UnicodeError, ValueError, StructuralFailure) as exc:
             if isinstance(exc, StructuralFailure):
                 diagnostics.append(_diagnostic("error", exc.message, exc.segment))
             else:
-                diagnostics.append(_diagnostic("error", str(exc), Segment("", str(resolved), 1, 1)))
+                diagnostics.append(_diagnostic("error", str(exc), Segment("", source_file, 1, 1)))
             return
         seen.add(resolved)
         active.append(resolved)
@@ -754,7 +757,9 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
                     if include is None:
                         raise StructuralFailure("invalid include declaration", member)
                     child = (resolved.parent / json.loads(json.dumps(include.group(1)))).resolve()
-                    document["includes"].append({"path": str(child), "span": member.span()})
+                    document["includes"].append(
+                        {"path": stable_source_path(child), "span": member.span()}
+                    )
                     visit(child)
                 elif head == "enum":
                     document["enums"].append(_enum(member))

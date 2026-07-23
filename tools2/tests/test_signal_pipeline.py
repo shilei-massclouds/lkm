@@ -42,6 +42,7 @@ from view_tool.__main__ import main as view_main
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
+KERNEL_PRESET_SCENARIO = TOOLS2 / "scenarios" / "Kernel.Preset.snapshot.json"
 
 
 class SignalPipelineTests(unittest.TestCase):
@@ -1211,6 +1212,8 @@ class SignalPipelineTests(unittest.TestCase):
 
             shortcut_outputs = []
             shortcut = TOOLS2 / "bin" / "pyveri"
+            empty_scenario = root / "empty-scenario.json"
+            empty_scenario.write_text("{}\n", encoding="utf-8")
             for spelling in ("Startup", "Preset"):
                 work = root / f"shortcut-{spelling}"
                 result = subprocess.run(
@@ -1220,6 +1223,8 @@ class SignalPipelineTests(unittest.TestCase):
                         str(spec),
                         "-t",
                         f"Root.{spelling}",
+                        "-s",
+                        str(empty_scenario),
                         "-u",
                         f"Child.{spelling}",
                         "--work-dir",
@@ -1618,6 +1623,8 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn("--until SIGNAL", help_result.stdout)
             self.assertFalse((TOOLS2 / "pyveri2").exists())
 
+            empty_scenario = root / "empty-scenario.json"
+            empty_scenario.write_text("{}\n", encoding="utf-8")
             snapshot = root / "snapshot.json"
             first_work = root / "first-work"
             first = subprocess.run(
@@ -1627,6 +1634,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "Root.Start",
                     "-f",
                     str(PIPELINE),
+                    "-s",
+                    str(empty_scenario),
                     "--source",
                     "TestHarness",
                     "--snapshot-out",
@@ -1684,6 +1693,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "Root.Start",
                     "-f",
                     str(PIPELINE),
+                    "-s",
+                    str(empty_scenario),
                     "--source",
                     "TestHarness",
                     "--work-dir",
@@ -1711,6 +1722,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "Root.Start",
                     "-f",
                     str(PIPELINE),
+                    "-s",
+                    str(empty_scenario),
                     "--max-depth",
                     "0",
                 ],
@@ -1832,6 +1845,38 @@ class SignalPipelineTests(unittest.TestCase):
             )
             saved = read_json(snapshot)
             self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
+            self.assertEqual(snapshot.read_bytes(), KERNEL_PRESET_SCENARIO.read_bytes())
+            self.assertEqual(saved["schema"], SNAPSHOT_SCHEMA)
+            self.assertEqual(saved["version"], SNAPSHOT_VERSION)
+            self.assertEqual(saved["producer"], PRODUCER)
+            self.assertEqual(saved["source"], "spec/model/main.spec")
+            self.assertEqual(saved["model_fingerprint"], derivation["model_fingerprint"])
+            self.assertEqual(saved["provenance"]["verdict"], "reached")
+            self.assertEqual(saved["provenance"]["boundary"], derivation["boundary"])
+            self.assertEqual(
+                saved["provenance"]["boundary"]["call_span"]["source_file"],
+                "spec/model/systems/opensbi.spec",
+            )
+            self.assertIn("task_ref_ready(BootTaskRef)", saved["snapshot"]["facts"])
+            self.assertIn(
+                "task_ref_targets(BootTaskRef,BootTask)", saved["snapshot"]["facts"]
+            )
+            exact_snapshot = root / "kernel-presend-exact.snapshot.json"
+            exact = subprocess.run(
+                [
+                    str(shortcut),
+                    "-u",
+                    "Kernel.Startup",
+                    "--snapshot-out",
+                    str(exact_snapshot),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(exact.returncode, 0, exact.stderr)
+            self.assertEqual(exact_snapshot.read_bytes(), KERNEL_PRESET_SCENARIO.read_bytes())
 
             normal_work = root / "normal-closure"
             normal = subprocess.run(
@@ -1903,6 +1948,133 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertIsNone(resumed_data["until_request"])
 
+            default_runs = []
+            for spelling in ("Startup", "Preset"):
+                default_work = root / f"kernel-default-{spelling}"
+                default_result = subprocess.run(
+                    [
+                        str(shortcut),
+                        "-t",
+                        f"Kernel.{spelling}",
+                        "--work-dir",
+                        str(default_work),
+                        "-o",
+                        str(root / f"kernel-default-{spelling}.txt"),
+                    ],
+                    cwd=ROOT if spelling == "Preset" else root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(default_result.returncode, 1, default_result.stderr)
+                default_data = read_json(default_work / "derive.json")
+                self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
+                self.assertEqual(default_data["signals"][0]["target"], "Kernel")
+                self.assertEqual(default_data["signals"][0]["name"], "Preset")
+                self.assertEqual(default_data["signals"][0]["outcome"], "completed")
+                default_runs.append((default_work / "derive.json").read_bytes())
+            self.assertEqual(default_runs[0], default_runs[1])
+
+            stale = subprocess.run(
+                [str(shortcut), "-f", str(PIPELINE), "-t", "Kernel.Startup"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stale.returncode, 2)
+            self.assertIn("snapshot model fingerprint does not match", stale.stderr)
+
+            direct_work = root / "kernel-direct-model-initial"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    driver_main(
+                        [
+                            str(ROOT / "spec" / "model" / "main.spec"),
+                            "--signal",
+                            "Kernel.Preset",
+                            "--max-depth",
+                            "all",
+                            "--max-breadth",
+                            "all",
+                            "--work-dir",
+                            str(direct_work),
+                        ]
+                    ),
+                    1,
+                )
+            direct_data = read_json(direct_work / "derive.json")
+            self.assertNotEqual(direct_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(direct_data["signals"][0]["outcome"], "rejected")
+
+    def test_pyveri_default_scenario_missing_override_and_path_safety(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            missing_work = root / "missing-work"
+            missing = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "ComputerProject.Startup",
+                    "--work-dir",
+                    str(missing_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("canonical signal ComputerProject.Preset", missing.stderr)
+            self.assertIn(
+                "tools2/scenarios/ComputerProject.Preset.snapshot.json", missing.stderr
+            )
+            self.assertFalse(missing_work.exists())
+
+            empty_scenario = root / "empty-scenario.json"
+            empty_scenario.write_text("{}\n", encoding="utf-8")
+            override_work = root / "override-work"
+            override = subprocess.run(
+                [
+                    str(shortcut),
+                    "-f",
+                    str(PIPELINE),
+                    "-t",
+                    "Root.Start",
+                    "-s",
+                    str(empty_scenario),
+                    "--work-dir",
+                    str(override_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(override.returncode, 0, override.stderr)
+
+            outside = root / "outside.snapshot.json"
+            outside.write_text("{}\n", encoding="utf-8")
+            symlink = TOOLS2 / "scenarios" / "Escape.Preset.snapshot.json"
+            symlink.symlink_to(outside)
+            self.addCleanup(symlink.unlink, missing_ok=True)
+            for signal in ("../outside.Preset", str(outside.with_suffix(".Preset")), "Escape.Preset"):
+                with self.subTest(signal=signal):
+                    unsafe = subprocess.run(
+                        [str(shortcut), "-f", str(PIPELINE), "-t", signal],
+                        cwd=root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(unsafe.returncode, 2)
+                    self.assertTrue(
+                        "unsafe default scenario" in unsafe.stderr
+                        or "argument -t/--trigger" in unsafe.stderr,
+                        unsafe.stderr,
+                    )
+
     def test_main_model_enable_chain_rejects_missing_prerequisites_strictly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1972,11 +2144,14 @@ class SignalPipelineTests(unittest.TestCase):
                     )
 
             alias_work = root / "startup-alias"
+            (root / "empty-scenario.json").write_text("{}\n", encoding="utf-8")
             alias = subprocess.run(
                 [
                     str(shortcut),
                     "-t",
                     "Computer.Startup",
+                    "-s",
+                    str(root / "empty-scenario.json"),
                     "--work-dir",
                     str(alias_work),
                 ],

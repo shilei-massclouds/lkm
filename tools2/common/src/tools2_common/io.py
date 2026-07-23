@@ -12,6 +12,9 @@ from typing import Any
 from .schemas import PRODUCER
 
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+
+
 class ProtocolError(ValueError):
     """An intermediate file is not owned by the expected tools2 protocol."""
 
@@ -34,6 +37,15 @@ def canonical_bytes(value: Any) -> bytes:
 
 def fingerprint(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def stable_source_path(path: str | Path) -> str:
+    """Return a checkout-independent display path for repository sources."""
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(_REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def read_json(path: str | Path) -> dict[str, Any]:

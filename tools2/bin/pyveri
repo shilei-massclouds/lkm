@@ -11,6 +11,8 @@ import sys
 TOOLS2_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = TOOLS2_ROOT.parent
 DEFAULT_SPEC = REPOSITORY_ROOT / "spec" / "model" / "main.spec"
+DEFAULT_TRIGGER = "ComputerProject.Preset"
+SCENARIOS_ROOT = TOOLS2_ROOT / "scenarios"
 
 
 def _bootstrap() -> None:
@@ -28,7 +30,6 @@ def _parser(normalize_signal_request) -> argparse.ArgumentParser:
     parser.add_argument(
         "-t",
         "--trigger",
-        default=normalize_signal_request("ComputerProject.Startup", option="--trigger"),
         type=lambda value: normalize_signal_request(value, option="--trigger"),
         metavar="SIGNAL",
         help="Signal trigger as Target.SignalName; default: ComputerProject.Startup",
@@ -64,12 +65,35 @@ def main(argv: list[str] | None = None) -> int:
     from tools2_common import normalize_signal_request
 
     args = _parser(normalize_signal_request).parse_args(argv)
+    trigger = args.trigger or normalize_signal_request(DEFAULT_TRIGGER, option="--trigger")
+    scenario = args.scenario
+    if args.trigger is not None and scenario is None:
+        scenario_root = SCENARIOS_ROOT.resolve()
+        expected = SCENARIOS_ROOT / f"{trigger}.snapshot.json"
+        candidate = expected.resolve()
+        try:
+            candidate.relative_to(scenario_root)
+        except ValueError:
+            print(
+                f"tools2/bin/pyveri: unsafe default scenario for canonical signal "
+                f"{trigger}: expected path {expected}",
+                file=sys.stderr,
+            )
+            return 2
+        if not candidate.is_file():
+            print(
+                f"tools2/bin/pyveri: no default scenario for canonical signal "
+                f"{trigger}: expected path {expected}",
+                file=sys.stderr,
+            )
+            return 2
+        scenario = candidate
     from pyveri.__main__ import main as driver_main
 
     driver_args = [
         str(args.spec),
         "--signal",
-        args.trigger,
+        trigger,
         "--source",
         args.source,
         "--max-depth",
@@ -77,8 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         "--max-breadth",
         args.max_breadth,
     ]
-    if args.scenario is not None:
-        driver_args.extend(["--scenario", str(args.scenario)])
+    if scenario is not None:
+        driver_args.extend(["--scenario", str(scenario)])
     if args.until is not None:
         driver_args.extend(["--until", args.until])
     if args.work_dir is not None:

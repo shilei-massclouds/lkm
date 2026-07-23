@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 "schema": SNAPSHOT_SCHEMA,
                 "version": SNAPSHOT_VERSION,
                 "producer": PRODUCER,
-                "source": str(args.spec.resolve()),
+                "source": derive_data["source"],
                 "model_fingerprint": derive_data["model_fingerprint"],
                 "snapshot": derive_data["last_stable_snapshot"],
                 "provenance": {
