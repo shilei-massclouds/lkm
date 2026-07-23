@@ -123,6 +123,14 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
 
+tools2 的默认文本视图服务于快速阅读 Signal 在系统层级间的传播：按结构化 Signal 的创建顺序逐行
+展示 source、Signal、target，按目标相对根系统的 hierarchy depth 使用两空格缩进，并只为已解析的
+Transition 展示目标系统实际 before/after 状态。若传播走向根目标的祖先，整体缩进必须平移到最小
+depth，使最上层祖先保持在最左侧。文本把 canonical `Preset` 显示为用户别名 `Startup`，但不得改变
+任何结构化产物。非 completed 结果、发送前 boundary 和失败原因必须在简化视图中直接可见；完整的
+协议诊断仍由 `VERBOSE=1` 选择原详细文本视图。该选择只影响文本渲染，不能改变推导、校验、Signal
+顺序、JSON、snapshot、verdict、退出码或正式模型。
+
 ## 通用分析方法
 
 按照信号的传导顺序分析和建立系统模型，具体顺序：

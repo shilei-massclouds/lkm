@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 
@@ -24,7 +25,66 @@ def _snapshot_delta(before: dict[str, Any] | None, after: dict[str, Any] | None)
     return lines
 
 
-def render_text(view: dict[str, Any]) -> str:
+def _compact_signal_name(name: str) -> str:
+    return "Startup" if name == "Preset" else name
+
+
+def _transition_states(signal: dict[str, Any]) -> tuple[Any, Any] | None:
+    handler = signal.get("handler")
+    if handler is None or handler.get("kind") != "Transition":
+        return None
+    before = signal.get("before_snapshot")
+    after = signal.get("after_snapshot")
+    if before is None or after is None:
+        return None
+    target = signal["target"]
+    before_states = before.get("states", {})
+    after_states = after.get("states", {})
+    if target not in before_states or target not in after_states:
+        return None
+    return before_states[target], after_states[target]
+
+
+def _render_compact(view: dict[str, Any]) -> str:
+    lines = [f"verdict: {view['verdict']}"]
+    boundary = view.get("boundary")
+    if boundary is not None:
+        lines.append(
+            f"boundary: {boundary['source']} -- {_compact_signal_name(boundary['signal'])} "
+            f"--> {boundary['target']} (before send)"
+        )
+
+    signals = view["signals"]
+    minimum_depth = min(
+        (signal["coordinate"]["depth"] for signal in signals),
+        default=0,
+    )
+    depth_origin = min(0, minimum_depth)
+    for signal in signals:
+        indent = "  " * (signal["coordinate"]["depth"] - depth_origin)
+        line = (
+            f"{indent}{signal['source']} -- {_compact_signal_name(signal['name'])} "
+            f"--> {signal['target']}"
+        )
+        states = _transition_states(signal)
+        if states is not None:
+            line += f"[{states[0]}:{states[1]}]"
+        if signal["outcome"] != "completed":
+            line += f" !! {signal['outcome']}: {signal.get('reason')}"
+        lines.append(line)
+
+    failure = view.get("failure")
+    if failure is not None:
+        lines.append(
+            "failure chain: "
+            + " -> ".join(failure["chain"])
+            + "; reason: "
+            + str(failure["reason"])
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _render_verbose(view: dict[str, Any]) -> str:
     root = view["root_request"]
     lines = [
         f"Signal derivation: {root['source']} -> {root['target']}.{root['signal']}",
@@ -100,3 +160,9 @@ def render_text(view: dict[str, Any]) -> str:
         lines.append("failure chain: " + " -> ".join(failure["chain"]))
         lines.append("failure reason: " + str(failure["reason"]))
     return "\n".join(lines) + "\n"
+
+
+def render_text(view: dict[str, Any]) -> str:
+    if os.environ.get("VERBOSE") == "1":
+        return _render_verbose(view)
+    return _render_compact(view)

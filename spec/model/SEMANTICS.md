@@ -552,8 +552,19 @@ ID 由根请求和稳定因果路径/同级 ordinal 生成，不使用临时目�
 `complete` 和 `reached` 可由 driver 写出 `--snapshot-out`，其内容可作为后续 `--scenario` 的 snapshot
 基础；reached snapshot 必须携带 boundary provenance。`failed`、`bounded` 和
 `until_signal_not_reached` 都不得导出可续跑 snapshot。`view.json` 只能整理 derive 的结构化字段，不能重新
-执行 guard、改变顺序或从 label 猜 outcome；text renderer 必须展示因果层级、同步等待、异步 FIFO、
-payload、状态/事实变化、until request/reached boundary、stopped 传播、拒绝原因、预算 frontier 和完整失败链。
+执行 guard、改变顺序或从 label 猜 outcome。默认 text renderer 按 Signal 创建顺序输出简化系统传播
+图，不得按 hierarchy depth 重排；每行使用 Signal 的 `coordinate.depth` 做两空格层级缩进，存在负
+depth 时以本次 trace 的最小 depth 整体平移。已解析 Transition 显示 target 在 before/after snapshot
+中的实际状态，Action 不显示状态；停止或拒绝且未提交的 Transition 因此显示相同状态，未解析 handler
+不得根据 Signal 名称或兼容 kind 猜测类型。文本显示层把 canonical `Preset` 拼作 `Startup`，结构化
+协议仍只保存 `Preset`。非 `completed` Signal 在本行显示 outcome/reason；首行保留 verdict，reached
+显示发送前 boundary，failed 保留 failure chain/reason，空 Signal trace 也必须是合法输出。
+
+只有环境变量 `VERBOSE` 严格等于 `1` 时，text renderer 才输出既有详细视图，展示因果层级、同步等待、
+异步 FIFO、payload、状态/事实/reference 变化、until request/reached boundary、stopped 传播、拒绝
+原因、预算 frontier、source span 和完整失败链，并保留 canonical `Preset` 拼写。未设置、空值、`0`
+或其它值均选择简化视图。这个渲染选择不得改变 derive/view JSON、snapshot、Signal 顺序、verdict 或
+退出码，不需要升级 version 3 协议。
 
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 

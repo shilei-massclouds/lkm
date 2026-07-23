@@ -59,6 +59,14 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 主模型的 `tools2/bin/pyveri -u Kernel.Startup` 必须从默认 `Human -> ComputerProject.Preset` 开始并在
   `Kernel.Preset` 发出前 reached；其 snapshot 可用于后续 `-t Kernel.Startup -s SNAPSHOT`，不带 until
   时仍执行完整可达推导。
+- 默认文本覆盖 Transition/Action 两种行、`Preset` 到 `Startup` 的显示别名、每层两空格的 hierarchy
+  depth 缩进、负 depth 整体平移以及 Signal 创建顺序不被 depth 重排；Transition 状态必须来自 target
+  的 before/after snapshot，stopped 未提交时显示相同状态，未解析 handler 不得猜类型或显示状态。
+- stopped/rejected/discarded/truncated/failed 必须在各自 Signal 同行显示 outcome/reason；reached 的
+  before-send boundary、failed 的 failure chain/reason 和空 Signal trace 都必须保持简洁且可辨识。
+- 未设置 `VERBOSE`、`VERBOSE=0` 和其它非 `1` 值均选择 compact；只有 `VERBOSE=1` 逐字恢复既有详细
+  文本和 canonical `Preset`。直接 renderer、render CLI、driver、shortcut、stdout 与 `-o` 都使用同一
+  选择，并验证两种文本模式不改变 derive/view JSON、snapshot、verdict、Signal 顺序或退出码。
 
 focused test 可用于开发，但最终必须依次运行 parser/model/Kernel focused、`make -C tools2 test`、老
 model/view/render、静态 trace/SVG 重新生成与布局评审、`git diff --check`，再从仓库根目录以不包装、

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 from check_tool.__main__ import main as check_main
 from derive_tool.__main__ import main as derive_main
@@ -18,6 +19,7 @@ from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
 from pyveri.__main__ import main as driver_main
 from render_tool.__main__ import main as render_main
+from render_tool.text import render_text
 from tools2_common import (
     AST_SCHEMA,
     AST_VERSION,
@@ -90,14 +92,17 @@ class SignalPipelineTests(unittest.TestCase):
         check_exit = check_main([str(derivation), "-o", str(checked)])
         self.assertIn(check_exit, {0, 1})
         self.assertEqual(view_main([str(derivation), "-o", str(view)]), 0)
-        self.assertEqual(render_main([str(view), "-o", str(text)]), 0)
+        with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
+            self.assertEqual(render_main([str(view), "-o", str(text)]), 0)
         return read_json(derivation), read_json(checked), text.read_text(encoding="utf-8")
 
     def test_drives_and_emits_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
             stdout = io.StringIO()
-            with contextlib.redirect_stdout(stdout):
+            with contextlib.redirect_stdout(stdout), mock.patch.dict(
+                os.environ, {"VERBOSE": "0"}
+            ):
                 exit_code = driver_main(
                     [str(PIPELINE), "--signal", "Root.Start", "--work-dir", str(work)]
                 )
@@ -141,8 +146,196 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertLess(root_complete, event_positions["emits_enqueued"])
             self.assertLess(event_positions["emits_enqueued"], event_positions["emits_dequeued"])
-            self.assertIn("synchronous: sender waits", stdout.getvalue())
-            self.assertIn("asynchronous FIFO", stdout.getvalue())
+            self.assertEqual(
+                stdout.getvalue(),
+                "verdict: complete\n"
+                "Human -- Start --> Root[Base:Ready]\n"
+                "  Root -- Configure --> Child\n"
+                "  Root -- Run --> Async[Base:Ready]\n"
+                "  Root -- Missing --> Sink !! discarded: no_handler\n",
+            )
+
+    def test_compact_renderer_uses_hierarchy_depth_order_and_actual_states(self) -> None:
+        base = {
+            "states": {"Child": "Base", "Parent": "Base", "Unknown": "Base"},
+            "facts": [],
+            "references": {},
+        }
+        ready = {
+            "states": {"Child": "Ready", "Parent": "Base", "Unknown": "Base"},
+            "facts": [],
+            "references": {},
+        }
+        transition = {
+            "id": "Child.Transition::Preset@Base",
+            "kind": "Transition",
+            "source_state": "Base",
+            "target_state": "Ready",
+        }
+        action = {
+            "id": "Parent.Action::Inspect@Base",
+            "kind": "Action",
+            "source_state": "Base",
+            "target_state": None,
+        }
+        view = {
+            "root_request": {
+                "source": "Human",
+                "target": "Child",
+                "signal": "Preset",
+            },
+            "verdict": "failed",
+            "budget": {"max_depth": 3, "max_breadth": 3},
+            "until_request": None,
+            "boundary": None,
+            "signals": [
+                {
+                    "id": "sig-0001",
+                    "source": "Human",
+                    "target": "Child",
+                    "name": "Preset",
+                    "delivery": "root",
+                    "lossy": False,
+                    "outcome": "completed",
+                    "reason": None,
+                    "handler": transition,
+                    "before_snapshot": base,
+                    "after_snapshot": ready,
+                    "coordinate": {"depth": 0, "breadth": 0},
+                    "cause_depth": 0,
+                },
+                {
+                    "id": "sig-0002",
+                    "source": "Child",
+                    "target": "Parent",
+                    "name": "Inspect",
+                    "delivery": "drives",
+                    "lossy": False,
+                    "outcome": "completed",
+                    "reason": None,
+                    "handler": action,
+                    "before_snapshot": ready,
+                    "after_snapshot": ready,
+                    "coordinate": {"depth": -1, "breadth": 0},
+                    "cause_depth": 1,
+                },
+                {
+                    "id": "sig-0003",
+                    "source": "Child",
+                    "target": "Unknown",
+                    "name": "Missing",
+                    "delivery": "emits",
+                    "lossy": False,
+                    "outcome": "rejected",
+                    "reason": "no_handler",
+                    "handler": None,
+                    "compat_process_kind": "Transition",
+                    "before_snapshot": ready,
+                    "after_snapshot": ready,
+                    "coordinate": {"depth": 1, "breadth": 0},
+                    "cause_depth": 1,
+                },
+                {
+                    "id": "sig-0004",
+                    "source": "Parent",
+                    "target": "Child",
+                    "name": "Preset",
+                    "delivery": "drives",
+                    "lossy": False,
+                    "outcome": "stopped",
+                    "reason": "until_signal_reached",
+                    "handler": transition,
+                    "before_snapshot": ready,
+                    "after_snapshot": ready,
+                    "coordinate": {"depth": 0, "breadth": 0},
+                    "cause_depth": 2,
+                },
+            ],
+            "events": [],
+            "truncated_frontier": [],
+            "failure": {
+                "chain": ["sig-0001", "sig-0003"],
+                "reason": "no_handler",
+            },
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VERBOSE", None)
+            compact = render_text(view)
+        self.assertEqual(
+            compact,
+            "verdict: failed\n"
+            "  Human -- Startup --> Child[Base:Ready]\n"
+            "Child -- Inspect --> Parent\n"
+            "    Child -- Missing --> Unknown !! rejected: no_handler\n"
+            "  Parent -- Startup --> Child[Ready:Ready] !! stopped: until_signal_reached\n"
+            "failure chain: sig-0001 -> sig-0003; reason: no_handler\n",
+        )
+        self.assertNotIn("Unknown[", compact)
+
+        for value in ("0", "yes", "01", " 1"):
+            with self.subTest(VERBOSE=value), mock.patch.dict(os.environ, {"VERBOSE": value}):
+                self.assertEqual(render_text(view), compact)
+        with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
+            verbose = render_text(view)
+        self.assertTrue(verbose.startswith("Signal derivation: Human -> Child.Preset\n"))
+        self.assertIn("synchronous: sender waits for this response", verbose)
+        self.assertIn("failure reason: no_handler", verbose)
+        self.assertNotIn("Startup", verbose)
+
+    def test_text_mode_is_render_only_for_driver_and_render_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            results: dict[str, tuple[int, Path, Path, Path]] = {}
+            for mode in ("0", "1"):
+                work = root / f"work-{mode}"
+                output = root / f"trace-{mode}.txt"
+                snapshot = root / f"snapshot-{mode}.json"
+                with mock.patch.dict(os.environ, {"VERBOSE": mode}):
+                    exit_code = driver_main(
+                        [
+                            str(PIPELINE),
+                            "--signal",
+                            "Root.Start",
+                            "--max-depth",
+                            "all",
+                            "--max-breadth",
+                            "all",
+                            "--work-dir",
+                            str(work),
+                            "--snapshot-out",
+                            str(snapshot),
+                            "-o",
+                            str(output),
+                        ]
+                    )
+                results[mode] = (exit_code, work, output, snapshot)
+
+            self.assertEqual(results["0"][0], results["1"][0], 0)
+            for filename in ("ast.json", "model.json", "derive.json", "check.json", "view.json"):
+                self.assertEqual(
+                    (results["0"][1] / filename).read_bytes(),
+                    (results["1"][1] / filename).read_bytes(),
+                )
+            self.assertEqual(results["0"][3].read_bytes(), results["1"][3].read_bytes())
+
+            compact = results["0"][2].read_text(encoding="utf-8")
+            verbose = results["1"][2].read_text(encoding="utf-8")
+            self.assertTrue(compact.startswith("verdict: complete\n"))
+            self.assertNotIn("Signal derivation:", compact)
+            self.assertTrue(verbose.startswith("Signal derivation: Human -> Root.Start\n"))
+            self.assertIn("synchronous: sender waits", verbose)
+            self.assertIn("asynchronous FIFO:", verbose)
+
+            render_compact = root / "render-compact.txt"
+            render_verbose = root / "render-verbose.txt"
+            view = results["0"][1] / "view.json"
+            with mock.patch.dict(os.environ, {"VERBOSE": "other"}):
+                self.assertEqual(render_main([str(view), "-o", str(render_compact)]), 0)
+            with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
+                self.assertEqual(render_main([str(view), "-o", str(render_verbose)]), 0)
+            self.assertEqual(render_compact.read_text(encoding="utf-8"), compact)
+            self.assertEqual(render_verbose.read_text(encoding="utf-8"), verbose)
 
     def test_type_lifecycle_process_is_composed_with_object_wrapper(self) -> None:
         derivation, checked, _ = self.run_source(
@@ -402,7 +595,10 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(checked["verdict"], "failed")
         self.assertEqual(derivation["signals"][0]["outcome"], "failed")
         self.assertEqual(derivation["last_stable_snapshot"]["states"]["Root"], "Base")
-        self.assertIn("invariant_not_satisfied", text)
+        self.assertIn(
+            "Human -- Start --> Root[Base:Base] !! failed: invariant_not_satisfied",
+            text,
+        )
 
     def test_strict_rejection_fails_with_complete_causal_chain(self) -> None:
         derivation, checked, text = self.run_source(
@@ -431,10 +627,31 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(derivation["failure"]["chain"], ["sig-0001", "sig-0002"])
         self.assertEqual(derivation["signals"][1]["outcome"], "rejected")
         self.assertIn("failure chain: sig-0001 -> sig-0002", text)
-        self.assertIn("no_handler", text)
+        self.assertIn("Root -- Missing --> Child !! rejected: no_handler", text)
+
+    def test_rejected_transition_uses_unchanged_actual_snapshot_state(self) -> None:
+        derivation, checked, text = self.run_source(
+            """
+            system Root {
+                initial_state: State::Ready;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            """,
+            "Root.Preset",
+        )
+        self.assertEqual(checked["verdict"], "failed")
+        self.assertEqual(derivation["signals"][0]["outcome"], "rejected")
+        self.assertEqual(
+            text.splitlines()[1],
+            "Human -- Startup --> Root[Ready:Ready] !! rejected: "
+            "state_not_accepted: expected State::Base, got State::Ready",
+        )
 
     def test_lossy_condition_rejection_is_discarded_and_never_pending(self) -> None:
-        derivation, checked, _ = self.run_source(
+        derivation, checked, text = self.run_source(
             """
             system Root {
                 initial_state: State::Base;
@@ -464,6 +681,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertIn("condition_not_satisfied", derivation["signals"][1]["reason"])
         self.assertEqual(derivation["summary"]["pending"], 0)
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
+        self.assertIn("!! discarded: condition_not_satisfied", text)
 
     def test_strict_emits_rejection_preserves_committed_stable_snapshot(self) -> None:
         derivation, _, _ = self.run_source(
@@ -635,7 +853,7 @@ class SignalPipelineTests(unittest.TestCase):
         bounded, _, text = self.run_source(source, "A.Go")
         self.assertEqual(bounded["verdict"], "bounded")
         self.assertEqual(bounded["truncated_frontier"][0]["coordinate"]["depth"], 4)
-        self.assertIn("truncated frontier", text)
+        self.assertIn("!! truncated: propagation_budget_exceeded", text)
         complete, _, _ = self.run_source(source, "A.Go", max_depth="all")
         self.assertEqual(complete["verdict"], "complete")
         explicit, _, _ = self.run_source(source, "A.Go", max_depth="4")
@@ -928,7 +1146,11 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertFalse(
             any(event["kind"] == "signal_sent" for event in derivation["events"])
         )
-        self.assertIn("reached boundary: Human -> Root.Preset", text)
+        self.assertEqual(
+            text,
+            "verdict: reached\n"
+            "boundary: Human -- Startup --> Root (before send)\n",
+        )
 
     def test_until_target_budget_and_handler_are_not_checked(self) -> None:
         derivation, checked, _ = self.run_source(
@@ -962,7 +1184,7 @@ class SignalPipelineTests(unittest.TestCase):
         )
 
     def test_until_drives_stops_uncommitted_ancestors_without_target_signal(self) -> None:
-        derivation, checked, _ = self.run_source(
+        derivation, checked, text = self.run_source(
             """
             system Root {
                 initial_state: State::Base;
@@ -998,6 +1220,14 @@ class SignalPipelineTests(unittest.TestCase):
         )
         self.assertEqual(derivation["summary"]["stopped"], 2)
         self.assertEqual(derivation["summary"]["pending"], 0)
+        self.assertIn(
+            "Human -- Start --> Root[Base:Base] !! stopped: until_signal_reached",
+            text,
+        )
+        self.assertIn(
+            "  Root -- Go --> Middle !! stopped: until_signal_reached",
+            text,
+        )
         self.assertFalse(
             any(
                 item["target"] == "Target" and item["name"] == "StopHere"
@@ -1326,7 +1556,40 @@ class SignalPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(resumed.returncode, 0, resumed.stderr)
-            self.assertIn("inspected(Root)", resumed_text.read_text(encoding="utf-8"))
+            self.assertIn(
+                "Human -- Inspect --> Root",
+                resumed_text.read_text(encoding="utf-8"),
+            )
+
+            verbose_work = root / "verbose-work"
+            verbose_environment = dict(os.environ)
+            verbose_environment["VERBOSE"] = "1"
+            verbose = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Root.Start",
+                    "-f",
+                    str(PIPELINE),
+                    "--source",
+                    "TestHarness",
+                    "--work-dir",
+                    str(verbose_work),
+                ],
+                cwd=root,
+                env=verbose_environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(verbose.returncode, first.returncode, verbose.stderr)
+            self.assertTrue(
+                verbose.stdout.startswith("Signal derivation: TestHarness -> Root.Start\n")
+            )
+            self.assertEqual(
+                (verbose_work / "derive.json").read_bytes(),
+                (first_work / "derive.json").read_bytes(),
+            )
 
             bounded = subprocess.run(
                 [

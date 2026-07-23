@@ -87,10 +87,23 @@ check 的退出码。所有用户错误写到 stderr，不输出 Python tracebac
 ## 展示边界
 
 view 逐字段复制/整理 derive 的 root/until request、reached boundary、verdict、events、signals、snapshots、frontier 和 failure chain；
-不得重新求值条件或通过名称推断 handler/outcome。text renderer 以 cause depth 缩进 Signal，明确标记
-`drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、到达时快照来源、
-before/after state/fact/reference delta、reached boundary、stopped propagation、discard/reject、truncated
-coordinate、source span 和完整因果链。
+不得重新求值条件或通过名称推断 handler/outcome。`render_text(view)` 保持单参数调用接口，并在内部仅以
+`os.environ.get("VERBOSE") == "1"` 选择 detailed renderer；render CLI、driver、shortcut 及 `-o` 输出
+不得各自实现另一套选择。该环境变量只控制最终文本，不能传入或修改 parse/model/derive/check/view。
+
+默认 compact renderer 首行输出 `verdict: VALUE`，随后按 `view["signals"]` 的原顺序输出：已解析
+Transition 为 `SOURCE -- SIGNAL --> TARGET[BEFORE:AFTER]`，已解析 Action 为
+`SOURCE -- SIGNAL --> TARGET`；未解析 handler 不猜类型，也不显示状态方括号。状态必须读取 target 在
+Signal before/after snapshot 中的实际值。Signal 文本名 `Preset` 显示为 `Startup`。每行按
+`coordinate.depth - min(0, min(coordinate.depth))` 使用两空格缩进，空 trace 不计算最小值；任何非
+`completed` outcome 在同行追加 ` !! OUTCOME: REASON`。reached 另输出
+`boundary: SOURCE -- SIGNAL --> TARGET (before send)`，failed 另保留一行 failure chain/reason。
+
+verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名称，以 cause depth 缩进 Signal，
+明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
+到达时快照来源、before/after state/fact/reference delta、reached boundary、stopped propagation、
+discard/reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 3 view 已包含两种
+renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 不实现 DOT、SVG 或 HTML。
 
 交互 HTML 是后续独立 JavaScript/TypeScript frontend 里程碑；它消费稳定 view schema，不在 Python

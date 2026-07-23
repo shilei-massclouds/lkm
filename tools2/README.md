@@ -6,6 +6,7 @@ Independent first-stage Signal derivation toolchain. It intentionally does not i
 make -C tools2 test
 tools2/bin/pyveri
 tools2/bin/pyveri -u Kernel.Startup --snapshot-out /tmp/kernel-presend.snapshot.json
+VERBOSE=1 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Start
 ```
 
 The default spec is `spec/model/main.spec`. Select another spec with `-f SPEC`, apply a scenario with
@@ -22,3 +23,7 @@ tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Inspect -s /tmp
 The shortcut defaults to `Human -> ComputerProject.Preset`; `Startup` is accepted as the external alias for
 `Preset`. Use `-u/--until SIGNAL` to stop immediately before that canonical Signal is sent and export the stable
 pre-send snapshot. All tools2 JSON and snapshots use protocol version 3.
+
+Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
+as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;
+unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This setting affects rendering only.
