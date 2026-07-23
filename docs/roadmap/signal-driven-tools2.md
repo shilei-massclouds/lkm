@@ -22,9 +22,10 @@
    包括歧义、重载和迁移诊断。
 4. pending 与 continuation：定义接受后等待未来 Signal、保存/恢复 continuation、队列所有权、超时、
    取消和 snapshot 可续跑语义；首期条件失败必须保持 rejected。
-5. 交互 HTML：由独立 JavaScript/TypeScript frontend 消费 view schema，实现确定 trace 的前进/后退
-   浏览；不得把浏览器变成推导器。与现有
-   [`interactive-model-animation.md`](interactive-model-animation.md) 协调 schema，但不删除老静态 SVG。
+5. 交互 HTML：独立 animate 阶段共同消费 tools2 v4 `model.json` 和 `view.json`，生成内嵌
+   `lkm.spec.signal-animation` v1 数据的自包含 HTML；按 Signal 前进/后退，不扩展 v4 view schema，
+   也不把浏览器变成推导器。完整计划见
+   [`interactive-model-animation.md`](interactive-model-animation.md)，老 tools 静态 SVG 保持原责任。
 6. 老工具迁移/退役：只有用户另行明确决定后才能规划。不得以 tools2 覆盖率或版本号自动触发。
 
 ## 首期验收证据

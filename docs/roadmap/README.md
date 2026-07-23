@@ -17,3 +17,4 @@
 - [阶段范式四层一致性审计](phase-paradigm-audit.md)
 - [Deferred / Trimmed 结构化治理审计](deferred-trimmed-audit.md)
 - [Signal-driven tools2 独立工具链](signal-driven-tools2.md)
+- [交互式 model trace HTML 动画](interactive-model-animation.md)

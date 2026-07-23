@@ -75,7 +75,7 @@
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 进行中 | model/tools2/signal | Signal-driven tools2 独立工具链 | 首期闭合隐式 Signal 推导、结构化 JSON、预算、快照和 text；后续再推进显式 DSL、handler 命名、continuation 与独立 HTML 前端。老 tools/ 与静态 trace/SVG 保持默认责任。 | [专题](roadmap/signal-driven-tools2.md) |
-| `P1` | 待办 | trace/view/render | 交互式 model trace HTML 动画 | 扩展 derive → view → render 数据流，以 signal transaction 生成可前进、后退的 HTML；保留静态 SVG，不新增 animated-svg。 | [实施计划](roadmap/interactive-model-animation.md) |
+| `P1` | 待办 | model/tools2/animate | 交互式 model trace HTML 动画 | 新增 tools2 独立 animate 阶段，支持 Signal 级前进/后退、自包含 HTML 和层级布局。 | [实施计划](roadmap/interactive-model-animation.md) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |
 | `P2` | 待办 | arceos_ex/checkpoint | 清除 `LOG=trace` 兼容入口 | README、脚本、stress case 与历史命令迁完后删除 alias，把 trace 名称留给 Linux-like trace。 | [checkpoint mapping](../spec/coding/mapping.md) |
