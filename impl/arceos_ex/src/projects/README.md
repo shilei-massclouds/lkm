@@ -1,3 +1,4 @@
 # arceos_ex Projects
 
-Project-level implementation notes live here when they need source-adjacent ownership.
+Metadata modules mirror ComputerProject and its Hardware/Firmware/Kernel direct children. They record the four-layer
+spec chain and do not implement runtime startup.

@@ -739,7 +739,7 @@ def _build_objects(
         if (
             effective_parent is None
             and has_kernel
-            and decl.name != "Kernel"
+            and decl.name not in {"Computer", "Kernel"}
             and not _type_is_or_extends(types, decl.kind, "ProjectObject")
         ):
             effective_parent = "Kernel"

@@ -4,6 +4,10 @@
 `impl/arceos_ex/src/systems/kernel.rs`。Kernel 只保存自己的四态 lifecycle 和顶层 completion；叶
 阶段状态与 checkpoint 留在所属 module。
 
+Kernel 是 `Computer` 的直接运行子系统，不属于 KernelProject。`systems/kernel.rs` 保留真实 lifecycle
+实现并附带四层规格链 metadata；Computer、Riscv64Platform、OpenSBI 的本轮 module 仅为 metadata。
+入口处 `BootArgs::new(a0, a1)` 是对 FirmwareProject 静态 ABI 产物的本地物化，不改变模型所有权。
+
 ## Preset 与 Setup
 
 架构入口发出 `Kernel.Started`、`BootTask.Online`、`BootInitFlow.Started` 和

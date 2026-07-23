@@ -1,6 +1,9 @@
 # Coding Projects
 
-Project-level coding constraints live here when they need a dedicated topic file.
+Project-level coding constraints mirror the three-child engineering tree.
 
-- [`kernel.md`](kernel.md) is the authoritative KernelProject coding specification and retains the stable legacy rule IDs for review traceability.
+- [`computer.md`](computer.md): ComputerProject orchestration and assembly metadata.
+- [`hardware.md`](hardware.md): Riscv64 adoption and BootHartContext construction ownership.
+- [`firmware.md`](firmware.md): SbiSpec adoption, BootArgs construction and OpenSBI product ownership.
+- [`kernel.md`](kernel.md): Config/Lds/kernel-image construction; retains stable legacy rule IDs.
 - [`rootfs-image.md`](rootfs-image.md) is the authoritative rootfs image-construction and fixture-overlay coding specification.

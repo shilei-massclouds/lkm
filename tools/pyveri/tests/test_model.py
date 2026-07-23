@@ -26,51 +26,53 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(len(result.errors), 0)
         self.assertIn("ComputerProject", result.model.objects)
         self.assertNotIn("OpenSbi" + "Firmware", result.model.objects)
-        self.assertEqual(result.model.objects["OpenSBI"].initial_state, "Ready")
+        self.assertEqual(result.model.objects["OpenSBI"].initial_state, "Base")
         self.assertEqual(
             result.model.children["ComputerProject"],
             [
+                "HardwareProject",
+                "FirmwareProject",
                 "KernelProject",
             ],
         )
         self.assertEqual(
-            result.model.children["KernelProject"],
+            result.model.children["Computer"],
             [
-                "Kernel",
+                "Riscv64Platform",
                 "OpenSBI",
+                "Kernel",
             ],
+        )
+        self.assertEqual(result.model.children["Riscv64Platform"], ["BootHartContext"])
+        self.assertEqual(result.model.children["KernelProject"], ["Config", "Lds"])
+        self.assertEqual(result.model.objects["Kernel"].parent, "Computer")
+        self.assertEqual(result.model.objects["Computer"].parent, None)
+        self.assertEqual(result.model.objects["Riscv64"].attrs, {})
+        self.assertEqual(
+            list(result.model.objects["BootHartContext"].attrs),
+            ["a0", "a1", "sp", "tp", "gp", "sstatus", "sie", "sip", "stvec", "sscratch", "satp"],
         )
         self.assertEqual(
             result.model.objects["OpenSBI"].states["Ready"].transitions["Enable"].target_state,
             "Online",
         )
         self.assertEqual(
-            result.model.children["Kernel"],
-            [
-                "SmpRuntimePhase",
-                "PayloadPhase",
-            ],
-        )
-        self.assertEqual(
             result.model.children["BootInitFlow"],
             [
                 "EntryPreludePhase",
-                "BootPhase",
-                "InterruptPhase",
-                "BootInitRestInitPhase",
-                "BootInitScheduleHandoffPhase",
-            ],
-        )
-        self.assertEqual(result.model.objects["BootTask"].initial_state, "Online")
-        self.assertEqual(
-            result.model.objects["BootPhase"].children,
-            [
                 "EntrySuccessorPhase",
                 "CorePreparePhase",
                 "MmCoreInitPhase",
                 "SchedInitPhase",
+                "IrqTimeInitPhase",
+                "LocalIrqEnablePhase",
+                "IrqOpenPreparePhase",
+                "ProcessPreparePhase",
+                "BootInitRestInitPhase",
+                "BootInitScheduleHandoffPhase",
             ],
         )
+        self.assertEqual(result.model.objects["BootTask"].initial_state, "Ready")
 
     def test_builds_object_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -81,15 +83,23 @@ class ModelBuilderTests(unittest.TestCase):
         dot = render_dot(view)
 
         self.assertIn("ComputerProject: ProjectObject", text)
+        self.assertIn("ComputerProject -> HardwareProject [parent]", text)
+        self.assertIn("ComputerProject -> FirmwareProject [parent]", text)
         self.assertIn("ComputerProject -> KernelProject [parent]", text)
-        self.assertIn("KernelProject -> OpenSBI [parent]", text)
+        self.assertIn("Computer -> Riscv64Platform [parent]", text)
+        self.assertIn("Computer -> OpenSBI [parent]", text)
+        self.assertIn("Computer -> Kernel [parent]", text)
+        self.assertIn("Riscv64Platform -> BootHartContext [parent]", text)
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
-        self.assertIn("BootInitFlow -> BootPhase [parent]", text)
+        self.assertIn("BootInitFlow -> EntryPreludePhase [parent]", text)
         self.assertNotIn("drives", text)
+        self.assertIn('"ComputerProject" -> "HardwareProject"', dot)
         self.assertIn('"ComputerProject" -> "KernelProject"', dot)
-        self.assertIn('"KernelProject" -> "OpenSBI"', dot)
+        self.assertIn('"Computer" -> "Riscv64Platform"', dot)
+        self.assertIn('"Computer" -> "OpenSBI"', dot)
+        self.assertIn('"Computer" -> "Kernel"', dot)
         self.assertIn('"BootTask" -> "BootInitFlow"', dot)
-        self.assertIn('"BootInitFlow" -> "BootPhase"', dot)
+        self.assertIn('"BootInitFlow" -> "EntryPreludePhase"', dot)
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
@@ -101,32 +111,42 @@ class ModelBuilderTests(unittest.TestCase):
         dot = render_dot(view)
 
         self.assertIn("ComputerProject.Preset", text)
-        self.assertIn("  -> ComputerProject.Setup [emits]", text)
-        self.assertIn("ComputerProject.Enable", text)
+        self.assertIn("  -> HardwareProject.Preset", text)
+        self.assertIn("  -> FirmwareProject.Preset", text)
         self.assertIn("  -> KernelProject.Preset", text)
-        self.assertIn("KernelProject.Enable", text)
-        self.assertIn("  -> OpenSBI.Enable", text)
+        self.assertIn("  -> ComputerProject.Setup [emits]", text)
+        self.assertIn("ComputerProject.Setup", text)
+        self.assertIn("  -> HardwareProject.Setup", text)
+        self.assertIn("  -> FirmwareProject.Setup", text)
+        self.assertIn("  -> KernelProject.Setup", text)
+        self.assertIn("ComputerProject.Enable", text)
+        self.assertIn("  -> Computer.Preset", text)
+        self.assertIn("Computer.Enable", text)
+        self.assertIn("  -> Riscv64Platform.Preset [emits]", text)
+        self.assertIn("Riscv64Platform.Enable", text)
+        self.assertIn("  -> OpenSBI.Preset [emits]", text)
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Preset [emits]", text)
         self.assertIn("Kernel.Preset", text)
         self.assertIn("  -> EntryPreludePhase.Preset", text)
         self.assertIn("Kernel.Setup", text)
-        self.assertIn("  -> BootPhase.Preset", text)
-        self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
         self.assertIn("CorePreparePhase.Setup", text)
         self.assertIn("MmCoreInitPhase.Setup", text)
-        self.assertIn("PayloadPhase.Setup", text)
+        self.assertIn("PayloadPreparePhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
         self.assertIn('"ComputerProject.Preset" -> "ComputerProject.Setup"', dot)
-        self.assertIn('"ComputerProject.Enable" -> "KernelProject.Preset"', dot)
-        self.assertIn('"KernelProject.Enable" -> "OpenSBI.Enable"', dot)
+        self.assertIn('"ComputerProject.Preset" -> "HardwareProject.Preset"', dot)
+        self.assertIn('"ComputerProject.Enable" -> "Computer.Preset"', dot)
+        self.assertIn('"Computer.Enable" -> "Riscv64Platform.Preset"', dot)
+        self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Preset"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
-        self.assertIn('"Kernel.Preset" -> "BootInitFlow.Preset"', dot)
+        self.assertIn('"Kernel.Preset" -> "BootTask.Enable"', dot)
+        self.assertIn('"BootTask.Enable" -> "BootInitFlow.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "EntryPreludePhase.Preset"', dot)
-        self.assertIn('"Kernel.Setup" -> "BootInitFlow.Setup"', dot)
-        self.assertIn('"BootInitFlow.Setup" -> "BootPhase.Preset"', dot)
+        self.assertIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
+        self.assertIn('"BootInitFlow.Setup" -> "EntrySuccessorPhase.Preset"', dot)
 
     def test_builds_timeline_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
@@ -143,30 +163,33 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
         self.assertIn("CorePreparePhase: ready (State::Ready)", text)
         self.assertIn("MmCoreInitPhase: ready (State::Ready)", text)
-        self.assertIn("BootPhase: ready (State::Ready)", text)
-        self.assertIn("PayloadPhase: ready (State::Ready)", text)
-        self.assertIn("PayloadPhase: online (State::Online)", text)
+        self.assertIn("PayloadPreparePhase: ready (State::Ready)", text)
+        self.assertIn("PayloadPreparePhase: online (State::Online)", text)
         self.assertIn("  - BootTask.State::Online", text)
-        self.assertIn("BootInitFlow: online (State::Online)", text)
+        self.assertIn("  - BootInitFlow.State::Online", text)
         self.assertIn("  - Soc.State::Prepared", text)
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
         self.assertIn("  - MemBlock.State::Offline", text)
-        self.assertIn("KernelProject: online (State::Online)", text)
-        self.assertIn("  - OpenSBI.State::Online", text)
-        self.assertNotIn("ComputerProject", text)
+        self.assertIn("FirmwareProject: ready (State::Ready)", text)
+        self.assertIn("  - BootArgs.State::Online", text)
+        self.assertIn("KernelProject: ready (State::Ready)", text)
+        self.assertIn("  - Config.State::Online", text)
+        self.assertIn("  - Lds.State::Online", text)
+        self.assertIn("Riscv64Platform: online (State::Online)", text)
+        self.assertIn("  - BootHartContext.State::Online", text)
+        self.assertIn("Kernel: prepared (State::Prepared)", text)
         self.assertNotIn("Kernel: ready", text)
         self.assertIn("<svg", svg)
-        self.assertIn("BootPhase", svg)
         self.assertIn("EntryPreludePhase", svg)
         self.assertIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
-        self.assertIn("PayloadPhase", svg)
+        self.assertIn("PayloadPreparePhase", svg)
+        self.assertIn("FirmwareProject", svg)
         self.assertIn("KernelProject", svg)
-        self.assertIn("OpenSBI", svg)
-        self.assertNotIn("ComputerProject", svg)
-
+        self.assertIn("Riscv64Platform", svg)
+        self.assertIn("BootHartContext", svg)
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
         document = parse_text(

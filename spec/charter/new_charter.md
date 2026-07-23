@@ -90,45 +90,44 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 内核系统是软件工程的产品，对工程同样基于状态机建模，用规格约束工程的过程。
 
-顶层模型是计算机工程，内核工程作为计算机工程的下级。把计算机工程做为顶层根，可以为内核工程的分析、推导验证提供必要的前置条件，也为将来计算机系统整体的规格化设计预留空间。
+顶层工程根是 `ComputerProject`，它有三个相互独立的直接子工程：`HardwareProject`、
+`FirmwareProject`、`KernelProject`。运行系统使用另一棵独立树，以 `Computer` 为根，直接包含
+`Riscv64Platform`、`OpenSBI` 和 `Kernel`；`BootHartContext` 是平台子系统。
 
-内核工程模型涵盖了从规格建立、代码生成、组装构造以及运行评估的全生命周期，最后的阶段运行评估要对内核运行实例建立规格模型，称为内核系统模型。
-
-内核系统模型是本项目的核心模型，其次是内核工程模型。
+Project 负责规格建立和构造，System 负责运行期启动。两棵树通过明确的静态规格/产物映射和
+`Computer` assembly fact 关联，不用 parent 混合表达工程归属与运行归属。
 
 所有模型都优先采用标准状态和迁移描述，必要时进行扩展。
 
 ### 计算机工程模型
 
-计算机工程模型（Computer Project）是构造计算机的工程过程实践的抽象，涵盖从规格标准到运行系统。该模型的最后一个阶段对产出的计算机系统实例进行启动和测试评估，这个计算机系统实例是包含了硬件/固件/内核/应用的完整系统。
+计算机工程模型（Computer Project）是构造计算机的工程过程实践的抽象，涵盖从规格标准到运行系统。
 
-1. 建立硬件标准和规范（preset）：从不存在（Base）到“纸上”计算机硬件（Prepared），具体到当前项目，是制订/遵循riscv64 ISA标准和soc硬件规格。
-2. 制造硬件和构造固件（setup）：从“纸上”计算机硬件（Prepared）到可运行的计算机硬件/固件（Ready），具体到当前项目，是制造riscv64体系结构的Soc计算机，制订/遵循SBI规范并构造SBI固件，如OpenSBI。
-3. 设计构造内核以及运行评估（enable）：从计算机硬件/固件（Ready）到可运行的完整的计算机系统（Online），具体到当前项目，在规格的指导约束下，构造内核，可以与Linux进行差分测试与评估。
+1. `Preset` 按固定顺序驱动三个子 Project 的 `Preset`，分别建立平台、OpenSBI 和 Kernel 规格。
+2. `Setup` 按相同顺序驱动三个子 Project 的构造；三者完成后都停在 `Ready`，并建立 `Computer` 已由三个运行系统组装的事实。
+3. `Enable` 只启动 `Computer`。`ComputerProject.Online` 表示启动已交接，不等待异步下游全部 Online。
 
 <img src=".\pic\计算机和内核建模.svg" alt="计算机和内核建模" style="zoom:50%;" />
 
-计算机工程模型的preset迁移和setup迁移自动在迁移完成时产生迁移完成通知事件，事件随即触发目标状态继续迁移，由此产生连锁反应直至Online状态。
+计算机工程的自迁移使用 completion event 串联；子 Project 构造使用同步 `drives`。交接后，运行系统按
+`Computer -> Riscv64Platform -> OpenSBI -> Kernel` 异步启动。
 
 > MUST[model]：计算机工程模型
 >
 > 1. 外部事件：唯一的工程启动事件PRESET，作用于Base状态，触发preset迁移
-> 2. preset和setup迁移在完成时自动产生通知事件，分别触发Prepared和Ready状态迁移
+> 2. Preset/Setup 必须按声明顺序驱动 Hardware/Firmware/KernelProject
+> 3. Enable 只驱动 Computer.Preset
 
 ### 内核工程模型
 
-内核工程模型由计算机工程模型在enable时驱动建立，工程生命周期包括从建立规格到运行评估。
-
-1. 建立内核规格（preset）：从不存在（Base）到规格化描述的内核（Prepared），具体到当前项目，是制订多层次的规格定义，并能够通过推导验证。这个多层次的规格定义即**内核系统模型**。
-2. 生成代码和组装构造（setup）：规格化描述的内核（Prepared）到内核Image（Ready），具体到当前项目，是在规格指导下由AI生成代码、封装组件和组装内核Image。
-3. 启动内核和测试评估（enable）：从内核Image（Ready）到内核运行实例（Online），具体到当前项目，内核系统启动完成进入到运行状态，通过各类测试和评估达到预期目标。
-
-内核工程模型的preset迁移和setup迁移自动在迁移完成时产生迁移完成通知事件，事件随即触发目标状态继续迁移，由此产生连锁反应直至Online状态。
+`KernelProject` 是 `ComputerProject` 的直接子工程。它的 `Preset` 建立 Kernel 系统规格；`Setup` 先完整
+构造 `Config`，再构造 `Lds`，两者都到 `Online`。`KernelProject` 随后停在 `Ready`，没有 Enable 阶段，
+也不拥有或启动运行系统 `Kernel`。
 
 > MUST[model]：内核工程模型
 >
-> 1. 外部事件：唯一的工程启动事件PRESET，作用于Base状态，触发preset迁移
-> 2. preset和setup迁移在完成时自动产生通知事件，分别触发Prepared和Ready状态迁移
+> 1. KernelProject 只由 ComputerProject 的 Preset/Setup 同步驱动
+> 2. KernelProject.Setup 完成时 Config 与 Lds 必须均为 Online，KernelProject 为 Ready
 
 ### 内核系统模型 - 本项目核心模型
 
@@ -157,21 +156,21 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 
 ## 计算机工程规格
 
-对构建计算机系统的过程约束，参照前述计算机工程模型，包括三个阶段：定义体系结构和硬件平台规范，生产硬件平台和构造固件，构造内核然后进行系统集成测试和评估。
+对构建计算机系统的过程约束，参照前述双树模型，分别驱动三个直接子 Project。
 
 > MUST[model]：计算机工程规格，遵循''标准状态和迁移''和“计算机工程模型”
 >
-> Preset：建立Riscv64 ISA规范
+> Preset：顺序驱动 HardwareProject、FirmwareProject、KernelProject 建立三份系统规格
 >
-> Setup：建立硬件平台，定义BootArgs标准，建立SbiSpec规范，实现OpenSBI
+> Setup：按同序构造 BootHartContext、BootArgs、Config/Lds，并建立 Computer assembly fact
 >
-> Enable：驱动内核工程
+> Enable：只驱动 Computer.Preset
 
 
 
 ## 内核工程规格
 
-构造内核系统的工程过程约束，参照前述内核工程模型，包括三个阶段：建立内核系统规格、构造内核映像、造到启动评估。
+构造内核系统的工程过程约束包括建立 Kernel 规格以及构造 Config/Lds；运行启动不属于本 Project。
 
 > MUST[model]：内核工程规格，遵循''标准状态和迁移''和“内核工程模型”
 >
@@ -179,7 +178,7 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 >
 > Setup：定义Lds和Config，构造产生内核映像
 >
-> Enable：驱动内核系统的实例启动，测试和评估
+> 完成：KernelProject 停在 Ready；Kernel 由 OpenSBI.Enable 异步启动
 
 
 

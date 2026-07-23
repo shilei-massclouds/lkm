@@ -66,8 +66,11 @@ class CliTests(unittest.TestCase):
         self.assertIn("\ndeferred:\n", text)
         self.assertIn("\ntrimmed:\n", text)
         self.assertIn("user_clone.001 [Feature]", text)
+        self.assertIn("HardwareProject.Transition::Preset", text)
+        self.assertIn("Riscv64Platform.Transition::Preset", text)
+        self.assertIn("OpenSBI.Transition::Enable", text)
         self.assertIn("MmCoreInitPhase.Transition::Setup", text)
-        self.assertIn("InterruptPhase.Transition::Setup", text)
+        self.assertIn("IrqTimeInitPhase.Transition::Setup", text)
 
     def test_summary_mode_runs_strict_full_verification_without_details(self) -> None:
         stdout = io.StringIO()

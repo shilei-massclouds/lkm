@@ -1,10 +1,32 @@
+#![allow(dead_code)]
+
 //! Runtime lifecycle boundary for the running `Kernel` system instance.
+
+use super::{MappingStatus, SpecPath, SystemMapping};
 
 use core::sync::atomic::AtomicU8;
 
 use crate::{
     checkpoint::Checkpoint,
     objects::state::{EventResult, LifecycleEvent, State, failed_condition},
+};
+
+pub const KERNEL_SYSTEM_MAPPING: SystemMapping = SystemMapping {
+    object_name: "Kernel",
+    charter: SpecPath {
+        layer: "charter",
+        path: "spec/charter/systems/kernel.md",
+    },
+    model: SpecPath {
+        layer: "model",
+        path: "spec/model/systems/kernel.spec",
+    },
+    coding: SpecPath {
+        layer: "coding",
+        path: "spec/coding/systems/kernel.md",
+    },
+    implementation: "impl/arceos_ex/src/systems/kernel.rs",
+    status: MappingStatus::RuntimeImplemented,
 };
 
 #[unsafe(link_section = ".data.phase")]

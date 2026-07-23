@@ -1638,11 +1638,84 @@ class SignalPipelineTests(unittest.TestCase):
                 ("Human", "ComputerProject", "Preset"),
             )
             self.assertEqual(derivation["boundary"]["normalized_signal"], "Kernel.Preset")
+            self.assertEqual(
+                [
+                    (item["source"], item["target"], item["name"])
+                    for item in derivation["signals"]
+                ],
+                [
+                    ("Human", "ComputerProject", "Preset"),
+                    ("ComputerProject", "HardwareProject", "Preset"),
+                    ("ComputerProject", "FirmwareProject", "Preset"),
+                    ("ComputerProject", "KernelProject", "Preset"),
+                    ("ComputerProject", "ComputerProject", "Setup"),
+                    ("ComputerProject", "HardwareProject", "Setup"),
+                    ("ComputerProject", "FirmwareProject", "Setup"),
+                    ("FirmwareProject", "BootArgs", "Setup"),
+                    ("FirmwareProject", "BootArgs", "Enable"),
+                    ("ComputerProject", "KernelProject", "Setup"),
+                    ("KernelProject", "Config", "Preset"),
+                    ("Config", "Config", "Setup"),
+                    ("Config", "Config", "Enable"),
+                    ("KernelProject", "Lds", "Preset"),
+                    ("Lds", "Lds", "Setup"),
+                    ("Lds", "Lds", "Enable"),
+                    ("ComputerProject", "ComputerProject", "Enable"),
+                    ("ComputerProject", "Computer", "Preset"),
+                    ("Computer", "Computer", "Setup"),
+                    ("Computer", "Computer", "Enable"),
+                    ("Computer", "Riscv64Platform", "Preset"),
+                    ("Riscv64Platform", "BootHartContext", "Preset"),
+                    ("Riscv64Platform", "Riscv64Platform", "Setup"),
+                    ("Riscv64Platform", "BootHartContext", "Setup"),
+                    ("Riscv64Platform", "Riscv64Platform", "Enable"),
+                    ("Riscv64Platform", "BootHartContext", "Enable"),
+                    ("Riscv64Platform", "OpenSBI", "Preset"),
+                    ("OpenSBI", "OpenSBI", "Setup"),
+                    ("OpenSBI", "OpenSBI", "Enable"),
+                ],
+            )
             self.assertFalse(
                 any(
                     item["target"] == "Kernel" and item["name"] == "Preset"
                     for item in derivation["signals"]
                 )
+            )
+            boundary_states = derivation["boundary"]["snapshot"]["states"]
+            self.assertEqual(
+                {
+                    name: boundary_states[name]
+                    for name in (
+                        "HardwareProject",
+                        "FirmwareProject",
+                        "KernelProject",
+                        "BootArgs",
+                        "Config",
+                        "Lds",
+                        "Computer",
+                        "Riscv64Platform",
+                        "BootHartContext",
+                        "OpenSBI",
+                        "Kernel",
+                    )
+                },
+                {
+                    "HardwareProject": "Ready",
+                    "FirmwareProject": "Ready",
+                    "KernelProject": "Ready",
+                    "BootArgs": "Online",
+                    "Config": "Online",
+                    "Lds": "Online",
+                    "Computer": "Online",
+                    "Riscv64Platform": "Online",
+                    "BootHartContext": "Online",
+                    "OpenSBI": "Online",
+                    "Kernel": "Base",
+                },
+            )
+            self.assertIn(
+                "computer_assembled_from(Riscv64Platform,OpenSBI,Kernel)",
+                derivation["boundary"]["snapshot"]["facts"],
             )
             saved = read_json(snapshot)
             self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
@@ -1671,6 +1744,18 @@ class SignalPipelineTests(unittest.TestCase):
                     for item in normal_data["signals"]
                 )
             )
+            normal_states = normal_data["last_stable_snapshot"]["states"]
+            self.assertEqual(normal_states["ComputerProject"], "Online")
+            self.assertEqual(normal_states["HardwareProject"], "Ready")
+            self.assertEqual(normal_states["FirmwareProject"], "Ready")
+            self.assertEqual(normal_states["KernelProject"], "Ready")
+            self.assertEqual(normal_states["BootArgs"], "Online")
+            self.assertEqual(normal_states["Config"], "Online")
+            self.assertEqual(normal_states["Lds"], "Online")
+            self.assertEqual(normal_states["Computer"], "Online")
+            self.assertEqual(normal_states["Riscv64Platform"], "Online")
+            self.assertEqual(normal_states["BootHartContext"], "Online")
+            self.assertEqual(normal_states["OpenSBI"], "Online")
 
             resumed_work = root / "kernel-resumed"
             resumed = subprocess.run(

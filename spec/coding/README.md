@@ -150,5 +150,5 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 - `objects/README.md`：`spec/model/objects/*.spec` 的逐文件 coding 覆盖表；共享专题必须在表中明确归属。
 - `projects/rootfs-image.md`：rootfs 镜像构造与 fixture overlay 的权威项目规则。
 - `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现证据、源码落点、命令和阶段性观察；不承载 MUST/SHOULD/MAY 规则。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
-- `projects/kernel.md`：KernelProject 实现映射。
-- `systems/kernel.md`：Kernel system 实现映射。
+- `projects/{computer,hardware,firmware,kernel}.md`：四个 Project 的规格/构造责任与 metadata 映射。
+- `systems/{computer,riscv64-platform,opensbi,kernel}.md`：四个运行 System 的启动责任与实现状态。

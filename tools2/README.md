@@ -24,6 +24,10 @@ The shortcut defaults to `Human -> ComputerProject.Preset`; `Startup` is accepte
 `Preset`. Use `-u/--until SIGNAL` to stop immediately before that canonical Signal is sent and export the stable
 pre-send snapshot. All tools2 JSON and snapshots use protocol version 3.
 
+For the main model, the default request constructs `HardwareProject`, `FirmwareProject`, and `KernelProject` in
+declaration order, then hands off to `Computer -> Riscv64Platform -> OpenSBI -> Kernel`. Project construction drives
+are synchronous; runtime startup sends retain FIFO creation order.
+
 Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
 as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;
 unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This setting affects rendering only.

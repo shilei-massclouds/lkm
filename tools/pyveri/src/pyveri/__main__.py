@@ -38,7 +38,18 @@ RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
 DEFAULT_TRACE_SVG_MARKER = "__pyveri_default_trace_svg__"
 DEFAULT_TRACE_ACTION_DEPTH = 3
-_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
+_LIFECYCLE_ROOT_OBJECTS = frozenset(
+    {
+        "ComputerProject",
+        "HardwareProject",
+        "FirmwareProject",
+        "KernelProject",
+        "Computer",
+        "Riscv64Platform",
+        "OpenSBI",
+        "Kernel",
+    }
+)
 
 
 def main(argv: list[str] | None = None) -> int:

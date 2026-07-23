@@ -314,7 +314,15 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["summary"]["blocked"], 0)
             self.assertEqual(data["summary"]["contradiction"], 0)
             self.assertEqual(data["states"]["ComputerProject"], "Online")
-            self.assertEqual(data["states"]["KernelProject"], "Online")
+            self.assertEqual(data["states"]["HardwareProject"], "Ready")
+            self.assertEqual(data["states"]["FirmwareProject"], "Ready")
+            self.assertEqual(data["states"]["KernelProject"], "Ready")
+            self.assertEqual(data["states"]["BootArgs"], "Online")
+            self.assertEqual(data["states"]["Config"], "Online")
+            self.assertEqual(data["states"]["Lds"], "Online")
+            self.assertEqual(data["states"]["Computer"], "Online")
+            self.assertEqual(data["states"]["Riscv64Platform"], "Online")
+            self.assertEqual(data["states"]["BootHartContext"], "Online")
             self.assertEqual(data["states"]["OpenSBI"], "Online")
             self.assertNotIn("OpenSbi" + "Firmware", data["states"])
             self.assertEqual(data["states"]["Kernel"], "Online")
@@ -439,7 +447,18 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(root["target_state"], "Prepared")
             self.assertEqual(root["status"], "proved")
             self.assertGreater(len(root["children"]), 0)
-            self.assertEqual(root["children"][0]["edge_kind"], "emits")
+            self.assertEqual(
+                [
+                    (child["object"], child["transition"], child["edge_kind"])
+                    for child in root["children"][:4]
+                ],
+                [
+                    ("HardwareProject", "Preset", "drives"),
+                    ("FirmwareProject", "Preset", "drives"),
+                    ("KernelProject", "Preset", "drives"),
+                    ("ComputerProject", "Setup", "emits"),
+                ],
+            )
             self.assertTrue(
                 any(record["span"] is not None for record in data["records"])
             )
@@ -705,24 +724,11 @@ class DeriveToolTests(unittest.TestCase):
             self.assertFalse(
                 any(
                     record["expression"]
-                    in ("boot_hartid == Riscv64.a0", "dtb_pa == Riscv64.a1")
-                    for record in obligations
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["expression"] == "boot_hartid == Riscv64.a0"
-                    and record["proof_class"] == "boot_arguments"
-                    and record["proof_provider"] == "riscv_boot_protocol"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["expression"] == "dtb_pa == Riscv64.a1"
-                    and record["proof_class"] == "boot_arguments"
-                    and record["proof_provider"] == "riscv_boot_protocol"
-                    for record in proved
+                    in (
+                        "boot_hartid == Riscv64.a0",
+                        "dtb_pa == Riscv64.a1",
+                    )
+                    for record in data["records"]
                 )
             )
             self.assertTrue(
@@ -758,7 +764,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
+                    == "BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -766,7 +772,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
+                    record["expression"] == "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -774,7 +780,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
+                    record["expression"] == "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -782,7 +788,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
+                    record["expression"] == "BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
@@ -1215,7 +1221,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)"
+                    == "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)"
                     and record["proof_class"] == "stack_layout"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
@@ -1308,8 +1314,8 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["object"] == "BootArgs"
                     and record["predicate"] == "attrs_accessible"
-                    and record["proof_class"] == "boot_arguments"
-                    and record["proof_provider"] == "riscv_boot_protocol"
+                    and record["proof_class"] == "firmware_boot_abi"
+                    and record["proof_provider"] == "firmware_project_boot_abi"
                     for record in proved
                 )
             )
@@ -1358,7 +1364,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["object"] == "Riscv64"
                     and record["predicate"] == "attrs_accessible"
-                    and record["proof_class"] == "architecture_register_file"
+                    and record["proof_class"] == "architecture_capabilities"
                     and record["proof_provider"] == "riscv_isa_spec"
                     for record in proved
                 )

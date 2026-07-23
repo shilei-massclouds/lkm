@@ -1,3 +1,4 @@
 # arceos_ex Systems
 
-System-level implementation notes live here when they need source-adjacent ownership.
+Metadata modules mirror Computer and its Riscv64Platform/OpenSBI/Kernel direct children. Only `kernel.rs` retains a
+real runtime lifecycle in this round; the other three modules record mapping metadata without changing startup flow.

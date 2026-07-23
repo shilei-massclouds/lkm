@@ -13,7 +13,7 @@
 
 进入 `entry_prelude_rust_entry()` 后，先 adoption Prepare、Kernel、BootTask、BootInitFlow 和
 EntryPrelude 的入口边界。EntryPrelude adoption 必须检查自身精确 Base 以及 model 的
-Riscv64、SbiSpec、OpenSBI、Lds、Config 依赖；不得再次输出早期 checkpoint。
+Riscv64、SbiSpec、BootArgs、BootHartContext、OpenSBI、Lds、Config 依赖；不得再次输出早期 checkpoint。
 
 ## Preset: Base -> Prepared
 

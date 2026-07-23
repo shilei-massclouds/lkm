@@ -29,7 +29,18 @@ _TRACE_ANNOTATION_GAP = 10
 _TRACE_ANNOTATION_MARGIN = 18
 _TRACE_ANNOTATION_CLEARANCE = 6
 _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
-_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
+_LIFECYCLE_ROOT_OBJECTS = frozenset(
+    {
+        "ComputerProject",
+        "HardwareProject",
+        "FirmwareProject",
+        "KernelProject",
+        "Computer",
+        "Riscv64Platform",
+        "OpenSBI",
+        "Kernel",
+    }
+)
 
 
 def render_view(

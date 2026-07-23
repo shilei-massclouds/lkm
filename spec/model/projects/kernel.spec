@@ -1,21 +1,80 @@
 /*
  * Kernel Project Specification
  *
- * KernelProject models the lifecycle of the kernel engineering work product:
- * establish the kernel system specification, build the image, then boot and
- * evaluate the resulting kernel instance.
- *
- * Four-level chain:
- * spec/charter/projects/kernel.md -> this model -> spec/coding/projects/kernel.md
- * -> impl/arceos_ex/src/projects/kernel.rs.
+ * KernelProject establishes the Kernel system specification, constructs Config
+ * completely, then constructs Lds and the kernel image. It stops at Ready.
  */
 
-/*
- * Lds 表示链接脚本形成的内核映像布局对象。
- * 它提供符号地址、BSS 边界、根栈边界、内核映像边界和入口前导期早期代码布局。
- */
+object Config: PrepareObject {
+    initial_state: State::Base;
+    parent: KernelProject;
+    source: config::entry_prelude;
+
+    attrs {
+        page_size: Size;
+        pt_size_on_stack: Size;
+        boot_stack_size: Size;
+        pmd_size: Size;
+        kernel_link_addr: VirtAddr<KernelImage>;
+        kernel_image_va_window_size: Size;
+        satp_mode: SatpMode;
+        fixmap: FixMapConfig;
+        selected_payload_kind: SelectedPayloadKind;
+        exec_argument_limits: ExecArgumentLimits;
+    }
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                emits { Transition::Setup; }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                emits { Transition::Enable; }
+            }
+        }
+    }
+
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            page_size > 0;
+            pmd_size >= page_size;
+            aligned(pmd_size, page_size);
+            pt_size_on_stack > 0;
+            pt_size_on_stack < page_size;
+            boot_stack_size >= page_size;
+            aligned(boot_stack_size, page_size);
+            kernel_link_addr != 0;
+            page_aligned(kernel_link_addr);
+            valid_virt_addr(kernel_link_addr);
+            kernel_image_va_window_size > 0;
+            kernel_image_va_window_size >= pmd_size;
+            valid_satp_mode(satp_mode);
+            valid_fixmap_config(fixmap);
+        }
+    }
+
+    reference linux_6_12 {
+        kernel_link_addr = symbol("KERNEL_LINK_ADDR");
+        kernel_image_va_window_size = symbol("SZ_2G");
+    }
+}
+
 object Lds: PrepareObject {
-    initial_state: State::Online;
+    initial_state: State::Base;
+    parent: KernelProject;
     source: linker::linux_6_12;
 
     attrs {
@@ -42,12 +101,36 @@ object Lds: PrepareObject {
         kernel_end: SymbolAddr;
     }
 
-    /*
-     * Online 表示链接布局在入口前导期开始前已经确定。
-     * 本状态约束关键符号存在、范围有序且栈边界页对齐。
-     */
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Config.state == State::Online;
+                }
+
+                emits { Transition::Setup; }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                emits { Transition::Enable; }
+            }
+        }
+    }
+
+    state State::Ready {
+        transitions {
+            on Transition::Enable -> State::Online {
+            }
+        }
+    }
+
     state State::Online {
         invariant {
+            Config.state == State::Online;
             attrs_accessible(self);
             global_pointer != 0;
             kernel_start != 0;
@@ -113,203 +196,47 @@ type ExecArgumentLimits {
     argument_bytes: Size;
 }
 
-/*
- * Config 表示入口前导期可见的构建配置和静态参数。
- * 它约束页大小、内核虚拟区域、地址转换模式、fixmap 布局和 exec 参数上限。
- */
-object Config: PrepareObject {
-    initial_state: State::Online;
-    source: config::entry_prelude;
-
-    attrs {
-        page_size: Size;
-        pt_size_on_stack: Size;
-        boot_stack_size: Size;
-        pmd_size: Size;
-        kernel_link_addr: VirtAddr<KernelImage>;
-        kernel_image_va_window_size: Size;
-        satp_mode: SatpMode;
-        fixmap: FixMapConfig;
-        selected_payload_kind: SelectedPayloadKind;
-        exec_argument_limits: ExecArgumentLimits;
-    }
-
-    /*
-     * Online 表示配置对象在入口前导期开始前已经确定。
-     * 本状态保证当前推导依赖的配置项存在并满足基本边界约束。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            page_size > 0;
-            pmd_size >= page_size;
-            aligned(pmd_size, page_size);
-            pt_size_on_stack > 0;
-            pt_size_on_stack < page_size;
-            boot_stack_size >= page_size;
-            aligned(boot_stack_size, page_size);
-            kernel_link_addr != 0;
-            page_aligned(kernel_link_addr);
-            valid_virt_addr(kernel_link_addr);
-            kernel_image_va_window_size > 0;
-            kernel_image_va_window_size >= pmd_size;
-            valid_satp_mode(satp_mode);
-            valid_fixmap_config(fixmap);
-        }
-    }
-
-    reference linux_6_12 {
-        kernel_link_addr = symbol("KERNEL_LINK_ADDR");
-        kernel_image_va_window_size = symbol("SZ_2G");
-    }
-}
-
-include "../systems/kernel.spec";
-
-/*
- * OpenSBI 表示本次启动中的单一 OpenSBI 固件/交接对象。Ready 表示固件
- * 和启动 ABI 已经具备内核入口交接事实；Enable 消费 KernelProject 构造好的
- * kernel image，完成控制权交接并发出进入 Kernel 生命周期的启动事件。
- */
-object OpenSBI: PrepareObject {
-    initial_state: State::Ready;
-    parent: KernelProject;
-    source: firmware::opensbi;
-
-    state State::Ready {
-        invariant {
-            SbiSpec.state == State::Online;
-            BootArgs.state == State::Online;
-            ordered_booting_enabled();
-            primary_hart_only_at_kernel_entry();
-            primary_hart_sie_clear_at_kernel_entry();
-            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
-        }
-
-        transitions {
-            on Transition::Enable -> State::Online {
-                depends_on {
-                    SbiSpec.state == State::Online;
-                    BootArgs.state == State::Online;
-                    Lds.state == State::Online;
-                    Config.state == State::Online;
-                    kernel_image_constructed();
-                }
-
-                ensures {
-                    task_ref_targets(BootTaskRef, BootTask);
-                    task_ref_ready(BootTaskRef);
-                }
-
-                emits {
-                    Kernel.Transition::Preset;
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            SbiSpec.state == State::Online;
-            BootArgs.state == State::Online;
-            Lds.state == State::Online;
-            Config.state == State::Online;
-            kernel_image_constructed();
-            ordered_booting_enabled();
-            primary_hart_only_at_kernel_entry();
-            primary_hart_sie_clear_at_kernel_entry();
-            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
-            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
-        }
-    }
-}
-
 object KernelProject: ProjectObject {
     initial_state: State::Base;
     parent: ComputerProject;
 
-    /*
-     * Base 表示内核工程已经进入模型空间，但尚未建立内核系统规格。
-     */
     state State::Base {
         transitions {
-            /*
-             * Preset 建立内核系统规格和工程模型前置。
-             */
             on Transition::Preset -> State::Prepared {
                 ensures {
                     kernel_system_spec_established();
-                }
-
-                emits {
-                    Transition::Setup;
                 }
             }
         }
     }
 
-    /*
-     * Prepared 表示内核系统规格已经建立，可以在规格约束下生成代码并组装 image。
-     */
     state State::Prepared {
         invariant {
             kernel_system_spec_established();
         }
 
         transitions {
-            /*
-             * Setup 覆盖 lds/conf/image layout 前置，生成代码并构造内核 image。
-             */
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    Lds.state == State::Online;
-                    Config.state == State::Online;
+                drives {
+                    Config.Transition::Preset;
+                    Lds.Transition::Preset;
                 }
 
                 ensures {
+                    Config.state == State::Online;
+                    Lds.state == State::Online;
                     kernel_image_constructed();
                 }
-
-                emits {
-                    Transition::Enable;
-                }
             }
         }
     }
 
-    /*
-     * Ready 表示内核 image 已经构造完成，可以启动并评估。
-     */
     state State::Ready {
         invariant {
-            Lds.state == State::Online;
             Config.state == State::Online;
+            Lds.state == State::Online;
+            kernel_system_spec_established();
             kernel_image_constructed();
-        }
-
-        transitions {
-            /*
-             * Enable 启动 OpenSBI 交接过程；OpenSBI 完成控制权交接后通过 emits
-             * 触发 Kernel.Preset，Kernel 自身的完成事件链负责自动推进到 Online。
-             */
-            on Transition::Enable -> State::Online {
-                drives {
-                    OpenSBI.Transition::Enable;
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示内核工程产物已经启动为在线内核实例。
-     */
-    state State::Online {
-        invariant {
-            OpenSBI.state == State::Online;
-            Kernel.state == State::Online;
         }
     }
 }

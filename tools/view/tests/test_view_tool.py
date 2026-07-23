@@ -66,6 +66,24 @@ class ViewToolTests(unittest.TestCase):
                     for edge in data["edges"]
                 )
             )
+            self.assertTrue(
+                all(
+                    any(
+                        edge["source"] == parent
+                        and edge["target"] == child
+                        and edge["kind"] == "parent"
+                        for edge in data["edges"]
+                    )
+                    for parent, child in (
+                        ("ComputerProject", "HardwareProject"),
+                        ("ComputerProject", "FirmwareProject"),
+                        ("Computer", "Riscv64Platform"),
+                        ("Computer", "OpenSBI"),
+                        ("Computer", "Kernel"),
+                        ("Riscv64Platform", "BootHartContext"),
+                    )
+                )
+            )
             declaration_sites = data["metadata"]["declaration_sites"]
             self.assertEqual(len(declaration_sites), 4)
             self.assertTrue(
@@ -100,9 +118,37 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     edge["source"] == "ComputerProject.Enable"
-                    and edge["target"] == "KernelProject.Preset"
+                    and edge["target"] == "Computer.Preset"
                     and edge["kind"] == "drives"
                     for edge in data["edges"]
+                )
+            )
+            self.assertEqual(
+                [
+                    edge["target"]
+                    for edge in data["edges"]
+                    if edge["source"] == "ComputerProject.Preset"
+                    and edge["kind"] == "drives"
+                ],
+                [
+                    "HardwareProject.Preset",
+                    "FirmwareProject.Preset",
+                    "KernelProject.Preset",
+                ],
+            )
+            self.assertTrue(
+                all(
+                    any(
+                        edge["source"] == source
+                        and edge["target"] == target
+                        and edge["kind"] == "emits"
+                        for edge in data["edges"]
+                    )
+                    for source, target in (
+                        ("Computer.Enable", "Riscv64Platform.Preset"),
+                        ("Riscv64Platform.Enable", "OpenSBI.Preset"),
+                        ("OpenSBI.Enable", "Kernel.Preset"),
+                    )
                 )
             )
 
@@ -149,6 +195,17 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
             self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "FirmwareProject" for row in rows))
+            self.assertTrue(any(row["phase"] == "KernelProject" for row in rows))
+            self.assertTrue(any(row["phase"] == "Riscv64Platform" for row in rows))
+            self.assertTrue(
+                any(
+                    item["object_name"] == "BootHartContext"
+                    and item["detail"] == "State::Online"
+                    for row in rows
+                    for item in row["items"]
+                )
+            )
             self.assertFalse(any(row["phase"] == "InterruptPhase" for row in rows))
             self.assertFalse(any(row["phase"] == "PayloadPhase" for row in rows))
 
@@ -208,7 +265,17 @@ class ViewToolTests(unittest.TestCase):
                 for cell in metadata["trace_cells"]
                 if cell["label"] == "BootTask.State::Online"
             )
-            self.assertEqual(boot_task_cell["column"], riscv64_cell["column"])
+            boot_hart_context_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["label"] == "BootHartContext.State::Online"
+            )
+            self.assertEqual(
+                boot_hart_context_cell["column"], riscv64_cell["column"]
+            )
+            self.assertEqual(
+                boot_task_cell["column"], boot_hart_context_cell["column"]
+            )
             self.assertFalse(
                 any(
                     cell["kind"] == "transition_span"
@@ -251,20 +318,59 @@ class ViewToolTests(unittest.TestCase):
             computer_enable_cell = trace_cell(
                 "transition_span", "ComputerProject.Transition::Enable"
             )
-            kernel_project_preset_cell = trace_cell(
-                "transition_span", "KernelProject.Transition::Preset"
-            )
-            kernel_project_setup_emit_cell = trace_cell(
-                "emit_event", "KernelProject.Transition::Setup"
-            )
             kernel_project_setup_cell = trace_cell(
                 "transition_span", "KernelProject.Transition::Setup"
             )
-            kernel_project_enable_emit_cell = trace_cell(
-                "emit_event", "KernelProject.Transition::Enable"
+            computer_system_preset_cell = trace_cell(
+                "transition_span", "Computer.Transition::Preset"
             )
-            kernel_project_enable_cell = trace_cell(
-                "transition_span", "KernelProject.Transition::Enable"
+            computer_system_setup_emit_cell = trace_cell(
+                "emit_event", "Computer.Transition::Setup"
+            )
+            computer_system_setup_cell = trace_cell(
+                "transition_span", "Computer.Transition::Setup"
+            )
+            computer_system_enable_emit_cell = trace_cell(
+                "emit_event", "Computer.Transition::Enable"
+            )
+            computer_system_enable_cell = trace_cell(
+                "transition_span", "Computer.Transition::Enable"
+            )
+            platform_preset_emit_cell = trace_cell(
+                "emit_event", "Riscv64Platform.Transition::Preset"
+            )
+            platform_preset_cell = trace_cell(
+                "transition_span", "Riscv64Platform.Transition::Preset"
+            )
+            platform_setup_emit_cell = trace_cell(
+                "emit_event", "Riscv64Platform.Transition::Setup"
+            )
+            platform_setup_cell = trace_cell(
+                "transition_span", "Riscv64Platform.Transition::Setup"
+            )
+            platform_enable_emit_cell = trace_cell(
+                "emit_event", "Riscv64Platform.Transition::Enable"
+            )
+            platform_enable_cell = trace_cell(
+                "transition_span", "Riscv64Platform.Transition::Enable"
+            )
+            opensbi_preset_emit_cell = trace_cell(
+                "emit_event", "OpenSBI.Transition::Preset"
+            )
+            opensbi_preset_cell = trace_cell(
+                "transition_span", "OpenSBI.Transition::Preset"
+            )
+            opensbi_setup_emit_cell = trace_cell(
+                "emit_event", "OpenSBI.Transition::Setup"
+            )
+            opensbi_setup_cell = trace_cell(
+                "transition_span", "OpenSBI.Transition::Setup"
+            )
+            opensbi_enable_emit_cell = trace_cell(
+                "emit_event", "OpenSBI.Transition::Enable"
+            )
+            opensbi_enable_cell = trace_cell(
+                "transition_span", "OpenSBI.Transition::Enable"
             )
             kernel_preset_cell = trace_cell(
                 "transition_span", "Kernel.Transition::Preset"
@@ -307,39 +413,60 @@ class ViewToolTests(unittest.TestCase):
                 computer_preset_cell,
                 computer_setup_cell,
                 computer_enable_cell,
-                kernel_project_preset_cell,
                 kernel_project_setup_cell,
-                kernel_project_enable_cell,
                 kernel_preset_cell,
                 kernel_setup_cell,
             ):
                 self.assertGreaterEqual(phase_cell["row_span"], 24)
-            self.assertEqual(
-                kernel_project_preset_cell["column"], computer_enable_cell["column"] + 1
+            self.assertFalse(
+                any(
+                    cell["kind"] == "transition_span"
+                    and cell["label"]
+                    in {
+                        "HardwareProject.Transition::Enable",
+                        "FirmwareProject.Transition::Enable",
+                        "KernelProject.Transition::Enable",
+                    }
+                    for cell in metadata["trace_cells"]
+                )
             )
             self.assertEqual(
-                kernel_project_setup_emit_cell["column"],
-                kernel_project_preset_cell["column"],
+                computer_system_setup_emit_cell["column"],
+                computer_system_preset_cell["column"],
             )
             self.assertEqual(
-                kernel_project_setup_cell["column"], kernel_project_preset_cell["column"]
+                computer_system_setup_cell["column"],
+                computer_system_preset_cell["column"],
             )
             self.assertEqual(
-                kernel_project_enable_emit_cell["column"],
-                kernel_project_preset_cell["column"],
+                computer_system_enable_emit_cell["column"],
+                computer_system_preset_cell["column"],
             )
             self.assertEqual(
-                kernel_project_enable_cell["column"], kernel_project_preset_cell["column"]
+                computer_system_enable_cell["column"],
+                computer_system_preset_cell["column"],
             )
             assert_emit_at_transition_end(
-                kernel_project_preset_cell, kernel_project_setup_emit_cell
+                computer_system_preset_cell, computer_system_setup_emit_cell
             )
             assert_emit_at_transition_end(
-                kernel_project_setup_cell, kernel_project_enable_emit_cell
+                computer_system_setup_cell, computer_system_enable_emit_cell
             )
             self.assertEqual(
-                kernel_preset_cell["column"], kernel_project_enable_cell["column"] + 1
+                platform_preset_emit_cell["column"], platform_preset_cell["column"]
             )
+            self.assertEqual(platform_setup_cell["column"], platform_preset_cell["column"])
+            self.assertEqual(platform_enable_cell["column"], platform_preset_cell["column"])
+            assert_emit_at_transition_end(platform_preset_cell, platform_setup_emit_cell)
+            assert_emit_at_transition_end(platform_setup_cell, platform_enable_emit_cell)
+            self.assertEqual(opensbi_preset_emit_cell["column"], opensbi_preset_cell["column"])
+            self.assertEqual(opensbi_setup_cell["column"], opensbi_preset_cell["column"])
+            self.assertEqual(opensbi_enable_cell["column"], opensbi_preset_cell["column"])
+            assert_emit_at_transition_end(opensbi_preset_cell, opensbi_setup_emit_cell)
+            assert_emit_at_transition_end(opensbi_setup_cell, opensbi_enable_emit_cell)
+            self.assertGreater(platform_preset_cell["column"], computer_system_preset_cell["column"])
+            self.assertGreater(opensbi_preset_cell["column"], platform_preset_cell["column"])
+            self.assertLess(kernel_preset_cell["row"], boot_task_cell["row"])
             self.assertEqual(boot_setup_cell["column"], kernel_preset_cell["column"] + 1)
             self.assertEqual(kernel_setup_emit_cell["column"], kernel_preset_cell["column"])
             self.assertGreater(

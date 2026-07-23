@@ -17,6 +17,8 @@
    [`../coding/objects/README.md`](../coding/objects/README.md)。
 4. [运行期实例声明](objects/dynamic-instance-declaration.md)：`drives` 中 fresh Type instance 的声明、
    词法 alias、生命周期、稳定 trace identity 与静态/运行时视图边界。
+5. [工程树](projects/README.md)：ComputerProject 及三个直接子 Project 的规格与构造责任。
+6. [系统树](systems/README.md)：Computer 及平台、OpenSBI、Kernel 的运行期启动责任。
 
 ## 定位
 
@@ -1347,7 +1349,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
-形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `ComputerProject`、`KernelProject`、`Kernel`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格。子阶段 4 的正式模型位于 `spec/model/phases/boot/mm-core-init/`。
+形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`。顶层由独立工程树
+`ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}` 构造独立系统树
+`Computer -> {Riscv64Platform, OpenSBI, Kernel}`，再由 Kernel 通过 BootTask/BootInitFlow 串接
+EntryPreludePhase、EntrySuccessorPhase、CorePreparePhase 与 MmCoreInitPhase 等内部规格。子阶段 4 的正式模型位于
+`spec/model/phases/boot/mm-core-init/`。
 
 本子阶段的结束状态应至少包含：
 
@@ -3784,18 +3790,22 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 
 # 新版准备
 
-## 计算机工程规格
+## 双树工程与系统启动规格
 
-`ComputerProject` 是当前模型的顶层工程对象，按计算机前置、硬件/固件前置和内核工程启动三段迁移组织：
+工程树固定为 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`。ComputerProject
+的 Preset 按该顺序同步推进三个子 Project 的 Preset；Setup 按同一顺序推进三个子 Project 的 Setup。
+子 Project 分别建立平台、OpenSBI、Kernel 规格并构造各自产物，最终停在 Ready，不执行 Enable。
 
-- `Preset -> Prepared`：确认 `Riscv64` 已在线，建立当前项目采用的 RISC-V64 ISA 前置；`emits ComputerProject.Setup`；无 `drives`。
-- `Setup -> Ready`：确认 `BootArgs`、`SbiSpec`、`OpenSBI` 已处于可交接状态，建立启动 ABI 与固件交接前置；`emits ComputerProject.Enable`；无 `drives`。
-- `Enable -> Online`：启动内核工程编排；`drives KernelProject.Preset`。
+静态归属如下：`Riscv64.parent = HardwareProject`；`SbiSpec`、`BootArgs.parent = FirmwareProject`；
+`Config`、`Lds.parent = KernelProject`。`BootHartContext` 虽由 HardwareProject.Setup 构造，却是
+`Riscv64Platform` 的运行子系统。Riscv64 只保存外部 ISA 能力；boot hart 的可变 GPR/CSR 全部属于
+BootHartContext。BootArgs 是 FirmwareProject 决定的只读 ABI 产物，不由入口寄存器反向定义。
 
-## 内核工程规格
+ComputerProject.Setup 在三个子 Project Ready 后建立 `Computer` 已由 `Riscv64Platform`、`OpenSBI`、
+`Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Preset`；其 Online
+表示启动已经交接，不表示异步下游已经全部 Online。
 
-`KernelProject` 描述内核工程产物从规格建立、image 构造到启动评估的生命周期：
-
-- `Preset -> Prepared`：建立 kernel system spec 和工程模型前置；`emits KernelProject.Setup`；无 `drives`。
-- `Setup -> Ready`：依赖 `Lds` 与 `Config`，生成代码并构造 kernel image；`emits KernelProject.Enable`；无 `drives`。
-- `Enable -> Online`：启动内核系统实例；`drives Kernel.Preset`。
+系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`，其中
+`BootHartContext.parent = Riscv64Platform`。Computer 自身三阶段完成后 emits Riscv64Platform.Preset；
+平台三阶段同步推进 BootHartContext 后 emits OpenSBI.Preset；OpenSBI 三阶段完成并令 handoff 寄存器
+与 BootArgs 一致后 emits Kernel.Preset。Kernel 保持现有到 BootInitFlow 的后续语义。

@@ -95,6 +95,10 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("<svg", text)
             self.assertIn("PreparePhase", text)
             self.assertIn("BootPhase", text)
+            self.assertIn("FirmwareProject", text)
+            self.assertIn("KernelProject", text)
+            self.assertIn("Riscv64Platform", text)
+            self.assertIn("BootHartContext", text)
 
     def test_render_text_from_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -139,6 +143,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("phase-arrow", text)
             self.assertIn('marker id="dot"', text)
             self.assertIn(">Riscv64</tspan>", text)
+            self.assertIn(">BootHartContext</tspan>", text)
             self.assertIn('dy="12">Online</tspan>', text)
             self.assertIn("<tspan", text)
             self.assertIn("depends-arrow", text)

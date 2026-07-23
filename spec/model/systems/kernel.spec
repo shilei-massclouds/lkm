@@ -20,7 +20,7 @@ include "../phases/payload/main.spec";
  */
 object Kernel: KernelObject {
     initial_state: State::Base;
-    parent: KernelProject;
+    parent: Computer;
 
     /*
      * Base 表示内核映像已经驻留在内存中，但是 Kernel 尚未收到启动事件、
@@ -35,6 +35,9 @@ object Kernel: KernelObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
+                    BootArgs.state == State::Online;
+                    Riscv64Platform.state == State::Online;
+                    BootHartContext.state == State::Online;
                     OpenSBI.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;

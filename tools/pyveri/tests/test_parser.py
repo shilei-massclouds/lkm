@@ -380,9 +380,14 @@ class ParserTests(unittest.TestCase):
 
         object_names = {obj.name for obj in document.objects}
         self.assertIn("ComputerProject", object_names)
+        self.assertIn("HardwareProject", object_names)
+        self.assertIn("FirmwareProject", object_names)
         self.assertIn("KernelProject", object_names)
+        self.assertIn("Computer", object_names)
+        self.assertIn("Riscv64Platform", object_names)
+        self.assertIn("OpenSBI", object_names)
         self.assertIn("Kernel", object_names)
-        self.assertIn("BootPhase", object_names)
+        self.assertIn("BootHartContext", object_names)
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
 

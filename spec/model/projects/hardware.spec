@@ -1,0 +1,63 @@
+/* Hardware engineering specification and project-owned ISA standard. */
+
+predicate riscv64_isa_capabilities_available() -> bool;
+predicate riscv64_platform_system_spec_established() -> bool;
+predicate riscv64_platform_constructed() -> bool;
+predicate boot_hart_context_constructed() -> bool;
+
+object Riscv64: IsaObject {
+    initial_state: State::Online;
+    parent: HardwareProject;
+    source: external_spec::riscv_isa;
+
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            riscv64_isa_capabilities_available();
+        }
+    }
+}
+
+object HardwareProject: ProjectObject {
+    initial_state: State::Base;
+    parent: ComputerProject;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Riscv64.state == State::Online;
+                }
+
+                ensures {
+                    riscv64_platform_system_spec_established();
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            Riscv64.state == State::Online;
+            riscv64_platform_system_spec_established();
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    riscv64_platform_constructed();
+                    boot_hart_context_constructed();
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            Riscv64.state == State::Online;
+            riscv64_platform_system_spec_established();
+            riscv64_platform_constructed();
+            boot_hart_context_constructed();
+        }
+    }
+}

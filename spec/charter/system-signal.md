@@ -25,10 +25,14 @@
 系统层级不改变信号的明确目标。发送给某个子系统的信号只触发该子系统，不会因为 parent/child
 关系自动向上冒泡并触发父系统；父系统是否收到信号，只由信号目标是否为父系统决定。
 
-完整内核模型采用一棵稳定、可复核的有效系统层级。源规格中的显式 `parent` 始终优先；当组合后的
-模型包含 `Kernel` 时，没有显式 parent 且不是 `ProjectObject` 或其子类型的静态系统默认属于
-`Kernel`。项目对象保留工程层级，当前根是 `ComputerProject`，其下是 `KernelProject`，再下是
-`Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，工具不得为了凑齐主模型层级而虚构 Kernel。
+完整内核模型采用两棵稳定、可复核且彼此独立的有效层级树。源规格中的显式 `parent` 始终优先；当
+组合后的模型包含 `Kernel` 时，没有显式 parent 且不是 `ProjectObject` 或其子类型的静态系统仍默认
+属于 `Kernel`，但具名 `Computer` 是系统树显式根，绝不能应用该默认。
+
+工程树是 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`；系统树是
+`Computer -> {Riscv64Platform, OpenSBI, Kernel}`，且 `BootHartContext.parent = Riscv64Platform`。
+工程产物通过显式 parent 归属对应 Project，运行系统不挂在 Project 下。不包含 `Kernel` 的独立规格
+片段保持自己的根，工具不得为了凑齐主模型层级而虚构 Kernel。
 有效层级只用于结构展示、Signal 坐标和预算；它仍不产生隐式冒泡、广播或 handler 继承。未知
 parent、自引用和 parent 环都是模型错误，所有静态 view 与 Signal 工具必须消费同一份归一化层级。
 
@@ -122,6 +126,11 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 `--signal` 保持必填。tools2 协议统一为 version 3 并拒绝 version 1、version 2、老工具协议和旧
 snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
+
+主模型的启动创建顺序固定为三个子 Project Preset、三个子 Project Setup、Computer assembly、
+`Computer -> Riscv64Platform -> OpenSBI -> Kernel`。后三段交接由异步 `emits` 形成全局 FIFO，不得按
+hierarchy depth 重排。`ComputerProject.Online` 只表示已经把启动交给 Computer；它不等待异步下游
+Online。
 
 tools2 的默认文本视图服务于快速阅读 Signal 在系统层级间的传播：按结构化 Signal 的创建顺序逐行
 展示 source、Signal、target，按目标相对根系统的 hierarchy depth 使用两空格缩进，并只为已解析的

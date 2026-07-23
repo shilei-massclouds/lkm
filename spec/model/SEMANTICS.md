@@ -414,9 +414,10 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
   使用后者。`Action::Name` 不产生 completion event，不能声明 `emits`。
 
 默认推导入口是 `ComputerProject.Transition::Preset`。该入口表示唯一外部工程启动
-事件 `PRESET`；后续 `ComputerProject`、`KernelProject` 和 `Kernel` 的启动推进必须
-通过 `emits` completion-event 链或显式 `drives` 表达，不得依赖工具隐式补齐
-`Setup`/`Enable`。
+事件 `PRESET`；它先以固定顺序 `drives` 三个直接子 Project 的规格与构造，再交接给
+系统根 `Computer`。后续 `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的运行
+启动通过 completion-event 链表达；各对象自己的 `Setup`/`Enable` 也必须由显式
+`emits` 或 `drives` 产生，不得依赖工具隐式补齐。
 
 ## SEM-SYSTEM-PARENT-001: Effective Parent Is Shared Across Model Consumers
 
@@ -424,9 +425,10 @@ lossy event 仍然真实发出并留下 accepted/discarded 结果，不是假定
 
 1. 源声明存在显式 `parent` 时原样采用，后续规则不得覆盖。
 2. 若组合模型包含具名 `Kernel`，无显式 parent 且类型不是 `ProjectObject` 或其传递子类型的系统采用
-   `Kernel`。
-3. `ProjectObject` 或其子类型不使用上述默认；当前项目树为根 `ComputerProject`、显式
-   `KernelProject.parent = ComputerProject`、显式 `Kernel.parent = KernelProject`。
+   `Kernel`；具名 `Computer` 是系统树显式根，不应用该默认。
+3. `ProjectObject` 或其子类型不使用上述默认。项目树为
+   `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`；系统树为
+   `Computer -> {Riscv64Platform, OpenSBI, Kernel}`，`BootHartContext.parent = Riscv64Platform`。
 4. 不含 `Kernel` 的独立 fixture 保留声明形成的根集合，不建立不存在的默认 parent。
 
 归一化后必须检查 unknown parent、self parent 和传递环，并把 effective parent 写入 model protocol。
@@ -905,7 +907,7 @@ RCU reader nesting、preemptible-RCU accounting、quiescent-state 或 scheduler/
 
 正式规格以 `CPU视角` 为基础，不支持脱离具体执行 CPU 的“上帝式”全局全知视角。每个 `CPU视角` 描述的是：本 CPU 自身拥有或可直接访问的本地状态、本 CPU 可以驱动的事件/action，以及本 CPU 能观察到的环境事实。其它 CPU 的内部执行进展，对当前 CPU 来说只能通过同步对象、ack、共享对象状态、拓扑事实、IPI 可见结果等环境事实进入当前视角，而不是由当前 CPU 直接展开或控制。
 
-CPU 的 live 寄存器组也是 `CPU视角` 的私有对象，包括通用寄存器组 GPRs 和控制状态寄存器 CSRs。每个 CPU 都拥有自己的 GPR/CSR 实例集合；一个 CPU 不能在自己的规格步骤中直接读写另一个 CPU 的 live registers，只能通过 trap frame、saved task context、IPI/同步结果或共享内存中已经发布的保存副本观察间接结果。RISC-V64 中 `tp` 属于本 CPU 的 GPR 视图，`sstatus`、`stvec`、`sie`、`sip`、`satp` 等属于本 CPU 的 CSR 视图；现有规格中 `Riscv64.tp`、`Riscv64.satp` 这类具名写法是 BP 迁移期的当前 CPU register alias，后续规范化时应收敛为 `CurrentCPU.cpu.Registers` 或等价 CPU-local register group 下的成员。
+CPU 的 live 寄存器组也是 `CPU视角` 的私有对象，包括通用寄存器组 GPRs 和控制状态寄存器 CSRs。每个 CPU 都拥有自己的 GPR/CSR 实例集合；一个 CPU 不能在自己的规格步骤中直接读写另一个 CPU 的 live registers，只能通过 trap frame、saved task context、IPI/同步结果或共享内存中已经发布的保存副本观察间接结果。RISC-V64 中 `tp` 属于本 CPU 的 GPR 视图，`sstatus`、`stvec`、`sie`、`sip`、`satp` 等属于本 CPU 的 CSR 视图；现有规格中 `BootHartContext.tp`、`BootHartContext.satp` 这类具名写法是 BP 迁移期的当前 CPU register alias，后续规范化时应收敛为 `CurrentCPU.cpu.Registers` 或等价 CPU-local register group 下的成员。
 
 `BP视角` 和 `AP视角` 是 `CPU视角` 的两个具体分类。BP 是唯一且必须存在的启动 CPU，承担主要内核初始化职责；AP 是后续进入的 secondary CPU，复用共享类型语义和 BP 已建立的共享环境，但必须拥有自己的 `CurrentCPU`、本地中断控制、current-task 引用、GPR/CSR 寄存器组和 AP entry/ack 路径。
 

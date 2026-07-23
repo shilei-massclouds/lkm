@@ -58,7 +58,10 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   续跑。
 - 主模型的 `tools2/bin/pyveri -u Kernel.Startup` 必须从默认 `Human -> ComputerProject.Preset` 开始并在
   `Kernel.Preset` 发出前 reached；其 snapshot 可用于后续 `-t Kernel.Startup -s SNAPSHOT`，不带 until
-  时仍执行完整可达推导。
+  时仍执行完整可达推导。发送前 snapshot 中三个直接子 Project 均为 `Ready`，
+  `BootArgs/Config/Lds`、`Computer/Riscv64Platform/BootHartContext/OpenSBI` 均为 `Online`，`Kernel` 仍为
+  `Base`；Signal 创建顺序必须保留三次 Project Preset、三次 Project Setup 和
+  `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的异步 FIFO 交接。
 - 默认文本覆盖 Transition/Action 两种行、`Preset` 到 `Startup` 的显示别名、每层两空格的 hierarchy
   depth 缩进、负 depth 整体平移以及 Signal 创建顺序不被 depth 重排；Transition 状态必须来自 target
   的 before/after snapshot，stopped 未提交时显示相同状态，未解析 handler 不得猜类型或显示状态。

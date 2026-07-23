@@ -538,20 +538,69 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 computer["children"],
                 [
+                    "HardwareProject",
+                    "FirmwareProject",
                     "KernelProject",
                 ],
             )
             self.assertEqual(
                 objects["KernelProject"]["children"],
                 [
-                    "Kernel",
-                    "OpenSBI",
+                    "Config",
+                    "Lds",
                 ],
             )
-            self.assertEqual(opensbi["initial_state"], "Ready")
+            self.assertEqual(
+                objects["Computer"]["children"],
+                [
+                    "Riscv64Platform",
+                    "OpenSBI",
+                    "Kernel",
+                ],
+            )
+            self.assertIsNone(objects["Computer"]["parent"])
+            self.assertEqual(kernel["parent"], "Computer")
+            self.assertEqual(
+                objects["Riscv64Platform"]["children"], ["BootHartContext"]
+            )
+            self.assertEqual(objects["Riscv64"]["attrs"], {})
+            self.assertEqual(
+                set(objects["BootHartContext"]["attrs"]),
+                {
+                    "a0",
+                    "a1",
+                    "gp",
+                    "satp",
+                    "sie",
+                    "sip",
+                    "sp",
+                    "sscratch",
+                    "sstatus",
+                    "stvec",
+                    "tp",
+                },
+            )
+            self.assertEqual(opensbi["initial_state"], "Base")
+            self.assertEqual(
+                opensbi["states"]["Base"]["transitions"]["Preset"]["target_state"],
+                "Prepared",
+            )
             self.assertEqual(
                 opensbi["states"]["Ready"]["transitions"]["Enable"]["target_state"],
                 "Online",
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in opensbi["states"]["Ready"]["transitions"][
+                        "Enable"
+                    ]["ensures"]
+                    for entry in block["entries"][:2]
+                ],
+                [
+                    "BootHartContext.a0 == BootArgs.boot_hartid",
+                    "BootHartContext.a1 == BootArgs.dtb_pa",
+                ],
             )
             self.assertIn("BootTask", kernel["children"])
             self.assertEqual(objects["BootTask"]["initial_state"], "Ready")
@@ -657,11 +706,19 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(preset["source_state"], "Base")
             self.assertEqual(preset["target_state"], "Prepared")
             self.assertEqual(
+                [entry["text"] for entry in preset["drives"][0]["entries"]],
+                [
+                    "HardwareProject.Transition::Preset",
+                    "FirmwareProject.Transition::Preset",
+                    "KernelProject.Transition::Preset",
+                ],
+            )
+            self.assertEqual(
                 [entry["text"] for entry in preset["emits"][0]["entries"]],
                 ["Transition::Setup"],
             )
             self.assertIn(
-                "Riscv64.stvec == phys_addr(EventStream.early_event_entry)",
+                "BootHartContext.stvec == phys_addr(EventStream.early_event_entry)",
                 [
                     entry["text"]
                     for block in event_preset["ensures"]
@@ -686,7 +743,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 [entry["text"] for entry in enable["drives"][0]["entries"]],
                 [
-                    "KernelProject.Transition::Preset",
+                    "Computer.Transition::Preset",
                 ],
             )
 

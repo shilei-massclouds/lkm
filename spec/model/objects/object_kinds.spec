@@ -13,13 +13,25 @@ type PhaseObject {
 type ProjectObject {
 }
 
+type SystemObject {
+}
+
+type ComputerObject: SystemObject {
+}
+
+type PlatformObject: SystemObject {
+}
+
+type FirmwareObject: SystemObject {
+}
+
 type PrepareObject {
 }
 
 type IsaObject {
 }
 
-type KernelObject {
+type KernelObject: SystemObject {
 }
 
 type DeviceObject {

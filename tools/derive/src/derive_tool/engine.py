@@ -105,19 +105,18 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "FixMap": ("fixmap_layout", "config_source_candidate"),
     "LinearMap": ("linear_map_layout", "config_source_candidate"),
     "Lds": ("linker_layout", "linker_script_candidate"),
-    "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
+    "BootArgs": ("firmware_boot_abi", "firmware_project_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
-    "Riscv64": ("architecture_register_file", "riscv_isa_spec_candidate"),
+    "Riscv64": ("architecture_capabilities", "riscv_isa_spec_candidate"),
+    "BootHartContext": ("architecture_register_file", "platform_context_candidate"),
     "BootTask": ("static_object_binding", "linker_symbol_candidate"),
     "EventStream": ("static_entry_symbol_binding", "linker_symbol_candidate"),
     "TrampolineVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "EarlyVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "SwapperVm": ("static_page_table_binding", "linker_symbol_candidate"),
 }
-_BOOT_PROTOCOL_PROOFS = {
-    "attrs_accessible(self)": ("boot_arguments", "riscv_boot_protocol"),
-    "boot_hartid == Riscv64.a0": ("boot_arguments", "riscv_boot_protocol"),
-    "dtb_pa == Riscv64.a1": ("boot_arguments", "riscv_boot_protocol"),
+_FIRMWARE_PROJECT_PROOFS = {
+    "attrs_accessible(self)": ("firmware_boot_abi", "firmware_project_boot_abi"),
 }
 _CONFIG_SOURCE_PROOFS = {
     "attrs_accessible(self)": ("config_attributes", "config_source"),
@@ -302,7 +301,15 @@ _EXTERNAL_SOURCE_PROOFS = {
         for expression, proof in _PHYSICAL_MEMORY_PROOFS.items()
     },
     ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
-        "architecture_register_file",
+        "architecture_capabilities",
+        "riscv_isa_spec",
+    ),
+    (
+        "Riscv64",
+        "external_spec::riscv_isa",
+        "riscv64_isa_capabilities_available()",
+    ): (
+        "architecture_capabilities",
         "riscv_isa_spec",
     ),
     ("SbiSpec", "external_spec::riscv_sbi", "sbi_hsm_available()"): (
@@ -548,10 +555,6 @@ _CONTAINS_PROOFS = {
     ),
 }
 _RELATION_PROOFS = {
-    "boot_hartid == Riscv64.a0": (
-        "boot_arguments",
-        "boot_protocol_candidate",
-    ),
     "page_size > 0": (
         "configuration",
         "config_source_candidate",
@@ -587,10 +590,6 @@ _RELATION_PROOFS = {
     "kernel_image_va_window_size >= pmd_size": (
         "configuration",
         "config_source_candidate",
-    ),
-    "dtb_pa == Riscv64.a1": (
-        "boot_arguments",
-        "boot_protocol_candidate",
     ),
     "global_pointer != 0": (
         "linker_layout",
@@ -668,11 +667,11 @@ _RELATION_PROOFS = {
         "stack_layout",
         "config_and_linker_candidate",
     ),
-    "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+    "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
         "stack_layout",
         "prior_derivation_facts",
     ),
-    "inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootHartContext.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
         "stack_layout",
         "prior_derivation_facts",
     ),
@@ -696,55 +695,55 @@ _RELATION_PROOFS = {
         "fixmap_layout",
         "config_source_candidate",
     ),
-    "Riscv64.sie == 0": (
+    "BootHartContext.sie == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.sip == 0": (
+    "BootHartContext.sip == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.stvec == phys_addr(EventStream.early_event_entry)": (
+    "BootHartContext.stvec == phys_addr(EventStream.early_event_entry)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
+    "BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.sscratch == 0": (
+    "BootHartContext.sscratch == 0": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == phys_addr(BootTask.storage)": (
+    "BootHartContext.tp == phys_addr(BootTask.storage)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
+    "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)": (
+    "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
+    "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.gp == phys_addr(Lds.global_pointer)": (
+    "BootHartContext.gp == phys_addr(Lds.global_pointer)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
+    "BootHartContext.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)": (
+    "BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode)": (
+    "BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -3094,7 +3093,7 @@ class _Deriver:
                     entry, entry_span, kind, state, entered_by
                 ):
                     continue
-                elif self._try_prove_boot_protocol_fact(
+                elif self._try_prove_firmware_project_fact(
                     entry, entry_span, kind, transition, state
                 ):
                     continue
@@ -3558,7 +3557,7 @@ class _Deriver:
             return True
         return False
 
-    def _try_prove_boot_protocol_fact(
+    def _try_prove_firmware_project_fact(
         self,
         expression: str,
         span: SourceSpan,
@@ -3574,7 +3573,7 @@ class _Deriver:
         ):
             return False
 
-        proof = _BOOT_PROTOCOL_PROOFS.get(expression.strip())
+        proof = _FIRMWARE_PROJECT_PROOFS.get(expression.strip())
         if proof is None:
             return False
         proof_class, proof_provider = proof
@@ -3974,14 +3973,14 @@ class _Deriver:
             return False
 
         if expression == "interrupt_concurrency_closed()":
-            self._validate_state("OpenSBI", "Ready")
+            self._validate_state("OpenSBI", "Base")
             if "primary_hart_sie_clear_at_kernel_entry()" not in self.proved_expressions:
                 return False
             proof_class = "system_exclusive_context"
             proof_provider = "prior_derivation_facts"
         elif expression == "task_concurrency_closed()":
             self._validate_state("SbiSpec", "Online")
-            self._validate_state("OpenSBI", "Ready")
+            self._validate_state("OpenSBI", "Base")
             if not {
                 "sbi_hsm_available()",
                 "ordered_booting_enabled()",
@@ -5558,11 +5557,11 @@ _PRIOR_FACT_PROOFS = {
             "trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)",
         },
     ),
-    "valid_task_ref(Riscv64.tp)": (
+    "valid_task_ref(BootHartContext.tp)": (
         "object_storage",
         {
-            "Riscv64.tp == phys_addr(BootTask.storage)",
-            "Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
+            "BootHartContext.tp == phys_addr(BootTask.storage)",
+            "BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap)",
         },
     ),
     "valid_task_storage(BootTask.storage)": (
@@ -5571,23 +5570,23 @@ _PRIOR_FACT_PROOFS = {
             "valid_object_storage(storage)",
         },
     ),
-    "valid_stack_pointer(Riscv64.sp)": (
+    "valid_stack_pointer(BootHartContext.sp)": (
         "architecture_state",
         {
-            "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
-            "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+            "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
         },
     ),
-    "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+    "inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
         "stack_layout",
         {
-            "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+            "BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
         },
     ),
-    "inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+    "inside(BootHartContext.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
         "stack_layout",
         {
-            "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+            "BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
         },
     ),
 }

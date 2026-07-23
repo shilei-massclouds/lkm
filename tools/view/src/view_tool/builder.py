@@ -32,7 +32,18 @@ _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 DEFAULT_TRACE_ACTION_DEPTH = 3
-_LIFECYCLE_ROOT_OBJECTS = frozenset({"ComputerProject", "KernelProject", "Kernel"})
+_LIFECYCLE_ROOT_OBJECTS = frozenset(
+    {
+        "ComputerProject",
+        "HardwareProject",
+        "FirmwareProject",
+        "KernelProject",
+        "Computer",
+        "Riscv64Platform",
+        "OpenSBI",
+        "Kernel",
+    }
+)
 _TRACE_PHASE_MIN_BODY_ROWS = 24
 
 

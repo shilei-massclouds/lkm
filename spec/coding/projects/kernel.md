@@ -26,8 +26,10 @@ paths that define the project object before later behavior is added.
 
 Rule ID: `kernel_project_coding_uses_model_lds_and_config_inputs` (MUST).
 
-Project-level construction may depend on model Lds and Config facts,
-architecture/firmware/platform facts, and build configuration facts.
+Project-level construction must build model Config completely before Lds, then
+establish the kernel-image fact. Architecture/firmware/platform specifications
+and build configuration facts are inputs; Config and Lds are KernelProject-owned
+products.
 
 #### Runtime separation
 
@@ -48,6 +50,5 @@ phase observations merely to represent system progress.
 
 Rule ID: `kernel_project_coding_keeps_build_inputs_project_owned` (MUST).
 
-Build inputs, image construction facts and project/product metadata
-remain project-owned unless a later model/coding update records a
-narrower object owner.
+Build inputs, image construction facts and project/product metadata remain
+project-owned. KernelProject stops at Ready and must not start Kernel or OpenSBI.

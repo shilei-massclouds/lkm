@@ -10,8 +10,8 @@
 
 1. [`README.md`](README.md)、[`mapping.md`](mapping.md) 和
    [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
-2. [`projects/kernel.md`](projects/kernel.md)：KernelProject 映射。
-3. [`systems/kernel.md`](systems/kernel.md)：Kernel 生命周期和顶层阶段树映射。
+2. [`projects/README.md`](projects/README.md)：Computer/Hardware/Firmware/KernelProject 映射。
+3. [`systems/README.md`](systems/README.md)：Computer/平台/OpenSBI/Kernel 运行系统映射。
 4. 编排阶段：BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow 直接叶阶段 ->
    payload commit。
 5. 对应叶子阶段和普通对象主题。

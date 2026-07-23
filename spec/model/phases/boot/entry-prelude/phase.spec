@@ -30,12 +30,12 @@ object BootTaskEntryBinding: KernelObject {
                 }
 
                 may_change {
-                    Riscv64.tp;
+                    BootHartContext.tp;
                 }
 
                 ensures {
-                    Riscv64.tp == phys_addr(BootTask.storage);
-                    valid_task_ref(Riscv64.tp);
+                    BootHartContext.tp == phys_addr(BootTask.storage);
+                    valid_task_ref(BootHartContext.tp);
                     task_preemption_control_ready(BootTask);
                     task_preempt_count_initialized_to_init_preempt_count(BootTask);
                     task_preemption_disabled(BootTask);
@@ -47,8 +47,8 @@ object BootTaskEntryBinding: KernelObject {
     /* Prepared 表示物理 tp binding 已完整建立。 */
     state State::Prepared {
         invariant {
-            Riscv64.tp == phys_addr(BootTask.storage);
-            valid_task_ref(Riscv64.tp);
+            BootHartContext.tp == phys_addr(BootTask.storage);
+            valid_task_ref(BootHartContext.tp);
             task_preemption_control_ready(BootTask);
             task_preempt_count_initialized_to_init_preempt_count(BootTask);
             task_preemption_disabled(BootTask);
@@ -63,12 +63,12 @@ object BootTaskEntryBinding: KernelObject {
                 }
 
                 may_change {
-                    Riscv64.tp;
+                    BootHartContext.tp;
                 }
 
                 ensures {
-                    Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-                    valid_task_ref(Riscv64.tp);
+                    BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
+                    valid_task_ref(BootHartContext.tp);
                     task_preemption_control_ready(BootTask);
                     task_preempt_count_initialized_to_init_preempt_count(BootTask);
                     task_preemption_disabled(BootTask);
@@ -80,8 +80,8 @@ object BootTaskEntryBinding: KernelObject {
     /* Ready 表示虚拟 tp binding 已提交；BootTask 始终保持 Online。 */
     state State::Ready {
         invariant {
-            Riscv64.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
-            valid_task_ref(Riscv64.tp);
+            BootHartContext.tp == virt_addr(BootTask.storage, EarlyVm, KernelImageMap);
+            valid_task_ref(BootHartContext.tp);
             task_preemption_control_ready(BootTask);
             task_preempt_count_initialized_to_init_preempt_count(BootTask);
             task_preemption_disabled(BootTask);
@@ -116,11 +116,11 @@ object BootInitStack: StackObject {
                 }
 
                 may_change {
-                    Riscv64.sp;
+                    BootHartContext.sp;
                 }
 
                 ensures {
-                    Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack);
+                    BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack);
                 }
             }
         }
@@ -132,9 +132,9 @@ object BootInitStack: StackObject {
     state State::Prepared {
         invariant {
             Lds.init_stack_end - Lds.init_stack_start >= Config.page_size;
-            Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack);
-            valid_stack_pointer(Riscv64.sp);
-            inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end);
+            BootHartContext.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack);
+            valid_stack_pointer(BootHartContext.sp);
+            inside(BootHartContext.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end);
         }
 
         transitions {
@@ -147,11 +147,11 @@ object BootInitStack: StackObject {
                 }
 
                 may_change {
-                    Riscv64.sp;
+                    BootHartContext.sp;
                 }
 
                 ensures {
-                    Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
+                    BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
                 }
             }
         }
@@ -164,9 +164,9 @@ object BootInitStack: StackObject {
     state State::Ready {
         invariant {
             Lds.init_stack_end - Lds.init_stack_start >= Config.page_size;
-            Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
-            valid_stack_pointer(Riscv64.sp);
-            inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
+            BootHartContext.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
+            valid_stack_pointer(BootHartContext.sp);
+            inside(BootHartContext.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
         }
 
         transitions {
@@ -234,13 +234,13 @@ object EventStream: FlowObject {
                 }
 
                 may_change {
-                    Riscv64.stvec;
+                    BootHartContext.stvec;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_function_symbol(early_event_entry);
-                    Riscv64.stvec == phys_addr(EventStream.early_event_entry);
+                    BootHartContext.stvec == phys_addr(EventStream.early_event_entry);
                     early_event_entry_phys_safe(EventStream.early_event_entry);
                     event_stream_early_entry_available(EventStream, EventStream.early_event_entry);
                     cpu_event_stream_ready(BootCPU, EventStream);
@@ -274,15 +274,15 @@ object EventStream: FlowObject {
                 }
 
                 may_change {
-                    Riscv64.stvec;
-                    Riscv64.sscratch;
+                    BootHartContext.stvec;
+                    BootHartContext.sscratch;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_function_symbol(formal_event_entry);
-                    Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
-                    Riscv64.sscratch == 0;
+                    BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
+                    BootHartContext.sscratch == 0;
                     event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
                     cpu_event_stream_ready(BootCPU, EventStream);
                     cpu_exception_stream_ready(BootCPU, ExceptionStream);
@@ -299,8 +299,8 @@ object EventStream: FlowObject {
         invariant {
             attrs_accessible(self);
             valid_function_symbol(formal_event_entry);
-            Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
-            Riscv64.sscratch == 0;
+            BootHartContext.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
+            BootHartContext.sscratch == 0;
             event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
             cpu_event_stream_ready(BootCPU, EventStream);
             cpu_exception_stream_ready(BootCPU, ExceptionStream);
@@ -340,13 +340,13 @@ object InterruptStream: FlowObject {
                 }
 
                 may_change {
-                    Riscv64.sie;
-                    Riscv64.sip;
+                    BootHartContext.sie;
+                    BootHartContext.sip;
                 }
 
                 ensures {
-                    Riscv64.sie == 0;
-                    Riscv64.sip == 0;
+                    BootHartContext.sie == 0;
+                    BootHartContext.sip == 0;
                     interrupt_fallback_panic_ready(InterruptStream);
                     interrupt_handler_bindings_default_panic(InterruptStream);
                 }
@@ -359,8 +359,8 @@ object InterruptStream: FlowObject {
      */
     state State::Prepared {
         invariant {
-            Riscv64.sie == 0;
-            Riscv64.sip == 0;
+            BootHartContext.sie == 0;
+            BootHartContext.sip == 0;
             interrupt_fallback_panic_ready(InterruptStream);
             interrupt_handler_bindings_default_panic(InterruptStream);
         }
@@ -381,8 +381,8 @@ object InterruptStream: FlowObject {
                 }
 
                 ensures {
-                    Riscv64.sie == 0;
-                    Riscv64.sip == 0;
+                    BootHartContext.sie == 0;
+                    BootHartContext.sip == 0;
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                     interrupt_dispatch_ready(InterruptStream);
                 }
@@ -395,8 +395,8 @@ object InterruptStream: FlowObject {
      */
     state State::Ready {
         invariant {
-            Riscv64.sie == 0;
-            Riscv64.sip == 0;
+            BootHartContext.sie == 0;
+            BootHartContext.sip == 0;
             cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
             interrupt_dispatch_ready(InterruptStream);
         }
@@ -862,12 +862,12 @@ object KernelImage: ImageObject {
                 }
 
                 may_change {
-                    Riscv64.gp;
+                    BootHartContext.gp;
                 }
 
                 ensures {
                     phys_start == phys_addr(Lds.kernel_start);
-                    Riscv64.gp == phys_addr(Lds.global_pointer);
+                    BootHartContext.gp == phys_addr(Lds.global_pointer);
                 }
             }
         }
@@ -882,7 +882,7 @@ object KernelImage: ImageObject {
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == phys_addr(Lds.kernel_start);
-            Riscv64.gp == phys_addr(Lds.global_pointer);
+            BootHartContext.gp == phys_addr(Lds.global_pointer);
         }
 
         transitions {
@@ -931,12 +931,12 @@ object KernelImage: ImageObject {
                 }
 
                 may_change {
-                    Riscv64.gp;
+                    BootHartContext.gp;
                 }
 
                 ensures {
                     phys_start == phys_addr(Lds.kernel_start);
-                    Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
+                    BootHartContext.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
                     gp_relative_access_ready();
                 }
             }
@@ -952,7 +952,7 @@ object KernelImage: ImageObject {
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
             phys_start == phys_addr(Lds.kernel_start);
-            Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
+            BootHartContext.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
             gp_relative_access_ready();
         }
     }
@@ -1211,14 +1211,14 @@ object Vm: AddressSpaceObject {
                 }
 
                 may_change {
-                    Riscv64.satp;
-                    Riscv64.gp;
-                    Riscv64.stvec;
+                    BootHartContext.satp;
+                    BootHartContext.gp;
+                    BootHartContext.stvec;
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
-                    vm_transition_stvec_released_to_event_stream(Riscv64.stvec, EventStream);
+                    BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+                    vm_transition_stvec_released_to_event_stream(BootHartContext.stvec, EventStream);
                 }
             }
         }
@@ -1232,7 +1232,7 @@ object Vm: AddressSpaceObject {
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;
             KernelImage.state == State::Online;
-            Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+            BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
             early_vm_translation_sync_complete(EarlyVm);
             riscv_early_boot_alternatives_deferred(Vm);
             riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
@@ -1250,12 +1250,12 @@ object Vm: AddressSpaceObject {
                 }
 
                 may_change {
-                    Riscv64.satp;
+                    BootHartContext.satp;
                     SwapperVm.pg_dir;
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+                    BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                 }
             }
         }
@@ -1268,7 +1268,7 @@ object Vm: AddressSpaceObject {
         invariant {
             SwapperVm.state == State::Online;
             EarlyVm.state == State::Destroyed;
-            Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+            BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
             swapper_vm_translation_sync_complete(SwapperVm);
         }
     }
@@ -1344,8 +1344,8 @@ object TrampolineVm: AddressSpaceObject {
                 }
 
                 may_change {
-                    Riscv64.satp;
-                    Riscv64.stvec;
+                    BootHartContext.satp;
+                    BootHartContext.stvec;
                 }
 
                 ensures {
@@ -1353,7 +1353,7 @@ object TrampolineVm: AddressSpaceObject {
                     valid_page_table_storage(pg_dir);
                     trampoline_vm_translation_sync_ready_before_satp(TrampolineVm);
                     phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
-                    Riscv64.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
+                    BootHartContext.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
                     event_stream_stvec_temporarily_borrowed(EventStream, Vm);
                 }
             }
@@ -1505,13 +1505,13 @@ object EarlyVm: AddressSpaceObject {
                 }
 
                 may_change {
-                    Riscv64.satp;
+                    BootHartContext.satp;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+                    BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
                     early_vm_translation_sync_complete(EarlyVm);
                     kernel_image_accessible(KernelImage, KernelImageMap);
                     fixmap_slot_accessible(FixMap.fdt_slot);
@@ -1527,7 +1527,7 @@ object EarlyVm: AddressSpaceObject {
         invariant {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
-            Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+            BootHartContext.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
             early_vm_translation_sync_complete(EarlyVm);
             kernel_image_accessible(KernelImage, KernelImageMap);
             fixmap_slot_accessible(FixMap.fdt_slot);
@@ -1633,13 +1633,13 @@ object SwapperVm: AddressSpaceObject {
              */
             on Transition::Enable -> State::Online {
                 may_change {
-                    Riscv64.satp;
+                    BootHartContext.satp;
                 }
 
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
-                    Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+                    BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                     swapper_vm_current(SwapperVm);
                     swapper_vm_translation_sync_complete(SwapperVm);
                 }
@@ -1654,7 +1654,7 @@ object SwapperVm: AddressSpaceObject {
         invariant {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
-            Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+            BootHartContext.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
             swapper_vm_current(SwapperVm);
             swapper_vm_translation_sync_complete(SwapperVm);
         }
@@ -2147,7 +2147,7 @@ object EntryPreludePhase: PhaseObject {
                 }
 
                 may_change {
-                    Riscv64.sstatus;
+                    BootHartContext.sstatus;
                 }
 
                 drives {
@@ -2171,8 +2171,8 @@ object EntryPreludePhase: PhaseObject {
                 }
 
                 ensures {
-                    kernel_fpu_disabled(Riscv64.sstatus);
-                    kernel_vector_disabled(Riscv64.sstatus);
+                    kernel_fpu_disabled(BootHartContext.sstatus);
+                    kernel_vector_disabled(BootHartContext.sstatus);
                     BootTask.state == State::Online;
                 }
 
@@ -2197,8 +2197,8 @@ object EntryPreludePhase: PhaseObject {
         transitions {
             on Transition::Enable -> State::Online {
                 ensures {
-                    kernel_fpu_disabled(Riscv64.sstatus);
-                    kernel_vector_disabled(Riscv64.sstatus);
+                    kernel_fpu_disabled(BootHartContext.sstatus);
+                    kernel_vector_disabled(BootHartContext.sstatus);
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
                 }
@@ -2211,8 +2211,8 @@ object EntryPreludePhase: PhaseObject {
             interrupt_concurrency_closed();
             task_concurrency_closed();
             context_is(SystemExclusive);
-            kernel_fpu_disabled(Riscv64.sstatus);
-            kernel_vector_disabled(Riscv64.sstatus);
+            kernel_fpu_disabled(BootHartContext.sstatus);
+            kernel_vector_disabled(BootHartContext.sstatus);
             InterruptStream.state == State::Prepared;
             EventStream.state == State::Ready;
             ExceptionStream.state == State::Prepared;

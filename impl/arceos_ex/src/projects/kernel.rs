@@ -6,28 +6,9 @@
 //! in the existing phase/system entry points until a later specification update
 //! assigns behavior here.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SpecPath {
-    pub layer: &'static str,
-    pub path: &'static str,
-}
+use super::{MappingStatus, ProjectMapping, SpecPath};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MappingStatus {
-    SkeletonOnly,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct KernelProjectMapping {
-    pub object_name: &'static str,
-    pub charter: SpecPath,
-    pub model: SpecPath,
-    pub coding: SpecPath,
-    pub implementation: &'static str,
-    pub status: MappingStatus,
-}
-
-pub const KERNEL_PROJECT_MAPPING: KernelProjectMapping = KernelProjectMapping {
+pub const KERNEL_PROJECT_MAPPING: ProjectMapping = ProjectMapping {
     object_name: "KernelProject",
     charter: SpecPath {
         layer: "charter",

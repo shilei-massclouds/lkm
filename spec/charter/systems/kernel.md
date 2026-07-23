@@ -2,6 +2,9 @@
 
 > [model] MUST：内核系统模型正式命名是Kernel。
 
+`Kernel` 是运行系统树根 `Computer` 的直接子系统；它不属于 `KernelProject`。`KernelProject` 只拥有
+构造规格和产物，OpenSBI 通过 `Kernel.Startup`（canonical `Kernel.Preset`）启动运行实例。
+
 ## 系统功能
 
 内核系统（简称内核）的核心功能是运行用户应用，具体包括三层：
@@ -77,7 +80,8 @@
 
 * Base：内核处于等待状态，等待引导信号startup触发它启动，引导信号是Preset信号的别名。
 
-  > [model] MUST：确保 Riscv64 规范、SBI 规范、OpenSBI、Lds 和 Config 都处于 `Online` 状态。
+  > [model] MUST：确保 `Riscv64`、`SbiSpec`、`BootArgs`、`BootHartContext`、`OpenSBI`、`Lds` 和
+  > `Config` 都处于 `Online` 状态，并且 boot-hart handoff 寄存器与 BootArgs 一致。
 
 * OnPreset：内核收到引导信号 startup，由静态且已经 Online 的 `BootTask` 执行早期初始化。
   `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
