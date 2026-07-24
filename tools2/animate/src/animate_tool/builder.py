@@ -102,6 +102,10 @@ def _project_step(
         raise ProtocolError(f"{label}.reason must be a string or null")
     before = _validate_snapshot(signal.get("before_snapshot"), label=f"{label}.before_snapshot")
     after = _validate_snapshot(signal.get("after_snapshot"), label=f"{label}.after_snapshot")
+    before_state = before["states"].get(target)
+    after_state = after["states"].get(target)
+    if before_state is None or after_state is None:
+        raise ProtocolError(f"{label} target {target!r} is missing from its snapshots")
     return {
         "index": index,
         "id": signal_id,
@@ -114,9 +118,107 @@ def _project_step(
         "handler": {"id": handler_id, "kind": handler_kind},
         "outcome": outcome,
         "reason": reason,
-        "before_snapshot": deepcopy(before),
-        "after_snapshot": deepcopy(after),
+        "response": {
+            "before_state": before_state if handler_kind == "Transition" else None,
+            "after_state": after_state if handler_kind == "Transition" else None,
+        },
+        "_before_snapshot": before,
+        "_after_snapshot": after,
     }
+
+
+def _ancestors(name: str, systems: dict[str, dict[str, Any]]) -> list[str]:
+    result: list[str] = []
+    current = systems[name].get("parent")
+    while current is not None:
+        result.append(current)
+        current = systems[current].get("parent")
+    result.reverse()
+    return result
+
+
+def _build_frames(
+    *,
+    steps: list[dict[str, Any]],
+    systems: dict[str, dict[str, Any]],
+    external: str,
+    initial_snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    visible: set[str] = set()
+    revealed: set[str] = set()
+    first_seen: dict[str, int] = {}
+    ordinal = 0
+
+    def add_visible(name: str) -> None:
+        nonlocal ordinal
+        if name not in visible:
+            visible.add(name)
+            first_seen[name] = ordinal
+            ordinal += 1
+
+    def reveal(name: str) -> None:
+        if name not in systems:
+            if name != external:
+                raise ProtocolError(f"animation frame references unknown external endpoint {name!r}")
+            add_visible(name)
+            revealed.add(name)
+            return
+        for ancestor in _ancestors(name, systems):
+            add_visible(ancestor)
+        add_visible(name)
+        revealed.add(name)
+
+    def frame(snapshot: dict[str, Any], *, index: int, step_id: str | None) -> dict[str, Any]:
+        nodes: list[dict[str, Any]] = []
+        children: dict[str, list[str]] = {}
+        for name in sorted(visible, key=first_seen.__getitem__):
+            if name not in systems:
+                parent = None
+                kind = "external"
+                structural = False
+                state = None
+            else:
+                parent = systems[name].get("parent")
+                kind = "system"
+                structural = name not in revealed
+                state = None if structural else snapshot["states"].get(name)
+                if not structural and state is None:
+                    raise ProtocolError(
+                        f"animation frame {index} has no snapshot state for revealed system {name!r}"
+                    )
+            nodes.append(
+                {
+                    "id": name,
+                    "parent": parent,
+                    "kind": kind,
+                    "state": state,
+                    "structural": structural,
+                    "first_seen": first_seen[name],
+                }
+            )
+            children.setdefault(parent or "$root", []).append(name)
+        sibling_order = {
+            parent: sorted(names, key=first_seen.__getitem__, reverse=True)
+            for parent, names in sorted(children.items())
+        }
+        return {
+            "index": index,
+            "step_id": step_id,
+            "nodes": nodes,
+            "sibling_order": sibling_order,
+        }
+
+    if steps:
+        reveal(steps[0]["source"])
+    initial = frame(initial_snapshot, index=-1, step_id=None)
+    frames: list[dict[str, Any]] = []
+    for step in steps:
+        reveal(step["source"])
+        reveal(step["target"])
+        frames.append(
+            frame(step["_after_snapshot"], index=step["index"], step_id=step["id"])
+        )
+    return initial, frames
 
 
 def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
@@ -144,6 +246,18 @@ def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, An
             )
         seen.add(step["id"])
         steps.append(step)
+    initial_snapshot = _validate_snapshot(
+        view.get("initial_snapshot"), label="view.initial_snapshot"
+    )
+    initial_frame, frames = _build_frames(
+        steps=steps,
+        systems=systems,
+        external=external,
+        initial_snapshot=initial_snapshot,
+    )
+    for step in steps:
+        del step["_before_snapshot"]
+        del step["_after_snapshot"]
     return {
         "schema": ANIMATION_SCHEMA,
         "version": ANIMATION_VERSION,
@@ -168,8 +282,8 @@ def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, An
             for name, system in sorted(systems.items())
         },
         "steps": steps,
-        "initial_frame": {"nodes": [], "sibling_order": {}},
-        "frames": [],
+        "initial_frame": initial_frame,
+        "frames": frames,
     }
 
 

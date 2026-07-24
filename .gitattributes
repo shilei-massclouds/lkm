@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.cmd text eol=crlf
 *.png binary
+tools2/animate/frontend/dist/* whitespace=-blank-at-eol,-blank-at-eof

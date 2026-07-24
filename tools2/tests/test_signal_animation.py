@@ -65,7 +65,58 @@ class SignalAnimationTests(unittest.TestCase):
                 ("sig-0004", "Root", "Sink", "Action"),
             ],
         )
-        self.assertEqual(animation["frames"], [])
+        self.assertEqual(
+            animation["initial_frame"]["nodes"],
+            [
+                {
+                    "id": "Human",
+                    "parent": None,
+                    "kind": "external",
+                    "state": None,
+                    "structural": False,
+                    "first_seen": 0,
+                }
+            ],
+        )
+        self.assertEqual(len(animation["frames"]), 4)
+        self.assertEqual(
+            [(node["id"], node["state"]) for node in animation["frames"][0]["nodes"]],
+            [("Human", None), ("Root", "Ready")],
+        )
+        self.assertNotIn("before_snapshot", animation["steps"][0])
+        self.assertNotIn("after_snapshot", animation["steps"][0])
+        self.assertEqual(
+            animation["steps"][0]["response"],
+            {"before_state": "Base", "after_state": "Ready"},
+        )
+        self.assertEqual(
+            animation["steps"][1]["response"],
+            {"before_state": None, "after_state": None},
+        )
+
+    def test_frames_reveal_targets_ancestors_and_latest_siblings_first(self) -> None:
+        animation = build_animation(self.model, self.view)
+        child_frame = animation["frames"][1]
+        self.assertEqual(child_frame["sibling_order"]["$root"], ["Root", "Human"])
+        self.assertEqual(child_frame["sibling_order"]["Root"], ["Child"])
+        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+        self.assertEqual(
+            animation["frames"][3]["sibling_order"]["Root"], ["Sink", "Async", "Child"]
+        )
+        self.assertEqual(animation["frames"][1]["nodes"][2]["state"], "Base")
+
+    def test_initial_model_source_has_stateless_ancestors_and_real_source_state(self) -> None:
+        view = deepcopy(self.view)
+        view["root_request"]["source"] = "Child"
+        view["signals"][0]["source"] = "Child"
+        animation = build_animation(self.model, view)
+        self.assertEqual(
+            [
+                (node["id"], node["state"], node["structural"])
+                for node in animation["initial_frame"]["nodes"]
+            ],
+            [("Root", None, True), ("Child", "Base", False)],
+        )
 
     def test_html_is_self_contained_and_script_data_is_safely_encoded(self) -> None:
         animation = build_animation(self.model, self.view)
