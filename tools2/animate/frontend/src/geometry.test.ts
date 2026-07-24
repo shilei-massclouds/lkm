@@ -14,8 +14,9 @@ describe('Signal arrow geometry', () => {
     const geometry = signalGeometry(source, target, stage);
     expect(geometry.self).toBe(false);
     expect(geometry.direction).toBe('right');
-    expect(geometry.path).toMatch(/^M 270 130 C /);
-    expect(geometry.path).toMatch(/ 490 290$/);
+    expect(geometry.path).toBe('M 270 130 L 490 290');
+    expect(geometry.labelX).toBe(380);
+    expect(geometry.labelY).toBe(210);
   });
 
   it('selects opposing edges in all four directions', () => {
@@ -37,25 +38,28 @@ describe('Signal arrow geometry', () => {
     expect(up.direction).toBe('up');
     expect(pathNumbers(up.path).slice(0, 2)).toEqual([170, source.top - stage.top]);
     expect(pathNumbers(up.path).slice(-2)).toEqual([170, upTarget.bottom - stage.top]);
+    for (const geometry of [signalGeometry(source, target, stage), left, down, up]) {
+      expect(geometry.path.match(/\bL\b/g)).toHaveLength(1);
+      expect(geometry.path).not.toContain(' C ');
+      const points = pathNumbers(geometry.path);
+      expect(geometry.labelX).toBe((points[0] + points[2]) / 2);
+      expect(geometry.labelY).toBe((points[1] + points[3]) / 2);
+    }
   });
 
-  it('uses a lower semicircle for self Signals', () => {
+  it('uses an upper semicircle for self Signals', () => {
     const geometry = signalGeometry(source, { ...source }, stage, 4, 6, true);
+    const points = pathNumbers(geometry.path);
+    const nodeTop = source.top - stage.top + 6;
     expect(geometry.self).toBe(true);
-    expect(geometry.path).toMatch(/^M 274 136 C /);
-    expect(geometry.path).toMatch(/, 2 284, 74 136$/);
-    expect(geometry.labelY).toBeGreaterThan(source.bottom - stage.top);
-  });
-
-  it('scales ordinary curvature with endpoint distance and node width', () => {
-    const near = pathNumbers(signalGeometry(source, target, stage).path);
-    const farTarget = { ...target, left: 900, right: 1100 };
-    const far = pathNumbers(signalGeometry(source, farTarget, stage).path);
-    const wideSource = { ...source, right: 480, width: 400 };
-    const wideTarget = { ...target, left: 700, right: 900, width: 200 };
-    const wide = pathNumbers(signalGeometry(wideSource, wideTarget, stage).path);
-    expect(far[2] - far[0]).toBeGreaterThan(near[2] - near[0]);
-    expect(wide[2] - wide[0]).toBeGreaterThan(near[2] - near[0]);
+    expect(geometry.path).toBe('M 274 136 C 346 -12, 2 -12, 74 136');
+    expect(points[0]).toBe(source.right - stage.left + 4);
+    expect(points[6]).toBe(source.left - stage.left + 4);
+    expect(points[1]).toBe(points[7]);
+    expect(points[3]).toBeLessThan(nodeTop);
+    expect(points[5]).toBeLessThan(nodeTop);
+    const curveApex = points[1] * 0.25 + points[3] * 0.75;
+    expect(geometry.labelY).toBeLessThan(curveApex);
   });
 
   it('scales self-loop reach and depth with the node dimensions', () => {
@@ -63,8 +67,19 @@ describe('Signal arrow geometry', () => {
     const large = { ...source, right: 480, bottom: 300, width: 400, height: 200 };
     const expanded = pathNumbers(signalGeometry(large, large, stage, 0, 0, true).path);
     expect(expanded[2] - expanded[0]).toBeCloseTo((regular[2] - regular[0]) * 2);
-    expect(expanded[3] - (large.bottom - stage.top)).toBeGreaterThan(
-      regular[3] - (source.bottom - stage.top)
+    expect((large.top - stage.top) - expanded[3]).toBeGreaterThan(
+      (source.top - stage.top) - regular[3]
     );
+  });
+
+  it('keeps a scaled self-loop and its label inside the reserved top clearance', () => {
+    const clearance = 160;
+    const large = {
+      left: 80, right: 480, top: stage.top + clearance, bottom: stage.top + clearance + 200,
+      width: 400, height: 200
+    };
+    const geometry = signalGeometry(large, large, stage, 0, 0, true);
+    expect(geometry.labelY).toBeGreaterThanOrEqual(0);
+    expect(geometry.labelY).toBeLessThan(clearance);
   });
 });

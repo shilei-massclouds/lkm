@@ -4,6 +4,7 @@ import FrameTree from './FrameTree.svelte';
 import NodeCard from './NodeCard.svelte';
 import SignalArrow from './SignalArrow.svelte';
 import type { AnimationFrame, AnimationStep } from './types';
+import { shouldRenderSignalArrow } from './visibility';
 
 let component: ReturnType<typeof mount> | null = null;
 afterEach(async () => {
@@ -136,6 +137,39 @@ describe('Signal response effects', () => {
     expect(identity.getAttribute('data-width-policy')).toBe('compact');
   });
 
+  it('suppresses only ancestor-to-descendant arrows in the rendered hierarchy', async () => {
+    const nodes = [
+      node,
+      { ...node, id: 'Level2First', parent: 'Root', first_seen: 1 },
+      { ...node, id: 'Level2Second', parent: 'Root', first_seen: 2 },
+      { ...node, id: 'Level3First', parent: 'Level2First', first_seen: 3 },
+      { ...node, id: 'Level3Second', parent: 'Level2First', first_seen: 4 },
+      { ...node, id: 'Level4First', parent: 'Level3First', first_seen: 5 }
+    ];
+    const deepFrame: AnimationFrame = {
+      index: 0,
+      step_id: 'sig-0001',
+      nodes,
+      sibling_order: {
+        '$root': ['Root'],
+        Root: ['Level2First', 'Level2Second'],
+        Level2First: ['Level3First', 'Level3Second'],
+        Level3First: ['Level4First']
+      }
+    };
+    component = mount(FrameTree, { target: document.body, props: { frame: deepFrame } });
+    await tick();
+    const endpoint = (id: string) =>
+      document.querySelector<HTMLElement>(`[data-node-id="${id}"]`)!;
+
+    expect(shouldRenderSignalArrow(endpoint('Root'), endpoint('Level2First'))).toBe(false);
+    expect(shouldRenderSignalArrow(endpoint('Root'), endpoint('Level4First'))).toBe(false);
+    expect(shouldRenderSignalArrow(endpoint('Root'), endpoint('Root'))).toBe(true);
+    expect(shouldRenderSignalArrow(endpoint('Level2First'), endpoint('Level2Second'))).toBe(true);
+    expect(shouldRenderSignalArrow(endpoint('Level4First'), endpoint('Level3Second'))).toBe(true);
+    expect(shouldRenderSignalArrow(endpoint('Level4First'), endpoint('Root'))).toBe(true);
+  });
+
   it('renders a red dashed self-loop contract for exceptional self Signals', async () => {
     component = mount(SignalArrow, {
       target: document.body,
@@ -152,5 +186,6 @@ describe('Signal response effects', () => {
     expect(arrow?.classList.contains('error')).toBe(true);
     expect(arrow?.getAttribute('data-arrow-kind')).toBe('self');
     expect(arrow?.getAttribute('aria-label')).toContain('failed');
+    expect(document.querySelector('#signal-arrowhead-error')?.getAttribute('refX')).toBe('10');
   });
 });

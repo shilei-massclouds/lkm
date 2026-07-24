@@ -4,6 +4,7 @@
   import FrameTree from './FrameTree.svelte';
   import SignalArrow from './SignalArrow.svelte';
   import { signalGeometry, type ArrowGeometry } from './geometry';
+  import { shouldRenderSignalArrow } from './visibility';
 
   let { animation }: { animation: AnimationTrace } = $props();
   const request = $derived(animation.trace.root_request);
@@ -88,6 +89,10 @@
     const source = endpoint(step.source);
     const target = endpoint(step.target);
     if (!source || !target) {
+      arrowGeometry = null;
+      return;
+    }
+    if (!shouldRenderSignalArrow(source, target)) {
       arrowGeometry = null;
       return;
     }

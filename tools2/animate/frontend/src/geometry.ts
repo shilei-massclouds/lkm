@@ -30,12 +30,14 @@ export function signalGeometry(
     const endX = x(source.left);
     const centerY = y(source.top + source.height / 2);
     const controlReach = source.width * 0.36;
-    const loopDepth = source.height * 0.62 + source.width * 0.18;
-    const loopY = y(source.bottom) + loopDepth;
+    const loopHeight = source.height * 0.62 + source.width * 0.18;
+    const loopY = y(source.top) - loopHeight;
+    const apexY = centerY * 0.25 + loopY * 0.75;
+    const labelGap = Math.max(source.height * 0.12, source.width * 0.04);
     return {
       path: `M ${startX} ${centerY} C ${startX + controlReach} ${loopY}, ${endX - controlReach} ${loopY}, ${endX} ${centerY}`,
       labelX: (startX + endX) / 2,
-      labelY: loopY + source.height * 0.05,
+      labelY: apexY - labelGap,
       self: true,
       direction: 'self'
     };
@@ -52,14 +54,10 @@ export function signalGeometry(
     const startY = y(sourceCenterY);
     const endX = x(towardRight ? target.left : target.right);
     const endY = y(targetCenterY);
-    const distance = Math.abs(endX - startX);
-    const meanWidth = (source.width + target.width) / 2;
-    const bend = Math.max(distance * 0.3, meanWidth * 0.35);
-    const curveDirection = towardRight ? 1 : -1;
     return {
-      path: `M ${startX} ${startY} C ${startX + bend * curveDirection} ${startY}, ${endX - bend * curveDirection} ${endY}, ${endX} ${endY}`,
+      path: `M ${startX} ${startY} L ${endX} ${endY}`,
       labelX: (startX + endX) / 2,
-      labelY: (startY + endY) / 2 - Math.max(source.height, target.height) * 0.12,
+      labelY: (startY + endY) / 2,
       self: false,
       direction: towardRight ? 'right' : 'left'
     };
@@ -69,12 +67,8 @@ export function signalGeometry(
   const startY = y(towardDown ? source.bottom : source.top);
   const endX = x(targetCenterX);
   const endY = y(towardDown ? target.top : target.bottom);
-  const distance = Math.abs(endY - startY);
-  const meanHeight = (source.height + target.height) / 2;
-  const bend = Math.max(distance * 0.3, meanHeight * 0.35);
-  const curveDirection = towardDown ? 1 : -1;
   return {
-    path: `M ${startX} ${startY} C ${startX} ${startY + bend * curveDirection}, ${endX} ${endY - bend * curveDirection}, ${endX} ${endY}`,
+    path: `M ${startX} ${startY} L ${endX} ${endY}`,
     labelX: (startX + endX) / 2,
     labelY: (startY + endY) / 2,
     self: false,

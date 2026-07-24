@@ -30,10 +30,10 @@
   aria-label={`${signal} Signal${exceptional ? `, ${outcome}` : ''}`}
 >
   <defs>
-    <marker id="signal-arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+    <marker id="signal-arrowhead" markerWidth="10" markerHeight="8" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
       <path d="M 0 0 L 10 4 L 0 8 z" />
     </marker>
-    <marker id="signal-arrowhead-error" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+    <marker id="signal-arrowhead-error" markerWidth="10" markerHeight="8" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
       <path d="M 0 0 L 10 4 L 0 8 z" />
     </marker>
   </defs>

@@ -217,19 +217,24 @@ test('ordinary and exceptional self Signals expose their response phases', async
       (match) => Number(match[0]));
     return {
       sourceBeforeTarget: sourceRect.right < targetRect.left,
+      path: path.getAttribute('d'),
       startError: Math.abs(numbers[0] - (sourceRect.right - stageRect.left + stage.scrollLeft)),
-      endError: Math.abs(numbers[6] - (targetRect.left - stageRect.left + stage.scrollLeft))
+      endError: Math.abs(numbers[2] - (targetRect.left - stageRect.left + stage.scrollLeft))
     };
   });
   expect(alignment).not.toBeNull();
   expect(alignment?.sourceBeforeTarget).toBe(true);
+  expect(alignment?.path).toMatch(/^M [^ ]+ [^ ]+ L [^ ]+ [^ ]+$/);
   expect(alignment?.startError).toBeLessThan(2);
   expect(alignment?.endError).toBeLessThan(2);
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
   await pipelineNext.click();
-  await expect(page.locator('.signal-overlay')).toHaveAttribute('data-arrow-kind', 'ordinary');
+  await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await expect(page.locator('[data-node-id="Root"]')).toHaveClass(/signal-source/);
   await expect(page.locator('[data-node-id="Child"]')).toHaveClass(/signal-target/);
+  await page.waitForFunction(() =>
+    document.querySelector('[data-node-id="Child"]')?.classList.contains('action-response')
+  );
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
 
   await openOffline(page, effectsHtml);
@@ -245,6 +250,25 @@ test('ordinary and exceptional self Signals expose their response phases', async
   const selfArrow = page.locator('.signal-overlay');
   await expect(selfArrow).toHaveAttribute('data-arrow-kind', 'self');
   await expect(selfArrow).toHaveAttribute('data-outcome', 'rejected');
+  const upperLoop = await page.locator('.stage').evaluate((stage) => {
+    const node = stage.querySelector<HTMLElement>('[data-node-id="Root"]');
+    const path = stage.querySelector<SVGPathElement>('.signal-path');
+    const label = stage.querySelector<SVGTextElement>('.signal-overlay text');
+    if (!node || !path || !label) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const numbers = Array.from(path.getAttribute('d')?.matchAll(/-?\d+(?:\.\d+)?/g) || [],
+      (match) => Number(match[0]));
+    return {
+      nodeTop: nodeRect.top - stageRect.top + stage.scrollTop,
+      controlTop: Math.min(numbers[3], numbers[5]),
+      labelY: Number(label.getAttribute('y'))
+    };
+  });
+  expect(upperLoop).not.toBeNull();
+  expect(upperLoop!.controlTop).toBeLessThan(upperLoop!.nodeTop);
+  expect(upperLoop!.labelY).toBeLessThan(upperLoop!.nodeTop);
+  expect(upperLoop!.labelY).toBeGreaterThanOrEqual(0);
   await expect(page.locator('.reason')).toContainText('rejected · no_handler');
   await page.waitForFunction(() =>
     document.querySelector('[data-node-id="Root"]')?.classList.contains('error-response')
@@ -282,6 +306,29 @@ test('full main model loads offline, scrolls targets, and restores 277 steps', a
     }
   }
   expect(sawScroll).toBe(true);
+  const longIdentityTypography = await page.locator('.stage').evaluate((stage) => {
+    const identities = Array.from(stage.querySelectorAll<HTMLElement>('.node-identity'));
+    const longIdentities = identities.filter((identity) =>
+      (identity.querySelector('strong')?.textContent?.length || 0) >= 16
+    );
+    return {
+      count: longIdentities.length,
+      sameFontSize: longIdentities.every((identity) => {
+        const name = identity.querySelector<HTMLElement>('strong');
+        const state = identity.querySelector<HTMLElement>('.node-state');
+        return !!name && !!state && getComputedStyle(name).fontSize === getComputedStyle(state).fontSize;
+      }),
+      overlapping: longIdentities.some((identity) => {
+        const name = identity.querySelector('strong')?.getBoundingClientRect();
+        const state = identity.querySelector('.node-state')?.getBoundingClientRect();
+        return !!name && !!state && name.left < state.right && name.right > state.left &&
+          name.top < state.bottom && name.bottom > state.top;
+      })
+    };
+  });
+  expect(longIdentityTypography.count).toBeGreaterThan(0);
+  expect(longIdentityTypography.sameFontSize).toBe(true);
+  expect(longIdentityTypography.overlapping).toBe(false);
   for (let index = 276; index >= 0; index -= 1) {
     await page.keyboard.press('ArrowLeft');
     await expect(counter).toContainText(`步骤 ${index} / 277`);
@@ -299,17 +346,21 @@ test('desktop viewports devote the page to the stage without outer scrolling', a
   ]) {
     await page.setViewportSize(viewport);
     await openOffline(page, pipelineHtml);
+    await page.keyboard.press('ArrowRight');
     const layout = await page.evaluate(() => ({
       documentHeight: document.documentElement.scrollHeight,
       viewportHeight: document.documentElement.clientHeight,
       stageHeight: document.querySelector('.stage')?.getBoundingClientRect().height || 0,
       headerHeight: document.querySelector('.trace-header')?.getBoundingClientRect().height || 0,
-      transportHeight: document.querySelector('.transport')?.getBoundingClientRect().height || 0
+      transportHeight: document.querySelector('.transport')?.getBoundingClientRect().height || 0,
+      nameFontSize: getComputedStyle(document.querySelector<HTMLElement>('[data-node-id="Root"] strong')!).fontSize,
+      stateFontSize: getComputedStyle(document.querySelector<HTMLElement>('[data-node-id="Root"] .node-state')!).fontSize
     }));
     expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
     expect(layout.stageHeight / viewport.height).toBeGreaterThanOrEqual(0.72);
     expect(layout.headerHeight).toBeLessThan(viewport.height * 0.12);
     expect(layout.transportHeight).toBeLessThan(viewport.height * 0.12);
+    expect(layout.stateFontSize).toBe(layout.nameFontSize);
   }
 });
 
@@ -331,12 +382,18 @@ test('mobile layout wraps without page-level horizontal overflow', async ({ page
     return {
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       stageOverflow: (stage?.scrollWidth || 0) - (stage?.clientWidth || 0),
-      overlapping
+      overlapping,
+      sameFontSize: identities.every((identity) => {
+        const name = identity.querySelector<HTMLElement>('strong');
+        const state = identity.querySelector<HTMLElement>('.node-state');
+        return !!name && !!state && getComputedStyle(name).fontSize === getComputedStyle(state).fontSize;
+      })
     };
   });
   expect(layout.pageOverflow).toBeLessThanOrEqual(1);
   expect(layout.stageOverflow).toBeGreaterThan(0);
   expect(layout.overlapping).toBe(false);
+  expect(layout.sameFontSize).toBe(true);
 });
 
 test('desktop and mobile players have stable visual baselines', async ({ page }) => {

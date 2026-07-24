@@ -96,6 +96,7 @@ dd {
   min-inline-size: 100%;
   min-block-size: 100%;
   padding: clamp(1rem, 3cqi, 3rem);
+  padding-block-start: clamp(7rem, 20cqi, 18rem);
   gap: clamp(.8rem, 2cqi, 2rem);
   justify-content: flex-start;
 }
@@ -144,7 +145,8 @@ dd {
   flex: 0 0 auto;
   color: #647168;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: clamp(.62rem, .72cqi, .72rem);
+  font-size: clamp(.78rem, 1cqi, .96rem);
+  font-weight: 400;
   white-space: nowrap;
 }
 .node-card.state-prepared { border-style: dashed; border-color: #7d8881; }

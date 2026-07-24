@@ -41,11 +41,16 @@ parent（含虚拟 `$root`）的 sibling order 都按首次出现序稳定升序
 父框只随已经可见的子树向上或向右扩展，不为未来节点预留空间。较早分支增长造成碰撞时，只把
 较晚出现的同级分支向右或向上推开，不得向左、向下回推、移动较早锚点或改变首次出现顺序。
 
-普通 Signal 使用 source 到 target 的箭头；播放器根据两端中心差选择最近的一对水平或垂直相向边，
-支持左到右、右到左、下到上和上到下。self Signal 使用按节点实时尺寸计算的回环。曲线必须按实时
-节点尺寸和端点距离计算，布局动画、父框膨胀、stage 滚动或尺寸变化时同步更新。stage 高度增长时
-必须补偿纵向滚动，使左下布局锚点在 viewport 中保持稳定；后退按目标 frame 重算相同布局和滚动
-边界。FLIP 只平滑已经确定的向外推开，reduced-motion 下直接到达确定位置。页面提供前后按钮、
+普通 Signal 使用 source 到 target 的直线箭头；播放器根据两端中心差选择最近的一对水平或垂直相向
+边，支持左到右、右到左、下到上和上到下，箭头尖必须精确落在 target 边界，Signal 名称位于线段
+中点。source 是 target 任意层祖先时不显示箭头，但 source/target 高亮、Transition/Action 响应、异常
+reason、滚动和导航仍按该 Signal 正常执行；self、后代到祖先、同级和跨分支 Signal 不受此隐藏规则
+影响。祖先关系只从当前 frame 已渲染节点的递归包含关系判定，不进入 animation v1 或 Python frame。
+self Signal 从节点右侧中部出发、在左侧中部结束，使用按节点实时宽高缩放的上方半圆弧；Signal 名称
+位于上弧外侧。stage 内容必须提供同样按节点尺寸有界缩放的顶部净空，保证桌面、移动端和深层节点的
+自环及文字不被裁剪。箭头几何必须在布局动画、父框膨胀、stage 滚动或尺寸变化时同步更新。stage 高度
+增长时必须补偿纵向滚动，使左下布局锚点在 viewport 中保持稳定；后退按目标 frame 重算相同布局和
+滚动边界。FLIP 只平滑已经确定的向外推开，reduced-motion 下直接到达确定位置。页面提供前后按钮、
 `ArrowLeft`/`ArrowRight`、步数和当前 Signal 文字说明，并尊重 `prefers-reduced-motion`。首轮不包含
 自动播放、速度、时间线跳转、浏览器 derive 或视频导出。
 
@@ -57,7 +62,8 @@ stroke 等视觉细线可固定为 CSS pixel。
 
 header 在一行优先显示小号品牌、请求标题以及 Source/Verdict/Signals/Protocol 四项紧凑元数据；
 删除说明句。普通 system 节点不显示 `SYSTEM`，名称与裸状态名（例如 `Ready`）或 `Stateless` 位于
-同一 identity 行，空间不足时状态整体换行且不得覆盖；底部 Transition 响应同样显示
+同一 identity 行且使用完全相同的流式字号；状态保持正常字重，空间不足时整体换行且不得覆盖；
+底部 Transition 响应同样显示
 `Base → Ready`，不显示 `State::`。External 和 Structure 保留类型标签。叶节点和 identity band 使用
 约 `clamp(11rem, 16cqi, 15rem)` 的紧凑宽度，名称允许换行；含子系统的父框不得由 identity 获得固定
 大宽度。控制栏在宽屏优先同行显示

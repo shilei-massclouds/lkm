@@ -94,17 +94,22 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   重复生成与任意前后往返必须恢复完全相同的 frame 和 sibling order。
 - frontend 单元测试必须覆盖 parent 包含、一级/三级 row、二级/四级 bottom-to-top column、children 位于
   identity 上方、偶数层左对齐与奇数层底部对齐；普通 system 不显示 `SYSTEM`，名称和裸状态名或
-  `Stateless` 正确换行，节点及底部响应均不显示 `State::`，External/Structure 标签和紧凑宽度保持。
-  箭头测试覆盖四方向端点、曲率随节点尺寸与距离成比例变化、自环按节点宽高变化、异常线型/reason、
-  状态样式、说明句/footer 不渲染和 reduced-motion。
+  `Stateless` 使用完全相同字号并正确换行、不重叠，节点及底部响应均不显示 `State::`，External/
+  Structure 标签和紧凑宽度保持。箭头几何测试覆盖四方向单一直线路径、source 边起点、target 边精确
+  终点和线段中点 label；自环必须位于节点上方、按节点宽高缩放、label 位于上弧外侧且不越出预留
+  顶部净空。组件测试覆盖直接和跨多层 ancestor 到 descendant 不生成 SVG，并确认 self、普通同级、
+  跨分支和 descendant 到 ancestor 仍生成；异常线型/reason、状态样式、说明句/footer 不渲染和
+  reduced-motion 继续覆盖。
 - 浏览器端到端测试必须覆盖按钮、ArrowLeft/ArrowRight、离线加载和 277 步往返；交替层级 fixture
   必须验证 Human 固定 stage 左下，后续一级节点只向右，二级向上、三级向右、四级向上。无碰撞时
   已有内容坐标不变；碰撞时只有较晚分支向右或向上，较早锚点不动；父框只随可见子树向上/向右
-  膨胀且不覆盖文字。箭头必须跟随四向布局、膨胀、滚动与 resize；前后确定性、自动滚入视区和
+  膨胀且不覆盖文字。箭头必须跟随四向布局、膨胀、滚动与 resize；Human 到 Root 显示直线，Root 到
+  Child 隐藏箭头但仍产生 Action 响应效果，异常 self Signal 走节点上弧。前后确定性、自动滚入视区和
   reduced-motion 保持可用，不得观察到网络请求或浏览器 derive 路径。
 - 浏览器布局验收必须覆盖 1024×768、1280×900 与 1920×1080：桌面页面无外层纵向滚动，stage 至少
   占 viewport 高度约 72%，header/transport 不随宽屏无界增长；390×844 允许换行和页面纵向滚动，
-  不得文字覆盖或页面横向溢出，横向溢出只能出现在 stage 内。桌面和移动端都维护稳定截图基线。
+  不得文字覆盖或页面横向溢出，横向溢出只能出现在 stage 内。浏览器测量必须确认名称与状态字号在
+  桌面、移动端完全相等；桌面和移动端都维护稳定截图基线。
 - `lkm-animate MODEL VIEW -o HTML` 与 driver/shortcut `--html-out` 必须覆盖成功、协议/I/O 错误、check
   退出码 0/1 保留，以及与 text `-o`、stdout、scenario、snapshot-out 和 work-dir 的组合。编译 bundle
   rebuild 后必须通过 stale check，固定 fixture 生成 `tools2/out/pipeline-animation.html`。

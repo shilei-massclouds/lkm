@@ -162,16 +162,22 @@ source/target model identity、parent cycle、snapshot 不一致或未知 handle
 按一级节点处理；奇数层 sibling 以底部对齐 row 从左向右排列，偶数层 sibling 以左边缘对齐的反向
 column 从下向上排列，任意深度继续交替。stage 的布局原点位于左下角。节点 identity 固定在自身框
 左下区域，children 区位于其上方；叶节点和 identity band 宽度约为
-`clamp(11rem, 16cqi, 15rem)`，名称可换行，状态不拆分并整体换行。父框只随当前可见 children 的真实
-footprint 向上或向右扩展，不预留未来空间；稳定 flex footprint 在碰撞时只把较晚 sibling 向右或
-向上推开，不得回推较早 sibling。
+`clamp(11rem, 16cqi, 15rem)`，名称可换行，状态不拆分并整体换行。名称和状态使用同一个字号
+`clamp()`，状态保持正常字重。父框只随当前可见 children 的真实 footprint 向上或向右扩展，不预留
+未来空间；稳定 flex footprint 在碰撞时只把较晚 sibling 向右或向上推开，不得回推较早 sibling。
 
 普通箭头比较 source/target 中心差，选择最近的一对水平或垂直相向边，覆盖左到右、右到左、下到上
-和上到下；self Signal 使用按节点宽高计算的回环。普通曲线控制量按端点距离和节点尺寸计算，不得
-使用固定像素半径。播放器使用 animation frame 在 FLIP、父框膨胀、stage 滚动、window/元素尺寸变化
-期间重测 CSS pixel 坐标并更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。树高度变化
-时补偿 stage 的 `scrollTop` 以保持左下锚点在 viewport 中稳定，前后 frame 都从目标布局重算相同滚动
-边界。失败类 outcome 使用红色虚线并显示 reason。Transition 响应切换真实 state，Action 只高亮/振动。
+和上到下；普通 path 只使用端到端的 `M … L …` 直线，起点位于 source 对应边，终点和箭头尖精确位于
+target 对应边，label 位于两端中点。source DOM 节点递归包含 target DOM 节点且两者不相同时，播放
+send/response 阶段不构造 SVG 箭头；该判定只使用当前 frame 的 DOM parent 包含关系，不修改 animation
+v1、Python frame、model 或 derive，且不得跳过端点高亮、Transition/Action 响应、异常 reason、滚动或
+导航。self、descendant 到 ancestor、同级和跨分支仍构造箭头。self Signal 从节点右侧中部到左侧中部，
+控制点位于节点上方，弧高和横向 reach 按节点宽高计算；label 位于上弧外侧。`.frame-forest` 顶部
+padding 必须提供有上下限的流式净空，至少容纳实时缩放自环及 label，避免桌面、移动端和深层节点被
+stage 裁剪。播放器使用 animation frame 在 FLIP、父框膨胀、stage 滚动、window/元素尺寸变化期间重测
+CSS pixel 坐标并更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。树高度变化时补偿 stage
+的 `scrollTop` 以保持左下锚点在 viewport 中稳定，前后 frame 都从目标布局重算相同滚动边界。失败类
+outcome 使用红色虚线并显示 reason。Transition 响应切换真实 state，Action 只高亮/振动。
 新增节点与向外推开使用 FLIP 平滑过渡，活动端点滚入视区；
 `prefers-reduced-motion` 下取消非必要位移、振动与脉冲但保留确定 frame、线型、reason 和导航。
 控制面只含前后按钮、ArrowLeft/ArrowRight、步数和当前 Signal 说明，不增加自动播放、速度或时间线。
@@ -184,6 +190,7 @@ frontend CSS 以 `%`/`dvh` 的外壳和 `auto minmax(0, 1fr) auto` 主 grid 建�
 
 header 只显示紧凑品牌、请求标题与四项同行 `label:value` 元数据，不渲染说明句或可见 footer；Protocol
 tooltip 承载 source file 与 model fingerprint。普通 system identity 不渲染 `SYSTEM`，名称和裸状态名
-或 `Stateless` 同行；名称可换行，状态保持完整并整体换行。底部 Transition 响应也不得渲染
+或 `Stateless` 同行并使用完全相同的流式字号；名称可换行，状态保持正常字重、完整并整体换行。底部
+Transition 响应也不得渲染
 `State::`；JSON 中的状态值不变。External/Structure 继续渲染类型标签。transport 不设固定
 最小高度，宽屏优先把步数、Signal 路径、响应/reason 和按钮同行，窄屏自然换行。
