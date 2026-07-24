@@ -1,5 +1,5 @@
 PYTHON ?= python3
-PYTHONPATH := common/src:parse/src:model/src:derive/src:check/src:view/src:render/src:pyveri/src
+PYTHONPATH := common/src:parse/src:model/src:derive/src:check/src:view/src:render/src:animate/src:pyveri/src
 
 .PHONY: test test-focused
 

@@ -11,6 +11,8 @@ from .io import (
     write_json,
 )
 from .schemas import (
+    ANIMATION_SCHEMA,
+    ANIMATION_VERSION,
     AST_SCHEMA,
     AST_VERSION,
     CHECK_SCHEMA,
@@ -27,6 +29,8 @@ from .schemas import (
 )
 
 __all__ = [
+    "ANIMATION_SCHEMA",
+    "ANIMATION_VERSION",
     "AST_SCHEMA",
     "AST_VERSION",
     "CHECK_SCHEMA",

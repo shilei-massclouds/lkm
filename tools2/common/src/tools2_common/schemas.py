@@ -14,3 +14,5 @@ VIEW_SCHEMA = "lkm.spec.view"
 VIEW_VERSION = 4
 SNAPSHOT_SCHEMA = "lkm.spec.snapshot"
 SNAPSHOT_VERSION = 4
+ANIMATION_SCHEMA = "lkm.spec.signal-animation"
+ANIMATION_VERSION = 1
