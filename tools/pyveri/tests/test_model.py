@@ -1026,6 +1026,28 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(result.ok, [diag.message for diag in result.errors])
 
+    def test_accepts_terminal_disable_from_on_cpu_for_task(self) -> None:
+        document = parse_text(
+            """
+            type Task {}
+            object Worker: Task {
+                initial_state: State::OnCpu;
+
+                state State::OnCpu {
+                    transitions {
+                        on Transition::Disable -> State::Offline {}
+                    }
+                }
+
+                state State::Offline {}
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertTrue(result.ok, [diag.message for diag in result.errors])
+
     def test_rejects_only_once_when_event_reachable_twice(self) -> None:
         document = parse_text(
             """

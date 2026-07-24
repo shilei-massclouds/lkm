@@ -630,11 +630,13 @@ impl Context {
     ) -> EventResult {
         self.scheduler
             .replace_user_task_on_runqueue(&self.cpu_group, previous, next, next_pid)?;
-        self.scheduler.suspend_task(
+        self.scheduler.prepare_simulated_task_switch(
             previous,
-            &mut self.kernel_init_task,
-            &mut self.kthreadd_task,
-            &mut self.user_task_set,
+            next,
+            &self.boot_cpu_current_task,
+            &self.kernel_init_task,
+            &self.kthreadd_task,
+            &self.user_task_set,
         )?;
         self.finish_task_switch(next)
     }
@@ -650,6 +652,19 @@ impl Context {
             &mut self.kthreadd_flow,
             &self.boot_idle_flow,
             &mut self.user_task_set,
+        )
+    }
+
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub fn smoke_identity_switch(&mut self) -> EventResult {
+        let current = self.boot_cpu_current_task.current();
+        self.scheduler.prepare_simulated_task_switch(
+            current,
+            current,
+            &self.boot_cpu_current_task,
+            &self.kernel_init_task,
+            &self.kthreadd_task,
+            &self.user_task_set,
         )
     }
 
@@ -703,11 +718,13 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        self.scheduler.suspend_task(
+        self.scheduler.prepare_simulated_task_switch(
             previous,
-            &mut self.kernel_init_task,
-            &mut self.kthreadd_task,
-            &mut self.user_task_set,
+            next,
+            &self.boot_cpu_current_task,
+            &self.kernel_init_task,
+            &self.kthreadd_task,
+            &self.user_task_set,
         )?;
         self.finish_task_switch(next)
     }
@@ -719,11 +736,13 @@ impl Context {
         if previous.same_identity(next) {
             return Ok(());
         }
-        self.scheduler.suspend_task(
+        self.scheduler.prepare_simulated_task_switch(
             previous,
-            &mut self.kernel_init_task,
-            &mut self.kthreadd_task,
-            &mut self.user_task_set,
+            next,
+            &self.boot_cpu_current_task,
+            &self.kernel_init_task,
+            &self.kthreadd_task,
+            &self.user_task_set,
         )?;
         self.finish_task_switch(next)
     }

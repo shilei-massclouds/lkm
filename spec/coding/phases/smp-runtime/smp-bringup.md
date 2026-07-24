@@ -1,16 +1,17 @@
 # SmpBringupPhase coding
 
 SmpBringupPhase 是 KernelInitFlow.Preset 的第 2 个直接子阶段。父级 transition 与 BP 协调动作由
-KernelInitTask 执行；AP Entry/Callin/OnlineIdle 由目标 AP 执行，不归 KernelInitFlow execution
-ownership，逐 AP TaskFlow 仍为 deferred。model 路径为
+KernelInitTask 执行；AP Entry/Callin/OnlineIdle 由目标 `ApIdleFlow[logical_id]` 执行，不归
+KernelInitFlow execution ownership。model 路径为
 `spec/model/phases/smp-runtime/smp-bringup/`，实现落点为
 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。
 
 ## 生命周期映射
 
 `preset()` 必须依赖 PreSmpInitPhase 精确 Online，发出 Started，然后在 BP 线上驱动准备和
-HSM 发起。HSM 前由 BP 把三个 replicated family 的 secondary 状态重置为 Base；HSM 后 AP
-entry 自行执行三阶段四态。BP 以 Acquire 观察全部目标 Online，再执行 completion wait、ack、
+HSM 发起。HSM 前每个 AP Task 已是 OnCpu/Reserved/Invalid，Flow 与三个 replicated phase family
+为 Base；HSM 后 AP 入口激活 Live authority，keyed Flow Startup 自行执行三阶段四态。BP 以 Acquire
+观察全部目标 Online，再执行 completion wait、ack、
 CpuGroup online publish 和 boundary。全部结果事实成立后提交 Prepared。`setup()`/`enable()`
 只检查结果并分别提交 Ready/Online；Online 只返回
 `KernelInitFlow.preset_after_smp_bringup()`。
@@ -60,26 +61,27 @@ those completions.
 
 #### Per-AP idle task and stack
 
-Each secondary CPU must have its own inactive, Online IdleTask and dedicated
-stack/pt_regs pointer prepared before hart_start. Online makes the task
-selectable as `rq->idle`; it does not publish it in a normal runnable-class
+Each secondary CPU must have its own `OnCpu/Reserved/Invalid` IdleTask and dedicated
+stack/pt_regs pointer prepared before hart_start. The Task is already reserved as
+`rq->idle/rq->curr`; it is not Online and is not published in a normal runnable-class
 queue. BootCPU's idle task/stack must not be reused for AP boot data.
 
 The inactive IdleTask storage is the same unified `Task` core used by
 all other task families, and its initial idle continuation uses the
 unified `TaskFlow` core. `task_ptr` in HSM boot data points to that
-Task carrier. Concrete AP TaskRef/TaskFlowRef slots are internal
-lowering under `SecondaryIdleTaskSet`; they do not complete the model-
-deferred AP object topology. After boot-data and real `tp` validation, the
-secondary architecture entry directly adopts that Task as OnCpu and strictly
-starts its initial idle TaskFlow. This first execution is not a Scheduler
-Continue; later scheduling remains Scheduler-owned.
+Task carrier. Concrete AP TaskRef/TaskFlowRef slots lower the formal replicated family
+under `SecondaryIdleTaskSet`. After boot-data and real `tp` validation, the secondary
+architecture entry changes only the Task authority from Reserved to Live. The HSM
+Startup receiver is resolved through `task_ptr.initial_flow`; that keyed `ApIdleFlow`
+then starts the three AP phases. This path has no Task Enable/Continue; later scheduling
+remains Scheduler-owned.
 
 #### SBI HSM start path
 
 RISC-V cpu_ops_sbi.cpu_start() must be lowered through SBI HSM
-hart_start with secondary_start_sbi as entry and per-AP boot data
-as opaque data. The current ordered booting path must not add a
+hart_start with secondary_start_sbi as entry and per-AP boot data whose ABI prefix is
+exactly Linux `{task_ptr, stack_ptr}` as opaque data. BP records the target TaskRef,
+FlowRef and logical-id as the keyed Startup cause. The current ordered booting path must not add a
 spinwait fallback unless the model is extended first.
 
 #### AP subphases

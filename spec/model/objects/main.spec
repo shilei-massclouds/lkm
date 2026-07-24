@@ -273,6 +273,15 @@ predicate sbi_boot_data_publish_barriers_observed<T>(provider: T) -> bool;
 predicate sbi_hsm_extension_available<T>(sbi: T) -> bool;
 predicate bp_selects_secondary_start_sbi_entry<T>(provider: T) -> bool;
 predicate sbi_hsm_hart_start_requests_issued<T, U>(provider: T, cpu_group: U) -> bool;
+predicate sbi_hsm_startup_signal_keyed_by_logical_id<T, F: TaskFlow>(provider: T, flow: F) -> bool;
+predicate sbi_hsm_startup_targets_task_initial_flow<T, K: Task, F: TaskFlow>(
+    provider: T,
+    task: K,
+    flow: F
+) -> bool;
+predicate secondary_idle_tasks_on_cpu_reserved<T>(cpu_group: T) -> bool;
+predicate secondary_idle_task_breakpoints_invalid<T>(cpu_group: T) -> bool;
+predicate secondary_idle_flows_base<T>(cpu_group: T) -> bool;
 predicate sbi_hsm_hart_start_return_observed<T, U>(provider: T, cpu_group: U) -> bool;
 predicate sbi_hart_boot_data_per_secondary_cpu<T, U>(provider: T, cpu_group: U) -> bool;
 predicate sbi_hart_boot_data_task_ptr_is_secondary_idle_task<T, U>(provider: T, idle_tasks: U) -> bool;
@@ -545,6 +554,12 @@ predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next
 predicate scheduler_switch_to_identity_path<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_saved<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_switch_prepare_validates_prev_live_active_flow<T, U>(scheduler: T, prev_ref: U) -> bool;
+predicate scheduler_switch_prepare_validates_next_breakpoint_flow_ref<T, U>(scheduler: T, next_ref: U) -> bool;
+predicate scheduler_switch_finish_atomic<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
+predicate scheduler_identity_switch_emits_no_task_or_context_event<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_terminal_switch_keeps_prev_breakpoint_invalid<T, U>(scheduler: T, prev_ref: U) -> bool;
+predicate scheduler_terminal_cleanup_runs_on_next_stack<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
 predicate scheduler_prepare_task_switch_done<T, U, V, W>(scheduler: T, runqueue: U, prev_ref: V, next_ref: W) -> bool;
 predicate scheduler_finish_task_switch_done<T, U, V>(scheduler: T, runqueue: U, prev_ref: V) -> bool;
 predicate scheduler_finish_task_switch_releases_rq_lock<T, U>(scheduler: T, runqueue: U) -> bool;
@@ -1151,21 +1166,25 @@ type SchedulerObject: KernelObject {
             depends_on {
                 task_ref_ready(prev_ref);
                 task_ref_ready(next_ref);
+                prev_ref != next_ref;
                 task_ref_targets_online_task(next_ref);
                 scheduler_switch_to_prepared(self, BootRunQueue, prev_ref, next_ref);
+                scheduler_switch_prepare_validates_prev_live_active_flow(self, prev_ref);
+                scheduler_switch_prepare_validates_next_breakpoint_flow_ref(self, next_ref);
             }
             drives {
-                prev_ref.Transition::Suspend;
                 prev_ref.Action::SaveCoreContext;
+                next_ref.Action::RestoreCoreContext;
+                prev_ref.Transition::Suspend;
                 CurrentTaskRef.Action::SetCurrent(task: next_ref);
                 BootCpuCurrentTask.Action::SetCurrent(task: next_ref);
-                next_ref.Action::RestoreCoreContext;
             }
             ensures {
                 scheduler_prepare_task_switch_done(self, BootRunQueue, prev_ref, next_ref);
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
+                scheduler_switch_finish_atomic(self, prev_ref, next_ref);
                 scheduler_finish_task_switch_done(self, BootRunQueue, prev_ref);
                 scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
                 scheduler_finish_task_switch_restores_preempt_count(self, next_ref);
@@ -1176,6 +1195,44 @@ type SchedulerObject: KernelObject {
                 scheduler_continue_signal_pending(self, next_ref);
             }
 
+            emits {
+                next_ref.Transition::Continue;
+            }
+        }
+
+        Action::SwitchToIdentity(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(task_ref);
+                CurrentTaskRef == task_ref;
+            }
+            ensures {
+                scheduler_switch_to_identity_path(self, task_ref);
+                scheduler_identity_switch_emits_no_task_or_context_event(self, task_ref);
+            }
+        }
+
+        Action::SwitchTerminal(prev_ref: TaskRef, next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                prev_ref != next_ref;
+                task_ref_ready(prev_ref);
+                task_ref_ready(next_ref);
+                scheduler_switch_prepare_validates_prev_live_active_flow(self, prev_ref);
+                scheduler_switch_prepare_validates_next_breakpoint_flow_ref(self, next_ref);
+            }
+            drives {
+                next_ref.Action::RestoreCoreContext;
+                prev_ref.Transition::Disable;
+                CurrentTaskRef.Action::SetCurrent(task: next_ref);
+                BootCpuCurrentTask.Action::SetCurrent(task: next_ref);
+                prev_ref.Transition::Cleanup;
+            }
+            ensures {
+                scheduler_terminal_switch_keeps_prev_breakpoint_invalid(self, prev_ref);
+                scheduler_terminal_cleanup_runs_on_next_stack(self, prev_ref, next_ref);
+                scheduler_switch_finish_atomic(self, prev_ref, next_ref);
+            }
             emits {
                 next_ref.Transition::Continue;
             }

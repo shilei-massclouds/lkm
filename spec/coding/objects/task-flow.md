@@ -57,12 +57,12 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 ## OnCpu 执行边界
 
 `TaskFlow` transition/action 在修改状态或执行 body 前，必须通过 owner bridge 解析 parent Task 并检查
-其状态为 `OnCpu`。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
+其状态为 `OnCpu` 且 authority 为 Live。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
 成员。`CurrentTaskSlot` 保留为 CPU 当前 TaskRef 的投影视图；建立以后必须与唯一 OnCpu Task 一致。
 
-Scheduler 切换按 `prev.Suspend -> save -> current/context commit -> physical stack switch ->
-next.Continue` 排序。`next.Continue` 必须在下一 Task 已真实获得 CPU 的入口/恢复点处理，不能由旧 Task
-栈在切换前提前提交 OnCpu。
+Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
+authority/context/FlowRef；finish 原子发布 prev breakpoint、消费 next breakpoint、提交 CurrentTaskSlot
+后处理 strict Continue。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
 
 Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时只发送 `Preset`；否则只向 Online
 active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
@@ -122,5 +122,8 @@ Flow 类型内复制这些内核 actions。实现字段名、SyscallTable route 
   或 child exec Flow 的临时具名 compatibility alias。
 - Task 与 TaskFlow 的 KUnit/smoke 专题可继续合并，因为它验证 owner/binding/handoff 跨对象协议。
 
-AP idle Flow 使用统一 `TaskFlow` core。smoke scheduler/mutex/rwsem/rwlock 的 test-only TaskFlow 同样
-委托统一 core，不能拥有平行 lifecycle 或公开 storage identity。
+`ApIdleFlow[logical_id]` 使用统一 `TaskFlow` core并绑定同 key `ApIdleTask`。BP HSM request 记录 keyed
+Startup cause；AP 从 `task_ptr.initial_flow` 解析 receiver，激活 owner Live authority 后由该 Flow
+pointwise 驱动 EntryPrelude/Callin/OnlineIdle。全路径不得调用 Task Enable/Continue。smoke
+scheduler/mutex/rwsem/rwlock 的 test-only TaskFlow 同样委托统一 core，不能拥有平行 lifecycle 或公开
+storage identity。

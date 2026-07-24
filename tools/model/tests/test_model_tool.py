@@ -686,6 +686,14 @@ class ModelToolTests(unittest.TestCase):
                     "BootCpuRegisters.a1 == BootArgs.dtb_pa",
                     "task_ref_targets(BootTaskRef, BootTask)",
                     "task_ref_ready(BootTaskRef)",
+                    "task_execution_authority_is(\n"
+                    "                        BootTask,\n"
+                    "                        TaskExecutionAuthority::Live\n"
+                    "                    )",
+                    "task_breakpoint_state_is(\n"
+                    "                        BootTask,\n"
+                    "                        TaskBreakpointState::Invalid\n"
+                    "                    )",
                 ],
             )
             self.assertEqual(
@@ -1289,11 +1297,15 @@ class ModelToolTests(unittest.TestCase):
             object Worker: Task {
                 initial_state: State::OnCpu;
                 state State::OnCpu {
-                    transitions { on Transition::Suspend -> State::Online {} }
+                    transitions {
+                        on Transition::Suspend -> State::Online {}
+                        on Transition::Disable -> State::Offline {}
+                    }
                 }
                 state State::Online {
                     transitions { on Transition::Continue -> State::OnCpu {} }
                 }
+                state State::Offline {}
             }
         """
         with tempfile.TemporaryDirectory() as tmp:

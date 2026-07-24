@@ -128,6 +128,90 @@ pub enum TaskKind {
     TestOnly,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum TaskExecutionAuthority {
+    None,
+    Reserved,
+    Live,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum TaskBreakpointState {
+    Invalid,
+    Prepared,
+    Valid,
+}
+
+/// The physical core-register context and its recoverable continuation
+/// metadata. This wrapper is owned by exactly one Task.
+pub struct TaskThreadContext {
+    arch: TaskSwitchContext,
+    breakpoint_state: TaskBreakpointState,
+    flow_ref: TaskFlowRef,
+    core_saved_count: usize,
+    core_restored_count: usize,
+}
+
+impl TaskThreadContext {
+    pub const fn new() -> Self {
+        Self {
+            arch: TaskSwitchContext::new(),
+            breakpoint_state: TaskBreakpointState::Invalid,
+            flow_ref: TaskFlowRef::NONE,
+            core_saved_count: 0,
+            core_restored_count: 0,
+        }
+    }
+
+    pub const fn arch(&self) -> &TaskSwitchContext {
+        &self.arch
+    }
+
+    pub fn arch_mut(&mut self) -> &mut TaskSwitchContext {
+        &mut self.arch
+    }
+
+    pub const fn breakpoint_state(&self) -> TaskBreakpointState {
+        self.breakpoint_state
+    }
+
+    pub const fn flow_ref(&self) -> TaskFlowRef {
+        self.flow_ref
+    }
+
+    pub const fn core_register_set(&self) -> bool {
+        self.arch.initialized()
+    }
+
+    pub const fn core_saved_count(&self) -> usize {
+        self.core_saved_count
+    }
+
+    pub const fn core_restored_count(&self) -> usize {
+        self.core_restored_count
+    }
+
+    fn prepare(&mut self) {
+        self.breakpoint_state = TaskBreakpointState::Prepared;
+        self.flow_ref = TaskFlowRef::NONE;
+    }
+
+    fn publish(&mut self, flow_ref: TaskFlowRef) {
+        self.breakpoint_state = TaskBreakpointState::Valid;
+        self.flow_ref = flow_ref;
+    }
+
+    fn consume(&mut self) {
+        self.breakpoint_state = TaskBreakpointState::Invalid;
+        self.flow_ref = TaskFlowRef::NONE;
+        self.core_restored_count = self.core_restored_count.wrapping_add(1);
+    }
+
+    fn record_save(&mut self) {
+        self.core_saved_count = self.core_saved_count.wrapping_add(1);
+    }
+}
+
 pub struct TaskCpuState {
     cpu_id: usize,
 }
@@ -157,6 +241,7 @@ const TASK_OWNED_FLOW_CAPACITY: usize = 4;
 pub struct Task {
     lifecycle: Lifecycle,
     on_cpu: bool,
+    execution_authority: TaskExecutionAuthority,
     task_ref: TaskRef,
     entry: TaskEntry,
     pid: usize,
@@ -166,7 +251,7 @@ pub struct Task {
     runqueue_published: bool,
     affinity_cpu_id: usize,
     no_setaffinity: bool,
-    switch_ctx: TaskSwitchContext,
+    thread_context: TaskThreadContext,
     initial_flow: TaskFlowRef,
     owned_flows: [TaskFlowRef; TASK_OWNED_FLOW_CAPACITY],
     active_flow: TaskFlowRef,
@@ -181,6 +266,7 @@ impl Task {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             on_cpu: false,
+            execution_authority: TaskExecutionAuthority::None,
             task_ref,
             entry: TaskEntry::None,
             pid: 0,
@@ -190,7 +276,7 @@ impl Task {
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
-            switch_ctx: TaskSwitchContext::new(),
+            thread_context: TaskThreadContext::new(),
             initial_flow: TaskFlowRef::NONE,
             owned_flows: [TaskFlowRef::NONE; TASK_OWNED_FLOW_CAPACITY],
             active_flow: TaskFlowRef::NONE,
@@ -206,6 +292,7 @@ impl Task {
         Self {
             lifecycle: Lifecycle::new(State::Online),
             on_cpu: true,
+            execution_authority: TaskExecutionAuthority::Live,
             task_ref: TaskRef::BOOT,
             entry: TaskEntry::None,
             pid: 0,
@@ -215,10 +302,42 @@ impl Task {
             runqueue_published: false,
             affinity_cpu_id: usize::MAX,
             no_setaffinity: false,
-            switch_ctx: TaskSwitchContext::new(),
+            thread_context: TaskThreadContext::new(),
             initial_flow: TaskFlowRef::BOOT_INIT,
             owned_flows: [
                 TaskFlowRef::BOOT_INIT,
+                TaskFlowRef::NONE,
+                TaskFlowRef::NONE,
+                TaskFlowRef::NONE,
+            ],
+            active_flow: TaskFlowRef::NONE,
+        }
+    }
+
+    /// init_idle()-equivalent AP reservation. The carrier is already the
+    /// CPU's current/idle Task, while HSM has not yet granted Live authority.
+    pub(crate) const fn new_ap_idle_reserved(
+        task_ref: TaskRef,
+        flow_ref: TaskFlowRef,
+        logical_id: usize,
+    ) -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Online),
+            on_cpu: true,
+            execution_authority: TaskExecutionAuthority::Reserved,
+            task_ref,
+            entry: TaskEntry::ApIdle,
+            pid: 0,
+            kind: TaskKind::Idle,
+            cpu: TaskCpuState { cpu_id: logical_id },
+            running: true,
+            runqueue_published: false,
+            affinity_cpu_id: usize::MAX,
+            no_setaffinity: false,
+            thread_context: TaskThreadContext::new(),
+            initial_flow: flow_ref,
+            owned_flows: [
+                flow_ref,
                 TaskFlowRef::NONE,
                 TaskFlowRef::NONE,
                 TaskFlowRef::NONE,
@@ -239,6 +358,29 @@ impl Task {
     /// the Task owns a CPU through the Task-only OnCpu projection.
     pub const fn online(&self) -> bool {
         matches!(self.lifecycle.state(), State::Online)
+    }
+
+    pub const fn execution_authority(&self) -> TaskExecutionAuthority {
+        self.execution_authority
+    }
+
+    pub const fn breakpoint_state(&self) -> TaskBreakpointState {
+        self.thread_context.breakpoint_state()
+    }
+
+    pub const fn breakpoint_flow(&self) -> TaskFlowRef {
+        self.thread_context.flow_ref()
+    }
+
+    pub const fn breakpoint_matches(&self, flow_ref: TaskFlowRef) -> bool {
+        matches!(
+            self.thread_context.breakpoint_state(),
+            TaskBreakpointState::Valid
+        ) && self.breakpoint_flow().same_identity(flow_ref)
+    }
+
+    pub const fn thread_context(&self) -> &TaskThreadContext {
+        &self.thread_context
     }
 
     pub const fn task_ref(&self) -> TaskRef {
@@ -347,7 +489,11 @@ impl Task {
     }
 
     pub fn setup(&mut self, checkpoint: Checkpoint) -> EventResult {
-        if self.runqueue_published {
+        if self.runqueue_published
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
+            || !self.thread_context.core_register_set()
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -364,12 +510,29 @@ impl Task {
     }
 
     pub fn adopt_setup(&mut self) -> EventResult {
+        if self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
+            || !self.thread_context.core_register_set()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
     pub fn enable(&mut self, checkpoint: Checkpoint) -> EventResult {
-        if !self.running || !self.runqueue_published || !self.initial_flow.is_valid() {
+        if !self.running
+            || !self.runqueue_published
+            || !self.initial_flow.is_valid()
+            || !self.owns_flow(self.initial_flow)
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -382,52 +545,46 @@ impl Task {
             State::Ready,
             State::Online,
             checkpoint,
-        )
+        )?;
+        self.thread_context.publish(self.initial_flow);
+        Ok(())
     }
 
     pub fn adopt_enable(&mut self) -> EventResult {
-        self.running = true;
-        self.runqueue_published = true;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
-    }
-
-    /// Publish a secondary CPU's pre-created idle task as its `rq->idle`
-    /// candidate without inserting it into a normal runnable-class queue.
-    pub(crate) fn adopt_ap_idle_enable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || self.entry != TaskEntry::ApIdle
-            || self.kind != TaskKind::Idle
-            || self.cpu.cpu_id() == usize::MAX
-            || !self.initial_flow.is_valid()
-            || self.running
-            || self.runqueue_published
-            || self.on_cpu
+        if !self.initial_flow.is_valid()
+            || !self.owns_flow(self.initial_flow)
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Prepared
         {
             return failed_condition(
                 LifecycleEvent::Enable,
-                self.state(),
+                self.lifecycle.state(),
                 State::Ready,
                 State::Online,
             );
         }
         self.running = true;
+        self.runqueue_published = true;
         self.lifecycle
-            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)?;
+        self.thread_context.publish(self.initial_flow);
+        Ok(())
     }
 
-    /// Adopt the initial execution authority delivered by the RISC-V
-    /// secondary-hart entry. This is deliberately not Task.Continue: no
-    /// scheduler has dispatched the CPU's pre-created idle task.
-    pub(crate) fn adopt_ap_entry_on_cpu(&mut self) -> EventResult {
+    /// Accept the keyed SBI HSM Startup delivery. Task lifecycle and identity
+    /// do not change; only the reserved execution authority becomes Live.
+    pub(crate) fn activate_hsm_authority(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Online
-            || self.on_cpu
+            || !self.on_cpu
             || self.entry != TaskEntry::ApIdle
             || self.kind != TaskKind::Idle
             || self.cpu.cpu_id() == usize::MAX
             || !self.running
             || self.runqueue_published
             || !self.initial_flow.is_valid()
+            || self.active_flow.is_valid()
+            || self.execution_authority != TaskExecutionAuthority::Reserved
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
         {
             return failed_condition(
                 LifecycleEvent::Continue,
@@ -436,7 +593,7 @@ impl Task {
                 State::OnCpu,
             );
         }
-        self.on_cpu = true;
+        self.execution_authority = TaskExecutionAuthority::Live;
         Ok(())
     }
 
@@ -444,7 +601,19 @@ impl Task {
     /// this from the new task's real entry/resume point, after the physical
     /// context switch has transferred execution.
     pub(crate) fn continue_on_cpu(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Online || self.on_cpu {
+        let expected_flow = if self.active_flow.is_valid() {
+            self.active_flow
+        } else {
+            self.initial_flow
+        };
+        if self.lifecycle.state() != State::Online
+            || self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Valid
+            || !expected_flow.is_valid()
+            || !self.owns_flow(expected_flow)
+            || !self.thread_context.flow_ref().same_identity(expected_flow)
+        {
             return failed_condition(
                 LifecycleEvent::Continue,
                 self.state(),
@@ -453,13 +622,22 @@ impl Task {
             );
         }
         self.on_cpu = true;
+        self.execution_authority = TaskExecutionAuthority::Live;
+        self.thread_context.consume();
         Ok(())
     }
 
-    /// Scheduler-only acceptance of `Task.Suspend`, committed before saving
-    /// the old task's context.
+    /// Scheduler-only acceptance of `Task.Suspend`, committed on the selected
+    /// task's stack after the old task's core registers have been saved.
     pub(crate) fn suspend_from_cpu(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Online || !self.on_cpu {
+        let flow_ref = self.active_flow;
+        if self.lifecycle.state() != State::Online
+            || !self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
+            || !flow_ref.is_valid()
+            || !self.owns_flow(flow_ref)
+        {
             return failed_condition(
                 LifecycleEvent::Suspend,
                 self.state(),
@@ -468,11 +646,18 @@ impl Task {
             );
         }
         self.on_cpu = false;
+        self.execution_authority = TaskExecutionAuthority::None;
+        self.thread_context.record_save();
+        self.thread_context.publish(flow_ref);
         Ok(())
     }
 
     pub fn disable(&mut self) -> EventResult {
-        if self.active_flow.is_valid() || self.on_cpu {
+        if self.active_flow.is_valid()
+            || !self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
+        {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
@@ -480,6 +665,9 @@ impl Task {
                 State::Offline,
             );
         }
+        self.on_cpu = false;
+        self.execution_authority = TaskExecutionAuthority::None;
+        self.thread_context.record_save();
         self.running = false;
         self.runqueue_published = false;
         self.lifecycle
@@ -487,6 +675,17 @@ impl Task {
     }
 
     pub fn cleanup(&mut self) -> EventResult {
+        if self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::None
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
+        {
+            return failed_condition(
+                LifecycleEvent::Cleanup,
+                self.lifecycle.state(),
+                State::Offline,
+                State::Destroyed,
+            );
+        }
         let mut index = 0;
         while index < TASK_OWNED_FLOW_CAPACITY {
             if self.owned_flows[index].is_valid() {
@@ -572,20 +771,58 @@ impl Task {
     }
 
     pub fn init_switch_context(&mut self, entry: extern "C" fn() -> !, stack_top: usize) {
-        let tp = self as *const Task as usize;
-        self.switch_ctx.init(entry, stack_top, tp);
+        self.thread_context.arch_mut().init(entry, stack_top);
+        if !self.on_cpu && self.lifecycle.state() == State::Prepared {
+            self.thread_context.prepare();
+        }
     }
 
     pub fn init_dummy_switch_context(&mut self) {
-        self.switch_ctx.init_with_dummy();
+        self.thread_context.arch_mut().init_with_dummy();
+        if !self.on_cpu && self.lifecycle.state() == State::Prepared {
+            self.thread_context.prepare();
+        }
     }
 
     pub const fn switch_context(&self) -> &TaskSwitchContext {
-        &self.switch_ctx
+        self.thread_context.arch()
     }
 
     pub fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
-        &mut self.switch_ctx
+        self.thread_context.arch_mut()
+    }
+
+    pub fn switch_in_ready(&self) -> bool {
+        let expected_flow = if self.active_flow.is_valid() {
+            self.active_flow
+        } else {
+            self.initial_flow
+        };
+        self.lifecycle.state() == State::Online
+            && !self.on_cpu
+            && self.execution_authority == TaskExecutionAuthority::None
+            && self.thread_context.breakpoint_state() == TaskBreakpointState::Valid
+            && self.thread_context.core_register_set()
+            && expected_flow.is_valid()
+            && self.owns_flow(expected_flow)
+            && self.breakpoint_matches(expected_flow)
+    }
+
+    pub fn switch_out_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.on_cpu
+            && self.execution_authority == TaskExecutionAuthority::Live
+            && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
+            && self.active_flow.is_valid()
+            && self.owns_flow(self.active_flow)
+    }
+
+    pub fn terminal_switch_out_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.on_cpu
+            && self.execution_authority == TaskExecutionAuthority::Live
+            && self.thread_context.breakpoint_state() == TaskBreakpointState::Invalid
+            && !self.active_flow.is_valid()
     }
 
     pub(super) fn register_owned_flow(&mut self, flow_ref: TaskFlowRef) -> EventResult {

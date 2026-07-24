@@ -3,7 +3,7 @@ use crate::checkpoint::Checkpoint;
 use super::{
     next_generation,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    task::{Task, TaskRef},
+    task::{Task, TaskExecutionAuthority, TaskRef},
 };
 
 pub const USER_FLOW_SLOTS_PER_TASK: usize = 2;
@@ -57,6 +57,11 @@ impl TaskFlowRef {
 
     pub const fn same_identity(self, other: Self) -> bool {
         self.slot == other.slot && self.generation == other.generation
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) const fn with_generation_for_test(self, generation: u32) -> Self {
+        Self::new(self.slot, generation)
     }
 }
 
@@ -491,5 +496,7 @@ impl TaskFlow {
 }
 
 pub fn task_flow_execution_guard_satisfied(flow: &TaskFlow, owner: &Task) -> bool {
-    owner.state() == State::OnCpu && flow.owner() == owner.task_ref()
+    owner.state() == State::OnCpu
+        && owner.execution_authority() == TaskExecutionAuthority::Live
+        && flow.owner() == owner.task_ref()
 }

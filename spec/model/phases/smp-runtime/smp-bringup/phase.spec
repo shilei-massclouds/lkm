@@ -247,9 +247,10 @@ context DoneUpCompletionWaitLockContext: ResourceExclusiveContext {
  * 准备 inactive idle task。每个 secondary CPU 都有自己的 idle task 和
  * 对应 kernel stack / pt_regs 栈顶；这些对象是 CPU 关联的 per-CPU
  * task/stack 事实，不是 CpuGroup 拥有的 CPU 本体。它不启动 CPU；各 idle
- * Task 在 hart_start 前已为 Online/rq->idle 候选，但不属于普通 runnable
- * class queue。只有 AP 真实进入 secondary entry 后，架构入口才提交该 Task
- * OnCpu 并启动 initial idle Flow。
+ * Task 在 hart_start 前已由 init_idle()-equivalent construction 建立为
+ * OnCpu/Reserved/Invalid 的 rq->idle/rq->curr carrier，不属于普通 runnable
+ * class queue。AP 真实进入 secondary entry 后只激活 Live authority；keyed
+ * HSM Startup 再启动同 logical-id 的 initial idle Flow。
  */
 object SecondaryIdleTaskSet: TaskSet {
     initial_state: State::Base;
@@ -272,6 +273,23 @@ object SecondaryIdleTaskSet: TaskSet {
                     secondary_idle_task_has_dedicated_stack(CpuGroup);
                     secondary_idle_task_pt_regs_stack_pointer_ready(CpuGroup);
                     secondary_idle_tasks_inactive(CpuGroup);
+                    secondary_idle_tasks_on_cpu_reserved(CpuGroup);
+                    secondary_idle_task_breakpoints_invalid(CpuGroup);
+                    secondary_idle_flows_base(CpuGroup);
+                    task_ap_idle_reserved_for_cpu(ApIdleTask);
+                    task_execution_authority_is(
+                        ApIdleTask,
+                        TaskExecutionAuthority::Reserved
+                    );
+                    task_breakpoint_state_is(
+                        ApIdleTask,
+                        TaskBreakpointState::Invalid
+                    );
+                    task_initial_flow_is(ApIdleTask, ApIdleFlow);
+                    task_owns_flow(ApIdleTask, ApIdleFlow);
+                    task_flow_owner_is(ApIdleFlow, ApIdleTask);
+                    task_flow_parent_is(ApIdleFlow, ApIdleTask);
+                    ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
                     secondary_cpus_present_but_not_online(CpuGroup);
                 }
             }
@@ -286,6 +304,23 @@ object SecondaryIdleTaskSet: TaskSet {
             secondary_idle_task_has_dedicated_stack(CpuGroup);
             secondary_idle_task_pt_regs_stack_pointer_ready(CpuGroup);
             secondary_idle_tasks_inactive(CpuGroup);
+            secondary_idle_tasks_on_cpu_reserved(CpuGroup);
+            secondary_idle_task_breakpoints_invalid(CpuGroup);
+            secondary_idle_flows_base(CpuGroup);
+            task_ap_idle_reserved_for_cpu(ApIdleTask);
+            task_execution_authority_is(
+                ApIdleTask,
+                TaskExecutionAuthority::Reserved
+            );
+            task_breakpoint_state_is(
+                ApIdleTask,
+                TaskBreakpointState::Invalid
+            );
+            task_initial_flow_is(ApIdleTask, ApIdleFlow);
+            task_owns_flow(ApIdleTask, ApIdleFlow);
+            task_flow_owner_is(ApIdleFlow, ApIdleTask);
+            task_flow_parent_is(ApIdleFlow, ApIdleTask);
+            ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
             secondary_cpus_present_but_not_online(CpuGroup);
         }
     }
@@ -413,6 +448,17 @@ object CpuStartProvider: HardwareObject {
                     cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
+                    sbi_hsm_startup_signal_keyed_by_logical_id(CpuStartProvider, ApIdleFlow);
+                    sbi_hsm_startup_targets_task_initial_flow(
+                        CpuStartProvider,
+                        ApIdleTask,
+                        ApIdleFlow
+                    );
+                }
+
+                emits {
+                    ApIdleTask.Action::ActivateHsmAuthority;
+                    ApIdleFlow.Transition::Preset;
                 }
             }
         }
@@ -437,6 +483,12 @@ object CpuStartProvider: HardwareObject {
             cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
             cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
             sbi_boot_data_publish_barriers_observed(CpuStartProvider);
+            sbi_hsm_startup_signal_keyed_by_logical_id(CpuStartProvider, ApIdleFlow);
+            sbi_hsm_startup_targets_task_initial_flow(
+                CpuStartProvider,
+                ApIdleTask,
+                ApIdleFlow
+            );
         }
     }
 }
@@ -453,13 +505,20 @@ object CpuStartProvider: HardwareObject {
  */
 object ApEntryPreludePhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpBringupPhase;
+    parent: ApIdleFlow;
 
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     CpuStartProvider.state == State::Ready;
+                    ApIdleTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        ApIdleTask,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_authority_activated_by_hsm(ApIdleTask);
+                    ap_idle_flow_hsm_startup_keyed(ApIdleFlow);
                     CpuGroup.state == State::Ready;
                     SwapperVm.state == State::Online;
                     EventStream.state == State::Ready;
@@ -579,7 +638,7 @@ object ApEntryPreludePhase: PhaseObject {
  */
 object ApSmpCallinPhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpBringupPhase;
+    parent: ApIdleFlow;
 
     state State::Base {
         transitions {
@@ -672,7 +731,7 @@ object ApSmpCallinPhase: PhaseObject {
  */
 object ApOnlineIdlePhase: PhaseObject {
     initial_state: State::Base;
-    parent: SmpBringupPhase;
+    parent: ApIdleFlow;
 
     state State::Base {
         transitions {
@@ -953,68 +1012,27 @@ object SmpBringupPhase: PhaseObject {
                     CpuAddRemoveLock.Transition::Preset;
                     CpuAddRemoveLock.Transition::Setup;
                     CpuStartProvider.Transition::Setup;
-                    ApEntryPreludePhase.Transition::Preset;
-                    ApSmpCallinPhase.Transition::Preset;
-                    ApOnlineIdlePhase.Transition::Preset;
-                    SecondaryCpuStartupAck.Transition::Setup;
-                    SecondaryCpuOnlineAck.Transition::Setup;
-                    SmpBringupBoundary.Transition::Setup;
                 }
 
                 ensures {
-                    smp_bringup_phase_ready(SmpBringupPhase);
                     secondary_idle_tasks_prepared(CpuGroup);
                     secondary_idle_task_per_secondary_cpu(CpuGroup);
                     secondary_idle_task_has_dedicated_stack(CpuGroup);
+                    secondary_idle_tasks_on_cpu_reserved(CpuGroup);
+                    secondary_idle_task_breakpoints_invalid(CpuGroup);
+                    secondary_idle_flows_base(CpuGroup);
                     sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
                     sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
-                    ap_secondary_start_sbi_entry_reached(CpuGroup);
-                    ap_smp_callin_reached(CpuGroup);
-                    ap_cpu_running_completion_produced(CpuHotplugSyncSet);
-                    ap_done_up_completion_produced(CpuHotplugSyncSet);
-                    ApEntryPreludePhase.state == State::Online;
-                    ApSmpCallinPhase.state == State::Online;
-                    ApOnlineIdlePhase.state == State::Online;
                     cpu_hotplug_sync_gates_prepared(CpuGroup);
-                    cpu_running_completion_observed(CpuGroup);
-                    done_up_completion_observed(CpuGroup);
-                    secondary_cpus_online_after_ap_ack(CpuGroup);
-                    secondary_cpus_online(CpuGroup);
-                    smp_concurrency_open(CpuGroup);
                     cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
                     smpboot_threads_mutex_guard_used(CpuHotplugSyncSet, SmpbootThreadsLock);
                     cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
-                    cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
-                    done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-                    ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
-                    ap_ipi_enable_observed(ApSmpCallinPhase);
-                    ap_local_irq_enable_observed(ApOnlineIdlePhase);
-                    smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase);
-                }
-
-                deferred smp_bringup.001 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Complete each AP CurrentCPU, LocalInterruptControl and CurrentTaskSlot object chain.";
-                    evidence { smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase); }
-                    close_when: "Every online AP has a complete CPU-local identity/control/task chain with SMP tests.";
-                }
-                deferred smp_bringup.002 {
-                    category: DeferredCategory::Protocol;
-                    summary: "Prove the AP hotplug-thread should_run smp_mb pairing.";
-                    evidence { ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck); }
-                    close_when: "The publish/observe memory-order proof and stress tests cover the should_run handoff.";
-                }
-                deferred smp_bringup.003 {
-                    category: DeferredCategory::ModelDetail;
-                    summary: "Complete AP hotplug-thread callback execution semantics.";
-                    evidence { ap_hotplug_callback_details_deferred(); }
-                    close_when: "Callback ordering, failure and CPU online/offline tests pass.";
-                }
-
-                emits {
-                    Transition::Setup;
+                    sbi_hsm_startup_signal_keyed_by_logical_id(
+                        CpuStartProvider,
+                        ApIdleFlow
+                    );
                 }
             }
         }
@@ -1027,32 +1045,15 @@ object SmpBringupPhase: PhaseObject {
             CpuHotplugSyncSet.state == State::Prepared;
             CpuAddRemoveLock.state == State::Ready;
             CpuStartProvider.state == State::Ready;
-            ApEntryPreludePhase.state == State::Online;
-            ApSmpCallinPhase.state == State::Online;
-            ApOnlineIdlePhase.state == State::Online;
-            SecondaryCpuStartupAck.state == State::Ready;
-            SecondaryCpuOnlineAck.state == State::Ready;
-            SmpBringupBoundary.state == State::Ready;
-            smp_bringup_phase_ready(SmpBringupPhase);
             sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
-            ap_secondary_start_sbi_entry_reached(CpuGroup);
-            ap_smp_callin_reached(CpuGroup);
-            ap_cpu_running_completion_produced(CpuHotplugSyncSet);
-            ap_done_up_completion_produced(CpuHotplugSyncSet);
-            secondary_cpus_online_after_ap_ack(CpuGroup);
-            secondary_cpus_online(CpuGroup);
-            smp_concurrency_open(CpuGroup);
+            secondary_idle_tasks_on_cpu_reserved(CpuGroup);
+            secondary_idle_task_breakpoints_invalid(CpuGroup);
+            secondary_idle_flows_base(CpuGroup);
             cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
             smpboot_threads_mutex_guard_used(CpuHotplugSyncSet, SmpbootThreadsLock);
             cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
             cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
             sbi_boot_data_publish_barriers_observed(CpuStartProvider);
-            cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
-            done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
-            ap_local_irq_enable_observed(ApOnlineIdlePhase);
-            ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
-            ap_ipi_enable_observed(ApSmpCallinPhase);
-            ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck);
         }
 
         transitions {
@@ -1086,6 +1087,9 @@ object SmpBringupPhase: PhaseObject {
                     secondary_cpus_online(CpuGroup);
                     smp_concurrency_open(CpuGroup);
                 }
+                emits {
+                    KernelInitFlow.Transition::Setup;
+                }
             }
         }
     }
@@ -1097,6 +1101,69 @@ object SmpBringupPhase: PhaseObject {
             SmpBringupBoundary.state == State::Ready;
             secondary_cpus_online(CpuGroup);
             smp_concurrency_open(CpuGroup);
+        }
+    }
+
+    actions {
+        /*
+         * AP Flow completion resumes the BP wait/ack continuation.  The AP
+         * phases have already run pointwise on the AP execution line.
+         */
+        Action::ObserveApCompletion {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Prepared;
+                ApIdleFlow.state == State::Online;
+                ApEntryPreludePhase.state == State::Online;
+                ApSmpCallinPhase.state == State::Online;
+                ApOnlineIdlePhase.state == State::Online;
+            }
+            drives {
+                SecondaryCpuStartupAck.Transition::Setup;
+                SecondaryCpuOnlineAck.Transition::Setup;
+                SmpBringupBoundary.Transition::Setup;
+            }
+            ensures {
+                smp_bringup_phase_ready(SmpBringupPhase);
+                ap_secondary_start_sbi_entry_reached(CpuGroup);
+                ap_smp_callin_reached(CpuGroup);
+                ap_cpu_running_completion_produced(CpuHotplugSyncSet);
+                ap_done_up_completion_produced(CpuHotplugSyncSet);
+                cpu_running_completion_observed(CpuGroup);
+                done_up_completion_observed(CpuGroup);
+                secondary_cpus_online_after_ap_ack(CpuGroup);
+                secondary_cpus_online(CpuGroup);
+                smp_concurrency_open(CpuGroup);
+                cpu_running_wait_lock_guard_used(CpuHotplugSyncSet, CpuRunningWaitLock);
+                done_up_wait_lock_guard_used(CpuHotplugSyncSet, DoneUpWaitLock);
+                ap_cache_tlb_flush_summary_observed(ApSmpCallinPhase);
+                ap_ipi_enable_observed(ApSmpCallinPhase);
+                ap_local_irq_enable_observed(ApOnlineIdlePhase);
+                smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase);
+            }
+
+            deferred smp_bringup.001 {
+                category: DeferredCategory::ModelDetail;
+                summary: "Complete each AP CurrentCPU, LocalInterruptControl and CurrentTaskSlot object chain.";
+                evidence { smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase); }
+                close_when: "Every online AP has a complete CPU-local identity/control/task chain with SMP tests.";
+            }
+            deferred smp_bringup.002 {
+                category: DeferredCategory::Protocol;
+                summary: "Prove the AP hotplug-thread should_run smp_mb pairing.";
+                evidence { ap_hotplug_thread_memory_barrier_pair_deferred(SecondaryCpuOnlineAck); }
+                close_when: "The publish/observe memory-order proof and stress tests cover the should_run handoff.";
+            }
+            deferred smp_bringup.003 {
+                category: DeferredCategory::ModelDetail;
+                summary: "Complete AP hotplug-thread callback execution semantics.";
+                evidence { ap_hotplug_callback_details_deferred(); }
+                close_when: "Callback ordering, failure and CPU online/offline tests pass.";
+            }
+
+            emits {
+                Transition::Setup;
+            }
         }
     }
 }

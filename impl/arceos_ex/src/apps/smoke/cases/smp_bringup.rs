@@ -1,7 +1,12 @@
 use crate::{
     apps::smoke::SmokeResult,
     context::context,
-    objects::{printk, state::State},
+    objects::{
+        printk,
+        state::State,
+        task::{Task, TaskRef},
+        task_flow::{TaskFlow, TaskFlowRef},
+    },
     phases,
 };
 
@@ -24,6 +29,10 @@ pub fn run() -> SmokeResult {
         || !ctx.secondary_idle_tasks.unified_task_flow_carriers()
     {
         printk::write_str("secondary idle task facts invalid\n");
+        return SmokeResult::Failed;
+    }
+    if !reserved_ap_flow_action_rejected() {
+        printk::write_str("reserved AP authority accepted Flow action\n");
         return SmokeResult::Failed;
     }
 
@@ -118,8 +127,12 @@ pub fn run() -> SmokeResult {
         if phases::smp_runtime::ap_entry_prelude::state_for(logical_id) != State::Online
             || phases::smp_runtime::ap_smp_callin::state_for(logical_id) != State::Online
             || phases::smp_runtime::ap_online_idle::state_for(logical_id) != State::Online
+            || ctx.cpu_start_provider.hsm_start_key(logical_id) != Some(logical_id)
+            || ctx.cpu_start_provider.hsm_start_task_ref(logical_id) != TaskRef::ap_idle(logical_id)
+            || ctx.cpu_start_provider.hsm_start_flow_ref(logical_id)
+                != TaskFlowRef::ap_idle(logical_id)
         {
-            printk::write_str("per-AP phase state invalid\n");
+            printk::write_str("per-AP keyed Task/Flow state invalid\n");
             return SmokeResult::Failed;
         }
         logical_id += 1;
@@ -142,4 +155,12 @@ pub fn run() -> SmokeResult {
         ctx.cpu_group.possible_cpu_count()
     ));
     SmokeResult::Passed
+}
+
+fn reserved_ap_flow_action_rejected() -> bool {
+    let task_ref = TaskRef::ap_idle(1);
+    let flow_ref = TaskFlowRef::ap_idle(1);
+    let task = Task::new_ap_idle_reserved(task_ref, flow_ref, 1);
+    let mut flow = TaskFlow::new_static_bound(flow_ref, task_ref);
+    flow.preset(&task, None).is_err()
 }

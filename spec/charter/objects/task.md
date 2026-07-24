@@ -1,6 +1,6 @@
 # Task
 
-`Task` 是内核中唯一的 task_struct-like carrier 类型。调度器调度 Task；Task 保存稳定身份、PID、
+`Task` 是内核中唯一的 task_struct-like carrier 类型。调度器调度 Task；Task 物理拥有稳定身份、PID、
 CPU 归属、调度状态、任务资源引用和 `TaskThreadContext`。`BootTask`、`KernelInitTask`、
 `KthreaddTask` 以及用户 child 都是同一 `Task` 类型的独立实例，不再建立并行的 task kind、
 process persona 或 idle-task carrier 类型。
@@ -31,9 +31,9 @@ PID 1、child Task 以及各自 Flow 的临时具名见证不再是正式静态�
 `Task` 类型拥有普通 Task 的唯一完整 lifecycle 定义：
 
 ```text
-Base --Preset--> Prepared --Setup--> Ready --Enable--> Online
+Base --Preset--> Prepared --Setup--> Ready --Enable(initial Flow breakpoint)--> Online
 Online --Continue--> OnCpu --Suspend--> Online
-Online --Disable--> Offline --Cleanup--> Destroyed
+OnCpu --Disable(terminal)--> Offline --Cleanup--> Destroyed
 ```
 
 `KernelInitTask`、`KthreaddTask` 等静态实例以及 `declare` 创建的 runtime child 都完整继承这张
@@ -41,25 +41,40 @@ Online --Disable--> Offline --Cleanup--> Destroyed
 运行期实例进入继承状态时都必须检查同一类型 invariant，其中 `self` 绑定到实际 instance identity，
 而不是类型名或 declaration site。
 
-`Online` 只表示 Task 已发布并可被 Scheduler 派发；idle task 可以是 runqueue 的 `rq->idle` / `rq->curr`
-而不属于普通 runnable class queue，因此 Online 不承诺普通 RunQ membership。`OnCpu` 表示该 Task
-当前实际占有 CPU 并正在其 execution continuation 上执行；它是 Task 专属扩展状态，不得扩展为
-`Object`、`PhaseObject` 或其它类型的通用生命周期状态。
+`Online` 是普通 Task 唯一持有有效、可恢复 TaskFlow 断点的状态；它同时表示 Task 已发布并可被
+Scheduler 派发。idle task 可以是 runqueue 的 `rq->idle` / `rq->curr` 而不属于普通 runnable class
+queue，因此 Online 不承诺普通 RunQ membership。`OnCpu` 表示该 Task 是 CPU 唯一 current/执行权
+carrier；它是 Task 专属扩展状态，不得扩展为 `Object`、`PhaseObject` 或其它类型的通用生命周期状态。
 
-`BootTask` 是唯一允许的静态 Task lifecycle override。它没有 Preset、Setup、Enable、Disable 或
-Cleanup transition，初始状态为 `OnCpu`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
+Task lifecycle 之外必须保存两组正交状态：
+
+- `TaskExecutionAuthority::{None, Reserved, Live}`：普通 Online Task 为 None，真实执行的普通 Task 为
+  Live；Reserved 只用于已经成为某 CPU `rq->idle/rq->curr` 但尚未收到 HSM 执行权的 AP idle Task。
+- `TaskBreakpointState::{Invalid, Prepared, Valid}`：Setup 只建立 Prepared context；Enable 把它绑定到
+  `initial_flow` 并发布 Valid；Continue 校验并消费 Valid context，OnCpu 期间为 Invalid；Suspend 保存
+  active Flow context 并再次发布 Valid。
+
+`TaskThreadContext` 固定物理保存 RISC-V `ra/sp/s0..s11`、breakpoint state、经 slot/generation 校验的
+`TaskFlowRef` 以及真实 save/restore 观察计数。`tp`、CPU identity 和 `CurrentTaskSlot` 均是独立的
+identity/current 机制，不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
+FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
+
+`BootTask` 是允许的静态 Task lifecycle override。它没有 Preset、Setup 或 Enable，初始状态为
+`OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
 往返。入口初态表示固件/架构入口已把 boot CPU 执行权直接交给该 Task；它不由 Scheduler Continue
 建立，也不依赖尚未建立的 BootRunQueue 或 CurrentTaskSlot。该状态同时保证静态 `init_task` storage、
 固定 PID 0、`TaskRef::BOOT` 和 canonical identity；不得把会变化的 `tp`、entry role、preemption 状态
 或 active TaskFlow 放入 invariant。boot-only const 初始化器直接构造这一状态，不复用普通 Task
 lifecycle 方法。除这一完整 override 外，不存在实例级 Task lifecycle 权威。
 
-secondary CPU 的 idle Task 仍走普通 `Base -> Prepared -> Ready -> Online` 生命周期；
-`fork_idle()` 在 hart 启动前把它发布为该 CPU 的 `rq->idle` 候选，但不把它放入普通 runnable
-class queue。目标 hart 从架构 secondary entry 开始执行时，由架构交接事实把同一 Task 从
-`Online` 置为 `OnCpu` 并严格启动它的 initial idle Flow；该首次执行不发送
-`Task.Continue`，也不经过 Scheduler。此例外只描述 CPU 启动入口的初始执行权，后续真实调度仍
-只能由 Scheduler 发送 Suspend/Continue。
+每个 secondary CPU 的 `ApIdleTask[logical_id]` 是按 logical-id 解释的 replicated family。
+`init_idle()`/BP 预建结束时它已经是该 CPU 的 `rq->idle/rq->curr`，初态直接为
+`OnCpu/Reserved/Invalid`，不是普通 `Base -> ... -> Online` 发布，也不进入普通 runnable class
+queue。对应 `ApIdleFlow[logical_id]` 已完成 owner/parent/initial binding，但保持 Base。SBI HSM 入口
+只验证 Linux `{task_ptr, stack_ptr}` boot data、加载独立 `tp/sp` 并把 authority 从 Reserved 激活为
+Live；它不改变 Task lifecycle，也不发送 Task Enable/Continue。随后 keyed HSM Startup 严格启动同一
+logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Online/Valid 断点，后续切换
+完全使用普通 Suspend/Continue。
 
 `tp` 的物理/虚拟绑定与早期 preemption 事实归 `EntryPreludePhase` 私有的
 `BootTaskEntryBinding`，不属于 Task carrier lifecycle。入口各阶段只能验证 `BootTask.OnCpu`
@@ -71,18 +86,24 @@ class queue。目标 hart 从架构 secondary entry 开始执行时，由架构�
 
 普通 Task 的 `Preset` 统一建立 fresh identity、`TaskRef`、typed initial Flow association、初始 Flow ownership 与 clone
 specification；`Setup` 统一消费 `TaskCreationCore` 已提交的 copy-process 事实，并建立 PID、thread
-context、scheduler entity 和 New/not-enqueued 状态；`Enable` 统一消费 running、runqueue publication
-与初始 Flow binding 并提交 Task Online；它不启动 Flow。`BootInitRestInitPhase` 必须完整驱动新 Task
+context、首次寄存器字节、Prepared breakpoint storage、scheduler entity 和 New/not-enqueued 状态；
+`Enable` 统一消费 running、runqueue publication 与初始 Flow binding，把 Prepared context 绑定该
+FlowRef 并原子发布 `Online/None/Valid`；它不启动 Flow。`BootInitRestInitPhase` 必须完整驱动新 Task
 的 Preset/Setup/Enable：其中 Preset/Setup 对应 carrier 创建与 copy-process 收口，Enable 对应
 `wake_up_new_task()` 后的 Online 发布。PID 1 与 kthreadd 的 initial Flow 都只能在各自 Task 首次真实
 获得 CPU 后启动；不得把 Task Online 误写成 initial Flow 已启动。PID 1 入口、`CLONE_FS`、kthreadd
 flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
-Scheduler 是 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一次真实切换必须先同步驱动 PrevTask
-Suspend 并确认旧 Task 离开 OnCpu，再提交 CurrentTaskSlot/context-switch 事实并完成物理栈切换，最后
-在 NextTask 已真实占有 CPU 的入口或恢复点异步发出 Continue。CurrentTaskSlot 一旦建立，就必须与
-唯一 OnCpu Task 的 TaskRef 一致；它是投影视图，不是执行权来源。
+Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一次真实切换分为 prepare、物理
+switch、finish：prepare 校验 prev `OnCpu/Live/Invalid`、prev active Flow 与 next
+`Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的 `ra/sp/s0..s11` 并从
+next Task identity 单独建立 `tp`；next 栈上的 finish 原子提交 prev `Online/None/Valid`、next
+`OnCpu/Live/Invalid`、CurrentTaskSlot 与观察事实，然后严格 Startup/Continue next Flow。若 prev 是
+终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
+不得先制造不可恢复的 Online。`prev == next` 是无动作路径：不发送 Suspend/Continue，不保存/恢复
+context，也不改变 lifecycle、authority、Flow binding 或计数。CurrentTaskSlot 是唯一 OnCpu Task 的
+投影视图，不是执行权来源。
 
 Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution continuation：若 initial Flow 仍为
 Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Flow 发出 Continue。发送前两条候选
@@ -103,8 +124,9 @@ metadata；不得以角色 enum、persona wrapper 或公开存储字段形成平
 Task 只维护 Flow ownership 与唯一 active binding，不复制 Flow lifecycle 状态。一个 Task 可以按
 exec 顺序拥有多个 Flow，但任一时刻最多一个 owned Flow Online；不同 Task 不得共享同一 Flow。
 
-普通 Task `Disable` 前必须保证所有 owned Flow 已退出 Online，且 exit 路径已按序清除 active binding；
-Task `Cleanup` 前必须保证所有 owned Flow 已到达 Destroyed。Flow alias 或内部存储退出词法/表槽范围
+普通 Task terminal `Disable` 必须从 OnCpu/Live/Invalid 直接到 Offline/None/Invalid，并保证所有 owned
+Flow 已退出 Online且 active binding 已清除；Task `Cleanup` 前必须保证所有 owned Flow 已到达
+Destroyed。Flow alias 或内部存储退出词法/表槽范围
 不表示 Flow 已被销毁。`BootTask` 不退出；其 initial Flow 是 `BootInitFlow`，后继
 `BootIdleFlow` 的 active binding 在 `BootInitFlow.Enable` 的调度切换预检中建立。TaskFlow 的每次
 推进还必须动态检查 parent Task 为 OnCpu。具体 Flow lifecycle、严格 initial-flow 启动和 exec

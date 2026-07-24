@@ -2877,7 +2877,7 @@ impl UserAppFlow {
         owner: &mut KernelInitTask,
     ) -> EventResult {
         if self.has_active_flow
-            || owner.state() != State::Online
+            || owner.state() != State::Offline
             || owner.task().active_flow().is_valid()
         {
             return failed_condition(
@@ -2887,7 +2887,6 @@ impl UserAppFlow {
                 State::Destroyed,
             );
         }
-        owner.task_mut().disable()?;
         owner.task_mut().cleanup()?;
         self.released = true;
         Ok(())
@@ -3529,6 +3528,23 @@ impl UserTaskSet {
         }
     }
 
+    pub(crate) fn task_switch_in_ready(&self, task_ref: TaskRef) -> bool {
+        self.slot_for_ref(task_ref)
+            .map(|slot| slot.task.switch_in_ready())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn task_switch_out_ready(&self, task_ref: TaskRef) -> bool {
+        self.slot_for_ref(task_ref)
+            .map(|slot| slot.task.switch_out_ready() || slot.task.terminal_switch_out_ready())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {
+        self.slot_for_ref(task_ref)
+            .map(|slot| &slot.task as *const Task as usize)
+    }
+
     fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
         if pid == 0 {
             return None;
@@ -3555,6 +3571,7 @@ impl UserTaskSet {
             TaskKind::UserModeThread,
         ));
         task_event_or_terminate(slot.task.adopt_preset());
+        slot.task.init_dummy_switch_context();
         task_event_or_terminate(slot.task.adopt_setup());
         task_event_or_terminate(slot.flows[0].declare());
 
@@ -3629,11 +3646,12 @@ impl UserTaskSet {
                 State::Online,
             );
         }
-        slot.task.suspend_from_cpu()?;
         if self.last_exited_task_ref.same_identity(task_ref) && !slot.task.active_flow().is_valid()
         {
             slot.task.disable()?;
             slot.task.cleanup()?;
+        } else {
+            slot.task.suspend_from_cpu()?;
         }
         Ok(())
     }
@@ -3780,7 +3798,6 @@ impl UserTaskSet {
             if task.continue_on_cpu().is_err()
                 || flows[flow_index].start_initial(task, None, None).is_err()
                 || flows[flow_index].cleanup_active_for_exit(task).is_err()
-                || task.suspend_from_cpu().is_err()
                 || task.disable().is_err()
                 || task.cleanup().is_err()
             {

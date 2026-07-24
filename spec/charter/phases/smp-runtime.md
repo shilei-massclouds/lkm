@@ -14,9 +14,11 @@
 叶子代码；不得在 BootTask 栈上预执行。
 
 SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePhase`、
-`ApSmpCallinPhase`、`ApOnlineIdlePhase` 仍由各 AP 自己执行，不属于 KernelInitFlow 的 execution
-ownership。逐 AP TaskFlow 正式拓扑继续 deferred；现有 replicated family 只保留 AP identity、
-pointwise 顺序与 BP wait/barrier 的观测语义。
+`ApSmpCallinPhase`、`ApOnlineIdlePhase` 由按 logical-id replicated 的 `ApIdleFlow` pointwise 驱动，
+不属于 KernelInitFlow 的 execution ownership。每个 `ApIdleTask` 在 HSM 前已经是
+`OnCpu/Reserved/Invalid`，其 Flow 为 Base；BP 只发布 Linux `{task_ptr, stack_ptr}` boot data 并异步
+发出 keyed HSM Startup。AP 架构入口验证 boot data、建立 `tp/sp`、激活 Live authority 后启动同 key
+Flow；BP 仅通过 cpu_running/done_up wait/barrier 观察完成。
 
 ## 引用
 

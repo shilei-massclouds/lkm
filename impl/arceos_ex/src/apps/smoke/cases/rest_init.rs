@@ -224,13 +224,19 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.scheduler_finish_preempt_count_restore_count() == 0
         || !ctx.scheduler.scheduler_switch_mm_or_lazy_tlb_deferred()
         || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
-        || ctx.scheduler.identity_switch_passes() != 0
+        || ctx.scheduler.identity_switch_passes() == 0
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || !boot_idle_setup_state.switch_ctx_initialized()
         || boot_idle_setup_state.core_saved_count() == 0
-        || boot_idle_setup_state.core_restored_count() == 0
+        || boot_idle_setup_state.core_restored_count() != 0
+        || ctx
+            .kernel_init_task
+            .task()
+            .thread_context()
+            .core_restored_count()
+            == 0
         || !ctx.kernel_init_task.released_for_pre_smp_init()
     {
         printk::write_str("scheduler dispatch facts invalid\n");
@@ -241,7 +247,7 @@ pub fn run() -> SmokeResult {
     if idle_schedule_passes != 0
         || ctx.scheduler.idle_schedule_returned_passes() != 0
         || ctx.scheduler.idle_schedule_identity_passes() != 0
-        || ctx.scheduler.identity_switch_passes() != 0
+        || ctx.scheduler.identity_switch_passes() == 0
     {
         printk::write_str("idle schedule relation facts invalid\n");
         return SmokeResult::Failed;

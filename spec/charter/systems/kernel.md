@@ -120,8 +120,9 @@
   > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它只驱动
   > `BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，并在首次 PID 1 switch
   > commit 紧邻边界到达 Online。真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与
-  > context-switch 事实并完成物理栈切换；`KernelInitTask.Continue` 必须在 PID 1 真正获得 CPU 的入口
-  > 提交 OnCpu，并严格启动 `KernelInitFlow.Preset`。Preset body 必须在 `kernel_init_entry()` 验证
+  > context-switch prepare 事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、
+  > 消费 KernelInitTask 断点并提交 CurrentTaskSlot/OnCpu/Live；随后严格启动 `KernelInitFlow.Preset`。
+  > Preset body 必须在 `kernel_init_entry()` 验证
   > PID 1 vmalloc stack 后执行。
 
   `KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动

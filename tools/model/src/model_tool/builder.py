@@ -116,6 +116,7 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Online", "Cleanup", "Destroyed"),
         ("Online", "Continue", "OnCpu"),
         ("OnCpu", "Suspend", "Online"),
+        ("OnCpu", "Disable", "Offline"),
         ("Offline", "Cleanup", "Destroyed"),
     }
 )

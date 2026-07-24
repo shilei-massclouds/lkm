@@ -50,16 +50,16 @@ Preset/Setup/Enable/Disable/Cleanup；预分配 storage 不是已声明实例，
 Cleanup。Flow `Disable` 必须清除 active binding，`Cleanup` 只允许从 Offline 且不再 active 的实例
 释放资源并到达 Destroyed。Destroyed storage 可以复用，但下一次声明必须使用新的 generation。
 
-Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 Disable Task，存在未
-Destroyed Flow 时不得 Cleanup Task。
+Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 terminal Disable Task，
+存在未 Destroyed Flow 时不得 Cleanup Task。终止 Task 不经由 Online breakpoint 状态退出。
 
 ## OnCpu 执行边界与严格启动信号
 
-`TaskFlow` 不保存 guard 字段或 guard 状态，也不声明 `process_guard` 类型块。每次 lifecycle transition
-或执行期 action 都即时要求 `flow.parent` 的 Task lifecycle state 为 `OnCpu`。这条要求只表达真实
-执行权，不依赖 current-task 镜像或窗口对象。类型继承只复用 parent 类型约束和已声明 process，不为
-Flow 实例物化 guard。fresh dynamic Flow 的 Base-only structural `Bind` 只建立 owner/parent/entry-source，
-不执行 continuation，因此不受 OnCpu 执行边界阻止。
+`TaskFlow` 不保存 guard 字段或 guard 状态，也不声明 `process_guard` 类型块。除 Base-only structural
+`Bind` 外，每次 lifecycle transition 或执行期 action 都即时要求 `flow.parent` 为 `OnCpu` 且
+`TaskExecutionAuthority::Live`。Reserved AP carrier 不能执行普通 Flow action；HSM Startup 的架构接收
+边界必须先把 authority 激活为 Live。fresh dynamic Flow 的 Bind 只建立 owner/parent/entry-source，
+不执行 continuation，因此不受执行边界阻止。
 
 普通 Task 的 initial Flow 只有一个严格 Startup 来源：Scheduler 在 Task 首次真实获得 CPU 后向 Task
 发出 Continue，Task 提交 OnCpu 后选择仍为 Base 的 initial Flow，并向它发出 Startup（canonical
@@ -70,10 +70,15 @@ BootTask 是入口特例：它从模型初态已经 OnCpu，因此首次执行�
 OpenSBI 发出 Kernel.Startup 后，Kernel 直接异步发出 BootInitFlow.Startup；接收方必须仍为 Base且
 parent BootTask 必须为 OnCpu，重复启动或执行权不匹配立即失败。
 
-PID 1 的首次 dispatch 是跨栈 continuation：scheduler 先同步完成 BootTask.Suspend，在 switch commit
-更新 CurrentTaskSlot 并完成真实栈切换，再在 `kernel_init_entry()` 验证 PID 1 vmalloc stack后处理
-KernelInitTask.Continue 及其严格 KernelInitFlow.Startup。不得在 BootTask 栈上预提交 PID 1 OnCpu，
-也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
+PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
+保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、
+CurrentTaskSlot、PID 1 Continue 与断点消费，再严格发出 KernelInitFlow Startup。不得在 BootTask 栈上
+预提交 PID 1 OnCpu，也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
+
+每个 `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 绑定。BP 发出的 HSM Startup 是异步、
+按 key 交付的 Signal；AP 由 boot-data `task_ptr.initial_flow` 解析并校验接收者，入口把 Reserved authority
+变为 Live 后才接受 Startup。Flow 的 Startup pointwise 驱动同 key 的 `ApEntryPreludePhase`、
+`ApSmpCallinPhase`、`ApOnlineIdlePhase`；BP 只能发起 HSM 并等待 completion，不得同步执行 AP phase。
 
 ## 首个 binding 与 exec replacement
 
@@ -110,5 +115,5 @@ owner/generation/lifecycle 不变量失败属于终止错误，不允许通过�
 
 ## 当前能力边界
 
-本轮不引入循环、并发调度、通用垃圾回收或 Signal 新语法。Flow teardown 继续只由显式
+本轮不引入完整 AP offline/hotplug teardown、通用垃圾回收或 Signal 新语法。Flow teardown 继续只由显式
 `Disable/Cleanup`、非零 generation 和正式 owner/binding 事实决定。

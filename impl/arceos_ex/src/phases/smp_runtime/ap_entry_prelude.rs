@@ -63,7 +63,7 @@ pub(crate) fn preset(adoption: ApEntryAdoption) -> ! {
     if !adoption.task_pointer_matches_target() {
         fail(logical_id, "task-pointer");
     }
-    if crate::objects::smp_bringup::adopt_ap_idle_entry_execution(logical_id).is_err() {
+    if crate::objects::smp_bringup::activate_ap_idle_entry_execution(logical_id).is_err() {
         fail(logical_id, "idle-task-entry-execution");
     }
 

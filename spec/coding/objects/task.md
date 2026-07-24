@@ -23,7 +23,7 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
   snapshot 都只是集合 lowering；每次成功 fork/clone 必须分配新的 logical Task identity 和 PID，
   并发布指向该 identity 的 fresh `TaskRef`；不得把存储槽地址或测试字段当作可复用 TaskRef。
 
-Rust `Task` 必须是 lifecycle、identity、PID、CPU、thread/switch context、typed `initial_flow` 和 Flow ownership 的唯一
+Rust `Task` 必须是 lifecycle、identity、PID、CPU、execution authority、`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
 carrier。Boot/KernelInit/Kthreadd/AP/smoke/user-child 角色结构只能保存角色 metadata 或 continuation
 scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段。linker-visible
 `init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue、current slot 和
@@ -31,7 +31,8 @@ BootTask API 必须解析到该同一地址。
 
 ## Task 类型级 lifecycle lowering
 
-普通 Task 的 `Base/Prepared/Ready/Online/OnCpu/Offline/Destroyed` 状态和
+普通 Task 的 `Base/Prepared/Ready/Online/OnCpu/Offline/Destroyed` 状态、
+`TaskExecutionAuthority::{None,Reserved,Live}`、`TaskBreakpointState::{Invalid,Prepared,Valid}` 和
 `preset/setup/enable/continue_on_cpu/suspend_from_cpu/disable/cleanup` 必须只实现于统一 Rust `Task` core。静态
 `KernelInitTask`、`KthreaddTask` 与 `UserTaskSet` 创建的 child 都通过 core 的同一组方法推进；角色
 结构不得定义同名 lifecycle-driving API，也不得保留转发 alias。它们只可暴露角色 metadata、只读
@@ -39,15 +40,18 @@ BootTask API 必须解析到该同一地址。
 
 `Task::preset` 负责 identity/TaskRef/initial-flow association/初始 Flow ownership/clone specification；
 `Task::setup` 必须在 Phase 或 runtime fork 路径已调用 `TaskCreationCore::copy_process` 后消费其
-copy-process 结果，建立 PID、stack/thread context、scheduler entity 和 New/not-enqueued 状态；
-`Task::enable` 只在调用者已完成 running、runqueue publication 与初始 Flow structural binding 后提交
-Online；它不启动 Flow。Scheduler 是 `continue_on_cpu`/`suspend_from_cpu` 的唯一调用者：真实切入后的
-入口或恢复点先提交 `Online -> OnCpu`，再严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
-的 `Continue`，两者必须恰有一个可接受。真实切出前同步提交 `OnCpu -> Online`。
+copy-process 结果，建立 PID、stack/thread context 的初始寄存器字节、Prepared breakpoint、scheduler
+entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 running、runqueue publication 与
+初始 Flow structural binding 后把 context 绑定 initial FlowRef 并原子提交 Online/None/Valid；它不启动
+Flow。Scheduler prepare 必须验证 prev OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef；
+next 栈上的 finish 才调用 context save/restore observation、提交 prev Online/None/Valid、next
+OnCpu/Live/Invalid 和 CurrentTaskSlot，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
+的 `Continue`。stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
+terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity switch 完全不调用上述方法。
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
-`BootTask` 使用 boot-only const initializer 直接构造 OnCpu `init_task_storage` 和固定
+`BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage` 和固定
 `TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
 早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有
 `BootTaskEntryBinding` lower；OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的 runqueue
@@ -98,12 +102,16 @@ owner/active bind`。child exit/exit_group 与 `KernelInitTask` shutdown 只有�
 - Task 与 TaskFlow 的 KUnit/smoke 专题可继续合并，因为它验证跨对象协议；合并测试不构成合并
   coding 权威。
 
-AP boot-data 的 `task_ptr` 指向统一 `Task` core；`SecondaryIdleTaskSet` 只保存 model-deferred AP family
-的聚合 metadata。smoke scheduler/mutex/rwsem/rwlock 的 test-only role metadata 同样委托统一 Task，
+AP boot-data 的 `task_ptr` 指向统一 `Task` core；`SecondaryIdleTaskSet` 保存已正式建模的按 logical-id
+`ApIdleTask`/`ApIdleFlow` family storage 与聚合 observation。smoke scheduler/mutex/rwsem/rwlock 的 test-only role metadata 同样委托统一 Task，
 不能拥有平行 lifecycle、CPU 或 switch-context carrier。
 
-AP idle Task 在 `hart_start` 前按普通 Task 生命周期发布到 Online，但保持
-`runqueue_published == false`，因为 `rq->idle` 不属于普通 runnable class queue。真实 secondary
-entry 验证 boot-data/`tp` 后，必须通过 AP-entry 专用 adoption 将该 Task 置为 OnCpu，并在同一边界
-严格启动 initial idle TaskFlow；不得伪造 Scheduler Continue。后续 Suspend/Continue 仍只允许
-Scheduler 驱动。
+AP idle Task 使用专用 const/prepare 构造器直接建立 OnCpu/Reserved/Invalid、CPU/rq idle-current
+reservation 与 initial Flow binding；不得经过普通 Task Enable，也不得保留 `adopt_ap_entry_on_cpu()`。
+真实 secondary entry 验证 boot-data/`tp` 后只把 authority 从 Reserved 激活为 Live，并通过
+`task_ptr.initial_flow` 校验/启动 keyed `ApIdleFlow`；Task lifecycle 保持 OnCpu。后续首次 Suspend 才
+发布首个 Online/Valid breakpoint，之后 Suspend/Continue 仍只允许 Scheduler 驱动。
+
+`TaskThreadContext` wrapper 必须位于统一 Task core，内部含 `TaskSwitchContext`、breakpoint state、绑定
+FlowRef 与真实 save/restore 计数。scheduler/role wrapper 不得保存测试专用第二套 context carrier。
+RISC-V `TaskSwitchContext` 仅含 `ra/sp/s0..s11`；汇编从独立 next Task pointer 参数建立 `tp`。

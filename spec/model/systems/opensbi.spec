@@ -42,6 +42,14 @@ object OpenSBI: FirmwareObject {
                     BootCpuRegisters.a1 == BootArgs.dtb_pa;
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
+                    task_execution_authority_is(
+                        BootTask,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_breakpoint_state_is(
+                        BootTask,
+                        TaskBreakpointState::Invalid
+                    );
                 }
 
                 emits {
@@ -65,6 +73,14 @@ object OpenSBI: FirmwareObject {
             firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
             firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
             firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
+            task_execution_authority_is(
+                BootTask,
+                TaskExecutionAuthority::Live
+            );
+            task_breakpoint_state_is(
+                BootTask,
+                TaskBreakpointState::Invalid
+            );
         }
     }
 }

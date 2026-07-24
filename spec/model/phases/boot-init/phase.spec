@@ -14,6 +14,14 @@ object BootInitFlow: TaskFlow {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        BootTask,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_breakpoint_state_is(
+                        BootTask,
+                        TaskBreakpointState::Invalid
+                    );
                     task_initial_flow_is(BootTask, self);
                     task_flow_initial_binding_consistent(self);
                 }

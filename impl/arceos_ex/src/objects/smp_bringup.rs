@@ -20,15 +20,15 @@ use super::{
     scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_objects::StaticObjects,
-    task::{Task, TaskEntry, TaskKind, TaskRef},
+    task::{Task, TaskBreakpointState, TaskExecutionAuthority, TaskRef},
     task_flow::{TaskFlow, TaskFlowRef},
 };
 use crate::checkpoint::Checkpoint;
 
 const AP_STACK_SIZE: usize = 16 * 1024;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
-const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 16;
-const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 24;
+const AP_BOOT_DATA_TASK_PTR_OFFSET: usize = 0;
+const AP_BOOT_DATA_STACK_PTR_OFFSET: usize = 8;
 const AP_BOOT_DATA_SATP_OFFSET: usize = 32;
 const AP_BOOT_DATA_GP_OFFSET: usize = 40;
 const AP_BOOT_DATA_RUST_ENTRY_OFFSET: usize = 48;
@@ -37,10 +37,10 @@ const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET: usize = 64;
 
 #[repr(C, align(64))]
 struct SbiHartBootData {
-    logical_id: usize,
-    hartid: usize,
     task_ptr: usize,
     stack_ptr: usize,
+    logical_id: usize,
+    hartid: usize,
     satp: usize,
     gp: usize,
     rust_entry: usize,
@@ -48,13 +48,26 @@ struct SbiHartBootData {
     kernel_virt_offset: usize,
 }
 
+const _: () = {
+    assert!(core::mem::offset_of!(SbiHartBootData, task_ptr) == AP_BOOT_DATA_TASK_PTR_OFFSET);
+    assert!(core::mem::offset_of!(SbiHartBootData, stack_ptr) == AP_BOOT_DATA_STACK_PTR_OFFSET);
+    assert!(core::mem::offset_of!(SbiHartBootData, satp) == AP_BOOT_DATA_SATP_OFFSET);
+    assert!(core::mem::offset_of!(SbiHartBootData, gp) == AP_BOOT_DATA_GP_OFFSET);
+    assert!(core::mem::offset_of!(SbiHartBootData, rust_entry) == AP_BOOT_DATA_RUST_ENTRY_OFFSET);
+    assert!(core::mem::offset_of!(SbiHartBootData, boot_data_virt) == AP_BOOT_DATA_VIRT_OFFSET);
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, kernel_virt_offset)
+            == AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET
+    );
+};
+
 impl SbiHartBootData {
     const fn empty() -> Self {
         Self {
-            logical_id: usize::MAX,
-            hartid: usize::MAX,
             task_ptr: 0,
             stack_ptr: 0,
+            logical_id: usize::MAX,
+            hartid: usize::MAX,
             satp: 0,
             gp: 0,
             rust_entry: 0,
@@ -70,6 +83,9 @@ struct ApIdleTaskRecord {
     flow: TaskFlow,
     logical_id: usize,
     hartid: usize,
+    reserved_before_hsm: bool,
+    prepared_task_ref: TaskRef,
+    prepared_flow_ref: TaskFlowRef,
 }
 
 impl ApIdleTaskRecord {
@@ -79,6 +95,9 @@ impl ApIdleTaskRecord {
             flow: TaskFlow::new_static(TaskFlowRef::NONE),
             logical_id: usize::MAX,
             hartid: usize::MAX,
+            reserved_before_hsm: false,
+            prepared_task_ref: TaskRef::NONE,
+            prepared_flow_ref: TaskFlowRef::NONE,
         }
     }
 
@@ -86,19 +105,20 @@ impl ApIdleTaskRecord {
         if logical_id == 0 || logical_id >= MAX_CPUS || hartid == usize::MAX {
             return false;
         }
-        self.task = Task::with_ref(TaskRef::ap_idle(logical_id));
-        self.flow = TaskFlow::new_static(TaskFlowRef::ap_idle(logical_id));
+        let task_ref = TaskRef::ap_idle(logical_id);
+        let flow_ref = TaskFlowRef::ap_idle(logical_id);
+        self.task = Task::new_ap_idle_reserved(task_ref, flow_ref, logical_id);
+        self.flow = TaskFlow::new_static_bound(flow_ref, task_ref);
         self.logical_id = logical_id;
         self.hartid = hartid;
-        self.task
-            .set_identity_metadata(0, TaskEntry::ApIdle, TaskKind::Idle)
-            .is_ok()
-            && self.task.set_task_cpu(logical_id)
-            && self.task.adopt_preset().is_ok()
-            && self.flow.bind(&mut self.task, TaskFlowRef::NONE).is_ok()
-            && self.task.bind_initial_flow(&self.flow).is_ok()
-            && self.task.adopt_setup().is_ok()
-            && self.task.adopt_ap_idle_enable().is_ok()
+        self.reserved_before_hsm = self.task.state() == State::OnCpu
+            && self.task.execution_authority() == TaskExecutionAuthority::Reserved
+            && self.task.breakpoint_state() == TaskBreakpointState::Invalid
+            && self.flow.state() == State::Base
+            && !self.flow.active();
+        self.prepared_task_ref = self.task.task_ref();
+        self.prepared_flow_ref = self.flow.flow_ref();
+        self.unified_carrier_ready(logical_id)
     }
 
     fn unified_carrier_ready(&self, logical_id: usize) -> bool {
@@ -106,22 +126,31 @@ impl ApIdleTaskRecord {
             && self.task.task_ref() == TaskRef::ap_idle(logical_id)
             && self.task.state() == State::OnCpu
             && self.task.online()
+            && self.task.breakpoint_state() == TaskBreakpointState::Invalid
             && self.task.cpu_id() == logical_id
-            && self.task.entry() == TaskEntry::ApIdle
-            && self.task.kind() == TaskKind::Idle
             && self.task.running()
             && !self.task.runqueue_published()
             && self.flow.owner() == self.task.task_ref()
-            && self.flow.state() == State::Online
-            && self.flow.active()
             && self.task.initial_flow() == self.flow.flow_ref()
-            && self.task.active_flow() == self.flow.flow_ref()
+            && self.reserved_before_hsm
+            && self.prepared_task_ref == self.task.task_ref()
+            && self.prepared_flow_ref == self.flow.flow_ref()
+            && ((self.task.execution_authority() == TaskExecutionAuthority::Reserved
+                && self.flow.state() == State::Base
+                && !self.flow.active()
+                && !self.task.active_flow().is_valid())
+                || (self.task.execution_authority() == TaskExecutionAuthority::Live
+                    && self.flow.state() == State::Online
+                    && self.flow.active()
+                    && self.task.active_flow() == self.flow.flow_ref()))
     }
 
-    fn adopt_entry_execution(&mut self, logical_id: usize) -> EventResult {
+    fn activate_entry_execution(&mut self, logical_id: usize) -> EventResult {
         if self.logical_id != logical_id
             || self.task.task_ref() != TaskRef::ap_idle(logical_id)
-            || self.task.state() != State::Online
+            || self.task.state() != State::OnCpu
+            || self.task.execution_authority() != TaskExecutionAuthority::Reserved
+            || self.task.breakpoint_state() != TaskBreakpointState::Invalid
             || self.flow.state() != State::Base
             || self.flow.active()
             || self.task.active_flow().is_valid()
@@ -133,7 +162,7 @@ impl ApIdleTaskRecord {
                 State::OnCpu,
             );
         }
-        self.task.adopt_ap_entry_on_cpu()?;
+        self.task.activate_hsm_authority()?;
         self.flow.start_initial(&mut self.task, None, None)
     }
 }
@@ -235,15 +264,15 @@ extern "C" fn arceos_ex_secondary_entry_rust(boot_data: *const SbiHartBootData) 
             options(nomem, nostack),
         );
     }
-    let Some(target_logical_id) = ap_boot_data_target_logical_id(boot_data as usize) else {
+    let data = unsafe { &*boot_data };
+    let Some(target_logical_id) = ap_idle_task_target_logical_id(data.task_ptr) else {
         crate::phases::smp_runtime::smp_bringup::ap_phase_fail_stop(
             "ApEntryPreludePhase",
             usize::MAX,
             State::Base,
-            "boot-data-slot",
+            "task-initial-flow-key",
         );
     };
-    let data = unsafe { &*boot_data };
     let adoption = ApEntryAdoption {
         target_logical_id,
         boot_data_logical_id: data.logical_id,
@@ -309,11 +338,15 @@ fn ap_boot_data_virt(logical_id: usize) -> Option<usize> {
     Some(unsafe { core::ptr::addr_of!(AP_BOOT_DATA[logical_id]) as usize })
 }
 
-fn ap_boot_data_target_logical_id(pointer: usize) -> Option<usize> {
+fn ap_idle_task_target_logical_id(pointer: usize) -> Option<usize> {
     let mut logical_id = 1usize;
     while logical_id < MAX_CPUS {
-        if ap_boot_data_virt(logical_id) == Some(pointer) {
-            return Some(logical_id);
+        if ap_idle_task_virt(logical_id) == Some(pointer) {
+            let initial_flow = unsafe { AP_IDLE_TASKS[logical_id].task.initial_flow() };
+            if initial_flow.same_identity(TaskFlowRef::ap_idle(logical_id)) {
+                return Some(logical_id);
+            }
+            return None;
         }
         logical_id += 1;
     }
@@ -327,7 +360,7 @@ fn ap_idle_task_virt(logical_id: usize) -> Option<usize> {
     Some(unsafe { core::ptr::addr_of!(AP_IDLE_TASKS[logical_id].task) as usize })
 }
 
-pub(crate) fn adopt_ap_idle_entry_execution(logical_id: usize) -> EventResult {
+pub(crate) fn activate_ap_idle_entry_execution(logical_id: usize) -> EventResult {
     if logical_id == 0 || logical_id >= MAX_CPUS {
         return failed_condition(
             LifecycleEvent::Continue,
@@ -336,7 +369,7 @@ pub(crate) fn adopt_ap_idle_entry_execution(logical_id: usize) -> EventResult {
             State::OnCpu,
         );
     }
-    unsafe { AP_IDLE_TASKS[logical_id].adopt_entry_execution(logical_id) }
+    unsafe { AP_IDLE_TASKS[logical_id].activate_entry_execution(logical_id) }
 }
 
 fn ap_stack_top_virt(logical_id: usize) -> Option<usize> {
@@ -663,6 +696,9 @@ pub struct CpuStartProvider {
     cpu_add_remove_mutex_guard_used: bool,
     cpu_hotplug_write_guard_used: bool,
     sbi_boot_data_publish_barriers_observed: bool,
+    hsm_start_keys: [usize; MAX_CPUS],
+    hsm_start_task_refs: [TaskRef; MAX_CPUS],
+    hsm_start_flow_refs: [TaskFlowRef; MAX_CPUS],
 }
 
 impl CpuStartProvider {
@@ -680,6 +716,9 @@ impl CpuStartProvider {
             cpu_add_remove_mutex_guard_used: false,
             cpu_hotplug_write_guard_used: false,
             sbi_boot_data_publish_barriers_observed: false,
+            hsm_start_keys: [usize::MAX; MAX_CPUS],
+            hsm_start_task_refs: [TaskRef::NONE; MAX_CPUS],
+            hsm_start_flow_refs: [TaskFlowRef::NONE; MAX_CPUS],
         }
     }
 
@@ -729,6 +768,33 @@ impl CpuStartProvider {
 
     pub const fn sbi_boot_data_publish_barriers_observed(&self) -> bool {
         self.sbi_boot_data_publish_barriers_observed
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn hsm_start_key(&self, logical_id: usize) -> Option<usize> {
+        if logical_id < MAX_CPUS && self.hsm_start_keys[logical_id] != usize::MAX {
+            Some(self.hsm_start_keys[logical_id])
+        } else {
+            None
+        }
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn hsm_start_task_ref(&self, logical_id: usize) -> TaskRef {
+        if logical_id < MAX_CPUS {
+            self.hsm_start_task_refs[logical_id]
+        } else {
+            TaskRef::NONE
+        }
+    }
+
+    #[cfg(app_smoke)]
+    pub const fn hsm_start_flow_ref(&self, logical_id: usize) -> TaskFlowRef {
+        if logical_id < MAX_CPUS {
+            self.hsm_start_flow_refs[logical_id]
+        } else {
+            TaskFlowRef::NONE
+        }
     }
 
     // CPU start setup retains the complete specified hotplug and SBI publication boundary.
@@ -843,16 +909,20 @@ impl CpuStartProvider {
                     return false;
                 }
                 AP_BOOT_DATA[logical_id] = SbiHartBootData {
-                    logical_id,
-                    hartid: cpu.hartid(),
                     task_ptr,
                     stack_ptr,
+                    logical_id,
+                    hartid: cpu.hartid(),
                     satp,
                     gp,
                     rust_entry,
                     boot_data_virt,
                     kernel_virt_offset: kernel_image.virt_offset(),
                 };
+                self.hsm_start_keys[logical_id] = logical_id;
+                self.hsm_start_task_refs[logical_id] = AP_IDLE_TASKS[logical_id].task.task_ref();
+                self.hsm_start_flow_refs[logical_id] =
+                    AP_IDLE_TASKS[logical_id].task.initial_flow();
             }
 
             self.secondary_start_sbi_selected = true;

@@ -4,6 +4,11 @@
 
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
+2026-07-24 Task/TaskFlow 断点与 AP authority 复核：本轮在既有 `objects`、scheduler、RISC-V
+switch 和 SMP bringup module 内，把寄存器现场统一收归 Task，并把 AP idle Task/Flow 改为按
+logical-id 的既有对象族 lowering；不新增 crate、facade、feature、公开 API 或组件依赖。
+`spec/compose/main.spec` 已复核，组合语义无需修改。
+
 2026-07-23 静态输入与 Enable 启动链复核：Config/Lds 改为构建时初态 Online 输入，Computer、
 Riscv64Platform、OpenSBI 改为初态 Ready 的 metadata-only system，并把形式启动链压缩为显式
 Enable 交接。这些调整不新增 crate、module、facade、feature、公开 API 或真实启动入口；既有 OpenSBI、

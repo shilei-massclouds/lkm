@@ -17,6 +17,7 @@ type TaskFlow: PhaseObject {
             depends_on {
                 self.state == State::Online;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_active_flow_is(self.parent, self);
             }
             ensures {
@@ -31,6 +32,7 @@ type TaskFlow: PhaseObject {
             depends_on {
                 self.state == State::Base;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_flow_initial_binding_consistent(self);
             }
             ensures {
@@ -46,6 +48,7 @@ type TaskFlow: PhaseObject {
             depends_on {
                 self.state == State::Prepared;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             emits {
                 Transition::Enable;
@@ -57,6 +60,7 @@ type TaskFlow: PhaseObject {
             depends_on {
                 self.state == State::Ready;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_active_binding_committed(self);
@@ -72,6 +76,7 @@ type KthreaddFlowType: TaskFlow {
             state_effect: StateEffect::Always;
             depends_on {
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_no_longer_active(self);
@@ -84,6 +89,7 @@ type KthreaddFlowType: TaskFlow {
                 self.state == State::Offline;
                 task_flow_no_longer_active(self);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_instance_released(self);
@@ -133,6 +139,7 @@ type UserAppFlow: TaskFlow {
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_started(self);
@@ -149,6 +156,7 @@ type UserAppFlow: TaskFlow {
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 user_app_flow_execution_context_ready(self);
@@ -165,6 +173,7 @@ type UserAppFlow: TaskFlow {
                 self.state == State::Ready;
                 user_app_flow_execution_context_ready(self);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_flow_enable_binding_ready(self);
             }
             ensures {
@@ -180,6 +189,7 @@ type UserAppFlow: TaskFlow {
             depends_on {
                 self.state == State::Online;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 user_app_flow_disable_reason_is_exit_exit_group_or_successful_exec(self);
@@ -194,6 +204,7 @@ type UserAppFlow: TaskFlow {
                 self.state == State::Offline;
                 task_flow_no_longer_active(self);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_instance_released(self);
@@ -267,6 +278,11 @@ predicate kthreadd_schedule_loop_deferred_until_on_cpu<
     T: Task,
     F: TaskFlow
 >(task: T, flow: F) -> bool;
+predicate ap_idle_flow_key_matches_task<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate ap_idle_flow_hsm_startup_keyed<F: TaskFlow>(flow: F) -> bool;
+predicate ap_idle_flow_task_ref_and_flow_ref_preserved<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
+predicate ap_idle_flow_pointwise_phases_complete<F: TaskFlow>(flow: F) -> bool;
+predicate ap_idle_flow_no_task_enable_or_continue<F: TaskFlow>(flow: F) -> bool;
 
 object KernelInitFlow: TaskFlow {
     initial_state: State::Base;
@@ -284,6 +300,7 @@ object KernelInitFlow: TaskFlow {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(KernelInitTask, TaskExecutionAuthority::Live);
                     task_flow_initial_binding_consistent(self);
                     BootInitFlow.state == State::Online;
                     kernel_init_entry_reaches_kernel_init_flow(
@@ -300,12 +317,8 @@ object KernelInitFlow: TaskFlow {
                 ensures {
                     task_flow_started(self);
                     PreSmpInitPhase.state == State::Online;
-                    SmpBringupPhase.state == State::Online;
                     kernel_init_flow_first_leaf(self, PreSmpInitPhase);
                     kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
-                }
-                emits {
-                    Transition::Setup;
                 }
             }
         }
@@ -315,7 +328,6 @@ object KernelInitFlow: TaskFlow {
         invariant {
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
-            SmpBringupPhase.state == State::Online;
             kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
         }
 
@@ -323,6 +335,8 @@ object KernelInitFlow: TaskFlow {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
+                    SmpBringupPhase.state == State::Online;
                 }
 
                 drives {
@@ -363,6 +377,7 @@ object KernelInitFlow: TaskFlow {
             on Transition::Enable -> State::Online {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
 
                 drives {
@@ -403,6 +418,7 @@ object KernelInitFlow: TaskFlow {
             on Transition::Disable -> State::Offline {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 ensures {
                     task_flow_no_longer_active(self);
@@ -424,6 +440,7 @@ object KernelInitFlow: TaskFlow {
                 depends_on {
                     task_flow_no_longer_active(self);
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 ensures {
                     task_flow_instance_released(self);
@@ -455,6 +472,7 @@ object KernelInitFlow: TaskFlow {
                 completion_token_available(KthreaddReadyGate);
                 kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
 
             drives {
@@ -476,6 +494,7 @@ object KernelInitFlow: TaskFlow {
                 PayloadHandoffPreparePhase.state == State::Online;
                 SelectedPayloadHandoff.state == State::Online;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
 
             drives {
@@ -516,6 +535,7 @@ object Pid1UserAppFlow: UserAppFlow {
                     user_app_flow_owner_bound(self);
                     user_app_flow_entry_source_bound(self);
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 ensures {
                     task_flow_started(self);
@@ -533,6 +553,7 @@ object Pid1UserAppFlow: UserAppFlow {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 ensures {
                     user_app_flow_execution_context_ready(self);
@@ -553,6 +574,7 @@ object Pid1UserAppFlow: UserAppFlow {
             on Transition::Enable -> State::Online {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                     task_flow_enable_binding_ready(self);
                 }
                 ensures {
@@ -598,6 +620,7 @@ object KthreaddFlow: KthreaddFlowType {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                     task_flow_initial_binding_consistent(self);
                 }
                 ensures {
@@ -615,6 +638,7 @@ object KthreaddFlow: KthreaddFlowType {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 emits {
                     Transition::Enable;
@@ -628,6 +652,7 @@ object KthreaddFlow: KthreaddFlowType {
             on Transition::Enable -> State::Online {
                 depends_on {
                     self.parent.state == State::OnCpu;
+                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 }
                 ensures {
                     task_active_flow_is(KthreaddTask, self);
@@ -677,6 +702,7 @@ object KthreaddFlow: KthreaddFlowType {
                 kthreadd_provider_ready(KthreaddTask);
                 Scheduler.state == State::Online;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
@@ -697,6 +723,114 @@ object KthreaddFlow: KthreaddFlowType {
  */
 
 /*
+ * Pointwise representative of the logical-id indexed AP idle Flow family.
+ * The HSM delivery key is resolved from boot-data task_ptr.initial_flow after
+ * the AP carrier authority has changed from Reserved to Live.
+ */
+type ApIdleFlowType: TaskFlow {
+}
+
+object ApIdleFlow: ApIdleFlowType {
+    initial_state: State::Base;
+    parent: ApIdleTask;
+
+    state State::Base {
+        invariant {
+            task_initial_flow_is(ApIdleTask, self);
+            task_owns_flow(ApIdleTask, self);
+            task_flow_owner_is(self, ApIdleTask);
+            task_flow_parent_is(self, ApIdleTask);
+        }
+
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    ApIdleTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        ApIdleTask,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_authority_activated_by_hsm(ApIdleTask);
+                    ap_idle_flow_hsm_startup_keyed(self);
+                    ap_idle_flow_key_matches_task(self, ApIdleTask);
+                    task_flow_initial_binding_consistent(self);
+                }
+                drives {
+                    ApEntryPreludePhase.Transition::Preset;
+                    ApSmpCallinPhase.Transition::Preset;
+                    ApOnlineIdlePhase.Transition::Preset;
+                }
+                ensures {
+                    task_flow_started(self);
+                    ap_idle_flow_task_ref_and_flow_ref_preserved(self, ApIdleTask);
+                    ap_idle_flow_pointwise_phases_complete(self);
+                    ap_idle_flow_no_task_enable_or_continue(self);
+                }
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            ap_idle_flow_pointwise_phases_complete(self);
+            ap_idle_flow_no_task_enable_or_continue(self);
+        }
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                }
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ap_idle_flow_pointwise_phases_complete(self);
+        }
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                }
+                ensures {
+                    task_active_flow_is(ApIdleTask, self);
+                    task_flow_active_binding_committed(self);
+                    task_flow_online_on_cpu(self);
+                    ap_idle_flow_no_task_enable_or_continue(self);
+                }
+                emits {
+                    SmpBringupPhase.Action::ObserveApCompletion;
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            task_active_flow_is(ApIdleTask, self);
+            task_flow_online_on_cpu(self);
+            ap_idle_flow_pointwise_phases_complete(self);
+            ap_idle_flow_no_task_enable_or_continue(self);
+        }
+    }
+}
+
+/*
  * Idle flow behavior and its boot-CPU instance.
  */
 type BootIdleFlowType: TaskFlow {
@@ -709,6 +843,7 @@ type BootIdleFlowType: TaskFlow {
                 task_ref_ready(CurrentTaskRef);
                 task_ref_targets(CurrentTaskRef, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 boot_idle_entry_prepared(self, BootTask);
@@ -727,6 +862,7 @@ type BootIdleFlowType: TaskFlow {
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             drives {
                 self.Action::DoIdleCycle;
@@ -742,6 +878,7 @@ type BootIdleFlowType: TaskFlow {
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             drives {
                 self.Action::WaitWhileNoNeedResched;
@@ -761,6 +898,7 @@ type BootIdleFlowType: TaskFlow {
             depends_on {
                 boot_idle_entry_prepared(self, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             within BootIdleWaitLocalInterruptContext {
                 ensures {
@@ -795,6 +933,7 @@ type BootIdleFlowType: TaskFlow {
             depends_on {
                 boot_idle_runtime_waiting(self, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 boot_idle_need_resched_set_for_schedule(BootTask);
@@ -814,6 +953,7 @@ type BootIdleFlowType: TaskFlow {
                 task_ref_ready(CurrentTaskRef);
                 task_ref_targets(CurrentTaskRef, BootTask);
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             drives {
                 Scheduler.Action::ScheduleIdle;
@@ -853,6 +993,7 @@ object BootIdleFlow: BootIdleFlowType {
                     KthreaddReadyGate.state == State::Online;
                     CpuGroup.state == State::Ready;
                     BootTask.state == State::OnCpu;
+                    task_execution_authority_is(BootTask, TaskExecutionAuthority::Live);
                 }
 
                 ensures {
@@ -891,6 +1032,7 @@ object BootIdleFlow: BootIdleFlowType {
             depends_on {
                 self.state == State::Ready;
                 self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                 task_active_flow_is(BootTask, self);
             }
             drives {

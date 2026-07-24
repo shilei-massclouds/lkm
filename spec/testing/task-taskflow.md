@@ -20,11 +20,11 @@ carrier and its independently-lived `TaskFlow` instances.
   BootTask-to-KernelInitTask switch commit; BootIdleEntry may start only after
   that scheduler call later restores BootTask.
 - Execution-boundary coverage must prove that a Flow process proceeds only
-  when its parent Task is OnCpu. A mismatch must fail without changing Flow
+  when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
   lifecycle state, and CurrentTaskSlot must agree with the OnCpu Task once set.
-- KernelInitTask, KthreaddTask and clone-child Enable must leave their initial
-  Flow in Base without sending a startup Signal. The first real switch to that
-  Task must accept strict Continue and start its initial Flow.
+- KernelInitTask, KthreaddTask and clone-child Setup must leave a Prepared context and their initial
+  Flow in Base. Enable binds the context to the exact initial FlowRef and publishes Online/Valid without
+  sending Startup. The first real switch must validate/consume it and start the initial Flow.
 - Repeated switches to an already-started Task must select the active Flow's
   strict Continue handler without resending initial-flow Startup; BootTask must
   resume BootIdleFlow without restarting BootInitFlow.
@@ -35,6 +35,14 @@ carrier and its independently-lived `TaskFlow` instances.
 - The handoff is valid only when the old flow is inactive before the active
   binding changes, the new flow is Ready at commit, and at most one owned flow
   is Online afterward.
+- Identity switch must not emit Suspend/Continue, change lifecycle/authority/breakpoint, or increment
+  physical context save/restore counts. Terminal switch must take OnCpu directly to Offline and cleanup
+  on the next stack without publishing an Online breakpoint.
+- BootTask begins OnCpu/Live/Invalid; its first Suspend binds BootIdleFlow and publishes its first Valid
+  breakpoint. Each AP begins OnCpu/Reserved/Invalid with Base ApIdleFlow; HSM preserves TaskRef/FlowRef,
+  activates Live authority and starts the matching logical-id Flow without Task Enable/Continue.
+- RISC-V sentinel coverage must save/restore `ra/sp/s0..s11` and prove `tp` is established from next Task
+  identity rather than from `TaskSwitchContext`.
 - User entry checkpoints use `UserAppFlow.EnterUserMode`. Old Task,
   persona, and Flow checkpoint names are not compatibility interfaces.
 

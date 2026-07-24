@@ -17,6 +17,18 @@ enum TaskRuntimeState {
     Running,
 }
 
+enum TaskExecutionAuthority {
+    None,
+    Reserved,
+    Live,
+}
+
+enum TaskBreakpointState {
+    Invalid,
+    Prepared,
+    Valid,
+}
+
 type TaskRef {
     processes {
         Action::SetCurrent(task: Task) {
@@ -77,6 +89,17 @@ predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_on_cpu_matches_current_slot<T: Task>(task: T) -> bool;
 predicate current_task_slot_matches_on_cpu_task<S, T: Task>(slot: S, task: T) -> bool;
 predicate scheduler_continue_signal_pending<S, R: TaskRef>(scheduler: S, task_ref: R) -> bool;
+predicate task_execution_authority_is<T: Task>(task: T, authority: TaskExecutionAuthority) -> bool;
+predicate task_breakpoint_state_is<T: Task>(task: T, state: TaskBreakpointState) -> bool;
+predicate task_breakpoint_bound_to_flow_ref<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_breakpoint_flow_ref_generation_valid<T: Task>(task: T) -> bool;
+predicate task_breakpoint_consumed_on_continue<T: Task>(task: T) -> bool;
+predicate task_breakpoint_published_on_suspend<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_breakpoint_published_on_enable<T: Task, F: TaskFlow>(task: T, flow: F) -> bool;
+predicate task_terminal_disable_keeps_breakpoint_invalid<T: Task>(task: T) -> bool;
+predicate task_identity_switch_has_no_context_event<T: Task>(task: T) -> bool;
+predicate task_authority_activated_by_hsm<T: Task>(task: T) -> bool;
+predicate task_ap_idle_reserved_for_cpu<T: Task>(task: T) -> bool;
 
 predicate boot_task_idle_role_ready<T: Task, R>(
     task: T,
@@ -109,6 +132,10 @@ type TaskThreadContext {
     s9: RegisterValue;
     s10: RegisterValue;
     s11: RegisterValue;
+    breakpoint_state: TaskBreakpointState;
+    flow_ref: TaskFlowRef;
+    save_count: usize;
+    restore_count: usize;
 }
 
 /*
@@ -120,6 +147,7 @@ type Task: ResourceObject {
     initial_state: State::Base;
 
     ext_state: TaskRuntimeState;
+    execution_authority: TaskExecutionAuthority;
     cpu_ref: CpuRef;
 
     associations {
@@ -203,6 +231,8 @@ type Task: ResourceObject {
                     task_thread_context_ready(self);
                     task_thread_context_owned(self, self.thread_context);
                     task_thread_context_core_register_set(self.thread_context);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Prepared);
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
                     task_sched_entity_initialized(self, scheduler);
                     task_state_new(self);
                     task_not_enqueued(self);
@@ -224,6 +254,8 @@ type Task: ResourceObject {
             task_thread_context_ready(self);
             task_thread_context_owned(self, self.thread_context);
             task_thread_context_core_register_set(self.thread_context);
+            task_breakpoint_state_is(self, TaskBreakpointState::Prepared);
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
             task_state_new(self);
             task_not_enqueued(self);
             task_has_no_prior_active_flow(self);
@@ -240,6 +272,7 @@ type Task: ResourceObject {
                     task_owns_flow(self, self.initial_flow);
                     task_flow_owner_is(self.initial_flow, self);
                     task_flow_parent_is(self.initial_flow, self);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Prepared);
                 }
                 ensures {
                     task_fresh_identity(self);
@@ -259,6 +292,11 @@ type Task: ResourceObject {
                     task_at_most_one_flow_online(self);
                     task_online_schedulable(self);
                     task_online_does_not_imply_dispatched(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(self, self.initial_flow);
+                    task_breakpoint_flow_ref_generation_valid(self);
+                    task_breakpoint_published_on_enable(self, self.initial_flow);
                 }
 
             }
@@ -281,15 +319,26 @@ type Task: ResourceObject {
             task_at_most_one_flow_online(self);
             task_online_schedulable(self);
             task_online_does_not_imply_dispatched(self);
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
+            task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+            task_breakpoint_flow_ref_generation_valid(self);
         }
 
         transitions {
             on Transition::Continue -> State::OnCpu {
+                depends_on {
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_flow_ref_generation_valid(self);
+                }
                 ensures {
                     task_on_cpu(self);
                     task_on_cpu_matches_current_slot(self);
                     task_dispatch_continuation_pending(self);
                     task_continue_sent_only_by_scheduler(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_breakpoint_consumed_on_continue(self);
                 }
 
                 emits {
@@ -297,17 +346,6 @@ type Task: ResourceObject {
                 }
             }
 
-            on Transition::Disable -> State::Offline {
-                depends_on {
-                    task_all_owned_flows_inactive(self);
-                    task_no_owned_flow_online(self);
-                }
-                ensures {
-                    task_all_owned_flows_inactive(self);
-                    task_exit_flow_disable_cleanup_ordered(self);
-                    task_no_owned_flow_online(self);
-                }
-            }
         }
     }
 
@@ -325,13 +363,42 @@ type Task: ResourceObject {
             task_state_running(self);
             task_runqueue_publication_committed(self);
             task_at_most_one_flow_online(self);
+            task_execution_authority_is(self, TaskExecutionAuthority::Live);
+            task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
         }
 
         transitions {
             on Transition::Suspend -> State::Online {
+                depends_on {
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_has_unique_active_flow(self);
+                }
                 ensures {
                     task_not_on_cpu(self);
                     task_suspend_sent_only_by_scheduler(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(self, self.active_flow);
+                    task_breakpoint_flow_ref_generation_valid(self);
+                    task_breakpoint_published_on_suspend(self, self.active_flow);
+                }
+            }
+
+            on Transition::Disable -> State::Offline {
+                depends_on {
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_all_owned_flows_inactive(self);
+                    task_no_owned_flow_online(self);
+                }
+                ensures {
+                    task_all_owned_flows_inactive(self);
+                    task_exit_flow_disable_cleanup_ordered(self);
+                    task_no_owned_flow_online(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_terminal_disable_keeps_breakpoint_invalid(self);
                 }
             }
         }
@@ -342,6 +409,8 @@ type Task: ResourceObject {
             task_all_owned_flows_inactive(self);
             task_exit_flow_disable_cleanup_ordered(self);
             task_no_owned_flow_online(self);
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
+            task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
         }
 
         transitions {
@@ -364,6 +433,8 @@ type Task: ResourceObject {
             task_all_owned_flows_destroyed(self);
             task_no_owned_flow_online(self);
             task_destroyed_only_after_flow_cleanup(self);
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
+            task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
         }
     }
 
@@ -427,6 +498,10 @@ type Task: ResourceObject {
             depends_on {
                 task_thread_context_owned(self, self.thread_context);
                 task_thread_context_core_register_set(self.thread_context);
+                self.state == State::OnCpu;
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                task_has_unique_active_flow(self);
             }
             ensures {
                 task_thread_context_core_saved(self.thread_context);
@@ -438,6 +513,10 @@ type Task: ResourceObject {
             depends_on {
                 task_thread_context_owned(self, self.thread_context);
                 task_thread_context_core_register_set(self.thread_context);
+                self.state == State::Online;
+                task_execution_authority_is(self, TaskExecutionAuthority::None);
+                task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                task_breakpoint_flow_ref_generation_valid(self);
             }
             ensures {
                 task_thread_context_core_restored(self.thread_context);
@@ -608,6 +687,10 @@ object BootTask: Task {
                     task_flow_parent_is(BootInitFlow, self);
                     task_not_on_cpu(self);
                     task_suspend_sent_only_by_scheduler(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(self, BootIdleFlow);
+                    task_breakpoint_published_on_suspend(self, BootIdleFlow);
                 }
             }
         }
@@ -627,15 +710,25 @@ object BootTask: Task {
             task_online_schedulable(self);
             task_online_does_not_imply_dispatched(self);
             task_not_on_cpu(self);
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
+            task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+            task_breakpoint_bound_to_flow_ref(self, BootIdleFlow);
         }
 
         transitions {
             on Transition::Continue -> State::OnCpu {
+                depends_on {
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(self, BootIdleFlow);
+                }
                 ensures {
                     task_on_cpu(self);
                     task_on_cpu_matches_current_slot(self);
                     task_dispatch_continuation_pending(self);
                     task_continue_sent_only_by_scheduler(self);
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_breakpoint_consumed_on_continue(self);
                 }
                 emits {
                     self.Action::DispatchContinuation;
@@ -668,6 +761,82 @@ object KthreaddTask: Task {
 }
 
 /*
+ * Pointwise representative of the logical-id indexed AP idle Task family.
+ * BP construction has already performed init_idle()-equivalent reservation;
+ * HSM entry activates authority without changing lifecycle state.
+ */
+object ApIdleTask: Task {
+    lifecycle_override: true;
+    initial_state: State::OnCpu;
+    parent: CpuGroup;
+
+    associations {
+        initial_flow = ApIdleFlow;
+        active_flow = ApIdleFlow;
+    }
+
+    state State::OnCpu {
+        invariant {
+            task_initial_flow_is(self, ApIdleFlow);
+            task_owns_flow(self, ApIdleFlow);
+            task_flow_owner_is(ApIdleFlow, self);
+            task_flow_parent_is(ApIdleFlow, self);
+        }
+
+        transitions {
+            on Transition::Suspend -> State::Online {
+                depends_on {
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                }
+                ensures {
+                    task_execution_authority_is(self, TaskExecutionAuthority::None);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+                    task_breakpoint_bound_to_flow_ref(self, ApIdleFlow);
+                    task_breakpoint_published_on_suspend(self, ApIdleFlow);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            task_execution_authority_is(self, TaskExecutionAuthority::None);
+            task_breakpoint_state_is(self, TaskBreakpointState::Valid);
+            task_breakpoint_bound_to_flow_ref(self, ApIdleFlow);
+        }
+
+        transitions {
+            on Transition::Continue -> State::OnCpu {
+                depends_on {
+                    task_breakpoint_flow_ref_generation_valid(self);
+                }
+                ensures {
+                    task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                    task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+                    task_breakpoint_consumed_on_continue(self);
+                }
+            }
+        }
+    }
+
+    actions {
+        Action::ActivateHsmAuthority {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_ap_idle_reserved_for_cpu(self);
+                task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
+            }
+            ensures {
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                task_authority_activated_by_hsm(self);
+            }
+        }
+    }
+}
+
+/*
  * Appendix: current boundaries and deferred refinements
  *
  * - Boot idle is not a second Task instance: BootTask retains identity when
@@ -675,8 +844,8 @@ object KthreaddTask: Task {
  *   coordination wrapper remains phase-owned and is not a task carrier.
  * - PID 1 user resources and role attach directly to KernelInitTask; there is
  *   no separate persona wrapper.
- * - SecondaryIdleTaskSet is an aggregate resource. Individuating one Task per
- *   possible non-boot CPU is deferred until the SMP task topology is expanded.
+ * - ApIdleTask/ApIdleFlow are pointwise representatives of logical-id indexed
+ *   replicated families; SecondaryIdleTaskSet stores their indexed lowering.
  * - UserTaskSet admits multiple independent runtime child Tasks and stores
  *   typed TaskRefs for later process dispatch; no static child witness exists.
  */

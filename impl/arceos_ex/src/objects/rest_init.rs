@@ -420,6 +420,10 @@ impl KernelInitTask {
         self.task.switch_context()
     }
 
+    pub(crate) fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
+        self.task.switch_context_mut()
+    }
+
     #[cfg_attr(app_smoke, allow(dead_code))]
     pub const fn task_ref(&self) -> TaskRef {
         self.task.task_ref()
@@ -764,6 +768,10 @@ impl KthreaddTask {
 
     pub fn switch_context(&self) -> &TaskSwitchContext {
         self.task.switch_context()
+    }
+
+    pub(crate) fn switch_context_mut(&mut self) -> &mut TaskSwitchContext {
+        self.task.switch_context_mut()
     }
 
     #[cfg_attr(app_smoke, allow(dead_code))]
