@@ -16,7 +16,17 @@ SCENARIOS_ROOT = TOOLS2_ROOT / "scenarios"
 
 
 def _bootstrap() -> None:
-    for name in ("common", "parse", "model", "derive", "check", "view", "render", "pyveri"):
+    for name in (
+        "common",
+        "parse",
+        "model",
+        "derive",
+        "check",
+        "view",
+        "render",
+        "animate",
+        "pyveri",
+    ):
         source = str(TOOLS2_ROOT / name / "src")
         if source not in sys.path:
             sys.path.insert(0, source)
@@ -57,6 +67,7 @@ def _parser(normalize_signal_request) -> argparse.ArgumentParser:
         "--snapshot-out", type=Path, help="write a resumable snapshot on complete or reached"
     )
     parser.add_argument("-o", "--output", type=Path, help="write rendered text instead of stdout")
+    parser.add_argument("--html-out", type=Path, help="write a self-contained Signal animation")
     return parser
 
 
@@ -111,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         driver_args.extend(["--snapshot-out", str(args.snapshot_out)])
     if args.output is not None:
         driver_args.extend(["-o", str(args.output)])
+    if args.html_out is not None:
+        driver_args.extend(["--html-out", str(args.html_out)])
     return driver_main(driver_args)
 
 

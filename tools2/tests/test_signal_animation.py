@@ -4,6 +4,7 @@ from copy import deepcopy
 import contextlib
 import io
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -145,6 +146,102 @@ class SignalAnimationTests(unittest.TestCase):
             )
         self.assertIn("view protocol mismatch", stderr.getvalue())
         self.assertFalse(output.exists())
+
+    def test_driver_html_output_composes_with_text_snapshot_scenario_and_work_dir(self) -> None:
+        scenario = self.root / "scenario.json"
+        scenario.write_text("{}\n", encoding="utf-8")
+        text = self.root / "trace.txt"
+        html = self.root / "trace.html"
+        snapshot = self.root / "snapshot.json"
+        work = self.root / "combined-work"
+        with contextlib.redirect_stdout(io.StringIO()):
+            exit_code = driver_main(
+                [
+                    str(PIPELINE),
+                    "--signal",
+                    "Root.Start",
+                    "--scenario",
+                    str(scenario),
+                    "--max-depth",
+                    "all",
+                    "--max-breadth",
+                    "all",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                    "-o",
+                    str(text),
+                    "--html-out",
+                    str(html),
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("verdict: complete", text.read_text(encoding="utf-8"))
+        self.assertTrue(snapshot.is_file())
+        self.assertTrue(html.read_text(encoding="utf-8").startswith("<!doctype html>"))
+        self.assertTrue((work / "model.json").is_file())
+        self.assertTrue((work / "view.json").is_file())
+
+    def test_driver_html_output_preserves_check_one_and_animation_error_becomes_two(self) -> None:
+        bounded_html = self.root / "bounded.html"
+        with contextlib.redirect_stdout(io.StringIO()):
+            bounded_exit = driver_main(
+                [
+                    str(PIPELINE),
+                    "--signal",
+                    "Root.Start",
+                    "--max-depth",
+                    "0",
+                    "--html-out",
+                    str(bounded_html),
+                ]
+            )
+        self.assertEqual(bounded_exit, 1)
+        self.assertTrue(bounded_html.is_file())
+
+        output_directory = self.root / "not-a-file"
+        output_directory.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr:
+            animation_exit = driver_main(
+                [
+                    str(PIPELINE),
+                    "--signal",
+                    "Root.Start",
+                    "--html-out",
+                    str(output_directory),
+                ]
+            )
+        self.assertEqual(animation_exit, 2)
+        self.assertIn("lkm-animate:", stderr.getvalue())
+        self.assertTrue(output_directory.is_dir())
+
+    def test_shortcut_passes_html_output_from_another_working_directory(self) -> None:
+        scenario = self.root / "scenario.json"
+        scenario.write_text("{}\n", encoding="utf-8")
+        html = self.root / "shortcut.html"
+        result = subprocess.run(
+            [
+                str(TOOLS2 / "bin" / "pyveri"),
+                "-t",
+                "Root.Start",
+                "-f",
+                str(PIPELINE),
+                "-s",
+                str(scenario),
+                "--html-out",
+                str(html),
+            ],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verdict: complete", result.stdout)
+        self.assertIn("lkm.spec.signal-animation", html.read_text(encoding="utf-8"))
 
     def test_source_fingerprint_endpoint_and_parent_validation_are_strict(self) -> None:
         cases: list[tuple[str, dict, dict, str]] = []

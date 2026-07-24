@@ -1,4 +1,4 @@
-"""tools2 driver: parse -> model -> derive -> check -> view -> render."""
+"""tools2 driver: parse -> model -> derive -> check -> view -> render/animate."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Iterator
 
 def _bootstrap() -> None:
     root = Path(__file__).resolve().parents[3]
-    for name in ("common", "parse", "model", "derive", "check", "view", "render"):
+    for name in ("common", "parse", "model", "derive", "check", "view", "render", "animate"):
         source = str(root / name / "src")
         if source not in sys.path:
             sys.path.insert(0, source)
@@ -20,6 +20,7 @@ def _bootstrap() -> None:
 
 _bootstrap()
 
+from animate_tool.__main__ import main as animate_main
 from check_tool.__main__ import main as check_main
 from derive_tool.__main__ import main as derive_main
 from derive_tool.engine import parse_budget
@@ -69,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-breadth", type=parse_budget, default=3, metavar="N|all")
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("-o", "--output", type=Path, help="write rendered text")
+    parser.add_argument("--html-out", type=Path, help="write a self-contained Signal animation")
     args = parser.parse_args(argv)
 
     with _working_directory(args.work_dir) as work:
@@ -108,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if render_main([str(view), "--format", "text", "-o", str(rendered)]) != 0:
             return 2
+        if args.html_out is not None:
+            if animate_main([str(model), str(view), "-o", str(args.html_out)]) != 0:
+                return 2
         text = rendered.read_text(encoding="utf-8")
         if args.output is None:
             sys.stdout.write(text)
