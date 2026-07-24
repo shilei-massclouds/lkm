@@ -1,5 +1,4 @@
 pub mod boot;
-pub mod boot_init;
 pub mod interrupt;
 pub mod payload;
 pub mod prepare;

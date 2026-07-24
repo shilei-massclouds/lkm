@@ -277,7 +277,7 @@ class DeriveToolTests(unittest.TestCase):
                     for transition in data["transitions"]
                 )
             )
-            self.assertEqual(data["states"]["EntryPreludePhase"], "Online")
+            self.assertNotIn("EntryPreludePhase", data["states"])
             self.assertEqual(data["states"]["EntrySuccessorPhase"], "Online")
             self.assertEqual(data["states"]["CorePreparePhase"], "Online")
             self.assertEqual(data["states"]["MmCoreInitPhase"], "Online")
@@ -542,18 +542,9 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "kernel_fpu_disabled"
-                    and record["proof_class"] == "riscv_status_register"
-                    and record["proof_provider"] == "transition_ensures"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["predicate"] == "kernel_vector_disabled"
-                    and record["proof_class"] == "riscv_status_register"
-                    and record["proof_provider"] == "transition_ensures"
-                    for record in proved
+                    transition["object"] == "BootInitFlow"
+                    and transition["transition"] == "Preset"
+                    for transition in data["transitions"]
                 )
             )
             self.assertTrue(

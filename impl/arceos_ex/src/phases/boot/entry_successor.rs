@@ -40,7 +40,7 @@ fn preset_start(ctx: &Context) -> EventResult {
 }
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
-    crate::phases::boot::entry_prelude::is_online()
+    crate::flows::boot_init_flow::is_prepared()
         && ctx.vm.state() == State::Ready
         && ctx.vm.entry_prelude_ready()
         && ctx.boot_task.state() == State::OnCpu
@@ -149,7 +149,7 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex entry successor enable failed\n",
     );
-    crate::phases::boot_init::setup_after_entry_successor()
+    crate::flows::boot_init_flow::setup_after_entry_successor()
 }
 
 fn enable_event(ctx: &mut Context) -> EventResult {
@@ -172,7 +172,7 @@ pub fn is_online() -> bool {
 }
 
 fn entry_successor_phase_ready(ctx: &Context) -> bool {
-    crate::phases::boot::entry_prelude::is_online()
+    crate::flows::boot_init_flow::is_prepared()
         && ctx.init_stack.state() == State::Online
         && ctx.cpu_group.boot_cpu_state() == State::Online
         && ctx.boot_current_cpu.state() == State::Online

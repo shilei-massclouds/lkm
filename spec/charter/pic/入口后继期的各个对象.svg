@@ -41,12 +41,12 @@
   <text x="193" y="158" class="group-label" text-anchor="middle">阶段对象</text>
 
   <rect x="88" y="205" width="210" height="68" rx="10" class="box phase"/>
-  <text x="193" y="232" class="label">引导期</text>
-  <text x="193" y="256" class="small">Boot Phase</text>
+  <text x="193" y="232" class="label">启动执行阶段</text>
+  <text x="193" y="256" class="small">BootInitFlow</text>
 
   <rect x="88" y="330" width="210" height="76" rx="10" class="box phase"/>
-  <text x="193" y="358" class="label">入口前导期对象</text>
-  <text x="193" y="383" class="small">EntryPreludePhase</text>
+  <text x="193" y="358" class="label">入口前导步骤完成</text>
+  <text x="193" y="383" class="small">BootInitFlow.Prepared</text>
 
   <rect x="88" y="486" width="210" height="86" rx="10" class="box phase"/>
   <text x="193" y="515" class="label">入口后继期对象</text>
@@ -54,9 +54,9 @@
   <text x="193" y="562" class="state">setup: start_kernel -> paging_init done</text>
 
   <path d="M193 273 L193 330" class="edge"/>
-  <text x="228" y="306" class="edge-label">包含</text>
+  <text x="228" y="306" class="edge-label">Preset</text>
   <path d="M193 406 L193 486" class="edge"/>
-  <text x="238" y="454" class="edge-label">接续 / cleanup</text>
+  <text x="238" y="454" class="edge-label">Setup 接续</text>
 
   <rect x="380" y="122" width="330" height="650" rx="16" class="group"/>
   <text x="545" y="158" class="group-label" text-anchor="middle">早期输入与内存准备</text>

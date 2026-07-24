@@ -58,11 +58,10 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if !phases::boot_init::rest_init::is_online()
-        || !phases::boot_init::rest_init::boot_init_rest_init_is_online()
-        || !phases::boot_init::rest_init::boot_init_schedule_handoff_is_online()
-        || phases::boot_init::rest_init::boot_idle_entry_is_online()
-        || !phases::boot_init::is_online()
+    if !crate::flows::boot_init_flow::rest_init_is_online()
+        || !crate::flows::boot_init_flow::schedule_handoff_is_online()
+        || crate::flows::boot_idle_flow::entry_is_online()
+        || !crate::flows::boot_init_flow::is_online()
     {
         printk::write_str("rest init phase is not online\n");
         return SmokeResult::Failed;
@@ -311,7 +310,7 @@ pub fn run() -> SmokeResult {
         ctx.kernel_init_task.entry_stack_pointer(),
         ctx.scheduler.schedule_passes(),
         ctx.scheduler.switch_to_passes(),
-        phases::boot_init::rest_init::boot_idle_entry_is_online()
+        crate::flows::boot_idle_flow::entry_is_online()
     ));
     SmokeResult::Passed
 }

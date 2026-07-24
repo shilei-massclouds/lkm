@@ -286,7 +286,7 @@ test('reduced motion settles immediately and disables response movement', async 
   await expect(page.locator('[data-node-id="Root"]')).toHaveCSS('animation-name', 'none');
 });
 
-test('full main model loads offline, scrolls targets, and restores 277 steps', async ({ page }) => {
+test('full main model loads offline, scrolls targets, and restores 274 steps', async ({ page }) => {
   test.setTimeout(60_000);
   expect(statSync(mainHtml).size).toBeLessThan(5 * 1024 * 1024);
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -294,11 +294,11 @@ test('full main model loads offline, scrolls targets, and restores 277 steps', a
   await openOffline(page, mainHtml);
   expect(Date.now() - started).toBeLessThan(5_000);
   const counter = page.locator('.counter');
-  await expect(counter).toContainText('步骤 0 / 277');
+  await expect(counter).toContainText('步骤 0 / 274');
   let sawScroll = false;
-  for (let index = 1; index <= 277; index += 1) {
+  for (let index = 1; index <= 274; index += 1) {
     await page.keyboard.press('ArrowRight');
-    await expect(counter).toContainText(`步骤 ${index} / 277`);
+    await expect(counter).toContainText(`步骤 ${index} / 274`);
     if (!sawScroll) {
       sawScroll = await page.locator('.stage').evaluate(
         (stage) => stage.scrollTop > 0 || stage.scrollLeft > 0
@@ -329,9 +329,9 @@ test('full main model loads offline, scrolls targets, and restores 277 steps', a
   expect(longIdentityTypography.count).toBeGreaterThan(0);
   expect(longIdentityTypography.sameFontSize).toBe(true);
   expect(longIdentityTypography.overlapping).toBe(false);
-  for (let index = 276; index >= 0; index -= 1) {
+  for (let index = 273; index >= 0; index -= 1) {
     await page.keyboard.press('ArrowLeft');
-    await expect(counter).toContainText(`步骤 ${index} / 277`);
+    await expect(counter).toContainText(`步骤 ${index} / 274`);
   }
   await expect(page.locator('[data-node-id]')).toHaveCount(1);
   await expect(page.locator('[data-node-id="Human"]')).toBeVisible();

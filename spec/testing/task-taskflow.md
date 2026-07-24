@@ -9,14 +9,16 @@ carrier and its independently-lived `TaskFlow` instances.
   `BootIdleSetup` scheduling record is an internal projection and must not be
   reported as a second Task or own a second Task lifecycle.
 - Entry tests must observe `BootTask.OnCpu` exactly once with the `T` early
-  marker, in `Kernel.Started -> BootTask.OnCpu -> BootInitFlow.Started ->
-  EntryPreludePhase.Started` order. Physical and virtual binding happen later,
+  marker, in `Kernel.Started -> BootTask.OnCpu -> BootInitFlow.Started` order.
+  Physical and virtual binding happen later,
   do not change BootTask lifecycle, and both must resolve to the same
   linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
 - BootInitFlow must expose `TaskFlowRef::BOOT_INIT`, owner/parent BootTask and
   `BootTask.initial_flow == BOOT_INIT`; it must not expose a stored guard field.
 - BootInitFlow tests must observe the standard Started/Prepared/Ready/Online
-  lifecycle. Online must precede and be adjacent to the first real
+  lifecycle and must not observe BP EntryPrelude checkpoints. Preset must drive
+  the original entry-object order directly and commit Prepared only after the
+  complete entry facts hold. Online must precede and be adjacent to the first real
   BootTask-to-KernelInitTask switch commit; BootIdleEntry may start only after
   that scheduler call later restores BootTask.
 - Execution-boundary coverage must prove that a Flow process proceeds only

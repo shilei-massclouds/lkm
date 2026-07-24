@@ -89,8 +89,8 @@
 
   `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 `Kernel.Started` 观察且只观察一次。
   随后 `BootInitFlow.Started`
-  启动标准阶段生命周期，并由其 Preset 驱动 `EntryPreludePhase`。入口协议由
-  `EntryPreludePhase` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp` 绑定到静态
+  启动标准阶段生命周期，并由其 Preset 直接编排入口对象。入口协议由
+  `BootInitFlow.Preset` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp` 绑定到静态
   `init_task` 并建立初始抢占关闭事实；`EarlyVm` 就绪后，binding 把 `tp` 切换为同一 carrier 的
   虚拟地址。该 binding 不是第二个 Task、TaskRef 或调度实体，也不改变 PID 0 identity。
 
@@ -100,10 +100,10 @@
 
   > [model] MUST：Kernel 接受 OpenSBI 发出的 Startup 后直接异步发出严格 BootInitFlow.Startup；
   > BootInitFlow 只有在自身仍为 Base、parent BootTask 为 OnCpu 时接受。接受后在
-  > `SingleTaskContext` 中驱动 `EntryPreludePhase.Transition::Preset` 并等待其到达 `Online`。
+  > `SingleTaskContext` 中直接按入口顺序驱动具体对象，并在完整入口事实成立后提交 Prepared。
 
-* Prepared：内核此时不响应中断，`BootTask` 仍为 OnCpu，`BootInitFlow` 已 Prepared；
-  `EntryPreludePhase` 已 Online。
+* Prepared：内核此时不响应中断，`BootTask` 仍为 OnCpu，`BootInitFlow` 已 Prepared；入口对象完整事实
+  已建立。
 
 * OnSetup：内核收到 Setup 信号，OnCpu 的 `BootTask` 继续代表内核完成中期初始化；
   该迁移不再次启动或替换 Task。

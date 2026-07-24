@@ -76,7 +76,7 @@ Live；它不改变 Task lifecycle，也不发送 Task Enable/Continue。随后 
 logical-id 的 initial idle Flow。AP 首次 Suspend 才产生第一个可恢复的 Online/Valid 断点，后续切换
 完全使用普通 Suspend/Continue。
 
-`tp` 的物理/虚拟绑定与早期 preemption 事实归 `EntryPreludePhase` 私有的
+`tp` 的物理/虚拟绑定与早期 preemption 事实归 `BootInitFlow.Preset` 私有的
 `BootTaskEntryBinding`，不属于 Task carrier lifecycle。入口各阶段只能验证 `BootTask.OnCpu`
 稳定 invariant，不能推进或重放其生命周期。
 

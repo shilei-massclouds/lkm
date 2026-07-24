@@ -1,4 +1,6 @@
-pub mod rest_init;
+mod preset;
+mod rest_init;
+mod schedule_handoff;
 
 use crate::{
     checkpoint::Checkpoint,
@@ -84,10 +86,10 @@ pub fn adopt_head_preset_start() -> EventResult {
         .accept_initial_start_signal(ctx.boot_task.task())
 }
 
-/// Completes BootInitFlow.Preset after EntryPreludePhase reaches Online.
-pub fn preset_after_entry_prelude() -> ! {
-    let dependencies_ready =
-        boot_task_on_cpu_and_canonical() && crate::phases::boot::entry_prelude::is_online();
+/// Completes BootInitFlow.Preset after all direct entry-object drives finish.
+pub(super) fn preset_after_entry_objects() -> ! {
+    let dependencies_ready = boot_task_on_cpu_and_canonical()
+        && preset::entry_objects_ready(crate::context::context_ref());
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         ctx.boot_init_flow
@@ -110,7 +112,7 @@ pub fn setup() -> ! {
         require_guarded_state(LifecycleEvent::Setup, State::Prepared, State::Ready),
         "arceos_ex boot init setup start failed\n",
     );
-    if !boot_task_on_cpu_and_canonical() || !crate::phases::boot::entry_prelude::is_online() {
+    if !boot_task_on_cpu_and_canonical() {
         crate::phases::shutdown_on_error(
             phase_failure(LifecycleEvent::Setup, State::Prepared, State::Ready),
             "arceos_ex boot init setup dependency failed\n",
@@ -122,7 +124,6 @@ pub fn setup() -> ! {
 pub fn setup_after_entry_successor() -> ! {
     if crate::context::context_ref().boot_init_flow.state() != State::Prepared
         || !boot_task_on_cpu_and_canonical()
-        || !crate::phases::boot::entry_prelude::is_online()
         || !crate::phases::boot::entry_successor::is_online()
     {
         crate::arch::riscv64::sbi::putstr(
@@ -188,7 +189,7 @@ pub fn setup_after_process_prepare() -> ! {
 
 /// Completes BootInitFlow.Setup after the final direct leaf reaches Online.
 pub fn setup_after_boot_init_rest_init() -> ! {
-    let dependencies_ready = setup_leaves_online() && rest_init::boot_init_rest_init_is_online();
+    let dependencies_ready = setup_leaves_online() && rest_init::is_online();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         ctx.boot_init_flow
@@ -211,21 +212,21 @@ pub fn enable() -> ! {
         require_guarded_state(LifecycleEvent::Enable, State::Ready, State::Online),
         "arceos_ex boot init enable start failed\n",
     );
-    if !setup_leaves_online() || !rest_init::boot_init_rest_init_is_online() {
+    if !setup_leaves_online() || !rest_init::is_online() {
         crate::phases::shutdown_on_error(
             phase_failure(LifecycleEvent::Enable, State::Ready, State::Online),
             "arceos_ex boot init enable dependency failed\n",
         );
     }
-    rest_init::setup(crate::context::context())
+    schedule_handoff::preset(crate::context::context())
 }
 
 /// Commits BootInitFlow.Online at the last reversible boundary.
 pub fn enable_after_boot_init_schedule_handoff() -> ! {
     let dependencies_ready = boot_task_on_cpu_and_canonical()
-        && rest_init::boot_init_rest_init_is_online()
-        && rest_init::boot_init_schedule_handoff_is_online()
-        && rest_init::precommit_ready();
+        && rest_init::is_online()
+        && schedule_handoff::is_online()
+        && schedule_handoff::precommit_ready();
     let ctx = crate::context::context();
     let result = if dependencies_ready {
         ctx.boot_init_flow.enable_with_successor(
@@ -247,27 +248,49 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
 
 /// Runs only if a later scheduler switch restores the original BootTask stack.
 pub fn boot_task_restored() -> ! {
-    rest_init::enable(crate::context::context())
+    crate::flows::boot_idle_flow::preset_entry(crate::context::context())
 }
 
 pub fn is_online() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Online
         && setup_leaves_online()
-        && rest_init::boot_init_rest_init_is_online()
-        && rest_init::boot_init_schedule_handoff_is_online()
+        && rest_init::is_online()
+        && schedule_handoff::is_online()
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn rest_init_is_online() -> bool {
+    rest_init::is_online()
+}
+
+#[cfg_attr(not(app_smoke), allow(dead_code))]
+pub(crate) fn schedule_handoff_is_online() -> bool {
+    schedule_handoff::is_online()
+}
+
+/// Reports the post-handoff boundary observed while KernelInitTask owns the CPU.
+pub fn dispatch_ready() -> bool {
+    let ctx = crate::context::context_ref();
+    is_online()
+        && ctx.scheduler.schedule_passes() != 0
+        && ctx.scheduler.current_runqueue_resolve_passes() != 0
+        && ctx.scheduler.pick_next_task_passes() != 0
+        && ctx.scheduler.switch_to_passes() != 0
+        && ctx.boot_cpu_current_task.switch_committed_count() != 0
+        && ctx.boot_cpu_current_task.current_is_kernel_init()
+        && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
 }
 
 pub fn is_prepared() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Prepared
         && boot_task_on_cpu_and_canonical()
-        && crate::phases::boot::entry_prelude::is_online()
 }
 
 pub fn is_ready() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Ready
         && boot_task_on_cpu_and_canonical()
         && setup_leaves_online()
-        && rest_init::boot_init_rest_init_is_online()
+        && rest_init::is_online()
 }
 
 fn require_setup_leaf(child_online: bool, child: &str) {
@@ -291,8 +314,7 @@ fn require_setup_leaf(child_online: bool, child: &str) {
 }
 
 fn setup_leaves_online() -> bool {
-    crate::phases::boot::entry_prelude::is_online()
-        && crate::phases::boot::entry_successor::is_online()
+    crate::phases::boot::entry_successor::is_online()
         && crate::phases::boot::core_prepare::is_online()
         && crate::phases::boot::mm_core_init::is_online()
         && crate::phases::boot::sched_init::is_online()
@@ -328,4 +350,8 @@ fn phase_failure(event: LifecycleEvent, expected: State, target: State) -> Event
         expected,
         target,
     )
+}
+
+pub(super) fn rest_init_facts_stable(ctx: &crate::context::Context) -> bool {
+    rest_init::facts_stable(ctx)
 }

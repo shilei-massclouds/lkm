@@ -755,7 +755,6 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 objects["BootInitFlow"]["children"],
                 [
-                    "EntryPreludePhase",
                     "EntrySuccessorPhase",
                     "CorePreparePhase",
                     "MmCoreInitPhase",
@@ -764,11 +763,12 @@ class ModelToolTests(unittest.TestCase):
                     "LocalIrqEnablePhase",
                     "IrqOpenPreparePhase",
                     "ProcessPreparePhase",
+                    "BootTaskEntryBinding",
                     "BootInitRestInitPhase",
                     "BootInitScheduleHandoffPhase",
                 ],
             )
-            self.assertEqual(objects["EntryPreludePhase"]["parent"], "BootInitFlow")
+            self.assertNotIn("EntryPreludePhase", objects)
             self.assertNotIn("BootPhase", objects)
             self.assertNotIn("InterruptPhase", objects)
             kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
@@ -794,17 +794,35 @@ class ModelToolTests(unittest.TestCase):
                 "transitions"
             ]["Setup"]
             self.assertEqual(
-                boot_init_preset["body_members"][1]["within"]["context"],
+                boot_init_preset["body_members"][2]["within"]["context"],
                 "SingleTaskContext",
             )
             self.assertEqual(
                 [
                     entry["text"]
-                    for entry in boot_init_preset["body_members"][1]["within"][
+                    for entry in boot_init_preset["body_members"][2]["within"][
                         "drives"
                     ][0]["entries"]
                 ],
-                ["EntryPreludePhase.Transition::Preset"],
+                [
+                    "InterruptStream.Transition::Preset",
+                    "KernelImage.Transition::Preset",
+                    "KernelImage.Transition::Setup",
+                    "BootCurrentCPU.Transition::Preset",
+                    "BootCurrentCPU.Transition::Setup",
+                    "CpuGroup.Transition::Preset",
+                    "BootCurrentCPU.Transition::Enable",
+                    "BootTaskEntryBinding.Transition::Preset",
+                    "BootInitStack.Transition::Preset",
+                    "EventStream.Transition::Preset",
+                    "ExceptionStream.Transition::Preset",
+                    "Vm.Transition::Preset",
+                    "Vm.Transition::Setup",
+                    "EventStream.Transition::Setup",
+                    "BootTaskEntryBinding.Transition::Setup",
+                    "BootInitStack.Transition::Setup",
+                    "Soc.Transition::Preset",
+                ],
             )
             self.assertEqual(kernel_preset["drives"], [])
             self.assertEqual(

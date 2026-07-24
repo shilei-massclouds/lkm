@@ -560,14 +560,14 @@ def _resolve_rule(
 
 def default_mapping_rules() -> dict[str, MappingRule]:
     return {
-        "EntryPreludePhase.Started": MappingRule(
+        "BootInitFlow.Started": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start",
             confidence="high",
             notes="RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping.",
         ),
-        "EntryPreludePhase.Ready": MappingRule(
+        "BootInitFlow.Prepared": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start_kernel",
@@ -1574,16 +1574,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
 
 
 def default_unmapped_notes() -> dict[str, str]:
-    return {
-        "EntryPreludePhase.Started": (
-            "EntryPreludePhase starts before this mapping pass claims a portable "
-            "Linux init/main.c anchor; RISC-V head.S entry mapping is left for a later pass."
-        ),
-        "EntryPreludePhase.Ready": (
-            "EntryPreludePhase completes before this mapping pass claims a portable "
-            "Linux init/main.c anchor; RISC-V head.S entry mapping is left for a later pass."
-        ),
-    }
+    return {}
 
 
 def load_inventory(path: Path) -> list[CheckpointInventoryRecord]:

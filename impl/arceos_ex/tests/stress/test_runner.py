@@ -280,15 +280,14 @@ class BasicOrchestrationTests(unittest.TestCase):
 
 class EventAndDiffTests(unittest.TestCase):
     def test_boot_entry_early_bytes_preserve_online_and_phase_order(self) -> None:
-        events = runner._extract_events("RTOAIK\n")
+        events = runner._extract_events("RTOIK\n")
         names = [event["name"] for event in events]
         self.assertEqual(
-            names[:4],
+            names[:3],
             [
                 "Kernel.Started",
                 "BootTask.OnCpu",
                 "BootInitFlow.Started",
-                "EntryPreludePhase.Started",
             ],
         )
         self.assertEqual(names.count("BootTask.OnCpu"), 1)

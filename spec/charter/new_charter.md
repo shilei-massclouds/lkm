@@ -203,16 +203,16 @@ Project 负责规格建立和构造，System 负责运行期启动。两棵树�
 ### 启动执行阶段 BootInitFlow
 
 `BootInitFlow` 是静态 `BootTask.initial_flow` 指向的 TaskFlow；TaskFlow 继承 PhaseObject，因此它使用标准
-`Base -> Prepared -> Ready -> Online` 生命周期。Preset 驱动 `EntryPreludePhase`；Setup 直接顺序驱动
+`Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
 `LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
 `BootInitScheduleHandoffPhase`。不存在 `BootPhase` 或 `InterruptPhase` 包装 lifecycle。
 
-### 入口前导期EntryPreludePhase
+### BootInitFlow.Preset 的入口前导步骤
 
-`EntryPreludePhase` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
+`BootInitFlow.Preset` 拥有入口期的 `BootTaskEntryBinding` 协调协议。它按“物理 `tp` binding →
 VM setup → 虚拟 `tp` binding”建立调度器运行前的初始抢占关闭条件。binding 不是 Task、TaskRef
-或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 OnCpu；本阶段只
+或 Flow，不改变 PID 0 identity。`BootTask` 在入口前已经由静态初始化器构造为 OnCpu；本步骤只
 验证其稳定 storage、PID 0、`TaskRef::BOOT` 和 canonical identity。
 
 ### BootInitFlow 的引导叶子

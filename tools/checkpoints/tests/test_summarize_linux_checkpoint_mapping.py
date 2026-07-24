@@ -36,8 +36,8 @@ def _mapping_rows() -> list[dict[str, object]]:
         },
         {
             "checkpoint_index": 1,
-            "checkpoint_name": "EntryPreludePhase.Started",
-            "checkpoint_variant": "EntryPreludePhaseStarted",
+            "checkpoint_name": "BootInitFlow.Started",
+            "checkpoint_variant": "BootInitFlowStarted",
             "linux_file": "arch/riscv/kernel/head.S",
             "linux_symbol": "_start",
             "linux_anchor": "_start definition line 1",

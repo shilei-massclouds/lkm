@@ -282,7 +282,7 @@ type CpuGroupGenerationWorkflow {
         /*
          * Before generating CPU/CpuGroup implementation or tests, the
          * generator must read the charter CPU/CpuGroup type note,
-         * SEM-CURRENT-CPU-MODEL-001, the entry-prelude/entry-successor model
+         * SEM-CURRENT-CPU-MODEL-001, the BootInitFlow.Preset/entry-successor model
          * facts, and the arceos_ex coding constraints for unified CPU
          * instances and logical-id indexing.
          */

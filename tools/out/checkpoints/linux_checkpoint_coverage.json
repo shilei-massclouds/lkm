@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 481,
+  "total_checkpoints": 477,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 364
+      "count": 360
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 364
+      "count": 360
     },
     {
       "confidence": "medium",
@@ -121,10 +121,6 @@
     },
     {
       "family": "BootIdleEntryPhase",
-      "count": 4
-    },
-    {
-      "family": "BootInitFlow",
       "count": 4
     },
     {
@@ -232,15 +228,15 @@
       "count": 2
     },
     {
+      "family": "BootInitFlow",
+      "count": 2
+    },
+    {
       "family": "CommandLine",
       "count": 2
     },
     {
       "family": "CorePreparePhase",
-      "count": 2
-    },
-    {
-      "family": "EntryPreludePhase",
       "count": 2
     },
     {

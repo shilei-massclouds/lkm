@@ -15,7 +15,7 @@ use super::{
         PerCpuRwSemaphoreWriteOutcome,
     },
     pre_smp_init::PreSmpInitBoundary,
-    rest_init::{BootIdleFlow, KernelInitTask, KthreaddTask},
+    rest_init::{KernelInitTask, KthreaddTask},
     sbi::Sbi,
     scheduler::Scheduler,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
@@ -24,6 +24,7 @@ use super::{
     task_flow::{TaskFlow, TaskFlowRef},
 };
 use crate::checkpoint::Checkpoint;
+use crate::flows::boot_idle_flow::BootIdleFlow;
 
 const AP_STACK_SIZE: usize = 16 * 1024;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);

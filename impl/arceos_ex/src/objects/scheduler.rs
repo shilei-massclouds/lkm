@@ -9,7 +9,7 @@ use super::{
     init_mm::InitMm,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
-    rest_init::{BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddTask},
+    rest_init::{KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddTask},
     state::{
         EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State, failed_condition,
     },
@@ -20,6 +20,7 @@ use super::{
 };
 use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
 use crate::checkpoint::Checkpoint;
+use crate::flows::boot_idle_flow::BootIdleFlow;
 
 const SMOKE_SCHEDULER_TASK_ID: usize = 1001;
 const SMOKE_MUTEX_TASK_ID: usize = 1002;

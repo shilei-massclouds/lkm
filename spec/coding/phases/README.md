@@ -7,7 +7,6 @@ by the repository `coding-spec-check` gate.
 ## Boot
 
 - [`boot.md`](boot.md) — boot 叶阶段 namespace 与直接 parent 映射
-- `boot/entry-prelude.md`
 - `boot/entry-successor.md`
 - `boot/core-prepare.md`
 - `boot/mm-core-init.md`
@@ -24,6 +23,7 @@ by the repository `coding-spec-check` gate.
 ## BootInitFlow
 
 - [`boot-init.md`](boot-init.md) — BootInitFlow Phase 父 transition 驱动映射
+- `boot-init/preset.md`
 - `boot-init/rest-init.md`
 
 ## KernelInitFlow execution phases

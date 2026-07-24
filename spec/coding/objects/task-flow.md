@@ -20,8 +20,8 @@ Flow 的 `Base/Prepared/Ready/Online/Offline/Destroyed` 必须独立于 owner Ta
 parent Task 处于 `OnCpu`；结构性 `bind()` 不执行 continuation，因此不要求 OnCpu。
 
 `BootInitFlow` 使用固定 `TaskFlowRef::BOOT_INIT`，是 `BootTask.initial_flow`；它的 core lifecycle
-由 `phases::boot_init` 驱动。`BootIdleFlow` 是 BootTask 的后继 idle Flow，其 metadata 归
-`BootIdleRuntime`/idle continuation；`KernelInitFlow` 和 `KthreaddFlow` 可以和相应 kernel Task
+由 `flows::boot_init_flow` 驱动。`BootIdleFlow` 是 BootTask 的后继 idle Flow，其 core 与直属入口
+归 `flows::boot_idle_flow`；`KernelInitFlow` 和 `KthreaddFlow` 可以和相应 kernel Task
 实现共址，但必须有独立 lifecycle 查询。`KernelInitTask`（PID 1）的用户资源必须命名并组织为该
 Task 的 user state；首次 exec 声明的 `UserAppFlow` 仅持有 application continuation lifecycle，
 不得把 credentials、files、signals、PID 或 process-group 身份再封装成 persona carrier。

@@ -124,7 +124,7 @@ fn enable(ctx: &mut Context) -> ! {
         enable_event(ctx),
         "arceos_ex irq open prepare enable failed\n",
     );
-    crate::phases::boot_init::setup_after_irq_open_prepare()
+    crate::flows::boot_init_flow::setup_after_irq_open_prepare()
 }
 
 fn enable_event(ctx: &Context) -> EventResult {

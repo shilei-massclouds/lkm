@@ -3917,7 +3917,7 @@ class _Deriver:
         if (
             kind != "invariant"
             or state is None
-            or state.object_name not in {"EntryPreludePhase", "EntrySuccessorPhase"}
+            or state.object_name != "EntrySuccessorPhase"
         ):
             return False
 

@@ -23,7 +23,7 @@
 | --- | --- |
 | Kernel system/startup | [`systems/kernel.md`](systems/kernel.md) |
 | Boot leaf namespace | [`phases/boot.md`](phases/boot.md) |
-| Boot `entry-prelude` | [`phases/boot/entry-prelude.md`](phases/boot/entry-prelude.md) |
+| BootInitFlow `preset` | [`phases/boot-init/preset.md`](phases/boot-init/preset.md) |
 | Boot `entry-successor` | [`phases/boot/entry-successor.md`](phases/boot/entry-successor.md) |
 | Boot `core-prepare` | [`phases/boot/core-prepare.md`](phases/boot/core-prepare.md) |
 | Boot `mm-core-init` | [`phases/boot/mm-core-init.md`](phases/boot/mm-core-init.md) |

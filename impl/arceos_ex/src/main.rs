@@ -7,6 +7,7 @@ mod apps;
 mod arch;
 mod checkpoint;
 mod context;
+mod flows;
 mod objects;
 mod phases;
 mod projects;

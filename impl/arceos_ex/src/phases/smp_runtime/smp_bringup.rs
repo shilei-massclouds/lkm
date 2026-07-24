@@ -32,7 +32,7 @@ pub fn preset(ctx: &mut Context) -> ! {
 fn preset_start() -> EventResult {
     let state = crate::phases::state::load(&SMP_BRINGUP_PHASE_STATE);
     if state != State::Base
-        || !crate::phases::boot_init::is_online()
+        || !crate::flows::boot_init_flow::is_online()
         || !crate::phases::smp_runtime::pre_smp_init::is_online()
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);

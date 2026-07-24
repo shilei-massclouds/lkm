@@ -373,8 +373,8 @@ entry anchors. For that scope it must be able to resolve
 arch/riscv/kernel/head.S symbols declared through SYM_CODE_START /
 SYM_CODE_END and ordinary assembly labels such as
 relocate_enable_mmu, and it may pair them with
-arch/riscv/mm/init.c::setup_vm() anchors. EntryPreludePhase.Started
-maps to head.S::_start when present; EntryPreludePhase.Ready maps
+arch/riscv/mm/init.c::setup_vm() anchors. BootInitFlow.Started
+maps to head.S::_start when present; BootInitFlow.Prepared maps
 to the _start_kernel tail start_kernel handoff when present. Early
 VM, FDT/fixmap, kernel-image and trap-stream checkpoints must use
 exact anchors only when a single Linux boundary is found; otherwise

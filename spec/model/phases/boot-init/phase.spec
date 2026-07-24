@@ -3,6 +3,7 @@
  * BootPhase and InterruptPhase wrapper lifecycles are intentionally absent.
  */
 
+include "preset.spec";
 include "rest-init/main.spec";
 
 object BootInitFlow: TaskFlow {
@@ -13,6 +14,12 @@ object BootInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
+                    Riscv64.state == State::Online;
+                    SbiSpec.state == State::Online;
+                    OpenSBI.state == State::Online;
+                    BootCpuRegisters.state == State::Online;
+                    Lds.state == State::Online;
+                    Config.state == State::Online;
                     BootTask.state == State::OnCpu;
                     task_execution_authority_is(
                         BootTask,
@@ -24,17 +31,64 @@ object BootInitFlow: TaskFlow {
                     );
                     task_initial_flow_is(BootTask, self);
                     task_flow_initial_binding_consistent(self);
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                }
+
+                may_change {
+                    BootCpuRegisters.sstatus;
                 }
 
                 within SingleTaskContext {
                     drives {
-                        EntryPreludePhase.Transition::Preset;
+                        InterruptStream.Transition::Preset;
+                        KernelImage.Transition::Preset;
+                        KernelImage.Transition::Setup;
+                        BootCurrentCPU.Transition::Preset;
+                        BootCurrentCPU.Transition::Setup;
+                        CpuGroup.Transition::Preset;
+                        BootCurrentCPU.Transition::Enable;
+                        BootTaskEntryBinding.Transition::Preset;
+                        BootInitStack.Transition::Preset;
+                        EventStream.Transition::Preset;
+                        ExceptionStream.Transition::Preset;
+                        Vm.Transition::Preset;
+                        Vm.Transition::Setup;
+                        EventStream.Transition::Setup;
+                        BootTaskEntryBinding.Transition::Setup;
+                        BootInitStack.Transition::Setup;
+                        Soc.Transition::Preset;
                     }
                 }
 
                 ensures {
-                    EntryPreludePhase.state == State::Online;
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
+                    kernel_fpu_disabled(BootCpuRegisters.sstatus);
+                    kernel_vector_disabled(BootCpuRegisters.sstatus);
+                    InterruptStream.state == State::Prepared;
+                    EventStream.state == State::Ready;
+                    ExceptionStream.state == State::Prepared;
+                    PageFaultException.state == State::Prepared;
+                    SyscallException.state == State::Prepared;
+                    BreakpointException.state == State::Prepared;
+                    UnexpectedException.state == State::Prepared;
+                    KernelImage.state == State::Online;
+                    RawDtb.state == State::Ready;
+                    BootTaskEntryBinding.state == State::Ready;
                     BootTask.state == State::OnCpu;
+                    BootInitStack.state == State::Ready;
+                    Vm.state == State::Ready;
+                    TrampolineVm.state == State::Destroyed;
+                    EarlyVm.state == State::Online;
+                    BootCurrentCPU.state == State::Online;
+                    BootCPU.state == State::Prepared;
+                    CpuGroup.state == State::Prepared;
+                    Soc.state == State::Prepared;
+                    task_ref_targets(BootTaskRef, BootTask);
+                    task_ref_ready(BootTaskRef);
                     task_flow_started(self);
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
@@ -50,7 +104,6 @@ object BootInitFlow: TaskFlow {
 
     state State::Prepared {
         invariant {
-            EntryPreludePhase.state == State::Online;
             BootTask.state == State::OnCpu;
             task_flow_started(self);
         }
@@ -110,7 +163,6 @@ object BootInitFlow: TaskFlow {
 
     state State::Ready {
         invariant {
-            EntryPreludePhase.state == State::Online;
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             KernelInitFlow.state == State::Base;
@@ -164,7 +216,6 @@ object BootInitFlow: TaskFlow {
 
     state State::Online {
         invariant {
-            EntryPreludePhase.state == State::Online;
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;

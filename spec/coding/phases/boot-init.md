@@ -2,7 +2,7 @@
 
 `BootInitFlow` 是 `BootTask.initial_flow` 指向的静态 TaskFlow。model 来源为
 [`phase.spec`](../../model/phases/boot-init/phase.spec)，实现落点为
-`impl/arceos_ex/src/phases/boot_init/mod.rs`。Boot、interrupt 目录只保留叶阶段 namespace；实现不得
+`impl/arceos_ex/src/flows/boot_init_flow/mod.rs`。Boot、interrupt 目录只保留 Setup 叶阶段 namespace；实现不得
 恢复 `BootPhase`、`InterruptPhase` 或任何平行 wrapper lifecycle。
 
 实现必须复用统一 `TaskFlow` core 和固定 `TaskFlowRef::BOOT_INIT`。不得另存 Flow state 或 guard
@@ -12,7 +12,7 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 
 | Transition | 直接 drives | completion |
 | --- | --- | --- |
-| Preset: Base -> Prepared | `EntryPreludePhase.Preset` | EntryPrelude Online 后提交 `BootInitFlow.Prepared` |
+| Preset: Base -> Prepared | 直接按入口顺序驱动 `InterruptStream` 至 `Soc` 的具体对象 | 完整入口事实成立后提交 `BootInitFlow.Prepared`；不建立入口 wrapper lifecycle |
 | Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
 | Enable: Ready -> Online | 只驱动 `BootInitScheduleHandoffPhase.Preset` | 该阶段建立 `BootIdleFlow` owner/active binding 并完成可逆切换预检；随后提交 `BootInitFlow.Online`，再进入真实 schedule |
 
@@ -21,7 +21,7 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 
 ```text
 OpenSBI -> Kernel.Startup -> BootInitFlow.Startup (BootTask.OnCpu)
-  -> EntryPreludePhase -> BootInitFlow.Prepared
+  -> entry objects -> BootInitFlow.Prepared
   -> EntrySuccessor -> CorePrepare -> MmCoreInit -> SchedInit
   -> IrqTimeInit -> LocalIrqEnable -> IrqOpenPrepare -> ProcessPrepare
   -> BootInitRestInit -> BootInitFlow.Ready
@@ -44,6 +44,16 @@ schedule 返回时才驱动它并进入不返回的 idle loop。
 
 ## Checkpoint
 
-`BootInitFlow.Started/Prepared/Ready/Online` 四个边界保留。`Prepared` 位于 EntryPrelude Online 后，
+`BootInitFlow.Started/Prepared/Ready/Online` 四个边界保留。`Prepared` 位于全部入口对象动作完成后，
 `Ready` 位于 RestInit Online 后，`Online` 位于 ScheduleHandoff Online 后且真实 switch 前。已删除的
-Boot/Interrupt wrapper checkpoint 不得作为兼容 marker 保留。
+BP EntryPrelude、Boot 和 Interrupt wrapper checkpoint 不得作为兼容 marker 保留。
+
+## 实现布局
+
+- `flows/boot_init_flow/mod.rs`：`BootInitFlow` 类型、Preset/Setup/Enable 与全部父 continuation。
+- `flows/boot_init_flow/preset.rs`：入口汇编 adoption、具体对象 drive 与 Preset 完成验证。
+- `flows/boot_init_flow/rest_init.rs`：`BootInitRestInitPhase`。
+- `flows/boot_init_flow/schedule_handoff.rs`：`BootInitScheduleHandoffPhase`。
+
+跨子模块只暴露父 continuation 与完成验证所需的 `pub(super)` 事实；不得保留
+`phases::boot_init` 旧路径 re-export。

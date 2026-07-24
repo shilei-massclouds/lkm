@@ -495,7 +495,7 @@ object CpuStartProvider: HardwareObject {
 
 /*
  * ApEntryPreludePhase 是每个 AP 从 SBI HSM 进入 secondary_start_sbi 后
- * 执行的 AP 专属入口先导期。它不同于 BP EntryPreludePhase：不建立
+ * 执行的 AP 专属入口先导期。它不同于 BP BootInitFlow.Preset：不建立
  * BootCurrentCPU，不清 BSS，不解析 boot args；它消费 HSM boot data，
  * 建立 AP 当前 idle task 指针、AP 栈/pt_regs 指针，切到已存在的
  * SwapperVm，并安装正式 trap vector。boot-data/tp 验证后，同一入口直接

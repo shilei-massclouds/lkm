@@ -59,6 +59,11 @@ namespace，删除其 wrapper lifecycle；payload 拆成两个私有 leaf module
 action 仍位于既有 objects/runtime 内部边界。该调整不新增 crate、feature、facade、公开 alias 或
 组件依赖，`spec/compose/main.spec` 无需改变。
 
+2026-07-24 启动 Flow 物理布局复核：crate 内新增私有 `flows` 代码层，按父 Flow 归组
+`BootInitFlow`、`BootIdleFlow` 及其直属子阶段；删除 `phases::boot_init` 旧路径且不提供兼容 re-export。
+该变化只调整 crate 内 canonical module ownership，不新增 crate、feature、facade、公开接口或组件依赖，
+因此 `spec/compose/main.spec` 的组合语义无需改变。
+
 `Composition Phase` 位于 `Object Coding Phase` 之后。它不重新定义模型对象、状态、事件、依赖和阶段顺序，而是在对象级编码实现已经满足规格语义的前提下，决定这些对象如何被组合、封装和发布。
 
 ## 阶段目标

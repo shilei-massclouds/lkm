@@ -13,14 +13,10 @@ use crate::{
     },
 };
 
-#[unsafe(link_section = ".data.phase")]
-static ENTRY_PRELUDE_PHASE_STATE: AtomicU8 =
-    AtomicU8::new(crate::phases::state::encode(State::Base));
-
-/// Phase-private lowering of the model `BootTaskEntryBinding` object.
+/// Preset-private lowering of the model `BootTaskEntryBinding` object.
 ///
 /// It deliberately stays out of `Context`: the binding is neither a second
-/// Task carrier nor a service exposed outside EntryPreludePhase.
+/// Task carrier nor a service exposed outside BootInitFlow.Preset.
 #[unsafe(link_section = ".data.phase")]
 static BOOT_TASK_ENTRY_BINDING_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
@@ -36,8 +32,6 @@ const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
 const TRACE_BOOT_TASK_ON_CPU: usize = Checkpoint::BootTaskOnCpu.early_byte() as usize;
 const TRACE_BOOT_INIT_FLOW_STARTED: usize = Checkpoint::BootInitFlowStarted.early_byte() as usize;
-const TRACE_ENTRY_PRELUDE_STARTED: usize =
-    Checkpoint::EntryPreludePhaseStarted.early_byte() as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
 const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
 const TRACE_BSS_ZEROED: usize = b'Z' as usize;
@@ -75,23 +69,19 @@ _start:
     li a0, {trace_boot_task_on_cpu}
     call {head_checkpoint}
 
-    # BootInitFlow.Preset starts before EntryPreludePhase.Preset.
+    # BootInitFlow.Preset starts before its direct entry-object drives.
     li a0, {trace_boot_init_flow_started}
     call {head_checkpoint}
 
     /*
-     * EntryPreludePhase.setup() head segment.
+     * BootInitFlow.Preset head segment.
      *
-     * This code is physically owned by the EntryPreludePhase file because it
-     * is the first executable part of that phase.  It performs only the model
+     * This code performs only the model
      * events that must happen before Rust can run: close the interrupt stream,
      * establish gp, disable kernel FPU/vector use, zero BSS, record the boot
      * CPU group input, install the init task pointer, and create the initial
-     * stack.  The Rust segment below continues the same setup() event.
+     * stack.  The Rust segment below continues the same Preset event.
      */
-    li a0, {trace_entry_prelude_started}
-    call {head_checkpoint}
-
     # InterruptStream.Preset: S-mode interrupt pending/enabled state is closed.
     csrw sie, zero
     csrw sip, zero
@@ -106,7 +96,7 @@ _start:
     li a0, {trace_kernel_image_preset}
     call {head_checkpoint}
 
-    # EntryPreludePhase private action: disable kernel FPU/vector use in sstatus.
+    # BootInitFlow.Preset private action: disable kernel FPU/vector use in sstatus.
     li t0, {sstatus_fpu_vector_mask}
     csrrc zero, sstatus, t0
 
@@ -142,7 +132,7 @@ _start:
     li a0, {trace_init_stack_preset}
     call {head_checkpoint}
 
-    # Continue EntryPreludePhase.setup() in Rust with the original boot args.
+    # Continue BootInitFlow.Preset in Rust with the original boot args.
     mv a0, s0
     mv a1, s1
     tail {rust_entry}
@@ -155,7 +145,7 @@ _start:
     head_text_align = const HEAD_TEXT_ALIGN,
     init_task_storage = sym crate::objects::boot_task::init_task_storage,
     pt_size_on_stack = const crate::objects::init_stack::PT_SIZE_ON_STACK,
-    rust_entry = sym entry_prelude_rust_entry,
+    rust_entry = sym boot_init_flow_preset_rust_entry,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
     trace_boot_init_flow_started = const TRACE_BOOT_INIT_FLOW_STARTED,
@@ -163,7 +153,6 @@ _start:
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
-    trace_entry_prelude_started = const TRACE_ENTRY_PRELUDE_STARTED,
     trace_kernel_started = const TRACE_KERNEL_STARTED,
     trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
 );
@@ -244,7 +233,7 @@ fn print_hex(value: usize) {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
+extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     let boot_args = BootArgs::new(hartid, dtb_pa);
     crate::phases::shutdown_on_error(
         crate::phases::prepare::adopt_head_prefix(&boot_args),
@@ -255,19 +244,19 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
         "arceos_ex kernel preset start failed\n",
     );
     crate::phases::shutdown_on_error(
-        crate::phases::boot_init::adopt_head_preset_start(),
+        super::adopt_head_preset_start(),
         "arceos_ex boot init preset start failed\n",
     );
     crate::phases::shutdown_on_error(
-        adopt_head_preset_start(&boot_args),
-        "arceos_ex entry prelude preset start failed\n",
+        adopt_preset_dependencies(&boot_args),
+        "arceos_ex boot init preset dependency failed\n",
     );
     preset_flow(&boot_args)
 }
 
-fn adopt_head_preset_start(boot_args: &BootArgs) -> EventResult {
+fn adopt_preset_dependencies(boot_args: &BootArgs) -> EventResult {
     let ctx = crate::context::context_ref();
-    let state = crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE);
+    let state = ctx.boot_init_flow.state();
     if state != State::Base
         || boot_args.state() != State::Online
         || !crate::phases::prepare::is_online()
@@ -281,28 +270,28 @@ fn adopt_head_preset_start(boot_args: &BootArgs) -> EventResult {
     Ok(())
 }
 
-/// Continues `EntryPreludePhase.setup()` after the `_start` head segment.
+/// Continues `BootInitFlow.Preset` after the `_start` head segment.
 ///
 /// The head segment above has already performed and checkpointed the pre-Rust
 /// lifecycle events:
 ///
 /// - `InterruptStream.Preset`
 /// - `KernelImage.Preset`
-/// - EntryPrelude private FPU/vector disable action
+/// - BootInitFlow.Preset private FPU/vector disable action
 /// - `KernelImage.Setup`
 /// - `BootCurrentCPU.Preset`
 /// - `BootTaskEntryBinding.Preset` while BootTask remains Online
 /// - `InitStack.Preset`
 ///
 /// This Rust segment adopts those completed events into the resource objects,
-/// then continues the remaining `EntryPreludePhase.setup()` drives in model
-/// order. It also supplies the phase-owned continuation that resumes this same
-/// setup() after `Vm.Setup` switches to the early virtual address space.
+/// then continues the remaining direct entry-object drives in model order. It
+/// also supplies the Flow-owned continuation that resumes this same Preset
+/// after `Vm.Setup` switches to the early virtual address space.
 fn preset_flow(boot_args: &BootArgs) -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
         preset_until_vm_switch(ctx, boot_args),
-        "arceos_ex entry prelude preset failed\n",
+        "arceos_ex boot init preset failed\n",
     );
     ctx.vm.setup(
         &ctx.config,
@@ -335,7 +324,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     if !csr::kernel_fpu_vector_disabled() {
         return failed_condition(
             LifecycleEvent::Preset,
-            crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE),
+            ctx.boot_init_flow.state(),
             State::Base,
             State::Prepared,
         );
@@ -353,20 +342,19 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
 }
 
-/// Continues the same `EntryPreludePhase.preset()` after `Vm.Setup` has switched
-/// to the early virtual address space.  Control returns here directly from the
-/// continuation selected by this phase; it does not pass through `BootPhase`.
+/// Continues the same `BootInitFlow.Preset` after `Vm.Setup` has switched to
+/// the early virtual address space. Control returns here directly through the
+/// Flow-owned continuation.
 extern "C" fn after_vm_setup_continuation() -> ! {
     let ctx = crate::context::context();
     crate::phases::shutdown_on_error(
         after_vm_setup(ctx),
-        "arceos_ex entry prelude preset tail failed\n",
+        "arceos_ex boot init preset tail failed\n",
     );
-    crate::phases::shutdown_on_error(adopt_ready(ctx), "arceos_ex entry prelude setup failed\n");
-    enable(ctx)
+    super::preset_after_entry_objects()
 }
 
-/// Finishes `EntryPreludePhase.preset()` after `Vm.Setup` has switched address
+/// Finishes `BootInitFlow.Preset` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
 fn after_vm_setup(ctx: &mut Context) -> EventResult {
     ctx.event_stream.setup(
@@ -378,8 +366,7 @@ fn after_vm_setup(ctx: &mut Context) -> EventResult {
     setup_boot_task_entry_binding_virtual(ctx)?;
     verify_boot_task_online_virtual(ctx)?;
     ctx.init_stack.setup(&ctx.vm)?;
-    Soc::preset()?;
-    adopt_prepared_with_check(ctx)
+    Soc::preset()
 }
 
 /// Adopts the physical `tp` operation already performed in the head segment.
@@ -517,64 +504,9 @@ fn boot_task_entry_preemption_initialized() -> bool {
     BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.load(Ordering::Relaxed)
 }
 
-fn enable(ctx: &mut Context) -> ! {
-    crate::phases::shutdown_on_error(enable_event(ctx), "arceos_ex entry prelude enable failed\n");
-    crate::phases::boot_init::preset_after_entry_prelude()
-}
-
-fn enable_event(ctx: &mut Context) -> EventResult {
-    let state = crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE);
-    if state != State::Ready || !entry_prelude_phase_ready(ctx) {
-        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
-    }
-
-    crate::phases::state::mark_checked(
-        &ENTRY_PRELUDE_PHASE_STATE,
-        LifecycleEvent::Enable,
-        State::Ready,
-        State::Online,
-        Checkpoint::EntryPreludePhaseOnline,
-    )
-}
-
-/// Adopts Prepared state after Preset drives complete.
-/// Checks the model Online invariant as the ensures condition.
-fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
-    let state = crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE);
-    if state != State::Base || !entry_prelude_phase_ready(ctx) {
-        return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
-    }
-
-    crate::phases::state::mark_checked(
-        &ENTRY_PRELUDE_PHASE_STATE,
-        LifecycleEvent::Preset,
-        State::Base,
-        State::Prepared,
-        Checkpoint::EntryPreludePhasePrepared,
-    )
-}
-
-fn adopt_ready(ctx: &mut Context) -> EventResult {
-    let state = crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE);
-    if state != State::Prepared || !entry_prelude_phase_ready(ctx) {
-        return failed_condition(LifecycleEvent::Setup, state, State::Prepared, State::Ready);
-    }
-
-    crate::phases::state::mark_checked(
-        &ENTRY_PRELUDE_PHASE_STATE,
-        LifecycleEvent::Setup,
-        State::Prepared,
-        State::Ready,
-        Checkpoint::EntryPreludePhaseReady,
-    )
-}
-
-pub fn is_online() -> bool {
-    crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE) == State::Online
-}
-
-fn entry_prelude_phase_ready(ctx: &Context) -> bool {
-    ctx.interrupt_stream.state() == State::Prepared
+pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
+    csr::kernel_fpu_vector_disabled()
+        && ctx.interrupt_stream.state() == State::Prepared
         && ctx.event_stream.state() == State::Ready
         && ctx.exception_stream.state() == State::Prepared
         && ctx.exception_stream.page_fault_state() == State::Prepared

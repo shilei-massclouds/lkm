@@ -87,7 +87,7 @@ tracked artifacts 或生成/apply marker patch。
 
 - [`../charter/main.md`](../charter/main.md) 中 “CPU / CpuGroup 类型与实例”
 - [`../model/SEMANTICS.md`](../model/SEMANTICS.md) 中 `SEM-CURRENT-CPU-MODEL-001`
-- [`../model/boot/entry-prelude/phase.spec`](../model/boot/entry-prelude/phase.spec)
+- [`../model/phases/boot-init/preset.spec`](../model/phases/boot-init/preset.spec)
 - [`../model/boot/entry-successor/phase.spec`](../model/boot/entry-successor/phase.spec)
 - [`../model/phases/smp-runtime/smp-bringup/phase.spec`](../model/phases/smp-runtime/smp-bringup/phase.spec)
 - [`../coding/arceos_ex.md`](../coding/arceos_ex.md)

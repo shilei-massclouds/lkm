@@ -44,34 +44,32 @@ pub fn adopt_head_preset_start() -> EventResult {
 pub fn preset_after_boot_init() -> ! {
     if crate::phases::state::load(&KERNEL_STATE) != State::Base
         || !crate::phases::prepare::is_online()
-        || !crate::phases::boot_init::is_prepared()
-        || !crate::phases::boot::entry_prelude::is_online()
+        || !crate::flows::boot_init_flow::is_prepared()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel preset invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
 
     crate::phases::shutdown_on_error(mark_prepared(), "arceos_ex kernel preset event failed\n");
-    crate::phases::boot_init::setup()
+    crate::flows::boot_init_flow::setup()
 }
 
 pub fn setup_after_boot_init() -> ! {
     if crate::phases::state::load(&KERNEL_STATE) != State::Prepared
         || !crate::phases::prepare::is_online()
-        || !crate::phases::boot_init::is_ready()
-        || !crate::phases::boot::entry_prelude::is_online()
+        || !crate::flows::boot_init_flow::is_ready()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel setup invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
 
     crate::phases::shutdown_on_error(mark_ready(), "arceos_ex kernel setup event failed\n");
-    crate::phases::boot_init::enable()
+    crate::flows::boot_init_flow::enable()
 }
 
 pub fn switch_after_boot_init() -> ! {
     if crate::phases::state::load(&KERNEL_STATE) != State::Ready
-        || !crate::phases::boot_init::is_online()
+        || !crate::flows::boot_init_flow::is_online()
     {
         crate::arch::riscv64::sbi::putstr("arceos_ex kernel boot init switch invariant failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
@@ -91,7 +89,7 @@ pub fn switch_after_boot_init() -> ! {
         &mut ctx.boot_cpu_current_task,
     );
     crate::phases::shutdown_on_error(schedule_result, "arceos_ex first schedule failed\n");
-    crate::phases::boot_init::boot_task_restored()
+    crate::flows::boot_init_flow::boot_task_restored()
 }
 
 pub fn enable_after_boot_init() -> ! {
@@ -107,9 +105,7 @@ pub fn enable_after_boot_init() -> ! {
 fn require_kernel_init_continue_boundary(ctx: &crate::context::Context) -> EventResult {
     let first_failed = if crate::phases::state::load(&KERNEL_STATE) != State::Ready {
         "Kernel.Ready"
-    } else if !crate::phases::boot::entry_prelude::is_online() {
-        "EntryPreludePhase.Online"
-    } else if !crate::phases::boot_init::is_online() {
+    } else if !crate::flows::boot_init_flow::is_online() {
         "BootInitFlow.Online"
     } else if ctx.kernel_init_task.state() != State::OnCpu {
         "KernelInitTask.OnCpu"
@@ -182,8 +178,7 @@ fn mark_ready() -> EventResult {
 
 pub fn mark_online() -> EventResult {
     if !crate::phases::prepare::is_online()
-        || !crate::phases::boot::entry_prelude::is_online()
-        || !crate::phases::boot_init::is_online()
+        || !crate::flows::boot_init_flow::is_online()
         || !crate::phases::smp_runtime::direct_children_online()
         || !crate::context::context_ref()
             .kernel_init_flow

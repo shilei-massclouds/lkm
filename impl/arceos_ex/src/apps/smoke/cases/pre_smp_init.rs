@@ -8,8 +8,8 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
     let pre_smp_ready = phases::smp_runtime::pre_smp_init::is_online();
-    let dispatch_ready = phases::boot_init::rest_init::dispatch_ready();
-    let boot_init_online = phases::boot_init::is_online();
+    let dispatch_ready = crate::flows::boot_init_flow::dispatch_ready();
+    let boot_init_online = crate::flows::boot_init_flow::is_online();
 
     if !pre_smp_ready || !dispatch_ready || !boot_init_online {
         printk::write_fmt(format_args!(

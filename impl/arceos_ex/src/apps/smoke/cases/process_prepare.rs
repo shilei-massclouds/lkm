@@ -12,7 +12,9 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::interrupt::process_prepare::is_online() || !phases::boot_init::is_online() {
+    if !phases::interrupt::process_prepare::is_online()
+        || !crate::flows::boot_init_flow::is_online()
+    {
         printk::write_str("process prepare phase is not online\n");
         return SmokeResult::Failed;
     }

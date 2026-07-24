@@ -1051,7 +1051,7 @@ object EntrySuccessorPhase: PhaseObject {
              */
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    EntryPreludePhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Online;
                     BootTask.state == State::OnCpu;
@@ -1124,7 +1124,7 @@ object EntrySuccessorPhase: PhaseObject {
                     task_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
-                    EntryPreludePhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
                     BootCPU.state == State::Online;
                     InterruptStream.state == State::Ready;
@@ -1164,7 +1164,7 @@ object EntrySuccessorPhase: PhaseObject {
                     task_concurrency_closed();
                     context_is(SystemExclusive);
                     early_boot_irqs_disabled_true();
-                    EntryPreludePhase.state == State::Online;
+                    BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
                     BootCPU.state == State::Online;
                     InterruptStream.state == State::Ready;

@@ -28,8 +28,8 @@ pub fn preset(ctx: &mut Context) -> ! {
 fn preset_start(ctx: &Context) -> EventResult {
     let state = crate::phases::state::load(&PRE_SMP_INIT_PHASE_STATE);
     if state != State::Base
-        || !crate::phases::boot_init::is_online()
-        || !crate::phases::boot_init::rest_init::dispatch_ready()
+        || !crate::flows::boot_init_flow::is_online()
+        || !crate::flows::boot_init_flow::dispatch_ready()
         || !ctx.kernel_init_task.current_stack_pointer_in_range()
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);

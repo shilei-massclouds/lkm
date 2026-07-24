@@ -75,7 +75,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(
             result.model.children["BootInitFlow"],
             [
-                "EntryPreludePhase",
                 "EntrySuccessorPhase",
                 "CorePreparePhase",
                 "MmCoreInitPhase",
@@ -84,6 +83,7 @@ class ModelBuilderTests(unittest.TestCase):
                 "LocalIrqEnablePhase",
                 "IrqOpenPreparePhase",
                 "ProcessPreparePhase",
+                "BootTaskEntryBinding",
                 "BootInitRestInitPhase",
                 "BootInitScheduleHandoffPhase",
             ],
@@ -108,7 +108,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootCurrentCPU -> BootCPU [parent]", text)
         self.assertIn("BootCPU -> BootCpuRegisters [parent]", text)
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
-        self.assertIn("BootInitFlow -> EntryPreludePhase [parent]", text)
+        self.assertNotIn("\nEntryPreludePhase:", text)
         self.assertNotIn("drives", text)
         self.assertIn('"ComputerProject" -> "HardwareProject"', dot)
         self.assertIn('"ComputerProject" -> "KernelProject"', dot)
@@ -116,7 +116,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Computer" -> "OpenSBI"', dot)
         self.assertIn('"Computer" -> "Kernel"', dot)
         self.assertIn('"BootTask" -> "BootInitFlow"', dot)
-        self.assertIn('"BootInitFlow" -> "EntryPreludePhase"', dot)
+        self.assertNotIn('"EntryPreludePhase"', dot)
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
@@ -146,9 +146,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Preset [emits]", text)
         self.assertIn("Kernel.Preset", text)
-        self.assertIn("  -> EntryPreludePhase.Preset", text)
+        self.assertIn("  -> InterruptStream.Preset", text)
         self.assertIn("Kernel.Setup", text)
-        self.assertIn("EntryPreludePhase.Setup", text)
+        self.assertNotIn("\nEntryPreludePhase.", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
         self.assertIn("CorePreparePhase.Setup", text)
         self.assertIn("MmCoreInitPhase.Setup", text)
@@ -161,7 +161,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Enable"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
         self.assertIn('"Kernel.Preset" -> "BootInitFlow.Preset"', dot)
-        self.assertIn('"BootInitFlow.Preset" -> "EntryPreludePhase.Preset"', dot)
+        self.assertIn('"BootInitFlow.Preset" -> "InterruptStream.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"BootInitFlow.Setup" -> "EntrySuccessorPhase.Preset"', dot)
 
@@ -176,7 +176,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("timeline view:", text)
         self.assertIn("  - BootCurrentCPU.State::Online", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
-        self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
+        self.assertNotIn("\nEntryPreludePhase:", text)
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
         self.assertIn("CorePreparePhase: ready (State::Ready)", text)
         self.assertIn("MmCoreInitPhase: ready (State::Ready)", text)
@@ -193,7 +193,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Kernel: prepared (State::Prepared)", text)
         self.assertNotIn("Kernel: ready", text)
         self.assertIn("<svg", svg)
-        self.assertIn("EntryPreludePhase", svg)
+        self.assertNotIn(">EntryPreludePhase<", svg)
         self.assertIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)

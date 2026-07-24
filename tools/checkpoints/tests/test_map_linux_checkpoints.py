@@ -576,8 +576,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
-                variant="EntryPreludePhaseStarted",
-                name="EntryPreludePhase.Started",
+                variant="BootInitFlowStarted",
+                name="BootInitFlow.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=0,
@@ -687,8 +687,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
-                variant="EntryPreludePhaseStarted",
-                name="EntryPreludePhase.Started",
+                variant="BootInitFlowStarted",
+                name="BootInitFlow.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=80,
@@ -728,7 +728,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             head_path = linux_tree / "arch" / "riscv" / "kernel" / "head.S"
             head_text = head_path.read_text(encoding="utf-8").replace(
                 "SYM_CODE_START(_start)\n",
-                "/* LKM_CHECKPOINT name=EntryPreludePhase.Started variant=EntryPreludePhaseStarted fingerprint=sha256:demo */\n"
+                "/* LKM_CHECKPOINT name=BootInitFlow.Started variant=BootInitFlowStarted fingerprint=sha256:demo */\n"
                 "SYM_CODE_START(_start)\n",
             )
             head_path.write_text(head_text, encoding="utf-8")
@@ -746,13 +746,13 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
-                variant="EntryPreludePhaseStarted",
-                name="EntryPreludePhase.Started",
+                variant="BootInitFlowStarted",
+                name="BootInitFlow.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=9,
-                variant="EntryPreludePhaseReady",
-                name="EntryPreludePhase.Ready",
+                variant="BootInitFlowPrepared",
+                name="BootInitFlow.Prepared",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=31,
@@ -860,7 +860,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             head_text = head_text.replace(
                 "SYM_CODE_START(_start_kernel)\n",
                 "SYM_CODE_START(_start_kernel)\n"
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_ENTRY_PRELUDE_PHASE_STARTED\n",
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_BOOT_INIT_FLOW_STARTED\n",
             )
             head_text = head_text.replace(
                 "    csrw CSR_TVEC, a3\n",
@@ -870,7 +870,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
             head_text = head_text.replace(
                 "    tail start_kernel\n",
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_ENTRY_PRELUDE_PHASE_READY\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_BOOT_INIT_FLOW_PREPARED\n"
                 "    tail start_kernel\n",
             )
             head_text = head_text.replace(
@@ -963,13 +963,13 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         records = [
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=8,
-                variant="EntryPreludePhaseStarted",
-                name="EntryPreludePhase.Started",
+                variant="BootInitFlowStarted",
+                name="BootInitFlow.Started",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=9,
-                variant="EntryPreludePhaseReady",
-                name="EntryPreludePhase.Ready",
+                variant="BootInitFlowPrepared",
+                name="BootInitFlow.Prepared",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=31,
@@ -1000,9 +1000,9 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
 
         by_name = {record.checkpoint_name: record for record in mapped}
-        self.assertEqual(by_name["EntryPreludePhase.Started"].linux_symbol, "_start")
-        self.assertIn("definition line", by_name["EntryPreludePhase.Started"].linux_anchor)
-        self.assertIn("tail start_kernel", by_name["EntryPreludePhase.Ready"].linux_anchor)
+        self.assertEqual(by_name["BootInitFlow.Started"].linux_symbol, "_start")
+        self.assertIn("definition line", by_name["BootInitFlow.Started"].linux_anchor)
+        self.assertIn("tail start_kernel", by_name["BootInitFlow.Prepared"].linux_anchor)
         self.assertEqual(by_name["TrampolineVm.Online"].linux_symbol, "relocate_enable_mmu")
         self.assertIn("csrw CSR_SATP, a0", by_name["TrampolineVm.Online"].linux_anchor)
         self.assertIn("create_kernel_page_table", by_name["EarlyVm.Ready"].linux_anchor)
@@ -1830,9 +1830,9 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         mapped = map_linux_checkpoints.map_checkpoints(inventory)
         by_name = {record.checkpoint_name: record for record in mapped}
 
-        self.assertEqual(by_name["EntryPreludePhase.Started"].linux_file, "arch/riscv/kernel/head.S")
-        self.assertEqual(by_name["EntryPreludePhase.Started"].linux_symbol, "_start")
-        self.assertIn("tail start_kernel", by_name["EntryPreludePhase.Ready"].linux_anchor)
+        self.assertEqual(by_name["BootInitFlow.Started"].linux_file, "arch/riscv/kernel/head.S")
+        self.assertEqual(by_name["BootInitFlow.Started"].linux_symbol, "_start")
+        self.assertIn("tail start_kernel", by_name["BootInitFlow.Prepared"].linux_anchor)
         self.assertNotEqual(by_name["EarlyVm.Ready"].mapping_kind, "unmapped")
         self.assertNotEqual(by_name["TrampolineVm.Ready"].mapping_kind, "unmapped")
         self.assertNotEqual(by_name["RawDtb.Ready"].mapping_kind, "unmapped")

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1220" viewBox="0 0 1280 1220" role="img" aria-labelledby="title desc">
   <title id="title">入口前导期对象构建时序</title>
-  <desc id="desc">将入口前导期对象的 setup 过程对象化为阶段对象对各对象过程的编排顺序。</desc>
+  <desc id="desc">展示 BootInitFlow.Preset 对入口对象过程的直接编排顺序。</desc>
   <defs>
     <style>
       text {
@@ -27,10 +27,10 @@
 
   <rect x="0" y="0" width="1280" height="1220" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">入口前导期对象构建时序</text>
-  <text x="640" y="74" text-anchor="middle" class="subtitle">入口前导期对象的 setup 过程，表达阶段对象对各对象过程的编排顺序</text>
+  <text x="640" y="74" text-anchor="middle" class="subtitle">BootInitFlow.Preset 直接编排入口对象过程</text>
 
   <rect x="48" y="128" width="178" height="1060" rx="14" class="lane"/>
-  <text x="137" y="164" text-anchor="middle" class="obj">入口前导期对象</text>
+  <text x="137" y="164" text-anchor="middle" class="obj">BootInitFlow.Preset</text>
   <text x="137" y="188" text-anchor="middle" class="subtitle">setup()</text>
   <line x1="137" y1="220" x2="137" y2="1166" class="timeline"/>
 

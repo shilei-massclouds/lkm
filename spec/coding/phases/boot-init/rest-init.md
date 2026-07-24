@@ -11,8 +11,8 @@ Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset s
 
 | 子阶段 | Preset 对象动作与 context | checkpoints | Online continuation |
 | --- | --- | --- | --- |
-| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `boot_init::enable_after_boot_init_rest_init()` |
-| BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched`、`BootIdleFlow.Setup` 和完整首次切换预检；不执行 `Scheduler.schedule()` | Started -> Prepared -> 既有 Ready -> Online | `boot_init::enable_after_boot_init_schedule_handoff()` |
+| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `boot_init_flow::enable_after_boot_init_rest_init()` |
+| BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched`、`BootIdleFlow.Setup` 和完整首次切换预检；不执行 `Scheduler.schedule()` | Started -> Prepared -> 既有 Ready -> Online | `boot_init_flow::enable_after_boot_init_schedule_handoff()` |
 | BootIdleEntry | 仅在 scheduler 将来恢复 BootTask 后，于 `BootIdleStartupContext` 中进入 runtime、prepare entry 与代表性 idle loop | Started -> Prepared -> 既有 Ready -> Online | 进入 BootTask 的不返回 idle loop，不回调 BootInitFlow |
 
 每个 Online continuation 只返回所属父 transition，不启动 sibling。BootInitScheduleHandoffPhase
@@ -38,9 +38,12 @@ Linux control-flow name for the owner-split path.
 
 #### Code path
 
-Phase source layout must follow the model phase tree. The target
-implementation path for this phase is the boot-init phase
-subtree, for example impl/arceos_ex/src/phases/boot_init/rest_init.rs.
+Phase source layout follows each parent Flow. `BootInitRestInitPhase` is in
+`impl/arceos_ex/src/flows/boot_init_flow/rest_init.rs`,
+`BootInitScheduleHandoffPhase` is in
+`impl/arceos_ex/src/flows/boot_init_flow/schedule_handoff.rs`, and
+`BootIdleEntryPhase` is in `impl/arceos_ex/src/flows/boot_idle_flow/entry.rs`.
+`BootIdleFlow` core lives in `flows/boot_idle_flow/mod.rs`.
 
 #### Ordering
 

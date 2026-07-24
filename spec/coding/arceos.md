@@ -39,7 +39,7 @@
 直接叶阶段和最终 selected payload commit。进入已绑定的 no-return payload 后，当前启动模型才闭环。
 
 在 `arceos_ex` 中，`ax-hal-ex` 与 `ax-runtime-ex` 的引导责任应按阶段边界划分。`ax-hal-ex` 负责 `_start` 到
-`EntryPreludePhase.Ready` 的最低层入口前导路径；`EntryPreludePhase.Ready` 之后由 `ax-runtime-ex` 接管。
+BootInitFlow.Preset 完成前的最低层入口前导路径；`BootInitFlow.Prepared` 之后由 `ax-runtime-ex` 接管。
 `EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，之后逐步增加的内核初始化过程也属于
 `ax-runtime-ex` 主引导链：BootInitFlow 直接完成 boot/interrupt/rest-init，首次 PID 1 dispatch 后
 KernelInitFlow 直接完成 SMP/runtime 与 payload prepare，再由 commit action 移交 selected payload。

@@ -12,7 +12,7 @@ pub fn run() -> SmokeResult {
     let ctx = context();
 
     if !phases::interrupt::irq_open_prepare::is_online()
-        || !phases::boot_init::is_online()
+        || !crate::flows::boot_init_flow::is_online()
         || !csr::supervisor_interrupts_enabled()
     {
         printk::write_str("irq open prepare phase is not online\n");

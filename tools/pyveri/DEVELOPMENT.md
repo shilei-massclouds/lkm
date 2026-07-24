@@ -235,9 +235,9 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 - 纵向时间自底向上。
 - 先生成状态单元，再由状态单元合并出上层阶段单元和子阶段单元。
 - 阶段列当前显示 `PreparePhase` 和 `BootPhase`。
-- 子阶段列当前在 `BootPhase` 内显示 `EntryPreludePhase`；`PreparePhase` 当前没有子阶段，子阶段列保持为空。
-- 子阶段单元必须嵌在所属阶段单元内部，并与其覆盖的状态单元边界对齐；由于时间向上，`EntryPreludePhase` 当前对齐 `BootPhase` 的下边界。
-- 状态列当前包括 `PreparePhase.Ready`、`PreparePhase.Online`、`EntryPreludePhase.Ready` 和 `BootPhase.Ready`。
+- 子阶段列当前在 `BootPhase` 内从 `EntrySuccessorPhase` 开始；`BootInitFlow.Preset` 直接驱动的入口对象不再合成子阶段单元。
+- 子阶段单元必须嵌在所属阶段单元内部，并与其覆盖的状态单元边界对齐；入口对象信号直接归属于 `BootInitFlow.Preset`。
+- 状态列当前包括 `PreparePhase.Ready`、`PreparePhase.Online` 和 `BootPhase.Ready`，不包含已删除的 BP 入口 wrapper 状态。
 - 对象列只填入达到某个阶段或子阶段状态时形成的对象状态结果。
 - 每个对象在同一张时间轴图中只出现一次，显示其在当前时间轴视图中的最终状态。
 - 对象单元按固定列数换行；排不开时在同一状态单元内向上堆叠。
@@ -245,13 +245,13 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口前导期对象来自 `EntryPreludePhase` 递归驱动出的对象状态推进结果，例如 `BootTaskEntryBinding`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
+- 入口步骤对象来自 `BootInitFlow.Preset` 直接驱动出的状态推进结果，例如 `BootTaskEntryBinding`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
 - `ComputerProject` 是顶层工程对象，不在时间轴行中显示；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
 待确认或后续改进：
 
-- 当前 `EntryPreludePhase` 到 `BootPhase` 的归属仍由工具内的阶段关系规则确定；后续应尽量从 `.spec` 的阶段父子关系和推导路径中通用推导。
+- 当前 `EntrySuccessorPhase` 到 `BootPhase` 的展示归属仍由工具内的阶段关系规则确定；后续应尽量从 `.spec` 的阶段父子关系和推导路径中通用推导。
 - 当前对象列显示的是视图级状态结果，不代表完整证明引擎已经验证所有 `depends_on` 和 `invariant`。
 - 单元宽度、对象宽度、对象列数、行高和内边距已经集中在 SVG 渲染逻辑中，后续可暴露为 CLI 参数或配置。
 
@@ -463,7 +463,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 已确认的分类调整：
 
 - `attrs_accessible(self)` 不能只按谓词名分类，应结合对象来源决定证明来源，例如配置源、链接脚本、静态对象布局、FDT/平台描述或启动 ABI。
-- `context_is(SystemExclusive)` 表达当前子阶段上下文。谓词里不显式传入阶段对象，因为推导器验证 invariant 时已经知道当前对象/状态，且子阶段之间没有重叠。当前已确认主文档与 `.spec` 语义一致：引导期 `BootPhase` 的默认上下文是 `SystemExclusive`，`EntryPreludePhase` 作为引导期子阶段继承并维持该默认上下文。`SystemExclusive` 本身不能只是标签，当前用两条显式支撑事实表达其可验证语义：`interrupt_concurrency_closed()` 表示入口前导期没有打开中断处理并发路径，`task_concurrency_closed()` 表示没有启动其它任务，因此当前阶段只有根流/根任务独占推进系统。推导器先验证 `SbiSpec` 与初态 `OpenSBI.Ready` 的入口事实，再由这些前序事实证明两条支撑事实；`context_is(SystemExclusive)` 只有在这两条支撑事实已经被证明后才成立。
+- `context_is(SystemExclusive)` 表达当前启动上下文。`BootInitFlow.Preset` 在依赖与完成事实中直接维持该上下文；它不是独立 Phase 状态。`SystemExclusive` 本身不能只是标签，当前用两条显式支撑事实表达其可验证语义：`interrupt_concurrency_closed()` 表示入口步骤没有打开中断处理并发路径，`task_concurrency_closed()` 表示没有启动其它任务，因此当前只有根流/根任务独占推进系统。推导器先验证 `SbiSpec` 与初态 `OpenSBI.Ready` 的入口事实，再由这些前序事实证明两条支撑事实；`context_is(SystemExclusive)` 只有在这两条支撑事实已经被证明后才成立。
 - `interrupt_concurrency_closed()` 的入口前提来源是固件 SBI 的内核交接状态。当前用单一 `OpenSBI` 对象表达 OpenSBI 固件实例和启动交接对象：`SbiSpec` 表达 SBI/HSM 规范事实，`OpenSBI.Ready` 表达可交接固件状态，`OpenSBI.Online` 表达控制权已交接给内核。`primary_hart_sie_clear_at_kernel_entry()` 归入 `firmware_entry_state / opensbi_firmware` 并作为 `interrupt_concurrency_closed()` 的前序事实。Linux `_start_kernel` 中的 `csrw CSR_IE, zero` 与 `csrw CSR_IP, zero` 以及 `.spec` 中 `InterruptStream.Preset` 的 `ensures` 只表达内核入口后的防御性规范化动作，证明的是 `InterruptStream.Prepared` 后的状态，不倒推证明入口起点已经关闭中断。
 - `task_concurrency_closed()` 的来源不只是当前 `.spec` 尚未建模其它任务，而是 RISC-V Linux ordered booting 的上一级交接语义。已核对本地 Linux 源码 `../linux-6.12`：`Documentation/arch/riscv/boot.rst` 说明 ordered booting 下固件只释放一个 hart 执行初始化，随后由该 hart 通过 SBI HSM 启动其它 harts；`arch/riscv/kernel/cpu_ops.c` 在检测到 `SBI_EXT_HSM` 后选择 `cpu_ops_sbi`；`arch/riscv/kernel/cpu_ops_sbi.c` 的 `sbi_cpu_start()` 通过 `SBI_EXT_HSM_HART_START` 启动 secondary hart；`arch/riscv/kernel/smpboot.c` 的 `__cpu_up()` 后续才调用 `cpu_start`。因此在支持 HSM 的 OpenSBI/ordered booting 路径下，入口前导期开始时只有 boot hart/root task 在运行，其它 hart/任务必须由当前根执行路径后续主动启动。推导中该事实由 `sbi_hsm_available()`、`ordered_booting_enabled()` 和 `primary_hart_only_at_kernel_entry()` 三条前序事实共同推出。`RISCV_BOOT_SPINWAIT` 只作为旧固件兼容路径记录，不作为当前规格默认路径。
 - `valid_hart_id(...)` 已被更具体的 `platform_hart_id_valid(...)` 取代。当前已引入 `PlatformCpuInfo` 准备期对象，表示从 FDT/platform CPU 描述中提取出的有效 hart id 集合；FDT 不决定谁是 boot hart，boot hart 身份仍来自 `BootArgs.boot_hartid`。`platform_hart_id_valid(BootArgs.boot_hartid)` 归入 `platform_cpu_description / fdt_cpu_description`，表示启动 ABI 给出的 boot hart id 属于 FDT 列举的有效 hart 集合；`BootCPU.preset()` 再把该身份收口为 `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`。
@@ -472,7 +472,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `OpenSBI.Enable/Online` 包含 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)`，表示当前 OpenSBI 固件交接给内核的 DTB blob 位于物理 RAM 中。Linux RISC-V boot protocol 只解释 `$a1` 是内存中的 devicetree 地址；OpenSBI firmware handoff 负责把 previous `a1` 或 `FW_JUMP_FDT_ADDR` 作为 next `arg1/a1` 传给下一阶段。DTB blob 的 RAM containment 因此归入 `firmware_entry_state / opensbi_firmware`，不归入泛化的 `SbiSpec`，也不由 `PhysicalMemory.source=fdt::memory` 自证。
 - `CpuGroup.Preset` 已改为驱动 `BootCPU.Preset`，由 `BootCPU` 依赖 `BootArgs.boot_hartid` 并用 `ensures { boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid); }` 表达transition 完成后记录启动 hart 标识。这样 `BootArgs` 成为入口启动参数的统一抽象；启动 hart 是否属于平台有效 hart 集合由 `PlatformCpuInfo` 的 FDT CPU 描述事实证明，后续逻辑 CPU 映射由 `CpuGroup.Cpu[logical_id]` 和 `CpuGroup.possible_cpus` 集合视图直接表达。
 - `Riscv64.attrs_accessible(self)` 归入 `architecture_capabilities / riscv_isa_spec`，只表示外部 ISA 能力可用；可变 GPR/CSR 不再是 `Riscv64` 属性。`BootCpuRegisters` 是 `BootCPU` 下初态 Online 的启动相关寄存器子集，其 `attrs_accessible(self)` 由 `architecture_register_file / boot_cpu_register_subset` 收口；它不随平台生命周期推进，也不推广到全部 `CPUObject`。
-- `EntryPreludePhase.Preset` 已用 transition 后置条件证明 `kernel_fpu_disabled(BootCpuRegisters.sstatus)` 和 `kernel_vector_disabled(BootCpuRegisters.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径清除这些位。
+- `BootInitFlow.Preset` 已用 transition 后置条件证明 `kernel_fpu_disabled(BootCpuRegisters.sstatus)` 和 `kernel_vector_disabled(BootCpuRegisters.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径清除这些位。
 
 后续规格结构清理：
 

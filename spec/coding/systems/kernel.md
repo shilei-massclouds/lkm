@@ -11,8 +11,8 @@ Kernel 是 `Computer` 的直接运行子系统，不属于 KernelProject。`syst
 ## Preset 与 Setup
 
 架构入口观察 `BootTask.OnCpu` 并由 OpenSBI 向 Kernel 发出 Startup，随后进入 Rust adoption。
-Kernel.Preset 严格异步发出 BootInitFlow.Startup；
-EntryPrelude Online 后 BootInitFlow Prepared，Kernel 随后 Prepared。
+Kernel.Preset 严格异步发出 BootInitFlow.Startup；入口对象完整事实成立后 BootInitFlow Prepared，
+Kernel 随后 Prepared。
 
 Kernel.Setup 驱动 BootInitFlow.Setup。BootInitFlow 直接完成全部 boot、interrupt 与 RestInit 叶阶段
 后提交 Ready，Kernel 随后 Ready。系统层不得调用已删除的 Boot/Interrupt wrapper。

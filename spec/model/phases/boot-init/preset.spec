@@ -1,8 +1,8 @@
 /*
- * Entry Prelude Phase Specification
+ * BootInitFlow Preset Object Specification
  *
- * This BootInitFlow-owned phase covers the current formal model from kernel entry through
- * the point where EarlyVm is online and the entry-prelude boundary is ready.
+ * These objects support BootInitFlow.Preset from kernel entry through the
+ * point where EarlyVm is online and BootInitFlow.Prepared can be committed.
  */
 
 /*
@@ -11,13 +11,13 @@
  */
 
 /*
- * BootTaskEntryBinding 是 EntryPreludePhase 私有的入口协调对象。它只
+ * BootTaskEntryBinding 是 BootInitFlow.Preset 私有的入口协调对象。它只
  * 绑定同一个静态 BootTask carrier 的物理/虚拟地址并建立入口抢占条件，
  * 不创建第二个 Task、TaskRef、Flow 或调度实体。
  */
 object BootTaskEntryBinding: KernelObject {
     initial_state: State::Base;
-    parent: EntryPreludePhase;
+    parent: BootInitFlow;
 
     /* Base 表示 init_task 尚未绑定到当前 hart 的 tp。 */
     state State::Base {
@@ -2143,127 +2143,6 @@ object Soc: HardwareObject {
             summary: "Define the complete SoC-specific early platform state points beyond boot CPU organization.";
             evidence { soc_full_early_platform_model_deferred(Soc); }
             close_when: "The supported SoC early platform facts and their implementation checkpoints are explicitly modeled and tested.";
-        }
-    }
-}
-
-/*
- * EntryPreludePhase 表示 Kernel 直接拥有的入口前导阶段对象。它编排本阶段内各对象的状态迁移并定义阶段边界。
- */
-object EntryPreludePhase: PhaseObject {
-    initial_state: State::Base;
-    parent: BootInitFlow;
-
-    /*
-     * Base 表示入口前导期刚开始，默认上下文为系统独占。
-     */
-    state State::Base {
-        invariant {
-            interrupt_concurrency_closed();
-            task_concurrency_closed();
-            context_is(SystemExclusive);
-        }
-
-        transitions {
-            /*
-             * Setup 按入口前导期构建时序驱动各对象状态迁移。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    Riscv64.state == State::Online;
-                    SbiSpec.state == State::Online;
-                    OpenSBI.state == State::Online;
-                    BootCpuRegisters.state == State::Online;
-                    Lds.state == State::Online;
-                    Config.state == State::Online;
-                }
-
-                may_change {
-                    BootCpuRegisters.sstatus;
-                }
-
-                drives {
-                    InterruptStream.Transition::Preset;
-                    KernelImage.Transition::Preset;
-                    KernelImage.Transition::Setup;
-                    BootCurrentCPU.Transition::Preset;
-                    BootCurrentCPU.Transition::Setup;
-                    CpuGroup.Transition::Preset;
-                    BootCurrentCPU.Transition::Enable;
-                    BootTaskEntryBinding.Transition::Preset;
-                    BootInitStack.Transition::Preset;
-                    EventStream.Transition::Preset;
-                    ExceptionStream.Transition::Preset;
-                    Vm.Transition::Preset;
-                    Vm.Transition::Setup;
-                    EventStream.Transition::Setup;
-                    BootTaskEntryBinding.Transition::Setup;
-                    BootInitStack.Transition::Setup;
-                    Soc.Transition::Preset;
-                }
-
-                ensures {
-                    kernel_fpu_disabled(BootCpuRegisters.sstatus);
-                    kernel_vector_disabled(BootCpuRegisters.sstatus);
-                    BootTask.state == State::OnCpu;
-                }
-
-                emits {
-                    Transition::Setup;
-                }
-            }
-        }
-    }
-
-    state State::Prepared {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                emits {
-                    Transition::Enable;
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        transitions {
-            on Transition::Enable -> State::Online {
-                ensures {
-                    kernel_fpu_disabled(BootCpuRegisters.sstatus);
-                    kernel_vector_disabled(BootCpuRegisters.sstatus);
-                    task_ref_targets(BootTaskRef, BootTask);
-                    task_ref_ready(BootTaskRef);
-                }
-            }
-        }
-    }
-
-    state State::Online {
-        invariant {
-            interrupt_concurrency_closed();
-            task_concurrency_closed();
-            context_is(SystemExclusive);
-            kernel_fpu_disabled(BootCpuRegisters.sstatus);
-            kernel_vector_disabled(BootCpuRegisters.sstatus);
-            InterruptStream.state == State::Prepared;
-            EventStream.state == State::Ready;
-            ExceptionStream.state == State::Prepared;
-            PageFaultException.state == State::Prepared;
-            SyscallException.state == State::Prepared;
-            BreakpointException.state == State::Prepared;
-            UnexpectedException.state == State::Prepared;
-            KernelImage.state == State::Online;
-            RawDtb.state == State::Ready;
-            BootTaskEntryBinding.state == State::Ready;
-            BootTask.state == State::OnCpu;
-            BootInitStack.state == State::Ready;
-            Vm.state == State::Ready;
-            TrampolineVm.state == State::Destroyed;
-            EarlyVm.state == State::Online;
-            BootCurrentCPU.state == State::Online;
-            BootCPU.state == State::Prepared;
-            CpuGroup.state == State::Prepared;
-            Soc.state == State::Prepared;
         }
     }
 }

@@ -49,9 +49,9 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 KernelInitFlow 直接编排叶阶段，不存在 Boot/Interrupt/SmpRuntime/Payload wrapper。Phase 源码只生成
 函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
-EntryPreludePhase 是 BootInitFlow.Preset 的直接子阶段，但当前物理路径
-`phases/boot/entry_prelude.rs` 与 Rust module 名保持不变；这是避免在所有权调整中混入目录迁移的
-显式例外，parent 与 continuation 必须以 model 为准，不能从物理目录反推。
+BootInitFlow.Preset 的入口前导是 Flow transition 内的描述性步骤，不是 PhaseObject。实现位于
+`flows/boot_init_flow/preset.rs`；入口对象信号 source 必须是 BootInitFlow，不能从物理目录或 helper
+名称反推出额外 parent/lifecycle。
 
 资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和transition 边界。
 
@@ -83,9 +83,9 @@ adoption 方式必须由 project/system coding 文件记录，但不能降低普
 ### ArceOS/Unikernel 引导边界
 
 映射到 `arceos_ex` 时，`ax-hal-ex` 只应承载最低层入口前导路径。它负责从 `_start` 开始建立进入 Rust 代码所需的最小执行条件，并推进到
-`EntryPreludePhase.Ready`。
+`BootInitFlow.Preset` 完成前的最低层入口路径。
 
-`EntryPreludePhase.Ready` 之后应交由 `ax-runtime-ex` 接管。`EntrySuccessorPhase` 是
+`BootInitFlow.Prepared` 之后应交由 `ax-runtime-ex` 接管。`EntrySuccessorPhase` 是
 `ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
 可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象 transition函数，但阶段编排边界应保留在 runtime 侧。
 

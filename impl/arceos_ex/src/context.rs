@@ -1,3 +1,4 @@
+use crate::flows::{boot_idle_flow::BootIdleFlow, boot_init_flow::BootInitFlow};
 #[cfg(checkpoint_handler_uart_irq_chain)]
 use crate::objects::irq_time::{
     Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
@@ -84,8 +85,7 @@ use crate::objects::{
     rcu::RcuCore,
     resource_tree::ResourceTree,
     rest_init::{
-        BootIdleFlow, KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate,
-        KthreaddTask, SystemState,
+        KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask, SystemState,
     },
     rootfs::{
         InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFS, RootfsBoundary,
@@ -117,7 +117,6 @@ use crate::objects::{
     workqueue::Workqueue,
     zones::Zones,
 };
-use crate::phases::boot_init::BootInitFlow;
 
 pub struct Context {
     pub config: Config,

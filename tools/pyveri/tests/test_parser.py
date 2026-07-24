@@ -399,7 +399,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual([state.name for state in boot_args.states], ["Online"])
         self.assertFalse(boot_args.states[0].transitions)
         self.assertNotIn("Boot" + "HartContext", object_names)
-        self.assertIn("EntryPreludePhase", object_names)
+        self.assertNotIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
 
     def test_current_model_entry_spans_use_expanded_lines(self) -> None:

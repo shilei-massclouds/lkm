@@ -36,7 +36,7 @@
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
 
-- `BootInitFlow.Preset` 直接驱动 `EntryPreludePhase`；Setup 直接驱动其余 boot/interrupt 叶子以及
+- `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
 - `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、
   finalize 和 `PayloadPreparePhase`；Enable 只驱动 `PayloadHandoffPreparePhase`。
@@ -786,7 +786,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 4. `Config`：构建配置对象，用于描述编译期配置、特性开关和影响内核早期路径的静态约束。
 5. `物理内存空间`：由硬件/平台设计与生产阶段固化的物理内存和设备 `I/O` 地址资源布局。
 
-这些对象的详细状态、来源和边界检查后续补充。当前先保留该阶段，以便后续说明入口前导期对象建立时依赖哪些更早已经存在的前置条件。
+这些对象的详细状态、来源和边界检查后续补充。当前保留这组入口前导分析，以说明 `BootInitFlow.Preset` 驱动对象时依赖哪些更早已经存在的前置条件。
 
 内核系统级生命周期、`Kernel` 对顶层阶段树的父子驱动关系，以及引导期、中断期、单核多任务期、多核运行期和 payload 交接的入口摘要，已拆分到 [内核系统](systems/kernel.md)。本节后续保留各阶段上下文与对象建立细节，作为后续继续拆分到 phase charter 的来源。
 
@@ -985,7 +985,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
    | `ram` | 物理 RAM 地址范围集合。 |  |
    | `iomap` | 设备 `I/O` 地址范围集合。 |  |
 
-这些对象不是入口前导期新建的对象，而是入口前导期对象建立时已经存在的前置基础。后续在细化入口前导期对象的初始状态检查、执行动作和结束状态检查时，应显式说明哪些检查或动作依赖这些准备期对象。
+这些对象不是入口前导步骤新建的对象，而是 `BootInitFlow.Preset` 执行时已经存在的前置基础。后续细化入口对象的初始状态检查、执行动作和结束状态检查时，应显式说明哪些检查或动作依赖这些准备期对象。
 
 ### 引导期对象建立
 
@@ -1009,7 +1009,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 需要注意的是，`System Exclusive` 仍是当前子阶段的环境前提，但这里先不把它视为当前子阶段新建立的对象；它首先是这一本子阶段中其他对象得以建立的背景条件。
 
-据此，当前可先识别出十一类本子阶段涉及的核心对象。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导期新建立的对象；它在本子阶段中作为只读资源布局被读取和验证。
+据此，当前可先识别出十类本步骤涉及的核心对象。这里统一采用“中文名 + 英文名”的命名方式；对于约定俗成的工程对象，也可直接使用英文名。需要注意，`物理内存空间` 属于准备期输入对象，不是入口前导步骤新建立的对象；它在本步骤中作为只读资源布局被读取和验证。
 
 1. `启动执行阶段`，英文名 `BootInitFlow`：`BootTask.initial_flow` 指向的初始 TaskFlow；它继承 PhaseObject，用于把前置环境交接下来的唯一启动执行片段显式纳入内核阶段树。
 2. `启动根任务`，英文名 `BootTask`：镜像入口前已经存在且从模型入口起 OnCpu 的静态 carrier；它对应 Linux 静态 `init_task` / PID 0 / swapper 的身份。
@@ -1021,7 +1021,6 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 8. `虚拟内存空间`，英文名 `VM`：代表内核虚拟内存空间的抽象；入口前导期只建立和使用其中的早期部分。它包含 `跳板虚拟内存空间`（`TrampolineVM`）、`早期虚拟内存空间`（`EarlyVM`）与 `交换虚拟内存空间`（`SwapperVM`）三个页表子对象。
 9. `处理器管理`，英文名 `CPUGroup`：`片上系统` 的下级子对象，负责维护所有 `CPU` 实例的引用、logical-id 索引和 possible/present/online 集合视图；CPU 本体状态由各 CPU 实例自己维护。
 10. `片上系统`，英文名 `SoC`：片上系统平台的抽象。
-11. `入口前导期对象`：属于阶段对象，是 `引导期` 的子阶段对象，用于承载入口前导期的初始化逻辑、默认上下文和阶段边界，并在该子阶段内编排其他对象过程。
 
 <p align="center">
   <img src="pic/入口前导期的各个对象.svg" alt="入口前导期对象分类与相互关系" width="900">
@@ -1031,7 +1030,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 8 入口前导期对象分类与相互关系
 </p>
 
-图 8 用于说明入口前导期涉及对象的分类与相互关系。该阶段主要涉及四类对象：流对象、地址空间对象、硬件对象和阶段对象。
+图 8 用于说明入口前导步骤涉及对象的分类与相互关系。该步骤主要涉及流对象、地址空间对象和硬件对象；编排权直接属于 `BootInitFlow.Preset`。
 
 在阶段对象中，`BootInitFlow` 是内核引导过程中最早出现的启动执行阶段。静态 `BootTask` 是其 parent，并从首个入口 checkpoint 起已在 boot CPU 上处于 OnCpu；`BootInitStack` 也是 `BootTask` 子对象。入口后继期还会为 `BootTask` 补充 `InitMM` 子对象，用于描述 Linux `init_mm` 这类根任务关联的地址空间元数据。`EventStream` 是 `InterruptStream` 的下级子对象，用于维护中断/异常入口表以及进入中断处理或异常处理之前的公共流程。
 
@@ -1039,7 +1038,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 在硬件对象中，`片上系统`（`SoC`）是片上系统平台的抽象；`处理器管理`（`CPUGroup`）是 `片上系统` 的下级子对象，负责记录和管理处理器相关状态。
 
-阶段对象是一类特殊对象，不只是用于控制其他对象的构建顺序，还用于承载本阶段的初始化逻辑、默认上下文和阶段边界。`入口前导期对象` 是 `引导期` 的子阶段对象，其父对象是 `引导期`；而 `引导期` 在形式化模型中可作为启动时间轴对象的子对象，由启动时间轴负责与准备期及后续阶段衔接。在执行语义上，概念根流通过推进启动时间轴及其中的阶段对象，逐步完成内核启动。
+`BootInitFlow` 是入口对象编排的唯一阶段对象；Preset transition 自身承载入口前导逻辑、默认上下文和完成边界，不再建立额外的 PhaseObject、parent、状态或 checkpoint。
 
 对于这些对象，当前先只确认它们与“入口前导期”相关：其中一部分在本子阶段中建立或推进状态，一部分作为准备期输入被读取。对象在本子阶段中实际覆盖的状态范围，以及 `discover`、`setup`、`enable` 等过程如何展开，后续再单独补充。
 
@@ -1055,7 +1054,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 1. `启动执行阶段`（`BootInitFlow`）
 
    描述：静态 `BootTask` 的 initial TaskFlow，从 `_start` 开始按标准阶段生命周期推进。
-   `EntryPreludePhase` 负责通过 `sstatus` 禁止内核态 FPU/VECTOR 使用；该入口约束属于阶段，
+   `BootInitFlow.Preset` 负责通过 `sstatus` 禁止内核态 FPU/VECTOR 使用；该入口约束属于 Flow transition，
    不建立第二个启动 Flow。
 
 2. `启动根任务`（`BootTask`）
@@ -1225,33 +1224,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
      * 执行动作：执行 `片上系统.preset()`，完成片上系统平台相关的早期预置动作。
      * 结束状态：`片上系统` 对象进入 `prepared` 状态，平台相关早期约束已建立；具体检查项后续补充。
 
-11. `入口前导期对象`
-
-   描述：属于阶段对象，是 `引导期` 的子阶段对象，主要用于承载入口前导期的初始化逻辑、默认上下文和阶段边界，并在该子阶段内编排其他对象过程。
-
-   * `setup` - 编排入口前导期初始化逻辑
-
-     * 初始状态：`根流` 已进入 `引导期`，且当前控制点位于入口前导期的起点边界。
-     * 执行动作：按照入口前导期对象构建时序，推进本子阶段内各个对象过程，并维持本子阶段的默认上下文；本过程末尾执行 `片上系统.preset()`。
-     * 结束状态：入口前导期的初始化逻辑完成，控制权到达下一个子阶段或 `start_kernel()` 对应的起点边界。
-
-   * `enable` - 入口前导期对象使能
-
-     * 初始状态：`入口前导期对象.setup()` 已完成。
-     * 执行动作：空。
-     * 结束状态：空。
-
-   * `cleanup` - 退出入口前导期
-
-     * 初始状态：不在本子阶段执行。
-     * 执行动作：不在本子阶段执行；由下一个子阶段 `入口后继期对象.setup()` 调用 `入口前导期对象.cleanup()`。
-     * 结束状态：入口前导期对象退出当前建立链，并确保入口后继期对象接续开始。
-
 ##### 入口前导期对象构建时序
 
-本小节用于补充 `入口前导期对象` 如何编排本子阶段中各个对象的建立顺序。`入口前导期对象` 自身属于阶段对象；在当前建模中，可以把它的 `setup` 过程理解为本子阶段初始化逻辑的展开过程。该过程由 `根流` 推进，并在推进过程中调用本子阶段内各个对象过程。等这些对象过程完成，并且控制权能够转入下一个子阶段或 `start_kernel()` 后，入口前导期结束，同时也形成后续阶段的起点边界。`入口前导期对象.cleanup()` 不在本子阶段执行，而是在下一个子阶段 `入口后继期对象.setup()` 中执行，以确保两个子阶段首尾相继。
+本小节补充 `BootInitFlow.Preset` 如何编排入口对象的建立顺序。Preset 在推进过程中直接调用各对象过程；全部对象事实成立后提交 `BootInitFlow.Prepared`，形成 `EntrySuccessorPhase` 的起点边界。这里没有额外的入口 PhaseObject 或 cleanup lifecycle。
 
-图 9 将入口前导期对象的 `setup` 过程表示为阶段对象对各个对象过程的编排顺序。该图不逐项标注与参考内核源码行号的精确对应关系；具体源码位置、过程内部展开方式和条件编译路径，后续在细化对应对象过程时再单独说明。
+图 9 将 `BootInitFlow.Preset` 表示为父 Flow 对各个对象过程的编排顺序。该图不逐项标注与参考内核源码行号的精确对应关系；具体源码位置、过程内部展开方式和条件编译路径，后续在细化对应对象过程时再单独说明。
 
 图中的时序节点可采用 `对象名.过程名()` 的简写形式，表示对某个对象执行一次状态迁移过程；具体执行动作和检查项回到对应对象的状态机描述中查看。
 
@@ -1263,7 +1240,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 9 入口前导期对象构建时序
 </p>
 
-从对象角度看，`入口前导期对象` 的 `setup` 并不是单一对象内部字段的简单赋值，而是一个阶段级编排过程。`a0` 与 `a1` 的入口参数识别先保留在对象的初始状态检查中，不作为图 9 中的 `setup` 执行动作。它依次完成以下工作：
+从对象角度看，`BootInitFlow.Preset` 是父 Flow 的编排过程。`a0` 与 `a1` 的入口参数识别先保留在对象的初始状态检查中，不作为图 9 中的对象动作。它依次完成以下工作：
 
 1. 建立 `中断流` 的早期受控状态，屏蔽所有中断。
 2. 执行 `内核映像.preset()`，用 `global_pointer$` 符号初始化物理地址阶段的 `gp`。
@@ -1276,7 +1253,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 9. 执行 `虚拟内存空间.setup()`，依次推进 `TrampolineVM.enable()` 与 `EarlyVM.enable()`：先基于 `静态对象集合.trampoline_pg_dir` 完成从物理地址空间到虚拟地址空间的切换，再借助 `静态对象集合.early_pg_dir` 完成第二次页表切换，扩大虚拟内存空间的管理范围；其中，`内核映像.enable()` 作为 `VM.setup()` 的内部调用，用于在虚拟内存空间重置 `gp-relative` 寻址方式。
 10. `VM.setup()` 完成后，执行 `事件流.enable()`，设置事件的正式处理入口，使 `RISCV64.stvec` 指向 `formal_event_entry`。
 11. 在 `VM.setup()` 完成后，执行 `根任务.enable()` 与 `根栈.setup()`，分别将 `tp` 与 `sp` 重置为虚拟地址。
-12. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置；`入口前导期对象.enable()` 暂时为空，`入口前导期对象.cleanup()` 留到下一个子阶段 `入口后继期对象.setup()` 中执行。
+12. 执行 `片上系统.preset()`，完成片上系统平台相关的早期预置，并直接提交 `BootInitFlow.Prepared`。
 
 当前时序图主要表达对象过程的编排顺序，不表达逐项源码对应关系。失败时进入 `FAIL` 状态的错误传播方式，以及每一步更细的依赖检查，后续继续补充。
 
@@ -1293,7 +1270,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - 状态中心对象模型记法所需的函数、谓词和基础类型声明
 - `addr_of`、`phys_addr`、`virt_addr` 及虚拟地址区域相关约束
 - 准备期输入对象模型
-- `Kernel` / `BootPhase` 阶段树，其中 `EntryPreludePhase` 是 Kernel 直接子阶段，`EntrySuccessorPhase`、`CorePreparePhase` 和 `MmCoreInitPhase` 是已经展开的 BootPhase 子阶段对象模型
+- `Kernel` / `BootInitFlow` 启动树，其中 Preset 直接编排入口对象，`EntrySuccessorPhase`、`CorePreparePhase` 和 `MmCoreInitPhase` 是已经展开的直接子阶段对象模型
 - 当前尚未展开或尚未证明的结构化 `deferred` 责任，以及当前参考配置、架构或输入下
   可证明不可达/无操作的结构化 `trimmed` 边界
 
@@ -1319,7 +1296,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前先识别出本子阶段的核心对象和边界，不展开完整状态机：
 
-1. `入口后继期对象`：属于阶段对象，是 `引导期` 的第二个子阶段对象。它从 `start_kernel()` 起点边界接续 `入口前导期对象`，负责编排本子阶段内的早期 C 初始化和完整虚拟地址空间建立，并在 `SwapperVM` 进入 `Online` 后形成阶段完成边界。
+1. `入口后继期对象`：属于阶段对象，是 `BootInitFlow` 的 Setup 叶子。它从 `BootInitFlow.Prepared` / `start_kernel()` 起点边界接续入口前导步骤，负责编排本子阶段内的早期 C 初始化和完整虚拟地址空间建立，并在 `SwapperVM` 进入 `Online` 后形成阶段完成边界。
 2. `虚拟内存空间`（`VM`）：在入口前导期已经进入早期虚拟地址空间状态。本子阶段触发 `VM.enable()`，推进完整内核虚拟内存空间建立。
 3. `交换虚拟内存空间`（`SwapperVM`）：`VM` 的页表子对象，维护并使用 `静态对象集合.swapper_pg_dir`。本子阶段中，`SwapperVM.setup()` 负责建立完整内核页表，`SwapperVM.enable()` 负责切换 `RISCV64.satp` 到该页表，使其成为当前地址空间。`SwapperVM.setup()` 可以使用临时页表构建 fixmap slots，例如 `FIX_PTE`、`FIX_PMD`、`FIX_PUD`、`FIX_P4D`；它们是内部构建设施，不作为本阶段目标对象展开，但在 `SwapperVM.setup()` 完成后应被清理。
 4. `内存块管理`（`MemBlock`，暂定名）：用于描述早期物理内存分配管理对象。它管理的是物理内存区段与保留区段；即使 Linux 后续通过直接线性映射访问其元数据，`MemBlock` 的抽象对象仍应归属于物理内存管理。`MemBlock.preset()` 由 `EarlyDtb.setup()` 触发，用于基于 `EarlyDtb.preset()` 已发布的 `PhysicalMemory` 收集候选可用物理内存区段和初步边界；`MemBlock.setup()` 对应 `setup_bootmem()`，在候选集合基础上施加内核自身占用、FDT 保留区、RawDtb、InitRD、memory limit、对齐和可映射范围等约束，形成可安全用于早期分配的物理内存管理状态；`MemBlock.enable()` 对应 `memblock_allow_resize()`，在完整线性映射可用后允许 `MemBlock` 元数据扩展。固件占用内存不作为 OpenSBI 等具体固件的特例硬编码，而应通过 FDT header `/memreserve/` 与 `/reserved-memory` 节点形成 FDT reserved ranges 后统一排除。它是后续物理页分配器和更完整内存管理对象的前置对象。
@@ -1347,14 +1324,14 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 10 入口后继期对象分类与相互关系
 </p>
 
-图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `入口前导期对象`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
+图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `BootInitFlow.Prepared`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
 形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`。顶层由独立工程树
 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}` 构造独立系统树
 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`，再由 Kernel 通过 BootTask/BootInitFlow 串接
-EntryPreludePhase、EntrySuccessorPhase、CorePreparePhase 与 MmCoreInitPhase 等内部规格。子阶段 4 的正式模型位于
+入口对象、EntrySuccessorPhase、CorePreparePhase 与 MmCoreInitPhase 等内部规格。子阶段 4 的正式模型位于
 `spec/model/phases/boot/mm-core-init/`。
 
 本子阶段的结束状态应至少包含：
@@ -2678,7 +2655,7 @@ Boot idle 入口不构成其前置条件。
 4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.Cpu[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
 5. `CPU hotplug 单 CPU 推进动作`：覆盖 `cpu_up(cpu, CPUHP_ONLINE)` / `_cpu_up(cpu, 0, CPUHP_ONLINE)`。该动作先检查 `cpu_possible` / `cpu_present` / `cpu_bootable` 等前置条件；若目标 CPU 仍处于 `CPUHP_OFFLINE`，要求前序 `CpuGroup.Cpu[cpu].IdleTask.state == Prepared`；随后设置 `CpuHotplugState.target_step = CPUHP_ONLINE`。Linux 在 boot CPU 上只推进到 `CPUHP_BRINGUP_CPU`，超过该 step 的 AP-side callbacks 交给目标 CPU 的 `CpuHotplugThread` 继续执行。因此该动作是单 CPU 的 hotplug 状态推进入口，不等同于一次性设置 `online = true`。
 6. `CPUHP_BRINGUP_CPU` 复合过程（`CpuHotplugState.bringup_cpu(cpu)`）：覆盖 `CpuHotplugState.advance()` 内部的 `CPUHP_BRINGUP_CPU` step。它是第三层 composite，其语义是 hotplug 状态机驱动的一段跨 CPU bringup 协议。BP side 由 boot CPU 执行 `__cpu_up()` / `cpu_ops->cpu_start(cpu, tidle)`，释放目标 hart，并等待 `CpuHotplugState.cpu_running` 和 `done_up` completion；AP side 由目标 secondary CPU 自己执行 `ApEntryPreludePhase`、`ApSmpCallinPhase` 和 `ApOnlineIdlePhase`。Linux/RISC-V 实现中 `cpu_running` 是全局静态 completion；规格层把它作为本次 hotplug bringup 的 arch 同步实例约束归入 `CpuHotplugState`，不对象化为独立同步门。
-7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `EntryPreludePhase` 的 AP 专属阶段：不清 BSS、不解析 boot args、不建立 `BootCurrentCPU`，而是消费 HSM boot data，验证真实 `tp` 指向预建 idle Task，在该架构入口执行权边界提交 `IdleTask.OnCpu` 并严格启动 initial idle Flow，建立 AP stack/pt_regs 指针，屏蔽本地中断，关闭 FPU/vector，切换到已存在的 `SwapperVM`，并安装正式 trap vector。该首次执行权来自 hart entry，不发送 Scheduler Continue。当前默认只支持 OpenSBI ordered booting + HSM；spinwait booting 不作为 fallback。
+7. `AP 入口先导期`（`ApEntryPreludePhase`）：覆盖 RISC-V `secondary_start_sbi` 与 `.Lsecondary_start_common`。它是区别于 BP `BootInitFlow.Preset` 入口步骤的 AP 专属阶段：不清 BSS、不解析 boot args、不建立 `BootCurrentCPU`，而是消费 HSM boot data，验证真实 `tp` 指向预建 idle Task，在该架构入口执行权边界提交 `IdleTask.OnCpu` 并严格启动 initial idle Flow，建立 AP stack/pt_regs 栈顶指针，屏蔽本地中断，关闭 FPU/vector，切换到已存在的 `SwapperVM`，并安装正式 trap vector。该首次执行权来自 hart entry，不发送 Scheduler Continue。当前默认只支持 OpenSBI ordered booting + HSM；spinwait booting 不作为 fallback。
 8. `AP smp_callin 期`（`ApSmpCallinPhase`）：覆盖 Linux `smp_callin()` 的最小语义。AP 在自身 CPU 视角中把 current idle task 绑定到 `init_mm`，记录 topology 和 `notify_cpu_starting()` 边界，启用该 CPU 的 IPI 接收路径，发布 `set_cpu_online()` 事实，执行本地 icache/TLB flush summary，然后 complete `cpu_running` 释放 BP side。
 9. `AP online-idle 期`（`ApOnlineIdlePhase`）：覆盖 `local_irq_enable()` 与 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`。AP 打开本地中断，进入 AP idle/park 运行线，并在 `cpuhp_online_idle()` 边界 complete `done_up`。本阶段明确不运行 BP payload 或用户 syscall；完整 idle loop、调度抢占和后续 AP hotplug callbacks 仍 deferred。
 10. `IPI 对象`（`SbiIpi`）的 per-CPU enable 动作：覆盖 secondary CPU 上的 `riscv_ipi_enable()`。前序 `SbiIpi.state == Ready` 已建立 IPI mux 和 hotplug hook；本阶段在每个 secondary CPU bringup 时启用该 CPU 的 IPI 接收路径。这里仍是按 CPU 的启用动作，不表示所有跨 CPU callback API 都已经进入完整运行边界。
@@ -3752,7 +3729,7 @@ v2 不实现通用过滤引擎，只固定启用 103 个 exact-mapped runtime ch
 
 Linux runtime checkpoint 输出应优先复用现有 `stress-mem` 数据面，形成一行可由 stress runner 解码的紧凑输出：
 `stress_mem: v=1 encoding=hex bytes=<n> total=<n> overflow=<0|1> dropped=<n> data=<hex>`。`data`
-解码后的文本事件首批应使用现有 runner 可识别的 checkpoint 形态，例如 `checkpoint: EntryPreludePhase.Started`。
+解码后的文本事件首批应使用现有 runner 可识别的 checkpoint 形态，例如 `checkpoint: BootInitFlow.Started`。
 这样 Linux 与 arceos_ex 可以复用同一事件提取、序列 hash、去重归档和差分报告机制。首批允许在安全的后续导出点把
 早期 recorder 内容一次性 dump 到 console；长期可演进为共享内存或 monitor 抽取，但不能把共享内存作为首批前置条件。
 

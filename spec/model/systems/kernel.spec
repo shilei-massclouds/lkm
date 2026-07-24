@@ -5,7 +5,6 @@
  *
  */
 
-include "../phases/boot/entry-prelude/main.spec";
 include "../phases/boot/main.spec";
 include "../phases/interrupt/main.spec";
 include "../phases/boot-init/main.spec";

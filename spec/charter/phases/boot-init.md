@@ -8,8 +8,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 ## 边界与职责
 
 - OpenSBI 发出 `Kernel.Startup` 后，Kernel 直接异步发出严格 `BootInitFlow.Startup`（canonical
-  `Preset`）；BootInitFlow 必须仍为 Base 且 parent BootTask 必须为 OnCpu。接受并记录 Started 后驱动
-  `EntryPreludePhase`；完成后提交 `BootInitFlow.Prepared`。重复启动或执行权不匹配使根执行失败。
+  `Preset`）；BootInitFlow 必须仍为 Base 且 parent BootTask 必须为 OnCpu。接受并记录 Started 后直接
+  编排入口对象；全部入口事实成立后提交 `BootInitFlow.Prepared`。重复启动或执行权不匹配使根执行失败。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
   `ProcessPreparePhase` 和 `BootInitRestInitPhase`。最后一个叶子 Online 后提交
@@ -26,7 +26,7 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 BootInitFlow 的每个 lifecycle transition 都在执行时重新检查 parent BootTask 必须为 OnCpu；不存在
 另一个 dispatch guard 字段、状态或镜像对象。
 
-以上全部 boot execution 叶子都直接以 `BootInitFlow` 为 parent。叶子 Online 后只返回
+Setup/Enable 的全部 boot execution 叶子都直接以 `BootInitFlow` 为 parent。叶子 Online 后只返回
 `BootInitFlow` 当前 transition 的 continuation，不直接启动 sibling。
 
 ## 生命周期与执行主体边界
