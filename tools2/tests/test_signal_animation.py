@@ -95,8 +95,10 @@ class SignalAnimationTests(unittest.TestCase):
             {"before_state": None, "after_state": None},
         )
 
-    def test_frames_reveal_targets_ancestors_and_latest_siblings_first(self) -> None:
+    def test_frames_reveal_targets_ancestors_and_directional_sibling_order(self) -> None:
         animation = build_animation(self.model, self.view)
+        self.assertEqual(animation["initial_frame"]["sibling_order"]["$root"], ["Human"])
+        self.assertEqual(animation["frames"][0]["sibling_order"]["$root"], ["Human", "Root"])
         child_frame = animation["frames"][1]
         self.assertEqual(child_frame["sibling_order"]["$root"], ["Root", "Human"])
         self.assertEqual(child_frame["sibling_order"]["Root"], ["Child"])
@@ -105,6 +107,70 @@ class SignalAnimationTests(unittest.TestCase):
             animation["frames"][3]["sibling_order"]["Root"], ["Sink", "Async", "Child"]
         )
         self.assertEqual(animation["frames"][1]["nodes"][2]["state"], "Base")
+
+    def test_same_parent_signal_places_source_immediately_before_target(self) -> None:
+        view = deepcopy(self.view)
+        view["signals"][1]["source"] = "Child"
+        view["signals"][1]["target"] = "Async"
+        animation = build_animation(self.model, view)
+        self.assertEqual(animation["frames"][1]["sibling_order"]["Root"], ["Child", "Async"])
+
+        later_view = deepcopy(self.view)
+        later_view["signals"][1]["source"] = "Child"
+        later_view["signals"][1]["target"] = "Async"
+        later_view["signals"][2]["target"] = "Sink"
+        later_view["signals"][3]["source"] = "Child"
+        later_view["signals"][3]["target"] = "Async"
+        later = build_animation(self.model, later_view)
+        self.assertEqual(
+            later["frames"][3]["sibling_order"]["Root"],
+            ["Sink", "Child", "Async"],
+        )
+
+    def test_cross_branch_signal_orders_the_divergent_branches_only(self) -> None:
+        model = deepcopy(self.model)
+        view = deepcopy(self.view)
+        model["model"]["systems"]["ChildLeaf"] = {
+            **deepcopy(model["model"]["systems"]["Child"]),
+            "parent": "Child",
+        }
+        model["model"]["systems"]["AsyncLeaf"] = {
+            **deepcopy(model["model"]["systems"]["Async"]),
+            "parent": "Async",
+        }
+        for snapshot in [
+            view["initial_snapshot"],
+            *(signal["before_snapshot"] for signal in view["signals"]),
+            *(signal["after_snapshot"] for signal in view["signals"]),
+        ]:
+            snapshot["states"]["ChildLeaf"] = snapshot["states"]["Child"]
+            snapshot["states"]["AsyncLeaf"] = snapshot["states"]["Async"]
+        view["signals"][1]["source"] = "ChildLeaf"
+        view["signals"][1]["target"] = "AsyncLeaf"
+        animation = build_animation(model, view)
+        frame = animation["frames"][1]
+        self.assertEqual(frame["sibling_order"]["Root"], ["Child", "Async"])
+        self.assertEqual(frame["sibling_order"]["Child"], ["ChildLeaf"])
+        self.assertEqual(frame["sibling_order"]["Async"], ["AsyncLeaf"])
+
+    def test_self_and_ancestor_signals_keep_the_base_containment_order(self) -> None:
+        animation = build_animation(self.model, self.view)
+        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+
+        descendant_view = deepcopy(self.view)
+        descendant_view["signals"][2]["source"] = "Async"
+        descendant_view["signals"][2]["target"] = "Root"
+        descendant = build_animation(self.model, descendant_view)
+        self.assertEqual(descendant["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+
+        self_view = deepcopy(self.view)
+        self_view["signals"][3]["source"] = "Sink"
+        self_view["signals"][3]["target"] = "Sink"
+        self_signal = build_animation(self.model, self_view)
+        self.assertEqual(
+            self_signal["frames"][3]["sibling_order"]["Root"],
+            ["Sink", "Async", "Child"],
+        )
 
     def test_initial_model_source_has_stateless_ancestors_and_real_source_state(self) -> None:
         view = deepcopy(self.view)

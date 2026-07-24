@@ -66,8 +66,28 @@ describe('Signal response effects', () => {
       props: { node: { ...node, state: null } }
     });
     await tick();
+    const identity = document.querySelector('.node-identity');
     expect(document.body.textContent).toContain('Stateless');
-    expect(document.body.textContent).not.toContain('Signal source');
+    expect(identity?.querySelector('strong')?.textContent).toBe('Root');
+    expect(identity?.querySelector('.node-state')?.textContent).toBe('Stateless');
+    expect(identity?.querySelector('.node-kind')).toBeNull();
+    expect(document.body.textContent).not.toContain('SYSTEM');
+
+    await unmount(component);
+    component = mount(NodeCard, {
+      target: document.body,
+      props: { node: { ...node, structural: true, state: null } }
+    });
+    await tick();
+    expect(document.querySelector('.node-kind')?.textContent).toBe('Structure');
+
+    await unmount(component);
+    component = mount(NodeCard, {
+      target: document.body,
+      props: { node: { ...node, kind: 'external', state: null } }
+    });
+    await tick();
+    expect(document.querySelector('.node-kind')?.textContent).toBe('External');
   });
 
   it('renders a red dashed self-loop contract for exceptional self Signals', async () => {

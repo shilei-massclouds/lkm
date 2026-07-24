@@ -15,6 +15,7 @@
   let arrowGeometry = $state<ArrowGeometry | null>(null);
   let overlayWidth = $state(1);
   let overlayHeight = $state(1);
+  let arrowFrame: number | null = null;
   const shownIndex = $derived(activeIndex ?? position);
   const frame = $derived(shownIndex < 0 ? animation.initial_frame : animation.frames[shownIndex]);
   const step = $derived(shownIndex < 0 ? null : animation.steps[shownIndex]);
@@ -39,7 +40,7 @@
   }
 
   function updateArrow() {
-    if (!stageElement || !step) {
+    if (!stageElement || !step || (phase !== 'send' && phase !== 'response')) {
       arrowGeometry = null;
       return;
     }
@@ -60,6 +61,20 @@
     );
     overlayWidth = Math.max(stageElement.scrollWidth, stageElement.clientWidth, 1);
     overlayHeight = Math.max(stageElement.scrollHeight, stageElement.clientHeight, 1);
+  }
+
+  function trackArrow() {
+    arrowFrame = null;
+    updateArrow();
+    if (activeIndex !== null && (phase === 'send' || phase === 'response')) {
+      arrowFrame = window.requestAnimationFrame(trackArrow);
+    }
+  }
+
+  function scheduleArrowUpdate() {
+    if (arrowFrame === null && activeIndex !== null) {
+      arrowFrame = window.requestAnimationFrame(trackArrow);
+    }
   }
 
   function revealTarget() {
@@ -90,6 +105,7 @@
     await tick();
     revealTarget();
     updateArrow();
+    scheduleArrowUpdate();
     await pause(300);
     phase = 'response';
     await pause(420);
@@ -99,6 +115,10 @@
     position = activeIndex;
     activeIndex = null;
     phase = 'idle';
+    if (arrowFrame !== null) {
+      window.cancelAnimationFrame(arrowFrame);
+      arrowFrame = null;
+    }
   }
 
   function responseText() {
@@ -129,12 +149,20 @@
       }
     };
     const onResize = () => updateArrow();
+    const observer = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(scheduleArrowUpdate)
+      : null;
     window.addEventListener('keydown', onKeydown);
     window.addEventListener('resize', onResize);
+    stageElement?.addEventListener('scroll', scheduleArrowUpdate, { passive: true });
+    if (stageElement) observer?.observe(stageElement);
     media?.addEventListener('change', setMotion);
     return () => {
       window.removeEventListener('keydown', onKeydown);
       window.removeEventListener('resize', onResize);
+      stageElement?.removeEventListener('scroll', scheduleArrowUpdate);
+      observer?.disconnect();
+      if (arrowFrame !== null) window.cancelAnimationFrame(arrowFrame);
       media?.removeEventListener('change', setMotion);
     };
   });
@@ -145,17 +173,20 @@
 </svelte:head>
 
 <section class="player-shell" aria-labelledby="trace-title">
-  <header>
-    <p class="eyebrow">tools2 · deterministic Signal trace</p>
-    <h1 id="trace-title">{request.target}.{request.signal}</h1>
-    <p class="lede">This first determined frame contains only the initial Signal source and the ancestors required to preserve structure.</p>
+  <header class="trace-header">
+    <div class="trace-heading">
+      <p class="eyebrow">tools2 · Signal trace</p>
+      <h1 id="trace-title">{request.target}.{request.signal}</h1>
+    </div>
+    <dl class="trace-meta">
+      <div><dt>Source:</dt><dd>{request.source}</dd></div>
+      <div><dt>Verdict:</dt><dd>{animation.trace.verdict}</dd></div>
+      <div><dt>Signals:</dt><dd>{animation.trace.total_steps}</dd></div>
+      <div title={`Source file: ${animation.source}\nModel fingerprint: ${animation.inputs.model_fingerprint}`}>
+        <dt>Protocol:</dt><dd>{animation.schema} v{animation.version}</dd>
+      </div>
+    </dl>
   </header>
-  <dl class="trace-meta">
-    <div><dt>Source</dt><dd>{request.source}</dd></div>
-    <div><dt>Verdict</dt><dd>{animation.trace.verdict}</dd></div>
-    <div><dt>Signals</dt><dd>{animation.trace.total_steps}</dd></div>
-    <div><dt>Protocol</dt><dd>{animation.schema} v{animation.version}</dd></div>
-  </dl>
   <div
     class="stage"
     class:reduced-motion={reducedMotion}
@@ -192,5 +223,4 @@
     </div>
     <button type="button" onclick={next} disabled={!canNext}>下一步</button>
   </section>
-  <footer title={animation.inputs.model_fingerprint}>{animation.source}</footer>
 </section>

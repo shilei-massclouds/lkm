@@ -33,10 +33,26 @@ animate 输出内嵌 `lkm.spec.signal-animation` version `1` 的自包含 HTML�
 after frames、可见节点、结构祖先和预计算 sibling order。JSON 必须安全内嵌，HTML 必须原子写入；
 协议或 I/O 失败不得留下半成品。
 
-播放器只负责把确定 frames 布局并呈现。父子包含优先于左右方向；同一 parent 下较晚首次出现的
-System 位于较早兄弟之上。普通 Signal 使用 source 到 target 的箭头，self Signal 使用节点下方的
-回环。页面提供前后按钮、`ArrowLeft`/`ArrowRight`、步数和当前 Signal 文字说明，并尊重
-`prefers-reduced-motion`。首轮不包含自动播放、速度、时间线跳转、浏览器 derive 或视频导出。
+播放器只负责把确定 frames 布局并呈现。父子包含高于左右方向，嵌套节点始终位于父框内；同一
+parent 下的基础顺序仍按首次出现序反向排列。当前 Signal 的 source/target 互非祖先时，在两者最低
+公共祖先处把 source 所在的直接子分支排在 target 分支左侧；两分支从基础顺序的较早位置开始相邻
+排列，其余兄弟保持基础相对顺序。self、祖先到后代和后代到祖先 Signal 不得为追求左右方向拆开
+父子关系。普通 Signal 使用 source 到 target 的箭头，self Signal 使用节点下方的回环；曲线必须按
+实时节点尺寸和端点距离计算，布局动画、容器滚动或尺寸变化时同步更新。页面提供前后按钮、
+`ArrowLeft`/`ArrowRight`、步数和当前 Signal 文字说明，并尊重 `prefers-reduced-motion`。首轮不包含
+自动播放、速度、时间线跳转、浏览器 derive 或视频导出。
+
+页面必须使用有上下限的流式尺寸而非绑定某个桌面分辨率。桌面外壳占据可用 viewport，主体按
+紧凑 header、自动扩展 stage、紧凑控制栏排列；stage 占据主要空间并在内部滚动。窄屏允许元数据、
+节点 identity 和控制栏自然换行以及页面纵向滚动，但页面本身不得横向溢出。主要长宽、间距、圆角、
+字体、卡片 padding 和箭头曲率使用相对单位、容器/viewport 比例及有界 `clamp()`；只有边框和 SVG
+stroke 等视觉细线可固定为 CSS pixel。
+
+header 在一行优先显示小号品牌、请求标题以及 Source/Verdict/Signals/Protocol 四项紧凑元数据；
+删除说明句。普通 system 节点不显示 `SYSTEM`，名称与完整 `State::*` 或 `Stateless` 位于同一 identity
+行，空间不足时整行换行且不得覆盖；External 和 Structure 保留类型标签。控制栏在宽屏优先同行显示
+步数、Signal 路径、响应或 reason，窄屏自然换行。source file 和 model fingerprint 只保留在 Protocol
+项的 tooltip，不显示 footer。
 
 ## 兼容性决定
 

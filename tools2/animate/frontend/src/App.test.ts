@@ -42,7 +42,7 @@ const animation: AnimationTrace = {
   ],
   initial_frame: { index: -1, step_id: null, nodes: [human], sibling_order: { '$root': ['Human'] } },
   frames: [
-    { index: 0, step_id: 'sig-0001', nodes: [human, rootReady], sibling_order: { '$root': ['Root', 'Human'] } },
+    { index: 0, step_id: 'sig-0001', nodes: [human, rootReady], sibling_order: { '$root': ['Human', 'Root'] } },
     { index: 1, step_id: 'sig-0002', nodes: [human, rootBase, child, asyncNode], sibling_order: { '$root': ['Root', 'Human'], Root: ['Async', 'Child'] } }
   ]
 };
@@ -73,7 +73,7 @@ describe('deterministic step navigation', () => {
     expect(previous.disabled).toBe(true);
     next.click();
     await settle();
-    expect(nodes()).toEqual(['Root', 'Human']);
+    expect(nodes()).toEqual(['Human', 'Root']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
     expect(document.body.textContent).toContain('State::Base → State::Ready');
     next.click();
@@ -85,7 +85,7 @@ describe('deterministic step navigation', () => {
     expect(document.body.textContent).toContain('Action：响应完成');
     previous.click();
     await tick();
-    expect(nodes()).toEqual(['Root', 'Human']);
+    expect(nodes()).toEqual(['Human', 'Root']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
   });
 
@@ -99,5 +99,17 @@ describe('deterministic step navigation', () => {
     await tick();
     expect(nodes()).toEqual(['Human']);
     expect(document.querySelector('.counter')?.textContent).toContain('0 / 2');
+  });
+
+  it('renders the compact metadata header without the lede or visible footer', async () => {
+    app = mount(App, { target: document.body, props: { animation } });
+    await tick();
+    expect(document.querySelector('.lede')).toBeNull();
+    expect(document.querySelector('footer')).toBeNull();
+    expect(document.querySelector('.trace-header')?.textContent).toContain('Source:Human');
+    expect(document.querySelector('.trace-header')?.textContent).toContain('Verdict:complete');
+    const protocol = Array.from(document.querySelectorAll('.trace-meta div')).at(-1);
+    expect(protocol?.getAttribute('title')).toContain('fixture.spec');
+    expect(protocol?.getAttribute('title')).toContain('sha256:fixture');
   });
 });

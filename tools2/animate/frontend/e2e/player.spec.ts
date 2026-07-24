@@ -94,6 +94,29 @@ test('ordinary and exceptional self Signals expose their response phases', async
   await openOffline(page, pipelineHtml);
   const pipelineNext = page.getByRole('button', { name: '下一步' });
   await pipelineNext.click();
+  const firstArrow = page.locator('.signal-overlay');
+  await expect(firstArrow).toHaveAttribute('data-arrow-kind', 'ordinary');
+  await page.waitForTimeout(250);
+  const alignment = await page.locator('.stage').evaluate((stage) => {
+    const source = stage.querySelector<HTMLElement>('[data-node-id="Human"]');
+    const target = stage.querySelector<HTMLElement>('[data-node-id="Root"]');
+    const path = stage.querySelector<SVGPathElement>('.signal-path');
+    if (!source || !target || !path) return null;
+    const stageRect = stage.getBoundingClientRect();
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const numbers = Array.from(path.getAttribute('d')?.matchAll(/-?\d+(?:\.\d+)?/g) || [],
+      (match) => Number(match[0]));
+    return {
+      sourceBeforeTarget: sourceRect.right < targetRect.left,
+      startError: Math.abs(numbers[0] - (sourceRect.right - stageRect.left + stage.scrollLeft)),
+      endError: Math.abs(numbers[6] - (targetRect.left - stageRect.left + stage.scrollLeft))
+    };
+  });
+  expect(alignment).not.toBeNull();
+  expect(alignment?.sourceBeforeTarget).toBe(true);
+  expect(alignment?.startError).toBeLessThan(2);
+  expect(alignment?.endError).toBeLessThan(2);
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
   await pipelineNext.click();
   await expect(page.locator('.signal-overlay')).toHaveAttribute('data-arrow-kind', 'ordinary');
@@ -159,10 +182,67 @@ test('full main model loads offline, scrolls targets, and restores 277 steps', a
   await expect(page.locator('[data-node-id="Human"]')).toBeVisible();
 });
 
-test('initial offline canvas has a stable visual baseline', async ({ page }) => {
+test('desktop viewports devote the page to the stage without outer scrolling', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const viewport of [
+    { width: 1024, height: 768 },
+    { width: 1280, height: 900 },
+    { width: 1920, height: 1080 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await openOffline(page, pipelineHtml);
+    const layout = await page.evaluate(() => ({
+      documentHeight: document.documentElement.scrollHeight,
+      viewportHeight: document.documentElement.clientHeight,
+      stageHeight: document.querySelector('.stage')?.getBoundingClientRect().height || 0,
+      headerHeight: document.querySelector('.trace-header')?.getBoundingClientRect().height || 0,
+      transportHeight: document.querySelector('.transport')?.getBoundingClientRect().height || 0
+    }));
+    expect(layout.documentHeight).toBeLessThanOrEqual(layout.viewportHeight);
+    expect(layout.stageHeight / viewport.height).toBeGreaterThanOrEqual(0.72);
+    expect(layout.headerHeight).toBeLessThan(viewport.height * 0.12);
+    expect(layout.transportHeight).toBeLessThan(viewport.height * 0.12);
+  }
+});
+
+test('mobile layout wraps without page-level horizontal overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openOffline(page, pipelineHtml);
+  for (let index = 0; index < 4; index += 1) await page.keyboard.press('ArrowRight');
+  const layout = await page.evaluate(() => {
+    const stage = document.querySelector<HTMLElement>('.stage');
+    const identities = Array.from(document.querySelectorAll<HTMLElement>('.node-identity'));
+    const overlapping = identities.some((identity) => {
+      const name = identity.querySelector('strong')?.getBoundingClientRect();
+      const state = identity.querySelector('.node-state')?.getBoundingClientRect();
+      if (!name || !state) return false;
+      return name.left < state.right && name.right > state.left &&
+        name.top < state.bottom && name.bottom > state.top;
+    });
+    return {
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      stageOverflow: (stage?.scrollWidth || 0) - (stage?.clientWidth || 0),
+      overlapping
+    };
+  });
+  expect(layout.pageOverflow).toBeLessThanOrEqual(1);
+  expect(layout.stageOverflow).toBeGreaterThan(0);
+  expect(layout.overlapping).toBe(false);
+});
+
+test('desktop and mobile players have stable visual baselines', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openOffline(page, pipelineHtml);
   await expect(page.locator('.stage')).toHaveScreenshot('initial-stage.png', {
+    animations: 'disabled'
+  });
+  await expect(page.locator('.player-shell')).toHaveScreenshot('desktop-player.png', {
+    animations: 'disabled'
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openOffline(page, pipelineHtml);
+  await expect(page.locator('.player-shell')).toHaveScreenshot('mobile-player.png', {
     animations: 'disabled'
   });
 });

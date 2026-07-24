@@ -148,16 +148,34 @@ source/target/name/delivery、handler kind/name、outcome/reason、Transition �
 
 初始 frame 只包含首个 source 与必要祖先。每个 after frame 累积当前 Signal 的 source/target 与必要
 祖先；外部端点可没有 model node。结构祖先没有 snapshot state 时必须保持 stateless。每个 parent 的
-sibling order 按首次出现序反向排列，使后出现者位于上方；该顺序在 Python 中预计算，浏览器只由
-frame 数据计算显示坐标。缺失 source/target model identity、parent cycle、snapshot 不一致或未知
-handler/outcome 结构必须以协议错误失败，不能猜测或静默丢失。
+基础 sibling order 按首次出现序反向排列。初始 frame 保持该基础顺序；每个 after frame 再按当前
+Signal 预计算方向化顺序：若 source/target 互非祖先，找到从虚拟 `$root` 开始的两条可见 parent 路径
+第一次分叉的直接子分支，从其共同 parent 的基础顺序取出两分支，在两者原位置的较早处按
+`[source 分支, target 分支]` 相邻插回，其余 sibling 相对顺序不变。self 或任一端点是另一端点祖先时
+不重排。浏览器只由 frame 数据计算显示坐标；前后导航不得在浏览器重新推断或累积顺序。缺失
+source/target model identity、parent cycle、snapshot 不一致或未知 handler/outcome 结构必须以协议
+错误失败，不能猜测或静默丢失。
 
 自包含 HTML 必须安全编码内嵌 JSON，阻止 `</script>`、`<!--` 等数据提前终止 script 内容；CSS、
 播放器 JS 和 animation v1 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
 都纳入仓库，并提供确定 rebuild 和 stale-bundle 检查。
 
-播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。普通箭头从 source 右侧指向 target
-左侧；self Signal 使用下半圆；失败类 outcome 使用红色虚线并显示 reason。Transition 响应切换真实
-state，Action 只高亮/振动。新增节点与兄弟重排平滑过渡，活动端点滚入视区；
+播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。同级节点按 `sibling_order` 水平排列，
+嵌套同级仍在父框内；普通箭头从 source 右侧指向 target 左侧，self Signal 使用下方回环。普通曲线
+控制量按 source-target 距离和节点宽度计算，self loop 按节点宽高计算，不得使用固定像素半径。
+播放器使用 animation frame 在 FLIP、stage 滚动、window/元素尺寸变化期间重测 CSS pixel 坐标并
+更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。失败类 outcome 使用红色虚线并显示
+reason。Transition 响应切换真实 state，Action 只高亮/振动。新增节点与兄弟重排平滑过渡，活动端点滚入视区；
 `prefers-reduced-motion` 下取消非必要位移、振动与脉冲但保留确定 frame、线型、reason 和导航。
 控制面只含前后按钮、ArrowLeft/ArrowRight、步数和当前 Signal 说明，不增加自动播放、速度或时间线。
+
+frontend CSS 以 `%`/`dvh` 的外壳和 `auto minmax(0, 1fr) auto` 主 grid 建立有界流式尺寸体系；stage
+不设固定高度而占满剩余空间，内部内容以 `min-content`、`fr` 和滚动容器保持可达。间距、圆角、字体、
+卡片 padding 与节点最小宽度使用 `rem`/`ch`、viewport 或 container 比例及 `clamp()`，响应断点使用
+`rem` 或 container query。桌面保持页面无纵向滚动并让 stage 占主要 viewport；窄屏允许页面纵向滚动，
+但页面无横向溢出，必要的横向滚动局限于 stage。
+
+header 只显示紧凑品牌、请求标题与四项同行 `label:value` 元数据，不渲染说明句或可见 footer；Protocol
+tooltip 承载 source file 与 model fingerprint。普通 system identity 不渲染 `SYSTEM`，名称和完整
+`State::*`/`Stateless` 同行且可整体换行；External/Structure 继续渲染类型标签。transport 不设固定
+最小高度，宽屏优先把步数、Signal 路径、响应/reason 和按钮同行，窄屏自然换行。

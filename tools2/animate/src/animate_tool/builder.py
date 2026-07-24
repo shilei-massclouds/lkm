@@ -144,6 +144,45 @@ def _ancestors(name: str, systems: dict[str, dict[str, Any]]) -> list[str]:
     return result
 
 
+def _visible_path(name: str, systems: dict[str, dict[str, Any]]) -> list[str]:
+    if name not in systems:
+        return [name]
+    return [*_ancestors(name, systems), name]
+
+
+def _directional_sibling_order(
+    base_order: dict[str, list[str]],
+    *,
+    source: str,
+    target: str,
+    systems: dict[str, dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Place divergent source/target branches left-to-right without breaking containment."""
+    order = {parent: list(children) for parent, children in base_order.items()}
+    source_path = _visible_path(source, systems)
+    target_path = _visible_path(target, systems)
+    shared = 0
+    while (
+        shared < len(source_path)
+        and shared < len(target_path)
+        and source_path[shared] == target_path[shared]
+    ):
+        shared += 1
+    if shared == len(source_path) or shared == len(target_path):
+        return order
+    parent = "$root" if shared == 0 else source_path[shared - 1]
+    source_branch = source_path[shared]
+    target_branch = target_path[shared]
+    siblings = order[parent]
+    insert_at = min(siblings.index(source_branch), siblings.index(target_branch))
+    remaining = [
+        sibling for sibling in siblings if sibling not in {source_branch, target_branch}
+    ]
+    remaining[insert_at:insert_at] = [source_branch, target_branch]
+    order[parent] = remaining
+    return order
+
+
 def _build_frames(
     *,
     steps: list[dict[str, Any]],
@@ -175,7 +214,13 @@ def _build_frames(
         add_visible(name)
         revealed.add(name)
 
-    def frame(snapshot: dict[str, Any], *, index: int, step_id: str | None) -> dict[str, Any]:
+    def frame(
+        snapshot: dict[str, Any],
+        *,
+        index: int,
+        step_id: str | None,
+        direction: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
         nodes: list[dict[str, Any]] = []
         children: dict[str, list[str]] = {}
         for name in sorted(visible, key=first_seen.__getitem__):
@@ -213,10 +258,20 @@ def _build_frames(
                 }
             )
             children.setdefault(parent or "$root", []).append(name)
-        sibling_order = {
+        base_order = {
             parent: sorted(names, key=first_seen.__getitem__, reverse=True)
             for parent, names in sorted(children.items())
         }
+        sibling_order = (
+            _directional_sibling_order(
+                base_order,
+                source=direction[0],
+                target=direction[1],
+                systems=systems,
+            )
+            if direction is not None
+            else base_order
+        )
         return {
             "index": index,
             "step_id": step_id,
@@ -232,7 +287,12 @@ def _build_frames(
         reveal(step["source"])
         reveal(step["target"])
         frames.append(
-            frame(step["_after_snapshot"], index=step["index"], step_id=step["id"])
+            frame(
+                step["_after_snapshot"],
+                index=step["index"],
+                step_id=step["id"],
+                direction=(step["source"], step["target"]),
+            )
         )
     return initial, frames
 
