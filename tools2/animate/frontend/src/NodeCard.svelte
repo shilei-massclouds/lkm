@@ -38,7 +38,13 @@
   <div class="node-identity">
     <span class="node-kind">{node.structural ? 'Structure' : node.kind === 'external' ? 'External' : 'System'}</span>
     <strong>{node.id}</strong>
-    <span class="node-state">{node.state ? `State::${node.state}` : node.structural ? 'No state shown' : 'Signal source'}</span>
+    <span class="node-state">{node.state
+      ? `State::${node.state}`
+      : node.structural
+        ? 'No state shown'
+        : node.kind === 'external'
+          ? 'Signal source'
+          : 'Stateless'}</span>
   </div>
   {#if children}
     {@render children()}

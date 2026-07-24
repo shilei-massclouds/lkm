@@ -19,11 +19,12 @@ export function signalGeometry(
   target: RectLike,
   stage: RectLike,
   scrollLeft = 0,
-  scrollTop = 0
+  scrollTop = 0,
+  self = false
 ): ArrowGeometry {
   const x = (value: number) => value - stage.left + scrollLeft;
   const y = (value: number) => value - stage.top + scrollTop;
-  if (source === target) {
+  if (self) {
     const startX = x(source.right);
     const endX = x(source.left);
     const centerY = y(source.top + source.height / 2);

@@ -26,9 +26,10 @@ def _validate_snapshot(value: Any, *, label: str) -> dict[str, Any]:
     facts = value.get("facts")
     references = value.get("references")
     if not isinstance(states, dict) or not all(
-        isinstance(name, str) and isinstance(state, str) for name, state in states.items()
+        isinstance(name, str) and (isinstance(state, str) or state is None)
+        for name, state in states.items()
     ):
-        raise ProtocolError(f"{label}.states must map system names to state names")
+        raise ProtocolError(f"{label}.states must map system names to state names or null")
     if not isinstance(facts, list) or not all(isinstance(item, str) for item in facts):
         raise ProtocolError(f"{label}.facts must be a string list")
     if not isinstance(references, dict):
@@ -102,10 +103,16 @@ def _project_step(
         raise ProtocolError(f"{label}.reason must be a string or null")
     before = _validate_snapshot(signal.get("before_snapshot"), label=f"{label}.before_snapshot")
     after = _validate_snapshot(signal.get("after_snapshot"), label=f"{label}.after_snapshot")
-    before_state = before["states"].get(target)
-    after_state = after["states"].get(target)
-    if before_state is None or after_state is None:
+    if target not in before["states"] or target not in after["states"]:
         raise ProtocolError(f"{label} target {target!r} is missing from its snapshots")
+    before_state = before["states"][target]
+    after_state = after["states"][target]
+    declared_states = systems[target]["states"]
+    if declared_states:
+        if before_state not in declared_states or after_state not in declared_states:
+            raise ProtocolError(f"{label} target {target!r} has an undeclared snapshot state")
+    elif before_state is not None or after_state is not None:
+        raise ProtocolError(f"{label} stateless target {target!r} must use null snapshot state")
     return {
         "index": index,
         "id": signal_id,
@@ -181,10 +188,19 @@ def _build_frames(
                 parent = systems[name].get("parent")
                 kind = "system"
                 structural = name not in revealed
-                state = None if structural else snapshot["states"].get(name)
-                if not structural and state is None:
+                if not structural and name not in snapshot["states"]:
                     raise ProtocolError(
                         f"animation frame {index} has no snapshot state for revealed system {name!r}"
+                    )
+                state = None if structural else snapshot["states"][name]
+                declared_states = systems[name]["states"]
+                if not structural and declared_states and state not in declared_states:
+                    raise ProtocolError(
+                        f"animation frame {index} has undeclared state for revealed system {name!r}"
+                    )
+                if not structural and not declared_states and state is not None:
+                    raise ProtocolError(
+                        f"animation frame {index} has state for stateless system {name!r}"
                     )
             nodes.append(
                 {

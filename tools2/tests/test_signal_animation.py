@@ -119,6 +119,46 @@ class SignalAnimationTests(unittest.TestCase):
             [("Root", None, True), ("Child", "Base", False)],
         )
 
+    def test_stateless_system_uses_null_state_without_becoming_structural(self) -> None:
+        model = deepcopy(self.model)
+        view = deepcopy(self.view)
+        model["model"]["systems"]["Child"]["states"] = {}
+        model["model"]["systems"]["Child"]["initial_state"] = None
+        for snapshot in [
+            view["initial_snapshot"],
+            *(signal["before_snapshot"] for signal in view["signals"]),
+            *(signal["after_snapshot"] for signal in view["signals"]),
+        ]:
+            snapshot["states"]["Child"] = None
+        animation = build_animation(model, view)
+        child_node = next(
+            node for node in animation["frames"][1]["nodes"] if node["id"] == "Child"
+        )
+        self.assertIsNone(child_node["state"])
+        self.assertFalse(child_node["structural"])
+
+    def test_stateless_transition_preserves_real_null_before_and_after_state(self) -> None:
+        model = deepcopy(self.model)
+        view = deepcopy(self.view)
+        model["model"]["systems"]["Root"]["states"] = {}
+        model["model"]["systems"]["Root"]["initial_state"] = None
+        for snapshot in [
+            view["initial_snapshot"],
+            *(signal["before_snapshot"] for signal in view["signals"]),
+            *(signal["after_snapshot"] for signal in view["signals"]),
+        ]:
+            snapshot["states"]["Root"] = None
+        animation = build_animation(model, view)
+        self.assertEqual(
+            animation["steps"][0]["response"],
+            {"before_state": None, "after_state": None},
+        )
+        root_node = next(
+            node for node in animation["frames"][0]["nodes"] if node["id"] == "Root"
+        )
+        self.assertIsNone(root_node["state"])
+        self.assertFalse(root_node["structural"])
+
     def test_html_is_self_contained_and_script_data_is_safely_encoded(self) -> None:
         animation = build_animation(self.model, self.view)
         animation["source"] = "fixture</script><!--trace"
@@ -132,20 +172,28 @@ class SignalAnimationTests(unittest.TestCase):
         self.assertNotIn('src="http', html)
         self.assertNotIn('href="http', html)
 
-    def test_cli_rejects_protocol_identity_mismatch_without_output(self) -> None:
+    def test_cli_rejects_schema_version_and_producer_mismatch_without_output(self) -> None:
         model_path = self.root / "model.json"
         view_path = self.root / "view.json"
-        output = self.root / "trace.html"
-        broken = deepcopy(self.view)
-        broken["version"] = 3
-        write_json(model_path, self.model)
-        write_json(view_path, broken)
-        with contextlib.redirect_stderr(io.StringIO()) as stderr:
-            self.assertEqual(
-                animate_main([str(model_path), str(view_path), "-o", str(output)]), 2
-            )
-        self.assertIn("view protocol mismatch", stderr.getvalue())
-        self.assertFalse(output.exists())
+        cases = (
+            ("schema", "model", "schema", "other.model", "model protocol mismatch"),
+            ("version", "view", "version", 3, "view protocol mismatch"),
+            ("producer", "view", "producer", "tools", "view protocol mismatch"),
+        )
+        for label, owner, field, value, message in cases:
+            with self.subTest(label=label):
+                model = deepcopy(self.model)
+                view = deepcopy(self.view)
+                (model if owner == "model" else view)[field] = value
+                output = self.root / f"trace-{label}.html"
+                write_json(model_path, model)
+                write_json(view_path, view)
+                with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    self.assertEqual(
+                        animate_main([str(model_path), str(view_path), "-o", str(output)]), 2
+                    )
+                self.assertIn(message, stderr.getvalue())
+                self.assertFalse(output.exists())
 
     def test_driver_html_output_composes_with_text_snapshot_scenario_and_work_dir(self) -> None:
         scenario = self.root / "scenario.json"
@@ -257,9 +305,30 @@ class SignalAnimationTests(unittest.TestCase):
         parent_cycle = deepcopy(self.model)
         parent_cycle["model"]["systems"]["Root"]["parent"] = "Child"
         cases.append(("parent", parent_cycle, self.view, "parent cycle"))
+        unknown_handler = deepcopy(self.view)
+        unknown_handler["signals"][0]["handler"]["kind"] = "Effect"
+        cases.append(("handler", self.model, unknown_handler, "unknown structure"))
+        unknown_outcome = deepcopy(self.view)
+        unknown_outcome["signals"][0]["outcome"] = "pending"
+        cases.append(("outcome", self.model, unknown_outcome, "not an animation v1 outcome"))
+        damaged_snapshot = deepcopy(self.view)
+        damaged_snapshot["signals"][0]["before_snapshot"]["facts"] = {}
+        cases.append(("snapshot", self.model, damaged_snapshot, "facts must be a string list"))
         for label, model, view, message in cases:
             with self.subTest(label=label), self.assertRaisesRegex(ProtocolError, message):
                 build_animation(model, view)
+
+    def test_all_animation_outcomes_and_repeated_generation_are_deterministic(self) -> None:
+        for outcome in ("completed", "rejected", "failed", "truncated", "stopped"):
+            with self.subTest(outcome=outcome):
+                view = deepcopy(self.view)
+                view["signals"][0]["outcome"] = outcome
+                view["signals"][0]["reason"] = None if outcome == "completed" else "fixture"
+                first = build_animation(self.model, view)
+                second = build_animation(self.model, view)
+                self.assertEqual(first, second)
+                self.assertEqual(first["steps"][0]["outcome"], outcome)
+                self.assertEqual(render_html(first), render_html(second))
 
 
 if __name__ == "__main__":

@@ -60,6 +60,16 @@ describe('Signal response effects', () => {
     expect(card?.getAttribute('data-state')).toBe('Ready');
   });
 
+  it('distinguishes stateless systems from structural and external nodes', async () => {
+    component = mount(NodeCard, {
+      target: document.body,
+      props: { node: { ...node, state: null } }
+    });
+    await tick();
+    expect(document.body.textContent).toContain('Stateless');
+    expect(document.body.textContent).not.toContain('Signal source');
+  });
+
   it('renders a red dashed self-loop contract for exceptional self Signals', async () => {
     component = mount(SignalArrow, {
       target: document.body,

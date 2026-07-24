@@ -55,7 +55,8 @@
       target.getBoundingClientRect(),
       stageRect,
       stageElement.scrollLeft,
-      stageElement.scrollTop
+      stageElement.scrollTop,
+      source === target
     );
     overlayWidth = Math.max(stageElement.scrollWidth, stageElement.clientWidth, 1);
     overlayHeight = Math.max(stageElement.scrollHeight, stageElement.clientHeight, 1);
@@ -65,9 +66,19 @@
     if (!stageElement || !step) return;
     const target = endpoint(step.target);
     if (!target || typeof stageElement.scrollTo !== 'function') return;
+    const targetRect = target.getBoundingClientRect();
+    const stageRect = stageElement.getBoundingClientRect();
     stageElement.scrollTo({
-      left: Math.max(0, target.offsetLeft + target.offsetWidth / 2 - stageElement.clientWidth / 2),
-      top: Math.max(0, target.offsetTop + target.offsetHeight / 2 - stageElement.clientHeight / 2),
+      left: Math.max(
+        0,
+        stageElement.scrollLeft + targetRect.left - stageRect.left +
+          targetRect.width / 2 - stageElement.clientWidth / 2
+      ),
+      top: Math.max(
+        0,
+        stageElement.scrollTop + targetRect.top - stageRect.top +
+          targetRect.height / 2 - stageElement.clientHeight / 2
+      ),
       behavior: reducedMotion ? 'auto' : 'smooth'
     });
   }
@@ -93,6 +104,9 @@
   function responseText() {
     if (!step) return '初始确定帧：尚未发送 Signal。';
     if (step.handler.kind === 'Transition') {
+      if (step.response.before_state === null && step.response.after_state === null) {
+        return 'Transition：无 lifecycle state 的响应已完成。';
+      }
       return `Transition：State::${step.response.before_state} → State::${step.response.after_state}`;
     }
     if (step.handler.kind === 'Action') return 'Action：响应完成，不改变 lifecycle state。';

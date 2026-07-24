@@ -14,7 +14,7 @@ describe('Signal arrow geometry', () => {
   });
 
   it('uses a lower semicircle for self Signals', () => {
-    const geometry = signalGeometry(source, source, stage, 4, 6);
+    const geometry = signalGeometry(source, { ...source }, stage, 4, 6, true);
     expect(geometry.self).toBe(true);
     expect(geometry.path).toMatch(/^M 274 136 C /);
     expect(geometry.path).toMatch(/, 2 248, 74 136$/);
