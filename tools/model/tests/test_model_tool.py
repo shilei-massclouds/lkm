@@ -250,6 +250,133 @@ class ModelToolTests(unittest.TestCase):
                 stderr,
             )
 
+    def test_lifecycle_handler_contributions_accumulate_base_to_instance(self) -> None:
+        source = """
+            type BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        depends_on { base_guard(self); }
+                        drives { BaseLeaf.Transition::Preset; }
+                        ensures { base_fact(self); }
+                        emits { Transition::Setup; }
+                    }
+                    Transition::Setup {
+                        state_effect: StateEffect::Always;
+                    }
+                }
+            }
+            type DerivedFlow: BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        depends_on { derived_guard(self); }
+                        drives { DerivedLeaf.Transition::Preset; }
+                        ensures { derived_fact(self); }
+                    }
+                }
+            }
+            type Leaf {
+                initial_state: State::Base;
+                state State::Base { transitions { on Transition::Preset -> State::Prepared {} } }
+                state State::Prepared {}
+            }
+            object BaseLeaf: Leaf {}
+            object DerivedLeaf: Leaf {}
+            object InstanceLeaf: Leaf {}
+            object Root: DerivedFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            depends_on { instance_guard(self); }
+                            drives { InstanceLeaf.Transition::Preset; }
+                            ensures { instance_fact(self); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready {} }
+                }
+                state State::Ready {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 0, stderr)
+            handler = data["model"]["objects"]["Root"]["states"]["Base"]["transitions"]["Preset"]
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in handler["depends_on"]
+                    for entry in block["entries"]
+                ],
+                ["base_guard(self)", "derived_guard(self)", "instance_guard(self)"],
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in handler["drives"]
+                    for entry in block["entries"]
+                ],
+                [
+                    "BaseLeaf.Transition::Preset",
+                    "DerivedLeaf.Transition::Preset",
+                    "InstanceLeaf.Transition::Preset",
+                ],
+            )
+            self.assertEqual(
+                [
+                    entry["text"]
+                    for block in handler["ensures"]
+                    for entry in block["entries"]
+                ],
+                ["base_fact(self)", "derived_fact(self)", "instance_fact(self)"],
+            )
+            self.assertEqual(
+                [item["owner"] for item in handler["handler_contributions"]],
+                ["BaseFlow", "DerivedFlow", "Root"],
+            )
+
+    def test_duplicate_inherited_side_effect_is_model_error(self) -> None:
+        source = """
+            type BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        emits { Transition::Setup; }
+                    }
+                }
+            }
+            type DerivedFlow: BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        emits { Transition::Setup; }
+                    }
+                }
+            }
+            object Root: DerivedFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared {} }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready {} }
+                }
+                state State::Ready {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            exit_code, stderr, _data = self._run_model_source(Path(tmp), source)
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "duplicate inherited emits entry: Root.Transition::Preset",
+                stderr,
+            )
+
     def test_declare_scope_and_explicit_callee_parameter_are_valid(self) -> None:
         source = """
             context GuardedContext: Context {
@@ -793,16 +920,19 @@ class ModelToolTests(unittest.TestCase):
             boot_init_setup = objects["BootInitFlow"]["states"]["Prepared"][
                 "transitions"
             ]["Setup"]
+            boot_init_preset_within = next(
+                member
+                for member in boot_init_preset["body_members"]
+                if member["kind"] == "within"
+            )["within"]
             self.assertEqual(
-                boot_init_preset["body_members"][2]["within"]["context"],
+                boot_init_preset_within["context"],
                 "SingleTaskContext",
             )
             self.assertEqual(
                 [
                     entry["text"]
-                    for entry in boot_init_preset["body_members"][2]["within"][
-                        "drives"
-                    ][0]["entries"]
+                    for entry in boot_init_preset_within["drives"][0]["entries"]
                 ],
                 [
                     "InterruptStream.Transition::Preset",

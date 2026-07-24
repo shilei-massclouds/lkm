@@ -313,7 +313,10 @@ def _handler(handler: dict[str, Any], *, owner: str) -> dict[str, Any]:
 
 
 def _compose_type_lifecycle_process(
-    handler: dict[str, Any], type_process: dict[str, Any] | None
+    handler: dict[str, Any],
+    type_process: dict[str, Any] | None,
+    *,
+    include_instance_contribution: bool = True,
 ) -> dict[str, Any]:
     """Attach reusable Type lifecycle behavior to an instance wrapper."""
 
@@ -321,13 +324,26 @@ def _compose_type_lifecycle_process(
         return handler
     result = deepcopy(handler)
     result["body"] = [*deepcopy(type_process.get("body", [])), *result.get("body", [])]
-    result["composed_type_processes"] = [
-        {
-            "id": type_process["id"],
-            "owner": type_process["owner"],
-            "span": deepcopy(type_process["span"]),
-        }
-    ]
+    type_contributions = deepcopy(
+        type_process.get("handler_contributions")
+        or [
+            {
+                "id": type_process["id"],
+                "owner": type_process["owner"],
+                "span": deepcopy(type_process["span"]),
+            }
+        ]
+    )
+    result["composed_type_processes"] = type_contributions
+    result["handler_contributions"] = deepcopy(type_contributions)
+    if include_instance_contribution:
+        result["handler_contributions"].append(
+            {
+                "id": handler["id"],
+                "owner": handler["owner"],
+                "span": deepcopy(handler["span"]),
+            }
+        )
     return result
 
 
@@ -462,10 +478,170 @@ def _type_processes(
     types: dict[str, dict[str, Any]], declared_type: str | None
 ) -> list[dict[str, Any]]:
     indexed: dict[tuple[str, str], dict[str, Any]] = {}
-    for declaration in reversed(_type_chain(types, declared_type)):
-        for process in declaration.get("processes", []):
-            indexed[(process["kind"], process["name"])] = deepcopy(process)
+    chain = _type_chain(types, declared_type)
+    override_index = next(
+        (
+            index
+            for index, declaration in enumerate(chain)
+            if declaration.get("properties", {}).get("lifecycle_override") == "true"
+        ),
+        None,
+    )
+    if override_index is not None:
+        chain = chain[: override_index + 1]
+    for declaration in reversed(chain):
+        for process in _declared_type_handlers(declaration):
+            key = (process["kind"], process["name"])
+            contribution = deepcopy(process)
+            contribution["handler_contributions"] = [
+                {
+                    "id": process["id"],
+                    "owner": process["owner"],
+                    "span": deepcopy(process["span"]),
+                }
+            ]
+            if key not in indexed or process["kind"] != "Transition":
+                indexed[key] = contribution
+                continue
+            effective = indexed[key]
+            effective["body"] = [
+                *effective.get("body", []),
+                *contribution.get("body", []),
+            ]
+            effective["handler_contributions"].extend(
+                contribution["handler_contributions"]
+            )
     return list(indexed.values())
+
+
+def _declared_type_handlers(declaration: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return lifecycle transitions before ordinary Type processes."""
+
+    transitions = [
+        handler
+        for state in declaration.get("states", {}).values()
+        for handler in state.get("handlers", [])
+        if handler.get("kind") == "Transition"
+    ]
+    return [*transitions, *declaration.get("processes", [])]
+
+
+def _semantic_value(value: Any) -> Any:
+    """Strip provenance-only fields before comparing inherited entries."""
+
+    if isinstance(value, dict):
+        return {
+            key: _semantic_value(item)
+            for key, item in sorted(value.items())
+            if key not in {"span", "text", "id", "owner"}
+        }
+    if isinstance(value, list):
+        return [_semantic_value(item) for item in value]
+    return value
+
+
+def _handler_entry_keys(handler: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for member in handler.get("body", []):
+        kind = member.get("kind")
+        if kind not in {"depends_on", "ensures", "updates", "drives", "emits"}:
+            continue
+        for entry in member.get("entries", []):
+            key = (kind, json.dumps(_semantic_value(entry), sort_keys=True, separators=(",", ":")))
+            result.setdefault(key, entry)
+    return result
+
+
+def _handler_property(handler: dict[str, Any], name: str) -> str | None:
+    for member in handler.get("body", []):
+        if member.get("kind") == "property" and member.get("name") == name:
+            return member.get("value")
+    return None
+
+
+def _check_handler_extension(
+    inherited: dict[str, Any],
+    extension: dict[str, Any],
+    diagnostics: list[dict[str, Any]],
+    *,
+    owner: str,
+) -> None:
+    inherited_parameters = [
+        (item.get("name"), item.get("type"))
+        for item in inherited.get("parameters", [])
+    ]
+    extension_parameters = [
+        (item.get("name"), item.get("type"))
+        for item in extension.get("parameters", [])
+    ]
+    if inherited_parameters and extension_parameters and inherited_parameters != extension_parameters:
+        _diagnostic(
+            diagnostics,
+            "error",
+            f"conflicting inherited handler parameters: {owner}.{extension['kind']}::{extension['name']}",
+            extension["span"],
+        )
+    inherited_effect = _handler_property(inherited, "state_effect")
+    extension_effect = _handler_property(extension, "state_effect")
+    if inherited_effect and extension_effect and inherited_effect != extension_effect:
+        _diagnostic(
+            diagnostics,
+            "error",
+            f"conflicting inherited state_effect: {owner}.{extension['kind']}::{extension['name']}",
+            extension["span"],
+        )
+    for field, label in (
+        ("source_state", "source state"),
+        ("target_state", "target state"),
+    ):
+        inherited_state = inherited.get(field)
+        extension_state = extension.get(field)
+        if (
+            inherited_state is not None
+            and extension_state is not None
+            and inherited_state != extension_state
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"conflicting inherited {label}: {owner}.{extension['kind']}::{extension['name']}",
+                extension["span"],
+            )
+    inherited_entries = _handler_entry_keys(inherited)
+    for key, entry in _handler_entry_keys(extension).items():
+        if key in inherited_entries:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"duplicate inherited {key[0]} entry: {owner}.{extension['kind']}::{extension['name']}",
+                entry.get("span", extension["span"]),
+            )
+
+
+def _check_type_process_inheritance(
+    types: dict[str, dict[str, Any]], diagnostics: list[dict[str, Any]]
+) -> None:
+    for declaration in types.values():
+        if declaration.get("properties", {}).get("lifecycle_override") == "true":
+            continue
+        base_name = declaration.get("base_type")
+        inherited = {
+            (item["kind"], item["name"]): item
+            for item in _type_processes(types, base_name)
+            if item["kind"] == "Transition"
+        }
+        for process in _declared_type_handlers(declaration):
+            key = (process["kind"], process["name"])
+            if process["kind"] == "Transition" and key in inherited:
+                _check_handler_extension(
+                    inherited[key], process, diagnostics, owner=declaration["name"]
+                )
+                inherited[key]["body"] = [
+                    *inherited[key].get("body", []),
+                    *process.get("body", []),
+                ]
+            elif process["kind"] == "Transition":
+                inherited[key] = deepcopy(process)
 
 
 def _parent_cycles(systems: dict[str, dict[str, Any]]) -> list[list[str]]:
@@ -499,7 +675,26 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         enum_spans[name] = declaration["span"]
 
     types = _index_types(document.get("types", []), diagnostics)
+    _check_type_process_inheritance(types, diagnostics)
     for declaration in types.values():
+        override_value = declaration.get("properties", {}).get("lifecycle_override")
+        if override_value is not None and override_value != "true":
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"lifecycle_override on type {declaration['name']} must be true when present",
+                declaration["span"],
+            )
+        inherited_lifecycle = _nearest_lifecycle(types, declaration.get("base_type"))
+        if inherited_lifecycle is not None and override_value == "true" and (
+            declaration.get("initial_state") is None or not declaration.get("states")
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"lifecycle_override on type {declaration['name']} requires both initial_state and states",
+                declaration["span"],
+            )
         _check_task_only_lifecycle(
             owner=declaration["name"],
             initial_state=declaration.get("initial_state"),
@@ -531,7 +726,15 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         declared_type = declaration.get("declared_type")
         lifecycle = _nearest_lifecycle(types, declared_type)
         declares_lifecycle = declaration.get("initial_state") is not None or bool(declaration.get("states"))
-        override = declaration.get("properties", {}).get("lifecycle_override") == "true"
+        override_value = declaration.get("properties", {}).get("lifecycle_override")
+        override = override_value == "true"
+        if override_value is not None and override_value != "true":
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"lifecycle_override on {name} must be true when present",
+                declaration["span"],
+            )
         _check_task_only_lifecycle(
             owner=name,
             initial_state=declaration.get("initial_state"),
@@ -544,10 +747,12 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             initial_state = lifecycle.get("initial_state")
             raw_states = list(lifecycle.get("states", {}).values())
             lifecycle_owner = lifecycle["name"]
+            state_graph_from_type = True
         else:
             initial_state = declaration.get("initial_state")
             raw_states = declaration.get("states", [])
             lifecycle_owner = None
+            state_graph_from_type = False
         if lifecycle is not None and declares_lifecycle and not override:
             # Existing standalone tools2 fixtures predate lifecycle_override and
             # may use ad-hoc system kinds; enforce this only for declared types.
@@ -558,6 +763,22 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     f"object lifecycle shadows inherited type lifecycle: {name}",
                     declaration["span"],
                 )
+        if lifecycle is not None and override and not declares_lifecycle:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"lifecycle_override on {name} requires a complete object lifecycle",
+                declaration["span"],
+            )
+        if lifecycle is not None and override and declares_lifecycle and (
+            declaration.get("initial_state") is None or not declaration.get("states")
+        ):
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"lifecycle_override on {name} requires both initial_state and states",
+                declaration["span"],
+            )
         states: dict[str, dict[str, Any]] = {}
         handlers_by_name: dict[str, list[dict[str, Any]]] = {}
         type_process_by_key = {
@@ -575,9 +796,23 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             for raw_handler in raw_state.get("handlers", []):
                 handler = _handler(raw_handler, owner=name)
                 if not override:
+                    inherited_handler = type_process_by_key.get(
+                        (handler["kind"], handler["name"])
+                    )
+                    if inherited_handler is not None and handler["kind"] == "Transition":
+                        if state_graph_from_type:
+                            handler["body"] = []
+                        else:
+                            _check_handler_extension(
+                                inherited_handler,
+                                handler,
+                                diagnostics,
+                                owner=name,
+                            )
                     handler = _compose_type_lifecycle_process(
                         handler,
-                        type_process_by_key.get((handler["kind"], handler["name"])),
+                        inherited_handler,
+                        include_instance_contribution=not state_graph_from_type,
                     )
                 handlers.append(handler)
             for item in handlers:
@@ -596,6 +831,23 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             }
 
         object_processes = [_handler(item, owner=name) for item in declaration.get("processes", [])]
+        if not override:
+            effective_object_processes = []
+            for process in object_processes:
+                inherited_handler = type_process_by_key.get(
+                    (process["kind"], process["name"])
+                )
+                if inherited_handler is not None and process["kind"] == "Transition":
+                    _check_handler_extension(
+                        inherited_handler,
+                        process,
+                        diagnostics,
+                        owner=name,
+                    )
+                effective_object_processes.append(
+                    _compose_type_lifecycle_process(process, inherited_handler)
+                )
+            object_processes = effective_object_processes
         object_keys = {
             (item["kind"], item["name"])
             for state in states.values()
@@ -699,9 +951,23 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             raw_states = list(lifecycle.get("states", {}).values()) if lifecycle is not None else []
             states: dict[str, dict[str, Any]] = {}
             handlers_by_name: dict[str, list[dict[str, Any]]] = {}
+            type_process_by_key = {
+                (item["kind"], item["name"]): item
+                for item in _type_processes(types, child_type)
+            }
             for raw_state in raw_states:
                 state_handlers = [_handler(item, owner=child_name) for item in raw_state.get("handlers", [])]
                 for handler in state_handlers:
+                    inherited_handler = type_process_by_key.get(
+                        (handler["kind"], handler["name"])
+                    )
+                    if inherited_handler is not None and handler["kind"] == "Transition":
+                        handler["body"] = []
+                    handler = _compose_type_lifecycle_process(
+                        handler,
+                        inherited_handler,
+                        include_instance_contribution=False,
+                    )
                     handler["lifecycle_owner"] = lifecycle["name"]
                     handlers_by_name.setdefault(handler["name"], []).append(handler)
                 states[raw_state["name"]] = {
@@ -713,7 +979,16 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
                     "lifecycle_owner": lifecycle["name"],
                 }
 
-            inherited_processes = _type_processes(types, child_type)
+            state_handler_keys = {
+                (item["kind"], item["name"])
+                for state in states.values()
+                for item in state["handlers"]
+            }
+            inherited_processes = [
+                item
+                for item in _type_processes(types, child_type)
+                if (item["kind"], item["name"]) not in state_handler_keys
+            ]
             for process in inherited_processes:
                 normalized = deepcopy(process)
                 normalized["owner"] = child_name

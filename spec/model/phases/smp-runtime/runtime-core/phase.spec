@@ -92,7 +92,11 @@ object SchedulerSmpRuntime: KernelObject {
                 depends_on {
                     SmpBringupPhase.state == State::Online;
                     Scheduler.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     CpuGroup.state == State::Ready;
                     SecondaryCpuOnlineAck.state == State::Ready;
                     SmpBringupBoundary.state == State::Ready;
@@ -415,7 +419,11 @@ object RuntimeCorePhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     SmpBringupPhase.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     Scheduler.state == State::Online;
                     Workqueue.state == State::Ready;
                     PageAllocator.state == State::Ready;

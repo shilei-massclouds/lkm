@@ -73,5 +73,5 @@ npm run test:e2e
 From the repository root, the corresponding convenience targets are `make -C tools2 test-frontend`,
 `make -C tools2 bundle-check`, `make -C tools2 test-browser`, and `make -C tools2 test-all`. Browser tests generate
 their model/view/HTML fixtures under a temporary directory, load them through `file://`, reject network requests,
-and exercise the full 274-Signal main-model trace. Explicit long-lived demos belong in the ignored `tools2/out/`
+and exercise every step of the successfully completed full main-model trace. Explicit long-lived demos belong in the ignored `tools2/out/`
 directory; `tools2/out/pipeline-animation.html` is the fixed small visual checkpoint.

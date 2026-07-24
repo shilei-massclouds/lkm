@@ -25,6 +25,31 @@ Base --[Preset]--> Prepared --[Setup]--> Ready --[Enable]--> Online
 状态边界。确实无法使用标准生命周期的对象必须在 charter 中说明原因和范围，并在 model 中
 作为显式例外，而不能让缺失的迁移由工具或实现隐式补齐。
 
+## 类型生命周期继承
+
+类型生命周期使用累积继承，而不是由最近声明的类型遮蔽基类型。该规则适用于所有 model 类型，
+不按 `TaskFlow` 或其它类型名称特判；没有 lifecycle 贡献的空壳类型（例如 `PhaseObject`）不会因此
+自动获得 lifecycle。
+
+同一个 handler 的有效定义按基类型到派生类型、最后到实例声明的顺序组成。基类型拥有通用的
+source/target state、`state_effect`、guard、完成事实和 completion event；派生类型与实例只能追加
+自己的特化条件、动作和事实：
+
+- 所有 `depends_on` 共同成立才可接受 Signal；
+- `drives`、`within` 及其它执行 body member 按每个贡献者的源码顺序、再按基类到实例的贡献顺序执行；
+- `ensures` 与目标状态 invariant 累积，并绑定实际 instance 的 `self`；
+- 所有 `emits` 只在整个有效 transition 成功提交、目标 invariant 全部成立后，按基类到实例及各自
+  源码顺序入队。
+
+派生类型或实例不得重复父级已经规范化的 `depends_on`、`drives`、`ensures`、state update 或
+`emits` 条目，也不得声明与继承 source/target state、参数或 `state_effect` 冲突的同名 handler。
+model 必须以各贡献条目的 source span 报错；工具不得以静默去重、最近声明覆盖或执行两次来解释
+重复声明。
+
+`lifecycle_override: true` 是唯一完整替换机制。override 必须同时给出完整 initial state、state graph
+和 handler 契约；它替换全部继承贡献，不允许只覆盖某个 guard、动作、完成事实或 event 来削弱
+基类型契约。
+
 ## 同对象迁移链
 
 标准阶段的三个迁移按以下规则生成：

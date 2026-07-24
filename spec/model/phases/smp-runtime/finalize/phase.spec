@@ -334,7 +334,11 @@ object FinalizePhase: PhaseObject {
                 depends_on {
                     RootfsPhase.state == State::Online;
                     RootfsBoundary.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     SystemState.state == State::Ready;
                     RcuCore.state == State::Ready;
                     SavedCommandLine.state == State::Ready;

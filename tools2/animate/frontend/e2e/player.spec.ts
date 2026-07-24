@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -15,8 +15,11 @@ let pipelineHtml = '';
 let effectsHtml = '';
 let alternatingHtml = '';
 let mainHtml = '';
+let mainSteps = 0;
 
-function generate(name: string, spec: string, signal: string) {
+function generate(
+  name: string, spec: string, signal: string, expectedStatus: number, expectedVerdict: string
+) {
   const html = join(generated, `${name}.html`);
   const work = join(generated, `${name}-work`);
   const result = spawnSync(
@@ -28,10 +31,14 @@ function generate(name: string, spec: string, signal: string) {
     ],
     { cwd: repository, env: { ...process.env, PYTHONPATH: pythonPath }, encoding: 'utf8' }
   );
-  if (result.status !== 0 && result.status !== 1) {
+  if (result.status !== expectedStatus) {
     throw new Error(`fixture generation failed (${result.status}): ${result.stderr}`);
   }
-  return html;
+  const derivation = JSON.parse(readFileSync(join(work, 'derive.json'), 'utf8'));
+  if (derivation.verdict !== expectedVerdict) {
+    throw new Error(`fixture verdict was ${derivation.verdict}, expected ${expectedVerdict}`);
+  }
+  return { html, totalSteps: derivation.signals.length };
 }
 
 async function openOffline(page: Page, html: string) {
@@ -45,18 +52,20 @@ async function openOffline(page: Page, html: string) {
 test.beforeAll(() => {
   generated = mkdtempSync(join(tmpdir(), 'lkm-signal-animation-e2e-'));
   pipelineHtml = generate(
-    'pipeline', join(repository, 'tools2/tests/fixtures/pipeline.spec'), 'Root.Start'
-  );
+    'pipeline', join(repository, 'tools2/tests/fixtures/pipeline.spec'), 'Root.Start', 0, 'complete'
+  ).html;
   effectsHtml = generate(
-    'effects', join(repository, 'tools2/tests/fixtures/animation-effects.spec'), 'Root.Begin'
-  );
+    'effects', join(repository, 'tools2/tests/fixtures/animation-effects.spec'), 'Root.Begin', 1, 'failed'
+  ).html;
   alternatingHtml = generate(
     'alternating', join(repository, 'tools2/tests/fixtures/alternating-layout.spec'),
-    'Controller.Begin'
+    'Controller.Begin', 0, 'complete'
+  ).html;
+  const main = generate(
+    'main', join(repository, 'spec/model/main.spec'), 'ComputerProject.Preset', 0, 'complete'
   );
-  mainHtml = generate(
-    'main', join(repository, 'spec/model/main.spec'), 'ComputerProject.Preset'
-  );
+  mainHtml = main.html;
+  mainSteps = main.totalSteps;
 });
 
 test.afterAll(() => {
@@ -286,19 +295,21 @@ test('reduced motion settles immediately and disables response movement', async 
   await expect(page.locator('[data-node-id="Root"]')).toHaveCSS('animation-name', 'none');
 });
 
-test('full main model loads offline, scrolls targets, and restores 274 steps', async ({ page }) => {
-  test.setTimeout(60_000);
-  expect(statSync(mainHtml).size).toBeLessThan(5 * 1024 * 1024);
+test('successful full main model loads offline, scrolls targets, and restores every step', async ({ page }) => {
+  test.setTimeout(180_000);
+  expect(statSync(mainHtml).size / mainSteps).toBeLessThan(30 * 1024);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const started = Date.now();
   await openOffline(page, mainHtml);
   expect(Date.now() - started).toBeLessThan(5_000);
   const counter = page.locator('.counter');
-  await expect(counter).toContainText('步骤 0 / 274');
+  expect(mainSteps).toBeGreaterThan(0);
+  await expect(page.locator('.trace-meta dd').nth(1)).toHaveText('complete');
+  await expect(counter).toContainText(`步骤 0 / ${mainSteps}`);
   let sawScroll = false;
-  for (let index = 1; index <= 274; index += 1) {
+  for (let index = 1; index <= mainSteps; index += 1) {
     await page.keyboard.press('ArrowRight');
-    await expect(counter).toContainText(`步骤 ${index} / 274`);
+    await expect(counter).toContainText(`步骤 ${index} / ${mainSteps}`);
     if (!sawScroll) {
       sawScroll = await page.locator('.stage').evaluate(
         (stage) => stage.scrollTop > 0 || stage.scrollLeft > 0
@@ -329,9 +340,9 @@ test('full main model loads offline, scrolls targets, and restores 274 steps', a
   expect(longIdentityTypography.count).toBeGreaterThan(0);
   expect(longIdentityTypography.sameFontSize).toBe(true);
   expect(longIdentityTypography.overlapping).toBe(false);
-  for (let index = 273; index >= 0; index -= 1) {
+  for (let index = mainSteps - 1; index >= 0; index -= 1) {
     await page.keyboard.press('ArrowLeft');
-    await expect(counter).toContainText(`步骤 ${index} / 274`);
+    await expect(counter).toContainText(`步骤 ${index} / ${mainSteps}`);
   }
   await expect(page.locator('[data-node-id]')).toHaveCount(1);
   await expect(page.locator('[data-node-id="Human"]')).toBeVisible();

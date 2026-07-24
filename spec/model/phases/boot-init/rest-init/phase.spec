@@ -720,6 +720,8 @@ object BootInitRestInitPhase: PhaseObject {
                     );
                     TaskCreationCore.Action::CopyProcess(
                         src_task: BootTask,
+                        src_task_ref: BootTaskRef,
+                        current_task_ref: CurrentTaskRef,
                         dst_task: KernelInitTask,
                         pid_ns: RootPidNamespace,
                         creds: CredentialCore,
@@ -872,6 +874,8 @@ object BootInitRestInitPhase: PhaseObject {
                     );
                     TaskCreationCore.Action::CopyProcess(
                         src_task: BootTask,
+                        src_task_ref: BootTaskRef,
+                        current_task_ref: CurrentTaskRef,
                         dst_task: KthreaddTask,
                         pid_ns: RootPidNamespace,
                         creds: CredentialCore,
@@ -1366,6 +1370,14 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
+                    scheduler_switch_prepare_validates_prev_live_active_flow(
+                        Scheduler,
+                        CurrentTaskRef
+                    );
+                    scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
+                        Scheduler,
+                        KernelInitTaskRef
+                    );
                     task_concurrency_open();
                     smp_concurrency_closed();
                     secondary_cpus_not_started(CpuGroup);
@@ -1406,6 +1418,14 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
             BootIdleFlow.state == State::Ready;
             task_active_flow_is(BootTask, BootIdleFlow);
+            scheduler_switch_prepare_validates_prev_live_active_flow(
+                Scheduler,
+                CurrentTaskRef
+            );
+            scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
+                Scheduler,
+                KernelInitTaskRef
+            );
             task_concurrency_open();
             smp_concurrency_closed();
         }

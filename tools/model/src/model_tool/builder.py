@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 import re
 from common.defaults import DEFAULT_TARGET
 from common.emits import parse_emit_expression
@@ -68,6 +68,10 @@ _REF_TRANSITION_EXPR_RE = re.compile(
 )
 _REF_ACTION_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_ASSOCIATION_PROCESS_EXPR_RE = re.compile(
+    r"\A(.+)\.(Transition|Action)::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _LOCK_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -729,6 +733,26 @@ def _build_objects(
             state_decls = decl.states
             lifecycle_owner = None
 
+        skip_inherited_handlers = override_value == "true"
+        state_decls, transition_contributions = _effective_state_declarations(
+            types,
+            decl.kind,
+            state_decls,
+            diagnostics,
+            instance_owner=decl.name,
+            state_graph_is_instance=object_declares_lifecycle,
+            skip_inherited=skip_inherited_handlers,
+        )
+        effective_processes = _effective_instance_processes(
+            types,
+            decl.kind,
+            decl.processes,
+            diagnostics,
+            instance_owner=decl.name,
+            skip_inherited=skip_inherited_handlers,
+        )
+        effective_decl = dc_replace(decl, processes=effective_processes)
+
         _check_lifecycle_names(
             decl.name,
             initial_state,
@@ -743,9 +767,10 @@ def _build_objects(
             state_decls,
             diagnostics,
             lifecycle_owner=lifecycle_owner,
+            handler_contributions=transition_contributions,
         )
-        attrs = _extract_attrs(decl, diagnostics)
-        associations = _extract_associations(decl, diagnostics)
+        attrs = _extract_attrs(effective_decl, diagnostics)
+        associations = _extract_associations(effective_decl, diagnostics)
         effective_parent = decl.parent
         if (
             effective_parent is None
@@ -757,7 +782,7 @@ def _build_objects(
         objects[decl.name] = ObjectDef(
             name=decl.name,
             kind=decl.kind,
-            decl=decl,
+            decl=effective_decl,
             initial_state=initial_state,
             parent=effective_parent,
             states=states,
@@ -771,7 +796,29 @@ def _check_type_lifecycles(
     types: dict[str, TypeDecl], diagnostics: list[Diagnostic]
 ) -> None:
     for decl in types.values():
+        override_value = decl.properties.get("lifecycle_override")
+        if override_value is not None and override_value != "true":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lifecycle_override on type {decl.name} must be true when present",
+                    decl.span,
+                )
+            )
         declares_lifecycle = decl.initial_state is not None or bool(decl.states)
+        inherited_lifecycle = _nearest_type_lifecycle(
+            types, _base_type_name(decl) or ""
+        )
+        if inherited_lifecycle is not None and override_value == "true" and (
+            decl.initial_state is None or not decl.states
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lifecycle_override on type {decl.name} requires both initial_state and states",
+                    decl.span,
+                )
+            )
         if not declares_lifecycle:
             continue
         if decl.initial_state is None or not decl.states:
@@ -828,6 +875,344 @@ def _nearest_type_lifecycle(
             return decl
         current = _base_type_name(decl)
     return None
+
+
+@dataclass(frozen=True)
+class _HandlerContribution:
+    owner: str
+    decl: ProcessDecl | TransitionDecl
+    source_state: str | None = None
+    target_state: str | None = None
+
+
+def _effective_type_chain(
+    types: dict[str, TypeDecl], type_name: str
+) -> list[TypeDecl]:
+    """Return lifecycle contributors in base-to-derived source order."""
+
+    derived_to_base: list[TypeDecl] = []
+    visited: set[str] = set()
+    current: str | None = type_name
+    while current is not None and current not in visited:
+        visited.add(current)
+        declaration = types.get(current)
+        if declaration is None:
+            break
+        derived_to_base.append(declaration)
+        if declaration.properties.get("lifecycle_override") == "true":
+            break
+        current = _base_type_name(declaration)
+    return list(reversed(derived_to_base))
+
+
+def _type_handler_contributions(
+    types: dict[str, TypeDecl],
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+) -> list[_HandlerContribution]:
+    contributions: list[_HandlerContribution] = []
+    for declaration in _effective_type_chain(types, type_name):
+        if process_kind == "Transition":
+            for state in declaration.states:
+                for transition in state.transitions:
+                    if transition.name == process_name:
+                        contributions.append(
+                            _HandlerContribution(
+                                declaration.name,
+                                transition,
+                                source_state=state.name,
+                                target_state=transition.target_state,
+                            )
+                        )
+        for process in declaration.processes:
+            if process.kind == process_kind and process.name == process_name:
+                contributions.append(
+                    _HandlerContribution(declaration.name, process)
+                )
+    return contributions
+
+
+def _normalized_handler_entries(
+    declaration: ProcessDecl | TransitionDecl,
+) -> dict[tuple[str, str], SourceSpan]:
+    entries: dict[tuple[str, str], SourceSpan] = {}
+
+    def visit_members(members: list[BodyMember]) -> None:
+        for member in members:
+            if member.block is not None and member.kind in {
+                "depends_on",
+                "ensures",
+                "updates",
+                "drives",
+                "emits",
+            }:
+                for entry, span in member.block.entry_spans:
+                    normalized = " ".join(entry.split())
+                    entries.setdefault((member.kind, normalized), span)
+            if member.within is not None:
+                visit_members(_ordered_body_members(member.within))
+
+    visit_members(_ordered_body_members(declaration))
+    return entries
+
+
+def _handler_state_effect(
+    declaration: ProcessDecl | TransitionDecl,
+) -> str | None:
+    return (
+        declaration.properties.get("state_effect")
+        if isinstance(declaration, ProcessDecl)
+        else None
+    )
+
+
+def _check_handler_contributions(
+    contributions: list[_HandlerContribution],
+    diagnostics: list[Diagnostic],
+    *,
+    label: str,
+    expected_source: str | None = None,
+    expected_target: str | None = None,
+) -> None:
+    parameters: tuple[tuple[str, str], ...] = ()
+    state_effect: str | None = None
+    seen_entries: dict[tuple[str, str], SourceSpan] = {}
+    for contribution in contributions:
+        declaration = contribution.decl
+        if parameters and declaration.parameters and declaration.parameters != parameters:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"conflicting inherited handler parameters: {label}",
+                    declaration.span,
+                )
+            )
+        elif declaration.parameters:
+            parameters = declaration.parameters
+
+        effect = _handler_state_effect(declaration)
+        if state_effect is not None and effect is not None and effect != state_effect:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"conflicting inherited state_effect: {label}",
+                    declaration.span,
+                )
+            )
+        elif effect is not None:
+            state_effect = effect
+
+        if (
+            expected_source is not None
+            and contribution.source_state is not None
+            and contribution.source_state != expected_source
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"conflicting inherited source state: {label}",
+                    declaration.span,
+                )
+            )
+        if (
+            expected_target is not None
+            and contribution.target_state is not None
+            and contribution.target_state != expected_target
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"conflicting inherited target state: {label}",
+                    declaration.span,
+                )
+            )
+
+        contribution_entries = _normalized_handler_entries(declaration)
+        for key, span in contribution_entries.items():
+            if key in seen_entries:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"duplicate inherited {key[0]} entry: {label}",
+                        span,
+                    )
+                )
+        seen_entries.update(contribution_entries)
+
+
+def _compose_process_contributions(
+    contributions: list[_HandlerContribution],
+) -> ProcessDecl:
+    declarations = [item.decl for item in contributions]
+    process_declarations = [
+        item for item in declarations if isinstance(item, ProcessDecl)
+    ]
+    template = process_declarations[-1]
+    parameters = next(
+        (item.parameters for item in declarations if item.parameters), ()
+    )
+    state_effect = next(
+        (
+            value
+            for item in reversed(process_declarations)
+            if (value := item.properties.get("state_effect")) is not None
+        ),
+        None,
+    )
+    properties = dict(template.properties)
+    if state_effect is not None:
+        properties["state_effect"] = state_effect
+    return ProcessDecl(
+        kind=template.kind,
+        name=template.name,
+        span=template.span,
+        parameters=parameters,
+        return_type=next(
+            (item.return_type for item in reversed(process_declarations) if item.return_type),
+            None,
+        ),
+        depends_on=[block for item in declarations for block in item.depends_on],
+        drives=[block for item in declarations for block in item.drives],
+        within=[within for item in declarations for within in item.within],
+        may_change=[block for item in declarations for block in item.may_change],
+        ensures=[block for item in declarations for block in item.ensures],
+        result=[block for item in process_declarations for block in item.result],
+        other_blocks=[block for item in declarations for block in item.other_blocks],
+        body_members=[member for item in declarations for member in item.body_members],
+        properties=properties,
+    )
+
+
+def _compose_transition_contributions(
+    contributions: list[_HandlerContribution],
+    graph_transition: TransitionDecl,
+) -> TransitionDecl:
+    declarations = [item.decl for item in contributions]
+    parameters = next(
+        (item.parameters for item in declarations if item.parameters),
+        graph_transition.parameters,
+    )
+    return TransitionDecl(
+        name=graph_transition.name,
+        target_state=graph_transition.target_state,
+        span=graph_transition.span,
+        parameters=parameters,
+        depends_on=[block for item in declarations for block in item.depends_on],
+        drives=[block for item in declarations for block in item.drives],
+        emits=[
+            block
+            for item in declarations
+            for block in (
+                item.emits
+                if isinstance(item, TransitionDecl)
+                else [block for block in item.other_blocks if block.kind == "emits"]
+            )
+        ],
+        within=[within for item in declarations for within in item.within],
+        may_change=[block for item in declarations for block in item.may_change],
+        ensures=[block for item in declarations for block in item.ensures],
+        boundaries=[
+            boundary
+            for item in declarations
+            if isinstance(item, TransitionDecl)
+            for boundary in item.boundaries
+        ],
+        deferred=[
+            block
+            for item in declarations
+            if isinstance(item, TransitionDecl)
+            for block in item.deferred
+        ],
+        other_blocks=[
+            block
+            for item in declarations
+            for block in item.other_blocks
+            if block.kind != "emits"
+        ],
+        body_members=[member for item in declarations for member in item.body_members],
+    )
+
+
+def _effective_state_declarations(
+    types: dict[str, TypeDecl],
+    type_name: str,
+    state_declarations: list[StateDecl],
+    diagnostics: list[Diagnostic],
+    *,
+    instance_owner: str,
+    state_graph_is_instance: bool,
+    skip_inherited: bool,
+) -> tuple[list[StateDecl], dict[str, tuple[tuple[str, SourceSpan], ...]]]:
+    effective_states: list[StateDecl] = []
+    provenance: dict[str, tuple[tuple[str, SourceSpan], ...]] = {}
+    for state in state_declarations:
+        transitions: list[TransitionDecl] = []
+        for transition in state.transitions:
+            contributions = [] if skip_inherited else _type_handler_contributions(
+                types, type_name, "Transition", transition.name
+            )
+            if state_graph_is_instance or skip_inherited:
+                contributions.append(
+                    _HandlerContribution(
+                        instance_owner,
+                        transition,
+                        source_state=state.name,
+                        target_state=transition.target_state,
+                    )
+                )
+            if not contributions:
+                contributions = [
+                    _HandlerContribution(
+                        instance_owner,
+                        transition,
+                        source_state=state.name,
+                        target_state=transition.target_state,
+                    )
+                ]
+            label = f"{instance_owner}.Transition::{transition.name}"
+            _check_handler_contributions(
+                contributions,
+                diagnostics,
+                label=label,
+                expected_source=state.name,
+                expected_target=transition.target_state,
+            )
+            transitions.append(
+                _compose_transition_contributions(contributions, transition)
+            )
+            provenance[transition.name] = tuple(
+                (item.owner, item.decl.span) for item in contributions
+            )
+        effective_states.append(dc_replace(state, transitions=transitions))
+    return effective_states, provenance
+
+
+def _effective_instance_processes(
+    types: dict[str, TypeDecl],
+    type_name: str,
+    local_processes: list[ProcessDecl],
+    diagnostics: list[Diagnostic],
+    *,
+    instance_owner: str,
+    skip_inherited: bool,
+) -> list[ProcessDecl]:
+    effective: list[ProcessDecl] = []
+    for process in local_processes:
+        if process.kind != "Transition":
+            effective.append(process)
+            continue
+        contributions = [] if skip_inherited else _type_handler_contributions(
+            types, type_name, process.kind, process.name
+        )
+        contributions.append(_HandlerContribution(instance_owner, process))
+        _check_handler_contributions(
+            contributions,
+            diagnostics,
+            label=f"{instance_owner}.{process.kind}::{process.name}",
+        )
+        effective.append(_compose_process_contributions(contributions))
+    return effective
 
 
 def _check_lifecycle_names(
@@ -944,6 +1329,7 @@ def _build_states(
     diagnostics: list[Diagnostic],
     *,
     lifecycle_owner: str | None = None,
+    handler_contributions: dict[str, tuple[tuple[str, SourceSpan], ...]] | None = None,
 ) -> dict[str, StateDef]:
     states: dict[str, StateDef] = {}
     for state_decl in state_decls:
@@ -963,6 +1349,7 @@ def _build_states(
             diagnostics,
             object_wide=True,
             lifecycle_owner=lifecycle_owner,
+            handler_contributions=handler_contributions,
         )
         states[state_decl.name] = StateDef(
             name=state_decl.name,
@@ -981,6 +1368,7 @@ def _build_events(
     *,
     object_wide: bool = False,
     lifecycle_owner: str | None = None,
+    handler_contributions: dict[str, tuple[tuple[str, SourceSpan], ...]] | None = None,
 ) -> dict[str, TransitionDef]:
     transitions: dict[str, TransitionDef] = {}
     for transition_decl in state_decl.transitions:
@@ -995,13 +1383,23 @@ def _build_events(
             )
             continue
 
+        contributions = (handler_contributions or {}).get(
+            transition_decl.name, ()
+        )
+        inherited_owners = [
+            owner for owner, _span in contributions if owner != object_name
+        ]
+        transition_lifecycle_owner = lifecycle_owner or (
+            inherited_owners[-1] if inherited_owners else None
+        )
         transitions[transition_decl.name] = TransitionDef(
             name=transition_decl.name,
             object_name=object_name,
             source_state=state_decl.name,
             target_state=transition_decl.target_state,
             decl=transition_decl,
-            lifecycle_owner=lifecycle_owner,
+            lifecycle_owner=transition_lifecycle_owner,
+            handler_contributions=contributions,
         )
     return transitions
 
@@ -2280,7 +2678,7 @@ def _association_type(
         if type_decl is None:
             return None
         for block in type_decl.blocks:
-            if block.kind != "associations":
+            if block.kind not in {"associations", "owned", "references"}:
                 continue
             for entry in block.entries:
                 match = pattern.match(entry)
@@ -2670,6 +3068,47 @@ def _check_drive_transition_entry(
     context: ExclusiveContextDef | None = None,
     bindings: dict[str, str],
 ) -> bool:
+    association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
+    if association_process is not None and "." in association_process.group(1):
+        receiver, process_kind, process_name, args = association_process.groups()
+        if process_kind != "Transition":
+            return False
+        receiver_type = _resolve_association_receiver_type(model, receiver, bindings)
+        if receiver_type is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown association transition receiver: {receiver}",
+                    span,
+                )
+            )
+            return True
+        if _type_process_decl(
+            model, receiver_type, "Transition", process_name
+        ) is None and not _is_supported_ref_type_transition(
+            receiver_type, process_name
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unsupported association transition reference: {receiver}.Transition::{process_name}",
+                    span,
+                )
+            )
+            return True
+        process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type, receiver_type)
+        _check_process_arguments(
+            model,
+            process_type,
+            "Transition",
+            process_name,
+            args,
+            diagnostics,
+            span,
+            bindings=bindings,
+        )
+        return True
+
     ref_transition = _REF_TRANSITION_EXPR_RE.match(entry)
     if ref_transition is not None:
         receiver_name, transition_name, args = ref_transition.group(1, 2, 3)
@@ -2795,6 +3234,42 @@ def _check_drive_action_entry(
     context: ExclusiveContextDef | None = None,
     bindings: dict[str, str],
 ) -> bool:
+    association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
+    if association_process is not None and "." in association_process.group(1):
+        receiver, process_kind, process_name, args = association_process.groups()
+        if process_kind != "Action":
+            return False
+        receiver_type = _resolve_association_receiver_type(model, receiver, bindings)
+        if receiver_type is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown association action receiver: {receiver}",
+                    span,
+                )
+            )
+            return True
+        if _type_process_decl(model, receiver_type, "Action", process_name) is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unsupported association action reference: {receiver}.Action::{process_name}",
+                    span,
+                )
+            )
+            return True
+        _check_process_arguments(
+            model,
+            receiver_type,
+            "Action",
+            process_name,
+            args,
+            diagnostics,
+            span,
+            bindings=bindings,
+        )
+        return True
+
     ref_action = _REF_ACTION_EXPR_RE.match(entry)
     if ref_action is not None:
         receiver_name, action_name, args = ref_action.group(1, 2, 3)

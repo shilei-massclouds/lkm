@@ -291,6 +291,13 @@ def _event_def_from_json(item: Any) -> TransitionDef:
         lifecycle_owner=_optional_string(
             data.get("lifecycle_owner"), "transition.lifecycle_owner"
         ),
+        handler_contributions=tuple(
+            (
+                _string(_as_object(item, "handler contribution"), "owner"),
+                _span_from_json(_as_object(item, "handler contribution")["span"]),
+            )
+            for item in data.get("handler_contributions", [])
+        ),
     )
 
 

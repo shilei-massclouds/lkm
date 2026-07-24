@@ -109,6 +109,18 @@ Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution
 Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Flow 发出 Continue。发送前两条候选
 必须恰有一条可接受；缺失、歧义或处理失败都使当前 Signal 根执行失败，不排队重试，也不静默忽略。
 
+## CopyProcess 的源执行权
+
+`TaskCreationCore.CopyProcess` 从当前正在执行的 Task 复制，而不是从一个仅可调度的 Online Task
+复制。调用时 `src_task` 必须同时满足：lifecycle 为 `OnCpu`、execution authority 为 `Live`，并且
+其 `TaskRef` 与当前 CPU 的 `CurrentTaskSlot` 只读投影一致。`Online`、`Reserved`、非 current 或
+TaskRef 不匹配都必须在任何 destination/copy-process 状态修改前拒绝。
+
+该契约对 BootTask、PID 1 和后续用户 Task 一视同仁；BootTask 只因入口时确实是
+`OnCpu/Live/current` 而可作为 rest-init 的源，不存在按名称放宽或把底层 persistent carrier
+lifecycle 当成执行权的特判。成功事实必须记录实际 source Task identity 与经 generation 校验的
+TaskRef。
+
 ## TaskRef 与身份存储
 
 `TaskRef` 必须使用 private storage slot 加非零 generation。静态 Task 使用固定 slot 和固定

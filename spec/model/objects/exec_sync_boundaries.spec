@@ -46,7 +46,11 @@ object ExecSyncBoundaries: KernelObject {
                 depends_on {
                     BinaryFormatRegistry.state == State::Ready;
                     PayloadParam.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     SystemState.state == State::Online;
                     system_state_running(SystemState);
                 }

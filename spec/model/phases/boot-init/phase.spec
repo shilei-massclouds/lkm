@@ -20,17 +20,11 @@ object BootInitFlow: TaskFlow {
                     BootCpuRegisters.state == State::Online;
                     Lds.state == State::Online;
                     Config.state == State::Online;
-                    BootTask.state == State::OnCpu;
-                    task_execution_authority_is(
-                        BootTask,
-                        TaskExecutionAuthority::Live
-                    );
                     task_breakpoint_state_is(
                         BootTask,
                         TaskBreakpointState::Invalid
                     );
                     task_initial_flow_is(BootTask, self);
-                    task_flow_initial_binding_consistent(self);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);
@@ -89,15 +83,11 @@ object BootInitFlow: TaskFlow {
                     Soc.state == State::Prepared;
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
-                    task_flow_started(self);
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);
                 }
 
-                emits {
-                    Transition::Setup;
-                }
             }
         }
     }
@@ -110,10 +100,6 @@ object BootInitFlow: TaskFlow {
 
         transitions {
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    BootTask.state == State::OnCpu;
-                }
-
                 within SingleTaskContext {
                     drives {
                         EntrySuccessorPhase.Transition::Preset;
@@ -154,9 +140,6 @@ object BootInitFlow: TaskFlow {
                     BootTask.state == State::OnCpu;
                 }
 
-                emits {
-                    Transition::Enable;
-                }
             }
         }
     }
@@ -172,10 +155,6 @@ object BootInitFlow: TaskFlow {
 
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on {
-                    BootTask.state == State::OnCpu;
-                }
-
                 drives {
                     BootInitScheduleHandoffPhase.Transition::Preset;
                 }
@@ -204,7 +183,6 @@ object BootInitFlow: TaskFlow {
                         KernelInitTaskRef
                     );
                     BootTask.state == State::OnCpu;
-                    task_flow_online_on_cpu(self);
                 }
 
                 emits {

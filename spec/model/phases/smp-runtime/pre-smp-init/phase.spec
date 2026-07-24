@@ -211,7 +211,11 @@ object PreSmpInitPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootInitFlow.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     task_owns_flow(KernelInitTask, KernelInitFlow);
                     kernel_init_flow_first_leaf(KernelInitFlow, PreSmpInitPhase);
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);

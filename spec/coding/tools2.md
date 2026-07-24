@@ -28,6 +28,9 @@ lock、state、Type lifecycle/process、对象 lifecycle override、命名形参
 `lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
+`ensures` 的顶层 `P || Q` 同样保留源码顺序：提交时若某个分支已由 candidate snapshot 满足则保持该
+分支，否则建立第一个分支；不得同时建立互斥 postcondition，也不得因 any-of 节点无法作为普通 fact
+写入而中止完整闭包。
 state/fact/reference 求值至少包括：
 
 - `Target.state == State::Name` 与 state assignment；
@@ -110,6 +113,16 @@ delivery、cause、coordinate 和 call span，先比较 canonical until request�
 state 或 condition 拒绝，以及 handler body/invariant/下游 Signal 失败，都必须传播为最终 failed。
 不得静默忽略、重试或转换为 discarded。`drives A || B` 只在发送前选择第一个可接受候选；未选候选
 不创建 Signal。预算导致的 `truncated` 与显式 until 导致的 `stopped` 仍是独立非丢失结果。
+
+默认 `tools2/bin/pyveri` 从主模型初态执行完整闭包时是验收场景：必须返回 0、check/view verdict
+必须为 `complete`，且 Signal 列表不得包含 `rejected` 或 `failed`。canonical Kernel snapshot 续跑
+同样必须完整成功。成功测试不得接受 `{0, 1}`；负向 fixture 继续精确断言返回 1、`failed` 及原因。
+完整浏览器 fixture 的 step 数由本次成功 derive 产物重建，不把历史 274/277 数量当成协议常量。
+
+derive 对已具名的符号引用执行 `==` / `!=` 时，必须比较引用值本身；例如
+`CurrentTaskRef != KernelInitTaskRef` 可由两个同类型且名称不同的 `TaskRef` 值直接判定，不要求模型
+另外制造 `assert:` fact。对象属性比较仍先读取 snapshot 中的 reference assignment；不能把“两个引用
+恰好指向同一对象”误作“两个引用值相等”。
 
 parse/model/derive 在成功写出合法诊断 JSON 时返回 0，I/O 或协议损坏返回 2。check 对 complete/reached 返回
 0，对 failed/bounded/until_signal_not_reached 返回 1，协议损坏返回 2。view/render 不改变 check verdict；driver 最终采用

@@ -144,9 +144,12 @@ object PayloadPreparePhase: PhaseObject {
                     FinalizePhase.state == State::Online;
                     FinalizeBoundary.state == State::Ready;
                     SystemState.state == State::Online;
-                    KernelInitTask.state == State::Online;
                     system_state_running(SystemState);
                     KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     BinaryFormatRegistry.state == State::Ready;
                 }
 
@@ -216,7 +219,11 @@ object PayloadPreparePhase: PhaseObject {
             ExecTransaction.state == State::Ready;
             UserCloneDeferredBoundaries.state == State::Ready;
             SelectedPayloadHandoff.state == State::Ready;
-            KernelInitTask.state == State::Online;
+            KernelInitTask.state == State::OnCpu;
+            task_execution_authority_is(
+                KernelInitTask,
+                TaskExecutionAuthority::Live
+            );
             payload_execution_owned_by_kernel_init_task(self, KernelInitTask);
         }
     }

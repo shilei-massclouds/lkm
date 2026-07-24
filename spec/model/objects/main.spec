@@ -425,6 +425,11 @@ predicate current_task_ref_updated_by_switch<T, U, V>(current_cpu: T, prev_ref: 
 predicate task_creation_flow_contract_ready<T>(core: T) -> bool;
 predicate task_clone_args_ready<T>(task: T) -> bool;
 predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
+predicate task_creation_copy_process_used_current_source<T, U, R>(
+    core: T,
+    src_task: U,
+    src_task_ref: R
+) -> bool;
 predicate task_creation_used_clone_args<T, U>(core: T, task: U) -> bool;
 predicate task_creation_copy_process_sighand_siglock_deferred<T>(core: T) -> bool;
 predicate task_creation_copy_process_tasklist_lock_deferred<T>(core: T) -> bool;
@@ -1094,7 +1099,11 @@ type SchedulerObject: KernelObject {
                             current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                             current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                             BootTask.state == State::Online;
-                            KernelInitTask.state == State::Online;
+                            KernelInitTask.state == State::OnCpu;
+                            task_execution_authority_is(
+                                KernelInitTask,
+                                TaskExecutionAuthority::Live
+                            );
                             scheduler_continue_signal_pending(self, KernelInitTaskRef);
                             scheduler_first_schedule_committed(self);
                             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
@@ -1133,7 +1142,11 @@ type SchedulerObject: KernelObject {
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                 BootTask.state == State::Online;
-                KernelInitTask.state == State::Online;
+                KernelInitTask.state == State::OnCpu;
+                task_execution_authority_is(
+                    KernelInitTask,
+                    TaskExecutionAuthority::Live
+                );
                 scheduler_continue_signal_pending(self, KernelInitTaskRef);
                 scheduler_first_schedule_committed(self);
                 kernel_init_dispatched_to_pre_smp_init(KernelInitTask);

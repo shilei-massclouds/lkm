@@ -33,7 +33,7 @@ type TaskFlow: PhaseObject {
                 self.state == State::Base;
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                task_flow_initial_binding_consistent(self);
+                task_flow_start_binding_consistent(self);
             }
             ensures {
                 task_flow_started(self);
@@ -65,6 +65,7 @@ type TaskFlow: PhaseObject {
             ensures {
                 task_flow_active_binding_committed(self);
                 task_flow_online_on_cpu(self);
+                task_has_unique_active_flow(self.parent);
             }
         }
     }
@@ -106,6 +107,8 @@ enum UserAppFlowEntrySource {
 }
 
 type UserAppFlow: TaskFlow {
+    lifecycle_override: true;
+
     processes {
         /* Structural binding is part of declaration, not Flow execution. */
         Action::Bind(
@@ -127,6 +130,7 @@ type UserAppFlow: TaskFlow {
                 user_app_flow_entry_source_is(self, entry_source);
                 user_app_flow_instance_fresh(self);
                 user_app_flow_owner_exclusive(self);
+                task_flow_start_binding_consistent(self);
             }
         }
     }
@@ -136,10 +140,14 @@ type UserAppFlow: TaskFlow {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Base;
+                self.parent.state == State::OnCpu;
+                task_execution_authority_is(
+                    self.parent,
+                    TaskExecutionAuthority::Live
+                );
+                task_flow_start_binding_consistent(self);
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
-                self.parent.state == State::OnCpu;
-                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 task_flow_started(self);
@@ -153,17 +161,17 @@ type UserAppFlow: TaskFlow {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Prepared;
+                self.parent.state == State::OnCpu;
+                task_execution_authority_is(
+                    self.parent,
+                    TaskExecutionAuthority::Live
+                );
                 user_app_flow_owner_bound(self);
                 user_app_flow_entry_source_bound(self);
-                self.parent.state == State::OnCpu;
-                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             ensures {
                 user_app_flow_execution_context_ready(self);
                 user_app_flow_exec_image_or_fork_continuation_ready(self);
-            }
-            emits {
-                Transition::Enable;
             }
         }
 
@@ -171,13 +179,18 @@ type UserAppFlow: TaskFlow {
             state_effect: StateEffect::Always;
             depends_on {
                 self.state == State::Ready;
-                user_app_flow_execution_context_ready(self);
                 self.parent.state == State::OnCpu;
-                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                task_flow_enable_binding_ready(self);
+                task_execution_authority_is(
+                    self.parent,
+                    TaskExecutionAuthority::Live
+                );
+                user_app_flow_execution_context_ready(self);
+                task_flow_active_binding_committed(self);
             }
             ensures {
                 task_flow_active_binding_committed(self);
+                task_flow_online_on_cpu(self);
+                task_has_unique_active_flow(self.parent);
                 user_app_flow_online(self);
                 user_app_flow_is_owner_unique_online_flow(self);
                 user_application_black_box_entered(self);
@@ -220,7 +233,7 @@ predicate task_flow_owner_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_parent_is<F: TaskFlow, T: Task>(flow: F, task: T) -> bool;
 predicate task_flow_owner_exclusive<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_initial_binding_consistent<F: TaskFlow>(flow: F) -> bool;
-predicate task_flow_enable_binding_ready<F: TaskFlow>(flow: F) -> bool;
+predicate task_flow_start_binding_consistent<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_started<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_online_on_cpu<F: TaskFlow>(flow: F) -> bool;
 predicate task_flow_resume_active_continuation<F: TaskFlow>(flow: F) -> bool;
@@ -300,8 +313,6 @@ object KernelInitFlow: TaskFlow {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     KernelInitTask.state == State::OnCpu;
-                    task_execution_authority_is(KernelInitTask, TaskExecutionAuthority::Live);
-                    task_flow_initial_binding_consistent(self);
                     BootInitFlow.state == State::Online;
                     kernel_init_entry_reaches_kernel_init_flow(
                         KernelInitTask,
@@ -315,7 +326,6 @@ object KernelInitFlow: TaskFlow {
                 }
 
                 ensures {
-                    task_flow_started(self);
                     PreSmpInitPhase.state == State::Online;
                     kernel_init_flow_first_leaf(self, PreSmpInitPhase);
                     kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
@@ -334,8 +344,6 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
                     SmpBringupPhase.state == State::Online;
                 }
 
@@ -353,9 +361,6 @@ object KernelInitFlow: TaskFlow {
                     RootfsPhase.state == State::Online;
                     FinalizePhase.state == State::Online;
                     PayloadPreparePhase.state == State::Online;
-                }
-                emits {
-                    Transition::Enable;
                 }
             }
         }
@@ -375,11 +380,6 @@ object KernelInitFlow: TaskFlow {
 
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                }
-
                 drives {
                     PayloadHandoffPreparePhase.Transition::Preset;
                 }
@@ -388,8 +388,6 @@ object KernelInitFlow: TaskFlow {
                     PayloadHandoffPreparePhase.state == State::Online;
                     kernel_init_flow_survives_payload_precommit(self);
                     task_active_flow_is(KernelInitTask, self);
-                    task_flow_active_binding_committed(self);
-                    task_flow_online_on_cpu(self);
                 }
 
                 emits {
@@ -531,18 +529,8 @@ object Pid1UserAppFlow: UserAppFlow {
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {
-                depends_on {
-                    user_app_flow_owner_bound(self);
-                    user_app_flow_entry_source_bound(self);
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                }
                 ensures {
-                    task_flow_started(self);
                     user_app_flow_instance_fresh(self);
-                }
-                emits {
-                    Transition::Setup;
                 }
             }
         }
@@ -551,14 +539,6 @@ object Pid1UserAppFlow: UserAppFlow {
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                }
-                ensures {
-                    user_app_flow_execution_context_ready(self);
-                    user_app_flow_exec_image_or_fork_continuation_ready(self);
-                }
             }
         }
     }
@@ -572,17 +552,6 @@ object Pid1UserAppFlow: UserAppFlow {
 
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                    task_flow_enable_binding_ready(self);
-                }
-                ensures {
-                    task_flow_active_binding_committed(self);
-                    user_app_flow_online(self);
-                    user_app_flow_is_owner_unique_online_flow(self);
-                    user_application_black_box_entered(self);
-                }
             }
         }
     }
@@ -618,17 +587,6 @@ object KthreaddFlow: KthreaddFlowType {
 
         transitions {
             on Transition::Preset -> State::Prepared {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                    task_flow_initial_binding_consistent(self);
-                }
-                ensures {
-                    task_flow_started(self);
-                }
-                emits {
-                    Transition::Setup;
-                }
             }
         }
     }
@@ -636,13 +594,6 @@ object KthreaddFlow: KthreaddFlowType {
     state State::Prepared {
         transitions {
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                }
-                emits {
-                    Transition::Enable;
-                }
             }
         }
     }
@@ -650,14 +601,8 @@ object KthreaddFlow: KthreaddFlowType {
     state State::Ready {
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
-                }
                 ensures {
                     task_active_flow_is(KthreaddTask, self);
-                    task_flow_active_binding_committed(self);
-                    task_flow_online_on_cpu(self);
                 }
             }
         }
@@ -745,15 +690,9 @@ object ApIdleFlow: ApIdleFlowType {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    ApIdleTask.state == State::OnCpu;
-                    task_execution_authority_is(
-                        ApIdleTask,
-                        TaskExecutionAuthority::Live
-                    );
                     task_authority_activated_by_hsm(ApIdleTask);
                     ap_idle_flow_hsm_startup_keyed(self);
                     ap_idle_flow_key_matches_task(self, ApIdleTask);
-                    task_flow_initial_binding_consistent(self);
                 }
                 drives {
                     ApEntryPreludePhase.Transition::Preset;
@@ -761,13 +700,9 @@ object ApIdleFlow: ApIdleFlowType {
                     ApOnlineIdlePhase.Transition::Preset;
                 }
                 ensures {
-                    task_flow_started(self);
                     ap_idle_flow_task_ref_and_flow_ref_preserved(self, ApIdleTask);
                     ap_idle_flow_pointwise_phases_complete(self);
                     ap_idle_flow_no_task_enable_or_continue(self);
-                }
-                emits {
-                    Transition::Setup;
                 }
             }
         }
@@ -780,16 +715,6 @@ object ApIdleFlow: ApIdleFlowType {
         }
         transitions {
             on Transition::Setup -> State::Ready {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(
-                        self.parent,
-                        TaskExecutionAuthority::Live
-                    );
-                }
-                emits {
-                    Transition::Enable;
-                }
             }
         }
     }
@@ -800,17 +725,8 @@ object ApIdleFlow: ApIdleFlowType {
         }
         transitions {
             on Transition::Enable -> State::Online {
-                depends_on {
-                    self.parent.state == State::OnCpu;
-                    task_execution_authority_is(
-                        self.parent,
-                        TaskExecutionAuthority::Live
-                    );
-                }
                 ensures {
                     task_active_flow_is(ApIdleTask, self);
-                    task_flow_active_binding_committed(self);
-                    task_flow_online_on_cpu(self);
                     ap_idle_flow_no_task_enable_or_continue(self);
                 }
                 emits {
@@ -972,6 +888,7 @@ type BootIdleFlowType: TaskFlow {
 }
 
 object BootIdleFlow: BootIdleFlowType {
+    lifecycle_override: true;
     initial_state: State::Base;
     parent: BootTask;
 
@@ -1004,6 +921,7 @@ object BootIdleFlow: BootIdleFlowType {
                     task_flow_parent_is(BootIdleFlow, BootTask);
                     task_flow_owner_exclusive(BootIdleFlow);
                     task_active_flow_is(BootTask, BootIdleFlow);
+                    task_has_unique_active_flow(BootTask);
                     secondary_cpus_not_started(CpuGroup);
                 }
             }
@@ -1022,6 +940,7 @@ object BootIdleFlow: BootIdleFlowType {
             task_flow_parent_is(BootIdleFlow, BootTask);
             task_flow_owner_exclusive(BootIdleFlow);
             task_active_flow_is(BootTask, BootIdleFlow);
+            task_has_unique_active_flow(BootTask);
             secondary_cpus_not_started(CpuGroup);
         }
     }

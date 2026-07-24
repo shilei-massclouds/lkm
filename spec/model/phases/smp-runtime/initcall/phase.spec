@@ -626,7 +626,11 @@ object InitcallTable: InitcallTableType {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     SavedCommandLine.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     PageAllocator.state == State::Ready;
                 }
 
@@ -867,7 +871,11 @@ object InitcallPhase: PhaseObject {
                 depends_on {
                     RuntimeCorePhase.state == State::Online;
                     RuntimeCoreBoundary.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     Lds.state == State::Online;
                     SavedCommandLine.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
@@ -904,6 +912,8 @@ object InitcallPhase: PhaseObject {
                     UartInterruptChainProbe.Transition::Setup;
                     Serial8250Console.Transition::Enable;
                     TtyPort.Transition::Setup;
+                    NTtyLineDiscipline.Transition::Setup;
+                    TtyInputWait.Transition::Setup;
                     Serial8250RuntimePort.Transition::Setup;
                     TtyPort.Transition::Enable;
                     Serial8250RuntimePort.Transition::Enable;

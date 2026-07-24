@@ -143,7 +143,9 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
         .task_creation_core
         .copy_process(
             TaskCopyProcessInputs {
-                src_task: &ctx.boot_task,
+                src_task: ctx.boot_task.task(),
+                src_task_ref: ctx.boot_task.task_ref(),
+                current_task_slot: &ctx.boot_cpu_current_task,
                 root_pid_namespace: &ctx.root_pid_namespace,
                 credential_core: &ctx.credential_core,
                 signal_core: &ctx.signal_core,
@@ -365,7 +367,9 @@ fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
 
     let copy_result = ctx.task_creation_core.copy_process(
         TaskCopyProcessInputs {
-            src_task: &ctx.boot_task,
+            src_task: ctx.boot_task.task(),
+            src_task_ref: ctx.boot_task.task_ref(),
+            current_task_slot: &ctx.boot_cpu_current_task,
             root_pid_namespace: &ctx.root_pid_namespace,
             credential_core: &ctx.credential_core,
             signal_core: &ctx.signal_core,

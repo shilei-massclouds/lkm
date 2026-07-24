@@ -821,6 +821,9 @@ class Engine:
                 if key in self.current["references"]:
                     return self.current["references"].get(key) == expected
                 rendered = self.substitute(expression["text"], signal=signal, bindings=bindings)
+                comparison = self._symbolic_reference_comparison(rendered)
+                if comparison is not None:
+                    return comparison
                 return _assertion(rendered) in self.current["facts"]
             if kind == "fact":
                 values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
@@ -829,10 +832,27 @@ class Engine:
                 ) or self._predicate_body_value(expression["name"], values, signal=signal)
             if kind == "assertion":
                 rendered = self.substitute(expression["expression"], signal=signal, bindings=bindings)
+                comparison = self._symbolic_reference_comparison(rendered)
+                if comparison is not None:
+                    return comparison
                 return _assertion(rendered) in self.current["facts"]
             raise DerivationProblem(f"unsupported condition kind {kind}")
         finally:
             self.current = saved
+
+    def _symbolic_reference_comparison(self, expression: str) -> bool | None:
+        comparison = re.fullmatch(
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*([A-Za-z_][A-Za-z0-9_]*)",
+            expression,
+        )
+        if comparison is None:
+            return None
+        left, operator, right = comparison.groups()
+        left_type = self._reference_type(left)
+        right_type = self._reference_type(right)
+        if left_type is None or left_type != right_type:
+            return None
+        return left == right if operator == "==" else left != right
 
     def _builtin_fact(self, name: str, values: list[Any]) -> bool:
         if name == "has_slot" and len(values) == 2:
@@ -888,6 +908,20 @@ class Engine:
                 return False
             task = self.systems[flow].get("parent")
             return task in self.systems and self.current["references"].get(f"{task}.initial_flow") == flow
+        if name == "task_flow_start_binding_consistent" and len(values) == 1:
+            flow = values[0]
+            if flow not in self.systems:
+                return False
+            task = self.systems[flow].get("parent")
+            if task not in self.systems:
+                return False
+            if self.current["references"].get(f"{task}.initial_flow") == flow:
+                return True
+            return (
+                _fact("task_owns_flow", [task, flow]) in self.current["facts"]
+                and _fact("task_flow_owner_is", [flow, task]) in self.current["facts"]
+                and _fact("task_flow_parent_is", [flow, task]) in self.current["facts"]
+            )
         return False
 
     def _predicate_path(self, path: str, bindings: dict[str, Any]) -> Any:
@@ -1024,6 +1058,25 @@ class Engine:
         handler: dict[str, Any],
     ) -> None:
         kind = expression["kind"]
+        if kind == "any_of":
+            if any(
+                self.expression_value(
+                    alternative,
+                    signal=signal,
+                    bindings=bindings,
+                    snapshot=candidate,
+                )
+                for alternative in expression["alternatives"]
+            ):
+                return
+            self.apply_effect(
+                expression["alternatives"][0],
+                signal=signal,
+                bindings=bindings,
+                candidate=candidate,
+                handler=handler,
+            )
+            return
         if kind == "fact":
             values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
             if expression["name"].endswith("_ref_targets") and len(values) == 2:

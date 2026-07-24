@@ -36,6 +36,9 @@ _TARGET_RE = re.compile(
 _STATE_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
+_ENTITY_STATE_EXPR_RE = re.compile(
+    r"\A(.+)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\Z"
+)
 _TRANSITION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
@@ -859,10 +862,11 @@ class _Deriver:
         self.state_validation_transitions: dict[tuple[str, str], TransitionDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
         self.proved_expressions: set[str] = set()
-        self.runtime_instances: dict[str, dict[str, object]] = {}
+        self.association_values, self.runtime_instances = _materialize_owned_instances(
+            model
+        )
         self.declaration_occurrences: dict[tuple[str, str, int, str], int] = {}
         self.runtime_owned_flows: dict[str, set[str]] = {}
-        self.association_values = _initial_association_values(model)
 
     def run(self) -> DerivationResult:
         target_object, target_transition = self._parse_target()
@@ -892,7 +896,11 @@ class _Deriver:
                     root_call_path=str(data["root_call_path"]),
                     owner_process=str(data["owner_process"]),
                     source_ordinal=int(data["source_ordinal"]),
-                    static_object=None,
+                    static_object=(
+                        str(data["static_object"])
+                        if data.get("static_object") is not None
+                        else None
+                    ),
                     ref_target=(
                         str(data["ref_target"])
                         if data.get("ref_target") is not None
@@ -936,6 +944,10 @@ class _Deriver:
                 object_name=obj.name,
                 state_name=obj.initial_state,
             )
+        for runtime_id, data in self.runtime_instances.items():
+            state = data.get("state")
+            if state is not None:
+                self.states[runtime_id] = str(state)
 
         for obj in self.model.objects.values():
             if obj.initial_state is not None:
@@ -1059,14 +1071,21 @@ class _Deriver:
                 transition_name=transition_name,
                 state_name=transition.target_state,
             )
-            if transition.lifecycle_owner is not None:
-                self._prove_blocks(
-                    transition.decl.ensures,
-                    "type lifecycle ensures",
-                    transition=transition,
-                    proof_class="type_lifecycle_ensures",
-                    proof_provider=transition.lifecycle_owner,
-                )
+            self._prove_blocks(
+                transition.decl.ensures,
+                (
+                    "type lifecycle ensures"
+                    if transition.lifecycle_owner is not None
+                    else "transition ensures"
+                ),
+                transition=transition,
+                proof_class=(
+                    "type_lifecycle_ensures"
+                    if transition.lifecycle_owner is not None
+                    else "transition_ensures"
+                ),
+                proof_provider=transition.lifecycle_owner or "transition_commit",
+            )
             if not self._validate_state(object_name, transition.target_state, entered_by=transition):
                 exit_message = "target state invariant blocked"
                 return False
@@ -2931,17 +2950,20 @@ class _Deriver:
         bindings = bindings or {}
         for block in blocks:
             for entry, entry_span in block.entry_spans:
-                canonical_entry = _canonicalize_ref_aliases(entry, bindings)
+                expression = _substitute_process_bindings(
+                    entry, {"self": transition.object_name}
+                )
+                canonical_entry = _canonicalize_ref_aliases(expression, bindings)
                 classification = _classify_obligation(
                     canonical_entry, kind, transition.object_name
                 )
                 self._record(
                     DerivationStatus.PROVED,
-                    f"{kind}: {entry}",
+                    f"{kind}: {expression}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,
-                    expression=entry,
+                    expression=expression,
                     source_kind=kind,
                     predicate=classification["predicate"],
                     proof_class=proof_class,
@@ -3123,16 +3145,25 @@ class _Deriver:
         ok = True
         for block in blocks:
             for entry, entry_span in block.entry_spans:
-                canonical_entry = _canonicalize_ref_aliases(entry, bindings)
-                if _STATE_EXPR_RE.match(entry):
+                context_object = _context_object(transition, state)
+                effective_entry = (
+                    _substitute_process_bindings(entry, {"self": context_object})
+                    if context_object is not None
+                    else entry
+                )
+                canonical_entry = _canonicalize_ref_aliases(effective_entry, bindings)
+                resolved_entry = self._resolve_predicate_expression(
+                    canonical_entry, context_object
+                )
+                if _ENTITY_STATE_EXPR_RE.match(effective_entry):
                     ok = (
                         self._verify_state_expression(
-                            entry, entry_span, kind, transition, state
+                            effective_entry, entry_span, kind, transition, state
                         )
                         and ok
                     )
                 elif self._try_prove_transition_ensures(
-                    entry, entry_span, kind, state, entered_by
+                    effective_entry, entry_span, kind, state, entered_by
                 ):
                     continue
                 elif self._try_prove_firmware_project_fact(
@@ -3188,6 +3219,15 @@ class _Deriver:
                     recorded_expression=entry,
                 ):
                     continue
+                elif resolved_entry != canonical_entry and self._try_prove_prior_fact(
+                    resolved_entry,
+                    entry_span,
+                    kind,
+                    transition,
+                    state,
+                    recorded_expression=effective_entry,
+                ):
+                    continue
                 elif self._try_prove_phase_context(
                     entry, entry_span, kind, transition, state
                 ):
@@ -3196,17 +3236,20 @@ class _Deriver:
                     entry, entry_span, kind, transition, state
                 ):
                     continue
+                elif effective_entry != entry and self._try_prove_builtin_predicate(
+                    effective_entry, entry_span, kind, transition, state
+                ):
+                    continue
                 else:
-                    context_object = _context_object(transition, state)
-                    classification = _classify_obligation(entry, kind, context_object)
+                    classification = _classify_obligation(effective_entry, kind, context_object)
                     self._record(
                         DerivationStatus.OBLIGATION,
-                        f"unresolved {kind}: {entry}",
+                        f"unresolved {kind}: {effective_entry}",
                         entry_span,
                         object_name=context_object,
                         transition_name=transition.name if transition is not None else None,
                         state_name=state.name if state is not None else None,
-                        expression=entry,
+                        expression=effective_entry,
                         source_kind=kind,
                         predicate=classification["predicate"],
                         obligation_category=classification["category"],
@@ -3270,6 +3313,8 @@ class _Deriver:
     def _entity_parent(self, entity: str) -> str | None:
         if entity in self.runtime_instances:
             owner = self.runtime_instances[entity].get("owner_task")
+            if owner is None:
+                owner = self.runtime_instances[entity].get("owner_object")
             return str(owner) if owner is not None else None
         obj = self.model.objects.get(entity)
         return obj.parent if obj is not None else None
@@ -3316,11 +3361,17 @@ class _Deriver:
         transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
-        match = _STATE_EXPR_RE.match(expression)
+        match = _ENTITY_STATE_EXPR_RE.match(expression)
         if match is None:
             return False
 
-        object_name, expected_state = match.group(1), match.group(2)
+        receiver, expected_state = match.group(1), match.group(2)
+        context_object = _context_object(transition, state)
+        object_name = self._resolve_entity_path(
+            receiver,
+            default_receiver=context_object or receiver.partition(".")[0],
+            bindings={},
+        ) or receiver
         actual_state = self.states.get(object_name)
         if actual_state == expected_state:
             self._record(
@@ -3344,6 +3395,19 @@ class _Deriver:
             expression=expression,
         )
         return False
+
+    def _resolve_predicate_expression(
+        self, expression: str, context_object: str | None
+    ) -> str:
+        parsed = _predicate_args(expression.strip())
+        if parsed is None:
+            return expression
+        predicate, raw_args = parsed
+        resolved = [
+            self._resolve_predicate_entity(argument, context_object)
+            for argument in raw_args
+        ]
+        return f"{predicate}({', '.join(resolved)})"
 
     def _try_prove_builtin_predicate(
         self,
@@ -3464,6 +3528,20 @@ class _Deriver:
                 parent is not None
                 and self._entity_association_value(parent, "initial_flow") == args[0]
             )
+        if predicate == "task_flow_start_binding_consistent" and len(args) == 1:
+            flow = args[0]
+            parent = self._entity_parent(flow)
+            if parent is None:
+                return False
+            if self._entity_association_value(parent, "initial_flow") == flow:
+                return True
+            required = {
+                _fact_key(f"task_flow_owner_is({flow}, {parent})"),
+                _fact_key(f"task_flow_parent_is({flow}, {parent})"),
+            }
+            return required.issubset(
+                {_fact_key(expression) for expression in self.proved_expressions}
+            )
         return False
 
     def _try_prove_transition_ensures(
@@ -3485,7 +3563,15 @@ class _Deriver:
             ensure_blocks.extend(within.ensures)
         for block in ensure_blocks:
             expression_key = _fact_key(expression)
-            if expression_key not in {_fact_key(entry) for entry in block.entries}:
+            bound_entries = {
+                _fact_key(
+                    _substitute_process_bindings(
+                        entry, {"self": state.object_name}
+                    )
+                )
+                for entry in block.entries
+            }
+            if expression_key not in bound_entries:
                 continue
             classification = _classify_obligation(
                 expression, kind, state.object_name
@@ -4354,14 +4440,76 @@ def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str |
     return None
 
 
-def _initial_association_values(
+def _materialize_owned_instances(
     model: ObjectModel,
-) -> dict[str, dict[str, str]]:
-    return {
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, object]]]:
+    associations = {
         obj.name: dict(obj.associations)
         for obj in model.objects.values()
         if obj.associations
     }
+    instances: dict[str, dict[str, object]] = {}
+    queue: list[tuple[str, str]] = [
+        (obj.name, obj.kind) for obj in model.objects.values()
+    ]
+    index = 0
+    while index < len(queue):
+        owner, owner_type = queue[index]
+        index += 1
+        for field_name, field_type in _type_owned_fields(model, owner_type):
+            child = f"{owner}.{field_name}"
+            associations.setdefault(owner, {})[field_name] = child
+            if child in instances:
+                continue
+            lifecycle = _type_lifecycle_decl(model, field_type)
+            initial_state = (
+                lifecycle.initial_state
+                if lifecycle is not None and lifecycle.initial_state is not None
+                else "Base"
+            )
+            instances[child] = {
+                "declaration_site": f"{owner}.owned::{field_name}",
+                "alias": field_name,
+                "declared_type": field_type,
+                "state": initial_state,
+                "occurrence": 1,
+                "root_call_path": "<model-owned>",
+                "owner_process": f"{owner}.owned",
+                "source_ordinal": 0,
+                "static_object": owner,
+                "owner_object": owner,
+            }
+            queue.append((child, field_type))
+    return associations, instances
+
+
+def _type_owned_fields(
+    model: ObjectModel, type_name: str
+) -> list[tuple[str, str]]:
+    fields: dict[str, str] = {}
+    chain: list[TypeDecl] = []
+    visited: set[str] = set()
+    current: str | None = type_name
+    pattern = re.compile(
+        r"\A([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\Z"
+    )
+    while current is not None and current not in visited:
+        visited.add(current)
+        declaration = model.types.get(current)
+        if declaration is None:
+            break
+        chain.append(declaration)
+        match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", declaration.header)
+        current = match.group(1) if match is not None else None
+    for declaration in reversed(chain):
+        for block in declaration.blocks:
+            if block.kind != "owned":
+                continue
+            for entry in block.entries:
+                match = pattern.match(entry)
+                if match is not None:
+                    fields[match.group(1)] = match.group(2)
+    return list(fields.items())
 
 
 def _normalize_ref_process_expression(
@@ -4866,6 +5014,7 @@ def _bind_static_transition(
         target_state=transition.target_state,
         decl=decl,
         lifecycle_owner=transition.lifecycle_owner,
+        handler_contributions=transition.handler_contributions,
     )
 
 

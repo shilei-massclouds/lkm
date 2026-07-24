@@ -444,8 +444,9 @@ tools2 外部请求中的 `Target.Startup` 是 `Target.Preset` 的保留别名�
 必须在处理请求前把它规范化为 `Preset`；模型调用、handler 查找、Signal record、ID、事件和 canonical
 JSON 只保留 `Preset`。该别名不扩展受控 transition 集合，DSL 仍必须使用 `Transition::Preset`。
 
-目标对象中同名 Transition 或 Action 是兼容 handler。对象自己的 override 优先，否则按传递类型继承
-解析 Type lifecycle/process。恰好一个 handler 且 owner state 与
+目标对象中同名 Transition 或 Action 是兼容 handler；其中同名 lifecycle Transition 按
+`SEM-LIFECYCLE-INHERIT-001` 构造唯一 effective handler，普通 Action 保持其已有的类型特化解析。
+只有 `lifecycle_override: true` 才完整替换传递 lifecycle 贡献。effective handler 与 owner state 的
 `depends_on` 均满足时才接受 Signal；没有 handler、同名 handler 歧义、owner state 不匹配或任一前提
 不成立均得到 `rejected`。参数缺失、未知参数、重复参数、值类型不匹配、非法引用、规格矛盾或
 invariant 失败属于 `failed`，不能降级为 rejected。Transition handler 成功时提交 target state；
@@ -600,7 +601,26 @@ process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reas
 - derive/view/render 尚不推导 Type process 内部迁移；阶段主线若需要使用某个 Type process 的效果，必须暂时通过对象 lifecycle wrapper、显式 action commit 或普通 predicate fact 承载，并在规格中说明该承载不改变 Type process 的正式语义。
 - 当前 derive 已能从 Type process 的 `ensures` 推导被驱动 action/transition 的成功事实；对象实例自己声明的 `actions { ... }` 暂时只作为可驱动 action commit 展示，不自动把该 action 内部 `ensures` 推导为后续 `depends_on` 的可用事实。阶段主线若需要消费对象 action 的结果，必须暂时在外层 transition/phase `ensures` 中显式承载，后续再扩展对象 action ensures 推导。
 
-Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效果和通用 facts，必须落在 Type 上；实例只负责把该 Type 行为绑定到具体场景，并补充场景级语义。实例不得复制 Type 内部 bookkeeping，例如 `Completion` 实例不应重新手写 token、wait queue 或 wake-one 的通用结果；这些结果应来自被驱动的 `Completion` Type process。若当前工具尚不能自动把 inherited lifecycle transition 展开为实例生命周期迁移，可以暂时使用实例 wrapper transition 提交实例状态，但 wrapper 的职责只能是驱动或承接 Type process，并提交场景级 facts。
+Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效果和通用 facts，必须落在 Type 上；实例只负责把该 Type 行为绑定到具体场景，并补充场景级语义。实例不得复制 Type 内部 bookkeeping，例如 `Completion` 实例不应重新手写 token、wait queue 或 wake-one 的通用结果；这些结果应来自被驱动的 `Completion` Type process。实例 wrapper transition 只声明自己的场景贡献；工具必须把继承贡献组成 effective handler，不能要求 wrapper 重写 Type 契约。
+
+## SEM-LIFECYCLE-INHERIT-001: Lifecycle Handlers Accumulate Base To Derived
+
+同名 lifecycle Transition 的有效契约由所有声明贡献累积组成。贡献顺序固定为最远基类型到
+最近派生类型，最后是具体 instance；空壳基类型没有贡献时不产生隐式 lifecycle。所有贡献保留
+owner、handler span 和每个 body member/entry span。
+
+- handler 的参数签名、source/target state 与非 `None` `state_effect` 必须兼容；冲突在 model 阶段
+  报错。
+- `depends_on`、`ensures`、invariant 与其它 facts 累积；所有前置条件共同成立，`self` 绑定实际实例。
+- `drives`、`within`、updates 等执行 member 按贡献顺序及各自源码顺序执行。
+- `emits` 从执行 body 分离，只有整个 transition 状态提交且所有 target invariant 成立后，才按相同
+  贡献/源码顺序入队。
+- 派生类型或实例重复父级的规范化 condition、effect、drive 或 emit 是 model error。工具不得静默
+  去重、执行重复副作用或用最近声明遮蔽父级。
+
+`lifecycle_override: true` 是唯一完整替换机制。它要求 instance 同时声明完整 initial state 和 state
+graph，并完全跳过传递类型贡献；局部 override 或通过缺省条目削弱继承契约不合法。老工具与 tools2
+必须对同一 effective handler 得到相同的 guard/fact/action/emit 顺序。
 
 没有显式拆分 `type T` 和 `object X: T` 的对象，规格语义上可以视为匿名 singleton type 的唯一实例：对象自身同时承载唯一实例身份和该实例的专属行为定义。该形式只适用于确实只有一个实例且短期没有复用需求的对象；一旦需要多个实例、对象引用泛化、owned 子对象复用或跨实例不变量，必须拆出显式 Type，让实例通过 `object X: T` 绑定。
 

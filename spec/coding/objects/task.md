@@ -51,6 +51,12 @@ terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity sw
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
+`TaskCreationCore::copy_process` 的 inputs 必须包含 source `Task`、经 generation 校验的 source
+`TaskRef` 与只读 `CurrentTaskSlot` 投影。它在写入自身 commit record 或 destination metadata 前，
+依次验证 source 为 `OnCpu`、authority 为 `Live`、source ref 解析回同一 carrier，且 current slot
+等于该 ref。调用者不得传入 persistent `Online` 状态代替当前执行权；BootTask 不使用名称特判。
+上述任一检查失败必须保持 core 和 destination 不变。
+
 `BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage` 和固定
 `TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
 早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有

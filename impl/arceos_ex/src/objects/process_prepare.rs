@@ -2,6 +2,7 @@ use super::{
     boot_task::BootTask,
     config::Config,
     cpu_capabilities::CpuCapabilities,
+    cpu_control::CurrentTaskSlot,
     cpu_group::CpuGroup,
     exception_stream::ExceptionStream,
     files::FilesStruct,
@@ -10,7 +11,7 @@ use super::{
     scheduler::Scheduler,
     state::{EventError, EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     static_branch::StaticBranch,
-    task::TaskEntry,
+    task::{Task, TaskEntry, TaskExecutionAuthority, TaskRef},
     user_boot::{
         KernelInitTaskUserState, UserAddressSpace, UserCloneDeferredBoundaries, UserTaskSet,
         UserTrapFrame,
@@ -386,6 +387,7 @@ pub struct TaskCreationCore {
     kthreadd_created: bool,
     user_child_created: bool,
     system_scheduling: bool,
+    copy_process_source: TaskRef,
 }
 
 impl TaskCreationCore {
@@ -409,6 +411,7 @@ impl TaskCreationCore {
             kthreadd_created: false,
             user_child_created: false,
             system_scheduling: false,
+            copy_process_source: TaskRef::NONE,
         }
     }
 
@@ -486,6 +489,11 @@ impl TaskCreationCore {
         self.system_scheduling
     }
 
+    #[cfg(app_smoke)]
+    pub const fn copy_process_source(&self) -> TaskRef {
+        self.copy_process_source
+    }
+
     pub fn preset(
         &mut self,
         slub_subsystem: &SlubSubsystem,
@@ -545,6 +553,7 @@ impl TaskCreationCore {
         self.kthreadd_created = false;
         self.user_child_created = false;
         self.system_scheduling = false;
+        self.copy_process_source = TaskRef::NONE;
 
         if self.vector_context.state() != State::Prepared
             || self.uprobe_core.state() != State::Ready
@@ -577,7 +586,18 @@ impl TaskCreationCore {
             || inputs.entry == TaskEntry::None
             || inputs.entry == TaskEntry::UserChild
             || inputs.entry == TaskEntry::SmokeScheduler
-            || !inputs.src_task.online()
+            || inputs.src_task.state() != State::OnCpu
+            || inputs.src_task.execution_authority() != TaskExecutionAuthority::Live
+            || !inputs.src_task_ref.is_valid()
+            || !inputs
+                .src_task
+                .task_ref()
+                .same_identity(inputs.src_task_ref)
+            || inputs.current_task_slot.state() != State::Ready
+            || !inputs
+                .current_task_slot
+                .current()
+                .same_identity(inputs.src_task_ref)
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.credential_core.state() != State::Prepared
             || inputs.signal_core.state() != State::Prepared
@@ -607,6 +627,7 @@ impl TaskCreationCore {
             | TaskEntry::ApIdle
             | TaskEntry::SmokeScheduler => {}
         }
+        self.copy_process_source = inputs.src_task_ref;
 
         Ok(TaskCopyProcessResult {
             entry: inputs.entry,
@@ -690,7 +711,9 @@ impl TaskCreationCore {
 }
 
 pub struct TaskCopyProcessInputs<'a> {
-    pub src_task: &'a BootTask,
+    pub src_task: &'a Task,
+    pub src_task_ref: TaskRef,
+    pub current_task_slot: &'a CurrentTaskSlot,
     pub root_pid_namespace: &'a RootPidNamespace,
     pub credential_core: &'a CredentialCore,
     pub signal_core: &'a SignalCore,

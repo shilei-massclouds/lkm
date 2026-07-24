@@ -233,11 +233,7 @@ object PageAllocatorBuddyFreePageSets: BuddyFreePageSetType {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    MemBlock.state == State::Online;
-                    Zones.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
-                    page_metadata_map_ready(PageMetadataMap, Zones);
-                    page_metadata_map_indexed_by_pfn(PageMetadataMap);
                 }
 
                 ensures {

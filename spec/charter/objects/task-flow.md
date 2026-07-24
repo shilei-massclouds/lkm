@@ -49,6 +49,9 @@ generation，旧引用在 slot 回收后必须稳定失效。
 Preset/Setup/Enable/Disable/Cleanup；预分配 storage 不是已声明实例，alias 离开词法范围也不代表
 Cleanup。Flow `Disable` 必须清除 active binding，`Cleanup` 只允许从 Offline 且不再 active 的实例
 释放资源并到达 Destroyed。Destroyed storage 可以复用，但下一次声明必须使用新的 generation。
+共同的 Preset guard 校验“可启动 binding”而不是只校验 `initial_flow`：初始 Flow 由 Task 的
+`initial_flow` association 满足，exec/fork replacement Flow 则由此前完成的 `Bind` owner/parent 事实
+满足。派生 Flow 不得通过覆盖 Preset 来绕过该共同 guard。
 
 Task 退出必须先 Disable/Cleanup 所有 owned Flow；存在 Online Flow 时不得 terminal Disable Task，
 存在未 Destroyed Flow 时不得 Cleanup Task。终止 Task 不经由 Online breakpoint 状态退出。
@@ -99,6 +102,10 @@ successful exec 同样保持 owner Task identity。`KernelInitFlow.Enable` 只�
 3. Task 提交 old -> new active handoff；
 4. 新 Flow `Enable` 并进入用户应用黑盒；
 5. 旧 Flow `Cleanup`。
+
+因此 `UserAppFlow` 使用完整 lifecycle override：它保留共同的 owner、`OnCpu/Live`、state 和完成事实，
+但 Setup 到达 Ready 后不会自动发送 Enable；只有第 3 步 active handoff 已提交后，第 4 步才能显式发送
+Enable。该完整替换不能实现为对子类型继承 guard 的局部削弱。
 
 Hello/Smoke 不执行 Flow replacement：`KernelInitFlow` 保持 Online，action 只进入已经绑定的内核态
 no-return entry。UserBoot 完成上述顺序后提交 `KernelInitFlow.PayloadHandoffCommitted`；该 checkpoint

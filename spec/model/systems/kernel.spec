@@ -110,7 +110,11 @@ object Kernel: KernelObject {
                         KernelInitTask
                     );
                     BootTask.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
                 }
             }

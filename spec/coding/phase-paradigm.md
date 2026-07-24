@@ -18,6 +18,12 @@
 中的 `drives` 建立；同级阶段之间没有隐式调用边。若 model 与该规则冲突，应先回到 charter
 和 model 审计，不能在 coding 或 impl 中自行选择一条顺序。
 
+Type lifecycle Transition 的 handler 必须先构造成有效继承链，再交给 derive 或 implementation
+lowering。model 工具保存每个贡献者及条目的 source span；有效 handler 按 base-to-derived、最后
+instance 的顺序累积 guard、facts、body member 和 post-commit emits。重复规范化副作用或契约冲突
+必须在 model 阶段失败，不允许 derive 静默去重、最近类型覆盖或让相同 Signal 执行两次。
+`lifecycle_override: true` 只接受完整替换；没有 override 的局部声明不能移除继承贡献。
+
 ## 源码边界
 
 Phase 在 impl 中映射为过程 module，不映射为普通资源对象式 `struct + impl Lifecycle`。每个
@@ -43,7 +49,8 @@ replicated phase family 必须把 target key 映射为独立状态槽，例如�
 每个阶段 transition 按以下顺序映射：
 
 1. **检查 source state**：确认 owner 仍处于 model 声明的源状态，并拒绝重复或越级触发。
-2. **检查 `depends_on`**：使用对象状态查询、结构化事实、构建期证明或明确的架构 adoption。
+2. **检查 `depends_on`**：按 base-to-derived、最后 instance 的顺序检查全部累积 guard，使用对象状态
+   查询、结构化事实、构建期证明或明确的架构 adoption。
 3. **记录开始边界**：若该阶段定义 `Phase.Started`，在 Preset 被接受且当前边界可执行的检查
    完成后发出一次；它不是状态提交。
 4. **执行 transition body**：严格按源码顺序 lowering `drives`、`within` 和相关检查。不得把
@@ -56,7 +63,8 @@ replicated phase family 必须把 target key 映射为独立状态槽，例如�
    必须 fail-stop 或回滚，且不得执行 `emits`。
 8. **发出完成 checkpoint**：在目标状态已经写入并通过边界检查之后发出已声明的 state
    checkpoint。
-9. **lowering `emits`**：按 model 顺序触发 completion event。标准阶段中，Preset 提交
+9. **lowering `emits`**：在全部继承贡献已成功完成后按 base-to-derived、最后 instance 及各自 model
+   源码顺序触发 completion event。标准阶段中，Preset 提交
    Prepared 后调用本阶段 Setup，Setup 提交 Ready 后调用本阶段 Enable。
 
 架构入口太早而无法完成全部 Rust 检查时，可以先用稳定汇编编码记录 `Started`，再在最早可行

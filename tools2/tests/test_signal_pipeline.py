@@ -91,11 +91,15 @@ class SignalPipelineTests(unittest.TestCase):
             derive_args.extend(["--source", source_name])
         self.assertEqual(derive_main(derive_args), 0)
         check_exit = check_main([str(derivation), "-o", str(checked)])
-        self.assertIn(check_exit, {0, 1})
+        checked_data = read_json(checked)
+        expected_check_exit = (
+            0 if checked_data["verdict"] in {"complete", "reached"} else 1
+        )
+        self.assertEqual(check_exit, expected_check_exit)
         self.assertEqual(view_main([str(derivation), "-o", str(view)]), 0)
         with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
             self.assertEqual(render_main([str(view), "-o", str(text)]), 0)
-        return read_json(derivation), read_json(checked), text.read_text(encoding="utf-8")
+        return read_json(derivation), checked_data, text.read_text(encoding="utf-8")
 
     def test_drives_and_emits_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -380,6 +384,301 @@ class SignalPipelineTests(unittest.TestCase):
             "Wrapper.Transition::Setup@process",
         )
         self.assertEqual(derivation["last_stable_snapshot"]["states"]["Root.child"], "Ready")
+
+    def test_multilevel_lifecycle_contributions_keep_guard_drive_fact_and_emit_order(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            type Leaf {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            type BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        depends_on { base_guard(self); }
+                        drives { BaseLeaf.Transition::Preset; }
+                        ensures { base_done(self); }
+                        emits { Transition::Setup; }
+                    }
+                    Transition::Setup {
+                        state_effect: StateEffect::Always;
+                    }
+                }
+            }
+            type DerivedFlow: BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        depends_on { derived_guard(self); }
+                        drives { DerivedLeaf.Transition::Preset; }
+                        ensures { derived_done(self); }
+                    }
+                }
+            }
+            object BaseLeaf: Leaf { }
+            object DerivedLeaf: Leaf { }
+            object InstanceLeaf: Leaf { }
+            object Root: DerivedFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    invariant {
+                        base_guard(self);
+                        derived_guard(self);
+                        instance_guard(self);
+                    }
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            depends_on { instance_guard(self); }
+                            drives { InstanceLeaf.Transition::Preset; }
+                            ensures { instance_done(self); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    invariant {
+                        base_done(self);
+                        derived_done(self);
+                        instance_done(self);
+                    }
+                    transitions { on Transition::Setup -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            """,
+            "Root.Preset",
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertEqual(checked["verdict"], "complete")
+        self.assertEqual(
+            [
+                (item["target"], item["name"], item["delivery"], item["outcome"])
+                for item in derivation["signals"]
+            ],
+            [
+                ("Root", "Preset", "root", "completed"),
+                ("BaseLeaf", "Preset", "drives", "completed"),
+                ("DerivedLeaf", "Preset", "drives", "completed"),
+                ("InstanceLeaf", "Preset", "drives", "completed"),
+                ("Root", "Setup", "emits", "completed"),
+            ],
+        )
+        self.assertEqual(
+            [
+                item["owner"]
+                for item in derivation["signals"][0]["handler"][
+                    "composed_type_processes"
+                ]
+            ],
+            ["BaseFlow", "DerivedFlow"],
+        )
+        self.assertEqual(
+            derivation["last_stable_snapshot"]["states"]["Root"], "Ready"
+        )
+        self.assertTrue(
+            {
+                "base_done(Root)",
+                "derived_done(Root)",
+                "instance_done(Root)",
+            }.issubset(derivation["last_stable_snapshot"]["facts"])
+        )
+        root_response = next(
+            item["sequence"]
+            for item in derivation["events"]
+            if item["kind"] == "response_completed" and item["signal_id"] == "sig-0001"
+        )
+        setup_enqueue = next(
+            item["sequence"]
+            for item in derivation["events"]
+            if item["kind"] == "emits_enqueued" and item["signal_id"] == "sig-0001"
+        )
+        self.assertLess(root_response, setup_enqueue)
+
+    def test_duplicate_inherited_side_effect_is_a_tools2_model_error(self) -> None:
+        source = """
+            type BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        emits { Transition::Setup; }
+                    }
+                    Transition::Setup { state_effect: StateEffect::Always; }
+                }
+            }
+            type DerivedFlow: BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        emits { Transition::Setup; }
+                    }
+                }
+            }
+            object Root: DerivedFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared { } }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "duplicate.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            modeled = read_json(model)
+            self.assertFalse(modeled["summary"]["ok"])
+            self.assertTrue(
+                any(
+                    "duplicate inherited emits entry" in item["message"]
+                    for item in modeled["diagnostics"]
+                )
+            )
+
+    def test_explicit_type_state_transition_contributes_source_target_and_body(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            type BaseCarrier {
+                initial_state: State::Base;
+                invariant { base_guard(self); }
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Ready {
+                            depends_on { base_guard(self); }
+                            ensures { base_done(self); }
+                        }
+                    }
+                }
+                state State::Ready { invariant { base_done(self); derived_done(self); } }
+            }
+            type DerivedCarrier: BaseCarrier {
+                invariant { derived_guard(self); }
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        depends_on { derived_guard(self); }
+                        ensures { derived_done(self); }
+                    }
+                }
+            }
+            object Root: DerivedCarrier { }
+            """,
+            "Root.Preset",
+        )
+        self.assertEqual(checked["verdict"], "complete")
+        root = derivation["signals"][0]
+        self.assertEqual(
+            (root["handler"]["source_state"], root["handler"]["target_state"]),
+            ("Base", "Ready"),
+        )
+        self.assertEqual(
+            [item["owner"] for item in root["handler"]["composed_type_processes"]],
+            ["BaseCarrier", "DerivedCarrier"],
+        )
+        self.assertTrue(
+            {"base_done(Root)", "derived_done(Root)"}.issubset(
+                derivation["last_stable_snapshot"]["facts"]
+            )
+        )
+
+        conflicting = """
+            type BaseCarrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            type DerivedCarrier: BaseCarrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared { } }
+                }
+                state State::Prepared { }
+            }
+            object Root: DerivedCarrier { }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root_dir = Path(tmp)
+            spec = root_dir / "conflict.spec"
+            ast = root_dir / "ast.json"
+            model = root_dir / "model.json"
+            spec.write_text(textwrap.dedent(conflicting), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            modeled = read_json(model)
+            self.assertTrue(
+                any(
+                    item["message"]
+                    == "conflicting inherited target state: DerivedCarrier.Transition::Preset"
+                    for item in modeled["diagnostics"]
+                )
+            )
+
+    def test_lifecycle_override_requires_and_uses_a_complete_replacement(self) -> None:
+        complete = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            object Root: Carrier {
+                lifecycle_override: true;
+                initial_state: State::Online;
+                state State::Online {
+                    actions { on Action::Inspect { ensures { override_used(self); } } }
+                }
+            }
+        """
+        derivation, checked, _ = self.run_source(complete, "Root.Inspect")
+        self.assertEqual(checked["verdict"], "complete")
+        self.assertEqual(set(derivation["initial_snapshot"]["states"].values()), {"Online"})
+        self.assertIn(
+            "override_used(Root)", derivation["last_stable_snapshot"]["facts"]
+        )
+
+        partial = """
+            type Carrier {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Ready { } }
+                }
+                state State::Ready { }
+            }
+            object Root: Carrier {
+                lifecycle_override: true;
+                initial_state: State::Online;
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "partial.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            spec.write_text(textwrap.dedent(partial), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            modeled = read_json(model)
+            self.assertFalse(modeled["summary"]["ok"])
+            self.assertTrue(
+                any(
+                    item["message"]
+                    == "lifecycle_override on Root requires both initial_state and states"
+                    for item in modeled["diagnostics"]
+                )
+            )
 
     def test_has_slot_uses_instance_field_declared_type_structure(self) -> None:
         source = """
@@ -1892,8 +2191,18 @@ class SignalPipelineTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertIn(normal.returncode, {0, 1}, normal.stderr)
+            self.assertEqual(normal.returncode, 0, normal.stderr)
             normal_data = read_json(normal_work / "derive.json")
+            normal_checked = read_json(normal_work / "check.json")
+            self.assertEqual(normal_data["verdict"], "complete")
+            self.assertEqual(normal_checked["verdict"], "complete")
+            self.assertEqual(normal_checked["exit_code"], 0)
+            self.assertFalse(
+                any(
+                    item["outcome"] in {"rejected", "failed"}
+                    for item in normal_data["signals"]
+                )
+            )
             self.assertIsNone(normal_data["until_request"])
             self.assertIsNone(normal_data["boundary"])
             self.assertTrue(
@@ -1920,6 +2229,32 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(normal_states["Riscv64Platform"], "Online")
             self.assertEqual(normal_states["BootCpuRegisters"], "Online")
             self.assertEqual(normal_states["OpenSBI"], "Online")
+            flow_lifecycle_counts = {
+                (target, transition): sum(
+                    item["target"] == target and item["name"] == transition
+                    for item in normal_data["signals"]
+                )
+                for target in (
+                    "BootInitFlow",
+                    "KernelInitFlow",
+                    "ApIdleFlow",
+                    "Pid1UserAppFlow",
+                )
+                for transition in ("Setup", "Enable")
+            }
+            self.assertEqual(
+                flow_lifecycle_counts,
+                {
+                    (target, transition): 1
+                    for target in (
+                        "BootInitFlow",
+                        "KernelInitFlow",
+                        "ApIdleFlow",
+                        "Pid1UserAppFlow",
+                    )
+                    for transition in ("Setup", "Enable")
+                },
+            )
 
             resumed_work = root / "kernel-resumed"
             resumed = subprocess.run(
@@ -1930,7 +2265,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "-s",
                     str(snapshot),
                     "--max-depth",
-                    "0",
+                    "all",
                     "--work-dir",
                     str(resumed_work),
                 ],
@@ -1939,8 +2274,18 @@ class SignalPipelineTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertIn(resumed.returncode, {0, 1}, resumed.stderr)
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
             resumed_data = read_json(resumed_work / "derive.json")
+            resumed_checked = read_json(resumed_work / "check.json")
+            self.assertEqual(resumed_data["verdict"], "complete")
+            self.assertEqual(resumed_checked["verdict"], "complete")
+            self.assertEqual(resumed_checked["exit_code"], 0)
+            self.assertFalse(
+                any(
+                    item["outcome"] in {"rejected", "failed"}
+                    for item in resumed_data["signals"]
+                )
+            )
             self.assertEqual(resumed_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(
                 (resumed_data["root_request"]["target"], resumed_data["root_request"]["signal"]),
@@ -1966,8 +2311,18 @@ class SignalPipelineTests(unittest.TestCase):
                     capture_output=True,
                     check=False,
                 )
-                self.assertEqual(default_result.returncode, 1, default_result.stderr)
+                self.assertEqual(default_result.returncode, 0, default_result.stderr)
                 default_data = read_json(default_work / "derive.json")
+                default_checked = read_json(default_work / "check.json")
+                self.assertEqual(default_data["verdict"], "complete")
+                self.assertEqual(default_checked["verdict"], "complete")
+                self.assertEqual(default_checked["exit_code"], 0)
+                self.assertFalse(
+                    any(
+                        item["outcome"] in {"rejected", "failed"}
+                        for item in default_data["signals"]
+                    )
+                )
                 self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
                 self.assertEqual(default_data["signals"][0]["target"], "Kernel")
                 self.assertEqual(default_data["signals"][0]["name"], "Preset")

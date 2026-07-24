@@ -81,7 +81,11 @@ object RootfsConsoleDeferred: KernelObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     InitramfsSyncDeferred.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                 }
 
                 ensures {
@@ -295,7 +299,11 @@ object RootFS: KernelObject {
                     RootfsConsoleDeferred.state == State::Ready;
                     RootfsPrepareNamespacePaths.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     rootfs_mount_created(VfsCore);
@@ -470,7 +478,11 @@ object RootfsPhase: PhaseObject {
                 depends_on {
                     InitcallPhase.state == State::Online;
                     InitcallBoundary.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     Workqueue.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
                 }

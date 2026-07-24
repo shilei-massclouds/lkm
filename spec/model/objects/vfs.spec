@@ -486,6 +486,10 @@ object VfsCore: ResourceObject {
                     dentry_lookup_returns(VfsCore, Dentry);
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                     inode_ext2_inode_bound(Inode, Ext2InodeRef::LookupFile);
+                    ext2_inode_is_regular_file(
+                        Ext2FileSystem,
+                        Ext2InodeRef::LookupFile
+                    );
                     inode_read_only_backed(Inode);
                     dentry_child_inserted(Dentry, Dentry);
                 }

@@ -158,6 +158,10 @@ def _event_to_json(item: TransitionDef) -> dict[str, Any]:
         "source_state": item.source_state,
         "target_state": item.target_state,
         "lifecycle_owner": item.lifecycle_owner,
+        "handler_contributions": [
+            {"owner": owner, "span": _span_to_json(span)}
+            for owner, span in item.handler_contributions
+        ],
         "span": _span_to_json(decl.span),
         "parameters": [
             {"name": name, "type": type_name}

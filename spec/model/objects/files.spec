@@ -271,7 +271,11 @@ object FilesStruct: ResourceObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     ConsoleRegistry.state == State::Ready;
                 }
 

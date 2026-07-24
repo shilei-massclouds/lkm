@@ -24,6 +24,16 @@ carrier and its independently-lived `TaskFlow` instances.
 - Execution-boundary coverage must prove that a Flow process proceeds only
   when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
   lifecycle state, and CurrentTaskSlot must agree with the OnCpu Task once set.
+- CopyProcess coverage must accept an OnCpu/Live source whose validated TaskRef
+  equals CurrentTaskSlot, and reject Online, Reserved, non-current and mismatched
+  TaskRef sources without changing TaskCreationCore or destination state.
+- Model-tool coverage must exercise multi-level lifecycle inheritance: cumulative
+  conditions/facts, base-to-derived drives, post-commit emits, duplicate-side-effect
+  rejection and complete override. The legacy and tools2 pipelines must produce the
+  same effective ordering for the shared fixture.
+- TaskFlow trace coverage must observe exactly one Setup and one Enable completion
+  Signal for each Flow lifecycle, preserve BootInitFlow's entry-object order, and
+  continue through rest-init, first dispatch and later Flow startup.
 - KernelInitTask, KthreaddTask and clone-child Setup must leave a Prepared context and their initial
   Flow in Base. Enable binds the context to the exact initial FlowRef and publishes Online/Valid without
   sending Startup. The first real switch must validate/consume it and start the initial Flow.

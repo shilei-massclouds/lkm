@@ -1395,6 +1395,90 @@ class DeriveToolTests(unittest.TestCase):
         self.assertIn("token_touched(TokenObject)", proved_expressions)
         self.assertIn("gate_open(GateObject)", proved_expressions)
 
+    def test_multilevel_lifecycle_drives_facts_and_emits_use_inheritance_order(self) -> None:
+        source = """
+            type BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        drives { BaseLeaf.Transition::Preset; }
+                        ensures { base_fact(self); }
+                        emits { Transition::Setup; }
+                    }
+                    Transition::Setup {
+                        state_effect: StateEffect::Always;
+                    }
+                }
+            }
+            type DerivedFlow: BaseFlow {
+                lifecycle {
+                    Transition::Preset {
+                        state_effect: StateEffect::Always;
+                        drives { DerivedLeaf.Transition::Preset; }
+                        ensures { derived_fact(self); }
+                    }
+                }
+            }
+            type Leaf {
+                initial_state: State::Base;
+                state State::Base { transitions { on Transition::Preset -> State::Prepared {} } }
+                state State::Prepared {}
+            }
+            object BaseLeaf: Leaf {}
+            object DerivedLeaf: Leaf {}
+            object InstanceLeaf: Leaf {}
+            object ComputerProject: DerivedFlow {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            drives { InstanceLeaf.Transition::Preset; }
+                            ensures { instance_fact(self); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    invariant {
+                        base_fact(self);
+                        derived_fact(self);
+                        instance_fact(self);
+                    }
+                    transitions { on Transition::Setup -> State::Ready {} }
+                }
+                state State::Ready {}
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(Path(tmp), source)
+
+        self.assertTrue(data["summary"]["ok"])
+        self.assertEqual(
+            [
+                (item["object"], item["transition"])
+                for item in data["transitions"]
+            ],
+            [
+                ("BaseLeaf", "Preset"),
+                ("DerivedLeaf", "Preset"),
+                ("InstanceLeaf", "Preset"),
+                ("ComputerProject", "Preset"),
+                ("ComputerProject", "Setup"),
+            ],
+        )
+        self.assertEqual(data["states"]["ComputerProject"], "Ready")
+        proved = {
+            record["expression"]
+            for record in data["records"]
+            if record["status"] == "proved"
+        }
+        self.assertTrue(
+            {
+                "base_fact(ComputerProject)",
+                "derived_fact(ComputerProject)",
+                "instance_fact(ComputerProject)",
+            }.issubset(proved)
+        )
+
     def test_runtime_type_lifecycle_rejects_transition_from_wrong_state(self) -> None:
         source = """
             type Carrier {

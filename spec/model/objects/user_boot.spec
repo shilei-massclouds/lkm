@@ -675,7 +675,11 @@ object UserCloneDeferredBoundaries: KernelObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     PayloadParam.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     SystemState.state == State::Online;
                     system_state_running(SystemState);
                 }
@@ -887,7 +891,11 @@ object UserAddressSpace: ResourceObject {
                     SwapperVm.state == State::Online;
                     PageAllocator.state == State::Ready;
                     KernelGlobalAllocator.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                 }
 
                 ensures {
@@ -1044,7 +1052,11 @@ object UserTrapFrame: ResourceObject {
                     UserAddressSpace.state == State::Ready;
                     ElfObject.state == State::Ready;
                     UserStack.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                 }
 
                 ensures {
@@ -1994,7 +2006,11 @@ object SyscallTable: ResourceObject {
                  */
                 depends_on {
                     SyscallException.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                 }
 
 
@@ -3125,7 +3141,11 @@ object UserBootPayload: ResourceObject {
                     RootFS.state == State::Online;
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     ExecSyncBoundaries.state == State::Ready;
                 }
 
@@ -3388,7 +3408,11 @@ object UserBootPayload: ResourceObject {
                     UserTrapFrame.state == State::Ready;
                     SyscallTable.state == State::Ready;
                     SyscallException.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     Pid1UserAppFlow.state == State::Online;
                     KernelInitFlow.state == State::Destroyed;
                     task_owns_flow(KernelInitTask, KernelInitFlow);
@@ -3436,7 +3460,11 @@ object UserBootPayload: ResourceObject {
     state State::Online {
         invariant {
             user_boot_payload_selected(self);
-            KernelInitTask.state == State::Online;
+            KernelInitTask.state == State::OnCpu;
+            task_execution_authority_is(
+                KernelInitTask,
+                TaskExecutionAuthority::Live
+            );
             KernelInitFlow.state == State::Destroyed;
             task_owns_flow(KernelInitTask, KernelInitFlow);
             task_at_most_one_flow_online(KernelInitTask);

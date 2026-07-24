@@ -2,6 +2,11 @@
 
 本目录记录 `Composition Phase` 的补充约束。
 
+2026-07-25 lifecycle 继承与 CopyProcess current-task 投影复核：effective handler 的组成只改变规格
+工具对既有 Type/instance 声明的解释；Rust `copy_process` 在既有 objects/boot-init 私有边界增加只读
+`CurrentTaskSlot` 与 `TaskRef` 输入，不新增 crate、facade、feature、公开 API 或组件依赖。
+`spec/compose/main.spec` 已复核，组合语义无需修改。
+
 2026-07-24 tools2 Signal animation 复核：独立 Python `animate` 包、Svelte/TypeScript 源码、锁定的
 frontend 工具链和纳入仓库的静态 JS/CSS bundle 只组合 tools2 离线 HTML 产物；不新增或调整内核
 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，内核

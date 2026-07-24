@@ -449,6 +449,8 @@ object CpuStartProvider: HardwareObject {
                     cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
                     sbi_boot_data_publish_barriers_observed(CpuStartProvider);
                     sbi_hsm_startup_signal_keyed_by_logical_id(CpuStartProvider, ApIdleFlow);
+                    ap_idle_flow_hsm_startup_keyed(ApIdleFlow);
+                    ap_idle_flow_key_matches_task(ApIdleFlow, ApIdleTask);
                     sbi_hsm_startup_targets_task_initial_flow(
                         CpuStartProvider,
                         ApIdleTask,
@@ -992,7 +994,11 @@ object SmpBringupPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     PreSmpInitPhase.state == State::Online;
-                    KernelInitTask.state == State::Online;
+                    KernelInitTask.state == State::OnCpu;
+                    task_execution_authority_is(
+                        KernelInitTask,
+                        TaskExecutionAuthority::Live
+                    );
                     BootIdleSetup.state == State::Ready;
                     BootIdleFlow.state == State::Ready;
                     KthreaddTask.state == State::Online;
@@ -1011,7 +1017,6 @@ object SmpBringupPhase: PhaseObject {
                     CpuHotplugSyncSet.Transition::Preset;
                     CpuAddRemoveLock.Transition::Preset;
                     CpuAddRemoveLock.Transition::Setup;
-                    CpuStartProvider.Transition::Setup;
                 }
 
                 ensures {
@@ -1021,18 +1026,13 @@ object SmpBringupPhase: PhaseObject {
                     secondary_idle_tasks_on_cpu_reserved(CpuGroup);
                     secondary_idle_task_breakpoints_invalid(CpuGroup);
                     secondary_idle_flows_base(CpuGroup);
-                    sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
-                    sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
                     cpu_hotplug_sync_gates_prepared(CpuGroup);
                     cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
                     smpboot_threads_mutex_guard_used(CpuHotplugSyncSet, SmpbootThreadsLock);
-                    cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
-                    cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
-                    sbi_boot_data_publish_barriers_observed(CpuStartProvider);
-                    sbi_hsm_startup_signal_keyed_by_logical_id(
-                        CpuStartProvider,
-                        ApIdleFlow
-                    );
+                }
+
+                emits {
+                    CpuStartProvider.Transition::Setup;
                 }
             }
         }
@@ -1044,16 +1044,11 @@ object SmpBringupPhase: PhaseObject {
             SmpbootThreadsLock.state == State::Ready;
             CpuHotplugSyncSet.state == State::Prepared;
             CpuAddRemoveLock.state == State::Ready;
-            CpuStartProvider.state == State::Ready;
-            sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
             secondary_idle_tasks_on_cpu_reserved(CpuGroup);
             secondary_idle_task_breakpoints_invalid(CpuGroup);
             secondary_idle_flows_base(CpuGroup);
             cpu_hotplug_read_guard_used(CpuHotplugSyncSet, CpuHotplugLock);
             smpboot_threads_mutex_guard_used(CpuHotplugSyncSet, SmpbootThreadsLock);
-            cpu_add_remove_mutex_guard_used(CpuStartProvider, CpuAddRemoveLock);
-            cpu_hotplug_write_guard_used(CpuStartProvider, CpuHotplugLock);
-            sbi_boot_data_publish_barriers_observed(CpuStartProvider);
         }
 
         transitions {
@@ -1086,9 +1081,6 @@ object SmpBringupPhase: PhaseObject {
                     smp_bringup_phase_ready(SmpBringupPhase);
                     secondary_cpus_online(CpuGroup);
                     smp_concurrency_open(CpuGroup);
-                }
-                emits {
-                    KernelInitFlow.Transition::Setup;
                 }
             }
         }

@@ -115,6 +115,11 @@ object VirtioMmioTransportDevice: ResourceObject {
                     virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
                     virtio_mmio_transport_supported_device(VirtioMmioTransportDevice);
                     virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
+                    virtio_device_allocated(VirtioDevice);
+                    virtio_device_transport_bound(
+                        VirtioDevice,
+                        VirtioMmioTransportDevice
+                    );
                     virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
                     virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
                     virtio_mmio_transport_irq_ack_ready(VirtioMmioTransportDevice);
@@ -143,6 +148,8 @@ object VirtioMmioTransportDevice: ResourceObject {
             virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
             virtio_mmio_transport_supported_device(VirtioMmioTransportDevice);
             virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
+            virtio_device_allocated(VirtioDevice);
+            virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
             virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_irq_ack_ready(VirtioMmioTransportDevice);

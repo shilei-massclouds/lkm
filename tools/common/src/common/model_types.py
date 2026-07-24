@@ -57,6 +57,7 @@ class TransitionDef:
     target_state: str
     decl: TransitionDecl
     lifecycle_owner: str | None = None
+    handler_contributions: tuple[tuple[str, SourceSpan], ...] = ()
 
 
 @dataclass(frozen=True)

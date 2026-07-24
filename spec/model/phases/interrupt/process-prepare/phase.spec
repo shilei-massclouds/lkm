@@ -314,6 +314,8 @@ object TaskCreationCore: KernelObject {
              */
             Action::CopyProcess<Src: Task, New: Task>(
                 src_task: Src,
+                src_task_ref: TaskRef,
+                current_task_ref: TaskRef,
                 dst_task: New,
                 pid_ns: RootPidNamespace,
                 creds: CredentialCore,
@@ -325,7 +327,30 @@ object TaskCreationCore: KernelObject {
             ) {
                 state_effect: StateEffect::None;
                 depends_on {
-                    src_task.state == State::Online;
+                    src_task.state == State::OnCpu;
+                    task_execution_authority_is(
+                        src_task,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_ref_ready(src_task_ref);
+                    task_ref_targets(src_task_ref, src_task);
+                    task_ref_ready(current_task_ref);
+                    task_ref_targets(current_task_ref, src_task);
+                    current_task_ref_targets_cpu_task(
+                        current_task_ref,
+                        BootCurrentCPU,
+                        src_task
+                    );
+                    current_task_ref_from_cpu_view(
+                        current_task_ref,
+                        BootCurrentCPU,
+                        src_task
+                    );
+                    current_task_slot_current(BootCpuCurrentTask, src_task);
+                    current_task_slot_matches_on_cpu_task(
+                        BootCpuCurrentTask,
+                        src_task
+                    );
                     dst_task.state == State::Prepared;
                     pid_ns.state == State::Ready;
                     creds.state == State::Prepared;
@@ -340,6 +365,11 @@ object TaskCreationCore: KernelObject {
 
                 ensures {
                     task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
+                    task_creation_copy_process_used_current_source(
+                        TaskCreationCore,
+                        src_task,
+                        src_task_ref
+                    );
                     task_creation_used_clone_args(TaskCreationCore, dst_task);
                     task_creation_bound_flow(TaskCreationCore, dst_task, flow);
                     task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
