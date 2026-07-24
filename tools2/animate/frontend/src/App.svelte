@@ -1,22 +1,93 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import type { AnimationTrace } from './types';
+  import { onMount, tick } from 'svelte';
+  import type { AnimationPhase, AnimationTrace } from './types';
   import FrameTree from './FrameTree.svelte';
+  import SignalArrow from './SignalArrow.svelte';
+  import { signalGeometry, type ArrowGeometry } from './geometry';
 
   let { animation }: { animation: AnimationTrace } = $props();
   const request = $derived(animation.trace.root_request);
   let position = $state(-1);
-  const frame = $derived(position < 0 ? animation.initial_frame : animation.frames[position]);
-  const step = $derived(position < 0 ? null : animation.steps[position]);
+  let activeIndex = $state<number | null>(null);
+  let phase = $state<AnimationPhase>('idle');
+  let reducedMotion = $state(typeof window === 'undefined' || typeof window.matchMedia !== 'function');
+  let stageElement = $state<HTMLElement | null>(null);
+  let arrowGeometry = $state<ArrowGeometry | null>(null);
+  let overlayWidth = $state(1);
+  let overlayHeight = $state(1);
+  const shownIndex = $derived(activeIndex ?? position);
+  const frame = $derived(shownIndex < 0 ? animation.initial_frame : animation.frames[shownIndex]);
+  const step = $derived(shownIndex < 0 ? null : animation.steps[shownIndex]);
+  const transitioning = $derived(activeIndex !== null);
   const canPrevious = $derived(position >= 0);
-  const canNext = $derived(position < animation.frames.length - 1);
+  const canNext = $derived(position < animation.frames.length - 1 && !transitioning);
 
   function previous() {
-    if (canPrevious) position -= 1;
+    if (canPrevious && !transitioning) {
+      position -= 1;
+      arrowGeometry = null;
+    }
   }
 
-  function next() {
-    if (canNext) position += 1;
+  function pause(milliseconds: number) {
+    return reducedMotion ? Promise.resolve() : new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  }
+
+  function endpoint(id: string) {
+    return Array.from(stageElement?.querySelectorAll<HTMLElement>('[data-node-id]') || [])
+      .find((element) => element.dataset.nodeId === id) || null;
+  }
+
+  function updateArrow() {
+    if (!stageElement || !step) {
+      arrowGeometry = null;
+      return;
+    }
+    const source = endpoint(step.source);
+    const target = endpoint(step.target);
+    if (!source || !target) {
+      arrowGeometry = null;
+      return;
+    }
+    const stageRect = stageElement.getBoundingClientRect();
+    arrowGeometry = signalGeometry(
+      source.getBoundingClientRect(),
+      target.getBoundingClientRect(),
+      stageRect,
+      stageElement.scrollLeft,
+      stageElement.scrollTop
+    );
+    overlayWidth = Math.max(stageElement.scrollWidth, stageElement.clientWidth, 1);
+    overlayHeight = Math.max(stageElement.scrollHeight, stageElement.clientHeight, 1);
+  }
+
+  function revealTarget() {
+    if (!stageElement || !step) return;
+    const target = endpoint(step.target);
+    if (!target || typeof stageElement.scrollTo !== 'function') return;
+    stageElement.scrollTo({
+      left: Math.max(0, target.offsetLeft + target.offsetWidth / 2 - stageElement.clientWidth / 2),
+      top: Math.max(0, target.offsetTop + target.offsetHeight / 2 - stageElement.clientHeight / 2),
+      behavior: reducedMotion ? 'auto' : 'smooth'
+    });
+  }
+
+  async function next() {
+    if (!canNext) return;
+    activeIndex = position + 1;
+    phase = 'send';
+    await tick();
+    revealTarget();
+    updateArrow();
+    await pause(300);
+    phase = 'response';
+    await pause(420);
+    phase = 'clear';
+    arrowGeometry = null;
+    await pause(180);
+    position = activeIndex;
+    activeIndex = null;
+    phase = 'idle';
   }
 
   function responseText() {
@@ -29,6 +100,11 @@
   }
 
   onMount(() => {
+    const media = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null;
+    const setMotion = () => { reducedMotion = media?.matches ?? true; };
+    setMotion();
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -38,8 +114,15 @@
         next();
       }
     };
+    const onResize = () => updateArrow();
     window.addEventListener('keydown', onKeydown);
-    return () => window.removeEventListener('keydown', onKeydown);
+    window.addEventListener('resize', onResize);
+    media?.addEventListener('change', setMotion);
+    return () => {
+      window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('resize', onResize);
+      media?.removeEventListener('change', setMotion);
+    };
   });
 </script>
 
@@ -59,13 +142,29 @@
     <div><dt>Signals</dt><dd>{animation.trace.total_steps}</dd></div>
     <div><dt>Protocol</dt><dd>{animation.schema} v{animation.version}</dd></div>
   </dl>
-  <div class="stage" aria-label="Signal animation canvas" aria-live="polite">
-    <FrameTree {frame} />
+  <div
+    class="stage"
+    class:reduced-motion={reducedMotion}
+    aria-label="Signal animation canvas"
+    aria-live="polite"
+    data-animation-phase={phase}
+    bind:this={stageElement}
+  >
+    <FrameTree {frame} activeStep={transitioning ? step : null} {phase} {reducedMotion} />
+    {#if arrowGeometry && step && (phase === 'send' || phase === 'response')}
+      <SignalArrow
+        geometry={arrowGeometry}
+        signal={step.signal}
+        outcome={step.outcome}
+        width={overlayWidth}
+        height={overlayHeight}
+      />
+    {/if}
   </div>
   <section class="transport" aria-label="Signal navigation">
     <button type="button" onclick={previous} disabled={!canPrevious}>上一步</button>
     <div class="step-copy">
-      <p class="counter">步骤 {position + 1} / {animation.trace.total_steps}</p>
+      <p class="counter">步骤 {shownIndex + 1} / {animation.trace.total_steps}</p>
       {#if step}
         <h2>{step.source} <span>— {step.signal} →</span> {step.target}</h2>
         <p>{responseText()}</p>

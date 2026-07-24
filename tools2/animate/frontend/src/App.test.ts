@@ -59,6 +59,11 @@ function nodes() {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-node-id]')).map((node) => node.dataset.nodeId);
 }
 
+async function settle() {
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  await tick();
+}
+
 describe('deterministic step navigation', () => {
   it('uses buttons and restores the exact previous frame', async () => {
     app = mount(App, { target: document.body, props: { animation } });
@@ -67,16 +72,16 @@ describe('deterministic step navigation', () => {
     const [previous, next] = Array.from(document.querySelectorAll<HTMLButtonElement>('button'));
     expect(previous.disabled).toBe(true);
     next.click();
-    await tick();
+    await settle();
     expect(nodes()).toEqual(['Root', 'Human']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
     expect(document.body.textContent).toContain('State::Base → State::Ready');
     next.click();
-    await tick();
+    await settle();
     expect(nodes()).toEqual(['Root', 'Async', 'Child', 'Human']);
     const rootChildren = document.querySelector('[data-children-of="Root"]');
     expect(rootChildren?.closest('[data-node-id="Root"]')).not.toBeNull();
-    expect(Array.from(rootChildren?.children || []).map((node) => node.getAttribute('data-node-id'))).toEqual(['Async', 'Child']);
+    expect(Array.from(rootChildren?.children || []).map((slot) => slot.querySelector('[data-node-id]')?.getAttribute('data-node-id'))).toEqual(['Async', 'Child']);
     expect(document.body.textContent).toContain('Action：响应完成');
     previous.click();
     await tick();
@@ -88,7 +93,7 @@ describe('deterministic step navigation', () => {
     app = mount(App, { target: document.body, props: { animation } });
     await tick();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
-    await tick();
+    await settle();
     expect(document.querySelector('.counter')?.textContent).toContain('1 / 2');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
     await tick();

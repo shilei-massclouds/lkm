@@ -14,6 +14,7 @@ export interface AnimationTrace {
 }
 
 export type HandlerKind = 'Transition' | 'Action' | null;
+export type AnimationPhase = 'idle' | 'send' | 'response' | 'clear';
 
 export interface AnimationStep {
   index: number;

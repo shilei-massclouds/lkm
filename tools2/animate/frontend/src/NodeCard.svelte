@@ -2,13 +2,34 @@
   import type { Snippet } from 'svelte';
   import type { AnimationNode } from './types';
 
-  let { node, children }: { node: AnimationNode; children?: Snippet } = $props();
+  let {
+    node,
+    children,
+    activeSource = false,
+    activeTarget = false,
+    responseKind = null,
+    outcome = 'completed',
+    responsePhase = false
+  }: {
+    node: AnimationNode;
+    children?: Snippet;
+    activeSource?: boolean;
+    activeTarget?: boolean;
+    responseKind?: 'Transition' | 'Action' | null;
+    outcome?: string;
+    responsePhase?: boolean;
+  } = $props();
   const stateClass = $derived(node.state ? `state-${node.state.toLowerCase()}` : 'state-none');
 </script>
 
 <article
   class:structural={node.structural}
   class:external={node.kind === 'external'}
+  class:signal-source={activeSource}
+  class:signal-target={activeTarget}
+  class:responding={activeTarget && responsePhase}
+  class:action-response={activeTarget && responsePhase && responseKind === 'Action'}
+  class:error-response={activeTarget && responsePhase && outcome !== 'completed'}
   class="node-card {stateClass}"
   data-node-id={node.id}
   data-parent-id={node.parent || '$root'}
