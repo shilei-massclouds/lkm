@@ -1,4 +1,10 @@
-# tools2 Signal 交互动画计划
+# tools2 Signal 交互动画完成归档
+
+## 完成状态
+
+本专题已于 2026-07-24 闭环，没有剩余实现责任；后续新增自动播放、时间线、视频导出或浏览器 derive
+均需另行建立任务和规格。实现保持在独立 `tools2/animate/` 目录，老 `tools/` 静态 SVG、tools2 v4
+model/view schema、derive 和 text renderer 均未改变。
 
 ## 目标与边界
 
@@ -143,6 +149,22 @@ v1 或首轮播放器的兼容性负担；未来如需增加，应另行确认�
   选择或 transition 逆执行路径。
 - tools2 v4 view schema、text renderer 与老 tools 静态 SVG 不因本能力扩展格式或改变默认行为。
 - focused validation 通过，`git diff --check` 通过，最后从仓库根目录直接运行 `make test`。
+
+## 实施与验收证据
+
+- 规格、骨架、确定帧、步进、层级、动效、CLI 与浏览器加固分别由提交 `b0ba0093`、`9f66f7f2`、
+  `092e74ef`、`568840fd`、`24747ef6`、`7561ff38`、`35d85d4f`、`75ce505f` 闭合。
+- Python animate 严格验证 v4 schema/version/producer、source/fingerprint、端点、handler、outcome、
+  snapshot 和 parent；合法无状态 system/process 使用真实 `null`，结构祖先另以 `structural` 标识。
+- Svelte 5 + TypeScript bundle 固定依赖并纳入仓库；最终 CSS/JS 约 6.05/50.51 KiB，rebuild 后 stale
+  check 通过。安全 JSON 内嵌和 HTML 原子写入均有测试。
+- 固定 pipeline demo 为 4 步、约 61 KiB；正式 `-u Kernel.Startup` demo 为 reached/12 步、约 96 KiB；
+  完整主模型为 failed/277 步、约 3.4 MiB，HTML 成功且保留 check 退出码 1。
+- `make -C tools2 test`：54/54；Vitest：8/8；Playwright Chromium：5/5。端到端覆盖按钮、键盘、
+  前后确定性、父子包含、兄弟重排、普通跨层箭头、自环、异常 reason、自动滚动、reduced-motion、
+  离线无网络加载、稳定截图和 277 步完整往返。
+- `git diff --check` 通过；仓库根直接 `make test` 最终汇总 182/182。人工检查的首帧截图只显示居中的
+  `Human` 外部端点，结构和配色与初始最小可见集契约一致。
 
 ## 非目标
 

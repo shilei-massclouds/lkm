@@ -6,6 +6,7 @@ Independent first-stage Signal derivation toolchain. It intentionally does not i
 make -C tools2 test
 tools2/bin/pyveri
 tools2/bin/pyveri -u Kernel.Startup --snapshot-out /tmp/kernel-presend.snapshot.json
+tools2/bin/pyveri -u Kernel.Startup --html-out tools2/out/main-animation.html
 VERBOSE=1 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Start
 ```
 
@@ -42,3 +43,35 @@ FIFO creation order. `Startup` remains only the external alias for `Preset`, nev
 Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
 as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;
 unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This setting affects rendering only.
+
+## Offline Signal animation
+
+The animation implementation is maintained independently below `tools2/animate/`: its Python package validates
+tools2 v4 `model.json + view.json` and precomputes deterministic animation v1 frames, while the nested Svelte 5 +
+TypeScript frontend only plays those frames. It neither imports the old `tools/` SVG renderer nor derives behavior
+in the browser.
+
+`tools2/bin/pyveri --html-out PATH` writes one atomic, self-contained HTML file and can be combined with text `-o`,
+stdout, `-s`, `--snapshot-out`, and `--work-dir`. Successful HTML generation preserves check exit status 0 or 1;
+animation protocol or I/O failure returns 2. The independently installable stage package exposes
+`lkm-animate MODEL VIEW -o HTML` for already-produced v4 files.
+
+The committed JavaScript/CSS in `tools2/animate/frontend/dist/` is the bundle used by Python. Rebuild and verify it
+with the pinned lockfile:
+
+```bash
+cd tools2/animate/frontend
+npm ci
+npm run check
+npm test
+npm run build
+npm run bundle-check
+npx playwright install chromium
+npm run test:e2e
+```
+
+From the repository root, the corresponding convenience targets are `make -C tools2 test-frontend`,
+`make -C tools2 bundle-check`, `make -C tools2 test-browser`, and `make -C tools2 test-all`. Browser tests generate
+their model/view/HTML fixtures under a temporary directory, load them through `file://`, reject network requests,
+and exercise the full 277-Signal main-model trace. Explicit long-lived demos belong in the ignored `tools2/out/`
+directory; `tools2/out/pipeline-animation.html` is the fixed small visual checkpoint.

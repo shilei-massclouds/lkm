@@ -6,6 +6,7 @@
 
 | 领域 | 已完成任务 | 专题证据 |
 | --- | --- | --- |
+| model/tools2/animate | tools2 Signal 交互式离线 HTML 动画 v1 | [交互式 model trace HTML 动画](interactive-model-animation.md) |
 | model/tools/docs | Deferred / Trimmed 结构化治理与 legacy inventory 全量审计 | [Deferred / Trimmed 结构化治理审计](deferred-trimmed-audit.md) |
 | validation/arceos_ex | 全量 Clippy 与 clean-build warning 收口 | [当前上下文归档](current-context.md) |
 | validation/trace | nightly/压力缺陷复现流水线首轮建立 | [当前上下文归档](current-context.md) |
