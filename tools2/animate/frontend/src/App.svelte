@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { AnimationTrace } from './types';
-  import NodeCard from './NodeCard.svelte';
+  import FrameTree from './FrameTree.svelte';
 
   let { animation }: { animation: AnimationTrace } = $props();
   const request = $derived(animation.trace.root_request);
@@ -60,11 +60,7 @@
     <div><dt>Protocol</dt><dd>{animation.schema} v{animation.version}</dd></div>
   </dl>
   <div class="stage" aria-label="Signal animation canvas" aria-live="polite">
-    <div class="frame" data-frame-index={frame.index}>
-      {#each frame.nodes as node (node.id)}
-        <NodeCard {node} />
-      {/each}
-    </div>
+    <FrameTree {frame} />
   </div>
   <section class="transport" aria-label="Signal navigation">
     <button type="button" onclick={previous} disabled={!canPrevious}>上一步</button>

@@ -16,6 +16,10 @@ const child = {
   id: 'Child', parent: 'Root', kind: 'system' as const, state: 'Base',
   structural: false, first_seen: 2
 };
+const asyncNode = {
+  id: 'Async', parent: 'Root', kind: 'system' as const, state: 'Ready',
+  structural: false, first_seen: 3
+};
 
 const animation: AnimationTrace = {
   schema: 'lkm.spec.signal-animation', version: 1, source: 'fixture.spec',
@@ -39,7 +43,7 @@ const animation: AnimationTrace = {
   initial_frame: { index: -1, step_id: null, nodes: [human], sibling_order: { '$root': ['Human'] } },
   frames: [
     { index: 0, step_id: 'sig-0001', nodes: [human, rootReady], sibling_order: { '$root': ['Root', 'Human'] } },
-    { index: 1, step_id: 'sig-0002', nodes: [human, rootBase, child], sibling_order: { '$root': ['Root', 'Human'], Root: ['Child'] } }
+    { index: 1, step_id: 'sig-0002', nodes: [human, rootBase, child, asyncNode], sibling_order: { '$root': ['Root', 'Human'], Root: ['Async', 'Child'] } }
   ]
 };
 
@@ -64,16 +68,19 @@ describe('deterministic step navigation', () => {
     expect(previous.disabled).toBe(true);
     next.click();
     await tick();
-    expect(nodes()).toEqual(['Human', 'Root']);
+    expect(nodes()).toEqual(['Root', 'Human']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
     expect(document.body.textContent).toContain('State::Base → State::Ready');
     next.click();
     await tick();
-    expect(nodes()).toEqual(['Human', 'Root', 'Child']);
+    expect(nodes()).toEqual(['Root', 'Async', 'Child', 'Human']);
+    const rootChildren = document.querySelector('[data-children-of="Root"]');
+    expect(rootChildren?.closest('[data-node-id="Root"]')).not.toBeNull();
+    expect(Array.from(rootChildren?.children || []).map((node) => node.getAttribute('data-node-id'))).toEqual(['Async', 'Child']);
     expect(document.body.textContent).toContain('Action：响应完成');
     previous.click();
     await tick();
-    expect(nodes()).toEqual(['Human', 'Root']);
+    expect(nodes()).toEqual(['Root', 'Human']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
   });
 
