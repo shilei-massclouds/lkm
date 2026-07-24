@@ -85,6 +85,17 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - 未设置 `VERBOSE`、`VERBOSE=0` 和其它非 `1` 值均选择 compact；只有 `VERBOSE=1` 逐字恢复既有详细
   文本和 canonical `Preset`。直接 renderer、render CLI、driver、shortcut、stdout 与 `-o` 都使用同一
   选择，并验证两种文本模式不改变 derive/view JSON、snapshot、verdict、Signal 顺序或退出码。
+- animate 必须拒绝错误 model/view schema、producer、version、source/fingerprint 组合、缺失端点、
+  parent cycle、未知 handler 结构和损坏 snapshot；输出使用安全 JSON 内嵌与原子写入，失败不留半成品。
+- animation v1 fixture 必须覆盖嵌套 drives/emits 一 Signal 一步、初始最小可见集、外部 Human、祖先
+  补齐、Transition 真实 before/after、Action 无状态变化，以及 completed/rejected/failed/truncated/
+  stopped outcome/reason。重复生成与任意前后往返必须恢复相同 frame 和 sibling order。
+- frontend 单元测试必须覆盖 parent 包含、后出现兄弟置顶、普通箭头、自环、异常线型/reason、状态
+  样式和 reduced-motion。浏览器端到端测试必须覆盖按钮、ArrowLeft/ArrowRight、前后确定性、自动
+  滚入视区、离线加载和少量稳定截图；不得观察到网络请求或浏览器 derive 路径。
+- `lkm-animate MODEL VIEW -o HTML` 与 driver/shortcut `--html-out` 必须覆盖成功、协议/I/O 错误、check
+  退出码 0/1 保留，以及与 text `-o`、stdout、scenario、snapshot-out 和 work-dir 的组合。编译 bundle
+  rebuild 后必须通过 stale check，固定 fixture 生成 `tools2/out/pipeline-animation.html`。
 
 focused test 可用于开发，但最终必须依次运行 parser/model/Kernel focused、`make -C tools2 test`、老
 model/view/render、静态 trace/SVG 重新生成与布局评审、`git diff --check`，再从仓库根目录以不包装、

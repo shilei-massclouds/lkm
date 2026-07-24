@@ -5,14 +5,15 @@
 
 ## 包与依赖边界
 
-源码固定分为 `common`、`parse`、`model`、`derive`、`check`、`view`、`render` 和 `pyveri` 八个
+源码固定分为 `common`、`parse`、`model`、`derive`、`check`、`view`、`render`、`animate` 和 `pyveri` 九个
 并列包，各包保留自己的 `pyproject.toml`。阶段入口沿用 `lkm-parse`、`lkm-model`、`lkm-derive`、
-`lkm-check`、`lkm-view`、`lkm-render` 和 `pyveri`；源码运行使用只包含 `tools2/*/src` 的独立
+`lkm-check`、`lkm-view`、`lkm-render`，新增 `lkm-animate`，driver 仍为 `pyveri`；源码运行使用只包含 `tools2/*/src` 的独立
 `PYTHONPATH`。任何 tools2 Python 文件不得 import `tools/`、老 `common` 或老 `pyveri`。
 
 `common` 只承载 schema 常量、JSON I/O、source span/diagnostic、稳定 canonical JSON/fingerprint 和
 跨阶段值校验。parse 不依赖后续阶段；model 只依赖 common 和 ast.json；derive 只依赖 common 和
-model.json；check/view 只消费 derive.json；render 只消费 view.json。driver 通过各阶段公开 Python
+model.json；check/view 只消费 derive.json；render 只消费 view.json；animate 同时消费 model.json 和
+view.json。driver 通过各阶段公开 Python
 入口按上述顺序调度，不越过中间协议直接拼装结果。
 
 目录中的 `build/` 是可清理的保留中间产物目录，`out/` 是用户显式选择的长期输出目录；测试不得
@@ -62,13 +63,20 @@ boundary provenance 内的 `source_file` 同样遵循该稳定路径规则，使
 
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
 以及 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
-接收 derive.json；render 接收 view.json，首期只实现 `--format text`。
+接收 derive.json；render 接收 view.json 且只实现 `--format text`；animate 接收 model.json、view.json
+并原子写出 HTML。animate 必须先分别验证两个输入的 v4 schema/version/producer、source 与 model
+fingerprint 身份，协议、身份、缺失端点或 I/O 错误返回 2 且不留下部分输出。
 
-driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir` 与文本 `-o`。默认
+driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir`、文本 `-o` 与
+`--html-out`。默认
 source 是 `Human`，预算默认 `3/3`；`all` 解析为无限，整数必须非负。未给 work-dir 时使用
 临时目录，给出时保留 `ast.json`、`model.json`、`derive.json`、`check.json` 和 `view.json`。只有 check
 verdict 为 complete 或 reached 才原子写 snapshot-out；reached snapshot 写入 boundary provenance；
 failed/bounded/until_signal_not_reached 或阶段错误时目标文件不得出现。
+
+driver 必须在 model/view 成功产生后为 `--html-out` 调用 animate。HTML 与 text stdout/`-o`、scenario、
+snapshot-out 和显式 work-dir 可同时使用；HTML 成功不得覆盖 check 的 0/1，animate 协议或 I/O 错误
+把最终结果提升为阶段错误 2。shortcut 只透传同名参数，不复制动画生成逻辑。
 
 仓库根可直接执行的唯一便利入口是 `tools2/bin/pyveri`；旧 `tools2/pyveri2` 必须删除。入口不得复制
 阶段逻辑，只负责从自身路径解析仓库根、建立 tools2 独立
@@ -127,7 +135,29 @@ verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名�
 到达时快照来源、before/after state/fact/reference delta、reached boundary、stopped propagation、
 reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 4 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
-当前 tools2 不实现 DOT、SVG 或 HTML。
+当前 tools2 render 不实现 DOT、SVG 或 HTML。交互 HTML 由独立 animate 包及 Svelte 5 + TypeScript
+frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
+老工具必须由用户另行决定。
 
-交互 HTML 是后续独立 JavaScript/TypeScript frontend 里程碑；它消费稳定 view schema，不在 Python
-renderer 中嵌入浏览器模拟器。老静态 trace/SVG 任务继续保留，退役老工具必须由用户另行决定。
+## Animation v1 与确定帧
+
+animate 必须把 v4 Signal 创建顺序一对一映射为 `lkm.spec.signal-animation` version `1` 步骤；不得
+折叠嵌套 drives/emits。协议记录输入 source/model fingerprint、稳定 step/signal/cause identity、
+source/target/name/delivery、handler kind/name、outcome/reason、Transition 的真实 before/after state、
+初始 frame 与每步 after frame 的可见节点、结构祖先和 sibling order。
+
+初始 frame 只包含首个 source 与必要祖先。每个 after frame 累积当前 Signal 的 source/target 与必要
+祖先；外部端点可没有 model node。结构祖先没有 snapshot state 时必须保持 stateless。每个 parent 的
+sibling order 按首次出现序反向排列，使后出现者位于上方；该顺序在 Python 中预计算，浏览器只由
+frame 数据计算显示坐标。缺失 source/target model identity、parent cycle、snapshot 不一致或未知
+handler/outcome 结构必须以协议错误失败，不能猜测或静默丢失。
+
+自包含 HTML 必须安全编码内嵌 JSON，阻止 `</script>`、`<!--` 等数据提前终止 script 内容；CSS、
+播放器 JS 和 animation v1 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
+都纳入仓库，并提供确定 rebuild 和 stale-bundle 检查。
+
+播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。普通箭头从 source 右侧指向 target
+左侧；self Signal 使用下半圆；失败类 outcome 使用红色虚线并显示 reason。Transition 响应切换真实
+state，Action 只高亮/振动。新增节点与兄弟重排平滑过渡，活动端点滚入视区；
+`prefers-reduced-motion` 下取消非必要位移、振动与脉冲但保留确定 frame、线型、reason 和导航。
+控制面只含前后按钮、ArrowLeft/ArrowRight、步数和当前 Signal 说明，不增加自动播放、速度或时间线。

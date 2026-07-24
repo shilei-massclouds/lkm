@@ -19,6 +19,8 @@
    词法 alias、生命周期、稳定 trace identity 与静态/运行时视图边界。
 5. [工程树](projects/README.md)：ComputerProject 及三个直接子 Project 的规格与构造责任。
 6. [系统树](systems/README.md)：Computer 及平台、OpenSBI、Kernel 的运行期启动责任。
+7. [tools2 Signal 动画](projects/tools2-signal-animation.md)：确定 Signal trace 的离线 HTML 发布、
+   Signal 级步进、非模拟器边界与播放器责任。
 
 ## 定位
 

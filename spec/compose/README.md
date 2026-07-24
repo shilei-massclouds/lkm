@@ -2,6 +2,11 @@
 
 本目录记录 `Composition Phase` 的补充约束。
 
+2026-07-24 tools2 Signal animation 复核：独立 Python `animate` 包、Svelte/TypeScript 源码、锁定的
+frontend 工具链和纳入仓库的静态 JS/CSS bundle 只组合 tools2 离线 HTML 产物；不新增或调整内核
+crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，内核
+组合语义无需修改。
+
 正式规格入口是 [`main.spec`](main.spec)。本文件只解释组合封装阶段的背景、范围和取舍。
 
 2026-07-24 Task/TaskFlow 断点与 AP authority 复核：本轮在既有 `objects`、scheduler、RISC-V
