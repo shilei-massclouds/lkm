@@ -4,6 +4,7 @@
 
   let {
     node,
+    level = 1,
     children,
     activeSource = false,
     activeTarget = false,
@@ -12,6 +13,7 @@
     responsePhase = false
   }: {
     node: AnimationNode;
+    level?: number;
     children?: Snippet;
     activeSource?: boolean;
     activeTarget?: boolean;
@@ -33,15 +35,17 @@
   class="node-card {stateClass}"
   data-node-id={node.id}
   data-parent-id={node.parent || '$root'}
+  data-level={level}
   data-state={node.state || 'none'}
+  data-children-position="above-identity"
 >
-  <div class="node-identity">
+  <div class="node-identity" data-width-policy="compact">
     {#if node.structural || node.kind === 'external'}
       <span class="node-kind">{node.structural ? 'Structure' : 'External'}</span>
     {/if}
     <strong>{node.id}</strong>
     <span class="node-state">{node.state
-      ? `State::${node.state}`
+      ? node.state
       : node.structural
         ? 'No state shown'
         : node.kind === 'external'

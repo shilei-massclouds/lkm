@@ -89,15 +89,19 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   parent cycle、未知 handler 结构和损坏 snapshot；输出使用安全 JSON 内嵌与原子写入，失败不留半成品。
 - animation v1 fixture 必须覆盖嵌套 drives/emits 一 Signal 一步、初始最小可见集、外部 Human、祖先
   补齐、Transition 真实 before/after、Action 无状态变化，以及 completed/rejected/failed/truncated/
-  stopped outcome/reason。Human 到 Root、同父兄弟与跨分支 Signal 必须使 source 分支位于 target 分支
-  左侧；self、祖先到后代与后代到祖先不得破坏包含关系。重复生成与任意前后往返必须恢复完全相同
-  的 frame 和 sibling order。
-- frontend 单元测试必须覆盖 parent 包含、方向化 sibling order、普通 system 不显示 `SYSTEM`、名称与
-  完整 `State::*`/`Stateless` 同 identity 行、External/Structure 标签、普通箭头曲率随节点尺寸与距离
-  成比例变化、自环按节点宽高变化、异常线型/reason、状态样式、说明句/footer 不渲染和
-  reduced-motion。浏览器端到端测试必须覆盖按钮、ArrowLeft/ArrowRight、source 位于 target 左侧且
-  箭头跟随布局/滚动、前后确定性、自动滚入视区、离线加载和 277 步往返；不得观察到网络请求或
-  浏览器 derive 路径。
+  stopped outcome/reason。虚拟 `$root` 和任意 parent 的 sibling order 必须稳定按 `first_seen` 升序，
+  同一步按 source、target reveal 分配序号；至少四层 parent 树不得因层级方向或当前 Signal 重排。
+  重复生成与任意前后往返必须恢复完全相同的 frame 和 sibling order。
+- frontend 单元测试必须覆盖 parent 包含、一级/三级 row、二级/四级 bottom-to-top column、children 位于
+  identity 上方、偶数层左对齐与奇数层底部对齐；普通 system 不显示 `SYSTEM`，名称和裸状态名或
+  `Stateless` 正确换行，节点及底部响应均不显示 `State::`，External/Structure 标签和紧凑宽度保持。
+  箭头测试覆盖四方向端点、曲率随节点尺寸与距离成比例变化、自环按节点宽高变化、异常线型/reason、
+  状态样式、说明句/footer 不渲染和 reduced-motion。
+- 浏览器端到端测试必须覆盖按钮、ArrowLeft/ArrowRight、离线加载和 277 步往返；交替层级 fixture
+  必须验证 Human 固定 stage 左下，后续一级节点只向右，二级向上、三级向右、四级向上。无碰撞时
+  已有内容坐标不变；碰撞时只有较晚分支向右或向上，较早锚点不动；父框只随可见子树向上/向右
+  膨胀且不覆盖文字。箭头必须跟随四向布局、膨胀、滚动与 resize；前后确定性、自动滚入视区和
+  reduced-motion 保持可用，不得观察到网络请求或浏览器 derive 路径。
 - 浏览器布局验收必须覆盖 1024×768、1280×900 与 1920×1080：桌面页面无外层纵向滚动，stage 至少
   占 viewport 高度约 72%，header/transport 不随宽屏无界增长；390×844 允许换行和页面纵向滚动，
   不得文字覆盖或页面横向溢出，横向溢出只能出现在 stage 内。桌面和移动端都维护稳定截图基线。

@@ -13,6 +13,7 @@ const pythonPath = [
 let generated = '';
 let pipelineHtml = '';
 let effectsHtml = '';
+let alternatingHtml = '';
 let mainHtml = '';
 
 function generate(name: string, spec: string, signal: string) {
@@ -49,6 +50,10 @@ test.beforeAll(() => {
   effectsHtml = generate(
     'effects', join(repository, 'tools2/tests/fixtures/animation-effects.spec'), 'Root.Begin'
   );
+  alternatingHtml = generate(
+    'alternating', join(repository, 'tools2/tests/fixtures/alternating-layout.spec'),
+    'Controller.Begin'
+  );
   mainHtml = generate(
     'main', join(repository, 'spec/model/main.spec'), 'ComputerProject.Preset'
   );
@@ -78,7 +83,7 @@ test('offline controls restore exact hierarchy and sibling order', async ({ page
   await expect(counter).toContainText('步骤 4 / 4');
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveCount(3);
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveText([
-    /Sink/, /Async/, /Child/
+    /Child/, /Async/, /Sink/
   ]);
 
   await page.keyboard.press('ArrowLeft');
@@ -87,6 +92,109 @@ test('offline controls restore exact hierarchy and sibling order', async ({ page
   await expect(counter).toContainText('步骤 1 / 4');
   await expect(page.locator('[data-node-id]')).toHaveCount(2);
   await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Ready');
+});
+
+test('four levels alternate from the lower-left and inflate only outward', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openOffline(page, alternatingHtml);
+  const counter = page.locator('.counter');
+  const contentRects = async (ids: string[]) => page.locator('.stage').evaluate((stage, names) => {
+    const stageRect = stage.getBoundingClientRect();
+    return Object.fromEntries(names.map((name) => {
+      const rect = stage.querySelector<HTMLElement>(`[data-node-id="${name}"]`)?.getBoundingClientRect();
+      return [name, rect ? {
+        left: rect.left - stageRect.left + stage.scrollLeft,
+        right: rect.right - stageRect.left + stage.scrollLeft,
+        top: rect.top - stageRect.top + stage.scrollTop,
+        bottom: rect.bottom - stageRect.top + stage.scrollTop
+      } : null];
+    }));
+  }, ids);
+  const advanceTo = async (index: number) => {
+    while (!((await counter.textContent()) || '').includes(`步骤 ${index} / 12`)) {
+      await page.keyboard.press('ArrowRight');
+    }
+  };
+
+  const initial = await contentRects(['Human']);
+  const initialScroll = await page.locator('.stage').evaluate((stage) => ({
+    left: stage.scrollLeft,
+    top: stage.scrollTop
+  }));
+  const stageSize = await page.locator('.stage').evaluate((stage) => ({
+    width: stage.clientWidth,
+    height: stage.clientHeight
+  }));
+  expect(initial.Human?.left).toBeLessThan(stageSize.width * 0.08);
+  expect(initial.Human?.bottom).toBeGreaterThan(stageSize.height * 0.9);
+
+  await advanceTo(3);
+  const shallow = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot']);
+  expect(shallow.Human!.left).toBeLessThan(shallow.Controller!.left);
+  expect(shallow.Controller!.left).toBeLessThan(shallow.EarlyRoot!.left);
+  expect(shallow.EarlyRoot!.left).toBeLessThan(shallow.LateRoot!.left);
+  expect(Math.abs(shallow.Human!.bottom - shallow.LateRoot!.bottom)).toBeLessThan(2);
+
+  await advanceTo(5);
+  const firstLevel2 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level2First']);
+  await advanceTo(6);
+  const secondLevel2 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level2First', 'Level2Second']);
+  expect(Math.abs(secondLevel2.Level2First!.left - firstLevel2.Level2First!.left)).toBeLessThan(2);
+  expect(Math.abs(secondLevel2.Level2First!.bottom - firstLevel2.Level2First!.bottom)).toBeLessThan(2);
+  expect(secondLevel2.Level2Second!.bottom).toBeLessThan(secondLevel2.Level2First!.top);
+
+  await advanceTo(8);
+  const firstLevel3 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level3First']);
+  await advanceTo(9);
+  const secondLevel3 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level3First', 'Level3Second']);
+  expect(Math.abs(secondLevel3.EarlyRoot!.left - firstLevel3.EarlyRoot!.left)).toBeLessThan(2);
+  expect(Math.abs(secondLevel3.EarlyRoot!.bottom - firstLevel3.EarlyRoot!.bottom)).toBeLessThan(2);
+  expect(secondLevel3.Level3Second!.left).toBeGreaterThan(secondLevel3.Level3First!.right);
+  expect(secondLevel3.LateRoot!.left).toBeGreaterThan(firstLevel3.LateRoot!.left);
+  expect(Math.abs(secondLevel3.Human!.left - shallow.Human!.left)).toBeLessThan(2);
+  expect(Math.abs(secondLevel3.Controller!.left - shallow.Controller!.left)).toBeLessThan(2);
+
+  await advanceTo(11);
+  const firstLevel4 = await contentRects(['Level4First']);
+  await advanceTo(12);
+  const secondLevel4 = await contentRects(['Level4First', 'Level4Second']);
+  const finalScroll = await page.locator('.stage').evaluate((stage) => ({
+    left: stage.scrollLeft,
+    top: stage.scrollTop
+  }));
+  expect(Math.abs(secondLevel4.Level4First!.left - firstLevel4.Level4First!.left)).toBeLessThan(2);
+  expect(Math.abs(secondLevel4.Level4First!.bottom - firstLevel4.Level4First!.bottom)).toBeLessThan(2);
+  expect(secondLevel4.Level4Second!.bottom).toBeLessThan(secondLevel4.Level4First!.top);
+
+  const hierarchy = await page.locator('.stage').evaluate((stage) =>
+    Array.from(stage.querySelectorAll<HTMLElement>('[data-layout]'))
+      .map((element) => [element.dataset.level, element.dataset.layout, element.dataset.alignment])
+  );
+  expect(hierarchy).toEqual([
+    ['1', 'row', 'bottom'], ['2', 'up', 'left'],
+    ['3', 'row', 'bottom'], ['4', 'up', 'left']
+  ]);
+
+  for (let index = 11; index >= 0; index -= 1) {
+    await page.keyboard.press('ArrowLeft');
+    await expect(counter).toContainText(`步骤 ${index} / 12`);
+  }
+  const restored = await contentRects(['Human']);
+  const restoredScroll = await page.locator('.stage').evaluate((stage) => ({
+    left: stage.scrollLeft,
+    top: stage.scrollTop
+  }));
+  expect(Math.abs(restored.Human!.left - initial.Human!.left)).toBeLessThan(2);
+  expect(Math.abs(restored.Human!.bottom - initial.Human!.bottom)).toBeLessThan(2);
+  expect(restoredScroll).toEqual(initialScroll);
+
+  await advanceTo(12);
+  const repeatedScroll = await page.locator('.stage').evaluate((stage) => ({
+    left: stage.scrollLeft,
+    top: stage.scrollTop
+  }));
+  expect(repeatedScroll).toEqual(finalScroll);
 });
 
 test('ordinary and exceptional self Signals expose their response phases', async ({ page }) => {

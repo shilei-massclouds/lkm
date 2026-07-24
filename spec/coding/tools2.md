@@ -147,12 +147,10 @@ source/target/name/delivery、handler kind/name、outcome/reason、Transition �
 初始 frame 与每步 after frame 的可见节点、结构祖先和 sibling order。
 
 初始 frame 只包含首个 source 与必要祖先。每个 after frame 累积当前 Signal 的 source/target 与必要
-祖先；外部端点可没有 model node。结构祖先没有 snapshot state 时必须保持 stateless。每个 parent 的
-基础 sibling order 按首次出现序反向排列。初始 frame 保持该基础顺序；每个 after frame 再按当前
-Signal 预计算方向化顺序：若 source/target 互非祖先，找到从虚拟 `$root` 开始的两条可见 parent 路径
-第一次分叉的直接子分支，从其共同 parent 的基础顺序取出两分支，在两者原位置的较早处按
-`[source 分支, target 分支]` 相邻插回，其余 sibling 相对顺序不变。self 或任一端点是另一端点祖先时
-不重排。浏览器只由 frame 数据计算显示坐标；前后导航不得在浏览器重新推断或累积顺序。缺失
+祖先；外部端点可没有 model node。结构祖先没有 snapshot state 时必须保持 stateless。生成器以
+source、target 的 reveal 顺序为同一步新节点分配稳定 `first_seen`；虚拟 `$root` 和任意 parent 的
+`sibling_order` 都按该序号升序生成，且所有 frame 都不得根据当前 Signal、层级视觉方向或端点关系
+重排。浏览器只由 frame 数据和 parent 链计算显示坐标；前后导航不得累积顺序。缺失
 source/target model identity、parent cycle、snapshot 不一致或未知 handler/outcome 结构必须以协议
 错误失败，不能猜测或静默丢失。
 
@@ -160,12 +158,21 @@ source/target model identity、parent cycle、snapshot 不一致或未知 handle
 播放器 JS 和 animation v1 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
 都纳入仓库，并提供确定 rebuild 和 stale-bundle 检查。
 
-播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。同级节点按 `sibling_order` 水平排列，
-嵌套同级仍在父框内；普通箭头从 source 右侧指向 target 左侧，self Signal 使用下方回环。普通曲线
-控制量按 source-target 距离和节点宽度计算，self loop 按节点宽高计算，不得使用固定像素半径。
-播放器使用 animation frame 在 FLIP、stage 滚动、window/元素尺寸变化期间重测 CSS pixel 坐标并
-更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。失败类 outcome 使用红色虚线并显示
-reason。Transition 响应切换真实 state，Action 只高亮/振动。新增节点与兄弟重排平滑过渡，活动端点滚入视区；
+播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。前端按 parent 链计算层级，外部根端点
+按一级节点处理；奇数层 sibling 以底部对齐 row 从左向右排列，偶数层 sibling 以左边缘对齐的反向
+column 从下向上排列，任意深度继续交替。stage 的布局原点位于左下角。节点 identity 固定在自身框
+左下区域，children 区位于其上方；叶节点和 identity band 宽度约为
+`clamp(11rem, 16cqi, 15rem)`，名称可换行，状态不拆分并整体换行。父框只随当前可见 children 的真实
+footprint 向上或向右扩展，不预留未来空间；稳定 flex footprint 在碰撞时只把较晚 sibling 向右或
+向上推开，不得回推较早 sibling。
+
+普通箭头比较 source/target 中心差，选择最近的一对水平或垂直相向边，覆盖左到右、右到左、下到上
+和上到下；self Signal 使用按节点宽高计算的回环。普通曲线控制量按端点距离和节点尺寸计算，不得
+使用固定像素半径。播放器使用 animation frame 在 FLIP、父框膨胀、stage 滚动、window/元素尺寸变化
+期间重测 CSS pixel 坐标并更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。树高度变化
+时补偿 stage 的 `scrollTop` 以保持左下锚点在 viewport 中稳定，前后 frame 都从目标布局重算相同滚动
+边界。失败类 outcome 使用红色虚线并显示 reason。Transition 响应切换真实 state，Action 只高亮/振动。
+新增节点与向外推开使用 FLIP 平滑过渡，活动端点滚入视区；
 `prefers-reduced-motion` 下取消非必要位移、振动与脉冲但保留确定 frame、线型、reason 和导航。
 控制面只含前后按钮、ArrowLeft/ArrowRight、步数和当前 Signal 说明，不增加自动播放、速度或时间线。
 
@@ -176,6 +183,7 @@ frontend CSS 以 `%`/`dvh` 的外壳和 `auto minmax(0, 1fr) auto` 主 grid 建�
 但页面无横向溢出，必要的横向滚动局限于 stage。
 
 header 只显示紧凑品牌、请求标题与四项同行 `label:value` 元数据，不渲染说明句或可见 footer；Protocol
-tooltip 承载 source file 与 model fingerprint。普通 system identity 不渲染 `SYSTEM`，名称和完整
-`State::*`/`Stateless` 同行且可整体换行；External/Structure 继续渲染类型标签。transport 不设固定
+tooltip 承载 source file 与 model fingerprint。普通 system identity 不渲染 `SYSTEM`，名称和裸状态名
+或 `Stateless` 同行；名称可换行，状态保持完整并整体换行。底部 Transition 响应也不得渲染
+`State::`；JSON 中的状态值不变。External/Structure 继续渲染类型标签。transport 不设固定
 最小高度，宽屏优先把步数、Signal 路径、响应/reason 和按钮同行，窄屏自然换行。

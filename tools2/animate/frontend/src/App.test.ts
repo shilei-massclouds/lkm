@@ -43,7 +43,7 @@ const animation: AnimationTrace = {
   initial_frame: { index: -1, step_id: null, nodes: [human], sibling_order: { '$root': ['Human'] } },
   frames: [
     { index: 0, step_id: 'sig-0001', nodes: [human, rootReady], sibling_order: { '$root': ['Human', 'Root'] } },
-    { index: 1, step_id: 'sig-0002', nodes: [human, rootBase, child, asyncNode], sibling_order: { '$root': ['Root', 'Human'], Root: ['Async', 'Child'] } }
+    { index: 1, step_id: 'sig-0002', nodes: [human, rootBase, child, asyncNode], sibling_order: { '$root': ['Human', 'Root'], Root: ['Child', 'Async'] } }
   ]
 };
 
@@ -75,13 +75,14 @@ describe('deterministic step navigation', () => {
     await settle();
     expect(nodes()).toEqual(['Human', 'Root']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
-    expect(document.body.textContent).toContain('State::Base → State::Ready');
+    expect(document.body.textContent).toContain('Transition：Base → Ready');
+    expect(document.body.textContent).not.toContain('State::');
     next.click();
     await settle();
-    expect(nodes()).toEqual(['Root', 'Async', 'Child', 'Human']);
+    expect(nodes()).toEqual(['Human', 'Root', 'Child', 'Async']);
     const rootChildren = document.querySelector('[data-children-of="Root"]');
     expect(rootChildren?.closest('[data-node-id="Root"]')).not.toBeNull();
-    expect(Array.from(rootChildren?.children || []).map((slot) => slot.querySelector('[data-node-id]')?.getAttribute('data-node-id'))).toEqual(['Async', 'Child']);
+    expect(Array.from(rootChildren?.children || []).map((slot) => slot.querySelector('[data-node-id]')?.getAttribute('data-node-id'))).toEqual(['Child', 'Async']);
     expect(document.body.textContent).toContain('Action：响应完成');
     previous.click();
     await tick();

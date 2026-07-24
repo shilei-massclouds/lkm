@@ -16,6 +16,7 @@
   let overlayWidth = $state(1);
   let overlayHeight = $state(1);
   let arrowFrame: number | null = null;
+  const frameScroll = new Map<number, { left: number; top: number }>();
   const shownIndex = $derived(activeIndex ?? position);
   const frame = $derived(shownIndex < 0 ? animation.initial_frame : animation.frames[shownIndex]);
   const step = $derived(shownIndex < 0 ? null : animation.steps[shownIndex]);
@@ -23,10 +24,50 @@
   const canPrevious = $derived(position >= 0);
   const canNext = $derived(position < animation.frames.length - 1 && !transitioning);
 
-  function previous() {
+  function scrollSnapshot() {
+    return stageElement
+      ? { height: stageElement.scrollHeight, top: stageElement.scrollTop }
+      : null;
+  }
+
+  function restoreBottomAnchor(snapshot: { height: number; top: number } | null) {
+    if (!stageElement || !snapshot) return;
+    const maximum = Math.max(0, stageElement.scrollHeight - stageElement.clientHeight);
+    stageElement.scrollTop = Math.min(
+      maximum,
+      Math.max(0, snapshot.top + stageElement.scrollHeight - snapshot.height)
+    );
+  }
+
+  function rememberScroll(index: number) {
+    if (stageElement) {
+      frameScroll.set(index, { left: stageElement.scrollLeft, top: stageElement.scrollTop });
+    }
+  }
+
+  function restoreFrameScroll(index: number) {
+    if (!stageElement) return false;
+    const saved = frameScroll.get(index);
+    if (!saved) return false;
+    stageElement.scrollLeft = Math.min(
+      Math.max(0, stageElement.scrollWidth - stageElement.clientWidth),
+      saved.left
+    );
+    stageElement.scrollTop = Math.min(
+      Math.max(0, stageElement.scrollHeight - stageElement.clientHeight),
+      saved.top
+    );
+    return true;
+  }
+
+  async function previous() {
     if (canPrevious && !transitioning) {
+      const snapshot = scrollSnapshot();
+      rememberScroll(position);
       position -= 1;
       arrowGeometry = null;
+      await tick();
+      if (!restoreFrameScroll(position)) restoreBottomAnchor(snapshot);
     }
   }
 
@@ -100,10 +141,15 @@
 
   async function next() {
     if (!canNext) return;
+    const snapshot = scrollSnapshot();
+    rememberScroll(position);
     activeIndex = position + 1;
     phase = 'send';
     await tick();
-    revealTarget();
+    if (!restoreFrameScroll(activeIndex)) {
+      restoreBottomAnchor(snapshot);
+      revealTarget();
+    }
     updateArrow();
     scheduleArrowUpdate();
     await pause(300);
@@ -115,6 +161,7 @@
     position = activeIndex;
     activeIndex = null;
     phase = 'idle';
+    rememberScroll(position);
     if (arrowFrame !== null) {
       window.cancelAnimationFrame(arrowFrame);
       arrowFrame = null;
@@ -127,7 +174,7 @@
       if (step.response.before_state === null && step.response.after_state === null) {
         return 'Transition：无 lifecycle state 的响应已完成。';
       }
-      return `Transition：State::${step.response.before_state} → State::${step.response.after_state}`;
+      return `Transition：${step.response.before_state} → ${step.response.after_state}`;
     }
     if (step.handler.kind === 'Action') return 'Action：响应完成，不改变 lifecycle state。';
     return '目标未解析到 handler；保留输入中的确定结果。';
@@ -149,18 +196,27 @@
       }
     };
     const onResize = () => updateArrow();
+    const onStageScroll = () => {
+      scheduleArrowUpdate();
+      if (activeIndex === null && phase === 'idle') rememberScroll(position);
+    };
     const observer = typeof ResizeObserver === 'function'
       ? new ResizeObserver(scheduleArrowUpdate)
       : null;
+    if (stageElement) {
+      stageElement.scrollTop = Math.max(0, stageElement.scrollHeight - stageElement.clientHeight);
+      stageElement.scrollLeft = 0;
+      rememberScroll(-1);
+    }
     window.addEventListener('keydown', onKeydown);
     window.addEventListener('resize', onResize);
-    stageElement?.addEventListener('scroll', scheduleArrowUpdate, { passive: true });
+    stageElement?.addEventListener('scroll', onStageScroll, { passive: true });
     if (stageElement) observer?.observe(stageElement);
     media?.addEventListener('change', setMotion);
     return () => {
       window.removeEventListener('keydown', onKeydown);
       window.removeEventListener('resize', onResize);
-      stageElement?.removeEventListener('scroll', scheduleArrowUpdate);
+      stageElement?.removeEventListener('scroll', onStageScroll);
       observer?.disconnect();
       if (arrowFrame !== null) window.cancelAnimationFrame(arrowFrame);
       media?.removeEventListener('change', setMotion);

@@ -13,8 +13,30 @@ describe('Signal arrow geometry', () => {
   it('connects source right to target left for ordinary Signals', () => {
     const geometry = signalGeometry(source, target, stage);
     expect(geometry.self).toBe(false);
+    expect(geometry.direction).toBe('right');
     expect(geometry.path).toMatch(/^M 270 130 C /);
     expect(geometry.path).toMatch(/ 490 290$/);
+  });
+
+  it('selects opposing edges in all four directions', () => {
+    const leftTarget = { ...target, left: -300, right: -100, top: 100, bottom: 200 };
+    const downTarget = { ...target, left: 80, right: 280, top: 500, bottom: 600 };
+    const upTarget = { ...target, left: 80, right: 280, top: -300, bottom: -200 };
+    const right = pathNumbers(signalGeometry(source, target, stage).path);
+    const left = signalGeometry(source, leftTarget, stage);
+    const down = signalGeometry(source, downTarget, stage);
+    const up = signalGeometry(source, upTarget, stage);
+
+    expect(right.slice(0, 2)).toEqual([source.right - stage.left, 130]);
+    expect(left.direction).toBe('left');
+    expect(pathNumbers(left.path).slice(0, 2)).toEqual([source.left - stage.left, 130]);
+    expect(pathNumbers(left.path).slice(-2)).toEqual([leftTarget.right - stage.left, 130]);
+    expect(down.direction).toBe('down');
+    expect(pathNumbers(down.path).slice(0, 2)).toEqual([170, source.bottom - stage.top]);
+    expect(pathNumbers(down.path).slice(-2)).toEqual([170, downTarget.top - stage.top]);
+    expect(up.direction).toBe('up');
+    expect(pathNumbers(up.path).slice(0, 2)).toEqual([170, source.top - stage.top]);
+    expect(pathNumbers(up.path).slice(-2)).toEqual([170, upTarget.bottom - stage.top]);
   });
 
   it('uses a lower semicircle for self Signals', () => {

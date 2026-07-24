@@ -95,20 +95,20 @@ class SignalAnimationTests(unittest.TestCase):
             {"before_state": None, "after_state": None},
         )
 
-    def test_frames_reveal_targets_ancestors_and_directional_sibling_order(self) -> None:
+    def test_frames_reveal_targets_and_keep_first_seen_sibling_order(self) -> None:
         animation = build_animation(self.model, self.view)
         self.assertEqual(animation["initial_frame"]["sibling_order"]["$root"], ["Human"])
         self.assertEqual(animation["frames"][0]["sibling_order"]["$root"], ["Human", "Root"])
         child_frame = animation["frames"][1]
-        self.assertEqual(child_frame["sibling_order"]["$root"], ["Root", "Human"])
+        self.assertEqual(child_frame["sibling_order"]["$root"], ["Human", "Root"])
         self.assertEqual(child_frame["sibling_order"]["Root"], ["Child"])
-        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
         self.assertEqual(
-            animation["frames"][3]["sibling_order"]["Root"], ["Sink", "Async", "Child"]
+            animation["frames"][3]["sibling_order"]["Root"], ["Child", "Async", "Sink"]
         )
         self.assertEqual(animation["frames"][1]["nodes"][2]["state"], "Base")
 
-    def test_same_parent_signal_places_source_immediately_before_target(self) -> None:
+    def test_same_parent_signal_does_not_reorder_existing_siblings(self) -> None:
         view = deepcopy(self.view)
         view["signals"][1]["source"] = "Child"
         view["signals"][1]["target"] = "Async"
@@ -124,10 +124,10 @@ class SignalAnimationTests(unittest.TestCase):
         later = build_animation(self.model, later_view)
         self.assertEqual(
             later["frames"][3]["sibling_order"]["Root"],
-            ["Sink", "Child", "Async"],
+            ["Child", "Async", "Sink"],
         )
 
-    def test_cross_branch_signal_orders_the_divergent_branches_only(self) -> None:
+    def test_cross_branch_signal_keeps_first_seen_ancestor_order(self) -> None:
         model = deepcopy(self.model)
         view = deepcopy(self.view)
         model["model"]["systems"]["ChildLeaf"] = {
@@ -153,15 +153,15 @@ class SignalAnimationTests(unittest.TestCase):
         self.assertEqual(frame["sibling_order"]["Child"], ["ChildLeaf"])
         self.assertEqual(frame["sibling_order"]["Async"], ["AsyncLeaf"])
 
-    def test_self_and_ancestor_signals_keep_the_base_containment_order(self) -> None:
+    def test_self_and_ancestor_signals_keep_first_seen_order(self) -> None:
         animation = build_animation(self.model, self.view)
-        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
 
         descendant_view = deepcopy(self.view)
         descendant_view["signals"][2]["source"] = "Async"
         descendant_view["signals"][2]["target"] = "Root"
         descendant = build_animation(self.model, descendant_view)
-        self.assertEqual(descendant["frames"][2]["sibling_order"]["Root"], ["Async", "Child"])
+        self.assertEqual(descendant["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
 
         self_view = deepcopy(self.view)
         self_view["signals"][3]["source"] = "Sink"
@@ -169,8 +169,57 @@ class SignalAnimationTests(unittest.TestCase):
         self_signal = build_animation(self.model, self_view)
         self.assertEqual(
             self_signal["frames"][3]["sibling_order"]["Root"],
-            ["Sink", "Async", "Child"],
+            ["Child", "Async", "Sink"],
         )
+
+    def test_four_levels_use_reveal_order_independent_of_signal_direction(self) -> None:
+        model = deepcopy(self.model)
+        view = deepcopy(self.view)
+        parents = {
+            "Level2First": "Root",
+            "Level2Second": "Root",
+            "Level3First": "Level2First",
+            "Level3Second": "Level2First",
+            "Level4First": "Level3First",
+            "Level4Second": "Level3First",
+        }
+        for name, parent in parents.items():
+            model["model"]["systems"][name] = {
+                **deepcopy(model["model"]["systems"]["Child"]),
+                "parent": parent,
+            }
+        for snapshot in [
+            view["initial_snapshot"],
+            *(signal["before_snapshot"] for signal in view["signals"]),
+            *(signal["after_snapshot"] for signal in view["signals"]),
+        ]:
+            for name in parents:
+                snapshot["states"][name] = "Base"
+        view["signals"][1]["source"] = "Level4First"
+        view["signals"][1]["target"] = "Level4Second"
+        view["signals"][2]["source"] = "Level3Second"
+        view["signals"][2]["target"] = "Level2Second"
+
+        animation = build_animation(model, view)
+        frame = animation["frames"][2]
+        self.assertEqual(frame["sibling_order"]["$root"], ["Human", "Root"])
+        self.assertEqual(
+            frame["sibling_order"]["Root"], ["Level2First", "Level2Second"]
+        )
+        self.assertEqual(
+            frame["sibling_order"]["Level2First"], ["Level3First", "Level3Second"]
+        )
+        self.assertEqual(
+            frame["sibling_order"]["Level3First"], ["Level4First", "Level4Second"]
+        )
+        for siblings in frame["sibling_order"].values():
+            seen = {
+                node["id"]: node["first_seen"]
+                for node in frame["nodes"]
+                if node["id"] in siblings
+            }
+            self.assertEqual(siblings, sorted(siblings, key=seen.__getitem__))
+        self.assertEqual(animation, build_animation(model, view))
 
     def test_initial_model_source_has_stateless_ancestors_and_real_source_state(self) -> None:
         view = deepcopy(self.view)

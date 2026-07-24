@@ -22,6 +22,7 @@
   class:self-loop={geometry.self}
   class="signal-overlay"
   data-arrow-kind={geometry.self ? 'self' : 'ordinary'}
+  data-arrow-direction={geometry.direction}
   data-outcome={outcome}
   viewBox={`0 0 ${width} ${height}`}
   {width}

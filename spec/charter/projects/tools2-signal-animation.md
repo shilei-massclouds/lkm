@@ -33,12 +33,19 @@ animate 输出内嵌 `lkm.spec.signal-animation` version `1` 的自包含 HTML�
 after frames、可见节点、结构祖先和预计算 sibling order。JSON 必须安全内嵌，HTML 必须原子写入；
 协议或 I/O 失败不得留下半成品。
 
-播放器只负责把确定 frames 布局并呈现。父子包含高于左右方向，嵌套节点始终位于父框内；同一
-parent 下的基础顺序仍按首次出现序反向排列。当前 Signal 的 source/target 互非祖先时，在两者最低
-公共祖先处把 source 所在的直接子分支排在 target 分支左侧；两分支从基础顺序的较早位置开始相邻
-排列，其余兄弟保持基础相对顺序。self、祖先到后代和后代到祖先 Signal 不得为追求左右方向拆开
-父子关系。普通 Signal 使用 source 到 target 的箭头，self Signal 使用节点下方的回环；曲线必须按
-实时节点尺寸和端点距离计算，布局动画、容器滚动或尺寸变化时同步更新。页面提供前后按钮、
+播放器只负责把确定 frames 布局并呈现。父子包含高于视觉方向，嵌套节点始终位于父框内；所有
+parent（含虚拟 `$root`）的 sibling order 都按首次出现序稳定升序排列，不得根据当前 Signal 重排。
+前端从 parent 链计算层级，并按 parent 深度交替 sibling 方向：一级节点从 stage 左下角向右排列，
+二级节点从 parent 内左下角向上排列，之后奇数层继续向右、偶数层继续向上。外部 `Human` 等根端点
+按一级节点参与同一布局。每个节点的 identity 固定在自身框左下区域，children 位于 identity 上方；
+父框只随已经可见的子树向上或向右扩展，不为未来节点预留空间。较早分支增长造成碰撞时，只把
+较晚出现的同级分支向右或向上推开，不得向左、向下回推、移动较早锚点或改变首次出现顺序。
+
+普通 Signal 使用 source 到 target 的箭头；播放器根据两端中心差选择最近的一对水平或垂直相向边，
+支持左到右、右到左、下到上和上到下。self Signal 使用按节点实时尺寸计算的回环。曲线必须按实时
+节点尺寸和端点距离计算，布局动画、父框膨胀、stage 滚动或尺寸变化时同步更新。stage 高度增长时
+必须补偿纵向滚动，使左下布局锚点在 viewport 中保持稳定；后退按目标 frame 重算相同布局和滚动
+边界。FLIP 只平滑已经确定的向外推开，reduced-motion 下直接到达确定位置。页面提供前后按钮、
 `ArrowLeft`/`ArrowRight`、步数和当前 Signal 文字说明，并尊重 `prefers-reduced-motion`。首轮不包含
 自动播放、速度、时间线跳转、浏览器 derive 或视频导出。
 
@@ -49,8 +56,11 @@ parent 下的基础顺序仍按首次出现序反向排列。当前 Signal 的 s
 stroke 等视觉细线可固定为 CSS pixel。
 
 header 在一行优先显示小号品牌、请求标题以及 Source/Verdict/Signals/Protocol 四项紧凑元数据；
-删除说明句。普通 system 节点不显示 `SYSTEM`，名称与完整 `State::*` 或 `Stateless` 位于同一 identity
-行，空间不足时整行换行且不得覆盖；External 和 Structure 保留类型标签。控制栏在宽屏优先同行显示
+删除说明句。普通 system 节点不显示 `SYSTEM`，名称与裸状态名（例如 `Ready`）或 `Stateless` 位于
+同一 identity 行，空间不足时状态整体换行且不得覆盖；底部 Transition 响应同样显示
+`Base → Ready`，不显示 `State::`。External 和 Structure 保留类型标签。叶节点和 identity band 使用
+约 `clamp(11rem, 16cqi, 15rem)` 的紧凑宽度，名称允许换行；含子系统的父框不得由 identity 获得固定
+大宽度。控制栏在宽屏优先同行显示
 步数、Signal 路径、响应或 reason，窄屏自然换行。source file 和 model fingerprint 只保留在 Protocol
 项的 tooltip，不显示 footer。
 

@@ -97,14 +97,17 @@ dd {
   min-block-size: 100%;
   padding: clamp(1rem, 3cqi, 3rem);
   gap: clamp(.8rem, 2cqi, 2rem);
-  align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
 }
+.layout-row { flex-direction: row; align-items: flex-end; }
+.layout-up { flex-direction: column-reverse; align-items: flex-start; }
 .node-card {
-  display: grid;
+  display: flex;
+  flex-direction: column-reverse;
   inline-size: max-content;
-  min-inline-size: clamp(10rem, 16cqi, 16rem);
+  min-inline-size: 0;
   gap: var(--content-gap);
+  align-items: flex-start;
   padding: var(--card-pad);
   border: 1px solid #66756c;
   border-radius: clamp(.5rem, 1cqi, .9rem);
@@ -114,9 +117,9 @@ dd {
 }
 .node-identity {
   display: flex;
-  inline-size: clamp(15rem, 24cqi, 24rem);
-  max-inline-size: 100%;
-  min-inline-size: 0;
+  inline-size: clamp(11rem, 16cqi, 15rem);
+  max-inline-size: clamp(11rem, 16cqi, 15rem);
+  min-inline-size: clamp(11rem, 16cqi, 15rem);
   gap: clamp(.3rem, .55cqi, .55rem);
   padding: clamp(.1rem, .3cqi, .3rem);
   align-items: baseline;
@@ -152,11 +155,9 @@ dd {
 .node-children {
   display: flex;
   inline-size: max-content;
-  min-inline-size: 100%;
   gap: clamp(.55rem, 1.25cqi, 1.2rem);
-  padding: clamp(.65rem, 1.4cqi, 1.25rem) 0 0;
-  border-top: 1px solid #d9e0db;
-  align-items: flex-start;
+  padding: 0 0 clamp(.65rem, 1.4cqi, 1.25rem);
+  border-bottom: 1px solid #d9e0db;
 }
 .node-children > .node-card { box-shadow: 0 .3rem .9rem rgb(24 42 32 / 7%); }
 .node-slot { position: relative; min-inline-size: min-content; flex: 0 0 auto; }
@@ -270,7 +271,11 @@ dd {
 }
 
 @container stage (max-width: 28rem) {
-  .node-identity { inline-size: clamp(13rem, 76cqi, 17rem); }
+  .node-identity {
+    inline-size: clamp(11rem, 68cqi, 14rem);
+    min-inline-size: clamp(11rem, 68cqi, 14rem);
+    max-inline-size: clamp(11rem, 68cqi, 14rem);
+  }
   .node-state { flex-basis: 100%; }
 }
 
