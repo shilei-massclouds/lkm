@@ -21,6 +21,9 @@
 6. [系统树](systems/README.md)：Computer 及平台、OpenSBI、Kernel 的运行期启动责任。
 7. [tools2 Signal 动画](projects/tools2-signal-animation.md)：确定 Signal trace 的离线 HTML 发布、
    Signal 级步进、非模拟器边界与播放器责任。
+8. [tools2 启动语义校准与旧工具退役](projects/tools2-semantic-validation-and-retirement.md)：确定按
+   Kernel 启动阶段校准 Signal 因果语义、建立 canonical boundary snapshot，并逐项接管和退役旧工具
+   的路线。
 
 ## 定位
 

@@ -15,3 +15,5 @@ ComputerProject
 - [`hardware.md`](hardware.md)：RISC-V 平台规格与 boot-hart context 构造。
 - [`firmware.md`](firmware.md)：SBI/OpenSBI 规格与初态 BootArgs 启动 ABI 实参。
 - [`kernel.md`](kernel.md)：静态 Config/Lds 输入的验证与 kernel image 构造。
+- [`tools2-semantic-validation-and-retirement.md`](tools2-semantic-validation-and-retirement.md)：tools2 按
+  Kernel 启动阶段校准语义并逐项接管、退役旧工具的权威路线。

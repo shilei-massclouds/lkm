@@ -1,5 +1,8 @@
 # tools2
 
+权威校准与旧工具退役路线见
+[`spec/charter/projects/tools2-semantic-validation-and-retirement.md`](../spec/charter/projects/tools2-semantic-validation-and-retirement.md)。
+
 Independent first-stage Signal derivation toolchain. It intentionally does not import or replace `tools/`.
 
 ```bash
