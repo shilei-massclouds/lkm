@@ -20,13 +20,13 @@
 当前推导入口是：
 
 ```text
-ComputerProject.Transition::Preset
+Computer.Transition::Preset
 ```
 
 当前推导目标是：
 
 ```text
-ComputerProject.state == State::Online
+Computer.state == State::Online
 ```
 
 ## 工具链架构目标
@@ -222,8 +222,8 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 - 已检查重复声明、未知父对象、未知事件目标状态、未知事件引用和未知状态引用。
 - 已提供对象视图、驱动关系视图和时间轴视图。
 - 图形输出中，`object` 和 `drives` 仍使用 Graphviz DOT；`timeline` 直接生成 SVG。
-- 已加入最小推导器，可从 `ComputerProject.Transition::Preset` 按事件源状态、`depends_on`、`drives`、目标状态 invariant 和 `emits` completion-event 顺序执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
-- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Transition::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `ComputerProject.Transition::Preset` 可严格推出目标 transition 已提交，并通过 completion-event 链使 `ComputerProject.state == State::Online`，复杂谓词仍作为 `obligation` 保留。
+- 已加入最小推导器，可从 `Computer.Transition::Preset` 按事件源状态、`depends_on`、`drives`、目标状态 invariant 和 `emits` completion-event 顺序执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
+- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Transition::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `Computer.Transition::Preset` 可严格推出目标 transition 已提交，并通过 completion-event 链使 `Computer.state == State::Online`，复杂谓词仍作为 `obligation` 保留。
 
 ### 2.1 Timeline View
 
@@ -246,7 +246,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
 - 入口步骤对象来自 `BootInitFlow.Preset` 直接驱动出的状态推进结果，例如 `BootTaskEntryBinding`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
-- `ComputerProject` 是顶层工程对象，不在时间轴行中显示；`Kernel` 承载内核系统阶段树。
+- `Computer` 是唯一顶层系统；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
 待确认或后续改进：
@@ -329,13 +329,13 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 默认目标：
 
 ```text
-ComputerProject.Transition::Preset
+Computer.Transition::Preset
 ```
 
 后续可以增加参数：
 
 ```text
---target ComputerProject.Transition::Preset
+--target Computer.Transition::Preset
 --format text|json
 --strict
 ```
@@ -392,8 +392,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --str
 
 已完成。`tools/pyveri/tests/test_derive.py` 已从“报告 blocked”改为“目标可达”：
 
-- 目标为 `ComputerProject.Transition::Preset`。
-- 期望目标 transition 已提交，且 completion-event 链最终达到 `ComputerProject.state == State::Online`。
+- 目标为 `Computer.Transition::Preset`。
+- 期望目标 transition 已提交，且 completion-event 链最终达到 `Computer.state == State::Online`。
 - 复杂谓词仍允许作为 `obligation` 保留。
 
 完成标准：
@@ -440,7 +440,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - 当前完整推导报告过于平铺，信息噪音较大。后续应重新设计输出层次，默认只显示摘要、目标状态、根因 blocked、deferred 和 obligation 统计；详细 transitions 和全部 obligation 应通过 verbose/detail 参数打开。
 - 将默认推导过程显示为进入/退出式 trace，而不是平铺的 `transitions` 列表。每个事件输出成对记录：进入行使用 `>`，退出行使用 `<`；被 `drives` 的子事件缩进两格嵌套在中间。成功退出行不额外标注 `ok`，失败退出行标注 `blocked:` 或 `contradiction:` 并附带原因。
 - trace 图形输出应先建立单元格布局，再填充内容：横向先划分对象/嵌套列，列与列之间的空隙也作为占位单元格；列内部再按时间顺序分段，状态框、事件区间和内部空隙都占据明确单元格。虚线只作为布局辅助线或 debug 层，最终 SVG 默认不必显示。
-- 当前以 `ComputerProject.Transition::Preset` 从 `State::Base` 到 `State::Prepared` 的推导作为结构化 trace 入口；该入口顺序驱动 `HardwareProject`、`FirmwareProject`、`KernelProject`，完成构造后通过 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Preset` 交接。Config/Lds 初态 Online 且不接收 Signal，前三个运行系统初态 Ready。
+- 当前以 `Computer.Transition::Preset` 从 `State::Base` 到 `State::Prepared` 的推导作为结构化 trace 入口；该入口顺序驱动 `Riscv64Platform`、`OpenSBI`、`Kernel` 的 Preset，再按相同顺序驱动 Setup，最后通过 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 交接。Config/Lds 初态 Ready，由 Kernel.Setup 依次 Enable。
 - 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
@@ -468,7 +468,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `task_concurrency_closed()` 的来源不只是当前 `.spec` 尚未建模其它任务，而是 RISC-V Linux ordered booting 的上一级交接语义。已核对本地 Linux 源码 `../linux-6.12`：`Documentation/arch/riscv/boot.rst` 说明 ordered booting 下固件只释放一个 hart 执行初始化，随后由该 hart 通过 SBI HSM 启动其它 harts；`arch/riscv/kernel/cpu_ops.c` 在检测到 `SBI_EXT_HSM` 后选择 `cpu_ops_sbi`；`arch/riscv/kernel/cpu_ops_sbi.c` 的 `sbi_cpu_start()` 通过 `SBI_EXT_HSM_HART_START` 启动 secondary hart；`arch/riscv/kernel/smpboot.c` 的 `__cpu_up()` 后续才调用 `cpu_start`。因此在支持 HSM 的 OpenSBI/ordered booting 路径下，入口前导期开始时只有 boot hart/root task 在运行，其它 hart/任务必须由当前根执行路径后续主动启动。推导中该事实由 `sbi_hsm_available()`、`ordered_booting_enabled()` 和 `primary_hart_only_at_kernel_entry()` 三条前序事实共同推出。`RISCV_BOOT_SPINWAIT` 只作为旧固件兼容路径记录，不作为当前规格默认路径。
 - `valid_hart_id(...)` 已被更具体的 `platform_hart_id_valid(...)` 取代。当前已引入 `PlatformCpuInfo` 准备期对象，表示从 FDT/platform CPU 描述中提取出的有效 hart id 集合；FDT 不决定谁是 boot hart，boot hart 身份仍来自 `BootArgs.boot_hartid`。`platform_hart_id_valid(BootArgs.boot_hartid)` 归入 `platform_cpu_description / fdt_cpu_description`，表示启动 ABI 给出的 boot hart id 属于 FDT 列举的有效 hart 集合；`BootCPU.preset()` 再把该身份收口为 `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`。
 - `BootCPU.hartid` 不是可选值，而是 `BootCPU.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。`CpuGroup` 不再长期保存 `boot_cpu_hartid`，只负责组织 `BootCPU` 和后续 secondary CPU 的引用、logical-id 索引与 possible/present/online 集合视图。
-- `BootArgs` 是模型观察起点已存在且初态 Online 的只读 boot ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；FirmwareProject 规定或采纳其类型和含义，但不通过 Setup 构造实例。其 Online invariant 归入 `firmware_boot_abi / firmware_project_boot_abi`，且 Online 只表示不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接。`OpenSBI.Enable` 只保证 `BootCpuRegisters.a0/a1` 与 `BootArgs.boot_hartid/dtb_pa` 一致，不能用入口寄存器反向定义这个静态对象，也不能据此合成其它寄存器值。
+- `BootArgs` 是模型观察起点已存在且初态 Online 的只读 boot ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；OpenSBI 规定或采纳其类型和含义，但不通过 Setup 构造实例。其 Online invariant 归入 `firmware_boot_abi`，且 Online 只表示不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接。`OpenSBI.Enable` 只保证 `BootCpuRegisters.a0/a1` 与 `BootArgs.boot_hartid/dtb_pa` 一致，不能用入口寄存器反向定义这个静态对象，也不能据此合成其它寄存器值。
 - `OpenSBI.Enable/Online` 包含 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)`，表示当前 OpenSBI 固件交接给内核的 DTB blob 位于物理 RAM 中。Linux RISC-V boot protocol 只解释 `$a1` 是内存中的 devicetree 地址；OpenSBI firmware handoff 负责把 previous `a1` 或 `FW_JUMP_FDT_ADDR` 作为 next `arg1/a1` 传给下一阶段。DTB blob 的 RAM containment 因此归入 `firmware_entry_state / opensbi_firmware`，不归入泛化的 `SbiSpec`，也不由 `PhysicalMemory.source=fdt::memory` 自证。
 - `CpuGroup.Preset` 已改为驱动 `BootCPU.Preset`，由 `BootCPU` 依赖 `BootArgs.boot_hartid` 并用 `ensures { boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid); }` 表达transition 完成后记录启动 hart 标识。这样 `BootArgs` 成为入口启动参数的统一抽象；启动 hart 是否属于平台有效 hart 集合由 `PlatformCpuInfo` 的 FDT CPU 描述事实证明，后续逻辑 CPU 映射由 `CpuGroup.Cpu[logical_id]` 和 `CpuGroup.possible_cpus` 集合视图直接表达。
 - `Riscv64.attrs_accessible(self)` 归入 `architecture_capabilities / riscv_isa_spec`，只表示外部 ISA 能力可用；可变 GPR/CSR 不再是 `Riscv64` 属性。`BootCpuRegisters` 是 `BootCPU` 下初态 Online 的启动相关寄存器子集，其 `attrs_accessible(self)` 由 `architecture_register_file / boot_cpu_register_subset` 收口；它不随平台生命周期推进，也不推广到全部 `CPUObject`。
@@ -476,7 +476,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 
 后续规格结构清理：
 
-- 已引入 `BootArgs` 对象作为 FirmwareProject 定义的内核启动 ABI；`OpenSBI.Enable` 把它物化到 `BootCpuRegisters.a0/a1`。`RawDtb` 依赖 `BootArgs.dtb_pa`，`CpuGroup` 依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
+- 已引入 `BootArgs` 对象作为 OpenSBI 拥有的内核启动 ABI；`OpenSBI.Enable` 把它物化到 `BootCpuRegisters.a0/a1`。`RawDtb` 依赖 `BootArgs.dtb_pa`，`CpuGroup` 依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
 - `RawDtb` 的规格按三层表达：`BootArgs.dtb_pa` 是 dtb 起始物理地址，`header_range` 覆盖读取 `DtbHeader` 所需范围，`range` 覆盖根据 `header.total_size` 得到的完整 dtb 范围。规格统一使用 `contains(container, value)` 表达包含关系，不再引入 `addr_in_ram` 或 `range_in_ram` 这类薄包装谓词；`contains(PhysicalMemory.ram, header_range)` 表示头部读取范围有效，`contains(PhysicalMemory.ram, range)` 表示启动代码读取 total_size 后的完整范围检查。
 - `RawDtb.Preset` 已用transition 后置条件证明 `header_range` 由 `BootArgs.dtb_pa` 和 `size_of::<DtbHeader>()` 派生，并证明头部 magic 有效；`RawDtb.Setup` 已用transition 后置条件证明完整 `range` 由 `BootArgs.dtb_pa` 和 `header.total_size` 派生，并证明完整 header 有效。`contains(PhysicalMemory.ram, header_range)` 与 `contains(PhysicalMemory.ram, range)` 不用transition 后置条件硬消，而是由 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)` 加上 RawDtb 自身的边界派生事实证明。
 - `RawDtb.Preset/Setup` 当前属于规格前置证明边界，不表示 Linux 6.12 的 RISC-V `setup_vm()` 在同一源码位置逐项验证 DTB。Linux 实现侧主要在 `setup_vm()` 中根据 `dtb_pa` 建立 FDT fixmap 映射并设置 `dtb_early_va/dtb_early_pa`，后续 `parse_dtb()` 调用 `early_init_dt_scan()`，再由 `early_init_dt_verify()` 执行 `fdt_check_header()` 并扫描 `/chosen`、`/memory` 等节点。本规格把这些后续隐含依赖提前收口，是为了让 `EarlyVm` 的 FDT 映射前提可推导、可检查。
@@ -587,7 +587,7 @@ tools/out/
 - 状态和事件引用检查。
 - `drives` 顺序保持。
 - `deferred` 收集。
-- 从 `ComputerProject.Transition::Preset` 推导到目标 transition，并通过 `emits` 连锁到最终在线状态的最小路径。
+- 从 `Computer.Transition::Preset` 推导到目标 transition，并通过 `emits` 连锁到最终在线状态的最小路径。
 
 ## 第一版非目标
 

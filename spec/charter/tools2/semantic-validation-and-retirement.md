@@ -38,8 +38,8 @@ derive、view 还是展示问题，再用文本复核因果链、用动画复核
 
 校准按 Kernel 启动实际发生顺序执行，而不是按文件目录、对象名称或工具实现模块倒推：
 
-1. 从默认 `Human -> ComputerProject.Preset` 和模型初态开始，保留 Project 构造以及
-   `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的真实上游链。
+1. 从默认 `Human -> Computer.Preset` 和模型初态开始，保留 Computer 对三个直接子 System 的
+   Preset/Setup 编排以及 `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的真实上游链。
 2. 在待校准组首个 canonical Signal 的发送动作之前停止，导出带 boundary provenance 的稳定
    snapshot。snapshot 必须由真实上游到达，不能由旧工具、手写 state/fact、隐式 emitter 回溯或
    目标 handler 的预执行合成。
@@ -61,13 +61,13 @@ Signal identity、source、target、model fingerprint 和 boundary provenance，
 
 下表中的“入口 snapshot”是每组必须建立和复核的 canonical boundary snapshot。名称用于标识边界，
 不要求本轮新增同名仓库文件；是否把某个 snapshot 提交为 scenario，必须在该组后续 charter-first
-工作中另行决定。当前已提交的 `Kernel.Preset.snapshot.json` 也必须由真实上游重建和复核，不能仅因
+工作中另行决定。当前提交的 `Kernel.Enable.snapshot.json` 也必须由真实上游重建和复核，不能仅因
 它已经存在而免验。
 
 | 组 | 启动范围 | canonical 入口 snapshot | 本组结束边界 |
 | --- | --- | --- | --- |
-| 1. 上游构造与交接 | 三个直接子 Project 的 Preset/Setup、Computer assembly，以及 RISC-V 平台和 OpenSBI 的 FIFO 启动交接 | `Kernel.Preset` 发送前 | `Kernel.Preset` 被接受，Kernel 的启动前提和 a0/a1 交接得到核对 |
-| 2. Kernel 与 BootInit 入口 | `Kernel.Preset`、异步交给 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `BootInitFlow.Preset` 发送前 | `BootInitFlow.Setup` 发送前，BootInitFlow 已到 Prepared |
+| 1. 上游构造与交接 | Computer 顺序驱动三个直接子 System 的 Preset/Setup、建立 assembly，以及平台和 OpenSBI 的 FIFO 启动交接 | `Kernel.Enable` 发送前 | `Kernel.Enable` 被接受，Kernel 的启动前提和 a0/a1 交接得到核对 |
+| 2. Kernel 与 BootInit 入口 | `Kernel.Enable`、Kernel Online 后异步交给 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `BootInitFlow.Preset` 发送前 | `BootInitFlow.Setup` 发送前，Kernel 保持 Online 且 BootInitFlow 已到 Prepared |
 | 3. BootInit 引导、中断与进程准备 | `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` | `BootInitFlow.Setup` 发送前 | `BootInitRestInitPhase.Preset` 发送前，前述叶子均已按顺序完成 |
 | 4. rest-init 与首次调度切换 | PID 1/kthreadd 建立、completion、BootIdleFlow 预检与 active binding、BootTask 到 KernelInitTask 的真实 switch | `BootInitRestInitPhase.Preset` 发送前 | `KernelInitFlow.Preset` 发送前，PID 1 已真实 OnCpu 且执行权完成迁移 |
 | 5. PID 1 内核初始化 | `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase` 和 `PayloadPreparePhase` | `KernelInitFlow.Preset` 发送前 | `KernelInitFlow.Enable` 发送前，KernelInitFlow 已到 Ready |
@@ -195,7 +195,7 @@ model、coding、适用 compose、实现和 testing 按 authority 顺序一致�
 ## 相关文档
 
 - [系统 Signal 语义](../system-signal.md)
-- [tools2 Signal 动画章程](tools2-signal-animation.md)
+- [tools2 Signal 动画章程](signal-animation.md)
 - [BootInitFlow 启动执行阶段](../phases/boot-init.md)
 - [KernelInitFlow 的 SMP/runtime 叶子阶段](../phases/smp-runtime.md)
 - [KernelInitFlow 的 payload 准备与提交](../phases/payload.md)

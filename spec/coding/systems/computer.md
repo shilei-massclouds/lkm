@@ -1,6 +1,10 @@
 # Computer system coding mapping
 
-`impl/arceos_ex/src/systems/computer.rs` records metadata only. The real binary still begins at the existing
-firmware/kernel entry path; this module must not add a second startup state machine or checkpoint stream.
-The metadata mapping records an initially Ready system whose only startup transition is Enable, followed by the
-asynchronous `Riscv64Platform.Enable` handoff. It does not change the existing firmware/assembly control flow.
+`impl/arceos_ex/src/systems/computer.rs` is metadata-only and records the charter/model/coding chain for the unique
+top-level System. It must map Base/Prepared/Ready/Online plus the ordered child Preset/Setup and assembly fact; it
+must not add a second executable startup state machine or synthesize checkpoints.
+
+The real binary begins at the existing firmware/kernel entry path. That runtime boundary adopts the canonical
+sending snapshot: Computer Online, Riscv64Platform/OpenSBI Online, Kernel Ready, and Config/Lds Online. Rust does
+not replay Human, Computer, platform, firmware, Config, or Lds construction. Metadata must still preserve the model
+order and the post-commit asynchronous `Riscv64Platform.Enable` handoff.

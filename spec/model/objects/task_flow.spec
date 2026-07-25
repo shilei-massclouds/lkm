@@ -312,6 +312,7 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
+                    Kernel.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     BootInitFlow.state == State::Online;
                     kernel_init_entry_reaches_kernel_init_flow(
@@ -336,6 +337,7 @@ object KernelInitFlow: TaskFlow {
 
     state State::Prepared {
         invariant {
+            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
@@ -368,6 +370,7 @@ object KernelInitFlow: TaskFlow {
 
     state State::Ready {
         invariant {
+            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;
@@ -399,6 +402,7 @@ object KernelInitFlow: TaskFlow {
 
     state State::Online {
         invariant {
+            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;
@@ -488,6 +492,7 @@ object KernelInitFlow: TaskFlow {
         Action::CommitPayloadHandoff {
             state_effect: StateEffect::None;
             depends_on {
+                Kernel.state == State::Online;
                 self.state == State::Online;
                 PayloadHandoffPreparePhase.state == State::Online;
                 SelectedPayloadHandoff.state == State::Online;

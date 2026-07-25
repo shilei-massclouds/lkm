@@ -172,13 +172,4 @@ impl Lds {
 
         per_cpu_load >= kernel_start_addr && load_end <= kernel_end_addr
     }
-
-    pub(crate) fn bss_zeroed(&self, kernel_image: &KernelImage) -> bool {
-        let Some(start) = kernel_image.runtime_to_phys(self.bss_start()) else {
-            return false;
-        };
-        let len = self.bss_end() - self.bss_start();
-        let bytes = unsafe { core::slice::from_raw_parts(start as *const u8, len) };
-        bytes.iter().all(|byte| *byte == 0)
-    }
 }

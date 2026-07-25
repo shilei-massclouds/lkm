@@ -62,7 +62,7 @@ test.beforeAll(() => {
     'Controller.Begin', 0, 'complete'
   ).html;
   const main = generate(
-    'main', join(repository, 'spec/model/main.spec'), 'ComputerProject.Preset', 0, 'complete'
+    'main', join(repository, 'spec/model/main.spec'), 'Computer.Preset', 0, 'complete'
   );
   mainHtml = main.html;
   mainSteps = main.totalSteps;

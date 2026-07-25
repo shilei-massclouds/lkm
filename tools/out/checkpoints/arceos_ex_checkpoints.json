@@ -15,16 +15,16 @@
   },
   {
     "index": 2,
-    "variant": "BootInitFlowStarted",
-    "name": "BootInitFlow.Started",
-    "early_byte": "O",
+    "variant": "KernelOnline",
+    "name": "Kernel.Online",
+    "early_byte": "L",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 3,
-    "variant": "KernelOnline",
-    "name": "Kernel.Online",
-    "early_byte": null,
+    "variant": "BootInitFlowStarted",
+    "name": "BootInitFlow.Started",
+    "early_byte": "O",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {

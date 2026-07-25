@@ -1,15 +1,72 @@
-/* Computer is the explicit root of the independent runtime-system tree. */
+/* Computer is the unique top-level system and full-model entry. */
+
+predicate computer_assembled_from<P, F, K>(platform: P, firmware: F, kernel: K) -> bool;
 
 object Computer: ComputerObject {
-    initial_state: State::Ready;
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                drives {
+                    Riscv64Platform.Transition::Preset;
+                    OpenSBI.Transition::Preset;
+                    Kernel.Transition::Preset;
+                }
+
+                ensures {
+                    Riscv64Platform.state == State::Prepared;
+                    OpenSBI.state == State::Prepared;
+                    Kernel.state == State::Prepared;
+                }
+
+                emits {
+                    Transition::Setup;
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            Riscv64Platform.state == State::Prepared;
+            OpenSBI.state == State::Prepared;
+            Kernel.state == State::Prepared;
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                drives {
+                    Riscv64Platform.Transition::Setup;
+                    OpenSBI.Transition::Setup;
+                    Kernel.Transition::Setup;
+                }
+
+                ensures {
+                    Riscv64Platform.state == State::Ready;
+                    OpenSBI.state == State::Ready;
+                    Kernel.state == State::Ready;
+                    computer_assembled_from(Riscv64Platform, OpenSBI, Kernel);
+                }
+
+                emits {
+                    Transition::Enable;
+                }
+            }
+        }
+    }
 
     state State::Ready {
+        invariant {
+            Riscv64Platform.state == State::Ready;
+            OpenSBI.state == State::Ready;
+            Kernel.state == State::Ready;
+            computer_assembled_from(Riscv64Platform, OpenSBI, Kernel);
+        }
+
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    HardwareProject.state == State::Ready;
-                    FirmwareProject.state == State::Ready;
-                    KernelProject.state == State::Ready;
                     computer_assembled_from(Riscv64Platform, OpenSBI, Kernel);
                 }
 

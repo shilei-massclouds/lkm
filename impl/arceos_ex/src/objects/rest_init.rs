@@ -1334,7 +1334,7 @@ pub(crate) extern "C" fn kernel_init_entry() -> ! {
         "kernel_init entry stack invariant failed\n",
     );
     crate::arch::riscv64::sbi::putstr("kernel_init (pid=1) started\n");
-    crate::systems::kernel::enable_after_boot_init()
+    crate::phases::smp_runtime::start_kernel_init_flow()
 }
 
 pub(crate) extern "C" fn kthreadd_entry() -> ! {

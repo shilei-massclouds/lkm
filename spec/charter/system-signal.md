@@ -25,17 +25,33 @@
 系统层级不改变信号的明确目标。发送给某个子系统的信号只触发该子系统，不会因为 parent/child
 关系自动向上冒泡并触发父系统；父系统是否收到信号，只由信号目标是否为父系统决定。
 
-完整内核模型采用两棵稳定、可复核且彼此独立的有效层级树。源规格中的显式 `parent` 始终优先；当
-组合后的模型包含 `Kernel` 时，没有显式 parent 且不是 `ProjectObject` 或其子类型的静态系统仍默认
-属于 `Kernel`，但具名 `Computer` 是系统树显式根，绝不能应用该默认。
+完整内核模型采用一棵稳定、可复核的有效层级树。源规格中的显式 `parent` 始终优先；当组合后的模型
+包含 `Kernel` 时，没有显式 parent 的静态系统仍默认属于 `Kernel`，但具名 `Computer` 是显式根，绝
+不能应用该默认。
 
-工程树是 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`；系统树是
-`Computer -> {Riscv64Platform, OpenSBI, Kernel}`。启动 CPU 的局部层级片段是
+系统树是 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`。启动 CPU 的局部层级片段是
 `BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器对象不属于 `Riscv64Platform`。
-工程产物通过显式 parent 归属对应 Project，运行系统不挂在 Project 下。不包含 `Kernel` 的独立规格
-片段保持自己的根，工具不得为了凑齐主模型层级而虚构 Kernel。
+外部规格和构造输入通过显式 parent 归属消费它们的 System：`Riscv64 -> Riscv64Platform`、
+`SbiSpec/BootArgs -> OpenSBI`、`Config/Lds -> Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，
+工具不得为了凑齐主模型层级而虚构 Kernel。
 有效层级只用于结构展示、Signal 坐标和预算；它仍不产生隐式冒泡、广播或 handler 继承。未知
 parent、自引用和 parent 环都是模型错误，所有静态 view 与 Signal 工具必须消费同一份归一化层级。
+
+### SystemObject 四态
+
+`SystemObject` 统一采用 `Base -> Prepared -> Ready -> Online` 四态，含义由系统自身而不是下游闭包
+定义：
+
+- `Base`：当前系统实例尚未完成规格采纳。
+- `Prepared`：当前系统实例的规格已经建立或采纳，尚未完成构造。
+- `Ready`：当前系统实例已经构造完成，可以接受启动交接。
+- `Online`：当前系统实例自身已经启动并提交控制权；不表示下游系统、内部初始化、应用环境或整个根
+  请求已经成功完成。
+
+因此，System 在提交 Online 后异步发送的下游 Signal 即使随后失败，已经提交的 Online 也不得回滚；
+严格 Signal 的失败仍沿因果链使根 verdict 为 failed。系统运行态、应用环境和 payload 交接继续由
+`SystemState`、内部 Flow 状态与 `PayloadHandoffCommitted` 等各自边界表达，不得借 System.Online
+合并这些含义。
 
 ## 信号Signal
 
@@ -106,7 +122,7 @@ Signal 推导工具采用下列兼容边界：
 降级为其它 outcome。预算截断必须是 trace 中可见的事实，而不是展示层推断。
 
 `tools2/` 是验证上述目标语义的独立工具链。本轮里程碑要求它完整加载 `spec/model/main.spec`，并能从
-真实 Signal 到达边界推导其可达闭包。完整模型只有 `ComputerProject.Preset` 是无需预制条件的起点；
+真实 Signal 到达边界推导其可达闭包。完整模型只有 `Computer.Preset` 是无需预制条件的起点；
 底层 driver/derive 根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它
 后续 Signal 若因前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得
 隐式回溯 emitter、运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须提供外部
@@ -132,22 +148,23 @@ Signal 变为 `stopped`，不得产生 `pending` 或隐式 continuation。若推
 tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/` 的实现或中间协议代码；两套工具
 通过路径、独立 Python import path、producer 和 schema version 隔离。公开快捷入口是
 `tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
-快捷入口的默认请求是 `Human -> ComputerProject.Preset`，`-t/--trigger` 可以覆盖目标，
+快捷入口的默认请求是 `Human -> Computer.Preset`，`-t/--trigger` 可以覆盖目标，
 `-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，但底层
 `--signal` 保持必填。仅当调用者显式给出 `-t/--trigger` 且没有给出 `-s/--scenario` 时，快捷入口按
 规范化后的 Signal 查找 `tools2/scenarios/<CanonicalSignal>.snapshot.json`；显式 scenario 优先，
 `Startup` 与 `Preset` 因而选择同一 canonical 文件。缺少默认文件或规范化名称不能安全落在 scenarios
 目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行默认
-`ComputerProject.Preset`，包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
+`Computer.Preset`，包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
 version 4，移除 `lossy` 字段与 `discarded` outcome，并拒绝
 version 1、version 2、version 3、老工具协议和旧
 snapshot。老 `tools/` 继续承担默认
 `make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
 
-主模型的启动创建顺序固定为三个子 Project Preset、三个子 Project Setup、Computer assembly、
-`Computer -> Riscv64Platform -> OpenSBI -> Kernel`。后三段交接由异步 `emits` 形成全局 FIFO，不得按
-hierarchy depth 重排。`ComputerProject.Online` 只表示已经把启动交给 Computer；它不等待异步下游
-Online。
+主模型的启动创建顺序固定为 `Computer.Preset` 依次同步驱动三个直接子 System 的 Preset，
+`Computer.Setup` 再依次同步驱动三者 Setup 并建立 assembly fact，随后经
+`Computer -> Riscv64Platform -> OpenSBI -> Kernel -> BootInitFlow` 交接。System 的自 Setup/Enable
+以及后四段交接由异步 `emits` 形成全局 FIFO，不得按 hierarchy depth 重排。每个 System.Online 只
+表示该实例已经提交控制权，不等待异步下游 Online。
 
 tools2 的默认文本视图服务于快速阅读 Signal 在系统层级间的传播：按结构化 Signal 的创建顺序逐行
 展示 source、Signal、target，按目标相对根系统的 hierarchy depth 使用两空格缩进，并只为已解析的

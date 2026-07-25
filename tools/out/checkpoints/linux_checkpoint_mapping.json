@@ -23,17 +23,6 @@
   },
   {
     "checkpoint_index": 2,
-    "checkpoint_name": "BootInitFlow.Started",
-    "checkpoint_variant": "BootInitFlowStarted",
-    "linux_file": "arch/riscv/kernel/head.S",
-    "linux_symbol": "_start",
-    "linux_anchor": "_start definition line 21",
-    "mapping_kind": "exact",
-    "confidence": "high",
-    "notes": "RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping."
-  },
-  {
-    "checkpoint_index": 3,
     "checkpoint_name": "Kernel.Online",
     "checkpoint_variant": "KernelOnline",
     "linux_file": null,
@@ -42,6 +31,17 @@
     "mapping_kind": "unmapped",
     "confidence": "none",
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
+  },
+  {
+    "checkpoint_index": 3,
+    "checkpoint_name": "BootInitFlow.Started",
+    "checkpoint_variant": "BootInitFlowStarted",
+    "linux_file": "arch/riscv/kernel/head.S",
+    "linux_symbol": "_start",
+    "linux_anchor": "_start definition line 21",
+    "mapping_kind": "exact",
+    "confidence": "high",
+    "notes": "RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping."
   },
   {
     "checkpoint_index": 4,

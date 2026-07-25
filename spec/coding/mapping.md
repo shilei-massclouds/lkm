@@ -77,7 +77,7 @@ Phase 对象表示 system/phase 树中的过程编排边界。它们的状态、
 边。
 
 `PreparePhase` 表示入口执行前已由构建、链接和平台共同形成的准备边界，属于显式例外。它的
-adoption 方式必须由 project/system coding 文件记录，但不能降低普通标准 Phase 的四状态和
+adoption 方式必须由对应 system coding 文件记录，但不能降低普通标准 Phase 的四状态和
 三迁移要求。
 
 ### ArceOS/Unikernel 引导边界

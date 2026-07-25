@@ -14,6 +14,7 @@ object BootInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
+                    Kernel.state == State::Online;
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
                     OpenSBI.state == State::Online;
@@ -186,7 +187,7 @@ object BootInitFlow: TaskFlow {
                 }
 
                 emits {
-                    Kernel.Transition::Setup;
+                    Scheduler.Action::Schedule;
                 }
             }
         }
@@ -194,6 +195,7 @@ object BootInitFlow: TaskFlow {
 
     state State::Online {
         invariant {
+            Kernel.state == State::Online;
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;

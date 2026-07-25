@@ -11,7 +11,7 @@ Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset s
 
 | 子阶段 | Preset 对象动作与 context | checkpoints | Online continuation |
 | --- | --- | --- | --- |
-| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `boot_init_flow::enable_after_boot_init_rest_init()` |
+| BootInitRestInit | RCU start、PID 1/kthreadd 创建、SystemState、completion；`KthreaddReadyGate.Complete` 保持在 `KthreaddReadyGateWaitLockContext` | Started -> Prepared -> 既有 Ready -> Online | `boot_init_flow::setup_after_boot_init_rest_init()` |
 | BootInitScheduleHandoff | `BootIdlePreemption.EnableNoResched`、`BootIdleFlow.Setup` 和完整首次切换预检；不执行 `Scheduler.schedule()` | Started -> Prepared -> 既有 Ready -> Online | `boot_init_flow::enable_after_boot_init_schedule_handoff()` |
 | BootIdleEntry | 仅在 scheduler 将来恢复 BootTask 后，于 `BootIdleStartupContext` 中进入 runtime、prepare entry 与代表性 idle loop | Started -> Prepared -> 既有 Ready -> Online | 进入 BootTask 的不返回 idle loop，不回调 BootInitFlow |
 
@@ -20,9 +20,9 @@ Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset s
 Ready/owner/active binding 和 scheduler 输入均已闭合；first-schedule、pick/switch/current-task 与
 stack-switch committed 只能由随后真实 `Scheduler.schedule()` 发布。
 
-BootInitFlow 提交 Online 后，Kernel.Enable 立即调用真实 scheduler handoff。
-`kernel_init_entry()` 验证真实 `sp` 后调用具名 `kernel::enable_after_boot_init()`；该 continuation
-检查 Kernel Ready、BootInitFlow Online、KernelInitTask OnCpu、唯一 entry count 与 SP
+BootInitFlow 提交 Online 后直接调用真实 scheduler handoff，不再回调 Kernel。
+`kernel_init_entry()` 验证真实 `sp` 后直接调用 `phases::smp_runtime::start_kernel_init_flow()`；该入口
+检查 Kernel Online、BootInitFlow Online、KernelInitTask OnCpu、唯一 entry count 与 SP
 verification，再启动 SmpRuntime。真实 schedule 调用将来返回到 BootTask 时才启动
 BootIdleEntryPhase；线性模型中的 current TaskRef 标签不构成物理 Rust stack 归属证据。
 

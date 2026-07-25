@@ -36,9 +36,9 @@ class ParseToolTests(unittest.TestCase):
             document = data["document"]
             self.assertGreaterEqual(len(document["objects"]), 19)
             computer = next(
-                item for item in document["objects"] if item["name"] == "ComputerProject"
+                item for item in document["objects"] if item["name"] == "Computer"
             )
-            self.assertEqual(computer["kind"], "ProjectObject")
+            self.assertEqual(computer["kind"], "ComputerObject")
 
     def test_entry_spans_are_serialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,7 +130,7 @@ class ParseToolTests(unittest.TestCase):
 
     def test_structured_boundaries_round_trip_with_include_source(self) -> None:
         child_source = """
-            object IncludedBoundaryOwner: ProjectObject {
+            object IncludedBoundaryOwner: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -254,7 +254,7 @@ class ParseToolTests(unittest.TestCase):
                 }
             }
 
-            object ComputerProject: ProjectObject {
+            object RootController: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -292,7 +292,7 @@ class ParseToolTests(unittest.TestCase):
                 ],
             )
             self.assertEqual([item["ordinal"] for item in statements], [1, 2, 3])
-            self.assertEqual(statements[0]["owner_process"], "ComputerProject.Transition::Preset")
+            self.assertEqual(statements[0]["owner_process"], "RootController.Transition::Preset")
             self.assertEqual(statements[0]["alias"], "first")
             self.assertEqual(statements[0]["declared_type"], "Item")
 
@@ -317,7 +317,7 @@ class ParseToolTests(unittest.TestCase):
                     type Item {{
                     }}
 
-                    object ComputerProject: ProjectObject {{
+                    object RootController: SystemObject {{
                         initial_state: State::Base;
                         state State::Base {{
                             transitions {{
@@ -355,7 +355,7 @@ class ParseToolTests(unittest.TestCase):
             nested.mkdir()
             (nested / "child.spec").write_text(
                 """
-                object IncludedObject: ProjectObject {
+                object IncludedObject: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -369,7 +369,7 @@ class ParseToolTests(unittest.TestCase):
                 """
                 include "nested/child.spec";
 
-                object RootObject: ProjectObject {
+                object RootObject: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -394,7 +394,7 @@ class ParseToolTests(unittest.TestCase):
             child = root / "child.spec"
             child.write_text(
                 """
-                object IncludedOnce: ProjectObject {
+                object IncludedOnce: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -429,7 +429,7 @@ class ParseToolTests(unittest.TestCase):
                 /*
                  * Included note.
                  */
-                object IncludedWithComment: ProjectObject {
+                object IncludedWithComment: SystemObject {
                     initial_state: State::Base;
                 }
                 """,

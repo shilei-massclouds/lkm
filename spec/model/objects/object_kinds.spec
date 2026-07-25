@@ -10,9 +10,6 @@
 type PhaseObject {
 }
 
-type ProjectObject {
-}
-
 type SystemObject {
 }
 

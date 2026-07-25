@@ -13,7 +13,7 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                object A: ProjectObject {
+                object A: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -86,7 +86,7 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                object A: ProjectObject {
+                object A: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -136,7 +136,7 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                object A: ProjectObject {
+                object A: SystemObject {
                     initial_state: State::Base;
 
                     state State::Base {
@@ -546,7 +546,7 @@ class DerivationTests(unittest.TestCase):
             if record.object_name == "BootArgs"
             and record.state_name == "Online"
             and record.proof_class == "firmware_boot_abi"
-            and record.proof_provider == "firmware_project_boot_abi"
+            and record.proof_provider == "firmware_boot_abi"
         }
         self.assertEqual(
             boot_args_invariants,
@@ -570,22 +570,18 @@ class DerivationTests(unittest.TestCase):
                 for record in derivation.records
             )
         )
-        self.assertIn("> ComputerProject.Transition::Preset State::Base", text)
-        self.assertIn("> HardwareProject.Transition::Preset State::Base", text)
-        self.assertIn("> FirmwareProject.Transition::Preset State::Base", text)
-        self.assertIn("  > ComputerProject.Transition::Setup State::Prepared", text)
+        self.assertIn("> Computer.Transition::Preset State::Base", text)
+        self.assertIn("> Riscv64Platform.Transition::Preset State::Base", text)
+        self.assertIn("> OpenSBI.Transition::Preset State::Base", text)
+        self.assertIn("  > Computer.Transition::Setup State::Prepared", text)
         self.assertIn("> Computer.Transition::Enable State::Ready", text)
         self.assertIn("> Riscv64Platform.Transition::Enable State::Ready", text)
         self.assertIn("> OpenSBI.Transition::Enable State::Ready", text)
-        self.assertNotIn("> Config.Transition::", text)
-        self.assertNotIn("> Lds.Transition::", text)
+        self.assertIn("> Config.Transition::Enable State::Ready", text)
+        self.assertIn("> Lds.Transition::Enable State::Ready", text)
         self.assertIn("> Kernel.Transition::Preset State::Base", text)
         self.assertIn("> EntrySuccessorPhase.Transition::Setup State::Prepared", text)
-        self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
-        self.assertEqual(derivation.states["ComputerProject"], "Online")
-        self.assertEqual(derivation.states["HardwareProject"], "Ready")
-        self.assertEqual(derivation.states["FirmwareProject"], "Ready")
-        self.assertEqual(derivation.states["KernelProject"], "Ready")
+        self.assertIn("< Computer.Transition::Preset State::Prepared", text)
         self.assertEqual(derivation.states["BootArgs"], "Online")
         self.assertEqual(derivation.states["Config"], "Online")
         self.assertEqual(derivation.states["Lds"], "Online")

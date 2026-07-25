@@ -1,4 +1,4 @@
-# Project Charter
+# System Charter
 
 ## 文档状态
 
@@ -17,11 +17,10 @@
    [`../coding/objects/README.md`](../coding/objects/README.md)。
 4. [运行期实例声明](objects/dynamic-instance-declaration.md)：`drives` 中 fresh Type instance 的声明、
    词法 alias、生命周期、稳定 trace identity 与静态/运行时视图边界。
-5. [工程树](projects/README.md)：ComputerProject 及三个直接子 Project 的规格与构造责任。
-6. [系统树](systems/README.md)：Computer 及平台、OpenSBI、Kernel 的运行期启动责任。
-7. [tools2 Signal 动画](projects/tools2-signal-animation.md)：确定 Signal trace 的离线 HTML 发布、
+5. [系统树](systems/README.md)：唯一顶层 Computer 及平台、OpenSBI、Kernel 的规格、构造与启动责任。
+6. [tools2 Signal 动画](tools2/signal-animation.md)：确定 Signal trace 的离线 HTML 发布、
    Signal 级步进、非模拟器边界与播放器责任。
-8. [tools2 启动语义校准与旧工具退役](projects/tools2-semantic-validation-and-retirement.md)：确定按
+7. [tools2 启动语义校准与旧工具退役](tools2/semantic-validation-and-retirement.md)：确定按
    Kernel 启动阶段校准 Signal 因果语义、建立 canonical boundary snapshot，并逐项接管和退役旧工具
    的路线。
 
@@ -1331,9 +1330,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
-形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`。顶层由独立工程树
-`ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}` 构造独立系统树
-`Computer -> {Riscv64Platform, OpenSBI, Kernel}`，再由 Kernel 通过 BootTask/BootInitFlow 串接
+形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`。顶层唯一系统树是
+`Computer -> {Riscv64Platform, OpenSBI, Kernel}`；Computer 依次驱动三个子系统的规格和构造，再由
+Kernel 通过 BootTask/BootInitFlow 串接
 入口对象、EntrySuccessorPhase、CorePreparePhase 与 MmCoreInitPhase 等内部规格。子阶段 4 的正式模型位于
 `spec/model/phases/boot/mm-core-init/`。
 
@@ -3772,30 +3771,24 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 
 # 新版准备
 
-## 双树工程与系统启动规格
+## 唯一顶层系统启动规格
 
-工程树固定为 `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`。ComputerProject
-的 Preset 按该顺序同步推进三个子 Project 的 Preset；Setup 按同一顺序推进三个子 Project 的 Setup。
-子 Project 分别建立平台、OpenSBI、Kernel 规格并构造各自产物，最终停在 Ready，不执行 Enable。
+系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`。Computer 的 Preset 按该顺序同步推进
+三个子 System 的 Preset；Setup 按同一顺序推进三个子 System 的 Setup，并建立 assembly fact。
 
-静态归属如下：`Riscv64.parent = HardwareProject`；`SbiSpec`、`BootArgs.parent = FirmwareProject`；
-`Config`、`Lds.parent = KernelProject`。二者是构建时已经确定的静态输入，完整模型的初态直接为
-`Online`；`Lds` 依赖已 Online 的 `Config`，但 KernelProject 不驱动二者的生命周期。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
+静态归属如下：`Riscv64.parent = Riscv64Platform`；`SbiSpec`、`BootArgs.parent = OpenSBI`；
+`Config`、`Lds.parent = Kernel`。Config/Lds 是构建时输入，完整模型初态为 Ready；Kernel.Setup 依次
+驱动 Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
-HardwareProject 构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
+平台构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
 从模型观察起点就已存在的只读启动 ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；
-FirmwareProject 规定或采纳参数的类型和含义，但不通过生命周期构造其实例。其初态 `Online` 只表示
+OpenSBI 规定或采纳参数的类型和含义，但不通过生命周期构造其实例。其初态 `Online` 只表示
 不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接，也不由入口寄存器反向定义。
 
-ComputerProject.Setup 在三个子 Project Ready 后建立 `Computer` 已由 `Riscv64Platform`、`OpenSBI`、
-`Kernel` 组装的事实并 self-emits Enable。ComputerProject.Enable 只 drives `Computer.Enable`；其 Online
-表示启动已经交接，不表示异步下游已经全部 Online。
-
-系统树固定为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；Kernel 下的启动 CPU 局部层级为
-`BootCurrentCPU -> BootCPU -> BootCpuRegisters`。Computer、Riscv64Platform 与 OpenSBI 在完整模型的
-初始观察点已经组装且可启动，初态为 Ready；Ready 不表示已经运行。Computer.Enable emits
-Riscv64Platform.Enable；平台 Enable emits OpenSBI.Enable；OpenSBI.Enable 精确建立
+Computer.Setup 在三个子 System Ready 后建立 assembly fact，提交 Ready 并 self-emits Enable；
+Computer.Enable 提交 Online 后 emits Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；
+OpenSBI.Enable 精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
-`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Preset。其余启动相关寄存器由 Kernel 入口阶段
-逐步更新；Kernel 保持 Base 初态及现有到 BootInitFlow 的后续语义。全局 `Startup` 仍规范化为
-`Preset`，不重绑定为 `Enable`。
+`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Enable。Kernel 先提交 Online，再 emits
+BootInitFlow.Preset；其余启动相关寄存器由入口阶段逐步更新。全局 `Startup` 仍规范化为 `Preset`，
+不重绑定为 `Enable`。

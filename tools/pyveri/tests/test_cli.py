@@ -66,7 +66,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("\ndeferred:\n", text)
         self.assertIn("\ntrimmed:\n", text)
         self.assertIn("memblock.001 [Feature]", text)
-        self.assertIn("HardwareProject.Transition::Preset", text)
+        self.assertIn("Riscv64Platform.Transition::Preset", text)
         self.assertIn("Riscv64Platform.Transition::Enable", text)
         self.assertIn("OpenSBI.Transition::Enable", text)
         self.assertIn("MmCoreInitPhase.Transition::Setup", text)
@@ -92,7 +92,7 @@ class CliTests(unittest.TestCase):
 
     def test_verbose_strict_derivation_rejects_open_obligations(self) -> None:
         source = """
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -101,7 +101,7 @@ class CliTests(unittest.TestCase):
                             deferred demo.001 {
                                 category: DeferredCategory::Proof;
                                 summary: "Prove the missing demo fact.";
-                                evidence { missing_demo_evidence(ComputerProject); }
+                                evidence { missing_demo_evidence(Computer); }
                                 close_when: "The fact has a formal provider and a regression test.";
                             }
                         }
@@ -156,8 +156,8 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("trace:", text)
-        self.assertIn("> ComputerProject.Transition::Preset State::Base", text)
-        self.assertIn("< ComputerProject.Transition::Preset State::Prepared", text)
+        self.assertIn("> Computer.Transition::Preset State::Base", text)
+        self.assertIn("< Computer.Transition::Preset State::Prepared", text)
 
     def test_check_command_uses_strict_derivation_exit_code(self) -> None:
         stdout = io.StringIO()
@@ -201,7 +201,7 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("trace view:", text)
         self.assertIn("columns:", text)
-        self.assertIn("ComputerProject.Transition::Preset", text)
+        self.assertIn("Computer.Transition::Preset", text)
 
     def test_view_trace_command_accepts_action_depth_option(self) -> None:
         stdout = io.StringIO()
@@ -287,7 +287,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")
             self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
-            self.assertIn("ComputerProject.Preset", text)
+            self.assertIn("Computer.Preset", text)
 
     def test_render_trace_command_accepts_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -397,7 +397,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output.is_file())
             self.assertIn(f"trace_svg: {output}", stdout.getvalue())
-            self.assertIn("ComputerProject.Preset", output.read_text(encoding="utf-8"))
+            self.assertIn("Computer.Preset", output.read_text(encoding="utf-8"))
         finally:
             if output.exists():
                 output.unlink()

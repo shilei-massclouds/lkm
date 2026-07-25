@@ -1,7 +1,7 @@
 # Rootfs image construction coding
 
 本文件是正式 rootfs profile、fixture 安装和 input manifest 的权威 coding 规格。运行期对象规则见
-`spec/coding/objects/`，验收编排见 [`../../testing/rootfs.md`](../../testing/rootfs.md)。
+`spec/coding/objects/`，验收编排见 [`../testing/rootfs.md`](../testing/rootfs.md)。
 
 ## Profiles and construction boundary
 

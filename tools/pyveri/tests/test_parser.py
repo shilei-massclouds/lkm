@@ -379,10 +379,6 @@ class ParserTests(unittest.TestCase):
         document = parse_file(spec)
 
         object_names = {obj.name for obj in document.objects}
-        self.assertIn("ComputerProject", object_names)
-        self.assertIn("HardwareProject", object_names)
-        self.assertIn("FirmwareProject", object_names)
-        self.assertIn("KernelProject", object_names)
         self.assertIn("Computer", object_names)
         self.assertIn("Riscv64Platform", object_names)
         self.assertIn("OpenSBI", object_names)
@@ -390,8 +386,8 @@ class ParserTests(unittest.TestCase):
         self.assertIn("BootCpuRegisters", object_names)
         boot_args = next(obj for obj in document.objects if obj.name == "BootArgs")
         self.assertEqual(boot_args.initial_state, "Online")
-        self.assertEqual(boot_args.parent, "FirmwareProject")
-        self.assertEqual(boot_args.properties["source"], "firmware_project::boot_abi")
+        self.assertEqual(boot_args.parent, "OpenSBI")
+        self.assertEqual(boot_args.properties["source"], "firmware::boot_abi")
         self.assertEqual(
             [entry for block in boot_args.attrs for entry in block.entries],
             ["boot_hartid: HartId", "dtb_pa: PhysAddr<Dtb>"],

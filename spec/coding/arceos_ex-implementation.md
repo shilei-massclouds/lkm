@@ -1,7 +1,7 @@
 # arceos_ex 实现说明
 
 本文记录 `arceos_ex` 的源码落点、运行命令、已经观察到的实现事实和阶段性取舍。它不是
-coding 规则来源，也不覆盖 model、project/system/phase/object/testing 专题中的约束。
+coding 规则来源，也不覆盖 model、system/phase/object/testing 专题中的约束。
 
 统一任务优先级和状态见 [`docs/ROADMAP.md`](../../docs/ROADMAP.md)。coding 阅读从
 [`arceos_ex.md`](arceos_ex.md) 开始；对象文件级归属见
@@ -10,11 +10,10 @@ coding 规则来源，也不覆盖 model、project/system/phase/object/testing �
 ## 权威规格入口
 
 - 通用映射：[`mapping.md`](mapping.md)、[`phase-paradigm.md`](phase-paradigm.md)。
-- Kernel project/system：[`projects/kernel.md`](projects/kernel.md)、
-  [`systems/kernel.md`](systems/kernel.md)。
+- Kernel system：[`systems/kernel.md`](systems/kernel.md)。
 - 阶段映射：[`phases/README.md`](phases/README.md)。
 - 普通对象：[`objects/README.md`](objects/README.md)。
-- Rootfs 镜像构造：[`projects/rootfs-image.md`](projects/rootfs-image.md)。
+- Rootfs 镜像构造：[`rootfs-image.md`](rootfs-image.md)。
 - Rootfs/user 验收编排：[`../testing/rootfs.md`](../testing/rootfs.md)。
 - 基本测试流水线：[`../testing/basic-tests.md`](../testing/basic-tests.md)。
 - 构建门禁：[`build.md`](build.md)。
@@ -194,7 +193,7 @@ failure diagnostics 使用稳定 phase/step/object/check/first-failed 字段并�
 
 ## 构建与测试证据
 
-rootfs 构造规则见 [`projects/rootfs-image.md`](projects/rootfs-image.md)，测试编排见
+rootfs 构造规则见 [`rootfs-image.md`](rootfs-image.md)，测试编排见
 [`../testing/rootfs.md`](../testing/rootfs.md)。正式 `canonical` builder 独立完成 Alpine/BusyBox init、稳定 test
 账户、fixture、rc.local launcher/script 和 LTP template；basic runner 只核对 manifest 或创建私有副本。
 

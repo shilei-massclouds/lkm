@@ -140,10 +140,11 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
 9. **PayloadPhase（完成）**：charter/model/coding/impl 已统一四态和同对象 emits。Preset 只准备
    公共 exec/clone deferred 边界；Setup 绑定 build-time 唯一 Hello/Smoke/UserBoot handoff，且
    只有 user-boot 推进 UserBootPayload；Enable 在任何 Online 前完成 selected variant prepare，
-   再按 selected handoff Online -> Payload Online/handlers -> Kernel Online -> no-return entry 推进。
+   再按 selected handoff Online -> Payload Online/handlers -> payload commit -> no-return entry 推进；Kernel
+   已在 BootInitFlow 启动前 Online，此处不重复提交。
    user-boot prepare/enter 已拆分，requested/default init 失败均停在 Payload Ready。旧 ID 432/433
    稳定，新增 481/482 默认 unmapped；inventory 483，mapping exact 103 / range 14 / unmapped 366。
-10. **coding `.spec` 退场（完成）**：阶段树文件退场后，已逐项审计 project、mapping、build、
+10. **coding `.spec` 退场（完成）**：阶段树文件退场后，已逐项审计 system、mapping、build、
    riscv64、rust 和 5 个 object 遗留文件的 629 行内容；142 个唯一 rule ID、原 type 分组及
    MUST/SHOULD/MAY/NOTE 层级均保留在对应权威 `.md`。charter/model/coding 索引和入口引用已
    切换到 Markdown，10 个遗留 `.spec` 已删除；独立 `coding-spec-check` 会列出并拒绝任何回归，

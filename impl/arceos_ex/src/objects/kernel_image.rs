@@ -98,8 +98,11 @@ impl KernelImage {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn adopt_head_setup(&mut self, lds: &Lds) -> EventResult {
-        if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(self) {
+    pub fn adopt_head_setup(&mut self, lds: &Lds, bss_clear_completed: bool) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || !lds.entry_layout_ready()
+            || !bss_clear_completed
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

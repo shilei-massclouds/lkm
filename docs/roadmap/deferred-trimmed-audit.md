@@ -56,7 +56,7 @@
 | device-probe wait、MD、root name/device variants、rootwait、initrd、NFS/CIFS、devtmpfs、ext2 root 后 `/dev` | 逐项归入 `rootfs.001`–`.010`；其中 reference-input/build-config 路径为 trimmed。ext4-for-ext2 的阶段性实现事实移出 inventory。 |
 | IMA/EVM key loading | 分别归入 trimmed `integrity_keys.001`、`.002`。 |
 | exec locks、credential/signal/LSM hooks、namespace/accounting、binfmt module retry | 拆为 `exec_sync.001`–`.004`；module retry 由 `CONFIG_MODULES=n` 证明为 trimmed。 |
-| project wrapper 中实际存在的 transition/action facts | 从错误的 deferred block 移回 ensures/invariant，不保留 active responsibility。 |
+| 已退役 wrapper 中实际存在的 transition/action facts | 从错误的 deferred block 移回 ensures/invariant，不保留 active responsibility。 |
 
 ### UserCloneDeferredBoundaries 复合记录逐项 disposition
 

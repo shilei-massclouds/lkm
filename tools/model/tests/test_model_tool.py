@@ -51,27 +51,22 @@ class ModelToolTests(unittest.TestCase):
             self.assertTrue(data["summary"]["ok"])
             self.assertGreaterEqual(data["summary"]["objects"], 25)
             self.assertEqual(data["summary"]["errors"], 0)
-            self.assertIn("ComputerProject", data["model"]["objects"])
+            self.assertIn("Computer", data["model"]["objects"])
             self.assertIn("OpenSBI", data["model"]["objects"])
             self.assertNotIn("OpenSbi" + "Firmware", data["model"]["objects"])
 
     def test_effective_parent_normalization_and_validation(self) -> None:
         source = """
-            type ProjectObject {}
-            type ProjectLeaf: ProjectObject {}
+            type SystemObject {}
+            type SystemLeaf: SystemObject {}
             type KernelObject {}
 
-            object ComputerProject: ProjectObject {
-                initial_state: State::Base;
-                state State::Base {}
-            }
-            object KernelProject: ProjectObject {
-                parent: ComputerProject;
+            object Computer: SystemObject {
                 initial_state: State::Base;
                 state State::Base {}
             }
             object Kernel: KernelObject {
-                parent: KernelProject;
+                parent: Computer;
                 initial_state: State::Base;
                 state State::Base {}
             }
@@ -80,11 +75,11 @@ class ModelToolTests(unittest.TestCase):
                 state State::Base {}
             }
             object ExplicitChild: KernelObject {
-                parent: ComputerProject;
+                parent: Computer;
                 initial_state: State::Base;
                 state State::Base {}
             }
-            object ProjectRoot: ProjectLeaf {
+            object IndependentSystem: SystemLeaf {
                 initial_state: State::Base;
                 state State::Base {}
             }
@@ -95,8 +90,8 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 0, stderr)
             objects = data["model"]["objects"]
             self.assertEqual(objects["DefaultChild"]["parent"], "Kernel")
-            self.assertEqual(objects["ExplicitChild"]["parent"], "ComputerProject")
-            self.assertIsNone(objects["ProjectRoot"]["parent"])
+            self.assertEqual(objects["ExplicitChild"]["parent"], "Computer")
+            self.assertEqual(objects["IndependentSystem"]["parent"], "Kernel")
 
         without_kernel = """
             type Plain {}
@@ -416,13 +411,13 @@ class ModelToolTests(unittest.TestCase):
                 }
             }
 
-            object ComputerProject: Factory {
+            object Computer: Factory {
                 initial_state: State::Base;
                 state State::Base {
                     transitions {
                         on Transition::Preset -> State::Prepared {
                             drives {
-                                ComputerProject.Action::Build;
+                                Computer.Action::Build;
                             }
                         }
                     }
@@ -460,7 +455,7 @@ class ModelToolTests(unittest.TestCase):
                 }}
             }}
             {extra_object}
-            object ComputerProject: Factory {{
+            object Computer: Factory {{
                 initial_state: State::Base;
                 state State::Base {{
                     transitions {{
@@ -653,7 +648,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
             data = read_json(model)
             objects = data["model"]["objects"]
-            computer = objects["ComputerProject"]
+            computer = objects["Computer"]
             kernel = objects["Kernel"]
             opensbi = objects["OpenSBI"]
             preset = computer["states"]["Base"]["transitions"]["Preset"]
@@ -665,21 +660,6 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 computer["children"],
                 [
-                    "HardwareProject",
-                    "FirmwareProject",
-                    "KernelProject",
-                ],
-            )
-            self.assertEqual(
-                objects["KernelProject"]["children"],
-                [
-                    "Config",
-                    "Lds",
-                ],
-            )
-            self.assertEqual(
-                objects["Computer"]["children"],
-                [
                     "Riscv64Platform",
                     "OpenSBI",
                     "Kernel",
@@ -687,7 +667,7 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertIsNone(objects["Computer"]["parent"])
             self.assertEqual(kernel["parent"], "Computer")
-            self.assertEqual(objects["Riscv64Platform"]["children"], [])
+            self.assertEqual(objects["Riscv64Platform"]["children"], ["Riscv64"])
             self.assertEqual(objects["Riscv64"]["attrs"], {})
             self.assertEqual(objects["BootCpuRegisters"]["parent"], "BootCPU")
             self.assertEqual(objects["BootCpuRegisters"]["initial_state"], "Online")
@@ -709,9 +689,9 @@ class ModelToolTests(unittest.TestCase):
             )
             boot_args = objects["BootArgs"]
             self.assertEqual(boot_args["initial_state"], "Online")
-            self.assertEqual(boot_args["parent"], "FirmwareProject")
+            self.assertEqual(boot_args["parent"], "OpenSBI")
             self.assertEqual(
-                boot_args["properties"]["source"], "firmware_project::boot_abi"
+                boot_args["properties"]["source"], "firmware::boot_abi"
             )
             self.assertEqual(
                 boot_args["attrs"],
@@ -719,14 +699,15 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertEqual(list(boot_args["states"]), ["Online"])
             self.assertFalse(boot_args["states"]["Online"]["transitions"])
-            self.assertEqual(objects["Config"]["initial_state"], "Online")
-            self.assertEqual(list(objects["Config"]["states"]), ["Online"])
-            self.assertFalse(objects["Config"]["states"]["Online"]["transitions"])
-            self.assertEqual(objects["Lds"]["initial_state"], "Online")
-            self.assertEqual(list(objects["Lds"]["states"]), ["Online"])
-            self.assertFalse(objects["Lds"]["states"]["Online"]["transitions"])
-            self.assertEqual(objects["Computer"]["initial_state"], "Ready")
-            self.assertEqual(list(objects["Computer"]["states"]), ["Online", "Ready"])
+            self.assertEqual(objects["Config"]["initial_state"], "Ready")
+            self.assertEqual(list(objects["Config"]["states"]), ["Online", "Ready"])
+            self.assertEqual(objects["Lds"]["initial_state"], "Ready")
+            self.assertEqual(list(objects["Lds"]["states"]), ["Online", "Ready"])
+            self.assertEqual(objects["Computer"]["initial_state"], "Base")
+            self.assertEqual(
+                list(objects["Computer"]["states"]),
+                ["Base", "Online", "Prepared", "Ready"],
+            )
             computer_enable = objects["Computer"]["states"]["Ready"]["transitions"][
                 "Enable"
             ]
@@ -736,12 +717,7 @@ class ModelToolTests(unittest.TestCase):
                     for block in computer_enable["depends_on"]
                     for entry in block["entries"]
                 ],
-                [
-                    "HardwareProject.state == State::Ready",
-                    "FirmwareProject.state == State::Ready",
-                    "KernelProject.state == State::Ready",
-                    "computer_assembled_from(Riscv64Platform, OpenSBI, Kernel)",
-                ],
+                ["computer_assembled_from(Riscv64Platform, OpenSBI, Kernel)"],
             )
             self.assertEqual(
                 [
@@ -751,9 +727,10 @@ class ModelToolTests(unittest.TestCase):
                 ],
                 ["Riscv64Platform.Transition::Enable"],
             )
-            self.assertEqual(objects["Riscv64Platform"]["initial_state"], "Ready")
+            self.assertEqual(objects["Riscv64Platform"]["initial_state"], "Base")
             self.assertEqual(
-                list(objects["Riscv64Platform"]["states"]), ["Online", "Ready"]
+                list(objects["Riscv64Platform"]["states"]),
+                ["Base", "Online", "Prepared", "Ready"],
             )
             platform_enable = objects["Riscv64Platform"]["states"]["Ready"][
                 "transitions"
@@ -765,7 +742,7 @@ class ModelToolTests(unittest.TestCase):
                     for entry in block["entries"]
                 ],
                 [
-                    "HardwareProject.state == State::Ready",
+                    "Computer.state == State::Online",
                     "Riscv64.state == State::Online",
                     "riscv64_platform_system_spec_established()",
                     "riscv64_platform_constructed()",
@@ -779,8 +756,10 @@ class ModelToolTests(unittest.TestCase):
                 ],
                 ["OpenSBI.Transition::Enable"],
             )
-            self.assertEqual(opensbi["initial_state"], "Ready")
-            self.assertEqual(list(opensbi["states"]), ["Online", "Ready"])
+            self.assertEqual(opensbi["initial_state"], "Base")
+            self.assertEqual(
+                list(opensbi["states"]), ["Base", "Online", "Prepared", "Ready"]
+            )
             self.assertEqual(
                 opensbi["states"]["Ready"]["transitions"]["Enable"]["target_state"],
                 "Online",
@@ -830,12 +809,13 @@ class ModelToolTests(unittest.TestCase):
                     for entry in block["entries"]
                 ],
                 [
-                    "FirmwareProject.state == State::Ready",
+                    "Computer.state == State::Online",
+                    "Riscv64Platform.state == State::Online",
                     "SbiSpec.state == State::Online",
                     "BootArgs.state == State::Online",
                     "opensbi_system_spec_established()",
                     "opensbi_firmware_constructed()",
-                    "Riscv64Platform.state == State::Online",
+                    "Kernel.state == State::Ready",
                     "Lds.state == State::Online",
                     "Config.state == State::Online",
                     "kernel_image_constructed()",
@@ -846,32 +826,25 @@ class ModelToolTests(unittest.TestCase):
                     "Enable"
                 ]["drives"]
             )
-            kernel_project_setup = objects["KernelProject"]["states"]["Prepared"][
+            kernel_setup = objects["Kernel"]["states"]["Prepared"][
                 "transitions"
             ]["Setup"]
-            self.assertFalse(kernel_project_setup["drives"])
             self.assertEqual(
                 [
                     entry["text"]
-                    for block in kernel_project_setup["depends_on"]
+                    for block in kernel_setup["drives"]
                     for entry in block["entries"]
                 ],
                 [
-                    "Config.state == State::Online",
-                    "Lds.state == State::Online",
+                    "Config.Transition::Enable",
+                    "Lds.Transition::Enable",
                 ],
             )
-            self.assertEqual(
-                [entry["text"] for entry in enable["drives"][0]["entries"]],
-                ["Computer.Transition::Enable"],
-            )
-            hardware_setup = objects["HardwareProject"]["states"]["Prepared"][
-                "transitions"
-            ]["Setup"]
             self.assertFalse(
                 any(
                     "BootCpuRegisters" in entry["text"]
-                    for block in hardware_setup["ensures"]
+                    for block in objects["Riscv64Platform"]["states"]["Prepared"]
+                    ["transitions"]["Setup"]["ensures"]
                     for entry in block["entries"]
                 )
             )
@@ -899,9 +872,10 @@ class ModelToolTests(unittest.TestCase):
             self.assertNotIn("BootPhase", objects)
             self.assertNotIn("InterruptPhase", objects)
             kernel_preset = kernel["states"]["Base"]["transitions"]["Preset"]
+            kernel_enable = kernel["states"]["Ready"]["transitions"]["Enable"]
             kernel_dependencies = [
                 entry["text"]
-                for block in kernel_preset["depends_on"]
+                for block in kernel_enable["depends_on"]
                 for entry in block["entries"]
             ]
             self.assertIn(
@@ -913,7 +887,6 @@ class ModelToolTests(unittest.TestCase):
             self.assertNotIn(
                 "BootCpuRegisters.state == State::Online", kernel_dependencies
             )
-            kernel_setup = kernel["states"]["Prepared"]["transitions"]["Setup"]
             boot_init_preset = objects["BootInitFlow"]["states"]["Base"][
                 "transitions"
             ]["Preset"]
@@ -955,14 +928,10 @@ class ModelToolTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(kernel_preset["drives"], [])
+            self.assertEqual(kernel_preset["emits"], [])
             self.assertEqual(
-                [entry["text"] for entry in kernel_preset["emits"][0]["entries"]],
+                [entry["text"] for entry in kernel_enable["emits"][0]["entries"]],
                 ["BootInitFlow.Transition::Preset"],
-            )
-            self.assertEqual(kernel_setup["drives"], [])
-            self.assertEqual(
-                [entry["text"] for entry in kernel_setup["emits"][0]["entries"]],
-                ["Transition::Enable"],
             )
             self.assertEqual(
                 [
@@ -1015,9 +984,9 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 [entry["text"] for entry in preset["drives"][0]["entries"]],
                 [
-                    "HardwareProject.Transition::Preset",
-                    "FirmwareProject.Transition::Preset",
-                    "KernelProject.Transition::Preset",
+                    "Riscv64Platform.Transition::Preset",
+                    "OpenSBI.Transition::Preset",
+                    "Kernel.Transition::Preset",
                 ],
             )
             self.assertEqual(
@@ -1047,11 +1016,22 @@ class ModelToolTests(unittest.TestCase):
                 [block["kind"] for block in completion_type["blocks"]],
                 ["owned", "lifecycle", "processes"],
             )
+            computer_setup = computer["states"]["Prepared"]["transitions"]["Setup"]
             self.assertEqual(
-                [entry["text"] for entry in enable["drives"][0]["entries"]],
+                [entry["text"] for entry in computer_setup["drives"][0]["entries"]],
                 [
-                    "Computer.Transition::Enable",
+                    "Riscv64Platform.Transition::Setup",
+                    "OpenSBI.Transition::Setup",
+                    "Kernel.Transition::Setup",
                 ],
+            )
+            self.assertEqual(enable["drives"], [])
+            boot_init_enable = objects["BootInitFlow"]["states"]["Ready"][
+                "transitions"
+            ]["Enable"]
+            self.assertEqual(
+                [entry["text"] for entry in boot_init_enable["emits"][0]["entries"]],
+                ["Scheduler.Action::Schedule"],
             )
 
     def test_model_json_preserves_entry_spans(self) -> None:
@@ -1219,7 +1199,7 @@ class ModelToolTests(unittest.TestCase):
                 state State::Online {}
             }
 
-            object ComputerProject: Task {
+            object Computer: Task {
                 initial_state: State::Base;
                 associations {
                     initial_flow = Flow;
@@ -1245,7 +1225,7 @@ class ModelToolTests(unittest.TestCase):
             data["model"]["objects"]["BootTask"]["associations"],
             {"initial_flow": "Flow"},
         )
-        entry = data["model"]["objects"]["ComputerProject"]["states"]["Base"][
+        entry = data["model"]["objects"]["Computer"]["states"]["Base"][
             "transitions"
         ]["Preset"]["emits"][0]["entries"][0]
         self.assertEqual(entry["text"], "self.initial_flow.Transition::Preset")
@@ -1724,7 +1704,7 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -1779,7 +1759,7 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -1870,7 +1850,7 @@ class ModelToolTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {

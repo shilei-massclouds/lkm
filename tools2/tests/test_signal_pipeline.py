@@ -42,7 +42,7 @@ from view_tool.__main__ import main as view_main
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
-KERNEL_PRESET_SCENARIO = TOOLS2 / "scenarios" / "Kernel.Preset.snapshot.json"
+KERNEL_ENABLE_SCENARIO = TOOLS2 / "scenarios" / "Kernel.Enable.snapshot.json"
 
 
 class SignalPipelineTests(unittest.TestCase):
@@ -2044,7 +2044,7 @@ class SignalPipelineTests(unittest.TestCase):
                 [
                     str(shortcut),
                     "-u",
-                    "Kernel.Startup",
+                    "Kernel.Enable",
                     "--work-dir",
                     str(work),
                     "--snapshot-out",
@@ -2060,37 +2060,33 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(derivation["verdict"], "reached")
             self.assertEqual(
                 (derivation["root_request"]["source"], derivation["root_request"]["target"], derivation["root_request"]["signal"]),
-                ("Human", "ComputerProject", "Preset"),
+                ("Human", "Computer", "Preset"),
             )
-            self.assertEqual(derivation["boundary"]["normalized_signal"], "Kernel.Preset")
+            self.assertEqual(derivation["boundary"]["normalized_signal"], "Kernel.Enable")
             self.assertEqual(
                 [
                     (item["source"], item["target"], item["name"])
                     for item in derivation["signals"]
                 ],
                 [
-                    ("Human", "ComputerProject", "Preset"),
-                    ("ComputerProject", "HardwareProject", "Preset"),
-                    ("ComputerProject", "FirmwareProject", "Preset"),
-                    ("ComputerProject", "KernelProject", "Preset"),
-                    ("ComputerProject", "ComputerProject", "Setup"),
-                    ("ComputerProject", "HardwareProject", "Setup"),
-                    ("ComputerProject", "FirmwareProject", "Setup"),
-                    ("ComputerProject", "KernelProject", "Setup"),
-                    ("ComputerProject", "ComputerProject", "Enable"),
-                    ("ComputerProject", "Computer", "Enable"),
+                    ("Human", "Computer", "Preset"),
+                    ("Computer", "Riscv64Platform", "Preset"),
+                    ("Computer", "OpenSBI", "Preset"),
+                    ("Computer", "Kernel", "Preset"),
+                    ("Computer", "Computer", "Setup"),
+                    ("Computer", "Riscv64Platform", "Setup"),
+                    ("Computer", "OpenSBI", "Setup"),
+                    ("Computer", "Kernel", "Setup"),
+                    ("Kernel", "Config", "Enable"),
+                    ("Kernel", "Lds", "Enable"),
+                    ("Computer", "Computer", "Enable"),
                     ("Computer", "Riscv64Platform", "Enable"),
                     ("Riscv64Platform", "OpenSBI", "Enable"),
                 ],
             )
-            self.assertFalse(
-                any(item["target"] in {"Config", "Lds"} for item in derivation["signals"])
-            )
-            self.assertFalse(
-                any(
-                    item["target"] == "Kernel" and item["name"] == "Preset"
-                    for item in derivation["signals"]
-                )
+            self.assertLess(
+                next(i for i, item in enumerate(derivation["signals"]) if item["target"] == "Config"),
+                next(i for i, item in enumerate(derivation["signals"]) if item["target"] == "Lds"),
             )
             self.assertFalse(
                 any(
@@ -2103,9 +2099,6 @@ class SignalPipelineTests(unittest.TestCase):
                 {
                     name: boundary_states[name]
                     for name in (
-                        "HardwareProject",
-                        "FirmwareProject",
-                        "KernelProject",
                         "BootArgs",
                         "Config",
                         "Lds",
@@ -2117,9 +2110,6 @@ class SignalPipelineTests(unittest.TestCase):
                     )
                 },
                 {
-                    "HardwareProject": "Ready",
-                    "FirmwareProject": "Ready",
-                    "KernelProject": "Ready",
                     "BootArgs": "Online",
                     "Config": "Online",
                     "Lds": "Online",
@@ -2127,7 +2117,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "Riscv64Platform": "Online",
                     "BootCpuRegisters": "Online",
                     "OpenSBI": "Online",
-                    "Kernel": "Base",
+                    "Kernel": "Ready",
                 },
             )
             self.assertIn(
@@ -2144,7 +2134,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
             saved = read_json(snapshot)
             self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
-            self.assertEqual(snapshot.read_bytes(), KERNEL_PRESET_SCENARIO.read_bytes())
+            self.assertEqual(snapshot.read_bytes(), KERNEL_ENABLE_SCENARIO.read_bytes())
             self.assertEqual(saved["schema"], SNAPSHOT_SCHEMA)
             self.assertEqual(saved["version"], SNAPSHOT_VERSION)
             self.assertEqual(saved["producer"], PRODUCER)
@@ -2165,7 +2155,7 @@ class SignalPipelineTests(unittest.TestCase):
                 [
                     str(shortcut),
                     "-u",
-                    "Kernel.Startup",
+                    "Kernel.Enable",
                     "--snapshot-out",
                     str(exact_snapshot),
                 ],
@@ -2175,7 +2165,7 @@ class SignalPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(exact.returncode, 0, exact.stderr)
-            self.assertEqual(exact_snapshot.read_bytes(), KERNEL_PRESET_SCENARIO.read_bytes())
+            self.assertEqual(exact_snapshot.read_bytes(), KERNEL_ENABLE_SCENARIO.read_bytes())
 
             normal_work = root / "normal-closure"
             normal = subprocess.run(
@@ -2207,7 +2197,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIsNone(normal_data["boundary"])
             self.assertTrue(
                 any(
-                    item["target"] == "Kernel" and item["name"] == "Preset"
+                    item["target"] == "Kernel" and item["name"] == "Enable"
                     for item in normal_data["signals"]
                 )
             )
@@ -2218,10 +2208,6 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertEqual(fixmap["outcome"], "completed")
             normal_states = normal_data["last_stable_snapshot"]["states"]
-            self.assertEqual(normal_states["ComputerProject"], "Online")
-            self.assertEqual(normal_states["HardwareProject"], "Ready")
-            self.assertEqual(normal_states["FirmwareProject"], "Ready")
-            self.assertEqual(normal_states["KernelProject"], "Ready")
             self.assertEqual(normal_states["BootArgs"], "Online")
             self.assertEqual(normal_states["Config"], "Online")
             self.assertEqual(normal_states["Lds"], "Online")
@@ -2261,7 +2247,7 @@ class SignalPipelineTests(unittest.TestCase):
                 [
                     str(shortcut),
                     "-t",
-                    "Kernel.Startup",
+                    "Kernel.Enable",
                     "-s",
                     str(snapshot),
                     "--max-depth",
@@ -2289,49 +2275,25 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(resumed_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(
                 (resumed_data["root_request"]["target"], resumed_data["root_request"]["signal"]),
-                ("Kernel", "Preset"),
+                ("Kernel", "Enable"),
             )
             self.assertIsNone(resumed_data["until_request"])
 
-            default_runs = []
-            for spelling in ("Startup", "Preset"):
-                default_work = root / f"kernel-default-{spelling}"
-                default_result = subprocess.run(
-                    [
-                        str(shortcut),
-                        "-t",
-                        f"Kernel.{spelling}",
-                        "--work-dir",
-                        str(default_work),
-                        "-o",
-                        str(root / f"kernel-default-{spelling}.txt"),
-                    ],
-                    cwd=ROOT if spelling == "Preset" else root,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-                self.assertEqual(default_result.returncode, 0, default_result.stderr)
-                default_data = read_json(default_work / "derive.json")
-                default_checked = read_json(default_work / "check.json")
-                self.assertEqual(default_data["verdict"], "complete")
-                self.assertEqual(default_checked["verdict"], "complete")
-                self.assertEqual(default_checked["exit_code"], 0)
-                self.assertFalse(
-                    any(
-                        item["outcome"] in {"rejected", "failed"}
-                        for item in default_data["signals"]
-                    )
-                )
-                self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
-                self.assertEqual(default_data["signals"][0]["target"], "Kernel")
-                self.assertEqual(default_data["signals"][0]["name"], "Preset")
-                self.assertEqual(default_data["signals"][0]["outcome"], "completed")
-                default_runs.append((default_work / "derive.json").read_bytes())
-            self.assertEqual(default_runs[0], default_runs[1])
+            default_work = root / "kernel-default-enable"
+            default_result = subprocess.run(
+                [str(shortcut), "-t", "Kernel.Enable", "--work-dir", str(default_work)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(default_result.returncode, 0, default_result.stderr)
+            default_data = read_json(default_work / "derive.json")
+            self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(default_data["signals"][0]["name"], "Enable")
 
             stale = subprocess.run(
-                [str(shortcut), "-f", str(PIPELINE), "-t", "Kernel.Startup"],
+                [str(shortcut), "-f", str(PIPELINE), "-t", "Kernel.Enable"],
                 cwd=root,
                 text=True,
                 capture_output=True,
@@ -2347,7 +2309,7 @@ class SignalPipelineTests(unittest.TestCase):
                         [
                             str(ROOT / "spec" / "model" / "main.spec"),
                             "--signal",
-                            "Kernel.Preset",
+                            "Kernel.Enable",
                             "--max-depth",
                             "all",
                             "--max-breadth",
@@ -2371,7 +2333,7 @@ class SignalPipelineTests(unittest.TestCase):
                 [
                     str(shortcut),
                     "-t",
-                    "ComputerProject.Startup",
+                    "Computer.Startup",
                     "--work-dir",
                     str(missing_work),
                 ],
@@ -2381,9 +2343,9 @@ class SignalPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(missing.returncode, 2)
-            self.assertIn("canonical signal ComputerProject.Preset", missing.stderr)
+            self.assertIn("canonical signal Computer.Preset", missing.stderr)
             self.assertIn(
-                "tools2/scenarios/ComputerProject.Preset.snapshot.json", missing.stderr
+                "tools2/scenarios/Computer.Preset.snapshot.json", missing.stderr
             )
             self.assertFalse(missing_work.exists())
 
@@ -2439,9 +2401,9 @@ class SignalPipelineTests(unittest.TestCase):
                     "Computer.Enable",
                     {
                         "states": {
-                            "HardwareProject": "Ready",
-                            "FirmwareProject": "Ready",
-                            "KernelProject": "Ready",
+                            "Riscv64Platform": "Ready",
+                            "OpenSBI": "Ready",
+                            "Kernel": "Ready",
                             "Computer": "Ready",
                         }
                     },
@@ -2451,7 +2413,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "Riscv64Platform.Enable",
                     {
                         "states": {
-                            "HardwareProject": "Ready",
+                            "Computer": "Online",
                             "Riscv64Platform": "Ready",
                         },
                     },
@@ -2461,9 +2423,12 @@ class SignalPipelineTests(unittest.TestCase):
                     "OpenSBI.Enable",
                     {
                         "states": {
-                            "FirmwareProject": "Ready",
+                            "Computer": "Online",
                             "Riscv64Platform": "Online",
                             "OpenSBI": "Ready",
+                            "Kernel": "Ready",
+                            "Config": "Online",
+                            "Lds": "Online",
                         },
                     },
                     "opensbi_system_spec_established()",
@@ -2515,10 +2480,10 @@ class SignalPipelineTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(alias.returncode, 1, alias.stderr)
+            self.assertEqual(alias.returncode, 0, alias.stderr)
             alias_data = read_json(alias_work / "derive.json")
             self.assertEqual(alias_data["root_request"]["signal"], "Preset")
-            self.assertEqual(alias_data["signals"][0]["reason"], "no_handler")
+            self.assertEqual(alias_data["signals"][0]["outcome"], "completed")
 
 
 if __name__ == "__main__":

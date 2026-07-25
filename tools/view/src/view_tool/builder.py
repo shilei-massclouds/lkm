@@ -34,10 +34,6 @@ _OBJECT_STATE_RE = re.compile(
 DEFAULT_TRACE_ACTION_DEPTH = 3
 _LIFECYCLE_ROOT_OBJECTS = frozenset(
     {
-        "ComputerProject",
-        "HardwareProject",
-        "FirmwareProject",
-        "KernelProject",
         "Computer",
         "Riscv64Platform",
         "OpenSBI",

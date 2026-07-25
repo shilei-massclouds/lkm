@@ -31,7 +31,6 @@ const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_KERNEL_STARTED: usize = Checkpoint::KernelStarted.early_byte() as usize;
 const TRACE_BOOT_TASK_ON_CPU: usize = Checkpoint::BootTaskOnCpu.early_byte() as usize;
-const TRACE_BOOT_INIT_FLOW_STARTED: usize = Checkpoint::BootInitFlowStarted.early_byte() as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
 const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
 const TRACE_BSS_ZEROED: usize = b'Z' as usize;
@@ -51,6 +50,11 @@ static mut head_boot_hartid: HeadHandoffWord = HeadHandoffWord(0);
 #[unsafe(link_section = ".head.handoff")]
 static mut head_init_stack_sp: HeadHandoffWord = HeadHandoffWord(0);
 
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut HEAD_BSS_CLEAR_COMPLETED: HeadHandoffWord = HeadHandoffWord(0);
+
 global_asm!(
     r#"
     .section .head.text.entry, "ax"
@@ -67,10 +71,6 @@ _start:
 
     # The linker-visible PID 0 carrier already has its only state: Online.
     li a0, {trace_boot_task_on_cpu}
-    call {head_checkpoint}
-
-    # BootInitFlow.Preset starts before its direct entry-object drives.
-    li a0, {trace_boot_init_flow_started}
     call {head_checkpoint}
 
     /*
@@ -109,6 +109,9 @@ _start:
     addi t0, t0, 8
     j 1b
 2:
+    la t0, {head_bss_clear_completed}
+    li t1, 1
+    sd t1, 0(t0)
     li a0, {trace_bss_zeroed}
     call {head_checkpoint}
 
@@ -139,6 +142,7 @@ _start:
 
 "#,
     head_boot_hartid = sym head_boot_hartid,
+    head_bss_clear_completed = sym HEAD_BSS_CLEAR_COMPLETED,
     head_checkpoint = sym arceos_ex_head_checkpoint,
     head_init_stack_sp = sym head_init_stack_sp,
     head_trap_entry = sym arceos_ex_head_trap_entry,
@@ -148,7 +152,6 @@ _start:
     rust_entry = sym boot_init_flow_preset_rust_entry,
     sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
-    trace_boot_init_flow_started = const TRACE_BOOT_INIT_FLOW_STARTED,
     trace_boot_task_on_cpu = const TRACE_BOOT_TASK_ON_CPU,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
@@ -240,9 +243,10 @@ extern "C" fn boot_init_flow_preset_rust_entry(hartid: usize, dtb_pa: usize) -> 
         "arceos_ex prepare event failed\n",
     );
     crate::phases::shutdown_on_error(
-        crate::systems::kernel::adopt_head_preset_start(),
-        "arceos_ex kernel preset start failed\n",
+        crate::systems::kernel::accept_enable_at_entry(&boot_args),
+        "arceos_ex kernel enable failed\n",
     );
+    crate::checkpoint::checkpoint(Checkpoint::BootInitFlowStarted);
     crate::phases::shutdown_on_error(
         super::adopt_head_preset_start(),
         "arceos_ex boot init preset start failed\n",
@@ -329,7 +333,8 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
             State::Prepared,
         );
     }
-    ctx.kernel_image.adopt_head_setup(&ctx.lds)?;
+    ctx.kernel_image
+        .adopt_head_setup(&ctx.lds, head_bss_clear_completed())?;
     ctx.boot_current_cpu.adopt_head_preset(boot_args)?;
     ctx.boot_cpu_local_interrupt.setup()?;
     ctx.boot_cpu_current_task.setup()?;
@@ -502,6 +507,15 @@ fn boot_task_entry_binding_state() -> State {
 
 fn boot_task_entry_preemption_initialized() -> bool {
     BOOT_TASK_ENTRY_PREEMPTION_INITIALIZED.load(Ordering::Relaxed)
+}
+
+fn head_bss_clear_completed() -> bool {
+    unsafe {
+        core::ptr::addr_of!(HEAD_BSS_CLEAR_COMPLETED)
+            .read_volatile()
+            .0
+            == 1
+    }
 }
 
 pub(super) fn entry_objects_ready(ctx: &Context) -> bool {

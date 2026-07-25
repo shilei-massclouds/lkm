@@ -1,20 +1,22 @@
 # BootInitFlow.Preset Coding
 
 `BootInitFlow.Preset` 直接承载 BP 入口前导编排，不再 lowering 为独立 PhaseObject。model 来源为
-[`preset.spec`](../../model/phases/boot-init/preset.spec) 与
-[`phase.spec`](../../model/phases/boot-init/phase.spec)，实现落点为
+[`preset.spec`](../../../model/phases/boot-init/preset.spec) 与
+[`phase.spec`](../../../model/phases/boot-init/phase.spec)，实现落点为
 `impl/arceos_ex/src/flows/boot_init_flow/preset.rs`。
 
 ## 入口例外与 adoption
 
-`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R`、`BootTask.OnCpu` 的 `T` 和
-`BootInitFlow.Started` 的 `O`。BootTask marker 观察镜像内已拥有执行权的 OnCpu carrier；
-BootInitFlow marker 表示 Preset 已接受。不得输出或 adoption 任何 BP EntryPrelude lifecycle。
+`_start` 在任何对象 drive 前依次输出 `Kernel.Started` 的 `R` 和 `BootTask.OnCpu` 的 `T`。BootTask
+marker 观察镜像内已拥有执行权的 OnCpu carrier。Rust 入口完成 Prepare 与 Kernel.Enable adoption、提交
+`Kernel.Online` 的 `L` 后，才输出 `BootInitFlow.Started` 的 `O`；后者表示 Kernel 发出的
+`BootInitFlow.Preset` 已接受。不得输出或 adoption 任何 BP EntryPrelude lifecycle。
 
-进入 `boot_init_flow_preset_rust_entry()` 后，先 adoption Prepare、Kernel、BootTask 和 BootInitFlow
-入口边界。adoption 必须检查 BootInitFlow 精确 Base 以及 model 的 Riscv64、SbiSpec、BootArgs、
-OpenSBI、Lds、Config 依赖、只表示属性可访问的 `BootCpuRegisters.Online` 和 `a0/a1` 精确交接事实；
-不得要求整组寄存器已经具有 Kernel 最终值，也不得再次输出早期 checkpoint。
+进入 `boot_init_flow_preset_rust_entry()` 后，先 adoption Prepare 和 canonical Kernel.Enable 发送前
+边界，验证 BootTask、BootInitFlow Base、Lds、Config、kernel image、BootArgs 与 `a0/a1` 交接事实，
+提交 Kernel.Online；随后接受 BootInitFlow.Preset 并 adoption head 已完成的入口动作。不得要求整组
+寄存器已经具有 Kernel 最终值，也不得重放 Human、Computer、Platform、OpenSBI 或 Kernel 的设计期
+构造过程。
 
 ## Preset: Base -> Prepared
 
@@ -28,8 +30,13 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 
 `Vm.Setup` 必须在同一个 Preset 内完成 TrampolineVm 到 EarlyVm 的切换，并通过
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase
-Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后返回 Kernel.Preset completion。
-Preset 不启动 BootInitFlow.Setup 的后续叶阶段。
+Online invariant 的完整对象事实并提交 `BootInitFlow.Prepared`；随后由 BootInitFlow 自身直接启动
+Setup 的第一个叶阶段，不回调 Kernel。
+
+`KernelImage.Setup` 的 BSS 清零事实必须在 head 清零循环完成点记录到不属于 BSS 的 handoff storage，
+并由 Rust adoption 消费。不得在进入 Rust、发出 Kernel.Online 或 BootInitFlow.Started checkpoint 后
+重新要求整段 BSS 仍为零：checkpoint handler、诊断缓冲区和其它已启动静态对象可以从这一刻起合法写入
+BSS。handoff fact 只证明清零循环已完成，不改变后续 BSS 的正常可写语义。
 
 `BootTaskEntryBinding` 的 Base/Prepared/Ready 状态只保存在本 Flow 子模块的私有静态状态中，不加入
 公共 `Context`。物理 adoption 与虚拟切换 helper 在任何修改前必须一次性验证 binding、BootTask、
@@ -46,7 +53,8 @@ VM/KernelImage、`TaskRef::BOOT` 和预期 `tp` 地址；提交后失败沿既�
 
 | Checkpoint | Position |
 | --- | --- |
-| `BootInitFlow.Started` | `_start` 的 `O`，Rust 不重复 |
+| `Kernel.Online` | Rust 完成 Kernel.Enable 入口验证后、接受 BootInitFlow.Preset 前的 `L` |
+| `BootInitFlow.Started` | Rust 接受 BootInitFlow.Preset 时的 `O`，严格晚于 Kernel.Online |
 | `BootInitFlow.Prepared` | `after_vm_setup()` 完成全部入口 drives、验证完整入口事实后 |
 
 `BootInitFlow.Prepared` 的长期 invariant 只保留后续阶段仍稳定的 Flow/BootTask 事实；入口时的一次性

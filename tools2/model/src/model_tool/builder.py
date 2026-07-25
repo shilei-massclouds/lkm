@@ -884,7 +884,6 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             parent is None
             and has_kernel
             and name not in {"Computer", "Kernel"}
-            and not _is_subtype(types, declared_type, "ProjectObject")
         ):
             parent = "Kernel"
 

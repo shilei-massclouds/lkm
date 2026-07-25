@@ -415,7 +415,7 @@ fn run_selected_payload_handoff(
     let handoff = &ctx.selected_payload_handoff;
     let valid = crate::phases::payload::prepare::is_online()
         && crate::phases::payload::handoff_prepare::is_online()
-        && !crate::systems::kernel::is_online()
+        && crate::systems::kernel::is_online()
         && ctx.kernel_init_flow.state() == State::Ready
         && !ctx.kernel_init_flow.released()
         && handoff.state() == State::Online
@@ -456,7 +456,10 @@ fn run_payload_handoff_committed(
 ) {
     let name = "kernel_init_flow.payload_handoff_committed";
     sink.start_case(total, "", name, checkpoint);
-    if ctx.kernel_init_flow.payload_handoff_committed() && committed_variant_state_valid(ctx) {
+    if crate::systems::kernel::is_online()
+        && ctx.kernel_init_flow.payload_handoff_committed()
+        && committed_variant_state_valid(ctx)
+    {
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "payload handoff commit order invalid");

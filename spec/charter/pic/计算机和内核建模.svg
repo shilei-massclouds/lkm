@@ -1,89 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-  <title id="title">独立的工程树与运行系统树</title>
-  <desc id="desc">ComputerProject 拥有三个 Project；Computer 拥有三个运行系统；BootCpuRegisters 属于 Kernel 下的 BootCPU。</desc>
+  <title id="title">Computer 唯一顶层系统树</title>
+  <desc id="desc">Human 向唯一顶层系统 Computer 发送 Preset；Computer 拥有平台、固件和内核三个子系统，各静态输入归属对应系统。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
     </marker>
     <style>
       .panel { fill: #f8fafc; stroke: #94a3b8; stroke-width: 2; }
-      .project { fill: #dbeafe; stroke: #2563eb; stroke-width: 2; }
+      .external { fill: #f1f5f9; stroke: #64748b; stroke-width: 2; }
       .system { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
       .artifact { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
       .edge { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
-      .assembly { fill: none; stroke: #7c3aed; stroke-width: 2; stroke-dasharray: 8 6; marker-end: url(#arrow); }
-      .title { font: 700 24px sans-serif; fill: #0f172a; }
+      .signal { fill: none; stroke: #7c3aed; stroke-width: 2; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+      .title { font: 700 24px sans-serif; fill: #0f172a; text-anchor: middle; }
       .label { font: 600 17px sans-serif; fill: #0f172a; text-anchor: middle; dominant-baseline: middle; }
       .note { font: 14px sans-serif; fill: #475569; text-anchor: middle; }
       .handoff { font: 600 15px sans-serif; fill: #7c3aed; text-anchor: middle; }
     </style>
   </defs>
 
-  <rect class="panel" x="30" y="30" width="540" height="650" rx="18"/>
-  <rect class="panel" x="630" y="30" width="540" height="650" rx="18"/>
-  <text class="title" x="300" y="72" text-anchor="middle">Projects（规格与构造）</text>
-  <text class="title" x="900" y="72" text-anchor="middle">Systems（运行与启动）</text>
+  <rect class="panel" x="30" y="30" width="1140" height="650" rx="18"/>
+  <text class="title" x="600" y="72">Computer 唯一顶层系统</text>
 
-  <rect class="project" x="185" y="105" width="230" height="64" rx="12"/>
-  <text class="label" x="300" y="137">ComputerProject</text>
+  <rect class="external" x="65" y="105" width="150" height="58" rx="12"/>
+  <text class="label" x="140" y="134">Human</text>
+  <path class="signal" d="M215 134 H445"/>
+  <text class="handoff" x="330" y="120">Computer.Preset</text>
 
-  <path class="edge" d="M300 169 V215 H125 V255"/>
-  <path class="edge" d="M300 169 V255"/>
-  <path class="edge" d="M300 169 V215 H475 V255"/>
+  <rect class="system" x="445" y="102" width="310" height="64" rx="12"/>
+  <text class="label" x="600" y="134">Computer</text>
 
-  <rect class="project" x="45" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="125" y="287">HardwareProject</text>
-  <rect class="project" x="220" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="300" y="287">FirmwareProject</text>
-  <rect class="project" x="395" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="475" y="287">KernelProject</text>
+  <path class="edge" d="M600 166 V220 H270 V265"/>
+  <path class="edge" d="M600 166 V265"/>
+  <path class="edge" d="M600 166 V220 H930 V265"/>
 
-  <path class="edge" d="M125 319 V385"/>
-  <path class="edge" d="M300 319 V385"/>
-  <path class="edge" d="M475 319 V385"/>
-  <rect class="artifact" x="55" y="385" width="140" height="52" rx="10"/>
-  <text class="label" x="125" y="411">Riscv64 spec</text>
-  <rect class="artifact" x="230" y="385" width="140" height="52" rx="10"/>
-  <text class="label" x="300" y="411">SbiSpec / BootArgs</text>
-  <rect class="artifact" x="405" y="385" width="140" height="52" rx="10"/>
-  <text class="label" x="475" y="411">Config / Lds</text>
+  <rect class="system" x="150" y="265" width="240" height="64" rx="12"/>
+  <text class="label" x="270" y="297">Riscv64Platform</text>
+  <rect class="system" x="480" y="265" width="240" height="64" rx="12"/>
+  <text class="label" x="600" y="297">OpenSBI</text>
+  <rect class="system" x="810" y="265" width="240" height="64" rx="12"/>
+  <text class="label" x="930" y="297">Kernel</text>
 
-  <text class="note" x="300" y="490">Preset：顺序建立三份系统规格</text>
-  <text class="note" x="300" y="518">Setup：顺序构造产物，三个子 Project 停在 Ready</text>
-  <text class="note" x="300" y="546">Enable：只把启动交接给 Computer</text>
+  <path class="edge" d="M270 329 V385"/>
+  <path class="edge" d="M600 329 V385"/>
+  <path class="edge" d="M930 329 V385"/>
+  <rect class="artifact" x="175" y="385" width="190" height="52" rx="10"/>
+  <text class="label" x="270" y="411">Riscv64</text>
+  <rect class="artifact" x="495" y="385" width="210" height="52" rx="10"/>
+  <text class="label" x="600" y="411">SbiSpec / BootArgs</text>
+  <rect class="artifact" x="825" y="385" width="210" height="52" rx="10"/>
+  <text class="label" x="930" y="411">Config / Lds</text>
 
-  <rect class="system" x="785" y="105" width="230" height="64" rx="12"/>
-  <text class="label" x="900" y="137">Computer</text>
+  <path class="edge" d="M930 437 V475"/>
+  <rect class="system" x="825" y="475" width="210" height="52" rx="10"/>
+  <text class="label" x="930" y="501">BootTask / BootInitFlow</text>
 
-  <path class="edge" d="M900 169 V215 H725 V255"/>
-  <path class="edge" d="M900 169 V255"/>
-  <path class="edge" d="M900 169 V215 H1075 V255"/>
-
-  <rect class="system" x="645" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="725" y="287">Riscv64Platform</text>
-  <rect class="system" x="820" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="900" y="287">OpenSBI</text>
-  <rect class="system" x="995" y="255" width="160" height="64" rx="12"/>
-  <text class="label" x="1075" y="287">Kernel</text>
-
-  <path class="edge" d="M1075 319 V350"/>
-  <rect class="system" x="995" y="350" width="160" height="46" rx="10"/>
-  <text class="label" x="1075" y="373">BootCurrentCPU</text>
-  <path class="edge" d="M1075 396 V420"/>
-  <rect class="system" x="995" y="420" width="160" height="46" rx="10"/>
-  <text class="label" x="1075" y="443">BootCPU</text>
-  <path class="edge" d="M1075 466 V490"/>
-  <rect class="artifact" x="995" y="490" width="160" height="46" rx="10"/>
-  <text class="label" x="1075" y="513">BootCpuRegisters</text>
-
-  <path class="assembly" d="M725 565 H900"/>
-  <path class="assembly" d="M900 565 H1075"/>
-  <text class="handoff" x="900" y="553">异步 Startup FIFO</text>
-  <text class="note" x="900" y="600">Computer → Riscv64Platform → OpenSBI → Kernel</text>
-  <text class="note" x="900" y="628">平台独立推进；OpenSBI 只确定交接 a0/a1</text>
-
-  <path class="assembly" d="M125 437 C390 585, 570 535, 725 319"/>
-  <path class="assembly" d="M300 437 C500 630, 745 630, 900 319"/>
-  <path class="assembly" d="M475 437 C650 600, 900 600, 1075 319"/>
-  <text class="handoff" x="600" y="654">静态规格/构造映射；不是运行时 ownership</text>
+  <path class="signal" d="M270 565 H600"/>
+  <path class="signal" d="M600 565 H930"/>
+  <text class="handoff" x="600" y="552">Enable 异步交接</text>
+  <text class="note" x="600" y="596">Computer → Riscv64Platform → OpenSBI → Kernel → BootInitFlow</text>
+  <text class="note" x="600" y="626">Preset/Setup 由 Computer 依次同步驱动；每个 System.Online 只提交自身控制权</text>
 </svg>

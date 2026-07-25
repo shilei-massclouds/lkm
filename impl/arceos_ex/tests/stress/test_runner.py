@@ -280,16 +280,10 @@ class BasicOrchestrationTests(unittest.TestCase):
 
 class EventAndDiffTests(unittest.TestCase):
     def test_boot_entry_early_bytes_preserve_online_and_phase_order(self) -> None:
-        events = runner._extract_events("RTOIK\n")
+        events = runner._extract_events("RTIKLO\n")
         names = [event["name"] for event in events]
-        self.assertEqual(
-            names[:3],
-            [
-                "Kernel.Started",
-                "BootTask.OnCpu",
-                "BootInitFlow.Started",
-            ],
-        )
+        self.assertLess(names.index("Kernel.Started"), names.index("Kernel.Online"))
+        self.assertLess(names.index("Kernel.Online"), names.index("BootInitFlow.Started"))
         self.assertEqual(names.count("BootTask.OnCpu"), 1)
 
     def test_complete_stress_record_is_decoded_but_partial_is_not(self) -> None:

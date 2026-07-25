@@ -8,8 +8,8 @@
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | Kernel.Started | KernelStarted | exact | high | init/main.c | start_kernel | start_kernel() definition line 903 | Linux C kernel entry anchor. |
 | 1 | BootTask.OnCpu | BootTaskOnCpu | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 2 | BootInitFlow.Started | BootInitFlowStarted | exact | high | arch/riscv/kernel/head.S | _start | _start definition line 21 | RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping. |
-| 3 | Kernel.Online | KernelOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 2 | Kernel.Online | KernelOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 3 | BootInitFlow.Started | BootInitFlowStarted | exact | high | arch/riscv/kernel/head.S | _start | _start definition line 21 | RISC-V64 Linux boot image entry symbol; architecture-scoped head.S mapping. |
 | 4 | PreparePhase.Ready | PreparePhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 5 | PreparePhase.Online | PreparePhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 6 | EntrySuccessorPhase.Started | EntrySuccessorPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

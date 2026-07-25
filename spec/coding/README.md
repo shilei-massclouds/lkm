@@ -26,7 +26,7 @@ Markdown 中用于评审追踪，但不再是 pyveri predicate。根目录 `make
 2. `mapping.md`：对象、状态、事件、checkpoint 和源码落点的通用映射规则。
 3. `phase-paradigm.md`：Phase 的四状态、父子 continuation、`emits` 和 checkpoint 映射。
 4. `build.md`、`tools2.md`、`riscv64.md`、`rust.md`：构建、独立 Signal 工具链、架构和语言映射规则。
-5. `projects/kernel.md`、`systems/kernel.md`：project/system 层级映射。
+5. `systems/*.md`：唯一顶层 System 树的规格、构造与启动映射。
 6. `phases/**/*.md`、`objects/**/*.md`：按 model 树读取对应主题映射。
 7. `arceos_ex.md`：当前目标内核的 coding 索引。
 8. `arceos_ex-implementation.md`：当前实现说明、命令和阶段性取舍；它不得覆盖前述映射。
@@ -49,11 +49,11 @@ coding。
 
 ## 目录层次
 
-`spec/coding/` 保留 `projects/`、`systems/`、`phases/`、`objects/` 四类子目录，
+`spec/coding/` 保留 `systems/`、`phases/`、`objects/` 三类对象层次目录，
 与 `spec/model/` 和 `spec/charter/` 的公共层次对齐。现有 `mapping/`、`build/`、`riscv64/`、
 `rust/` 等通用编码规格继续由本目录根入口承载；目标内核专题规则按系统、阶段和对象拆入
-上述子目录。后续新增或拆分的专题约束，
-若主要约束项目、系统、阶段或对象之一，应落入对应四分目录。
+上述子目录。后续新增或拆分的专题约束，若主要约束系统、阶段或对象之一，应落入对应目录；构建
+专题保留在本目录根级文件。
 
 ## `.spec` 迁移结果
 
@@ -62,7 +62,7 @@ Kernel 根审计开始时 coding 目录有 26 个 `.spec`。Kernel 根批次删�
 批次又把 `irq-time-init.spec`、`local-irq-enable.spec`、`irq-open-prepare.spec` 和
 `process-prepare.spec` 的有效实现规则迁入对应 `.md` 并删除；现 BootInitFlow 子树迁移删除
 `rest-init.spec`，SmpRuntime 子树迁移删除 6 个 phase 文件。最后一批审计并迁移通用
-mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后，coding `.spec` 已清零。
+mapping/build/riscv64/rust 4 个、system 1 个和 object 5 个遗留文件后，coding `.spec` 已清零。
 
 ## 当前实践目标
 
@@ -148,7 +148,6 @@ mapping/build/riscv64/rust 4 个、project 1 个和 object 5 个遗留文件后�
 - `tools2.md`：首期独立 Signal 工具链的包边界、中间协议、CLI 和实现责任。
 - `arceos_ex.md`：`arceos_ex` coding 索引入口，链接 system、phase、object 和实现说明。
 - `objects/README.md`：`spec/model/objects/*.spec` 的逐文件 coding 覆盖表；共享专题必须在表中明确归属。
-- `projects/rootfs-image.md`：rootfs 镜像构造与 fixture overlay 的权威项目规则。
+- `rootfs-image.md`：rootfs 镜像构造与 fixture overlay 的权威构建规则。
 - `arceos_ex-implementation.md`：`arceos_ex` 第一轮对象级实现证据、源码落点、命令和阶段性观察；不承载 MUST/SHOULD/MAY 规则。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
-- `projects/{computer,hardware,firmware,kernel}.md`：四个 Project 的规格/构造责任与 metadata 映射。
-- `systems/{computer,riscv64-platform,opensbi,kernel}.md`：四个运行 System 的启动责任与实现状态。
+- `systems/{computer,riscv64-platform,opensbi,kernel}.md`：四个 System 的规格、构造、启动责任与实现状态。

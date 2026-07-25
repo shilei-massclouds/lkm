@@ -14,7 +14,7 @@
 
 - 解析 `.spec` 文件，忽略 `/* ... */` 和 `// ...` 注释。
 - 建立对象、状态、事件、依赖、不变量和延期义务的模型。
-- 从 `ComputerProject.Transition::Preset` 开始，推导唯一外部工程启动事件是否能通过 completion-event 连锁达到目标状态。
+- 从 `Computer.Transition::Preset` 开始，推导唯一外部系统启动事件是否能通过 completion-event 连锁达到目标状态。
 - 报告已证明、无法证明、矛盾和 `deferred` 条目。
 - 支持 `include "relative/path.spec";`，路径相对当前 `.spec` 文件所在目录解析。
 

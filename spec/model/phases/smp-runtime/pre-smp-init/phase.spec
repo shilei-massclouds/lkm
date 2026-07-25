@@ -200,7 +200,7 @@ object PreSmpInitBoundary: KernelObject {
  * kernel_init_freeable() 的 gfp_allowed_mask 起点。Scheduler.Action::Schedule
  * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
  * 绑定为 KernelInitFlow 并指向 KernelInitFlow 入口。该真实任务入口
- * 只在 BootInitFlow.Online 后由 Kernel.Enable continuation 启动。
+ * 只在 BootInitFlow.Online 后由 KernelInitTask 的真实入口直接启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;

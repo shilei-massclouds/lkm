@@ -85,7 +85,7 @@ snapshot-out 和显式 work-dir 可同时使用；HTML 成功不得覆盖 check 
 阶段逻辑，只负责从自身路径解析仓库根、建立 tools2 独立
 `PYTHONPATH` 并把短参数翻译给 driver：可选的 `-t/--trigger` 对应 `--signal`，`-u/--until` 对应
 `--until`，`-s/--scenario` 对应 `--scenario`，`-f/--spec` 选择输入规格。`-t` 的默认值经规范化后是
-`ComputerProject.Preset`，帮助 usage 必须显示 `[-t SIGNAL] [-u SIGNAL]`；`-f` 默认指向
+`Computer.Preset`，帮助 usage 必须显示 `[-t SIGNAL] [-u SIGNAL]`；`-f` 默认指向
 `spec/model/main.spec`，快捷 source 默认 `Human`、预算默认 `all/all`；显式参数覆盖它们。预算、source、
 work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通用默认仍为 `3/3`。入口从脚本自身
 位置解析仓库和包路径，因此从仓库根或其它当前目录调用的行为一致。
@@ -96,7 +96,7 @@ work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通
 拥有最高优先级。候选路径 resolve 后必须仍位于 `tools2/scenarios/` 内，不能用 target/name、绝对路径、
 `..` 或 symlink 越界。安全的候选不存在时，入口在启动 driver/derive 前返回 2，stderr 同时报告
 canonical signal 和预期路径。`Target.Startup` 与 `Target.Preset` 选择同一文件。调用者省略 `-t` 时
-不做默认场景查找，而从模型初态执行默认 `ComputerProject.Preset`；因此 `-u Kernel.Startup` 仍从完整
+不做默认场景查找，而从模型初态执行默认 `Computer.Preset`；因此 `-u Kernel.Enable` 仍从完整
 上游链生成 snapshot。该查找只属于 shortcut，driver、derive CLI/API 和 scenario loader 不得复制它。
 
 shortcut、driver 和 derive API/CLI 都调用 common 中同一 Signal request 规范化函数；任何 target 的

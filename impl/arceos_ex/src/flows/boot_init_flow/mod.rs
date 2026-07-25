@@ -103,7 +103,7 @@ pub(super) fn preset_after_entry_objects() -> ! {
         )
     };
     crate::phases::shutdown_on_error(result, "arceos_ex boot init preset failed\n");
-    crate::systems::kernel::preset_after_boot_init()
+    setup()
 }
 
 /// Starts BootInitFlow.Setup with its first direct leaf.
@@ -203,7 +203,7 @@ pub fn setup_after_boot_init_rest_init() -> ! {
         )
     };
     crate::phases::shutdown_on_error(result, "arceos_ex boot init setup failed\n");
-    crate::systems::kernel::setup_after_boot_init()
+    enable()
 }
 
 /// BootInitFlow.Enable drives only the reversible schedule-handoff leaf.
@@ -243,7 +243,34 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
         )
     };
     crate::phases::shutdown_on_error(result, "arceos_ex boot init enable failed\n");
-    crate::systems::kernel::switch_after_boot_init()
+    schedule()
+}
+
+/// Sends BootInitFlow's post-commit Scheduler.Action::Schedule signal. The
+/// call returns only after a later switch restores the original BootTask.
+fn schedule() -> ! {
+    if !crate::systems::kernel::is_online() || !is_online() {
+        crate::phases::shutdown_on_error(
+            phase_failure(LifecycleEvent::Enable, State::Online, State::Online),
+            "arceos_ex boot init schedule invariant failed\n",
+        );
+    }
+
+    let ctx = crate::context::context();
+    let schedule_result = ctx.scheduler.schedule(
+        &ctx.cpu_group,
+        &mut ctx.kernel_init_task,
+        &mut ctx.kernel_init_flow,
+        &ctx.user_app_flow,
+        &mut ctx.kthreadd_task,
+        &mut ctx.kthreadd_flow,
+        &ctx.boot_idle_flow,
+        &mut ctx.user_task_set,
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.boot_cpu_current_task,
+    );
+    crate::phases::shutdown_on_error(schedule_result, "arceos_ex first schedule failed\n");
+    boot_task_restored()
 }
 
 /// Runs only if a later scheduler switch restores the original BootTask stack.
@@ -284,13 +311,6 @@ pub fn dispatch_ready() -> bool {
 pub fn is_prepared() -> bool {
     crate::context::context_ref().boot_init_flow.state() == State::Prepared
         && boot_task_on_cpu_and_canonical()
-}
-
-pub fn is_ready() -> bool {
-    crate::context::context_ref().boot_init_flow.state() == State::Ready
-        && boot_task_on_cpu_and_canonical()
-        && setup_leaves_online()
-        && rest_init::is_online()
 }
 
 fn require_setup_leaf(child_online: bool, child: &str) {

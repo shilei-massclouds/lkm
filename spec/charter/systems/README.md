@@ -1,6 +1,6 @@
 # Charter Systems
 
-运行系统树独立于工程树。固定根和直接子节点是：
+完整模型只有一棵顶层系统树。固定根和直接子节点是：
 
 ```text
 Computer
@@ -14,7 +14,7 @@ Computer
 
 主题文件：
 
-- [`computer.md`](computer.md)：运行系统根和启动链入口。
-- [`riscv64-platform.md`](riscv64-platform.md)：由 Ready 经 Enable 启动的平台系统。
-- [`opensbi.md`](opensbi.md)：固件运行实例和 Kernel 交接。
-- [`kernel.md`](kernel.md)：现有 Kernel 生命周期与内部阶段树。
+- [`computer.md`](computer.md)：唯一顶层根、assembly fact 和启动链入口。
+- [`riscv64-platform.md`](riscv64-platform.md)：平台规格、构造与运行交接。
+- [`opensbi.md`](opensbi.md)：固件规格、构造与 Kernel 交接。
+- [`kernel.md`](kernel.md)：kernel image 构造、入口交接与内部阶段树。

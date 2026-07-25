@@ -31,10 +31,6 @@ _TRACE_ANNOTATION_CLEARANCE = 6
 _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
 _LIFECYCLE_ROOT_OBJECTS = frozenset(
     {
-        "ComputerProject",
-        "HardwareProject",
-        "FirmwareProject",
-        "KernelProject",
         "Computer",
         "Riscv64Platform",
         "OpenSBI",
@@ -587,12 +583,13 @@ def _timeline_phase_order(view: ViewModel, phase_id: str) -> int:
 
 def _timeline_phase_order_from_id(phase_id: str) -> int:
     order = {
-        "ComputerProject": 0,
-        "KernelProject": 1,
-        "Kernel": 2,
-        "PreparePhase": 3,
-        "BootPhase": 4,
-        "EntrySuccessorPhase": 5,
+        "Computer": 0,
+        "Riscv64Platform": 1,
+        "OpenSBI": 2,
+        "Kernel": 3,
+        "PreparePhase": 4,
+        "BootPhase": 5,
+        "EntrySuccessorPhase": 6,
     }
     return order.get(phase_id, 1000)
 

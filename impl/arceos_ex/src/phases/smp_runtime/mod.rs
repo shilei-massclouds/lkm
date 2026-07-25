@@ -10,7 +10,10 @@ pub mod rootfs;
 pub mod runtime_core;
 pub mod smp_bringup;
 
-use crate::objects::state::{EventResult, LifecycleEvent, State, failed_condition};
+use crate::{
+    checkpoint::Checkpoint,
+    objects::state::{EventResult, LifecycleEvent, State, failed_condition},
+};
 
 /// Entered only from `kernel_init_entry()` after its actual stack check.
 pub fn start_kernel_init_flow() -> ! {
@@ -115,14 +118,7 @@ pub fn enable_after_payload_handoff_prepare() -> ! {
         flow_failure(LifecycleEvent::Enable, State::Ready, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow enable failed\n");
-    crate::systems::kernel::commit_payload_handoff()
-}
-
-pub fn direct_children_online() -> bool {
-    pre_smp_init::is_online()
-        && smp_bringup::is_online()
-        && setup_children_online()
-        && crate::phases::payload::handoff_prepare::is_online()
+    commit_payload_handoff()
 }
 
 fn setup_children_online() -> bool {
@@ -151,13 +147,32 @@ fn require_flow_continuation(
 }
 
 fn mainline_ready(ctx: &crate::context::Context) -> bool {
-    ctx.kernel_init_task.state() == State::OnCpu
+    crate::systems::kernel::is_online()
+        && crate::flows::boot_init_flow::is_online()
+        && ctx.kernel_init_task.state() == State::OnCpu
         && ctx.boot_cpu_current_task.current_is_kernel_init()
         && ctx.boot_cpu_current_task.current() == ctx.kernel_init_task.task_ref()
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()
         && ctx.kernel_init_task.current_stack_pointer_in_range()
+}
+
+fn commit_payload_handoff() -> ! {
+    let ctx = crate::context::context();
+    crate::phases::shutdown_on_error(
+        ctx.kernel_init_flow
+            .require_payload_handoff_action(&ctx.kernel_init_task),
+        "arceos_ex kernel init payload handoff guard failed\n",
+    );
+    crate::phases::shutdown_on_error(
+        crate::apps::commit_selected_payload(ctx),
+        "arceos_ex selected payload handoff commit failed\n",
+    );
+    ctx.kernel_init_flow.mark_payload_handoff_committed();
+    crate::checkpoint::checkpoint(Checkpoint::KernelInitFlowPayloadHandoffCommitted);
+    crate::checkpoint::dispatch_after_trace(Checkpoint::KernelInitFlowPayloadHandoffCommitted, ctx);
+    crate::apps::enter_selected_payload(ctx)
 }
 
 fn flow_failure(event: LifecycleEvent, expected: State, target: State) -> EventResult {

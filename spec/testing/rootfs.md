@@ -1,7 +1,7 @@
 # Rootfs and user-mode acceptance testing
 
 本文件是 rootfs/user fixture、发行版 smoke、BusyBox init 输入编排和 checkpoint difftest 的权威测试规格。
-镜像构造见 [`../coding/projects/rootfs-image.md`](../coding/projects/rootfs-image.md)；基本测试生命周期见
+镜像构造见 [`../coding/rootfs-image.md`](../coding/rootfs-image.md)；基本测试生命周期见
 [`basic-tests.md`](basic-tests.md)；对象行为见 `spec/coding/objects/` 对应文档。
 
 ## User fixture output and analysis

@@ -112,7 +112,7 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "FixMap": ("fixmap_layout", "config_source_candidate"),
     "LinearMap": ("linear_map_layout", "config_source_candidate"),
     "Lds": ("linker_layout", "linker_script_candidate"),
-    "BootArgs": ("firmware_boot_abi", "firmware_project_candidate"),
+    "BootArgs": ("firmware_boot_abi", "opensbi_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
     "Riscv64": ("architecture_capabilities", "riscv_isa_spec_candidate"),
     "BootCpuRegisters": ("architecture_register_file", "boot_cpu_register_subset"),
@@ -122,15 +122,15 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "EarlyVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "SwapperVm": ("static_page_table_binding", "linker_symbol_candidate"),
 }
-_FIRMWARE_PROJECT_PROOFS = {
-    "attrs_accessible(self)": ("firmware_boot_abi", "firmware_project_boot_abi"),
+_FIRMWARE_BOOT_ABI_PROOFS = {
+    "attrs_accessible(self)": ("firmware_boot_abi", "firmware_boot_abi"),
     "firmware_boot_args_defined(self)": (
         "firmware_boot_abi",
-        "firmware_project_boot_abi",
+        "firmware_boot_abi",
     ),
     "boot_args_read_only(self)": (
         "firmware_boot_abi",
-        "firmware_project_boot_abi",
+        "firmware_boot_abi",
     ),
 }
 _CONFIG_SOURCE_PROOFS = {
@@ -3166,7 +3166,7 @@ class _Deriver:
                     effective_entry, entry_span, kind, state, entered_by
                 ):
                     continue
-                elif self._try_prove_firmware_project_fact(
+                elif self._try_prove_firmware_boot_abi_fact(
                     entry, entry_span, kind, transition, state
                 ):
                     continue
@@ -3592,7 +3592,7 @@ class _Deriver:
             return True
         return False
 
-    def _try_prove_firmware_project_fact(
+    def _try_prove_firmware_boot_abi_fact(
         self,
         expression: str,
         span: SourceSpan,
@@ -3608,7 +3608,7 @@ class _Deriver:
         ):
             return False
 
-        proof = _FIRMWARE_PROJECT_PROOFS.get(expression.strip())
+        proof = _FIRMWARE_BOOT_ABI_PROOFS.get(expression.strip())
         if proof is None:
             return False
         proof_class, proof_provider = proof

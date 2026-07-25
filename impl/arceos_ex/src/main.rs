@@ -10,7 +10,6 @@ mod context;
 mod flows;
 mod objects;
 mod phases;
-mod projects;
 #[cfg(checkpoint_handler_stress_mem)]
 mod stress_mem;
 mod systems;

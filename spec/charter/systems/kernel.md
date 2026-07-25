@@ -2,8 +2,9 @@
 
 > [model] MUST：内核系统模型正式命名是Kernel。
 
-`Kernel` 是运行系统树根 `Computer` 的直接子系统；它不属于 `KernelProject`。`KernelProject` 只拥有
-构造规格和产物，OpenSBI 通过 `Kernel.Startup`（canonical `Kernel.Preset`）启动运行实例。
+`Kernel` 是系统树根 `Computer` 的直接子系统。它同时承担 Kernel 规格采纳、静态配置发布、kernel
+image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把控制权交给已经 Ready 的 Kernel
+实例。
 
 ## 系统功能
 
@@ -51,10 +52,11 @@
 
 内核作为信号目标系统可以接收的信号：
 
-1. 引导信号：如前所述，OpenSBI向内核发出引导信号startup，把引导控制权移交到内核。内核对应处理该信号的迁移过程是Kernel.OnPreset。
+1. 引导信号：OpenSBI 向内核发出 Enable，把引导控制权移交到已经构造完成的 Kernel；内核对应处理
+   该信号的迁移过程是 `Kernel.Transition::Enable`。
 2. 中断信号：如前所述，中断控制器向内核发出中断信号irq，内核对应处理该信号的动作是Kernel.OnIrq。
 
-> GAP: Kernel.OnPreset 与 Kernel.OnIrq 的 Signal-to-Transition/Action 绑定尚未在正式 Signal DSL 和当前 model 中定义。
+> GAP: Kernel.Enable 与 Kernel.OnIrq 的 Signal-to-Transition/Action 绑定尚未在正式 Signal DSL 中定义。
 
 内核可能发出的信号：
 
@@ -71,67 +73,54 @@
 
 ### 生命周期范式
 
-生命周期符合[阶段范式](../phase-paradigm.md)。内核启动信号触发 `Kernel.Transition::Preset` 响应过程。
-
-> [model] MUST：以 `Kernel` 为目标的启动信号触发 `Kernel.Transition::Preset`；`Signal` 与
-> `Transition` 是不同概念。
+生命周期符合 [SystemObject 四态](../system-signal.md#systemobject-四态)。`Preset` 和 `Setup` 是构建
+阶段；OpenSBI 的引导交接触发 `Kernel.Transition::Enable`。`Startup` 仍只规范化为 Preset，因此
+`Kernel.Startup` 表示设计期 `Kernel.Preset`，绝不表示真实固件入口。
 
 ### 状态与迁移
 
-* Base：内核处于等待状态，等待引导信号startup触发它启动，引导信号是Preset信号的别名。
+* Base：Kernel 规格尚未采纳。
 
-  > [model] MUST：确保 `Riscv64`、`SbiSpec`、`BootArgs`、`Riscv64Platform`、`OpenSBI`、`Lds` 和
-  > `Config` 都处于 `Online` 状态，并精确检查 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
-  > `BootCpuRegisters.a1 == BootArgs.dtb_pa`。不得把整组寄存器已准备完成作为 Kernel 启动前置。
+* OnPreset：由 `Computer.Preset` 同步驱动。本轮没有额外的 Kernel 规格迁移内容，只提交 Prepared；
+  不启动 BootTask 或任何内部 Flow。
 
-* OnPreset：内核收到引导信号 startup，由静态且已经 OnCpu 的 `BootTask` 执行早期初始化。
-  `BootTask` 是唯一的 task_struct-like carrier；它不是 Kernel 引导响应过程的别名。
+* Prepared：Kernel 规格已建立，等待构造。
 
-  `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 `Kernel.Started` 观察且只观察一次。
-  随后 `BootInitFlow.Started`
-  启动标准阶段生命周期，并由其 Preset 直接编排入口对象。入口协议由
-  `BootInitFlow.Preset` 拥有的 `BootTaskEntryBinding` 协调：先把物理地址阶段的 `tp` 绑定到静态
-  `init_task` 并建立初始抢占关闭事实；`EarlyVm` 就绪后，binding 把 `tp` 切换为同一 carrier 的
-  虚拟地址。该 binding 不是第二个 Task、TaskRef 或调度实体，也不改变 PID 0 identity。
+* OnSetup：由 `Computer.Setup` 同步驱动。先同步发送 `Config.Enable`，再同步发送 `Lds.Enable`；Lds
+  必须依赖已经 Online 的 Config。随后验证两者并构造 kernel image，提交 Ready。Config 与 Lds 的
+  完整模型初态都是 Ready：Enable 只验证、发布构建输入，不代表运行期初始化。
 
-  `BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow，并因 TaskFlow 继承 PhaseObject 而编排
-  启动阶段。它的 owner/parent 在入口前已绑定到 BootTask；后继 `BootIdleFlow` 的 ownership 与
-  active binding 在 `BootIdleFlow.Setup` 建立。
+* Ready：kernel image 已构造，Config/Lds 已 Online，可以接受固件交接。
 
-  > [model] MUST：Kernel 接受 OpenSBI 发出的 Startup 后直接异步发出严格 BootInitFlow.Startup；
-  > BootInitFlow 只有在自身仍为 Base、parent BootTask 为 OnCpu 时接受。接受后在
-  > `SingleTaskContext` 中直接按入口顺序驱动具体对象，并在完整入口事实成立后提交 Prepared。
+* OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
+  `SbiSpec`、`BootArgs`、Config/Lds 和 kernel image，确认静态 `BootTask` 与入口 ABI，并精确检查
+  `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
+  `BootCpuRegisters.a1 == BootArgs.dtb_pa`；不得把整组寄存器已准备完成作为前置。验证完成后提交
+  Kernel.Online，再异步发送 `BootInitFlow.Preset`。
 
-* Prepared：内核此时不响应中断，`BootTask` 仍为 OnCpu，`BootInitFlow` 已 Prepared；入口对象完整事实
-  已建立。
+* Online：Kernel 实例自身已经启动并把控制权交给 BootInitFlow。Kernel 在整个内部启动、首次调度、
+  PID 1 初始化和 payload 交接期间始终保持 Online；它不等待这些内部边界完成，也不在后续任何阶段
+  再次提交 Online。`SystemState.Online`、`BootInitFlow.Online` 和
+  `KernelInitFlow.PayloadHandoffCommitted` 保持互相独立。
 
-* OnSetup：内核收到 Setup 信号，OnCpu 的 `BootTask` 继续代表内核完成中期初始化；
-  该迁移不再次启动或替换 Task。
+`BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 Kernel Enable 接受点观察且只观察
+一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；它收到 Preset 后自行串联
+Preset/Setup/Enable：Preset 直接编排入口对象并提交 Prepared、自发 Setup；Setup 直接顺序驱动
+`EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
+`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
+`BootInitRestInitPhase`，提交 Ready、自发 Enable；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交
+Online 后直接异步发送 `Scheduler.Action::Schedule`。
 
-  > [model] MUST：向 `BootInitFlow` 同步发送 Setup；它直接顺序驱动
-  > `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
-  > `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
-  > `ProcessPreparePhase`、`BootInitRestInitPhase`，等待最后一个叶子到达 Online 后提交 Ready。
+首次调度真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与 context-switch prepare
+事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点并
+提交 CurrentTaskSlot/OnCpu/Live。PID 1 的真实入口直接启动 `KernelInitFlow.Preset`，不再回调 Kernel
+的 Setup 或 Enable。Preset body 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 
-* Ready：内核已经初步具备响应中断信号的能力，等待Enable信号以触发多任务启动。
-
-* OnEnable：内核收到Enable信号，加载并切换到首个用户应用中运行。
-
-  > [model] MUST：先向 `BootInitFlow` 同步发送 Enable。它只驱动
-  > `BootInitScheduleHandoffPhase`，建立 `BootIdleFlow` Ready/active binding，并在首次 PID 1 switch
-  > commit 紧邻边界到达 Online。真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与
-  > context-switch prepare 事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、
-  > 消费 KernelInitTask 断点并提交 CurrentTaskSlot/OnCpu/Live；随后严格启动 `KernelInitFlow.Preset`。
-  > Preset body 必须在 `kernel_init_entry()` 验证
-  > PID 1 vmalloc stack 后执行。
-
-  `KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动
-  `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase`；Enable
-  只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受 parent Task OnCpu 约束的
-  `CommitPayloadHandoff`：UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入
-  内核态 no-return entry。
-
-* Online：内核处于正常服务状态，支持应用运行。
+`KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动
+`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase`；Enable
+只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受 parent Task OnCpu 约束的
+`CommitPayloadHandoff`：UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入
+内核态 no-return entry；该 action 不触碰 Kernel.Online。
 
 ## 动作
 

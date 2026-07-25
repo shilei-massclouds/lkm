@@ -115,9 +115,8 @@ fn checkpoint_reentry_shutdown() -> ! {
 pub enum Checkpoint {
     KernelStarted,
     BootTaskOnCpu,
-    BootInitFlowStarted,
-    #[allow(dead_code)]
     KernelOnline,
+    BootInitFlowStarted,
     PreparePhaseReady,
     PreparePhaseOnline,
     EntrySuccessorPhaseStarted,
@@ -608,6 +607,7 @@ impl Checkpoint {
         match self {
             Self::KernelStarted => b'R',
             Self::BootTaskOnCpu => b'T',
+            Self::KernelOnline => b'L',
             Self::BootInitFlowStarted => b'O',
             Self::InterruptStreamPrepared => b'I',
             Self::KernelImagePrepared => b'K',

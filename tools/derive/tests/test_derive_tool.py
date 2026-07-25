@@ -116,13 +116,13 @@ class DeriveToolTests(unittest.TestCase):
                 }}
             }}
 
-            object ComputerProject: FactoryType {{
+            object Computer: FactoryType {{
                 initial_state: State::Base;
                 state State::Base {{
                     transitions {{
                         on Transition::Preset -> State::Prepared {{
                             drives {{
-                                ComputerProject.Action::Run;
+                                Computer.Action::Run;
                             }}
                         }}
                     }}
@@ -150,10 +150,6 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(data["summary"]["ok"])
             self.assertEqual(data["summary"]["blocked"], 0)
             self.assertEqual(data["summary"]["contradiction"], 0)
-            self.assertEqual(data["states"]["ComputerProject"], "Online")
-            self.assertEqual(data["states"]["HardwareProject"], "Ready")
-            self.assertEqual(data["states"]["FirmwareProject"], "Ready")
-            self.assertEqual(data["states"]["KernelProject"], "Ready")
             self.assertEqual(data["states"]["BootArgs"], "Online")
             self.assertEqual(data["states"]["Config"], "Online")
             self.assertEqual(data["states"]["Lds"], "Online")
@@ -202,7 +198,7 @@ class DeriveToolTests(unittest.TestCase):
 
     def test_unproved_boundary_evidence_creates_obligation(self) -> None:
         source = """
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -211,7 +207,7 @@ class DeriveToolTests(unittest.TestCase):
                             deferred demo.001 {
                                 category: DeferredCategory::Proof;
                                 summary: "Prove the missing demo fact.";
-                                evidence { missing_demo_evidence(ComputerProject); }
+                                evidence { missing_demo_evidence(Computer); }
                                 close_when: "The fact has a formal provider and a regression test.";
                             }
                         }
@@ -243,7 +239,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertIn("deferred demo.001 evidence", obligation["source_kind"])
             self.assertEqual(
-                obligation["expression"], "missing_demo_evidence(ComputerProject)"
+                obligation["expression"], "missing_demo_evidence(Computer)"
             )
 
     def test_derive_json_contains_records_transitions_and_trace(self) -> None:
@@ -264,7 +260,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertNotIn("unknown", data["summary"]["obligation_categories"])
             self.assertTrue(
                 any(
-                    transition["object"] == "ComputerProject"
+                    transition["object"] == "Computer"
                     and transition["transition"] == "Preset"
                     for transition in data["transitions"]
                 )
@@ -287,7 +283,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["states"]["VmallocAllocator"], "Ready")
             self.assertEqual(len(data["trace"]), 1)
             root = data["trace"][0]
-            self.assertEqual(root["object"], "ComputerProject")
+            self.assertEqual(root["object"], "Computer")
             self.assertEqual(root["transition"], "Preset")
             self.assertEqual(root["source_state"], "Base")
             self.assertEqual(root["target_state"], "Prepared")
@@ -299,10 +295,10 @@ class DeriveToolTests(unittest.TestCase):
                     for child in root["children"][:4]
                 ],
                 [
-                    ("HardwareProject", "Preset", "drives"),
-                    ("FirmwareProject", "Preset", "drives"),
-                    ("KernelProject", "Preset", "drives"),
-                    ("ComputerProject", "Setup", "emits"),
+                    ("Riscv64Platform", "Preset", "drives"),
+                    ("OpenSBI", "Preset", "drives"),
+                    ("Kernel", "Preset", "drives"),
+                    ("Computer", "Setup", "emits"),
                 ],
             )
             self.assertTrue(
@@ -1154,7 +1150,7 @@ class DeriveToolTests(unittest.TestCase):
                     if record["object"] == "BootArgs"
                     and record["state"] == "Online"
                     and record["proof_class"] == "firmware_boot_abi"
-                    and record["proof_provider"] == "firmware_project_boot_abi"
+                    and record["proof_provider"] == "firmware_boot_abi"
                 },
                 {
                     "attrs_accessible",
@@ -1353,12 +1349,12 @@ class DeriveToolTests(unittest.TestCase):
             object StaticCarrier: Carrier {
             }
 
-            object ComputerProject: Factory {
+            object Computer: Factory {
                 initial_state: State::Base;
                 state State::Base {
                     transitions {
                         on Transition::Preset -> State::Prepared {
-                            drives { ComputerProject.Action::Run; }
+                            drives { Computer.Action::Run; }
                         }
                     }
                 }
@@ -1427,7 +1423,7 @@ class DeriveToolTests(unittest.TestCase):
             object BaseLeaf: Leaf {}
             object DerivedLeaf: Leaf {}
             object InstanceLeaf: Leaf {}
-            object ComputerProject: DerivedFlow {
+            object Computer: DerivedFlow {
                 initial_state: State::Base;
                 state State::Base {
                     transitions {
@@ -1461,11 +1457,11 @@ class DeriveToolTests(unittest.TestCase):
                 ("BaseLeaf", "Preset"),
                 ("DerivedLeaf", "Preset"),
                 ("InstanceLeaf", "Preset"),
-                ("ComputerProject", "Preset"),
-                ("ComputerProject", "Setup"),
+                ("Computer", "Preset"),
+                ("Computer", "Setup"),
             ],
         )
-        self.assertEqual(data["states"]["ComputerProject"], "Ready")
+        self.assertEqual(data["states"]["Computer"], "Ready")
         proved = {
             record["expression"]
             for record in data["records"]
@@ -1473,9 +1469,9 @@ class DeriveToolTests(unittest.TestCase):
         }
         self.assertTrue(
             {
-                "base_fact(ComputerProject)",
-                "derived_fact(ComputerProject)",
-                "instance_fact(ComputerProject)",
+                "base_fact(Computer)",
+                "derived_fact(Computer)",
+                "instance_fact(Computer)",
             }.issubset(proved)
         )
 
@@ -1503,12 +1499,12 @@ class DeriveToolTests(unittest.TestCase):
                 }
             }
 
-            object ComputerProject: Factory {
+            object Computer: Factory {
                 initial_state: State::Base;
                 state State::Base {
                     transitions {
                         on Transition::Preset -> State::Prepared {
-                            drives { ComputerProject.Action::Run; }
+                            drives { Computer.Action::Run; }
                         }
                     }
                 }
@@ -1637,7 +1633,7 @@ class DeriveToolTests(unittest.TestCase):
                 {padding}
                 drives {{
                     declare flow of UserAppFlow;
-                    flow.Transition::Preset(owner_task: ComputerProject);
+                    flow.Transition::Preset(owner_task: Computer);
                 }}
             }}
         """
@@ -1658,7 +1654,7 @@ class DeriveToolTests(unittest.TestCase):
             Action::Make {{
                 drives {{
                     declare flow of UserAppFlow;
-                    flow.Transition::Preset(owner_task: ComputerProject);
+                    flow.Transition::Preset(owner_task: Computer);
                 }}
             }}
             Action::Run {{

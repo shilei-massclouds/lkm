@@ -404,11 +404,11 @@ on Transition::Preset -> State::Prepared {
 - `emits` 覆盖 lifecycle transition、显式 state-changing runtime Transition 与 Action Signal；
   后两者不改变 `emits` 必须在 source commit 后才投递的规则。
 
-默认推导入口是 `ComputerProject.Transition::Preset`。该入口表示唯一外部工程启动
-事件 `PRESET`；它先以固定顺序 `drives` 三个直接子 Project 的规格与构造，再交接给
-初态 Ready 的系统根 `Computer`。后续运行启动固定为
-`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Preset` 的
-completion-event 链；`Config` 与 `Lds` 初态 Online 且不接收生命周期事件。所有实际 Signal
+默认推导入口是 `Computer.Transition::Preset`。该入口表示完整模型唯一的顶层启动请求；Computer
+先以固定顺序 `drives` 三个直接子 System 的 Preset，再按同序 drives Setup 并建立 assembly fact。
+后续运行启动固定为
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable -> BootInitFlow.Preset`
+的 completion-event 链；`Config` 与 `Lds` 初态 Ready，并由 Kernel.Setup 依次驱动 Enable。所有实际 Signal
 仍必须由显式 `emits` 或 `drives` 产生，不得依赖工具隐式补齐。
 
 ## SEM-SYSTEM-PARENT-001: Effective Parent Is Shared Across Model Consumers
@@ -416,13 +416,10 @@ completion-event 链；`Config` 与 `Lds` 初态 Online 且不接收生命周期
 模型构建器必须先建立类型继承，再按下列顺序归一化每个静态系统的 effective parent：
 
 1. 源声明存在显式 `parent` 时原样采用，后续规则不得覆盖。
-2. 若组合模型包含具名 `Kernel`，无显式 parent 且类型不是 `ProjectObject` 或其传递子类型的系统采用
-   `Kernel`；具名 `Computer` 是系统树显式根，不应用该默认。
-3. `ProjectObject` 或其子类型不使用上述默认。项目树为
-   `ComputerProject -> {HardwareProject, FirmwareProject, KernelProject}`；系统树为
-   `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；启动 CPU 的局部层级为
+2. 若组合模型包含具名 `Kernel`，无显式 parent 的系统采用 `Kernel`；具名 `Computer` 是系统树显式
+   根，不应用该默认。系统树为 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`；启动 CPU 的局部层级为
    `BootCurrentCPU -> BootCPU -> BootCpuRegisters`。
-4. 不含 `Kernel` 的独立 fixture 保留声明形成的根集合，不建立不存在的默认 parent。
+3. 不含 `Kernel` 的独立 fixture 保留声明形成的根集合，不建立不存在的默认 parent。
 
 归一化后必须检查 unknown parent、self parent 和传递环，并把 effective parent 写入 model protocol。
 老 `tools/model`、tools2 model、文本树、静态 trace/SVG 和 Signal hierarchy coordinate 都必须消费该字段，
@@ -463,19 +460,19 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 `model_structure`，与来自当前快照的精确事实区分。未知新语法必须在 parse/model 诊断中以
 `unsupported` 和 source span 报告，不能静默删除、按名称猜测或留给 view/render 修正。
 
-根 Signal 没有 scenario 时从模型初态接收。完整主模型的初态包含 Online 的静态 `Config`/`Lds` 与
-Ready 的 `Computer`/`Riscv64Platform`/`OpenSBI`；Ready 只表示已组装且可启动，不表示已经运行。
-完整主模型只有 `ComputerProject.Preset` 是无预制条件的
-起点；`Kernel.Preset` 或其它后续 Signal 若因前期状态或事实未建立而被拒绝，必须直接得到列出缺项和
+根 Signal 没有 scenario 时从模型初态接收。完整主模型的初态包含 Online 的静态
+`Riscv64`/`SbiSpec`/`BootArgs`、Ready 的 `Config`/`Lds`，以及 Base 的 Computer 和三个直接子 System。Ready 只表示
+本实例已构造且可启动，不表示已经运行。默认完整闭包入口是 `Computer.Preset`；`Kernel.Enable` 或其它
+后续 Signal 若因前期状态或事实未建立而被拒绝，必须直接得到列出缺项和
 完整因果链的 `failed`。derive 不得隐式回溯 emitter、执行上游 transition 或合成前置快照；调用者从
 后续边界继续时必须显式提供真实边界的 snapshot/scenario。
 
-快捷入口未给 `-t/--trigger` 时默认请求 `Human -> ComputerProject.Preset`，其用户可见默认拼写可以是
-`ComputerProject.Startup`，但进入 driver 前必须规范化。快捷入口、driver 和 derive 的 source 默认均为
+快捷入口未给 `-t/--trigger` 时默认请求 `Human -> Computer.Preset`，其用户可见默认拼写可以是
+`Computer.Startup`，但进入 driver 前必须规范化。快捷入口、driver 和 derive 的 source 默认均为
 `Human`，显式 `--source` 优先；底层 driver/derive 的 `--signal` 仍必填。
 
 `Startup -> Preset` 规范化规则不因运行系统改为 Enable 启动而改变；`Startup` 不是 `Enable` 的别名。
-因此 `Computer.Startup` 等请求会规范化为不存在的 Preset handler 并严格失败，不能绕过唯一 Enable 链。
+因此 `Kernel.Startup` 表示设计期 `Kernel.Preset`，不能替代真实固件交接 `Kernel.Enable`。
 
 ### Ordering, rejection and completion
 
@@ -833,7 +830,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   body 表达的控制流、进入/退出并不形成作用域，或当前工具尚不能表达必要的动态绑定；
   这些情况应在规格中说明原因。
 - `within ContextName only-once { ... }` 表示该具体 lexical `within` 块声明自己在
-  `ComputerProject.Transition::Preset` 可达调用图中只被进入一次。该标记必须由 model
+  `Computer.Transition::Preset` 可达调用图中只被进入一次。该标记必须由 model
   工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。当前
   formal source 暂不使用该标记驱动 guard 省略；它作为工具能力保留，等待后续
   guard 优化机制单独恢复。
@@ -901,7 +898,7 @@ state State::Ready {
 
 `only-once` 是 `within` 使用点上的可验证断言，不是 `Context` 类型属性。同一个
 context 可以在一个地方被 `only-once` 使用，在另一个地方作为普通可复用上下文使用。
-工具验证时从 `ComputerProject.Transition::Preset` 出发，沿 `drives` 和 `emits` 调用图统计每个标记
+工具验证时从 `Computer.Transition::Preset` 出发，沿 `drives` 和 `emits` 调用图统计每个标记
 `only-once` 的 lexical block 的可达进入次数；计数不是 1 时必须报错。
 
 当前策略是先建立基本 guard 规格和保守 lowering，不把 Effective Context 自动作为

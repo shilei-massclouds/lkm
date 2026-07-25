@@ -65,7 +65,7 @@ class RenderToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertIn("object view:", stdout.getvalue())
-            self.assertIn("ComputerProject: ProjectObject", stdout.getvalue())
+            self.assertIn("Computer: ComputerObject", stdout.getvalue())
             self.assertIn("DeclarationSite", stdout.getvalue())
 
     def test_render_dot_writes_ascii_file(self) -> None:
@@ -95,8 +95,6 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("<svg", text)
             self.assertIn("PreparePhase", text)
             self.assertIn("BootPhase", text)
-            self.assertNotIn("FirmwareProject", text)
-            self.assertNotIn("KernelProject", text)
             self.assertNotIn("BootArgs", text)
 
     def test_render_text_from_trace_view(self) -> None:
@@ -112,7 +110,7 @@ class RenderToolTests(unittest.TestCase):
             text = stdout.getvalue()
             self.assertIn("trace view:", text)
             self.assertIn("columns:", text)
-            self.assertIn("ComputerProject.Transition::Preset", text)
+            self.assertIn("Computer.Transition::Preset", text)
             self.assertIn("[emits]", text)
             self.assertIn("[drives]", text)
 
@@ -127,11 +125,11 @@ class RenderToolTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
             self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
             self.assertIn("<svg", text)
-            self.assertIn("ComputerProject.Preset", text)
-            self.assertIn("ComputerProject.Setup", text)
-            self.assertIn("Kernel.Preset", text)
+            self.assertIn("Computer.Preset", text)
+            self.assertIn("Computer.Setup", text)
+            self.assertIn("Kernel.Enable", text)
             self.assertIn("EntrySuccessorPhase.Setup", text)
-            self.assertIn("<title>emits Kernel.Transition::Setup</title>", text)
+            self.assertIn("<title>emits BootInitFlow.Transition::Preset</title>", text)
             self.assertIn(">emits</tspan>", text)
             self.assertNotIn(">emits Kernel</tspan>", text)
             self.assertIn("emit-label", text)
@@ -146,7 +144,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn('dy="12">Online</tspan>', text)
             self.assertIn("<tspan", text)
             self.assertIn("depends-arrow", text)
-            self.assertNotIn("ComputerProject.Base", text)
+            self.assertNotIn("Computer.Base", text)
 
     def test_render_svg_from_trace_view_draws_within_context(self) -> None:
         view = ViewModel(

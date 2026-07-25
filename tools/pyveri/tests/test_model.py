@@ -24,21 +24,13 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(result.ok, [diag.format() for diag in result.errors])
         self.assertEqual(len(result.errors), 0)
-        self.assertIn("ComputerProject", result.model.objects)
+        self.assertIn("Computer", result.model.objects)
         self.assertNotIn("OpenSbi" + "Firmware", result.model.objects)
-        self.assertEqual(result.model.objects["Config"].initial_state, "Online")
-        self.assertEqual(result.model.objects["Lds"].initial_state, "Online")
-        self.assertEqual(result.model.objects["Computer"].initial_state, "Ready")
-        self.assertEqual(result.model.objects["Riscv64Platform"].initial_state, "Ready")
-        self.assertEqual(result.model.objects["OpenSBI"].initial_state, "Ready")
-        self.assertEqual(
-            result.model.children["ComputerProject"],
-            [
-                "HardwareProject",
-                "FirmwareProject",
-                "KernelProject",
-            ],
-        )
+        self.assertEqual(result.model.objects["Config"].initial_state, "Ready")
+        self.assertEqual(result.model.objects["Lds"].initial_state, "Ready")
+        self.assertEqual(result.model.objects["Computer"].initial_state, "Base")
+        self.assertEqual(result.model.objects["Riscv64Platform"].initial_state, "Base")
+        self.assertEqual(result.model.objects["OpenSBI"].initial_state, "Base")
         self.assertEqual(
             result.model.children["Computer"],
             [
@@ -47,8 +39,9 @@ class ModelBuilderTests(unittest.TestCase):
                 "Kernel",
             ],
         )
-        self.assertEqual(result.model.children["Riscv64Platform"], [])
-        self.assertEqual(result.model.children["KernelProject"], ["Config", "Lds"])
+        self.assertEqual(result.model.children["Riscv64Platform"], ["Riscv64"])
+        self.assertIn("Config", result.model.children["Kernel"])
+        self.assertIn("Lds", result.model.children["Kernel"])
         self.assertEqual(result.model.objects["Kernel"].parent, "Computer")
         self.assertEqual(result.model.objects["Computer"].parent, None)
         self.assertEqual(result.model.objects["Riscv64"].attrs, {})
@@ -60,8 +53,8 @@ class ModelBuilderTests(unittest.TestCase):
         )
         boot_args = result.model.objects["BootArgs"]
         self.assertEqual(boot_args.initial_state, "Online")
-        self.assertEqual(boot_args.parent, "FirmwareProject")
-        self.assertEqual(boot_args.decl.properties["source"], "firmware_project::boot_abi")
+        self.assertEqual(boot_args.parent, "OpenSBI")
+        self.assertEqual(boot_args.decl.properties["source"], "firmware::boot_abi")
         self.assertEqual(
             boot_args.attrs,
             {"boot_hartid": "HartId", "dtb_pa": "PhysAddr<Dtb>"},
@@ -98,10 +91,7 @@ class ModelBuilderTests(unittest.TestCase):
         text = render_text(view)
         dot = render_dot(view)
 
-        self.assertIn("ComputerProject: ProjectObject", text)
-        self.assertIn("ComputerProject -> HardwareProject [parent]", text)
-        self.assertIn("ComputerProject -> FirmwareProject [parent]", text)
-        self.assertIn("ComputerProject -> KernelProject [parent]", text)
+        self.assertIn("Computer: ComputerObject", text)
         self.assertIn("Computer -> Riscv64Platform [parent]", text)
         self.assertIn("Computer -> OpenSBI [parent]", text)
         self.assertIn("Computer -> Kernel [parent]", text)
@@ -110,8 +100,6 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootTask -> BootInitFlow [parent]", text)
         self.assertNotIn("\nEntryPreludePhase:", text)
         self.assertNotIn("drives", text)
-        self.assertIn('"ComputerProject" -> "HardwareProject"', dot)
-        self.assertIn('"ComputerProject" -> "KernelProject"', dot)
         self.assertIn('"Computer" -> "Riscv64Platform"', dot)
         self.assertIn('"Computer" -> "OpenSBI"', dot)
         self.assertIn('"Computer" -> "Kernel"', dot)
@@ -127,24 +115,23 @@ class ModelBuilderTests(unittest.TestCase):
         text = render_text(view)
         dot = render_dot(view)
 
-        self.assertIn("ComputerProject.Preset", text)
-        self.assertIn("  -> HardwareProject.Preset", text)
-        self.assertIn("  -> FirmwareProject.Preset", text)
-        self.assertIn("  -> KernelProject.Preset", text)
-        self.assertIn("  -> ComputerProject.Setup [emits]", text)
-        self.assertIn("ComputerProject.Setup", text)
-        self.assertIn("  -> HardwareProject.Setup", text)
-        self.assertIn("  -> FirmwareProject.Setup", text)
-        self.assertIn("  -> KernelProject.Setup", text)
-        self.assertIn("ComputerProject.Enable", text)
-        self.assertIn("  -> Computer.Enable", text)
+        self.assertIn("Computer.Preset", text)
+        self.assertIn("  -> Riscv64Platform.Preset", text)
+        self.assertIn("  -> OpenSBI.Preset", text)
+        self.assertIn("  -> Kernel.Preset", text)
+        self.assertIn("  -> Computer.Setup [emits]", text)
+        self.assertIn("Computer.Setup", text)
+        self.assertIn("  -> Riscv64Platform.Setup", text)
+        self.assertIn("  -> OpenSBI.Setup", text)
+        self.assertIn("  -> Kernel.Setup", text)
+        self.assertIn("Computer.Enable", text)
         self.assertIn("Computer.Enable", text)
         self.assertIn("  -> Riscv64Platform.Enable [emits]", text)
         self.assertIn("Riscv64Platform.Enable", text)
         self.assertIn("  -> OpenSBI.Enable [emits]", text)
         self.assertNotIn("-> BootCpuRegisters.", text)
         self.assertIn("OpenSBI.Enable", text)
-        self.assertIn("  -> Kernel.Preset [emits]", text)
+        self.assertIn("  -> Kernel.Enable [emits]", text)
         self.assertIn("Kernel.Preset", text)
         self.assertIn("  -> InterruptStream.Preset", text)
         self.assertIn("Kernel.Setup", text)
@@ -154,13 +141,12 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("MmCoreInitPhase.Setup", text)
         self.assertIn("PayloadPreparePhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
-        self.assertIn('"ComputerProject.Preset" -> "ComputerProject.Setup"', dot)
-        self.assertIn('"ComputerProject.Preset" -> "HardwareProject.Preset"', dot)
-        self.assertIn('"ComputerProject.Enable" -> "Computer.Enable"', dot)
+        self.assertIn('"Computer.Preset" -> "Computer.Setup"', dot)
+        self.assertIn('"Computer.Preset" -> "Riscv64Platform.Preset"', dot)
         self.assertIn('"Computer.Enable" -> "Riscv64Platform.Enable"', dot)
         self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Enable"', dot)
-        self.assertIn('"OpenSBI.Enable" -> "Kernel.Preset"', dot)
-        self.assertIn('"Kernel.Preset" -> "BootInitFlow.Preset"', dot)
+        self.assertIn('"OpenSBI.Enable" -> "Kernel.Enable"', dot)
+        self.assertIn('"Kernel.Enable" -> "BootInitFlow.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "InterruptStream.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"BootInitFlow.Setup" -> "EntrySuccessorPhase.Preset"', dot)
@@ -185,21 +171,17 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
         self.assertIn("  - MemBlock.State::Offline", text)
-        self.assertNotIn("FirmwareProject:", text)
         self.assertNotIn("BootArgs.State::", text)
-        self.assertNotIn("KernelProject:", text)
-        self.assertNotIn("Config.State::", text)
-        self.assertNotIn("Lds.State::", text)
-        self.assertIn("Kernel: prepared (State::Prepared)", text)
-        self.assertNotIn("Kernel: ready", text)
+        self.assertIn("Config.State::Online", text)
+        self.assertIn("Lds.State::Online", text)
+        self.assertIn("Kernel: ready (State::Ready)", text)
+        self.assertIn("Kernel: online (State::Online)", text)
         self.assertIn("<svg", svg)
         self.assertNotIn(">EntryPreludePhase<", svg)
         self.assertIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
         self.assertNotIn("PayloadPreparePhase", svg)
-        self.assertNotIn("FirmwareProject", svg)
-        self.assertNotIn("KernelProject", svg)
         self.assertNotIn("BootArgs", svg)
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
@@ -1054,7 +1036,7 @@ class ModelBuilderTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -1107,7 +1089,7 @@ class ModelBuilderTests(unittest.TestCase):
             context GuardedContext: Context {
             }
 
-            object ComputerProject: ProjectObject {
+            object Computer: SystemObject {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -1187,7 +1169,7 @@ class ModelBuilderTests(unittest.TestCase):
                 ("C", "Setup"),
                 ("D", "Setup"),
                 ("A", "Setup"),
-                ("ComputerProject", "Preset"),
+                ("Computer", "Preset"),
             ],
         )
 

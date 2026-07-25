@@ -10,12 +10,11 @@
 
 1. [`README.md`](README.md)、[`mapping.md`](mapping.md) 和
    [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
-2. [`projects/README.md`](projects/README.md)：Computer/Hardware/Firmware/KernelProject 映射。
-3. [`systems/README.md`](systems/README.md)：Computer/平台/OpenSBI/Kernel 运行系统映射。
-4. 编排阶段：BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow 直接叶阶段 ->
+2. [`systems/README.md`](systems/README.md)：Computer/平台/OpenSBI/Kernel 的规格、构造和启动映射。
+3. 编排阶段：BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow 直接叶阶段 ->
    payload commit。
-5. 对应叶子阶段和普通对象主题。
-6. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
+4. 对应叶子阶段和普通对象主题。
+5. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
 
 ## System 与阶段索引
 
@@ -59,7 +58,7 @@
 | Ext2 | [`objects/ext2.md`](objects/ext2.md) |
 | VFS / devfs | [`objects/vfs.md`](objects/vfs.md) |
 | User boot / files / syscall | [`objects/user-boot.md`](objects/user-boot.md) |
-| Rootfs image construction | [`projects/rootfs-image.md`](projects/rootfs-image.md) |
+| Rootfs image construction | [`rootfs-image.md`](rootfs-image.md) |
 | Rootfs/user acceptance testing | [`../testing/rootfs.md`](../testing/rootfs.md) |
 
 上述 `.md` 是唯一 coding 权威来源；稳定 legacy rule ID 已归并到对应主题文件，coding `.spec`

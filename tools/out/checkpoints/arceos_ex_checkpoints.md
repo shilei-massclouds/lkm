@@ -4,8 +4,8 @@
 | ---: | --- | --- | --- | --- |
 | 0 | KernelStarted | Kernel.Started | R | impl/arceos_ex/src/checkpoint/mod.rs |
 | 1 | BootTaskOnCpu | BootTask.OnCpu | T | impl/arceos_ex/src/checkpoint/mod.rs |
-| 2 | BootInitFlowStarted | BootInitFlow.Started | O | impl/arceos_ex/src/checkpoint/mod.rs |
-| 3 | KernelOnline | Kernel.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 2 | KernelOnline | Kernel.Online | L | impl/arceos_ex/src/checkpoint/mod.rs |
+| 3 | BootInitFlowStarted | BootInitFlow.Started | O | impl/arceos_ex/src/checkpoint/mod.rs |
 | 4 | PreparePhaseReady | PreparePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 5 | PreparePhaseOnline | PreparePhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 6 | EntrySuccessorPhaseStarted | EntrySuccessorPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |

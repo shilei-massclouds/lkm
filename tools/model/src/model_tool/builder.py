@@ -776,7 +776,6 @@ def _build_objects(
             effective_parent is None
             and has_kernel
             and decl.name not in {"Computer", "Kernel"}
-            and not _type_is_or_extends(types, decl.kind, "ProjectObject")
         ):
             effective_parent = "Kernel"
         objects[decl.name] = ObjectDef(

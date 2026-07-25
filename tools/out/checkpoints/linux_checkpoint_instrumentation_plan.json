@@ -11,7 +11,7 @@
     "anchor_fingerprint": "sha256:157e6bf6ecd4ba00cd50b5e0ca62ec6a68da217256432e23ceb379c27df14abc"
   },
   {
-    "checkpoint_index": 2,
+    "checkpoint_index": 3,
     "checkpoint_name": "BootInitFlow.Started",
     "checkpoint_variant": "BootInitFlowStarted",
     "linux_file": "arch/riscv/kernel/head.S",

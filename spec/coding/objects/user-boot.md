@@ -188,5 +188,5 @@ complete Linux lock protocol remain deferred.
 
 KUnit/checkpoint handlers are read-only observers of production facts. Fixture building and delayed
 stdin live in [`../../testing/rootfs.md`](../../testing/rootfs.md); image construction lives in
-[`../projects/rootfs-image.md`](../projects/rootfs-image.md). The ordinary acceptance boundary is guest
+[`../rootfs-image.md`](../rootfs-image.md). The ordinary acceptance boundary is guest
 output plus modeled checkpoint facts, never mutation of a user/process object by a handler.

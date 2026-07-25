@@ -1,12 +1,82 @@
-/* OpenSBI runtime system and the firmware-to-kernel handoff boundary. */
+/* OpenSBI specification, firmware construction, and kernel handoff. */
+
+predicate opensbi_system_spec_established() -> bool;
+predicate opensbi_firmware_constructed() -> bool;
+predicate firmware_boot_args_defined<T>(boot_args: T) -> bool;
+predicate boot_args_read_only<T>(boot_args: T) -> bool;
+
+object SbiSpec: PrepareObject {
+    initial_state: State::Online;
+    parent: OpenSBI;
+    source: external_spec::riscv_sbi;
+
+    state State::Online {
+        invariant {
+            sbi_hsm_available();
+        }
+    }
+}
+
+object BootArgs: PrepareObject {
+    initial_state: State::Online;
+    parent: OpenSBI;
+    source: firmware::boot_abi;
+
+    attrs {
+        boot_hartid: HartId;
+        dtb_pa: PhysAddr<Dtb>;
+    }
+
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            firmware_boot_args_defined(self);
+            boot_args_read_only(self);
+        }
+    }
+}
 
 object OpenSBI: FirmwareObject {
-    initial_state: State::Ready;
+    initial_state: State::Base;
     parent: Computer;
     source: firmware::opensbi;
 
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    SbiSpec.state == State::Online;
+                    BootArgs.state == State::Online;
+                }
+
+                ensures {
+                    opensbi_system_spec_established();
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            SbiSpec.state == State::Online;
+            BootArgs.state == State::Online;
+            opensbi_system_spec_established();
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    opensbi_system_spec_established();
+                    opensbi_firmware_constructed();
+                }
+            }
+        }
+    }
+
     state State::Ready {
         invariant {
+            SbiSpec.state == State::Online;
+            BootArgs.state == State::Online;
             ordered_booting_enabled();
             primary_hart_only_at_kernel_entry();
             primary_hart_sie_clear_at_kernel_entry();
@@ -15,12 +85,13 @@ object OpenSBI: FirmwareObject {
         transitions {
             on Transition::Enable -> State::Online {
                 depends_on {
-                    FirmwareProject.state == State::Ready;
+                    Computer.state == State::Online;
+                    Riscv64Platform.state == State::Online;
                     SbiSpec.state == State::Online;
                     BootArgs.state == State::Online;
                     opensbi_system_spec_established();
                     opensbi_firmware_constructed();
-                    Riscv64Platform.state == State::Online;
+                    Kernel.state == State::Ready;
                     Lds.state == State::Online;
                     Config.state == State::Online;
                     kernel_image_constructed();
@@ -53,7 +124,7 @@ object OpenSBI: FirmwareObject {
                 }
 
                 emits {
-                    Kernel.Transition::Preset;
+                    Kernel.Transition::Enable;
                 }
             }
         }
@@ -63,6 +134,8 @@ object OpenSBI: FirmwareObject {
         invariant {
             SbiSpec.state == State::Online;
             BootArgs.state == State::Online;
+            opensbi_system_spec_established();
+            opensbi_firmware_constructed();
             BootCpuRegisters.a0 == BootArgs.boot_hartid;
             BootCpuRegisters.a1 == BootArgs.dtb_pa;
             Lds.state == State::Online;
