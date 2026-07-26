@@ -941,6 +941,40 @@ class SignalPipelineTests(unittest.TestCase):
             text,
         )
 
+    def test_failed_emitted_successor_does_not_roll_back_committed_source(self) -> None:
+        derivation, checked, _ = self.run_source(
+            """
+            system Root {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Start -> State::Online {
+                            emits { Successor.Action::Commit; }
+                            ensures { root_online(self); }
+                        }
+                    }
+                }
+                state State::Online { invariant { root_online(self); } }
+            }
+            system Successor {
+                parent: Root;
+                initial_state: State::Base;
+                state State::Base { }
+            }
+            """,
+            "Root.Start",
+        )
+        self.assertEqual(checked["verdict"], "failed")
+        self.assertEqual(derivation["verdict"], "failed")
+        self.assertEqual(derivation["signals"][0]["outcome"], "completed")
+        self.assertEqual(derivation["signals"][1]["outcome"], "rejected")
+        self.assertEqual(
+            derivation["last_stable_snapshot"]["states"]["Root"], "Online"
+        )
+        self.assertIn(
+            "root_online(Root)", derivation["last_stable_snapshot"]["facts"]
+        )
+
     def test_strict_rejection_fails_with_complete_causal_chain(self) -> None:
         derivation, checked, text = self.run_source(
             """
@@ -2195,11 +2229,91 @@ class SignalPipelineTests(unittest.TestCase):
             )
             self.assertIsNone(normal_data["until_request"])
             self.assertIsNone(normal_data["boundary"])
-            self.assertTrue(
-                any(
-                    item["target"] == "Kernel" and item["name"] == "Enable"
-                    for item in normal_data["signals"]
+            signals = normal_data["signals"]
+
+            def signal_index(source: str, target: str, name: str) -> int:
+                return next(
+                    index
+                    for index, item in enumerate(signals)
+                    if (item["source"], item["target"], item["name"])
+                    == (source, target, name)
                 )
+
+            kernel_enable_index = signal_index("OpenSBI", "Kernel", "Enable")
+            accept_index = signal_index("Kernel", "Kernel", "AcceptEnable")
+            boot_started_index = signal_index("Kernel", "BootInitFlow", "Preset")
+            boot_ready_index = signal_index("Kernel", "BootInitFlow", "Setup")
+            boot_online_index = signal_index("Kernel", "BootInitFlow", "Enable")
+            first_schedule_index = signal_index("Kernel", "Scheduler", "Schedule")
+            kernel_init_started_index = signal_index(
+                "KernelInitTask", "KernelInitFlow", "Preset"
+            )
+            kernel_init_ready_index = signal_index(
+                "Kernel", "KernelInitFlow", "Setup"
+            )
+            kernel_init_online_index = signal_index(
+                "Kernel", "KernelInitFlow", "Enable"
+            )
+            handoff_prepare_online_index = signal_index(
+                "PayloadHandoffPreparePhase",
+                "PayloadHandoffPreparePhase",
+                "Enable",
+            )
+            payload_commit_index = signal_index(
+                "Kernel", "KernelInitFlow", "CommitPayloadHandoff"
+            )
+            self.assertEqual(
+                [
+                    kernel_enable_index,
+                    accept_index,
+                    boot_started_index,
+                    boot_ready_index,
+                    boot_online_index,
+                    first_schedule_index,
+                    kernel_init_started_index,
+                    kernel_init_ready_index,
+                    kernel_init_online_index,
+                    handoff_prepare_online_index,
+                    payload_commit_index,
+                ],
+                sorted(
+                    [
+                        kernel_enable_index,
+                        accept_index,
+                        boot_started_index,
+                        boot_ready_index,
+                        boot_online_index,
+                        first_schedule_index,
+                        kernel_init_started_index,
+                        kernel_init_ready_index,
+                        kernel_init_online_index,
+                        handoff_prepare_online_index,
+                        payload_commit_index,
+                    ]
+                ),
+            )
+            kernel_enable_signal = signals[kernel_enable_index]
+            self.assertEqual(
+                (
+                    kernel_enable_signal["before_snapshot"]["states"]["Kernel"],
+                    kernel_enable_signal["after_snapshot"]["states"]["Kernel"],
+                ),
+                ("Ready", "Online"),
+            )
+            for item in signals[accept_index:payload_commit_index]:
+                self.assertEqual(item["before_snapshot"]["states"]["Kernel"], "Ready")
+                self.assertEqual(item["after_snapshot"]["states"]["Kernel"], "Ready")
+            self.assertEqual(
+                signals[payload_commit_index]["before_snapshot"]["states"]["Kernel"],
+                "Online",
+            )
+            self.assertEqual(
+                sum(
+                    (item["source"], item["target"], item["name"])
+                    == ("Kernel", "KernelInitFlow", "CommitPayloadHandoff")
+                    for item in signals
+                ),
+                1,
             )
             fixmap = next(
                 item
@@ -2215,6 +2329,15 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(normal_states["Riscv64Platform"], "Online")
             self.assertEqual(normal_states["BootCpuRegisters"], "Online")
             self.assertEqual(normal_states["OpenSBI"], "Online")
+            self.assertEqual(normal_states["Kernel"], "Online")
+            self.assertEqual(normal_states["KernelInitFlow"], "Destroyed")
+            self.assertEqual(normal_states["Pid1UserAppFlow"], "Online")
+            self.assertTrue(
+                any(
+                    fact.startswith("kernel_application_environment_ready(Kernel,")
+                    for fact in normal_data["last_stable_snapshot"]["facts"]
+                )
+            )
             flow_lifecycle_counts = {
                 (target, transition): sum(
                     item["target"] == target and item["name"] == transition
@@ -2243,6 +2366,7 @@ class SignalPipelineTests(unittest.TestCase):
             )
 
             resumed_work = root / "kernel-resumed"
+            completed_snapshot = root / "kernel-online.snapshot.json"
             resumed = subprocess.run(
                 [
                     str(shortcut),
@@ -2254,6 +2378,8 @@ class SignalPipelineTests(unittest.TestCase):
                     "all",
                     "--work-dir",
                     str(resumed_work),
+                    "--snapshot-out",
+                    str(completed_snapshot),
                 ],
                 cwd=root,
                 text=True,
@@ -2278,6 +2404,47 @@ class SignalPipelineTests(unittest.TestCase):
                 ("Kernel", "Enable"),
             )
             self.assertIsNone(resumed_data["until_request"])
+
+            bypass_work = root / "kernel-bypass-lower-flow"
+            bypass = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "BootInitFlow.Preset",
+                    "-s",
+                    str(snapshot),
+                    "--work-dir",
+                    str(bypass_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(bypass.returncode, 1)
+            bypass_data = read_json(bypass_work / "derive.json")
+            self.assertEqual(bypass_data["signals"][0]["outcome"], "rejected")
+            self.assertIn("kernel_enable_accepted", bypass_data["signals"][0]["reason"])
+
+            duplicate_work = root / "kernel-duplicate-enable"
+            duplicate = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Kernel.Enable",
+                    "-s",
+                    str(completed_snapshot),
+                    "--work-dir",
+                    str(duplicate_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(duplicate.returncode, 1)
+            duplicate_data = read_json(duplicate_work / "derive.json")
+            self.assertEqual(duplicate_data["signals"][0]["outcome"], "rejected")
 
             default_work = root / "kernel-default-enable"
             default_result = subprocess.run(

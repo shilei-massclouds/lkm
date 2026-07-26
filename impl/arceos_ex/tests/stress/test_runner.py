@@ -279,11 +279,27 @@ class BasicOrchestrationTests(unittest.TestCase):
 
 
 class EventAndDiffTests(unittest.TestCase):
-    def test_boot_entry_early_bytes_preserve_online_and_phase_order(self) -> None:
-        events = runner._extract_events("RTIKLO\n")
+    def test_kernel_online_follows_lower_enable_process_and_precedes_handoff(self) -> None:
+        events = runner._extract_events(
+            "RTIKO\n"
+            "checkpoint: Scheduler.Schedule task=BootTask\n"
+            "checkpoint: PayloadHandoffPreparePhase.Online task=KernelInitTask\n"
+            "checkpoint: Kernel.Online task=KernelInitTask\n"
+            "checkpoint: KernelInitFlow.PayloadHandoffCommitted task=KernelInitTask\n"
+            "checkpoint: UserAppFlow.EnterUserMode task=KernelInitTask\n"
+        )
         names = [event["name"] for event in events]
-        self.assertLess(names.index("Kernel.Started"), names.index("Kernel.Online"))
-        self.assertLess(names.index("Kernel.Online"), names.index("BootInitFlow.Started"))
+        ordered = [
+            "Kernel.Started",
+            "BootInitFlow.Started",
+            "Scheduler.Schedule",
+            "PayloadHandoffPreparePhase.Online",
+            "Kernel.Online",
+            "KernelInitFlow.PayloadHandoffCommitted",
+            "UserAppFlow.EnterUserMode",
+        ]
+        self.assertEqual([name for name in names if name in ordered], ordered)
+        self.assertEqual(names.count("Kernel.Online"), 1)
         self.assertEqual(names.count("BootTask.OnCpu"), 1)
 
     def test_complete_stress_record_is_decoded_but_partial_is_not(self) -> None:

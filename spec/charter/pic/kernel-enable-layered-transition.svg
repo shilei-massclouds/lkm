@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="330" viewBox="0 0 1160 330" role="img" aria-labelledby="title desc">
+  <title id="title">Kernel.Enable layered transition</title>
+  <desc id="desc">Kernel remains Ready while Enable drives BootInitFlow, the first scheduler pass, KernelInitFlow, and payload handoff preparation. It then commits Online and emits CommitPayloadHandoff.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #172033; }
+      .state { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .step { fill: #f8fafc; stroke: #64748b; stroke-width: 1.5; }
+      .commit { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .emit { fill: #fff7ed; stroke: #ea580c; stroke-width: 1.5; }
+      .flow { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
+      .async { fill: none; stroke: #ea580c; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .label { font-size: 15px; font-weight: 600; text-anchor: middle; }
+      .small { font-size: 13px; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <text x="580" y="28" class="label">Kernel.Enable：上层一次迁移，下层分层执行</text>
+  <rect x="20" y="70" width="120" height="62" rx="10" class="state"/>
+  <text x="80" y="96" class="label">Kernel Ready</text>
+  <text x="80" y="117" class="small">接受 OpenSBI 交接</text>
+
+  <rect x="170" y="55" width="635" height="165" rx="14" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2"/>
+  <text x="487" y="80" class="small">整个框内 Kernel 生命周期状态保持 Ready</text>
+  <rect x="190" y="105" width="125" height="62" rx="8" class="step"/>
+  <text x="252" y="132" class="label">BootInitFlow</text>
+  <text x="252" y="153" class="small">Preset / Setup / Enable</text>
+  <rect x="350" y="105" width="125" height="62" rx="8" class="step"/>
+  <text x="412" y="132" class="label">Scheduler</text>
+  <text x="412" y="153" class="small">首次 Schedule</text>
+  <rect x="510" y="105" width="125" height="62" rx="8" class="step"/>
+  <text x="572" y="132" class="label">KernelInitFlow</text>
+  <text x="572" y="153" class="small">Preset / Setup / Enable</text>
+  <rect x="670" y="105" width="115" height="62" rx="8" class="step"/>
+  <text x="727" y="128" class="label">Payload handoff</text>
+  <text x="727" y="149" class="small">prepare Online</text>
+
+  <path d="M140 101 H190" class="flow"/>
+  <path d="M315 136 H350" class="flow"/>
+  <path d="M475 136 H510" class="flow"/>
+  <path d="M635 136 H670" class="flow"/>
+
+  <rect x="845" y="70" width="130" height="62" rx="10" class="commit"/>
+  <text x="910" y="96" class="label">Kernel Online</text>
+  <text x="910" y="117" class="small">原子提交一次</text>
+  <path d="M805 101 H845" class="flow"/>
+
+  <rect x="1010" y="70" width="130" height="62" rx="10" class="emit"/>
+  <text x="1075" y="94" class="label">CommitPayload</text>
+  <text x="1075" y="115" class="small">Handoff</text>
+  <path d="M975 101 H1010" class="async"/>
+
+  <text x="1075" y="168" class="small">emits：提交后的后继事件</text>
+  <text x="1075" y="190" class="small">失败不回滚 Kernel Online</text>
+  <path d="M1075 132 V226" class="async"/>
+  <rect x="990" y="228" width="170" height="62" rx="10" class="step"/>
+  <text x="1075" y="254" class="label">应用入口 / replacement</text>
+  <text x="1075" y="275" class="small">Hello · Smoke · UserBoot</text>
+
+  <text x="487" y="255" class="small">Flow、Phase、上下文切换与 checkpoint 是 Kernel.Enable 的过程细化；drives 不要求物理调用栈同步。</text>
+</svg>

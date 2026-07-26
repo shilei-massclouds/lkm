@@ -5166,9 +5166,16 @@ def _owned_child_type(model: ObjectModel, parent_name: str, child_name: str) -> 
     candidates.extend(
         block for block in parent.decl.other_blocks if block.kind == "owned"
     )
-    type_decl = model.types.get(parent.kind)
-    if type_decl is not None:
+    visited: set[str] = set()
+    current = parent.kind
+    while current and current not in visited:
+        visited.add(current)
+        type_decl = model.types.get(current)
+        if type_decl is None:
+            break
         candidates.extend(block for block in type_decl.blocks if block.kind == "owned")
+        match = re.search(r":\s*([A-Z][A-Za-z0-9_]*)", type_decl.header)
+        current = match.group(1) if match is not None else None
 
     pattern = re.compile(
         r"\A" + re.escape(child_name) + r"\s*:\s*([A-Z][A-Za-z0-9_]*)\Z"

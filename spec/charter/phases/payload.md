@@ -19,8 +19,9 @@ UserBoot 映像/地址空间准备、fresh `UserAppFlow.Preset/Setup` 以及 rep
 
 ## CommitPayloadHandoff
 
-`KernelInitFlow` 提交 Online 后才能执行 `CommitPayloadHandoff` action，且 action 必须再次检查 parent
-`KernelInitTask.OnCpu`。
+`KernelInitFlow` 和 Kernel 均提交 Online 后才能执行 `CommitPayloadHandoff` action，且 action 必须再次
+检查 parent `KernelInitTask.OnCpu`。唯一发送者是已经提交 Online 的 `Kernel.Enable`；
+`KernelInitFlow.Enable` 不得自行发送该 action。
 
 - UserBoot 固定执行 `KernelInitFlow.Disable -> KernelInitTask.CommitFlowHandoff ->
   UserAppFlow.Enable -> KernelInitFlow.Cleanup`，再提交用户 payload Online 和用户态 no-return entry。
@@ -28,7 +29,7 @@ UserBoot 映像/地址空间准备、fresh `UserAppFlow.Preset/Setup` 以及 rep
 
 `KernelInitFlow.PayloadHandoffCommitted` 继承原成功 exec 后 `PayloadPhase.Online` 的 Linux 对齐语义。
 任何候选、映像或 precheck 失败都不得伪造该 checkpoint；requested/default init 失败继续保持既有
-panic terminal 规则。
+panic terminal 规则。Kernel.Online 后 action 失败不回滚 Kernel，但根执行结果必须为 failed。
 
 ## 引用
 

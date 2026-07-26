@@ -92,8 +92,9 @@ Base代表尚未建立对象的初始状态，Online代表运行状态，其余�
 对象不属于平台。
 
 System 同时承担本实例的规格建立、构造和运行交接。`SystemObject` 四态统一表示当前实例的局部进度：
-Base 尚未完成规格采纳，Prepared 已建立规格，Ready 已构造且可启动，Online 已启动并提交控制权。
-Online 不表示下游、内部初始化、应用环境或 payload 已完成。
+Base 尚未完成规格采纳，Prepared 已建立规格，Ready 已构造且可接受本层 Enable，Online 已完整履行
+本 System charter 定义的 Enable 服务契约。Online 不自动等于异步下游或根请求全部成功，也不自动
+排除内部初始化、应用环境或 payload 准备；这些过程是否属于本层 Enable 由具体 System charter 定义。
 
 所有模型都优先采用标准状态和迁移描述，必要时进行扩展。
 
@@ -108,8 +109,8 @@ Online 不表示下游、内部初始化、应用环境或 payload 已完成。
 <img src=".\pic\计算机和内核建模.svg" alt="计算机和内核建模" style="zoom:50%;" />
 
 Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使用同步 `drives`。运行交接按
-`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable -> BootInitFlow.Preset`
-异步推进。
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 异步推进；
+`BootInitFlow`、首次 Scheduler 调度与 `KernelInitFlow` 是 Kernel.Enable 的同步逻辑下层过程。
 
 > MUST[model]：Computer 模型
 >
@@ -122,13 +123,14 @@ Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使�
 `Config` 与 `Lds` 是 Kernel 的构建时静态输入，完整模型初态为 Ready。`Kernel.Preset` 建立 Kernel
 系统规格并提交 Prepared；Setup 先驱动 Config.Enable，再驱动依赖 Config.Online 的 Lds.Enable，随后
 构造 kernel image 并提交 Ready。OpenSBI 通过 Kernel.Enable 交接真实入口；Kernel 验证上游和入口 ABI，
-提交 Online 后异步发送 BootInitFlow.Preset。
+在 Ready 内顺序驱动 BootInitFlow、首次调度和 KernelInitFlow 直至
+`PayloadHandoffPreparePhase.Online`，再提交 Online 并异步发送 `CommitPayloadHandoff`。
 
 > MUST[model]：Kernel 构造与启动模型
 >
 > 1. Kernel.Preset/Setup 只由 Computer 的同名迁移同步驱动
 > 2. Kernel.Setup 按 Config.Enable、Lds.Enable 顺序发布输入，构造 image 后为 Ready
-> 3. Kernel.Enable 只接受真实 OpenSBI 交接，提交 Online 后启动 BootInitFlow；后续不重复提交 Online
+> 3. Kernel.Enable 只接受真实 OpenSBI 交接，应用环境准备完成后提交 Online，并且只由该提交发送 payload handoff
 
 ### 内核系统模型 - 本项目核心模型
 
@@ -141,15 +143,15 @@ Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使�
 外部事件只有两类：
 
 1. 构造与启动事件：Computer 的 Preset/Setup 把 Kernel 从 Base 推进到 Ready；OpenSBI 的 Enable 交接
-   把 Kernel 推进到 Online。此 Online 只表示 Kernel 入口已验证并把控制权交给 BootInitFlow，不表示
-   中断、多任务、SMP 或应用环境已经完成。
+   在 Ready 内完成 BootInitFlow、首次调度、KernelInitFlow 和 payload 可逆预提交，把 Kernel 推进到
+   Online。此 Online 表示应用运行环境已经准备就绪、等待应用启动。
 2. 中断事件：包括时钟中断和外设中断，不同的中断触发内核不同的反应，处理完成后重回触发时的状态，等待下一次中断事件。内核处于不同的状态时，处理中断的能力不同。Base状态时不响应中断事件，从Prepared状态开始逐步具备响应各种中断的能力，直到Online状态时达到响应中断的最大开放能力。注意：中断事件不会导致状态迁移，引起状态迁移的是启动事件以及后续的迁移完成事件。
 
 启动事件具有“惯性”，最初由每一级的迁移完成事件传递，直至Online状态。在Online状态下，内核具有两种策略，一是进入等待状态，等待中断的触发；二是进入轮询状态，不断尝试主动读取外部设备的状态，符合某种条件时采取处理措施。因此，当采取轮询策略时有一个特例，外部设备的状态变化基于轮询机制触发内核的内部反应。
 > MUST[model]：内核系统模型
 >
 > 1. 外部构造事件 Preset/Setup 由 Computer 驱动；真实引导交接是 OpenSBI 发出的 Enable
-> 2. Kernel.Online 在 BootInitFlow 启动前提交，并在整个内部启动期保持不变
+> 2. Kernel 在内部启动期保持 Ready，`PayloadHandoffPreparePhase.Online` 后只提交一次 Online
 
 # 规格
 
@@ -182,7 +184,7 @@ Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使�
 >
 > Setup：依次发布 Config/Lds，构造 kernel image 并提交 Ready
 >
-> Enable：接替固件控制权，提交 Kernel.Online 后异步启动 BootInitFlow
+> Enable：接替固件控制权，驱动内部启动与应用环境准备，提交 Kernel.Online 后异步发送 payload handoff
 
 ### 启动执行阶段 BootInitFlow
 
@@ -190,9 +192,9 @@ Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使�
 `Base -> Prepared -> Ready -> Online` 生命周期。Preset 直接执行入口前导对象编排；Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、
 `LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase`；Enable 只驱动
-`BootInitScheduleHandoffPhase`。Preset 提交 Prepared 后异步发送自身 Setup，Setup 提交 Ready 后异步发送
-自身 Enable，Enable 提交 Online 后直接异步发送 `Scheduler.Action::Schedule`。不存在 `BootPhase` 或
-`InterruptPhase` 包装 lifecycle，也不回调 Kernel 的 Setup/Enable。
+`BootInitScheduleHandoffPhase`。三段 lifecycle 由 Kernel.Enable 依次驱动，Enable 提交 Online 后由
+Kernel.Enable 继续驱动 `Scheduler.Action::Schedule`。不存在 `BootPhase` 或 `InterruptPhase` 包装
+lifecycle，也不产生第二次 Kernel Enable 接受。
 
 ### BootInitFlow.Preset 的入口前导步骤
 
@@ -297,7 +299,8 @@ vmalloc stack 后执行。Preset 驱动 `PreSmpInitPhase` 和
 
 `PayloadPreparePhase.Online` 是原 payload Ready 的 selection boundary；
 `PayloadHandoffPreparePhase.Online` 是可逆 precommit。`KernelInitFlow` Online 后的
-`CommitPayloadHandoff` 才执行 UserBoot Flow replacement；Hello/Smoke 不替换 Flow。
+Kernel.Online commit 作为唯一发送者发出 `CommitPayloadHandoff`，才执行 UserBoot Flow replacement；
+Hello/Smoke 不替换 Flow。
 
 #### PayloadExecSyncBoundaries
 

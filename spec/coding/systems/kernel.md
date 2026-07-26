@@ -26,17 +26,19 @@ Kernel.Ready。真实 Rust 不重放这一完整构造过程；build 和链接�
 架构入口的 `KernelStarted` checkpoint 是 canonical `Kernel.Enable` 接受点。Rust 从真实上游
 `Kernel.Enable` 发送前边界采用以下状态：Kernel Ready，Config/Lds Online，Computer、
 Riscv64Platform、OpenSBI Online。`BootArgs::new(a0, a1)` 物化只读启动 ABI 输入；入口验证 kernel image、
-BootTask 和 a0/a1 后立即提交 Kernel.Online，再启动 BootInitFlow。KernelOnline 必须位于入口验证完成
-之后、BootInitFlowStarted 之前。
+BootTask 和 a0/a1 后只接受 Enable，不提交 Kernel.Online。`KernelStarted` 仍是接受点，随后
+BootInitFlow、首次调度和 KernelInitFlow 都在 Kernel Ready/Enable 执行上下文中运行。
 
-Kernel.Online 只表示当前 Kernel 实例已经启动并提交内部控制权。Kernel 在 BootInit、首次调度、PID 1
-初始化和 payload 交接期间始终 Online；任何后续 module 都不得再次提交或回滚它。
+`PayloadHandoffPreparePhase.Online` 表示应用环境的全部可逆准备已经完成。KernelInitFlow 随后先提交
+Online，再由 `systems::kernel` 验证完整下层闭包并原子提交 Kernel.Online；`KernelOnline` 必须严格位于
+`PayloadHandoffPreparePhase.Online` 之后、selected payload commit 之前。Kernel.Online 表示应用运行环境
+已经准备就绪并等待应用启动，而不是刚进入内核。Online 提交后的 payload handoff 失败不得回滚
+Kernel；根启动结果仍按失败处理。
 
 ## BootInit 与跨栈 continuation
 
 ```text
 Kernel.Enable accepts
-  -> Kernel.Online
   -> BootInitFlow.Preset -> BootInitFlow.Setup -> BootInitFlow.Enable
   -> BootInitScheduleHandoff -> BootInitFlow.Online
   -> Scheduler.schedule(): BootTask.Suspend, save, current/context commit
@@ -47,18 +49,21 @@ Kernel.Enable accepts
   -> KernelInitFlow.Setup: RuntimeCore, Initcall, Rootfs, Finalize, PayloadPrepare
   -> KernelInitFlow.Enable: PayloadHandoffPrepare
   -> KernelInitFlow.Online
-  -> KernelInitFlow.CommitPayloadHandoff
+  -> Kernel.Online
+  -> Kernel emits KernelInitFlow.CommitPayloadHandoff
 ```
 
-BootInitFlow 自行串联 Preset/Setup/Enable，Enable 提交 Online 后直接调用 Scheduler；不得回调 Kernel 的
-Setup/Enable。Scheduler 是 Task Suspend/Continue 的唯一发送者，不得在 BootTask 栈上提前处理 next
+物理 Rust continuation 可以由 BootInitFlow 串联其叶阶段并在 Flow Online 后直接进入 Scheduler，
+但这些边界在逻辑上都由同一个 Kernel.Enable 驱动，不得另建 pending/continuation lifecycle 状态。
+Scheduler 是 Task Suspend/Continue 的唯一发送者，不得在 BootTask 栈上提前处理 next
 Continue 或运行 KernelInitFlow 叶阶段。`kernel_init_entry()` 验证 PID 1 实际 SP 后调用具名
-continuation，后者验证 Kernel Online、BootInitFlow Online、KernelInitTask OnCpu、CurrentTaskSlot
+continuation，后者验证 Kernel Ready 且 Enable 已接受、BootInitFlow Online、KernelInitTask OnCpu、CurrentTaskSlot
 identity 和 entry count，再执行 KernelInitFlow 的第一个叶阶段。
 
 UserBoot 的 commit action 完成旧 Flow Disable、active handoff、新 Flow Enable 和旧 Flow Cleanup；
-Hello/Smoke 保持 KernelInitFlow，不进行 Flow replacement。payload 断言必须要求 Kernel 已经 Online，
-但 payload commit 不修改 Kernel 状态。
+Hello/Smoke 保持 KernelInitFlow，不进行 Flow replacement。准备期断言必须要求 Kernel Ready 且 Enable
+已接受；commit action 必须要求 Kernel 已经 Online，且不得修改 Kernel 状态。唯一 action sender 是
+已经完成 Online 提交的 Kernel.Enable，KernelInitFlow.Enable 不得自行发送。
 
 ## 约束
 

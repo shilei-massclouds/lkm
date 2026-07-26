@@ -7,6 +7,7 @@ include "preset.spec";
 include "rest-init/main.spec";
 
 object BootInitFlow: TaskFlow {
+    lifecycle_override: true;
     initial_state: State::Base;
     parent: BootTask;
 
@@ -14,7 +15,8 @@ object BootInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    Kernel.state == State::Online;
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
                     OpenSBI.state == State::Online;
@@ -26,6 +28,12 @@ object BootInitFlow: TaskFlow {
                         TaskBreakpointState::Invalid
                     );
                     task_initial_flow_is(BootTask, self);
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_flow_start_binding_consistent(self);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);
@@ -87,6 +95,7 @@ object BootInitFlow: TaskFlow {
                     task_owns_flow(BootTask, self);
                     task_flow_owner_is(self, BootTask);
                     task_flow_parent_is(self, BootTask);
+                    task_flow_started(self);
                 }
 
             }
@@ -101,6 +110,16 @@ object BootInitFlow: TaskFlow {
 
         transitions {
             on Transition::Setup -> State::Ready {
+                depends_on {
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                }
+
                 within SingleTaskContext {
                     drives {
                         EntrySuccessorPhase.Transition::Preset;
@@ -156,6 +175,16 @@ object BootInitFlow: TaskFlow {
 
         transitions {
             on Transition::Enable -> State::Online {
+                depends_on {
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                }
+
                 drives {
                     BootInitScheduleHandoffPhase.Transition::Preset;
                 }
@@ -184,10 +213,8 @@ object BootInitFlow: TaskFlow {
                         KernelInitTaskRef
                     );
                     BootTask.state == State::OnCpu;
-                }
-
-                emits {
-                    Scheduler.Action::Schedule;
+                    task_flow_online_on_cpu(self);
+                    task_has_unique_active_flow(self.parent);
                 }
             }
         }
@@ -195,7 +222,6 @@ object BootInitFlow: TaskFlow {
 
     state State::Online {
         invariant {
-            Kernel.state == State::Online;
             ProcessPreparePhase.state == State::Online;
             BootInitRestInitPhase.state == State::Online;
             BootInitScheduleHandoffPhase.state == State::Online;

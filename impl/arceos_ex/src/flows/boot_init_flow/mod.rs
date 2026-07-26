@@ -246,10 +246,11 @@ pub fn enable_after_boot_init_schedule_handoff() -> ! {
     schedule()
 }
 
-/// Sends BootInitFlow's post-commit Scheduler.Action::Schedule signal. The
-/// call returns only after a later switch restores the original BootTask.
+/// Lowers Kernel.Enable's Scheduler.Action::Schedule after BootInitFlow has
+/// committed Online. The call returns only after a later switch restores the
+/// original BootTask.
 fn schedule() -> ! {
-    if !crate::systems::kernel::is_online() || !is_online() {
+    if !crate::systems::kernel::enable_in_progress() || !is_online() {
         crate::phases::shutdown_on_error(
             phase_failure(LifecycleEvent::Enable, State::Online, State::Online),
             "arceos_ex boot init schedule invariant failed\n",

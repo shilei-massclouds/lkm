@@ -341,9 +341,6 @@ type Task: ResourceObject {
                     task_breakpoint_consumed_on_continue(self);
                 }
 
-                emits {
-                    self.Action::DispatchContinuation;
-                }
             }
 
         }
@@ -729,9 +726,6 @@ object BootTask: Task {
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
                     task_breakpoint_state_is(self, TaskBreakpointState::Invalid);
                     task_breakpoint_consumed_on_continue(self);
-                }
-                emits {
-                    self.Action::DispatchContinuation;
                 }
             }
         }

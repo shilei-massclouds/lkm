@@ -1055,7 +1055,6 @@ object SmpBringupPhase: PhaseObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     PreSmpInitPhase.state == State::Online;
-                    smp_bringup_phase_ready(SmpBringupPhase);
                     SmpBringupBoundary.state == State::Ready;
                 }
 
@@ -1069,7 +1068,6 @@ object SmpBringupPhase: PhaseObject {
     state State::Ready {
         invariant {
             PreSmpInitPhase.state == State::Online;
-            smp_bringup_phase_ready(SmpBringupPhase);
             SmpBringupBoundary.state == State::Ready;
             secondary_cpus_online(CpuGroup);
             smp_concurrency_open(CpuGroup);

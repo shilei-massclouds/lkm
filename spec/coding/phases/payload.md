@@ -25,10 +25,13 @@ Linux `do_sysctl_args()` 等旧 `PayloadPhase.Ready` 的精确语义迁移到
 - 所有会失败的路径、容量和交接条件都已预检。
 
 `PayloadHandoffPreparePhase.Online` 是 precommit 边界，默认没有 Linux exact mapping。
+它同时是 Kernel.Enable 的应用环境就绪完成边界：checkpoint handler 观察它时 Kernel 必须仍为 Ready，
+KernelInitFlow 也仍为 Ready。handler 返回后 KernelInitFlow 与 Kernel 才依次提交 Online。
 
 ## KernelInitFlow.CommitPayloadHandoff
 
-只有 KernelInitFlow 已 Online 且动态 dispatch guard 成立时才能调用 action。UserBoot 必须按固定顺序
+只有 Kernel 和 KernelInitFlow 都已 Online 且动态 dispatch guard 成立时才能调用 action。该 action
+只能由已提交的 Kernel.Enable 发出；KernelInitFlow.Enable 不得自行发送。UserBoot 必须按固定顺序
 提交：
 
 ```text
@@ -41,6 +44,9 @@ KernelInitFlow.PayloadHandoffCommitted
 
 禁止在 HandoffPrepare 中提前 Disable/Cleanup。成功 exec 后旧 `PayloadPhase.Online` 的 Linux
 `run_init_process()` 语义迁移到 `KernelInitFlow.PayloadHandoffCommitted`。
+
+Online 提交和 action 是两个独立原子边界。action 或其 handler 失败时根启动 verdict 为 failed，但
+Kernel 保持 Online，不得回滚或重复提交 `KernelOnline`。
 
 Hello 与 Smoke 不替换 Flow：action 保持 KernelInitFlow Online/active，只进入已绑定的内核态
 no-return entry。Smoke 的 test Task/Flow 生命周期仍由其自身对象管理。

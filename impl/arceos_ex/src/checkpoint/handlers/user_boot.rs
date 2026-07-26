@@ -415,7 +415,8 @@ fn run_selected_payload_handoff(
     let handoff = &ctx.selected_payload_handoff;
     let valid = crate::phases::payload::prepare::is_online()
         && crate::phases::payload::handoff_prepare::is_online()
-        && crate::systems::kernel::is_online()
+        && crate::systems::kernel::state() == State::Ready
+        && crate::systems::kernel::enable_in_progress()
         && ctx.kernel_init_flow.state() == State::Ready
         && !ctx.kernel_init_flow.released()
         && handoff.state() == State::Online

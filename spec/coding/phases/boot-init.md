@@ -16,17 +16,19 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 | Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
 | Enable: Ready -> Online | 只驱动 `BootInitScheduleHandoffPhase.Preset` | 该阶段建立 `BootIdleFlow` owner/active binding 并完成可逆切换预检；随后提交 `BootInitFlow.Online`，再进入真实 schedule |
 
-每个叶子 Online 只能返回 BootInitFlow 当前 transition 的具名 continuation；父 continuation 必须检查
+这些 transition 是 Kernel.Enable 的下层过程细化，整个 BootInitFlow 生命周期执行期间 Kernel 保持
+Ready，且入口必须即时验证 Enable 已接受。每个叶子 Online 只能返回 BootInitFlow 当前 transition 的具名 continuation；父 continuation 必须检查
 刚完成的叶子精确 Online，才能启动下一个叶子。
 
 ```text
-OpenSBI -> Kernel.Startup -> BootInitFlow.Startup (BootTask.OnCpu)
+OpenSBI -> Kernel.Enable accepts -> Kernel drives BootInitFlow.Preset (BootTask.OnCpu)
   -> entry objects -> BootInitFlow.Prepared
   -> EntrySuccessor -> CorePrepare -> MmCoreInit -> SchedInit
   -> IrqTimeInit -> LocalIrqEnable -> IrqOpenPrepare -> ProcessPrepare
   -> BootInitRestInit -> BootInitFlow.Ready
   -> BootInitScheduleHandoff -> BootInitFlow.Online
-  -> real BootTask-to-KernelInitTask switch
+  -> Kernel drives Scheduler.Schedule -> real BootTask-to-KernelInitTask switch
+  -> KernelInitFlow leaves while Kernel.Ready
 ```
 
 ## 首次真实调度
@@ -34,7 +36,8 @@ OpenSBI -> Kernel.Startup -> BootInitFlow.Startup (BootTask.OnCpu)
 Task Enable 只负责 `wake_up_new_task` 等价动作；创建 PID 1 和 kthreadd 时不发送 initial-flow Signal，
 不得预执行任何 Flow。
 
-首次真实调度先同步处理 BootTask Suspend，再保存上下文并提交 CPU-local current Task/context facts，
+首次真实调度在逻辑上由 Kernel.Enable 于 BootInitFlow.Online 后驱动；`drives` 不要求物理调用栈同步。
+调度先同步处理 BootTask Suspend，再保存上下文并提交 CPU-local current Task/context facts，
 完成物理栈切换；随后在 `kernel_init_entry()` 中处理 KernelInitTask Continue 并严格向
 `KernelInitFlow` 发出 Startup。真正的 KernelInitFlow 叶阶段代码在验证 16 KiB vmalloc
 stack 后执行，不能在 BootTask 的 `schedule()` 调用栈上执行。

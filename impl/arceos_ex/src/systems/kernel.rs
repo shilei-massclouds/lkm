@@ -4,7 +4,7 @@
 
 use super::{MappingStatus, SpecPath, SystemMapping};
 
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::{
     checkpoint::Checkpoint,
@@ -39,8 +39,15 @@ pub const KERNEL_SYSTEM_MAPPING: SystemMapping = SystemMapping {
 #[unsafe(link_section = ".data.phase")]
 static KERNEL_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Ready));
 
+// This is an execution-context fact, not an additional lifecycle state. Kernel
+// stays Ready from the OpenSBI handoff until the application environment is
+// completely prepared.
+#[unsafe(link_section = ".data.phase")]
+static KERNEL_ENABLE_ACCEPTED: AtomicBool = AtomicBool::new(false);
+
 /// Accepts the OpenSBI handoff after the Rust entry has adopted its immutable
-/// ABI inputs. All checks precede the single Kernel.Online commit.
+/// ABI inputs. All checks precede recording the accepted Enable context; the
+/// Kernel.Online commit happens only after application-environment readiness.
 pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
     let state = crate::phases::state::load(&KERNEL_STATE);
     let ctx = crate::context::context_ref();
@@ -62,8 +69,51 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
         || ctx.boot_task.pid() != 0
         || ctx.boot_task.task().active_flow().is_valid()
         || ctx.boot_init_flow.state() != State::Base
+        || KERNEL_ENABLE_ACCEPTED.load(Ordering::Acquire)
     {
         return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+
+    if KERNEL_ENABLE_ACCEPTED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return failed_condition(LifecycleEvent::Enable, state, State::Ready, State::Online);
+    }
+    Ok(())
+}
+
+pub fn enable_in_progress() -> bool {
+    state() == State::Ready && KERNEL_ENABLE_ACCEPTED.load(Ordering::Acquire)
+}
+
+/// Commits the target state after every lower-layer process driven by
+/// Kernel.Enable has reached its application-environment-ready boundary.
+pub fn commit_online_after_application_environment_ready() -> EventResult {
+    let actual = state();
+    let ctx = crate::context::context_ref();
+    if actual != State::Ready
+        || !KERNEL_ENABLE_ACCEPTED.load(Ordering::Acquire)
+        || !crate::flows::boot_init_flow::is_online()
+        || ctx.scheduler.schedule_passes() != 1
+        || ctx.scheduler.kernel_init_stack_switch_started_count() != 1
+        || ctx.kernel_init_task.state() != State::OnCpu
+        || ctx.kernel_init_task.entry_started_count() != 1
+        || !ctx.kernel_init_task.entry_stack_verified()
+        || !ctx.kernel_init_task.current_stack_pointer_in_range()
+        || !ctx.boot_cpu_current_task.current_is_kernel_init()
+        || ctx.kernel_init_flow.state() != State::Online
+        || ctx.kernel_init_flow.released()
+        || !ctx.kernel_init_flow.active()
+        || !crate::phases::payload::prepare::is_online()
+        || !crate::phases::payload::handoff_prepare::is_online()
+        || ctx.selected_payload_handoff.state() != State::Online
+        || !ctx.selected_payload_handoff.kind_bound()
+        || !ctx.selected_payload_handoff.variant_setup_ready()
+        || !ctx.selected_payload_handoff.variant_prepare_ready()
+        || !ctx.selected_payload_handoff.no_return_entry_bound()
+    {
+        return failed_condition(LifecycleEvent::Enable, actual, State::Ready, State::Online);
     }
 
     crate::phases::state::mark(
@@ -75,6 +125,10 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
     )
 }
 
+pub fn state() -> State {
+    crate::phases::state::load(&KERNEL_STATE)
+}
+
 pub fn is_online() -> bool {
-    crate::phases::state::load(&KERNEL_STATE) == State::Online
+    state() == State::Online
 }

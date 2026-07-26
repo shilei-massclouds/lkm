@@ -1062,6 +1062,8 @@ type SchedulerObject: KernelObject {
                         drives {
                             let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef);
                             self.Action::SwitchTo(CurrentTaskRef, next);
+                            KernelInitTask.Transition::Continue;
+                            KernelInitTask.Action::DispatchContinuation;
                         }
 
                         ensures {
@@ -1207,10 +1209,6 @@ type SchedulerObject: KernelObject {
                 current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
                 scheduler_continue_signal_pending(self, next_ref);
             }
-
-            emits {
-                next_ref.Transition::Continue;
-            }
         }
 
         Action::SwitchToIdentity(task_ref: TaskRef) {
@@ -1240,14 +1238,13 @@ type SchedulerObject: KernelObject {
                 CurrentTaskRef.Action::SetCurrent(task: next_ref);
                 BootCpuCurrentTask.Action::SetCurrent(task: next_ref);
                 prev_ref.Transition::Cleanup;
+                next_ref.Transition::Continue;
+                next_ref.Action::DispatchContinuation;
             }
             ensures {
                 scheduler_terminal_switch_keeps_prev_breakpoint_invalid(self, prev_ref);
                 scheduler_terminal_cleanup_runs_on_next_stack(self, prev_ref, next_ref);
                 scheduler_switch_finish_atomic(self, prev_ref, next_ref);
-            }
-            emits {
-                next_ref.Transition::Continue;
             }
         }
 

@@ -247,8 +247,8 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
  * 建立：Preset/Setup/Enable 使其进入 Online。rest_init 三子阶段不再推进
  * Scheduler 生命周期，只消费 Scheduler.state == Online，并在
  * BootInitScheduleHandoffPhase 只关闭首次切换的可逆预检与 BootIdleFlow
- * binding；真正的首次 handoff 由其父 BootInitFlow 提交 Online 后，交给
- * BootInitFlow.Enable 提交 Online 后直接发送 Scheduler.Action::Schedule。该 action 自身通过嵌套 within 进入
+ * binding；真正的首次 handoff 在 BootInitFlow 提交 Online 后，由仍在执行的
+ * Kernel.Enable 同步驱动 Scheduler.Action::Schedule。该 action 自身通过嵌套 within 进入
  * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
  * ScheduleRunQueueContext，分别覆盖 schedule-owned preempt-disabled guard、
  * __schedule() local-irq-disabled guard 和 rq->lock 独占区。

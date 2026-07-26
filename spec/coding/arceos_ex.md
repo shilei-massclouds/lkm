@@ -11,8 +11,8 @@
 1. [`README.md`](README.md)、[`mapping.md`](mapping.md) 和
    [`phase-paradigm.md`](phase-paradigm.md)：coding 职责、通用规则和阶段专用映射。
 2. [`systems/README.md`](systems/README.md)：Computer/平台/OpenSBI/Kernel 的规格、构造和启动映射。
-3. 编排阶段：BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow 直接叶阶段 ->
-   payload commit。
+3. 编排阶段：Kernel Ready 内执行 BootInitFlow 直接叶阶段 -> 首次 PID 1 dispatch -> KernelInitFlow
+   直接叶阶段 -> Kernel Online commit -> emitted payload commit。
 4. 对应叶子阶段和普通对象主题。
 5. [`arceos_ex-implementation.md`](arceos_ex-implementation.md)：当前实现证据和工程入口。
 

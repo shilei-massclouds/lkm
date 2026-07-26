@@ -27,7 +27,8 @@ coding 规则来源，也不覆盖 model、system/phase/object/testing 专题中
 尚未恢复 tgoskits/ArceOS crate 兼容、overlay workspace、feature 传递、`axlog` 或 `ax-alloc`
 facade；这些属于 roadmap 中延期的 Composition Phase。
 
-当前实现已经贯通 BootInitFlow、SmpRuntime 与 Payload 的模型阶段树。默认 smoke
+当前实现已经贯通 Kernel Ready 内的 BootInitFlow、SmpRuntime 与 Payload 模型阶段树，并在
+`PayloadHandoffPreparePhase.Online` 后提交 Kernel Online，再执行 payload handoff。默认 smoke
 payload 执行对象级用例后通过 SBI 关机；`APP=hello` 观察最终 KernelInitTask payload handoff；
 `APP=user-boot` 观察 ext2/VFS/ELF/user-entry/syscall 路径。
 

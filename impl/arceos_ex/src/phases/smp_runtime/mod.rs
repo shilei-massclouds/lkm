@@ -118,6 +118,10 @@ pub fn enable_after_payload_handoff_prepare() -> ! {
         flow_failure(LifecycleEvent::Enable, State::Ready, State::Online)
     };
     crate::phases::shutdown_on_error(result, "arceos_ex kernel init flow enable failed\n");
+    crate::phases::shutdown_on_error(
+        crate::systems::kernel::commit_online_after_application_environment_ready(),
+        "arceos_ex kernel online commit failed\n",
+    );
     commit_payload_handoff()
 }
 
@@ -147,7 +151,7 @@ fn require_flow_continuation(
 }
 
 fn mainline_ready(ctx: &crate::context::Context) -> bool {
-    crate::systems::kernel::is_online()
+    crate::systems::kernel::enable_in_progress()
         && crate::flows::boot_init_flow::is_online()
         && ctx.kernel_init_task.state() == State::OnCpu
         && ctx.boot_cpu_current_task.current_is_kernel_init()

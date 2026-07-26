@@ -13,6 +13,12 @@ carrier and its independently-lived `TaskFlow` instances.
   Physical and virtual binding happen later,
   do not change BootTask lifecycle, and both must resolve to the same
   linker-visible `init_task_storage`/`TaskRef::BOOT` carrier.
+- The complete Kernel.Enable boundary must preserve
+  `Kernel.Started < BootInitFlow.Started < Scheduler.Schedule <
+  PayloadHandoffPreparePhase.Online < Kernel.Online <
+  KernelInitFlow.PayloadHandoffCommitted < application entry`. Kernel must
+  remain Ready through the handoff-prepare checkpoint, and Hello, Smoke and
+  UserBoot acceptance must each observe exactly one `Kernel.Online`.
 - BootInitFlow must expose `TaskFlowRef::BOOT_INIT`, owner/parent BootTask and
   `BootTask.initial_flow == BOOT_INIT`; it must not expose a stored guard field.
 - BootInitFlow tests must observe the standard Started/Prepared/Ready/Online
@@ -46,7 +52,8 @@ carrier and its independently-lived `TaskFlow` instances.
   `UserAppFlow: Base -> Prepared -> Ready -> Online` in that order.
 - The handoff is valid only when the old flow is inactive before the active
   binding changes, the new flow is Ready at commit, and at most one owned flow
-  is Online afterward.
+  is Online afterward. A post-Kernel.Online emitted handoff failure must fail
+  the root result without rolling Kernel back or submitting Online again.
 - Identity switch must not emit Suspend/Continue, change lifecycle/authority/breakpoint, or increment
   physical context save/restore counts. Terminal switch must take OnCpu directly to Offline and cleanup
   on the next stack without publishing an Online breakpoint.

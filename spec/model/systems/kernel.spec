@@ -243,6 +243,7 @@ object Kernel: KernelObject {
                     Config.state == State::Online;
                     Lds.state == State::Online;
                     kernel_image_constructed();
+                    kernel_enable_accept_available(self);
                 }
             }
         }
@@ -254,6 +255,18 @@ object Kernel: KernelObject {
             Lds.state == State::Online;
             kernel_system_spec_established();
             kernel_image_constructed();
+            kernel_enable_accept_available(self);
+        }
+
+        actions {
+            on Action::AcceptEnable {
+                depends_on {
+                    kernel_enable_accept_available(self);
+                }
+                ensures {
+                    kernel_enable_accepted(self);
+                }
+            }
         }
 
         transitions {
@@ -273,13 +286,36 @@ object Kernel: KernelObject {
                     BootInitFlow.state == State::Base;
                 }
 
+                drives {
+                    Kernel.Action::AcceptEnable;
+                    BootInitFlow.Transition::Preset;
+                    BootInitFlow.Transition::Setup;
+                    BootInitFlow.Transition::Enable;
+                    Scheduler.Action::Schedule;
+                    KernelInitFlow.Transition::Setup;
+                    KernelInitFlow.Transition::Enable;
+                }
+
                 ensures {
-                    BootTask.state == State::OnCpu;
-                    BootInitFlow.state == State::Base;
+                    BootInitFlow.state == State::Online;
+                    scheduler_first_schedule_committed(Scheduler);
+                    KernelInitTask.state == State::OnCpu;
+                    KernelInitFlow.state == State::Online;
+                    PayloadHandoffPreparePhase.state == State::Online;
+                    SelectedPayloadHandoff.state == State::Online;
+                    kernel_application_environment_ready(
+                        self,
+                        BootInitFlow,
+                        Scheduler,
+                        KernelInitTask,
+                        KernelInitFlow,
+                        PayloadHandoffPreparePhase,
+                        SelectedPayloadHandoff
+                    );
                 }
 
                 emits {
-                    BootInitFlow.Transition::Preset;
+                    KernelInitFlow.Action::CommitPayloadHandoff;
                 }
             }
         }
@@ -292,8 +328,33 @@ object Kernel: KernelObject {
             Config.state == State::Online;
             Lds.state == State::Online;
             kernel_image_constructed();
+            kernel_enable_accepted(self);
             BootCpuRegisters.a0 == BootArgs.boot_hartid;
             BootCpuRegisters.a1 == BootArgs.dtb_pa;
+            kernel_application_environment_ready(
+                self,
+                BootInitFlow,
+                Scheduler,
+                KernelInitTask,
+                KernelInitFlow,
+                PayloadHandoffPreparePhase,
+                SelectedPayloadHandoff
+            );
         }
     }
 }
+
+/*
+ * Stable completion fact captured at the Kernel.Online commit. The concrete
+ * lower states above are checked at that instant; an emitted UserBoot handoff
+ * may then replace and destroy KernelInitFlow without rolling Kernel back.
+ */
+predicate kernel_application_environment_ready<K, B, S, T, F, P, H>(
+    kernel: K,
+    boot_flow: B,
+    scheduler: S,
+    init_task: T,
+    init_flow: F,
+    prepare_phase: P,
+    handoff: H
+) -> bool;

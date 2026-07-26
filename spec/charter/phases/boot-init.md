@@ -7,8 +7,9 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 
 ## 边界与职责
 
-- OpenSBI 发出 `Kernel.Startup` 后，Kernel 直接异步发出严格 `BootInitFlow.Startup`（canonical
-  `Preset`）；BootInitFlow 必须仍为 Base 且 parent BootTask 必须为 OnCpu。接受并记录 Started 后直接
+- OpenSBI 发出 `Kernel.Enable` 后，Kernel 在自己的 Enable 响应中同步驱动严格
+  `BootInitFlow.Startup`（canonical `Preset`）；BootInitFlow 必须仍为 Base、Kernel 必须保持 Ready，
+  且 parent BootTask 必须为 OnCpu。接受并记录 Started 后直接
   编排入口对象；全部入口事实成立后提交 `BootInitFlow.Prepared`。重复启动或执行权不匹配使根执行失败。
 - Setup 直接顺序驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、
   `SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、
@@ -20,8 +21,8 @@ PhaseObject，它从 `_start` 开始承载并编排启动执行片段，同时�
 - Enable 只驱动 `BootInitScheduleHandoffPhase`，由该叶子建立首次调度的可逆预检与
   `BootIdleFlow` owner/active binding。
 - 不可逆切换前必须完整建立 `BootIdleFlow` 的 owner/active binding 并使其到达 Ready；随后提交
-  `BootInitFlow.Online` 与 Kernel 的 Prepared switch result，再执行真实 BootTask→KernelInitTask
-  task-stack switch。
+  `BootInitFlow.Online` 与 Prepared switch result，再由 Kernel.Enable 驱动首次 Scheduler 调度并执行
+  真实 BootTask→KernelInitTask task-stack switch。此时 Kernel 仍为 Ready。
 
 BootInitFlow 的每个 lifecycle transition 都在执行时重新检查 parent BootTask 必须为 OnCpu；不存在
 另一个 dispatch guard 字段、状态或镜像对象。

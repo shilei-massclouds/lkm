@@ -67,11 +67,11 @@ Signal identity、source、target、model fingerprint 和 boundary provenance，
 | 组 | 启动范围 | canonical 入口 snapshot | 本组结束边界 |
 | --- | --- | --- | --- |
 | 1. 上游构造与交接 | Computer 顺序驱动三个直接子 System 的 Preset/Setup、建立 assembly，以及平台和 OpenSBI 的 FIFO 启动交接 | `Kernel.Enable` 发送前 | `Kernel.Enable` 被接受，Kernel 的启动前提和 a0/a1 交接得到核对 |
-| 2. Kernel 与 BootInit 入口 | `Kernel.Enable`、Kernel Online 后异步交给 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `BootInitFlow.Preset` 发送前 | `BootInitFlow.Setup` 发送前，Kernel 保持 Online 且 BootInitFlow 已到 Prepared |
+| 2. Kernel 与 BootInit 入口 | `Kernel.Enable` 在 Ready 内同步驱动 `BootInitFlow.Preset`，以及 BootInit 最早入口对象建立 | `Kernel.Enable` 发送前 | `BootInitFlow.Setup` 发送前，Kernel 保持 Ready 且 BootInitFlow 已到 Prepared |
 | 3. BootInit 引导、中断与进程准备 | `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase` | `BootInitFlow.Setup` 发送前 | `BootInitRestInitPhase.Preset` 发送前，前述叶子均已按顺序完成 |
 | 4. rest-init 与首次调度切换 | PID 1/kthreadd 建立、completion、BootIdleFlow 预检与 active binding、BootTask 到 KernelInitTask 的真实 switch | `BootInitRestInitPhase.Preset` 发送前 | `KernelInitFlow.Preset` 发送前，PID 1 已真实 OnCpu 且执行权完成迁移 |
 | 5. PID 1 内核初始化 | `PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase` 和 `PayloadPreparePhase` | `KernelInitFlow.Preset` 发送前 | `KernelInitFlow.Enable` 发送前，KernelInitFlow 已到 Ready |
-| 6. payload 预提交与交接 | `PayloadHandoffPreparePhase`、KernelInitFlow Online、`CommitPayloadHandoff`，以及 Hello/Smoke/UserBoot 各自的 no-return 或 replacement 边界 | `KernelInitFlow.Enable` 发送前 | `KernelInitFlow.PayloadHandoffCommitted` 或对应的确定失败边界 |
+| 6. payload 预提交与交接 | `PayloadHandoffPreparePhase`、KernelInitFlow Online、Kernel Online、由 Kernel 发出的 `CommitPayloadHandoff`，以及 Hello/Smoke/UserBoot 各自的 no-return 或 replacement 边界 | `KernelInitFlow.Enable` 发送前 | `KernelInitFlow.PayloadHandoffCommitted` 或对应的确定失败边界；handoff 失败时 Kernel 保持 Online、根结果 failed |
 
 每组先验收粗粒度主干，再按 canonical Signal 顺序细分；表中的结束边界不是允许忽略组内子阶段的
 聚合断言。尤其第 5 组列出的各叶子都必须拥有自己的因果账本和 Linux/checkpoint 对照，只是共享同一

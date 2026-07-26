@@ -15,7 +15,7 @@ pub(super) fn mainline_ready(ctx: &Context) -> bool {
 }
 
 pub(super) fn common_dependencies_ready() -> bool {
-    crate::systems::kernel::is_online()
+    crate::systems::kernel::enable_in_progress()
         && crate::phases::prepare::is_online()
         && crate::flows::boot_init_flow::is_online()
         && crate::phases::boot::core_prepare::is_online()

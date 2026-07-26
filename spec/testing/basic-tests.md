@@ -160,3 +160,10 @@ expectation、cleanup、`execution_status = "completed" | "failed"` 和
 与对应的 `APP=user-boot` 请求必须在 build 前生成 schema v2 结构化配置失败结果，错误明确提示改用
 `shell`；`kernel.app = "user-boot"` 仍是 TOML 内部选择 user-mode kernel payload 的合法值，不能
 把该内部值重新暴露成测试身份。
+
+`hello-native` 与 `kernel-smoke-native` 必须启用 announce probe，并各自把
+`checkpoint: Kernel.Online` 的精确计数固定为 1。UserBoot 的同一单次提交由 acceptance
+`rc-local-{native,linux-object}` 固定：这两个用例同时观察 announce 串口与 stress-memory 副本，所以一次
+提交的组合 observed text 精确出现 2 次，重复提交则会出现 4 次。`user-smoke-native` 保持无 probe，因为
+高频 syscall announcement 会与用户输出逐字节交错并破坏行级 marker。上述计数与 Task/TaskFlow testing
+contract 的顺序断言共同防止入口提前提交或 payload variant 重复提交 Kernel Online。

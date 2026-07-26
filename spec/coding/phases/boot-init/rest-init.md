@@ -20,9 +20,10 @@ Enable 复查同一组长期事实并发布状态。`Started` 只记录 Preset s
 Ready/owner/active binding 和 scheduler 输入均已闭合；first-schedule、pick/switch/current-task 与
 stack-switch committed 只能由随后真实 `Scheduler.schedule()` 发布。
 
-BootInitFlow 提交 Online 后直接调用真实 scheduler handoff，不再回调 Kernel。
+BootInitFlow 提交 Online 后物理实现直接调用真实 scheduler handoff；逻辑上该 action 仍由
+Kernel.Enable 驱动，Kernel 保持 Ready。
 `kernel_init_entry()` 验证真实 `sp` 后直接调用 `phases::smp_runtime::start_kernel_init_flow()`；该入口
-检查 Kernel Online、BootInitFlow Online、KernelInitTask OnCpu、唯一 entry count 与 SP
+检查 Kernel Ready/Enable accepted、BootInitFlow Online、KernelInitTask OnCpu、唯一 entry count 与 SP
 verification，再启动 SmpRuntime。真实 schedule 调用将来返回到 BootTask 时才启动
 BootIdleEntryPhase；线性模型中的 current TaskRef 标签不构成物理 Rust stack 归属证据。
 

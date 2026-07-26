@@ -298,6 +298,7 @@ predicate ap_idle_flow_pointwise_phases_complete<F: TaskFlow>(flow: F) -> bool;
 predicate ap_idle_flow_no_task_enable_or_continue<F: TaskFlow>(flow: F) -> bool;
 
 object KernelInitFlow: TaskFlow {
+    lifecycle_override: true;
     initial_state: State::Base;
     parent: KernelInitTask;
 
@@ -312,13 +313,20 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Preset -> State::Prepared {
                 depends_on {
-                    Kernel.state == State::Online;
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
                     KernelInitTask.state == State::OnCpu;
                     BootInitFlow.state == State::Online;
                     kernel_init_entry_reaches_kernel_init_flow(
                         KernelInitTask,
                         KernelInitFlow
                     );
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                    task_flow_start_binding_consistent(self);
                 }
 
                 drives {
@@ -330,6 +338,7 @@ object KernelInitFlow: TaskFlow {
                     PreSmpInitPhase.state == State::Online;
                     kernel_init_flow_first_leaf(self, PreSmpInitPhase);
                     kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
+                    task_flow_started(self);
                 }
             }
         }
@@ -337,7 +346,6 @@ object KernelInitFlow: TaskFlow {
 
     state State::Prepared {
         invariant {
-            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             kernel_init_flow_preset_runs_on_verified_stack(self, KernelInitTask);
@@ -346,7 +354,14 @@ object KernelInitFlow: TaskFlow {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
                     SmpBringupPhase.state == State::Online;
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
                 }
 
                 drives {
@@ -370,7 +385,6 @@ object KernelInitFlow: TaskFlow {
 
     state State::Ready {
         invariant {
-            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;
@@ -383,6 +397,16 @@ object KernelInitFlow: TaskFlow {
 
         transitions {
             on Transition::Enable -> State::Online {
+                depends_on {
+                    Kernel.state == State::Ready;
+                    kernel_enable_accepted(Kernel);
+                    self.parent.state == State::OnCpu;
+                    task_execution_authority_is(
+                        self.parent,
+                        TaskExecutionAuthority::Live
+                    );
+                }
+
                 drives {
                     PayloadHandoffPreparePhase.Transition::Preset;
                 }
@@ -391,10 +415,9 @@ object KernelInitFlow: TaskFlow {
                     PayloadHandoffPreparePhase.state == State::Online;
                     kernel_init_flow_survives_payload_precommit(self);
                     task_active_flow_is(KernelInitTask, self);
-                }
-
-                emits {
-                    self.Action::CommitPayloadHandoff;
+                    task_flow_active_binding_committed(self);
+                    task_flow_online_on_cpu(self);
+                    task_has_unique_active_flow(self.parent);
                 }
             }
         }
@@ -402,7 +425,6 @@ object KernelInitFlow: TaskFlow {
 
     state State::Online {
         invariant {
-            Kernel.state == State::Online;
             task_flow_started(self);
             PreSmpInitPhase.state == State::Online;
             SmpBringupPhase.state == State::Online;

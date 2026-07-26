@@ -44,14 +44,29 @@ parent、自引用和 parent 环都是模型错误，所有静态 view 与 Signa
 
 - `Base`：当前系统实例尚未完成规格采纳。
 - `Prepared`：当前系统实例的规格已经建立或采纳，尚未完成构造。
-- `Ready`：当前系统实例已经构造完成，可以接受启动交接。
-- `Online`：当前系统实例自身已经启动并提交控制权；不表示下游系统、内部初始化、应用环境或整个根
-  请求已经成功完成。
+- `Ready`：当前系统实例已经构造完成，可以接受本层 Enable 服务请求。
+- `Online`：当前系统实例已经完整履行自身 charter 定义的 Enable 服务契约并原子提交完成；具体完成
+  条件由该 System 的 charter 定义，不能从通用四态名称推断。
 
-因此，System 在提交 Online 后异步发送的下游 Signal 即使随后失败，已经提交的 Online 也不得回滚；
-严格 Signal 的失败仍沿因果链使根 verdict 为 failed。系统运行态、应用环境和 payload 交接继续由
-`SystemState`、内部 Flow 状态与 `PayloadHandoffCommitted` 等各自边界表达，不得借 System.Online
-合并这些含义。
+System.Online 不自动等于全部下游闭包成功，也不自动排除内部初始化或应用环境准备；是否把某段下层
+过程纳入本层 Enable，取决于该 System 的服务边界。System 在提交 Online 后通过 `emits` 发出的后继
+Signal 即使随后失败，已经提交的 Online 也不得回滚；严格 Signal 的失败仍沿因果链使根 verdict 为
+failed。
+
+### 分层生命周期抽象
+
+上层 lifecycle Transition 可以由下层 Flow、Phase、调度、上下文切换和 checkpoint 共同实现。各层
+必须遵循同一套提交规则：
+
+1. Transition 从接受到完成期间保持源 lifecycle state；只有服务契约全部完成时才原子提交目标状态。
+2. 下层 Flow、Phase、上下文切换和 checkpoint 是上层 Transition 的过程细化，不因跨函数、跨栈或跨
+   Task 执行而自动成为上层 Transition 之后的独立生命周期。
+3. `drives` 表示源响应对目标下层过程的逻辑完成依赖；它不要求物理调用栈同步，也不禁止实现用真实
+   调度和上下文切换承载该依赖。
+4. `emits` 只用于源 Transition 已提交后的后继事件。后继处理失败会使根 verdict 为 failed，但不得
+   回滚已经提交的源状态。
+5. 实现耗时、异步硬件执行或跨 Task continuation 本身都不是新增 `Starting`、`Pending` 等 lifecycle
+   状态的理由；当前四态保持不变，过程进度由下层状态和 checkpoint 表达。
 
 ## 信号Signal
 
@@ -162,9 +177,10 @@ snapshot。老 `tools/` 继续承担默认
 
 主模型的启动创建顺序固定为 `Computer.Preset` 依次同步驱动三个直接子 System 的 Preset，
 `Computer.Setup` 再依次同步驱动三者 Setup 并建立 assembly fact，随后经
-`Computer -> Riscv64Platform -> OpenSBI -> Kernel -> BootInitFlow` 交接。System 的自 Setup/Enable
-以及后四段交接由异步 `emits` 形成全局 FIFO，不得按 hierarchy depth 重排。每个 System.Online 只
-表示该实例已经提交控制权，不等待异步下游 Online。
+`Computer -> Riscv64Platform -> OpenSBI -> Kernel` 交接。System 的自 Setup/Enable 以及这三段 System
+交接由异步 `emits` 形成全局 FIFO，不得按 hierarchy depth 重排；Kernel 再在自身 Enable 响应中以
+`drives` 完成 BootInitFlow、首次调度和 KernelInitFlow。每个 System.Online 表示该实例已经完成自身
+charter 定义的 Enable 契约，不等待提交后 `emits` 的异步下游成功。
 
 tools2 的默认文本视图服务于快速阅读 Signal 在系统层级间的传播：按结构化 Signal 的创建顺序逐行
 展示 source、Signal、target，按目标相对根系统的 hierarchy depth 使用两空格缩进，并只为已解析的

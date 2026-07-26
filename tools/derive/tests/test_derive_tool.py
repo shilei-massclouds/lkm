@@ -171,6 +171,49 @@ class DeriveToolTests(unittest.TestCase):
             self.assertIn("locks", data["model"])
             self.assertIn("exclusive_contexts", data["model"])
 
+    def test_inherited_owned_child_transition_receiver_is_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(
+                Path(tmp),
+                """
+                type Child {
+                    lifecycle {
+                        Transition::Preset {
+                            state_effect: StateEffect::Always;
+                            ensures { child_prepared(self); }
+                        }
+                    }
+                }
+                type BaseOwner {
+                    owned { child: Child; }
+                    lifecycle {
+                        Transition::Preset {
+                            state_effect: StateEffect::Always;
+                            drives { self.child.Transition::Preset; }
+                            ensures { owner_prepared(self); }
+                        }
+                    }
+                }
+                type DerivedOwner: BaseOwner { }
+                object Computer: DerivedOwner {
+                    initial_state: State::Base;
+                    state State::Base {
+                        transitions {
+                            on Transition::Preset -> State::Prepared { }
+                        }
+                    }
+                    state State::Prepared { }
+                }
+                """,
+            )
+        self.assertEqual(data["summary"]["blocked"], 0)
+        self.assertTrue(
+            any(
+                item.get("expression") == "Computer.child.Transition::Preset"
+                and item["status"] == "proved"
+                for item in data["records"]
+            )
+        )
     def test_derive_json_has_separate_structured_boundary_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)

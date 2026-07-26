@@ -930,8 +930,24 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(kernel_preset["drives"], [])
             self.assertEqual(kernel_preset["emits"], [])
             self.assertEqual(
+                [
+                    entry["text"]
+                    for block in kernel_enable["drives"]
+                    for entry in block["entries"]
+                ],
+                [
+                    "Kernel.Action::AcceptEnable",
+                    "BootInitFlow.Transition::Preset",
+                    "BootInitFlow.Transition::Setup",
+                    "BootInitFlow.Transition::Enable",
+                    "Scheduler.Action::Schedule",
+                    "KernelInitFlow.Transition::Setup",
+                    "KernelInitFlow.Transition::Enable",
+                ],
+            )
+            self.assertEqual(
                 [entry["text"] for entry in kernel_enable["emits"][0]["entries"]],
-                ["BootInitFlow.Transition::Preset"],
+                ["KernelInitFlow.Action::CommitPayloadHandoff"],
             )
             self.assertEqual(
                 [
@@ -1029,10 +1045,7 @@ class ModelToolTests(unittest.TestCase):
             boot_init_enable = objects["BootInitFlow"]["states"]["Ready"][
                 "transitions"
             ]["Enable"]
-            self.assertEqual(
-                [entry["text"] for entry in boot_init_enable["emits"][0]["entries"]],
-                ["Scheduler.Action::Schedule"],
-            )
+            self.assertEqual(boot_init_enable["emits"], [])
 
     def test_model_json_preserves_entry_spans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

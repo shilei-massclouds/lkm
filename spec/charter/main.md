@@ -38,12 +38,14 @@
 `PayloadPhase` 已删除；本文后续保留的旧名称只用于记录历史分析目录/批次，不再定义对象、parent、
 lifecycle 或 checkpoint。
 
+- `Kernel.Enable` 把 BootInitFlow 三段 lifecycle、首次 Scheduler 调度以及 KernelInitFlow 三段 lifecycle
+  作为自己的下层实现过程；物理栈切换不改变这项逻辑 `drives` 关系。
 - `BootInitFlow.Preset` 直接驱动入口对象并提交 Prepared；Setup 直接驱动 boot/interrupt 叶子以及
   `BootInitRestInitPhase`；Enable 只驱动 `BootInitScheduleHandoffPhase`。
 - `KernelInitFlow.Preset` 直接驱动 PreSMP/SMP bringup；Setup 直接驱动 runtime、initcall、rootfs、
   finalize 和 `PayloadPreparePhase`；Enable 只驱动 `PayloadHandoffPreparePhase`。
-- UserBoot replacement 只发生在 `KernelInitFlow` Online 后受 dispatch guard 约束的
-  `CommitPayloadHandoff` action；Hello/Smoke 不替换 Flow。
+- `PayloadHandoffPreparePhase.Online` 后 Kernel.Enable 提交 Kernel.Online，并由 Kernel 作为唯一发送者
+  `emits KernelInitFlow.CommitPayloadHandoff`。UserBoot 执行 replacement；Hello/Smoke 不替换 Flow。
 
 ## 文档用途
 
@@ -3789,6 +3791,7 @@ Computer.Setup 在三个子 System Ready 后建立 assembly fact，提交 Ready 
 Computer.Enable 提交 Online 后 emits Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；
 OpenSBI.Enable 精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
-`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Enable。Kernel 先提交 Online，再 emits
-BootInitFlow.Preset；其余启动相关寄存器由入口阶段逐步更新。全局 `Startup` 仍规范化为 `Preset`，
-不重绑定为 `Enable`。
+`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Enable。Kernel 在 Ready 内 drives
+BootInitFlow、首次 Scheduler 调度和 KernelInitFlow；`PayloadHandoffPreparePhase.Online` 后提交
+Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
+全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

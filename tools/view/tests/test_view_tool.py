@@ -199,7 +199,7 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(row["phase"] == "BootInitScheduleHandoffPhase" for row in rows)
             )
-            self.assertFalse(any(row["phase"] == "PayloadPreparePhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "PayloadPreparePhase" for row in rows))
             self.assertFalse(any(row["phase"] == "Riscv64Platform" for row in rows))
             self.assertFalse(
                 any(
@@ -342,8 +342,8 @@ class ViewToolTests(unittest.TestCase):
             kernel_enable_cell = trace_cell(
                 "transition_span", "Kernel.Transition::Enable"
             )
-            boot_init_preset_emit_cell = trace_cell(
-                "emit_event", "BootInitFlow.Transition::Preset"
+            boot_init_preset_cell = trace_cell(
+                "transition_span", "BootInitFlow.Transition::Preset"
             )
             boot_init_enable_cell = trace_cell(
                 "transition_span", "BootInitFlow.Transition::Enable"
@@ -397,7 +397,10 @@ class ViewToolTests(unittest.TestCase):
             self.assertLess(kernel_enable_cell["row"], boot_task_cell["row"])
             self.assertEqual(boot_setup_cell["column"], kernel_enable_cell["column"] + 1)
             self.assertEqual(interrupt_setup_cell["column"], boot_setup_cell["column"])
-            assert_emit_at_transition_end(kernel_enable_cell, boot_init_preset_emit_cell)
+            self.assertGreater(
+                boot_init_preset_cell["column"], kernel_enable_cell["column"]
+            )
+            self.assertGreater(boot_init_preset_cell["row"], kernel_enable_cell["row"])
             self.assertTrue(
                 any(
                     row.get("group_role") == "body_start"

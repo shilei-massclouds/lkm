@@ -90,37 +90,45 @@ image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把
   必须依赖已经 Online 的 Config。随后验证两者并构造 kernel image，提交 Ready。Config 与 Lds 的
   完整模型初态都是 Ready：Enable 只验证、发布构建输入，不代表运行期初始化。
 
-* Ready：kernel image 已构造，Config/Lds 已 Online，可以接受固件交接。
+* Ready：kernel image 已装入内存，Config/Lds 已 Online，OpenSBI 即将交接；Kernel 尚未启动，可以接受
+  固件发出的 Enable。
 
 * OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
   `SbiSpec`、`BootArgs`、Config/Lds 和 kernel image，确认静态 `BootTask` 与入口 ABI，并精确检查
   `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
-  `BootCpuRegisters.a1 == BootArgs.dtb_pa`；不得把整组寄存器已准备完成作为前置。验证完成后提交
-  Kernel.Online，再异步发送 `BootInitFlow.Preset`。
+  `BootCpuRegisters.a1 == BootArgs.dtb_pa`；不得把整组寄存器已准备完成作为前置。接受交接后 Kernel 在
+  Ready 状态内顺序驱动 BootInitFlow 的 Preset/Setup/Enable、首次 Scheduler 调度和
+  KernelInitFlow 的 Preset/Setup/Enable。首次调度和 PID 1 叶阶段可以由真实跨栈 continuation 承载，
+  但逻辑上仍是同一个 Kernel.Enable 响应。`PayloadHandoffPreparePhase.Online` 证明 selected payload
+  的可逆预提交与应用运行环境准备完成；随后 Kernel.Enable 才提交 Kernel.Online。
 
-* Online：Kernel 实例自身已经启动并把控制权交给 BootInitFlow。Kernel 在整个内部启动、首次调度、
-  PID 1 初始化和 payload 交接期间始终保持 Online；它不等待这些内部边界完成，也不在后续任何阶段
-  再次提交 Online。`SystemState.Online`、`BootInitFlow.Online` 和
-  `KernelInitFlow.PayloadHandoffCommitted` 保持互相独立。
+* Online：应用运行环境已经准备就绪，等待应用启动。提交后 Kernel 作为唯一发送者异步发送
+  `KernelInitFlow.Action::CommitPayloadHandoff`。该 action 的 UserBoot replacement 或 Hello/Smoke
+  no-return entry 若失败，根请求失败但 Kernel 保持 Online；不得回滚或重复提交 Online。
+  `SystemState.Online`、`BootInitFlow.Online`、`KernelInitFlow.Online`、Kernel.Online 与
+`KernelInitFlow.PayloadHandoffCommitted` 是有序但不同的边界。
+
+<img src="../pic/kernel-enable-layered-transition.svg" alt="Kernel.Enable 分层迁移与 Online 提交边界" />
 
 `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 Kernel Enable 接受点观察且只观察
-一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；它收到 Preset 后自行串联
-Preset/Setup/Enable：Preset 直接编排入口对象并提交 Prepared、自发 Setup；Setup 直接顺序驱动
+一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；Kernel.Enable 顺序驱动其
+Preset/Setup/Enable：Preset 直接编排入口对象并提交 Prepared；Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
-`BootInitRestInitPhase`，提交 Ready、自发 Enable；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交
-Online 后直接异步发送 `Scheduler.Action::Schedule`。
+`BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交
+Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`。
 
 首次调度真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与 context-switch prepare
 事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点并
 提交 CurrentTaskSlot/OnCpu/Live。PID 1 的真实入口直接启动 `KernelInitFlow.Preset`，不再回调 Kernel
 的 Setup 或 Enable。Preset body 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 
-`KernelInitFlow.Preset` 直接驱动 `PreSmpInitPhase`、`SmpBringupPhase`；Setup 直接驱动
+`KernelInitFlow.Preset` 在 Kernel Ready/Enable 执行上下文中直接驱动 `PreSmpInitPhase`、
+`SmpBringupPhase`；Setup 直接驱动
 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`、`PayloadPreparePhase`；Enable
-只驱动 `PayloadHandoffPreparePhase`。Flow Online 后执行受 parent Task OnCpu 约束的
-`CommitPayloadHandoff`：UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入
-内核态 no-return entry；该 action 不触碰 Kernel.Online。
+只驱动 `PayloadHandoffPreparePhase`。这些内部启动过程不要求 Kernel 已 Online。Flow Online 和
+PayloadHandoffPreparePhase.Online 后，Kernel.Enable 提交 Online 并 `emits CommitPayloadHandoff`；
+UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入内核态 no-return entry。
 
 ## 动作
 

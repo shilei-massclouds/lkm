@@ -148,7 +148,12 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Enable"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Preset"', dot)
         self.assertIn('"BootInitFlow.Preset" -> "InterruptStream.Preset"', dot)
-        self.assertIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
+        self.assertIn('"Kernel.Enable" -> "BootInitFlow.Setup"', dot)
+        self.assertIn('"Kernel.Enable" -> "BootInitFlow.Enable"', dot)
+        self.assertIn('"Kernel.Enable" -> "Scheduler.Action.Schedule"', dot)
+        self.assertIn('"Kernel.Enable" -> "KernelInitFlow.Setup"', dot)
+        self.assertIn('"Kernel.Enable" -> "KernelInitFlow.Enable"', dot)
+        self.assertNotIn('"BootInitFlow.Preset" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"BootInitFlow.Setup" -> "EntrySuccessorPhase.Preset"', dot)
 
     def test_builds_timeline_view(self) -> None:
@@ -176,12 +181,15 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("Lds.State::Online", text)
         self.assertIn("Kernel: ready (State::Ready)", text)
         self.assertIn("Kernel: online (State::Online)", text)
+        self.assertIn("PayloadPreparePhase: online (State::Online)", text)
+        self.assertIn("PayloadHandoffPreparePhase: online (State::Online)", text)
         self.assertIn("<svg", svg)
         self.assertNotIn(">EntryPreludePhase<", svg)
         self.assertIn("EntrySuccessorPhase", svg)
         self.assertIn("CorePreparePhase", svg)
         self.assertIn("MmCoreInitPhase", svg)
-        self.assertNotIn("PayloadPreparePhase", svg)
+        self.assertIn("PayloadPreparePhase", svg)
+        self.assertIn("PayloadHandoffPreparePhase", svg)
         self.assertNotIn("BootArgs", svg)
 
     def test_accepts_exclusive_context_within_action_refs(self) -> None:

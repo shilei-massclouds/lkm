@@ -70,8 +70,9 @@ Preset）。Task 再次获得 CPU 时 initial Flow 已非 Base，Task 必须改�
 两条候选必须恰有一条可接受；任何已发送 Signal 被拒绝或处理失败都会使根执行失败，不排队、不重试。
 
 BootTask 是入口特例：它从模型初态已经 OnCpu，因此首次执行不经过 Scheduler 或 Task.Continue。
-OpenSBI 发出 Kernel.Startup 后，Kernel 直接异步发出 BootInitFlow.Startup；接收方必须仍为 Base且
-parent BootTask 必须为 OnCpu，重复启动或执行权不匹配立即失败。
+OpenSBI 发出 Kernel.Enable 后，Kernel 接受交接并在仍为 Ready 的同一迁移过程中直接驱动
+BootInitFlow.Preset；这不是 Kernel 提交后的异步事件。接收方必须仍为 Base 且 parent BootTask 必须为
+OnCpu，重复启动、绕过 Kernel.Enable 或执行权不匹配立即失败。
 
 PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
 保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、
@@ -94,8 +95,9 @@ switch commit 的紧邻边界发布。只有调度器未来恢复 `BootTask` 时
 runqueue 投影视图，但不得把它们暴露成第二个 Task carrier。
 
 successful exec 同样保持 owner Task identity。`KernelInitFlow.Enable` 只完成
-`PayloadHandoffPreparePhase` 的可逆 precommit；真正 replacement 是 `KernelInitFlow` 已 Online 时、
-仍受 parent Task OnCpu 约束的 `CommitPayloadHandoff` action，并使用固定顺序：
+`PayloadHandoffPreparePhase` 的可逆 precommit；它不发送 handoff action。真正 replacement 是
+Kernel 与 `KernelInitFlow` 均已 Online 时、由已提交的 `Kernel.Enable` 唯一发出、仍受 parent Task
+OnCpu 约束的 `CommitPayloadHandoff` action，并使用固定顺序：
 
 1. fresh `UserAppFlow.Preset/Setup`；
 2. 旧 Flow `Disable`；

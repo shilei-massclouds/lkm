@@ -93,8 +93,8 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
    continuation 已完成首轮对齐；coding README/mapping 已改为 `.md` 权威；删除不可解析的
    `coding/main.spec` 和 `coding/arceos_ex.spec`，顶层
    `spec/main.spec` 恢复可解析；当时剩余 24 个 coding `.spec` 已分类。announce 运行以
-   `RTOI...` 证明 `Kernel.Started` 先于 `BootInitFlow.Started`，并直接到达
-   `Kernel.Online -> Hello, world!`。
+   `RTOI...` 证明 `Kernel.Started` 先于 `BootInitFlow.Started`。本轮后续分层边界修订已取代当时
+   “入口即 Kernel.Online”的历史结论。
 3. **两层阶段范式（完成）**：charter 范式只负责生成 model 的标准生命周期、父 `drives` 和
    同对象 `emits`；coding 范式独立负责四状态设置/检查、父 continuation、执行主体交接和
    checkpoint lowering。旧的 sibling emits、平坦 DFS 和 `handoff() -> next.setup()` 规则已删除。
@@ -115,7 +115,8 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
    continuation，查询收敛为精确 Online。四个 legacy coding `.spec` 已迁移删除。五个阶段均完整
    观察 Started/Prepared/Ready/Online，旧 ID 保持，新 Prepared/Online 默认 unmapped。announce
    实测四条 Online -> sibling Started 顺序、ProcessPrepare.Online -> Interrupt.Prepared/Ready/Online
-   -> BootInitFlow.Ready，并最终到达 Kernel.Online 与 Hello；默认 stress 一轮 3/3 通过。
+   -> BootInitFlow.Ready，并最终到达 Hello；当时的 Kernel.Online 边界已由后续分层修订替代；默认
+   stress 一轮 3/3 通过。
 6. **BootInitFlow（完成）**：BootTask 是入口前已存在且始终 Online 的 PID 0 carrier；BootInitFlow
    是其 PhaseObject 子对象。Preset 驱动 EntryPrelude，Setup 顺序驱动 Boot 与 Interrupt，Enable
    驱动 RestInit 与 ScheduleHandoff，并在首次 PID 1 真实切换提交边界到达 Online。BootIdleEntry
@@ -140,8 +141,8 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
 9. **PayloadPhase（完成）**：charter/model/coding/impl 已统一四态和同对象 emits。Preset 只准备
    公共 exec/clone deferred 边界；Setup 绑定 build-time 唯一 Hello/Smoke/UserBoot handoff，且
    只有 user-boot 推进 UserBootPayload；Enable 在任何 Online 前完成 selected variant prepare，
-   再按 selected handoff Online -> Payload Online/handlers -> payload commit -> no-return entry 推进；Kernel
-   已在 BootInitFlow 启动前 Online，此处不重复提交。
+   再按 selected handoff Online -> Payload Online/handlers -> payload commit -> no-return entry 推进；
+   其中“Kernel 已在 BootInitFlow 前 Online”是历史结论，已由后续分层修订取代。
    user-boot prepare/enter 已拆分，requested/default init 失败均停在 Payload Ready。旧 ID 432/433
    稳定，新增 481/482 默认 unmapped；inventory 483，mapping exact 103 / range 14 / unmapped 366。
 10. **coding `.spec` 退场（完成）**：阶段树文件退场后，已逐项审计 system、mapping、build、
@@ -234,7 +235,8 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
   announce、smoke 54/54 和 requested/default init 失败 focused run；checkpoint inventory 为 483，
   Linux mapping 为 exact 103 / range 14 / unmapped 366，instrumentation plan 仍为 103。hello 四个
   Payload checkpoint 均由 KernelInitTask 发出；user-boot 实测 UserAddressSpace.Ready <
-  Payload.Online < Kernel.Online < UserModeEntry，两个失败分支都没有后三个成功事件。
+  Payload.Online < Kernel.Online < UserModeEntry；这里的旧 Payload wrapper 与 Kernel 边界均由后续
+  TaskFlow 归属和分层生命周期修订取代，两个失败分支都没有后三个成功事件。
 - coding `.spec` 退场批次通过 `make coding-spec-check`；根目录直接 `make test` 为 169/169；
   默认 ordinary-path stress 三个 case 各 30/30，总计 90/90；默认 rc-local difftest 为 1/1，
   103 个 Linux markers 为 0 missing / 0 stale / 0 mismatch。
@@ -269,6 +271,10 @@ KernelInitFlow Online 下的 `CommitPayloadHandoff` action：UserBoot 严格执�
 -> active Flow handoff -> UserAppFlow Enable -> KernelInitFlow Cleanup；Hello/Smoke 不替换 flow，
 只进入已经绑定的 kernel-mode no-return entry。模型对失败 guard、完整 replacement 顺序和两类
 非 replacement 分支分别保留可验证条件。
+
+后续 Kernel.Enable 分层生命周期修订进一步固定：Kernel 在 BootInitFlow、首次调度和 KernelInitFlow
+执行期间保持 Ready；`PayloadHandoffPreparePhase.Online` 后提交 Kernel.Online，并由 Kernel 作为唯一
+发送者异步发出 `CommitPayloadHandoff`。这项修订不增加 lifecycle 状态，也不改变物理跨栈切换。
 
 checkpoint inventory 重新稠密编号为 481，Linux mapping 为 exact 103 / range 14 / unmapped 364。
 两个新标准 phase checkpoint 取代旧 wrapper：Linux 原 `PayloadPhase.Ready` 语义迁移到

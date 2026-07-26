@@ -61,8 +61,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json` 得到的 canonical
   bytes 逐字节一致，并验证 v4、稳定 model fingerprint、发送前 boundary provenance、关键状态、a0/a1
   事实和 BootTaskRef 事实。`tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive
-  `initial_snapshot` 与 golden 完全一致且 Kernel.Enable 被 handler 接受；其后完整闭包
-  当前允许传播独立 modeled failure/退出码 1。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须
+  `initial_snapshot` 与 golden 完全一致且 Kernel.Enable 被 handler 接受；其后完整闭包必须成功到达
+  payload handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须
   拒绝。显式 `-s` 仍可覆盖默认 golden。
 - `tools2/bin/pyveri -t Computer.Preset` 在没有对应默认文件时必须返回 2；只有省略 `-t` 的默认
   `Computer.Preset` 请求从模型初态真实推导。底层 driver/derive 直接请求 `Kernel.Enable` 且不带

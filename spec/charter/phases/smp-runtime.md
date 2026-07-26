@@ -7,11 +7,16 @@
   `KernelInitFlow.Prepared`。
 - Setup 依次驱动 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase`、`FinalizePhase`，随后进入
   `PayloadPreparePhase`；后者 Online 后提交 `KernelInitFlow.Ready`。
+- Enable 驱动 `PayloadHandoffPreparePhase` 并提交 `KernelInitFlow.Online`。Preset/Setup/Enable 全部
+  运行在 Kernel Ready 的 Enable 执行上下文中，不错误要求 Kernel 已 Online。
 
 首次真实 dispatch 先同步驱动 BootTask.Suspend；完成栈切换后，`KernelInitTask.Continue` 在 PID 1
 真实获得 CPU 的入口提交 OnCpu 并严格启动 `KernelInitFlow.Preset`。runtime lowering 必须在
 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行 Preset body 和所有
 叶子代码；不得在 BootTask 栈上预执行。
+
+KernelInitFlow.Online 只把应用环境准备结果返回 Kernel.Enable，不自行发送 payload handoff。Kernel
+随后提交 Online 并作为唯一发送者异步发送 `CommitPayloadHandoff`。
 
 SmpBringup 的 BP 协调属于 `KernelInitFlow` continuation。`ApEntryPreludePhase`、
 `ApSmpCallinPhase`、`ApOnlineIdlePhase` 由按 logical-id replicated 的 `ApIdleFlow` pointwise 驱动，

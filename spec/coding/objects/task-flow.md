@@ -89,8 +89,9 @@ new flow enable
 old flow cleanup
 ```
 
-PID 1 首次 UserBoot replacement 的前两步属于 `PayloadHandoffPreparePhase`；后四步只能由 Online
-KernelInitFlow 的 `CommitPayloadHandoff` action 执行。Hello/Smoke 不 replacement，保持
+PID 1 首次 UserBoot replacement 的前两步属于 `PayloadHandoffPreparePhase`；后四步只能由 Kernel 与
+KernelInitFlow 都已 Online 后、Kernel.Enable 唯一发送的 `CommitPayloadHandoff` action 执行。
+Hello/Smoke 不 replacement，保持
 KernelInitFlow active 并进入已绑定的内核态 no-return entry。
 
 `KernelInitTask`（PID 1）首次 exec、每次 runtime exec 与每次 fork continuation 都建立 fresh Flow

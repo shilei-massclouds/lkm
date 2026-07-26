@@ -2,6 +2,11 @@
 
 本目录记录 `Composition Phase` 的补充约束。
 
+2026-07-26 Kernel.Enable 分层迁移复核：晚移 `Kernel.Online` 只调整既有 `systems::kernel`、
+BootInitFlow、scheduler、KernelInitFlow 与 payload 私有 module 之间的状态检查和 checkpoint 顺序；
+不新增 crate、facade、feature、公开 API 或组件依赖，也不引入 continuation module 或 pending 状态。
+`spec/compose/main.spec` 已复核，组合语义无需修改。
+
 2026-07-25 lifecycle 继承与 CopyProcess current-task 投影复核：effective handler 的组成只改变规格
 工具对既有 Type/instance 声明的解释；Rust `copy_process` 在既有 objects/boot-init 私有边界增加只读
 `CurrentTaskSlot` 与 `TaskRef` 输入，不新增 crate、facade、feature、公开 API 或组件依赖。

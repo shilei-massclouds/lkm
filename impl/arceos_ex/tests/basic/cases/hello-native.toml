@@ -6,7 +6,7 @@ timeout_seconds = 120
 [kernel]
 app = "hello"
 provider = "native"
-probe = []
+probe = ["announce"]
 profile = "release"
 
 [disk]
@@ -25,3 +25,6 @@ interaction = "none"
 process_exit = 0
 markers = ["Hello, world!"]
 forbidden_markers = ["arceos_ex initcall event failed", "arceos_ex panic"]
+marker_counts = [
+  { marker = "checkpoint: Kernel.Online", exactly = 1 },
+]

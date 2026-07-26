@@ -407,8 +407,9 @@ on Transition::Preset -> State::Prepared {
 默认推导入口是 `Computer.Transition::Preset`。该入口表示完整模型唯一的顶层启动请求；Computer
 先以固定顺序 `drives` 三个直接子 System 的 Preset，再按同序 drives Setup 并建立 assembly fact。
 后续运行启动固定为
-`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable -> BootInitFlow.Preset`
-的 completion-event 链；`Config` 与 `Lds` 初态 Ready，并由 Kernel.Setup 依次驱动 Enable。所有实际 Signal
+`Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 的 completion-event
+链；Kernel.Enable 再把 `BootInitFlow.Preset` 作为其 Ready→Online 迁移内的第一个下层 `drives`。
+`Config` 与 `Lds` 初态 Ready，并由 Kernel.Setup 依次驱动 Enable。所有实际 Signal
 仍必须由显式 `emits` 或 `drives` 产生，不得依赖工具隐式补齐。
 
 ## SEM-SYSTEM-PARENT-001: Effective Parent Is Shared Across Model Consumers
@@ -476,7 +477,9 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 
 ### Ordering, rejection and completion
 
-`drives` 是 source-ordered 同步 Signal：目标响应（包括它的同步子响应）结束后，源 handler 才继续。
+`drives` 是 source-ordered 逻辑同步 Signal：目标响应（包括它的同步子响应）完成后，源 handler 的
+逻辑过程才继续；实现可以用跨栈切换、跨 Task continuation 或 checkpoint 边界承载，不要求目标响应
+与 source 位于同一物理调用栈。
 任一 drives 被拒绝，根推导为 `failed`。`drives` statement 写成 `A || B` 时表示有序备选：工具在同一到达前快照上按源码顺序检查 receiver、handler、payload、source state 和 `depends_on`，只发送首个可接受候选。未选候选只产生 choice-check 证据，不分配 Signal ID；若没有候选可接受，当前 drives 失败并报告每个候选的拒绝原因。候选一旦发送并开始响应，后续同步子响应失败不得回滚并改选另一个候选。
 条件或 invariant 中的 `P || Q` 是短路逻辑析取，并与 drives 的有序 Signal 备选保持不同的规范化节点；它只读取当前快照，不发送 Signal。
 
@@ -658,7 +661,9 @@ owner/parent/entry-source 的 structural `Bind` 不是 lifecycle 推进或执行
 parent 首次 dispatch。
 
 `BootTask` 的模型初态是 `OnCpu/Live/Invalid`，表示固件/架构入口已经交付 boot CPU；其首次执行
-不经过 Scheduler。Kernel 接受 OpenSBI Startup 后直接异步发出严格 `BootInitFlow.Preset`。
+不经过 Scheduler。Kernel 接受 OpenSBI Enable 后保持 Ready，并在同一 Enable 过程中直接驱动严格
+`BootInitFlow.Preset`；BootInitFlow、首次调度和 KernelInitFlow 都是该迁移的过程细化，不是提交后的
+异步后继事件。只有应用环境准备完成并提交 Kernel Online 后，才异步发出 payload handoff action。
 普通 Task 的 Setup 只准备寄存器字节并把断点置为 Prepared；Enable 才把它绑定到 initial Flow，
 发布 `Online/None/Valid`。Scheduler 在物理切换后的 next 栈 finish 点消费该断点并提交
 `OnCpu/Live/Invalid`，再通过 `DispatchContinuation` 的
