@@ -59,11 +59,15 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   生成 snapshot。
 - 提交的 `tools2/scenarios/Kernel.Enable.snapshot.json` 必须与从仓库根运行
   `tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json` 得到的 canonical
-  bytes 逐字节一致，并验证 v4、稳定 model fingerprint、发送前 boundary provenance、关键状态、a0/a1
-  事实和 BootTaskRef 事实。`tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive
-  `initial_snapshot` 与 golden 完全一致且 Kernel.Enable 被 handler 接受；其后完整闭包必须成功到达
-  payload handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须
-  拒绝。显式 `-s` 仍可覆盖默认 golden。
+  bytes 逐字节一致，并验证 v4、稳定 model fingerprint、发送前 boundary provenance、关键状态、
+  Linux RV64 boot spec 采纳及其 a0/a1/satp/物理 PMD 要求、三项 image 构造叶事实、精确 a0/a1/satp
+  交接、ordered boot/DTB 和 BootTaskRef 事实。该边界必须有 `task_concurrency_closed()`，但尚未有
+  `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
+  `tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive `initial_snapshot` 与 golden
+  完全一致且 Kernel.Enable 被 handler 接受；其后第一个 `InterruptStream.Preset` 必须建立
+  `sie/sip == 0` 与 `interrupt_concurrency_closed()`，完整闭包再成功到达 payload
+  handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须拒绝。显式
+  `-s` 仍可覆盖默认 golden。
 - `tools2/bin/pyveri -t Computer.Preset` 在没有对应默认文件时必须返回 2；只有省略 `-t` 的默认
   `Computer.Preset` 请求从模型初态真实推导。底层 driver/derive 直接请求 `Kernel.Enable` 且不带
   snapshot/scenario 时仍必须因前期状态/事实缺失而 failed，并且不得隐式回溯 emitter 或合成快照。
@@ -73,7 +77,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `Kernel.Enable` 发出前 reached；其 snapshot 可用于后续 `-t Kernel.Enable -s SNAPSHOT`，不带 until
   时仍执行完整可达推导。发送前 snapshot 中 `Computer/Riscv64Platform/OpenSBI` 均为 `Online`，
   `Kernel` 为 `Ready`，`Config/Lds` 为 `Online`，`BootInitFlow` 仍为 `Base`；初态即 Online 的
-  `BootArgs/BootCpuRegisters` 仍可访问，snapshot 还必须包含精确的 a0/a1 交接事实。
+  `BootArgs/BootCpuRegisters` 与 `LinuxRiscv64KernelBootSpec` 仍可访问，snapshot 还必须包含精确的
+  a0/a1/satp 交接、物理 PMD 对齐及 image 构造叶事实；不得提前包含 Kernel 入口才建立的中断关闭事实。
   Signal 创建顺序必须保留三个子 System 的三次 Preset、三次 Setup、Config 先于 Lds Enable，以及
   `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的异步 FIFO 交接，且不得出现
   `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。

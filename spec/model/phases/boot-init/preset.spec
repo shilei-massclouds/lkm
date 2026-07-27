@@ -347,6 +347,7 @@ object InterruptStream: FlowObject {
                 ensures {
                     BootCpuRegisters.sie == 0;
                     BootCpuRegisters.sip == 0;
+                    interrupt_concurrency_closed();
                     interrupt_fallback_panic_ready(InterruptStream);
                     interrupt_handler_bindings_default_panic(InterruptStream);
                 }
@@ -361,6 +362,7 @@ object InterruptStream: FlowObject {
         invariant {
             BootCpuRegisters.sie == 0;
             BootCpuRegisters.sip == 0;
+            interrupt_concurrency_closed();
             interrupt_fallback_panic_ready(InterruptStream);
             interrupt_handler_bindings_default_panic(InterruptStream);
         }

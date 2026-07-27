@@ -162,7 +162,6 @@ predicate contains<T, U>(container: T, value: U) -> bool;
 predicate sbi_hsm_available() -> bool;
 predicate ordered_booting_enabled() -> bool;
 predicate primary_hart_only_at_kernel_entry() -> bool;
-predicate primary_hart_sie_clear_at_kernel_entry() -> bool;
 predicate firmware_dtb_blob_in_ram_at_kernel_entry<T>(dtb_pa: PhysAddr<T>) -> bool;
 predicate firmware_dtb_blob_complete_at_kernel_entry<T>(dtb_pa: PhysAddr<T>) -> bool;
 predicate firmware_dtb_blob_accessible_at_kernel_entry<T>(dtb_pa: PhysAddr<T>) -> bool;

@@ -39,10 +39,12 @@ across working directories and equivalent checkout locations.
 
 For the main model, the default request prepares `Riscv64Platform`, `OpenSBI`, and `Kernel` in declaration order,
 then sets up the same three systems. `Config` and `Lds` are initially Ready; `Kernel.Setup` enables them in that
-order before constructing the kernel image. Runtime handoff uses
+order, then records ELF linking, boot Image construction, and physical PMD-aligned placement as distinct facts.
+Kernel.Preset adopts the external Linux RV64 boot contract without asserting artifact compliance. Runtime handoff uses
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable`. Synchronous drives retain source
-order and asynchronous sends retain FIFO creation order. `Startup` remains only the external alias for `Preset`,
-never for `Enable`.
+order and asynchronous sends retain FIFO creation order. OpenSBI.Enable establishes a0/a1, live `satp == 0`, DTB,
+ordered-boot and primary-hart facts; it does not establish the interrupt-closed fact, which first appears after the
+Kernel-owned `InterruptStream.Preset`. `Startup` remains only the external alias for `Preset`, never for `Enable`.
 
 Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
 as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;

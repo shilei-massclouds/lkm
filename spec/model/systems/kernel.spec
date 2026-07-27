@@ -6,6 +6,44 @@ include "../phases/boot-init/main.spec";
 include "../phases/smp-runtime/main.spec";
 include "../phases/payload/main.spec";
 
+predicate linux_riscv64_kernel_boot_spec_available() -> bool;
+predicate linux_riscv64_kernel_boot_spec_adopted() -> bool;
+predicate linux_riscv64_kernel_a0_hartid_required() -> bool;
+predicate linux_riscv64_kernel_a1_dtb_pa_required() -> bool;
+predicate linux_riscv64_kernel_satp_zero_required() -> bool;
+predicate linux_riscv64_kernel_pmd_aligned_load_required<S>(pmd_size: S) -> bool;
+predicate kernel_elf_linked_from_config_and_lds<C, L>(config: C, lds: L) -> bool;
+predicate kernel_boot_image_constructed_from_elf<C, L>(config: C, lds: L) -> bool;
+
+predicate kernel_image_physical_load_pmd_aligned<A, S>(phys_start: A, pmd_size: S) -> bool {
+    aligned(phys_start, pmd_size);
+}
+
+predicate kernel_image_constructed() -> bool {
+    kernel_elf_linked_from_config_and_lds(Config, Lds);
+    kernel_boot_image_constructed_from_elf(Config, Lds);
+    kernel_image_physical_load_pmd_aligned(
+        phys_addr(Lds.kernel_start),
+        Config.pmd_size
+    );
+}
+
+object LinuxRiscv64KernelBootSpec: PrepareObject {
+    initial_state: State::Online;
+    parent: Kernel;
+    source: external_spec::linux_6_12_riscv_boot;
+
+    state State::Online {
+        invariant {
+            linux_riscv64_kernel_boot_spec_available();
+            linux_riscv64_kernel_a0_hartid_required();
+            linux_riscv64_kernel_a1_dtb_pa_required();
+            linux_riscv64_kernel_satp_zero_required();
+            linux_riscv64_kernel_pmd_aligned_load_required(Config.pmd_size);
+        }
+    }
+}
+
 object Config: PrepareObject {
     initial_state: State::Ready;
     parent: Kernel;
@@ -70,6 +108,7 @@ object Config: PrepareObject {
     }
 
     reference linux_6_12 {
+        pmd_size = symbol("PMD_SIZE");
         kernel_link_addr = symbol("KERNEL_LINK_ADDR");
         kernel_image_va_window_size = symbol("SZ_2G");
     }
@@ -220,8 +259,14 @@ object Kernel: KernelObject {
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {
+                depends_on {
+                    LinuxRiscv64KernelBootSpec.state == State::Online;
+                    linux_riscv64_kernel_boot_spec_available();
+                }
+
                 ensures {
                     kernel_system_spec_established();
+                    linux_riscv64_kernel_boot_spec_adopted();
                 }
             }
         }
@@ -229,11 +274,19 @@ object Kernel: KernelObject {
 
     state State::Prepared {
         invariant {
+            LinuxRiscv64KernelBootSpec.state == State::Online;
             kernel_system_spec_established();
+            linux_riscv64_kernel_boot_spec_adopted();
         }
 
         transitions {
             on Transition::Setup -> State::Ready {
+                depends_on {
+                    LinuxRiscv64KernelBootSpec.state == State::Online;
+                    linux_riscv64_kernel_boot_spec_adopted();
+                    linux_riscv64_kernel_pmd_aligned_load_required(Config.pmd_size);
+                }
+
                 drives {
                     Config.Transition::Enable;
                     Lds.Transition::Enable;
@@ -242,7 +295,13 @@ object Kernel: KernelObject {
                 ensures {
                     Config.state == State::Online;
                     Lds.state == State::Online;
-                    kernel_image_constructed();
+                    kernel_elf_linked_from_config_and_lds(Config, Lds);
+                    kernel_boot_image_constructed_from_elf(Config, Lds);
+                    aligned(phys_addr(Lds.kernel_start), Config.pmd_size);
+                    kernel_image_physical_load_pmd_aligned(
+                        phys_addr(Lds.kernel_start),
+                        Config.pmd_size
+                    );
                     kernel_enable_accept_available(self);
                 }
             }
@@ -251,9 +310,17 @@ object Kernel: KernelObject {
 
     state State::Ready {
         invariant {
+            LinuxRiscv64KernelBootSpec.state == State::Online;
             Config.state == State::Online;
             Lds.state == State::Online;
             kernel_system_spec_established();
+            linux_riscv64_kernel_boot_spec_adopted();
+            kernel_elf_linked_from_config_and_lds(Config, Lds);
+            kernel_boot_image_constructed_from_elf(Config, Lds);
+            kernel_image_physical_load_pmd_aligned(
+                phys_addr(Lds.kernel_start),
+                Config.pmd_size
+            );
             kernel_image_constructed();
             kernel_enable_accept_available(self);
         }
@@ -275,12 +342,21 @@ object Kernel: KernelObject {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
                     BootArgs.state == State::Online;
+                    LinuxRiscv64KernelBootSpec.state == State::Online;
+                    linux_riscv64_kernel_boot_spec_adopted();
                     Riscv64Platform.state == State::Online;
                     OpenSBI.state == State::Online;
                     BootCpuRegisters.a0 == BootArgs.boot_hartid;
                     BootCpuRegisters.a1 == BootArgs.dtb_pa;
+                    BootCpuRegisters.satp == 0;
                     Lds.state == State::Online;
                     Config.state == State::Online;
+                    kernel_elf_linked_from_config_and_lds(Config, Lds);
+                    kernel_boot_image_constructed_from_elf(Config, Lds);
+                    kernel_image_physical_load_pmd_aligned(
+                        phys_addr(Lds.kernel_start),
+                        Config.pmd_size
+                    );
                     kernel_image_constructed();
                     BootTask.state == State::OnCpu;
                     BootInitFlow.state == State::Base;
@@ -325,8 +401,16 @@ object Kernel: KernelObject {
         invariant {
             Riscv64Platform.state == State::Online;
             OpenSBI.state == State::Online;
+            LinuxRiscv64KernelBootSpec.state == State::Online;
+            linux_riscv64_kernel_boot_spec_adopted();
             Config.state == State::Online;
             Lds.state == State::Online;
+            kernel_elf_linked_from_config_and_lds(Config, Lds);
+            kernel_boot_image_constructed_from_elf(Config, Lds);
+            kernel_image_physical_load_pmd_aligned(
+                phys_addr(Lds.kernel_start),
+                Config.pmd_size
+            );
             kernel_image_constructed();
             kernel_enable_accepted(self);
             BootCpuRegisters.a0 == BootArgs.boot_hartid;

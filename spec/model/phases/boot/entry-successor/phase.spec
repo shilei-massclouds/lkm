@@ -1036,15 +1036,10 @@ object EntrySuccessorPhase: PhaseObject {
     parent: BootInitFlow;
 
     /*
-     * Base 表示入口后继期刚开始，仍处于系统独占上下文。
+     * Base 表示入口后继期尚未开始；系统独占事实由 BootInitFlow.Preset
+     * 建立，并在本对象接受 Preset 时检查，不能由初态 invariant 预置。
      */
     state State::Base {
-        invariant {
-            interrupt_concurrency_closed();
-            task_concurrency_closed();
-            context_is(SystemExclusive);
-        }
-
         transitions {
             /*
              * Setup 按 start_kernel/setup_arch 到 paging_init() 的最小核心路径编排对象推进。
@@ -1060,6 +1055,9 @@ object EntrySuccessorPhase: PhaseObject {
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
                     KernelImage.state == State::Online;
+                    interrupt_concurrency_closed();
+                    task_concurrency_closed();
+                    context_is(SystemExclusive);
                 }
 
                 drives {

@@ -2166,6 +2166,44 @@ class SignalPipelineTests(unittest.TestCase):
                 "assert:BootCpuRegisters.a1 == BootArgs.dtb_pa",
                 derivation["boundary"]["snapshot"]["facts"],
             )
+            boundary_facts = set(derivation["boundary"]["snapshot"]["facts"])
+            self.assertIn("assert:BootCpuRegisters.satp == 0", boundary_facts)
+            self.assertIn("linux_riscv64_kernel_boot_spec_available", boundary_facts)
+            self.assertIn("linux_riscv64_kernel_boot_spec_adopted", boundary_facts)
+            self.assertIn("linux_riscv64_kernel_a0_hartid_required", boundary_facts)
+            self.assertIn("linux_riscv64_kernel_a1_dtb_pa_required", boundary_facts)
+            self.assertIn("linux_riscv64_kernel_satp_zero_required", boundary_facts)
+            self.assertIn(
+                'linux_riscv64_kernel_pmd_aligned_load_required("Config.pmd_size")',
+                boundary_facts,
+            )
+            self.assertIn(
+                "kernel_elf_linked_from_config_and_lds(Config,Lds)", boundary_facts
+            )
+            self.assertIn(
+                "kernel_boot_image_constructed_from_elf(Config,Lds)", boundary_facts
+            )
+            self.assertIn(
+                'kernel_image_physical_load_pmd_aligned("phys_addr(Lds.kernel_start)","Config.pmd_size")',
+                boundary_facts,
+            )
+            self.assertIn("ordered_booting_enabled", boundary_facts)
+            self.assertIn("primary_hart_only_at_kernel_entry", boundary_facts)
+            self.assertIn("task_concurrency_closed", boundary_facts)
+            self.assertNotIn("interrupt_concurrency_closed", boundary_facts)
+            self.assertNotIn("context_is(SystemExclusive)", boundary_facts)
+            self.assertNotIn("primary_hart_sie_clear_at_kernel_entry", boundary_facts)
+            self.assertEqual(boundary_states["LinuxRiscv64KernelBootSpec"], "Online")
+            self.assertEqual(boundary_states["BootInitFlow"], "Base")
+            self.assertEqual(boundary_states["KernelInitFlow"], "Base")
+            self.assertFalse(
+                any(
+                    event.get("signal_id") is not None
+                    and event.get("target") == "Kernel"
+                    and event.get("signal") == "Enable"
+                    for event in derivation["events"]
+                )
+            )
             saved = read_json(snapshot)
             self.assertEqual(saved["snapshot"], derivation["boundary"]["snapshot"])
             self.assertEqual(snapshot.read_bytes(), KERNEL_ENABLE_SCENARIO.read_bytes())
@@ -2404,6 +2442,16 @@ class SignalPipelineTests(unittest.TestCase):
                 ("Kernel", "Enable"),
             )
             self.assertIsNone(resumed_data["until_request"])
+            interrupt_preset = next(
+                item
+                for item in resumed_data["signals"]
+                if (item["source"], item["target"], item["name"])
+                == ("BootInitFlow", "InterruptStream", "Preset")
+            )
+            interrupt_facts = set(interrupt_preset["after_snapshot"]["facts"])
+            self.assertIn("assert:BootCpuRegisters.sie == 0", interrupt_facts)
+            self.assertIn("assert:BootCpuRegisters.sip == 0", interrupt_facts)
+            self.assertIn("interrupt_concurrency_closed", interrupt_facts)
 
             bypass_work = root / "kernel-bypass-lower-flow"
             bypass = subprocess.run(
@@ -2598,7 +2646,7 @@ class SignalPipelineTests(unittest.TestCase):
                             "Lds": "Online",
                         },
                     },
-                    "opensbi_system_spec_established()",
+                    "linux_riscv64_kernel_boot_spec_adopted()",
                 ),
             ]
             for index, (signal, scenario, missing) in enumerate(cases):

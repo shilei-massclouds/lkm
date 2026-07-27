@@ -8,12 +8,20 @@ OpenSBI 初态为 Base：
 - `Preset` 采纳 `SbiSpec`、规定 `BootArgs` 的类型和含义并建立 OpenSBI 系统规格，提交 Prepared；它
   不构造或改变初态 Online 的只读输入实例。
 - `Setup` 验证规格并构造 OpenSBI 固件，提交 Ready。
-- `Enable` 一次性验证平台 Online、固件、SBI/BootArgs、Config/Lds、kernel image、固件/DTB 与有序
-  启动前提。它精确保证
+- `Enable` 一次性验证平台 Online、固件、SBI/BootArgs、已采纳的 Linux/RISC-V64 kernel boot 规格、
+  Config/Lds，以及 ELF、boot Image 和物理 PMD 放置三项构造事实。它为本次 handoff 选择 SBI HSM
+  ordered booting，只释放 primary hart，并精确保证
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
-`BootCpuRegisters.a1 == BootArgs.dtb_pa`，提交 Online 后异步发送 `Kernel.Enable`。这条边界表达控制权
-交接；它不表示其它启动相关寄存器已经具有 Kernel 最终值。OpenSBI 不拥有 Kernel，也不拥有 Kernel
-的内部 phase。
+`BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0`，同时保证 DTB 位于入口可访问
+的 RAM 且 blob 完整。提交 Online 后异步发送 `Kernel.Enable`。这条边界表达控制权交接；除上述直接
+入口契约外，它不表示其它启动相关寄存器已经具有 Kernel 最终值。尤其不要求 OpenSBI 预先清零
+`sie/sip`：Kernel 在 `BootInitFlow.Preset` 的第一个入口动作中自行完成防御性屏蔽。OpenSBI 不拥有
+Kernel，也不拥有 Kernel 的内部 phase。
+
+OpenSBI.Ready 只承载规格与 firmware 构造完成事实，不提前承载 ordered boot 已选定、primary hart
+已进入或入口寄存器已经提交等运行期 handoff 事实；这些事实由 Enable 建立并由 Online invariant 保持。
+其中 `satp == 0` 的 live CSR 等式只约束 OpenSBI 提交与 `Kernel.Enable` 接受边界；Kernel 随后会切换
+页表，OpenSBI.Online 保持的是“交接时 satp 为零”的稳定 handoff 记录，不要求 live satp 永远为零。
 
 OpenSBI.Online 只表示固件实例已经启动并提交 Kernel 入口控制权；下游失败不回滚该状态。
 

@@ -34,9 +34,8 @@ object BootInitFlow: TaskFlow {
                         TaskExecutionAuthority::Live
                     );
                     task_flow_start_binding_consistent(self);
-                    interrupt_concurrency_closed();
                     task_concurrency_closed();
-                    context_is(SystemExclusive);
+                    BootCpuRegisters.satp == 0;
                 }
 
                 may_change {

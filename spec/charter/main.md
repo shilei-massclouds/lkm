@@ -3779,8 +3779,11 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 三个子 System 的 Preset；Setup 按同一顺序推进三个子 System 的 Setup，并建立 assembly fact。
 
 静态归属如下：`Riscv64.parent = Riscv64Platform`；`SbiSpec`、`BootArgs.parent = OpenSBI`；
-`Config`、`Lds.parent = Kernel`。Config/Lds 是构建时输入，完整模型初态为 Ready；Kernel.Setup 依次
-驱动 Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
+`LinuxRiscv64KernelBootSpec`、`Config`、`Lds.parent = Kernel`。只读的
+`LinuxRiscv64KernelBootSpec` 提供 a0/a1、satp=0 和 RV64 物理 PMD/2 MiB 装载对齐要求；Kernel.Preset
+只采纳这些规范要求。Config/Lds 是构建时输入，完整模型初态为 Ready；Kernel.Setup 依次驱动
+Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config，然后分别证明 ELF 链接、boot Image
+构造和物理 PMD 放置，三项叶事实共同推出汇总 kernel-image fact。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
 平台构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
 从模型观察起点就已存在的只读启动 ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；
@@ -3789,9 +3792,11 @@ OpenSBI 规定或采纳参数的类型和含义，但不通过生命周期构造
 
 Computer.Setup 在三个子 System Ready 后建立 assembly fact，提交 Ready 并 self-emits Enable；
 Computer.Enable 提交 Online 后 emits Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；
-OpenSBI.Enable 精确建立
+OpenSBI.Enable 为本次 handoff 建立 ordered boot/primary hart 事实并精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
-`BootCpuRegisters.a1 == BootArgs.dtb_pa` 后 emits Kernel.Enable。Kernel 在 Ready 内 drives
-BootInitFlow、首次 Scheduler 调度和 KernelInitFlow；`PayloadHandoffPreparePhase.Online` 后提交
+`BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0` 后 emits Kernel.Enable；它不
+负责清零 `sie/sip`。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
+InterruptStream 清零 `sie/sip` 并建立中断封闭事实，再推进首次 Scheduler 调度和 KernelInitFlow；
+`PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。
 全局 `Startup` 仍规范化为 `Preset`，不重绑定为 `Enable`。

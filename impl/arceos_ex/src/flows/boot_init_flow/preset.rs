@@ -61,6 +61,11 @@ global_asm!(
     .align {head_text_align}
     .globl _start
 _start:
+    # Kernel.Enable entry guard: Linux/RV64 requires translation disabled.
+    # Reject before KernelStarted or any BootInitFlow child action is observed.
+    csrr t0, satp
+    bnez t0, 9f
+
     # Preserve OpenSBI boot arguments while the head segment rewrites a0.
     mv s0, a0
     mv s1, a1
@@ -139,6 +144,11 @@ _start:
     mv a0, s0
     mv a1, s1
     tail {rust_entry}
+
+9:
+    # No stack, gp, lifecycle checkpoint, or child action is valid yet.
+    # Stay fail-stopped at the exact rejected handoff boundary.
+    j 9b
 
 "#,
     head_boot_hartid = sym head_boot_hartid,

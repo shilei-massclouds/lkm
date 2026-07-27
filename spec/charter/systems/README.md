@@ -7,6 +7,7 @@ Computer
 |- Riscv64Platform
 |- OpenSBI
 `- Kernel
+   |- LinuxRiscv64KernelBootSpec
    `- BootCurrentCPU
       `- BootCPU
          `- BootCpuRegisters
@@ -17,4 +18,4 @@ Computer
 - [`computer.md`](computer.md)：唯一顶层根、assembly fact 和启动链入口。
 - [`riscv64-platform.md`](riscv64-platform.md)：平台规格、构造与运行交接。
 - [`opensbi.md`](opensbi.md)：固件规格、构造与 Kernel 交接。
-- [`kernel.md`](kernel.md)：kernel image 构造、入口交接与内部阶段树。
+- [`kernel.md`](kernel.md)：Linux/RISC-V64 kernel boot 规格采纳、kernel image 构造、入口交接与内部阶段树。

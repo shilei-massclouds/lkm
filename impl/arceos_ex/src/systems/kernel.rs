@@ -46,8 +46,10 @@ static KERNEL_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State
 static KERNEL_ENABLE_ACCEPTED: AtomicBool = AtomicBool::new(false);
 
 /// Accepts the OpenSBI handoff after the Rust entry has adopted its immutable
-/// ABI inputs. All checks precede recording the accepted Enable context; the
-/// Kernel.Online commit happens only after application-environment readiness.
+/// ABI inputs. The live SATP check occurs before the early-VM switch; OpenSBI's
+/// stable handoff record cannot substitute for it. All checks precede recording
+/// the accepted Enable context; the Kernel.Online commit happens only after
+/// application-environment readiness.
 pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
     let state = crate::phases::state::load(&KERNEL_STATE);
     let ctx = crate::context::context_ref();
@@ -64,6 +66,7 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
         || kernel_start == 0
         || kernel_start >= kernel_link_addr
         || !kernel_start.is_multiple_of(ctx.config.pmd_size())
+        || crate::arch::riscv64::csr::read_satp() != 0
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task_ref() != TaskRef::BOOT
         || ctx.boot_task.pid() != 0

@@ -2,9 +2,11 @@
 
 > [model] MUST：内核系统模型正式命名是Kernel。
 
-`Kernel` 是系统树根 `Computer` 的直接子系统。它同时承担 Kernel 规格采纳、静态配置发布、kernel
-image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把控制权交给已经 Ready 的 Kernel
-实例。
+`Kernel` 是系统树根 `Computer` 的直接子系统。它同时承担 Linux/RISC-V64 kernel boot 规格采纳、
+静态配置发布、kernel image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把控制权
+交给已经 Ready 的 Kernel 实例。只读外部 `LinuxRiscv64KernelBootSpec` 的 parent 是 `Kernel`；它从
+Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提供规范要求，不表示某个
+具体 kernel image 已经满足这些要求。
 
 ## 系统功能
 
@@ -81,23 +83,32 @@ image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把
 
 * Base：Kernel 规格尚未采纳。
 
-* OnPreset：由 `Computer.Preset` 同步驱动。本轮没有额外的 Kernel 规格迁移内容，只提交 Prepared；
-  不启动 BootTask 或任何内部 Flow。
+* OnPreset：由 `Computer.Preset` 同步驱动。验证初态 Online 的
+  `LinuxRiscv64KernelBootSpec`，采纳 RV64 kernel 入口 ABI 与构造契约并建立 Kernel 系统规格后提交
+  Prepared；这里的规范事实至少包括入口 `a0=hartid`、`a1=dtb_pa`、`satp=0`，以及 kernel 必须放在
+  物理 PMD/2 MiB 边界。Preset 只建立“必须满足什么”，不把规范要求反向当作具体产物已经合规，也不
+  启动 BootTask 或任何内部 Flow。
 
 * Prepared：Kernel 规格已建立，等待构造。
 
 * OnSetup：由 `Computer.Setup` 同步驱动。先同步发送 `Config.Enable`，再同步发送 `Lds.Enable`；Lds
-  必须依赖已经 Online 的 Config。随后验证两者并构造 kernel image，提交 Ready。Config 与 Lds 的
-  完整模型初态都是 Ready：Enable 只验证、发布构建输入，不代表运行期初始化。
+  必须依赖已经 Online 的 Config。随后在 Kernel.Prepared 内消费已采纳的
+  `LinuxRiscv64KernelBootSpec`，分别证明 ELF 已按 Config/Lds 链接、boot Image 已由 ELF 构造，以及
+  kernel 的物理装载起点按 RV64 PMD/2 MiB 边界对齐。三项叶事实共同推出汇总
+  `kernel_image_constructed`；不得用虚拟 `kernel_link_addr` 的页对齐替代物理装载对齐。全部成立后才
+  提交 Ready。Config 与 Lds 的完整模型初态都是 Ready：Enable 只验证、发布构建输入，不代表运行期
+  初始化。
 
-* Ready：kernel image 已装入内存，Config/Lds 已 Online，OpenSBI 即将交接；Kernel 尚未启动，可以接受
-  固件发出的 Enable。
+* Ready：Linux/RISC-V64 boot 规格已经采纳，ELF、boot Image 与物理 PMD 放置三项构造事实均成立，
+  Config/Lds 已 Online，OpenSBI 即将交接；Kernel 尚未启动，可以接受固件发出的 Enable。
 
 * OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
-  `SbiSpec`、`BootArgs`、Config/Lds 和 kernel image，确认静态 `BootTask` 与入口 ABI，并精确检查
+  `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds 和三项 kernel image 构造事实，
+  确认静态 `BootTask` 与入口 ABI，并精确检查
   `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
-  `BootCpuRegisters.a1 == BootArgs.dtb_pa`；不得把整组寄存器已准备完成作为前置。接受交接后 Kernel 在
-  Ready 状态内顺序驱动 BootInitFlow 的 Preset/Setup/Enable、首次 Scheduler 调度和
+  `BootCpuRegisters.a1 == BootArgs.dtb_pa` 与 `BootCpuRegisters.satp == 0`；不得把整组寄存器已准备完成
+  作为前置，也不得要求 OpenSBI 已经清零 `sie/sip`。接受交接后 Kernel 在 Ready 状态内顺序驱动
+  BootInitFlow 的 Preset/Setup/Enable、首次 Scheduler 调度和
   KernelInitFlow 的 Preset/Setup/Enable。首次调度和 PID 1 叶阶段可以由真实跨栈 continuation 承载，
   但逻辑上仍是同一个 Kernel.Enable 响应。`PayloadHandoffPreparePhase.Online` 证明 selected payload
   的可逆预提交与应用运行环境准备完成；随后 Kernel.Enable 才提交 Kernel.Online。
@@ -112,7 +123,9 @@ image 构造和运行入口交接；OpenSBI 通过 canonical `Kernel.Enable` 把
 
 `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 Kernel Enable 接受点观察且只观察
 一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；Kernel.Enable 顺序驱动其
-Preset/Setup/Enable：Preset 直接编排入口对象并提交 Prepared；Setup 直接顺序驱动
+Preset/Setup/Enable：Preset 的第一个入口动作由 `InterruptStream.Preset` 直接清零启动 CPU 的
+`sie/sip`，建立 `interrupt_concurrency_closed`，再编排其余入口对象并提交 Prepared。该动作对应
+Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
 `BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交

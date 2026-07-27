@@ -15,19 +15,31 @@ Rule IDs (MUST):
 - `kernel_system_coding_keeps_runtime_phases_internal`
 - `kernel_system_coding_does_not_synthesize_checkpoints`
 
-`Config` 与 `Lds` 是初态 Ready 的静态构建输入。完整模型中 Kernel.Setup 必须先接受
-`Config.Enable`，再接受依赖 Config.Online 的 `Lds.Enable`，验证二者后建立 kernel-image fact 并提交
-Kernel.Ready。真实 Rust 不重放这一完整构造过程；build 和链接产物是进入 canonical Kernel.Enable
-发送前边界的外部事实。`systems/kernel.rs` 记录四层规格链，不保存 leaf 或 wrapper lifecycle，也不
-伪造设计期 checkpoint。
+`LinuxRiscv64KernelBootSpec` 是来自 Linux 6.12 RISC-V boot contract 的初态 Online、只读外部规格对象；
+Kernel.Preset 只采纳 a0/a1、入口 `satp=0` 与 RV64 物理 PMD 装载对齐要求，不提前宣称当前产物已经
+满足要求。`Config` 与 `Lds` 是初态 Ready 的静态构建输入。完整模型中 Kernel.Setup 必须先接受
+`Config.Enable`，再接受依赖 Config.Online 的 `Lds.Enable`，然后分别验证并建立：Config/Lds 生成
+kernel ELF、ELF 生成 boot Image、boot Image 的物理起始地址按 `Config.pmd_size` 对齐。三项叶事实共同
+推导 `kernel_image_constructed()`，随后才提交 Kernel.Ready。
+
+真实 Rust 不重放这一完整构造过程；build、链接和物理装载产物是进入 canonical Kernel.Enable 发送前
+边界的外部事实。`systems/kernel.rs` 记录四层规格链，不保存外部规格对象、leaf 或 wrapper lifecycle，
+也不伪造设计期 checkpoint。
 
 ## Enable 与入口 adoption
 
 架构入口的 `KernelStarted` checkpoint 是 canonical `Kernel.Enable` 接受点。Rust 从真实上游
 `Kernel.Enable` 发送前边界采用以下状态：Kernel Ready，Config/Lds Online，Computer、
-Riscv64Platform、OpenSBI Online。`BootArgs::new(a0, a1)` 物化只读启动 ABI 输入；入口验证 kernel image、
-BootTask 和 a0/a1 后只接受 Enable，不提交 Kernel.Online。`KernelStarted` 仍是接受点，随后
-BootInitFlow、首次调度和 KernelInitFlow 都在 Kernel Ready/Enable 执行上下文中运行。
+Riscv64Platform、OpenSBI Online。`BootArgs::new(a0, a1)` 物化只读启动 ABI 输入；入口验证 a0/a1、
+实时 `satp=0`、kernel image 物理 PMD 对齐、Config/Lds 与 BootTask 后只接受 Enable，不提交
+Kernel.Online。入口 `_start` 必须在 `KernelStarted` 和任何 BootInitFlow child action 之前读取 live
+`satp` 并对非零值 fail-stop；Rust adoption 在 EarlyVm 切换前再次复核。不得用 OpenSBI 的历史 handoff
+记录替代任一次实时检查。`KernelStarted` 仍是接受点，随后 BootInitFlow、首次调度和 KernelInitFlow
+都在 Kernel Ready/Enable 执行上下文中运行。
+
+OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
+`InterruptStream.Preset`；入口汇编在该边界清零 `sie/sip`，由此首次建立
+`interrupt_concurrency_closed()`。这发生在 Kernel.Enable 已接受之后、其余入口前导动作之前。
 
 `PayloadHandoffPreparePhase.Online` 表示应用环境的全部可逆准备已经完成。KernelInitFlow 随后先提交
 Online，再由 `systems::kernel` 验证完整下层闭包并原子提交 Kernel.Online；`KernelOnline` 必须严格位于

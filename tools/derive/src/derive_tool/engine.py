@@ -340,53 +340,30 @@ _EXTERNAL_SOURCE_PROOFS = {
         "riscv_sbi_spec",
     ),
     (
-        "OpenSBI",
-        "firmware::opensbi",
-        "ordered_booting_enabled()",
-    ): (
-        "firmware_boot_policy",
-        "opensbi_firmware",
-    ),
+        "LinuxRiscv64KernelBootSpec",
+        "external_spec::linux_6_12_riscv_boot",
+        "linux_riscv64_kernel_boot_spec_available()",
+    ): ("kernel_boot_spec", "linux_riscv64_boot_spec"),
     (
-        "OpenSBI",
-        "firmware::opensbi",
-        "primary_hart_only_at_kernel_entry()",
-    ): (
-        "firmware_entry_state",
-        "opensbi_firmware",
-    ),
+        "LinuxRiscv64KernelBootSpec",
+        "external_spec::linux_6_12_riscv_boot",
+        "linux_riscv64_kernel_a0_hartid_required()",
+    ): ("kernel_boot_abi", "linux_riscv64_boot_spec"),
     (
-        "OpenSBI",
-        "firmware::opensbi",
-        "primary_hart_sie_clear_at_kernel_entry()",
-    ): (
-        "firmware_entry_state",
-        "opensbi_firmware",
-    ),
+        "LinuxRiscv64KernelBootSpec",
+        "external_spec::linux_6_12_riscv_boot",
+        "linux_riscv64_kernel_a1_dtb_pa_required()",
+    ): ("kernel_boot_abi", "linux_riscv64_boot_spec"),
     (
-        "OpenSBI",
-        "firmware::opensbi",
-        "firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)",
-    ): (
-        "firmware_entry_state",
-        "opensbi_firmware",
-    ),
+        "LinuxRiscv64KernelBootSpec",
+        "external_spec::linux_6_12_riscv_boot",
+        "linux_riscv64_kernel_satp_zero_required()",
+    ): ("kernel_boot_register_state", "linux_riscv64_boot_spec"),
     (
-        "OpenSBI",
-        "firmware::opensbi",
-        "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)",
-    ): (
-        "firmware_entry_state",
-        "opensbi_firmware",
-    ),
-    (
-        "OpenSBI",
-        "firmware::opensbi",
-        "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)",
-    ): (
-        "firmware_entry_state",
-        "opensbi_firmware",
-    ),
+        "LinuxRiscv64KernelBootSpec",
+        "external_spec::linux_6_12_riscv_boot",
+        "linux_riscv64_kernel_pmd_aligned_load_required(Config.pmd_size)",
+    ): ("kernel_image_load_layout", "linux_riscv64_boot_spec"),
     (
         "PlatformCpuInfo",
         "fdt::cpus",
@@ -444,7 +421,6 @@ _EXTERNAL_PREDICATES = {
     "printk_buffer_setup_copied_remaining_records": "console",
     "printk_buffer_ready": "console",
     "primary_hart_only_at_kernel_entry": "firmware_entry_state",
-    "primary_hart_sie_clear_at_kernel_entry": "firmware_entry_state",
     "resource_tree_write_lock_guard_used": "rwlock_guard",
     "sbi_capability_view_ready": "sbi_capability",
     "slot_contains": "fixmap_slot_content",
@@ -530,7 +506,6 @@ _DERIVED_PROVIDERS = {
     "memory_zeroed": "boot_code_candidate",
     "phys_to_virt_transition_completed": "prior_derivation_facts",
     "primary_hart_only_at_kernel_entry": "opensbi_firmware",
-    "primary_hart_sie_clear_at_kernel_entry": "opensbi_firmware",
     "resource_tree_write_lock_guard_used": "transition_ensures",
     "slot_contains": "prior_derivation_facts",
     "sbi_hsm_available": "riscv_sbi_spec",
@@ -566,6 +541,17 @@ _DERIVED_PROVIDERS = {
     "valid_task_ref": "prior_derivation_facts",
     "valid_task_storage": "linker_symbol_candidate",
     "soc_early_platform_ready": "fdt_and_platform_candidate",
+}
+
+_AGGREGATE_FACT_PROOFS = {
+    "kernel_image_constructed()": (
+        "kernel_image_construction",
+        {
+            "kernel_elf_linked_from_config_and_lds(Config, Lds)",
+            "kernel_boot_image_constructed_from_elf(Config, Lds)",
+            "kernel_image_physical_load_pmd_aligned(phys_addr(Lds.kernel_start), Config.pmd_size)",
+        },
+    ),
 }
 _CONTAINS_PROOFS = {
     "contains(PhysicalMemory.ram, header_range)": (
@@ -3228,6 +3214,10 @@ class _Deriver:
                     recorded_expression=effective_entry,
                 ):
                     continue
+                elif self._try_prove_aggregate_fact(
+                    entry, entry_span, kind, transition, state
+                ):
+                    continue
                 elif self._try_prove_phase_context(
                     entry, entry_span, kind, transition, state
                 ):
@@ -3992,6 +3982,36 @@ class _Deriver:
         )
         return True
 
+    def _try_prove_aggregate_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        transition: TransitionDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        proof = _AGGREGATE_FACT_PROOFS.get(_fact_key(expression))
+        if proof is None:
+            return False
+        proof_class, required = proof
+        proved_keys = {_fact_key(item) for item in self.proved_expressions}
+        if not {_fact_key(item) for item in required}.issubset(proved_keys):
+            return False
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider="prior_derivation_facts",
+        )
+        return True
+
     def _try_prove_phase_context(
         self,
         expression: str,
@@ -4007,13 +4027,7 @@ class _Deriver:
         ):
             return False
 
-        if expression == "interrupt_concurrency_closed()":
-            self._validate_state("OpenSBI", "Ready")
-            if "primary_hart_sie_clear_at_kernel_entry()" not in self.proved_expressions:
-                return False
-            proof_class = "system_exclusive_context"
-            proof_provider = "prior_derivation_facts"
-        elif expression == "task_concurrency_closed()":
+        if expression == "task_concurrency_closed()":
             self._validate_state("SbiSpec", "Online")
             self._validate_state("OpenSBI", "Ready")
             if not {

@@ -32,7 +32,7 @@
 系统树是 `Computer -> {Riscv64Platform, OpenSBI, Kernel}`。启动 CPU 的局部层级片段是
 `BootCurrentCPU -> BootCPU -> BootCpuRegisters`；寄存器对象不属于 `Riscv64Platform`。
 外部规格和构造输入通过显式 parent 归属消费它们的 System：`Riscv64 -> Riscv64Platform`、
-`SbiSpec/BootArgs -> OpenSBI`、`Config/Lds -> Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，
+`SbiSpec/BootArgs -> OpenSBI`、`LinuxRiscv64KernelBootSpec/Config/Lds -> Kernel`。不包含 `Kernel` 的独立规格片段保持自己的根，
 工具不得为了凑齐主模型层级而虚构 Kernel。
 有效层级只用于结构展示、Signal 坐标和预算；它仍不产生隐式冒泡、广播或 handler 继承。未知
 parent、自引用和 parent 环都是模型错误，所有静态 view 与 Signal 工具必须消费同一份归一化层级。

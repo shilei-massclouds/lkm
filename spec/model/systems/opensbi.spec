@@ -4,6 +4,7 @@ predicate opensbi_system_spec_established() -> bool;
 predicate opensbi_firmware_constructed() -> bool;
 predicate firmware_boot_args_defined<T>(boot_args: T) -> bool;
 predicate boot_args_read_only<T>(boot_args: T) -> bool;
+predicate opensbi_kernel_entry_satp_zero_handoff() -> bool;
 
 object SbiSpec: PrepareObject {
     initial_state: State::Online;
@@ -77,9 +78,8 @@ object OpenSBI: FirmwareObject {
         invariant {
             SbiSpec.state == State::Online;
             BootArgs.state == State::Online;
-            ordered_booting_enabled();
-            primary_hart_only_at_kernel_entry();
-            primary_hart_sie_clear_at_kernel_entry();
+            opensbi_system_spec_established();
+            opensbi_firmware_constructed();
         }
 
         transitions {
@@ -89,28 +89,43 @@ object OpenSBI: FirmwareObject {
                     Riscv64Platform.state == State::Online;
                     SbiSpec.state == State::Online;
                     BootArgs.state == State::Online;
+                    LinuxRiscv64KernelBootSpec.state == State::Online;
+                    linux_riscv64_kernel_boot_spec_adopted();
+                    linux_riscv64_kernel_a0_hartid_required();
+                    linux_riscv64_kernel_a1_dtb_pa_required();
+                    linux_riscv64_kernel_satp_zero_required();
+                    linux_riscv64_kernel_pmd_aligned_load_required(Config.pmd_size);
                     opensbi_system_spec_established();
                     opensbi_firmware_constructed();
                     Kernel.state == State::Ready;
                     Lds.state == State::Online;
                     Config.state == State::Online;
+                    kernel_elf_linked_from_config_and_lds(Config, Lds);
+                    kernel_boot_image_constructed_from_elf(Config, Lds);
+                    kernel_image_physical_load_pmd_aligned(
+                        phys_addr(Lds.kernel_start),
+                        Config.pmd_size
+                    );
                     kernel_image_constructed();
                 }
 
                 may_change {
                     BootCpuRegisters.a0;
                     BootCpuRegisters.a1;
+                    BootCpuRegisters.satp;
                 }
 
                 ensures {
                     ordered_booting_enabled();
                     primary_hart_only_at_kernel_entry();
-                    primary_hart_sie_clear_at_kernel_entry();
+                    task_concurrency_closed();
                     firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
                     firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
                     firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
                     BootCpuRegisters.a0 == BootArgs.boot_hartid;
                     BootCpuRegisters.a1 == BootArgs.dtb_pa;
+                    BootCpuRegisters.satp == 0;
+                    opensbi_kernel_entry_satp_zero_handoff();
                     task_ref_targets(BootTaskRef, BootTask);
                     task_ref_ready(BootTaskRef);
                     task_execution_authority_is(
@@ -134,15 +149,18 @@ object OpenSBI: FirmwareObject {
         invariant {
             SbiSpec.state == State::Online;
             BootArgs.state == State::Online;
+            LinuxRiscv64KernelBootSpec.state == State::Online;
             opensbi_system_spec_established();
             opensbi_firmware_constructed();
+            linux_riscv64_kernel_boot_spec_adopted();
             BootCpuRegisters.a0 == BootArgs.boot_hartid;
             BootCpuRegisters.a1 == BootArgs.dtb_pa;
+            opensbi_kernel_entry_satp_zero_handoff();
             Lds.state == State::Online;
             Config.state == State::Online;
             ordered_booting_enabled();
             primary_hart_only_at_kernel_entry();
-            primary_hart_sie_clear_at_kernel_entry();
+            task_concurrency_closed();
             firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
             firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
             firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);

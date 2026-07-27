@@ -2,6 +2,12 @@
 
 本目录记录 `Composition Phase` 的补充约束。
 
+2026-07-27 Linux RV64 Kernel 启动契约复核：新增的只读 `LinuxRiscv64KernelBootSpec` 仍由既有
+`systems::kernel` metadata 和入口验证承接；物理 PMD 对齐及 `satp=0` 检查使用既有 Config/Lds、CSR
+与 Kernel.Enable 接受边界，`sie/sip` 清零继续位于既有 BootInitFlow/InterruptStream 入口汇编路径。
+不新增 crate、module、facade、feature、公开 API 或组件依赖；`spec/compose/main.spec` 已复核，组合
+语义无需修改。
+
 2026-07-26 Kernel.Enable 分层迁移复核：晚移 `Kernel.Online` 只调整既有 `systems::kernel`、
 BootInitFlow、scheduler、KernelInitFlow 与 payload 私有 module 之间的状态检查和 checkpoint 顺序；
 不新增 crate、facade、feature、公开 API 或组件依赖，也不引入 continuation module 或 pending 状态。

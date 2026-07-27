@@ -1,7 +1,9 @@
 //! Metadata-only mapping for the runtime `OpenSBI` system.
 //!
-//! Its handoff determines only `BootCpuRegisters.a0/a1`; the remaining entry
-//! registers are updated by the kernel's existing assembly path.
+//! Its formal handoff determines `BootCpuRegisters.a0/a1`, requires entry
+//! `satp == 0`, and records ordered-boot/DTB facts. It intentionally does not
+//! require `sie/sip == 0`; the kernel's first InterruptStream action clears
+//! those registers.
 
 use super::{MappingStatus, SpecPath, SystemMapping};
 

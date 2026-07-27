@@ -782,7 +782,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "context_is"
-                    and record["proof_class"] == "phase_context"
+                    and record["object"] == "EntrySuccessorPhase"
+                    and record["source_kind"] == "depends_on"
+                    and record["proof_class"] == "derived_fact"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
@@ -790,7 +792,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "interrupt_concurrency_closed"
-                    and record["proof_class"] == "system_exclusive_context"
+                    and record["object"] == "EntrySuccessorPhase"
+                    and record["source_kind"] == "depends_on"
+                    and record["proof_class"] == "derived_fact"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
@@ -798,7 +802,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "task_concurrency_closed"
-                    and record["proof_class"] == "system_exclusive_context"
+                    and record["object"] == "EntrySuccessorPhase"
+                    and record["source_kind"] == "depends_on"
+                    and record["proof_class"] == "derived_fact"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
@@ -811,11 +817,25 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 any(
                     record["predicate"] == "primary_hart_sie_clear_at_kernel_entry"
-                    and record["proof_class"] == "firmware_entry_state"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "linux_riscv64_kernel_boot_spec_available"
+                    and record["proof_class"] == "kernel_boot_spec"
+                    and record["proof_provider"] == "linux_riscv64_boot_spec"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_image_constructed"
+                    and record["proof_class"] == "kernel_image_construction"
+                    and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
             )
@@ -823,7 +843,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "primary_hart_only_at_kernel_entry"
                     and record["proof_class"] == "firmware_entry_state"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -831,7 +851,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "ordered_booting_enabled"
                     and record["proof_class"] == "firmware_boot_policy"
-                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
