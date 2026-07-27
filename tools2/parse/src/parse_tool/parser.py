@@ -545,7 +545,7 @@ def _parse_expression(tokens: list[Token], *, assignment: bool) -> dict[str, Any
 
 def _parse_call(tokens: list[Token]) -> dict[str, Any]:
     if tokens and tokens[0].value == "lossy":
-        raise ParseFailure("lossy Signal syntax was removed in protocol v4", tokens[0])
+        raise ParseFailure("lossy Signal syntax was removed before protocol v5", tokens[0])
     process_position = next(
         (
             index

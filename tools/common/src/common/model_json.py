@@ -10,6 +10,7 @@ from common.model_types import (
     DeclarationSiteDef,
     TransitionDef,
     ExclusiveContextDef,
+    ExternalDef,
     ObjectDef,
     ObjectModel,
     StateDef,
@@ -20,6 +21,7 @@ from common.spec_ast import (
     Block,
     ContextGuardDecl,
     EnumDecl,
+    ExternalDecl,
     TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
@@ -67,6 +69,10 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         name: _exclusive_context_from_json(item)
         for name, item in _object(model_data, "exclusive_contexts").items()
     }
+    externals = {
+        name: _external_from_json(item)
+        for name, item in _object(model_data, "externals").items()
+    }
     objects = {
         name: _object_def_from_json(item)
         for name, item in _object(model_data, "objects").items()
@@ -90,6 +96,7 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         types=types,
         locks=locks,
         exclusive_contexts=exclusive_contexts,
+        externals=externals,
         objects=objects,
         children=children,
         boundaries=boundaries,
@@ -145,6 +152,17 @@ def _exclusive_context_from_json(item: Any) -> ExclusiveContextDef:
         lock_ref=decl.lock_ref,
         obj_refs=tuple(decl.obj_refs),
     )
+
+
+def _external_from_json(item: Any) -> ExternalDef:
+    data = _as_object(item, "external")
+    decl = ExternalDecl(
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        drives=[_block_from_json(block) for block in _list(data, "drives")],
+        emits=[_block_from_json(block) for block in _list(data, "emits")],
+    )
+    return ExternalDef(name=decl.name, decl=decl)
 
 
 def _context_guard_from_json(item: Any) -> ContextGuardDecl:

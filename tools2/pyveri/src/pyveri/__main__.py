@@ -53,9 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("spec", type=Path)
     parser.add_argument(
         "--signal",
-        required=True,
         type=lambda value: normalize_signal_request(value, option="--signal"),
-        help="root Signal as Target.SignalName",
+        help="one root Signal as Target.SignalName; omit to execute the model external orchestration",
     )
     parser.add_argument(
         "-u",
@@ -86,8 +85,6 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         derive_args = [
             str(model),
-            "--signal",
-            args.signal,
             "--source",
             args.source,
             "--max-depth",
@@ -97,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
             "-o",
             str(derivation),
         ]
+        if args.signal is not None:
+            derive_args.extend(["--signal", args.signal])
         if args.scenario is not None:
             derive_args.extend(["--scenario", str(args.scenario)])
         if args.until is not None:

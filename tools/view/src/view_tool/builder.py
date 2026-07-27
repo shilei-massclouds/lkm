@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from common.defaults import DEFAULT_TARGET
+from common.emits import parse_emit_expression
 from common.model_types import TransitionDef, ObjectModel, StateDef
 from common.spec_ast import BodyMember, Block, WithinDecl
 from common.view_types import (
@@ -50,6 +51,12 @@ def build_object_view(model: ObjectModel) -> ViewModel:
         name: ViewNode(id=name, label=name, kind=obj.kind)
         for name, obj in model.objects.items()
     }
+    for external in model.externals.values():
+        nodes[external.name] = ViewNode(
+            id=external.name,
+            label=external.name,
+            kind="External",
+        )
     edges: list[ViewEdge] = []
 
     for obj in model.objects.values():
@@ -170,6 +177,32 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
 
     nodes: dict[str, ViewNode] = {}
     edges: list[ViewEdge] = []
+
+    for external in model.externals.values():
+        source = f"external::{external.name}"
+        nodes[source] = ViewNode(id=source, label=external.name, kind="External")
+        for delivery, blocks in (
+            ("drives", external.decl.drives),
+            ("emits", external.decl.emits),
+        ):
+            for block in blocks:
+                for entry in block.entries:
+                    call = parse_emit_expression(entry)
+                    if (
+                        call is None
+                        or call.receiver not in model.objects
+                        or call.kind != "Transition"
+                    ):
+                        continue
+                    target = _transition_node_id(call.receiver, call.name)
+                    _add_transition_node(nodes, target, call.receiver, call.name)
+                    edges.append(
+                        ViewEdge(
+                            source=source,
+                            target=target,
+                            kind=delivery,
+                        )
+                    )
 
     for obj in model.objects.values():
         for state in obj.states.values():
@@ -1125,9 +1158,27 @@ def _build_timeline_rows(
         for target_obj, target_transition in _emitted_transitions(model, transition):
             process_transition(target_obj, target_transition, next_phase, next_phase_state)
 
-    root = _default_transition_target()
-    if root is not None:
-        process_transition(root[0], root[1], root[0], None)
+    if len(model.externals) == 1:
+        external = next(iter(model.externals.values()))
+        for blocks in (external.decl.drives, external.decl.emits):
+            for block in blocks:
+                for entry in block.entries:
+                    call = parse_emit_expression(entry)
+                    if (
+                        call is not None
+                        and call.kind == "Transition"
+                        and call.receiver in model.objects
+                    ):
+                        process_transition(
+                            call.receiver,
+                            call.name,
+                            call.receiver,
+                            None,
+                        )
+    else:
+        root = _default_transition_target()
+        if root is not None:
+            process_transition(root[0], root[1], root[0], None)
 
     final_by_object: dict[str, tuple[str, str, str, str]] = {}
     for phase, phase_state, object_name, target_state, transition_name in sequence:

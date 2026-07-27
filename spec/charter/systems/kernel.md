@@ -93,17 +93,18 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 
 * OnSetup：由 `Computer.Setup` 同步驱动。先同步发送 `Config.Enable`，再同步发送 `Lds.Enable`；Lds
   必须依赖已经 Online 的 Config。随后在 Kernel.Prepared 内消费已采纳的
-  `LinuxRiscv64KernelBootSpec`，分别证明 ELF 已按 Config/Lds 链接、boot Image 已由 ELF 构造，以及
-  kernel 的物理装载起点按 RV64 PMD/2 MiB 边界对齐。三项叶事实共同推出汇总
-  `kernel_image_constructed`；不得用虚拟 `kernel_link_addr` 的页对齐替代物理装载对齐。全部成立后才
-  提交 Ready。Config 与 Lds 的完整模型初态都是 Ready：Enable 只验证、发布构建输入，不代表运行期
-  初始化。
+  `LinuxRiscv64KernelBootSpec`，分别证明 ELF 已按 Config/Lds 链接、boot Image 文件已由 ELF 构造；
+  两项叶事实共同推出汇总 `kernel_image_file_constructed`。Setup 不选择装载物理地址，也不声称 Image
+  已经放置到待启动内存。Config 与 Lds 的完整模型初态都是 Ready：Enable 只验证、发布构建输入，
+  不代表运行期初始化。
 
-* Ready：Linux/RISC-V64 boot 规格已经采纳，ELF、boot Image 与物理 PMD 放置三项构造事实均成立，
-  Config/Lds 已 Online，OpenSBI 即将交接；Kernel 尚未启动，可以接受固件发出的 Enable。
+* Ready：Linux/RISC-V64 boot 规格已经采纳，ELF 与 boot Image 文件构造事实成立，Config/Lds 已
+  Online，OpenSBI 即将建立装载和交接事实；Kernel 尚未启动，可以接受固件发出的 Enable。Ready
+  不表示映像字节已经位于某个待启动物理地址。
 
 * OnEnable：只接受 OpenSBI 的真实入口交接。必须验证 `Riscv64Platform`、`OpenSBI`、`Riscv64`、
-  `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds 和三项 kernel image 构造事实，
+  `SbiSpec`、`BootArgs`、`LinuxRiscv64KernelBootSpec`、Config/Lds、kernel image 文件构造事实，以及
+  OpenSBI 为其 `kernel_load_pa` 保持的“映像已装载待交接”和 PMD 对齐事实，
   确认静态 `BootTask` 与入口 ABI，并精确检查
   `BootCpuRegisters.a0 == BootArgs.boot_hartid`、
   `BootCpuRegisters.a1 == BootArgs.dtb_pa` 与 `BootCpuRegisters.satp == 0`；不得把整组寄存器已准备完成
@@ -130,6 +131,10 @@ Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI �
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
 `BootInitRestInitPhase` 并提交 Ready；Enable 只驱动 `BootInitScheduleHandoffPhase`，提交
 Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`。
+
+`KernelImage.Preset` 在真实入口位置建立 `KernelImage.phys_start`，并核对该值等于
+`OpenSBI.kernel_load_pa`。设计期 linker symbol `Lds.kernel_start` 仍描述 ELF 入口和布局，但
+`phys_addr(Lds.kernel_start)` 不得再被当作映像物理装载地址。
 
 首次调度真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与 context-switch prepare
 事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点并

@@ -573,7 +573,7 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("> Computer.Transition::Preset State::Base", text)
         self.assertIn("> Riscv64Platform.Transition::Preset State::Base", text)
         self.assertIn("> OpenSBI.Transition::Preset State::Base", text)
-        self.assertIn("  > Computer.Transition::Setup State::Prepared", text)
+        self.assertIn("> Computer.Transition::Setup State::Prepared", text)
         self.assertIn("> Computer.Transition::Enable State::Ready", text)
         self.assertIn("> Riscv64Platform.Transition::Enable State::Ready", text)
         self.assertIn("> OpenSBI.Transition::Enable State::Ready", text)

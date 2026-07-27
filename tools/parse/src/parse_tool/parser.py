@@ -16,6 +16,7 @@ from common.spec_ast import (
     EnumDecl,
     TransitionDecl,
     ExclusiveContextDecl,
+    ExternalDecl,
     FunctionDecl,
     LockDecl,
     ObjectDecl,
@@ -52,6 +53,7 @@ _TYPE_RE = re.compile(rf"\Atype\s+({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _LOCK_RE = re.compile(rf"\Alock\s+({_IDENT})(?:\s*:\s*({_IDENT}))?\s*;\Z", re.S)
 _EXCLUSIVE_CONTEXT_RE = re.compile(rf"\Aexclusive_context\s+({_IDENT})\s*\{{", re.S)
 _CONTEXT_RE = re.compile(rf"\Acontext\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
+_EXTERNAL_RE = re.compile(rf"\Aexternal\s+({_IDENT})\s*\{{", re.S)
 _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
@@ -121,6 +123,7 @@ def parse_text(text: str) -> SpecDocument:
     types: list[TypeDecl] = []
     locks: list[LockDecl] = []
     exclusive_contexts: list[ExclusiveContextDecl] = []
+    externals: list[ExternalDecl] = []
     objects: list[ObjectDecl] = []
 
     for segment in segments:
@@ -139,6 +142,8 @@ def parse_text(text: str) -> SpecDocument:
             exclusive_contexts.append(_parse_exclusive_context(segment))
         elif head.startswith("context "):
             exclusive_contexts.append(_parse_context(segment))
+        elif head.startswith("external "):
+            externals.append(_parse_external(segment))
         elif head.startswith("object "):
             objects.append(_parse_object(segment))
         else:
@@ -154,6 +159,7 @@ def parse_text(text: str) -> SpecDocument:
         types=types,
         locks=locks,
         exclusive_contexts=exclusive_contexts,
+        externals=externals,
         objects=objects,
     )
 
@@ -187,7 +193,19 @@ def _enrich_document(
         types=[_enrich_type(t, line_to_file, line_to_local) for t in document.types],
         locks=[_with_file_node(lk, line_to_file, line_to_local) for lk in document.locks],
         exclusive_contexts=[_enrich_ctx(c, line_to_file, line_to_local) for c in document.exclusive_contexts],
+        externals=[_enrich_external(item, line_to_file, line_to_local) for item in document.externals],
         objects=[_enrich_obj(o, line_to_file, line_to_local) for o in document.objects],
+    )
+
+
+def _enrich_external(
+    external: ExternalDecl, lf: list[str], ll: list[int]
+) -> ExternalDecl:
+    return dc_replace(
+        external,
+        span=_with_file(external.span, lf, ll),
+        drives=[_with_file_block(block, lf, ll) for block in external.drives],
+        emits=[_with_file_block(block, lf, ll) for block in external.emits],
     )
 
 
@@ -596,6 +614,35 @@ def _parse_context(segment: _Segment) -> ExclusiveContextDecl:
         raise ParseError(f"line {segment.start_line}: invalid context declaration")
 
     return _parse_context_body(segment, match, kind=match.group(2))
+
+
+def _parse_external(segment: _Segment) -> ExternalDecl:
+    match = _EXTERNAL_RE.match(segment.text)
+    if match is None:
+        raise ParseError(f"line {segment.start_line}: invalid external declaration")
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
+    drives: list[Block] = []
+    emits: list[Block] = []
+    for part in _split_members(body, body_start_line):
+        block_match = _BLOCK_RE.match(part.text.strip())
+        if block_match is None or block_match.group(1) not in {"drives", "emits"}:
+            raise ParseError(
+                f"line {part.start_line}: external members must be drives or emits blocks"
+            )
+        block = _to_block(part, block_match.group(1))
+        destination = drives if block.kind == "drives" else emits
+        if destination:
+            raise ParseError(
+                f"line {part.start_line}: duplicate external {block.kind} block"
+            )
+        destination.append(block)
+    if not drives or not drives[0].entry_spans:
+        raise ParseError(f"line {segment.start_line}: external declaration requires drives")
+    if not emits or not emits[0].entry_spans:
+        raise ParseError(f"line {segment.start_line}: external declaration requires emits")
+    return ExternalDecl(name=match.group(1), span=segment.span, drives=drives, emits=emits)
 
 
 def _parse_context_body(
@@ -1563,6 +1610,7 @@ def summarize(document: SpecDocument) -> str:
         f"types: {len(document.types)}",
         f"locks: {len(document.locks)}",
         f"exclusive_contexts: {len(document.exclusive_contexts)}",
+        f"externals: {len(document.externals)}",
         f"objects: {len(document.objects)}",
         f"states: {state_count}",
         f"transitions: {transition_count}",

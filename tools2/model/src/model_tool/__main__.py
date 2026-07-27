@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnostics": diagnostics,
             "summary": {
                 "systems": len(model["systems"]),
+                "externals": len(model["externals"]),
                 "handlers": sum(
                     len(state["handlers"])
                     for system in model["systems"].values()

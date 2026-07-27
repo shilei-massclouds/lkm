@@ -24,7 +24,7 @@ view.json。driver 通过各阶段公开 Python
 parser/model 必须让 `spec/model/main.spec` 通过零 error、零 unsupported，并支持 include、嵌套泛型、
 enum、type/object/system 与传递继承、属性、owned、association/reference、predicate/function、context/
 lock、state、Type lifecycle/process、对象 lifecycle override、命名形参/result、`within`、结构化
-`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`drives` 和 `emits`。v4 不接受
+`deferred`/`trimmed` evidence、`depends_on`、`ensures`、`updates`、`external`、`drives` 和 `emits`。v5 不接受
 `lossy` 修饰；所有已发送 Signal 都必须被 handler 接受并处理。
 model 必须把 `drives` 的顶层 `A || B` 规范化为有序 choice 节点；derive 在发送前检查候选可接受性，未选择候选不得进入 Signal 序列或消耗预算。
 条件和 invariant 的顶层 `P || Q` 必须规范化为布尔 any-of 节点并按当前快照短路求值，不得保留为无法解释的 assertion 字符串。
@@ -46,11 +46,16 @@ association/reference 和 effective parent 必须规范化为稳定 model 字段
 未知表达式必须产生带 path、line、column 的 `unsupported` diagnostic；语法/引用/类型、unknown/self/
 cyclic parent 矛盾使用 `error`。有 error/unsupported 时后续阶段仍可写出诊断 JSON，但不得执行推导。
 
+完整模型允许唯一的 `external Human` 声明。external 不进入 object 表或 parent 树；其 `drives` 按源码
+顺序同步执行并在首个失败处短路，全部成功后才把 `emits` 按源码顺序加入全局 FIFO。默认推导执行该
+external 编排；显式 `--signal` 只发送该单个根 Signal。三个 Human Signal 都以 Human 为 source，彼此
+没有共同 cause，`root_request` 指向第一个真实 Signal，而不是虚构的 `Human.Startup`。
+
 ## 中间协议
 
 所有 JSON 顶层必须包含 `schema`、`version`、`producer: "tools2"` 和 `source`。schema 名沿用
-`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `4`。消费者必须在读取后立即
-验证三元组，不接受缺失 producer、老 producer、version 1/2/3 或其它 version。Signal/model/view JSON
+`lkm.spec.ast/model/derive/check/view/snapshot`，tools2 各自使用 version `5`。消费者必须在读取后立即
+验证三元组，不接受缺失 producer、老 producer、version 1/2/3/4 或其它 version。Signal/model/view JSON
 不包含 `lossy`/`strict` 字段，outcome 不包含 `discarded`。
 
 AST 保留 include 展开后的声明、source order 和每个声明/语句 span。model 建立 enum、system、parent、
@@ -58,16 +63,16 @@ state、handler、参数、条件、effect 和 call 索引，并输出 source �
 formal semantics；快照统一包含 `states`、有序 `facts` 和 `references`，JSON 输出使用排序 key 和稳定
 列表顺序。仓库内输入的顶层 `source`、include 路径和 span `source_file` 必须写为使用 `/` 的仓库
 相对路径，仓库外输入保留绝对路径；model fingerprint 必须消费这些稳定路径以及完整 model 语义和
-source span 内容，不得包含 checkout 绝对路径前缀。snapshot 继续使用 v4 既有字段，顶层 `source` 和
+source span 内容，不得包含 checkout 绝对路径前缀。snapshot 继续使用既有字段，顶层 `source` 和
 boundary provenance 内的 `source_file` 同样遵循该稳定路径规则，使同一 checkout 从不同 cwd 运行以及
 不同绝对路径下的等价 checkout 产生相同 canonical bytes。
 
 ## CLI 与退出码
 
 阶段工具都接受显式 `-o/--output`。parse 接收 `.spec`；model 接收 ast.json；derive 接收 model.json
-以及 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
+以及可选的 `--signal Target.Name`、`-u/--until Target.Name`、`--source`、`--scenario`、`--max-depth`、`--max-breadth`；check 和 view
 接收 derive.json；render 接收 view.json 且只实现 `--format text`；animate 接收 model.json、view.json
-并原子写出 HTML。animate 必须先分别验证两个输入的 v4 schema/version/producer、source 与 model
+并原子写出 HTML。animate 必须先分别验证两个输入的 v5 schema/version/producer、source 与 model
 fingerprint 身份，协议、身份、缺失端点或 I/O 错误返回 2 且不留下部分输出。
 
 driver 接收 `.spec` 和同一组 derive 参数，另提供 `--snapshot-out`、`--work-dir`、文本 `-o` 与
@@ -85,7 +90,7 @@ snapshot-out 和显式 work-dir 可同时使用；HTML 成功不得覆盖 check 
 阶段逻辑，只负责从自身路径解析仓库根、建立 tools2 独立
 `PYTHONPATH` 并把短参数翻译给 driver：可选的 `-t/--trigger` 对应 `--signal`，`-u/--until` 对应
 `--until`，`-s/--scenario` 对应 `--scenario`，`-f/--spec` 选择输入规格。`-t` 的默认值经规范化后是
-`Computer.Preset`，帮助 usage 必须显示 `[-t SIGNAL] [-u SIGNAL]`；`-f` 默认指向
+模型中唯一的 `external` 编排，帮助 usage 必须显示 `[-t SIGNAL] [-u SIGNAL]`；`-f` 默认指向
 `spec/model/main.spec`，快捷 source 默认 `Human`、预算默认 `all/all`；显式参数覆盖它们。预算、source、
 work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通用默认仍为 `3/3`。入口从脚本自身
 位置解析仓库和包路径，因此从仓库根或其它当前目录调用的行为一致。
@@ -96,7 +101,7 @@ work-dir、snapshot-out 和文本输出参数保持透传，底层 driver 的通
 拥有最高优先级。候选路径 resolve 后必须仍位于 `tools2/scenarios/` 内，不能用 target/name、绝对路径、
 `..` 或 symlink 越界。安全的候选不存在时，入口在启动 driver/derive 前返回 2，stderr 同时报告
 canonical signal 和预期路径。`Target.Startup` 与 `Target.Preset` 选择同一文件。调用者省略 `-t` 时
-不做默认场景查找，而从模型初态执行默认 `Computer.Preset`；因此 `-u Kernel.Enable` 仍从完整
+不做默认场景查找，而从模型初态执行默认 Human 外部编排；因此 `-u Kernel.Enable` 仍从完整
 上游链生成 snapshot。该查找只属于 shortcut，driver、derive CLI/API 和 scenario loader 不得复制它。
 
 shortcut、driver 和 derive API/CLI 都调用 common 中同一 Signal request 规范化函数；任何 target 的
@@ -146,7 +151,7 @@ Signal before/after snapshot 中的实际值。Signal 文本名 `Preset` 显示�
 verbose renderer 保持本轮修改前的详细格式和 canonical `Preset` 名称，以 cause depth 缩进 Signal，
 明确标记 `drives wait`、`emits enqueue/dequeue`、payload、predicate proof source、effective context、
 到达时快照来源、before/after state/fact/reference delta、reached boundary、stopped propagation、
-reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 4 view 已包含两种
+reject、truncated coordinate、source span 和完整因果链。当前 tools2 version 5 view 已包含两种
 renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 当前 tools2 render 不实现 DOT、SVG 或 HTML。交互 HTML 由独立 animate 包及 Svelte 5 + TypeScript
 frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
@@ -154,7 +159,7 @@ frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静�
 
 ## Animation v1 与确定帧
 
-animate 必须把 v4 Signal 创建顺序一对一映射为 `lkm.spec.signal-animation` version `1` 步骤；不得
+animate 必须把 v5 Signal 创建顺序一对一映射为 `lkm.spec.signal-animation` version `1` 步骤；不得
 折叠嵌套 drives/emits。协议记录输入 source/model fingerprint、稳定 step/signal/cause identity、
 source/target/name/delivery、handler kind/name、outcome/reason、Transition 的真实 before/after state、
 初始 frame 与每步 after frame 的可见节点、结构祖先和 sibling order。

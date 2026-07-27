@@ -38,8 +38,9 @@ derive、view 还是展示问题，再用文本复核因果链、用动画复核
 
 校准按 Kernel 启动实际发生顺序执行，而不是按文件目录、对象名称或工具实现模块倒推：
 
-1. 从默认 `Human -> Computer.Preset` 和模型初态开始，保留 Computer 对三个直接子 System 的
-   Preset/Setup 编排以及 `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的真实上游链。
+1. 从默认 Human 外部编排和模型初态开始，保留 Human 对 Computer 的 Preset/Setup/Enable 编排、
+   Computer 对三个直接子 System 的 Preset/Setup 编排以及
+   `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的真实上游链。
 2. 在待校准组首个 canonical Signal 的发送动作之前停止，导出带 boundary provenance 的稳定
    snapshot。snapshot 必须由真实上游到达，不能由旧工具、手写 state/fact、隐式 emitter 回溯或
    目标 handler 的预执行合成。

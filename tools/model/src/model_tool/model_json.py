@@ -12,6 +12,7 @@ from common.model_types import (
     DeclarationSiteDef,
     TransitionDef,
     ExclusiveContextDef,
+    ExternalDef,
     ObjectDef,
     StateDef,
 )
@@ -82,6 +83,10 @@ def build_result_to_model_json(
             "exclusive_contexts": {
                 name: _exclusive_context_to_json(item)
                 for name, item in sorted(model.exclusive_contexts.items())
+            },
+            "externals": {
+                name: _external_to_json(item)
+                for name, item in sorted(model.externals.items())
             },
             "objects": {
                 name: _object_to_json(item)
@@ -201,6 +206,15 @@ def _exclusive_context_to_json(item: ExclusiveContextDef) -> dict[str, Any]:
         "effects": [_block_to_json(block) for block in item.decl.effects],
         "other_blocks": [_block_to_json(block) for block in item.decl.other_blocks],
         "properties": item.decl.properties,
+    }
+
+
+def _external_to_json(item: ExternalDef) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "span": _span_to_json(item.decl.span),
+        "drives": [_block_to_json(block) for block in item.decl.drives],
+        "emits": [_block_to_json(block) for block in item.decl.emits],
     }
 
 

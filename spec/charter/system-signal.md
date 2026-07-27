@@ -137,7 +137,26 @@ Signal 推导工具采用下列兼容边界：
 降级为其它 outcome。预算截断必须是 trace 中可见的事实，而不是展示层推断。
 
 `tools2/` 是验证上述目标语义的独立工具链。本轮里程碑要求它完整加载 `spec/model/main.spec`，并能从
-真实 Signal 到达边界推导其可达闭包。完整模型只有 `Computer.Preset` 是无需预制条件的起点；
+真实 Signal 到达边界推导其可达闭包。完整模型声明唯一的外部启动编排：
+
+```text
+external Human {
+    drives {
+        Computer.Transition::Preset;
+        Computer.Transition::Setup;
+    }
+    emits {
+        Computer.Transition::Enable;
+    }
+}
+```
+
+`external` 声明的主体不是 model object：它无 lifecycle、无 parent，也不参与对象数量和根树归一化。
+同一声明中的 `drives` 严格同步按源码顺序执行，任一步失败立即短路；全部 drives 成功后，`emits` 才
+按源码顺序进入全局 FIFO。完整模型只允许一个外部编排声明，默认推导执行该编排；显式单 Signal
+请求仍只发送指定 Signal，不隐式补齐编排中的前序或后继 lifecycle。
+
+底层 driver/derive 根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它
 底层 driver/derive 根请求没有显式 snapshot/scenario 时必须严格使用模型初态。`Kernel.Preset` 或其它
 后续 Signal 若因前期状态或事实尚未建立而被拒绝，报告具体缺项和完整失败链是正确结果。工具不得
 隐式回溯 emitter、运行上游 transition 或合成到达时快照；调用者从后续边界继续时必须提供外部
@@ -163,24 +182,31 @@ Signal 变为 `stopped`，不得产生 `pending` 或隐式 continuation。若推
 tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/` 的实现或中间协议代码；两套工具
 通过路径、独立 Python import path、producer 和 schema version 隔离。公开快捷入口是
 `tools2/bin/pyveri`，默认主模型和无限 depth/breadth 预算；底层阶段 driver 仍保留通用 `3/3` 默认。
-快捷入口的默认请求是 `Human -> Computer.Preset`，`-t/--trigger` 可以覆盖目标，
-`-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，但底层
-`--signal` 保持必填。仅当调用者显式给出 `-t/--trigger` 且没有给出 `-s/--scenario` 时，快捷入口按
+快捷入口省略 `-t/--trigger` 时执行唯一外部编排；`-t/--trigger` 可以覆盖为一个指定 Signal，
+`-u/--until` 可以指定发送前截至；底层 driver/derive 的 source 默认同为 `Human`，省略
+`--signal` 时同样执行唯一外部编排。仅当调用者显式给出 `-t/--trigger` 且没有给出
+`-s/--scenario` 时，快捷入口按
 规范化后的 Signal 查找 `tools2/scenarios/<CanonicalSignal>.snapshot.json`；显式 scenario 优先，
 `Startup` 与 `Preset` 因而选择同一 canonical 文件。缺少默认文件或规范化名称不能安全落在 scenarios
-目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行默认
-`Computer.Preset`，包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
-version 4，移除 `lossy` 字段与 `discarded` outcome，并拒绝
-version 1、version 2、version 3、老工具协议和旧
-snapshot。老 `tools/` 继续承担默认
-`make test` 和静态 trace/SVG；老工具的替换或退役、显式 Signal DSL 和交互 HTML 都需要后续另行确认。
+目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行 Human 外部编排，
+包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
+version 5，移除 `lossy` 字段与 `discarded` outcome，并拒绝
+version 1、version 2、version 3、version 4、老工具协议和旧 snapshot。动画封装协议继续为 version
+1。受支持的旧 `tools/` parse/model/derive/check/view/render 路径必须解析同一 `external` 声明并遵守
+同一默认编排与显式单 Signal 边界；它们保留各自现有的中间协议版本，且不得导入 tools2 实现。
 
-主模型的启动创建顺序固定为 `Computer.Preset` 依次同步驱动三个直接子 System 的 Preset，
-`Computer.Setup` 再依次同步驱动三者 Setup 并建立 assembly fact，随后经
+主模型的启动创建顺序固定为 Human 同步 drives `Computer.Preset`；该 handler 依次同步驱动三个直接
+子 System 的 Preset。成功后 Human 同步 drives `Computer.Setup`；该 handler 再依次同步驱动三者
+Setup 并建立 assembly fact。两步都成功后 Human 异步 emits `Computer.Enable`，随后经
 `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 交接。System 的自 Setup/Enable 以及这三段 System
-交接由异步 `emits` 形成全局 FIFO，不得按 hierarchy depth 重排；Kernel 再在自身 Enable 响应中以
+交接中只有后者由异步 `emits` 形成全局 FIFO；Computer 的三个 handler 不相互发送 Signal。FIFO 不得
+按 hierarchy depth 重排；Kernel 再在自身 Enable 响应中以
 `drives` 完成 BootInitFlow、首次调度和 KernelInitFlow。每个 System.Online 表示该实例已经完成自身
 charter 定义的 Enable 契约，不等待提交后 `emits` 的异步下游成功。
+
+Human 创建的三个 Computer Signal 的 source 都是 `Human`；两次同步 Signal 的 delivery 是 `drives`，
+Enable 的 delivery 是 `emits`。它们不是某个伪 `Human.Startup` Signal 的子 Signal，因而没有共同
+`cause_id`；`root_request` 继续指向第一个真实 Signal `Computer.Preset`。
 
 tools2 的默认文本视图服务于快速阅读 Signal 在系统层级间的传播：按结构化 Signal 的创建顺序逐行
 展示 source、Signal、target，按目标相对根系统的 hierarchy depth 使用两空格缩进，并只为已解析的

@@ -759,8 +759,8 @@ _RELATION_PROOFS = {
 }
 
 
-def derive(model: ObjectModel, target: str = DEFAULT_TARGET) -> DerivationResult:
-    """Derive a target transition from the model's declared initial states."""
+def derive(model: ObjectModel, target: str | None = None) -> DerivationResult:
+    """Derive the external orchestration or one explicitly selected transition."""
 
     return _Deriver(model, target).run()
 
@@ -835,9 +835,10 @@ def render_derivation_text(result: DerivationResult) -> str:
 
 
 class _Deriver:
-    def __init__(self, model: ObjectModel, target: str) -> None:
+    def __init__(self, model: ObjectModel, target: str | None) -> None:
         self.model = model
-        self.target = target
+        self.external_default = target is None
+        self.target = target or "<external>"
         self.states: dict[str, str] = {}
         self.records: list[DerivationRecord] = []
         self.transitions: list[TransitionCommit] = []
@@ -855,12 +856,14 @@ class _Deriver:
         self.runtime_owned_flows: dict[str, set[str]] = {}
 
     def run(self) -> DerivationResult:
-        target_object, target_transition = self._parse_target()
-        target_state = self._target_state(target_object, target_transition)
         self._initialize_states()
-
-        if target_object is not None and target_transition is not None:
-            self._derive_transition(target_object, target_transition)
+        if self.external_default:
+            target_object, target_transition = self._derive_external_orchestration()
+        else:
+            target_object, target_transition = self._parse_target()
+            if target_object is not None and target_transition is not None:
+                self._derive_transition(target_object, target_transition)
+        target_state = self._target_state(target_object, target_transition)
 
         return DerivationResult(
             target=self.target,
@@ -907,6 +910,56 @@ class _Deriver:
                 for runtime_id, data in self.runtime_instances.items()
             ),
         )
+
+    def _derive_external_orchestration(self) -> tuple[str | None, str | None]:
+        if len(self.model.externals) != 1:
+            self._record(
+                DerivationStatus.CONTRADICTION,
+                "default derivation requires exactly one external orchestration",
+            )
+            return None, None
+        external = next(iter(self.model.externals.values()))
+        first: tuple[str, str] | None = None
+        for delivery, blocks in (
+            ("drives", external.decl.drives),
+            ("emits", external.decl.emits),
+        ):
+            for block in blocks:
+                for entry, span in block.entry_spans:
+                    call = parse_emit_expression(entry)
+                    if (
+                        call is None
+                        or call.receiver is None
+                        or call.receiver == "self"
+                        or call.kind != "Transition"
+                    ):
+                        self._record(
+                            DerivationStatus.CONTRADICTION,
+                            f"invalid external {delivery} Signal: {entry}",
+                            span,
+                        )
+                        if delivery == "drives":
+                            return first or (None, None)
+                        continue
+                    if first is None:
+                        first = (call.receiver, call.name)
+                        self.target = f"{call.receiver}.Transition::{call.name}"
+                    completed = self._derive_transition(
+                        call.receiver,
+                        call.name,
+                        edge_kind=delivery,
+                        args=call.args,
+                    )
+                    if delivery == "drives" and not completed:
+                        return first
+        if first is None:
+            self._record(
+                DerivationStatus.CONTRADICTION,
+                f"external orchestration {external.name} has no Signal calls",
+                external.decl.span,
+            )
+            return None, None
+        return first
 
     def _parse_target(self) -> tuple[str | None, str | None]:
         match = _TARGET_RE.match(self.target)

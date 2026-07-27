@@ -109,21 +109,17 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(data["view"], "drives")
             self.assertEqual(data["rankdir"], "LR")
             self.assertIn("Computer.Preset", data["nodes"])
-            self.assertTrue(
-                any(
-                    edge["source"] == "Computer.Preset"
-                    and edge["target"] == "Computer.Setup"
-                    and edge["kind"] == "emits"
+            self.assertEqual(
+                [
+                    (edge["target"], edge["kind"])
                     for edge in data["edges"]
-                )
-            )
-            self.assertTrue(
-                any(
-                    edge["source"] == "Computer.Setup"
-                    and edge["target"] == "Computer.Enable"
-                    and edge["kind"] == "emits"
-                    for edge in data["edges"]
-                )
+                    if edge["source"] == "external::Human"
+                ],
+                [
+                    ("Computer.Preset", "drives"),
+                    ("Computer.Setup", "drives"),
+                    ("Computer.Enable", "emits"),
+                ],
             )
             self.assertEqual(
                 [
@@ -195,6 +191,9 @@ class ViewToolTests(unittest.TestCase):
             rows = data["metadata"]["timeline_rows"]
             self.assertFalse(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
+            self.assertTrue(
+                any(row["subphase"] == "EntrySuccessorPhase" for row in rows)
+            )
             self.assertTrue(any(row["phase"] == "IrqTimeInitPhase" for row in rows))
             self.assertTrue(
                 any(row["phase"] == "BootInitScheduleHandoffPhase" for row in rows)
@@ -312,14 +311,8 @@ class ViewToolTests(unittest.TestCase):
             computer_preset_cell = trace_cell(
                 "transition_span", "Computer.Transition::Preset"
             )
-            computer_setup_emit_cell = trace_cell(
-                "emit_event", "Computer.Transition::Setup"
-            )
             computer_setup_cell = trace_cell(
                 "transition_span", "Computer.Transition::Setup"
-            )
-            computer_enable_emit_cell = trace_cell(
-                "emit_event", "Computer.Transition::Enable"
             )
             computer_enable_cell = trace_cell(
                 "transition_span", "Computer.Transition::Enable"
@@ -357,22 +350,12 @@ class ViewToolTests(unittest.TestCase):
             interrupt_setup_cell = trace_cell(
                 "transition_span", "IrqTimeInitPhase.Transition::Setup"
             )
-            self.assertEqual(
-                computer_setup_emit_cell["column"], computer_preset_cell["column"]
-            )
             self.assertEqual(computer_setup_cell["column"], computer_preset_cell["column"])
-            self.assertEqual(
-                computer_enable_emit_cell["column"], computer_preset_cell["column"]
-            )
             self.assertEqual(
                 computer_enable_cell["column"], computer_preset_cell["column"]
             )
-            assert_emit_at_transition_end(
-                computer_preset_cell, computer_setup_emit_cell
-            )
-            assert_emit_at_transition_end(
-                computer_setup_cell, computer_enable_emit_cell
-            )
+            self.assertLess(computer_preset_cell["row"], computer_setup_cell["row"])
+            self.assertLess(computer_setup_cell["row"], computer_enable_cell["row"])
             for phase_cell in (
                 computer_preset_cell,
                 computer_setup_cell,

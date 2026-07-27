@@ -868,7 +868,8 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
-                    phys_start == phys_addr(Lds.kernel_start);
+                    kernel_image_phys_start_observed_at_entry(self, phys_start);
+                    phys_start == OpenSBI.kernel_load_pa;
                     BootCpuRegisters.gp == phys_addr(Lds.global_pointer);
                 }
             }
@@ -883,7 +884,8 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
-            phys_start == phys_addr(Lds.kernel_start);
+            kernel_image_phys_start_observed_at_entry(self, phys_start);
+            phys_start == OpenSBI.kernel_load_pa;
             BootCpuRegisters.gp == phys_addr(Lds.global_pointer);
         }
 
@@ -901,7 +903,7 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
-                    phys_start == phys_addr(Lds.kernel_start);
+                    phys_start == OpenSBI.kernel_load_pa;
                     memory_zeroed(segments.bss.range);
                     fits_in_kernel_image_map(self, KernelImageMap);
                 }
@@ -917,7 +919,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
-            phys_start == phys_addr(Lds.kernel_start);
+            phys_start == OpenSBI.kernel_load_pa;
             memory_zeroed(segments.bss.range);
             fits_in_kernel_image_map(self, KernelImageMap);
         }
@@ -937,7 +939,7 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
-                    phys_start == phys_addr(Lds.kernel_start);
+                    phys_start == OpenSBI.kernel_load_pa;
                     BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
                     gp_relative_access_ready();
                 }
@@ -953,7 +955,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
-            phys_start == phys_addr(Lds.kernel_start);
+            phys_start == OpenSBI.kernel_load_pa;
             BootCpuRegisters.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
             gp_relative_access_ready();
         }

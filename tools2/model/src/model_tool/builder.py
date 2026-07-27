@@ -715,6 +715,27 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             )
         contexts[declaration["name"]] = deepcopy(declaration)
 
+    externals: dict[str, dict[str, Any]] = {}
+    for declaration in document.get("externals", []):
+        name = declaration["name"]
+        if name in externals:
+            _diagnostic(diagnostics, "error", f"duplicate external {name}", declaration["span"])
+            continue
+        externals[name] = {
+            "name": name,
+            "drives": [_call(entry) for entry in declaration.get("drives", [])],
+            "emits": [_call(entry) for entry in declaration.get("emits", [])],
+            "span": deepcopy(declaration["span"]),
+        }
+    if len(externals) > 1:
+        second = list(externals.values())[1]
+        _diagnostic(
+            diagnostics,
+            "error",
+            "a model may declare only one external orchestration",
+            second["span"],
+        )
+
     raw_systems = document.get("systems", [])
     has_kernel = any(item["name"] == "Kernel" for item in raw_systems)
     systems: dict[str, dict[str, Any]] = {}
@@ -1055,6 +1076,42 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
             systems[cycle[0]]["span"],
         )
 
+    for external in externals.values():
+        if external["name"] in systems:
+            _diagnostic(
+                diagnostics,
+                "error",
+                f"external name conflicts with system {external['name']}",
+                external["span"],
+            )
+        for delivery in ("drives", "emits"):
+            for call in external[delivery]:
+                if call.get("kind") != "call":
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"external {delivery} entry must be a single process call",
+                        call.get("span", external["span"]),
+                    )
+                    continue
+                receiver = call.get("receiver")
+                if receiver == "self" or receiver not in systems:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"external {delivery} has unknown receiver {receiver}",
+                        call["span"],
+                    )
+                    continue
+                candidates = systems[receiver]["handlers_by_name"].get(call["name"], [])
+                if not candidates:
+                    _diagnostic(
+                        diagnostics,
+                        "error",
+                        f"external {delivery} has no handler for {receiver}.{call['name']}",
+                        call["span"],
+                    )
+
     def report_invalid_calls(members: list[dict[str, Any]]) -> None:
         for member in members:
             for entry in member.get("entries", []):
@@ -1095,6 +1152,7 @@ def build_model(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str
         "functions": deepcopy(document.get("functions", [])),
         "contexts": contexts,
         "locks": {item["name"]: deepcopy(item) for item in document.get("locks", [])},
+        "externals": externals,
         "systems": systems,
     }
     return core, diagnostics

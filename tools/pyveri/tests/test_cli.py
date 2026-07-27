@@ -118,7 +118,15 @@ class CliTests(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                exit_code = main([str(spec), "--derive", "--strict"])
+                exit_code = main(
+                    [
+                        str(spec),
+                        "--derive",
+                        "--strict",
+                        "--target",
+                        "Computer.Transition::Preset",
+                    ]
+                )
 
         self.assertEqual(exit_code, 1)
         text = stdout.getvalue()

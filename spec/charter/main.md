@@ -3782,20 +3782,24 @@ Linux 侧运行命令以 `/home/cloud/gitLKM/linux-6.12/start.sh` 为准：QEMU 
 `LinuxRiscv64KernelBootSpec`、`Config`、`Lds.parent = Kernel`。只读的
 `LinuxRiscv64KernelBootSpec` 提供 a0/a1、satp=0 和 RV64 物理 PMD/2 MiB 装载对齐要求；Kernel.Preset
 只采纳这些规范要求。Config/Lds 是构建时输入，完整模型初态为 Ready；Kernel.Setup 依次驱动
-Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config，然后分别证明 ELF 链接、boot Image
-构造和物理 PMD 放置，三项叶事实共同推出汇总 kernel-image fact。`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
+Config.Enable 和 Lds.Enable，后者依赖已经 Online 的 Config，然后分别证明 ELF 链接与 boot Image
+文件构造，两项叶事实共同推出 `kernel_image_file_constructed`；Kernel.Ready 不包含物理装载事实。
+`Riscv64` 只保存外部 ISA 能力。boot CPU 天然存在且可访问的
 启动相关 GPR/CSR 子集由初态 `Online` 的 `BootCpuRegisters` 表示，其 parent 是 `BootCPU`；它不是
 平台构造产物，也不推广为所有 `CPUObject` 的通用寄存器文件。`BootArgs` 是
 从模型观察起点就已存在的只读启动 ABI 实参对象，保存本次启动已给定的 `boot_hartid/dtb_pa`；
 OpenSBI 规定或采纳参数的类型和含义，但不通过生命周期构造其实例。其初态 `Online` 只表示
 不可变参数事实可访问，不表示 OpenSBI 已完成 Kernel 交接，也不由入口寄存器反向定义。
 
-Computer.Setup 在三个子 System Ready 后建立 assembly fact，提交 Ready 并 self-emits Enable；
-Computer.Enable 提交 Online 后 emits Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；
-OpenSBI.Enable 为本次 handoff 建立 ordered boot/primary hart 事实并精确建立
+模型外部 Human 依次同步 drives Computer.Preset、Computer.Setup，二者成功后异步 emits
+Computer.Enable；Computer 的三个 handler 不相互触发。Computer.Enable 提交 Online 后 emits
+Riscv64Platform.Enable。平台 Enable emits OpenSBI.Enable；OpenSBI.Enable 选择 `kernel_load_pa`，分别
+建立 Image 已装载待交接和该地址满足 PMD/2 MiB 对齐的事实，再为本次 handoff 建立 ordered
+boot/primary hart 事实并精确建立
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 和
 `BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0` 后 emits Kernel.Enable；它不
-负责清零 `sie/sip`。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
+负责清零 `sie/sip`。实际字节放置可以由 QEMU/loader 完成；OpenSBI.Enable 交接域保证其结果，不虚构
+固件内部复制。Kernel 在 Ready 内 drives BootInitFlow，后者的 Preset 首先由
 InterruptStream 清零 `sie/sip` 并建立中断封闭事实，再推进首次 Scheduler 调度和 KernelInitFlow；
 `PayloadHandoffPreparePhase.Online` 后提交
 Online，再 emits `KernelInitFlow.CommitPayloadHandoff`。其余启动相关寄存器由入口阶段逐步更新。

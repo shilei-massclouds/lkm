@@ -1,4 +1,4 @@
-"""Validate tools2 v4 inputs and project stable animation metadata."""
+"""Validate tools2 v5 inputs and project stable animation metadata."""
 
 from __future__ import annotations
 

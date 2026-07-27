@@ -404,9 +404,11 @@ on Transition::Preset -> State::Prepared {
 - `emits` 覆盖 lifecycle transition、显式 state-changing runtime Transition 与 Action Signal；
   后两者不改变 `emits` 必须在 source commit 后才投递的规则。
 
-默认推导入口是 `Computer.Transition::Preset`。该入口表示完整模型唯一的顶层启动请求；Computer
-先以固定顺序 `drives` 三个直接子 System 的 Preset，再按同序 drives Setup 并建立 assembly fact。
-后续运行启动固定为
+完整模型的默认推导入口是唯一的外部 `Human` 编排。Human 先同步 drives
+`Computer.Transition::Preset`，成功后同步 drives `Computer.Transition::Setup`；两者都完成后再异步
+emits `Computer.Transition::Enable`。`external` 不是模型对象：没有 lifecycle、parent 或 handler，
+也不进入对象树。任一同步 drives 失败立即短路，后续 drives 和 emits 均不发送；Computer 的三个
+handler 不相互发送 Signal。后续运行启动固定为
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 的 completion-event
 链；Kernel.Enable 再把 `BootInitFlow.Preset` 作为其 Ready→Online 迁移内的第一个下层 `drives`。
 `Config` 与 `Lds` 初态 Ready，并由 Kernel.Setup 依次驱动 Enable。所有实际 Signal
@@ -428,9 +430,10 @@ on Transition::Preset -> State::Prepared {
 
 ## SEM-SIGNAL-TOOLS2-001: Full-Model Signal Derivation Is An Isolated Compatibility Semantics
 
-本节只约束 `tools2/` Signal 工具链，不修改前述 `tools/` 现行 transition/event 推导语义。
-`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `4` 并带 `producer: "tools2"`；每个阶段必须拒绝
-producer 或 version 不匹配的输入，不能把 tools2 version 1/2/3、老工具 JSON 或旧 snapshot 当成兼容输入。
+本节的完整 Signal envelope 语义只约束 `tools2/`；受支持的旧 `tools/` 路径必须用自身既有协议解析、
+建模、推导和展示同一 external 默认编排与显式单 Signal 边界，但不导入 tools2 实现。
+`tools2` 的 `lkm.spec.*` 中间协议统一使用 version `5` 并带 `producer: "tools2"`；每个阶段必须拒绝
+producer 或 version 不匹配的输入，不能把 tools2 version 1/2/3/4、老工具 JSON 或旧 snapshot 当成兼容输入。
 
 ### Normalization and handling
 
@@ -461,16 +464,18 @@ reference。初态 state invariant 建立带来源的初始事实；有 body 的
 `model_structure`，与来自当前快照的精确事实区分。未知新语法必须在 parse/model 诊断中以
 `unsupported` 和 source span 报告，不能静默删除、按名称猜测或留给 view/render 修正。
 
-根 Signal 没有 scenario 时从模型初态接收。完整主模型的初态包含 Online 的静态
+显式根 Signal 没有 scenario 时从模型初态接收。完整主模型的初态包含 Online 的静态
 `Riscv64`/`SbiSpec`/`BootArgs`、Ready 的 `Config`/`Lds`，以及 Base 的 Computer 和三个直接子 System。Ready 只表示
-本实例已构造且可启动，不表示已经运行。默认完整闭包入口是 `Computer.Preset`；`Kernel.Enable` 或其它
+本实例已构造且可启动，不表示已经运行。省略根 Signal 时执行模型中唯一的 `external Human` 编排；
+`Kernel.Enable` 或其它
 后续 Signal 若因前期状态或事实未建立而被拒绝，必须直接得到列出缺项和
 完整因果链的 `failed`。derive 不得隐式回溯 emitter、执行上游 transition 或合成前置快照；调用者从
 后续边界继续时必须显式提供真实边界的 snapshot/scenario。
 
-快捷入口未给 `-t/--trigger` 时默认请求 `Human -> Computer.Preset`，其用户可见默认拼写可以是
-`Computer.Startup`，但进入 driver 前必须规范化。快捷入口、driver 和 derive 的 source 默认均为
-`Human`，显式 `--source` 优先；底层 driver/derive 的 `--signal` 仍必填。
+快捷入口未给 `-t/--trigger` 时从初态执行唯一的 `external Human` 编排；第一个真实 Signal 是
+`Human -> Computer.Preset`，但不存在 `Human.Startup` envelope。快捷入口、driver 和 derive 的 source
+默认均为 `Human`，显式 `--source` 优先；底层 driver/derive 省略 `--signal` 时采用相同外部编排。
+显式 `--signal` 只建立该单个根 Signal，不补齐外部编排的前序或后继 lifecycle。
 
 `Startup -> Preset` 规范化规则不因运行系统改为 Enable 启动而改变；`Startup` 不是 `Enable` 的别名。
 因此 `Kernel.Startup` 表示设计期 `Kernel.Preset`，不能替代真实固件交接 `Kernel.Enable`。

@@ -76,10 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     from tools2_common import normalize_signal_request
 
     args = _parser(normalize_signal_request).parse_args(argv)
-    trigger = args.trigger or normalize_signal_request(DEFAULT_TRIGGER, option="--trigger")
+    trigger = args.trigger
     scenario = args.scenario
     if args.trigger is not None and scenario is None:
         scenario_root = SCENARIOS_ROOT.resolve()
+        assert trigger is not None
         expected = SCENARIOS_ROOT / f"{trigger}.snapshot.json"
         candidate = expected.resolve()
         try:
@@ -103,8 +104,6 @@ def main(argv: list[str] | None = None) -> int:
 
     driver_args = [
         str(args.spec),
-        "--signal",
-        trigger,
         "--source",
         args.source,
         "--max-depth",
@@ -112,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         "--max-breadth",
         args.max_breadth,
     ]
+    if trigger is not None:
+        driver_args.extend(["--signal", trigger])
     if scenario is not None:
         driver_args.extend(["--scenario", str(scenario)])
     if args.until is not None:

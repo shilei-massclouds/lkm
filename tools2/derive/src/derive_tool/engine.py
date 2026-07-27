@@ -186,6 +186,7 @@ class Engine:
         source: str,
         root_target: str,
         root_name: str,
+        orchestration: dict[str, Any] | None,
         until_target: str | None,
         until_name: str | None,
         initial_snapshot: dict[str, Any],
@@ -198,6 +199,7 @@ class Engine:
         self.source = source
         self.root_target = root_target
         self.root_name = root_name
+        self.orchestration = orchestration
         self.until_target = until_target
         self.until_name = until_name
         self.initial_snapshot = _snapshot(initial_snapshot)
@@ -1712,30 +1714,74 @@ class Engine:
     def run(self) -> dict[str, Any]:
         root: dict[str, Any] | None = None
         try:
-            root = self.new_signal(
-                source=self.source,
-                target=self.root_target,
-                name=self.root_name,
-                raw_arguments=[],
-                delivery="root",
-                cause_id=None,
-                coordinate={
-                    "depth": 0,
-                    "breadth": 0,
-                    "movement": {"up": 0, "across": 0, "down": 0},
-                    "_budget_depth": 0,
-                    "_budget_breadth": 0,
-                },
-                compat_process_kind=None,
-                call_span=None,
-            )
             diagnostics = self.document.get("diagnostics", [])
-            if diagnostics:
-                root["before_snapshot"] = _snapshot(self.current)
-                self.fail(root, "model_has_errors_or_unsupported_syntax")
+            coordinate = {
+                "depth": 0,
+                "breadth": 0,
+                "movement": {"up": 0, "across": 0, "down": 0},
+                "_budget_depth": 0,
+                "_budget_breadth": 0,
+            }
+            if self.orchestration is None:
+                root = self.new_signal(
+                    source=self.source,
+                    target=self.root_target,
+                    name=self.root_name,
+                    raw_arguments=[],
+                    delivery="root",
+                    cause_id=None,
+                    coordinate=coordinate,
+                    compat_process_kind=None,
+                    call_span=None,
+                )
+                if diagnostics:
+                    root["before_snapshot"] = _snapshot(self.current)
+                    self.fail(root, "model_has_errors_or_unsupported_syntax")
+                else:
+                    self.deliver(root)
+                self._drain_queue()
             else:
-                self.deliver(root)
-            self._drain_queue()
+                calls = [
+                    *(('drives', call) for call in self.orchestration["drives"]),
+                    *(('emits', call) for call in self.orchestration["emits"]),
+                ]
+                for delivery, call in calls:
+                    if delivery == "emits" and (
+                        self.failed or self.was_bounded or root is None
+                    ):
+                        break
+                    signal = self.new_signal(
+                        source=self.orchestration["name"],
+                        target=call["receiver"],
+                        name=call["name"],
+                        raw_arguments=call["arguments"],
+                        delivery=delivery,
+                        cause_id=None,
+                        coordinate=coordinate,
+                        compat_process_kind=call["process_kind"],
+                        call_span=call.get("span"),
+                        fifo_position=(len(self.queue) + 1) if delivery == "emits" else None,
+                    )
+                    if root is None:
+                        root = signal
+                    if diagnostics:
+                        signal["before_snapshot"] = _snapshot(self.current)
+                        self.fail(signal, "model_has_errors_or_unsupported_syntax")
+                        break
+                    if delivery == "drives":
+                        self.deliver(signal)
+                        if signal["outcome"] != "completed":
+                            break
+                    else:
+                        self.queue.append(signal)
+                        self.event(
+                            "emits_enqueued",
+                            signal_id=None,
+                            child_id=signal["id"],
+                            fifo_position=len(self.queue),
+                        )
+                if not self.failed and not self.was_bounded:
+                    self._drain_queue()
         except UntilReached:
             pass
         if self.failed:
@@ -1869,7 +1915,7 @@ def initial_snapshot(model: dict[str, Any]) -> dict[str, Any]:
 def derive(
     model_document: dict[str, Any],
     *,
-    signal: str,
+    signal: str | None = None,
     source: str = "Human",
     until: str | None = None,
     scenario: str | Path | None = None,
@@ -1877,17 +1923,31 @@ def derive(
     max_breadth: int | None = 3,
 ) -> dict[str, Any]:
     try:
-        canonical_signal = normalize_signal_request(signal, option="--signal")
+        canonical_signal = (
+            None if signal is None else normalize_signal_request(signal, option="--signal")
+        )
         canonical_until = (
             None if until is None else normalize_signal_request(until, option="--until")
         )
     except ValueError as exc:
         raise DerivationProblem(str(exc)) from exc
-    target, name = canonical_signal.rsplit(".", 1)
+    model = model_document["model"]
+    orchestration = None
+    if canonical_signal is None:
+        externals = list(model.get("externals", {}).values())
+        if len(externals) != 1:
+            raise DerivationProblem("default derivation requires exactly one external orchestration")
+        orchestration = externals[0]
+        first_calls = [*orchestration.get("drives", []), *orchestration.get("emits", [])]
+        if not first_calls:
+            raise DerivationProblem("external orchestration has no Signal calls")
+        target, name = first_calls[0]["receiver"], first_calls[0]["name"]
+        source = orchestration["name"]
+    else:
+        target, name = canonical_signal.rsplit(".", 1)
     until_target, until_name = (
         (None, None) if canonical_until is None else canonical_until.rsplit(".", 1)
     )
-    model = model_document["model"]
     base = initial_snapshot(model)
     start = load_scenario(
         scenario,
@@ -1900,6 +1960,7 @@ def derive(
         source=source,
         root_target=target,
         root_name=name,
+        orchestration=orchestration,
         until_target=until_target,
         until_name=until_name,
         initial_snapshot=start,

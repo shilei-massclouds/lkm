@@ -36,7 +36,18 @@ class DeriveToolTests(unittest.TestCase):
         spec.write_text(source, encoding="utf-8")
         self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
-        self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+        self.assertEqual(
+            derive_main(
+                [
+                    str(model),
+                    "--target",
+                    "Computer.Transition::Preset",
+                    "-o",
+                    str(derive),
+                ]
+            ),
+            0,
+        )
         return read_json(derive)
 
     @staticmethod
@@ -270,7 +281,18 @@ class DeriveToolTests(unittest.TestCase):
 
             self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
-            self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+            self.assertEqual(
+                derive_main(
+                    [
+                        str(model),
+                        "--target",
+                        "Computer.Transition::Preset",
+                        "-o",
+                        str(derive),
+                    ]
+                ),
+                0,
+            )
             data = read_json(derive)
 
             self.assertTrue(data["target"]["reached"])
@@ -324,7 +346,18 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["states"]["MemBlock"], "Offline")
             self.assertEqual(data["states"]["PageAllocator"], "Ready")
             self.assertEqual(data["states"]["VmallocAllocator"], "Ready")
-            self.assertEqual(len(data["trace"]), 1)
+            self.assertEqual(len(data["trace"]), 3)
+            self.assertEqual(
+                [
+                    (item["object"], item["transition"], item["edge_kind"])
+                    for item in data["trace"]
+                ],
+                [
+                    ("Computer", "Preset", "drives"),
+                    ("Computer", "Setup", "drives"),
+                    ("Computer", "Enable", "emits"),
+                ],
+            )
             root = data["trace"][0]
             self.assertEqual(root["object"], "Computer")
             self.assertEqual(root["transition"], "Preset")
@@ -335,13 +368,12 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(
                 [
                     (child["object"], child["transition"], child["edge_kind"])
-                    for child in root["children"][:4]
+                    for child in root["children"][:3]
                 ],
                 [
                     ("Riscv64Platform", "Preset", "drives"),
                     ("OpenSBI", "Preset", "drives"),
                     ("Kernel", "Preset", "drives"),
-                    ("Computer", "Setup", "emits"),
                 ],
             )
             self.assertTrue(
@@ -833,8 +865,8 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "kernel_image_constructed"
-                    and record["proof_class"] == "kernel_image_construction"
+                    record["predicate"] == "kernel_image_file_constructed"
+                    and record["proof_class"] == "derived_fact"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )

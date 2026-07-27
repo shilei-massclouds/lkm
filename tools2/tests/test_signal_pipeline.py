@@ -49,7 +49,7 @@ class SignalPipelineTests(unittest.TestCase):
     def run_source(
         self,
         source: str,
-        signal: str,
+        signal: str | None,
         *,
         max_depth: str = "3",
         max_breadth: str = "3",
@@ -72,8 +72,6 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
         derive_args = [
             str(model),
-            "--signal",
-            signal,
             "--max-depth",
             max_depth,
             "--max-breadth",
@@ -81,6 +79,8 @@ class SignalPipelineTests(unittest.TestCase):
             "-o",
             str(derivation),
         ]
+        if signal is not None:
+            derive_args.extend(["--signal", signal])
         if scenario is not None:
             scenario_path = root / "scenario.json"
             scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -159,6 +159,190 @@ class SignalPipelineTests(unittest.TestCase):
                 "  Root -- Run --> Async[Base:Ready]\n"
                 "  Root -- Observe --> Sink\n",
             )
+
+    def test_external_orchestration_drives_then_enqueues_emits_and_explicit_is_single(self) -> None:
+        source = """
+            external Human {
+                drives {
+                    Computer.Transition::Preset;
+                    Computer.Transition::Setup;
+                }
+                emits {
+                    Computer.Transition::Enable;
+                }
+            }
+
+            system Computer {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions { on Transition::Preset -> State::Prepared { } }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready { } }
+                }
+                state State::Ready {
+                    transitions { on Transition::Enable -> State::Online { } }
+                }
+                state State::Online { }
+            }
+        """
+        derivation, checked, _ = self.run_source(
+            source, None, max_depth="all", max_breadth="all"
+        )
+        self.assertEqual(checked["verdict"], "complete")
+        self.assertEqual(
+            [
+                (
+                    item["source"],
+                    item["target"],
+                    item["name"],
+                    item["delivery"],
+                    item["cause_id"],
+                )
+                for item in derivation["signals"]
+            ],
+            [
+                ("Human", "Computer", "Preset", "drives", None),
+                ("Human", "Computer", "Setup", "drives", None),
+                ("Human", "Computer", "Enable", "emits", None),
+            ],
+        )
+        self.assertEqual(derivation["root_request"]["signal_id"], "sig-0001")
+        enqueue = next(
+            item["sequence"]
+            for item in derivation["events"]
+            if item["kind"] == "emits_enqueued" and item["child_id"] == "sig-0003"
+        )
+        dequeue = next(
+            item["sequence"]
+            for item in derivation["events"]
+            if item["kind"] == "emits_dequeued" and item["signal_id"] == "sig-0003"
+        )
+        self.assertLess(enqueue, dequeue)
+
+        explicit, explicit_checked, _ = self.run_source(source, "Computer.Preset")
+        self.assertEqual(explicit_checked["verdict"], "complete")
+        self.assertEqual(len(explicit["signals"]), 1)
+        self.assertEqual(explicit["signals"][0]["delivery"], "root")
+        self.assertEqual(explicit["last_stable_snapshot"]["states"]["Computer"], "Prepared")
+
+    def test_external_synchronous_failure_short_circuits_later_drives_and_emits(self) -> None:
+        source = """
+            predicate preset_allowed() -> bool;
+            external Human {
+                drives {
+                    Computer.Transition::Preset;
+                    Computer.Transition::Setup;
+                }
+                emits {
+                    Computer.Transition::Enable;
+                }
+            }
+            system Computer {
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            depends_on { preset_allowed(); }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready { } }
+                }
+                state State::Ready {
+                    transitions { on Transition::Enable -> State::Online { } }
+                }
+                state State::Online { }
+            }
+        """
+        derivation, checked, _ = self.run_source(source, None)
+        self.assertEqual(checked["verdict"], "failed")
+        self.assertEqual(
+            [(item["name"], item["outcome"]) for item in derivation["signals"]],
+            [("Preset", "rejected")],
+        )
+        self.assertFalse(
+            any(item["kind"] == "emits_enqueued" for item in derivation["events"])
+        )
+
+    def test_external_parse_and_semantic_errors_are_reported(self) -> None:
+        cases = {
+            "duplicate-block": (
+                """
+                    external Human {
+                        drives { Computer.Transition::Preset; }
+                        drives { Computer.Transition::Setup; }
+                        emits { Computer.Transition::Enable; }
+                    }
+                """,
+                "duplicate external drives block",
+            ),
+            "illegal-member": (
+                """
+                    external Human {
+                        depends_on { allowed(); }
+                        drives { Computer.Transition::Preset; }
+                        emits { Computer.Transition::Enable; }
+                    }
+                """,
+                "external members must be drives or emits blocks",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, (source, expected) in cases.items():
+                spec = root / f"{name}.spec"
+                ast = root / f"{name}.ast.json"
+                spec.write_text(textwrap.dedent(source), encoding="utf-8")
+                self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+                messages = [
+                    item["message"] for item in read_json(ast)["document"]["diagnostics"]
+                ]
+                self.assertTrue(any(expected in message for message in messages), messages)
+
+            semantic = root / "semantic.spec"
+            semantic_ast = root / "semantic.ast.json"
+            semantic_model = root / "semantic.model.json"
+            semantic.write_text(
+                textwrap.dedent(
+                    """
+                    external Human {
+                        drives { Missing.Transition::Preset; }
+                        emits { Computer.Transition::Enable; }
+                    }
+                    external Operator {
+                        drives { Computer.Transition::Preset; }
+                        emits { Computer.Transition::Enable; }
+                    }
+                    system Human {
+                        initial_state: State::Base;
+                        state State::Base { }
+                    }
+                    system Computer {
+                        initial_state: State::Base;
+                        state State::Base {
+                            transitions { on Transition::Preset -> State::Ready { } }
+                        }
+                        state State::Ready {
+                            transitions { on Transition::Enable -> State::Online { } }
+                        }
+                        state State::Online { }
+                    }
+                    """
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(parse_main([str(semantic), "-o", str(semantic_ast)]), 0)
+            self.assertEqual(
+                model_main([str(semantic_ast), "-o", str(semantic_model)]), 0
+            )
+            model_data = read_json(semantic_model)
+            self.assertFalse(model_data["summary"]["ok"])
+            messages = [item["message"] for item in model_data["diagnostics"]]
+            self.assertTrue(any("only one external" in message for message in messages))
+            self.assertTrue(any("conflicts with system Human" in message for message in messages))
+            self.assertTrue(any("unknown receiver Missing" in message for message in messages))
 
     def test_compact_renderer_uses_hierarchy_depth_order_and_actual_states(self) -> None:
         base = {
@@ -733,7 +917,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2, 3):
+            for old_version in (1, 2, 3, 4):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -750,7 +934,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=4", stderr.getvalue())
+                self.assertIn("version=5", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -812,7 +996,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v4_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v5_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -822,7 +1006,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2, 3):
+            for old_version in (1, 2, 3, 4):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -837,7 +1021,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=4", stderr.getvalue())
+                    self.assertIn("version=5", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1058,7 +1242,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v4_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v5_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -1881,7 +2065,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v4_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v5_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -2107,15 +2291,29 @@ class SignalPipelineTests(unittest.TestCase):
                     ("Computer", "Riscv64Platform", "Preset"),
                     ("Computer", "OpenSBI", "Preset"),
                     ("Computer", "Kernel", "Preset"),
-                    ("Computer", "Computer", "Setup"),
+                    ("Human", "Computer", "Setup"),
                     ("Computer", "Riscv64Platform", "Setup"),
                     ("Computer", "OpenSBI", "Setup"),
                     ("Computer", "Kernel", "Setup"),
                     ("Kernel", "Config", "Enable"),
                     ("Kernel", "Lds", "Enable"),
-                    ("Computer", "Computer", "Enable"),
+                    ("Human", "Computer", "Enable"),
                     ("Computer", "Riscv64Platform", "Enable"),
                     ("Riscv64Platform", "OpenSBI", "Enable"),
+                ],
+            )
+            computer_signals = [
+                item for item in derivation["signals"] if item["target"] == "Computer"
+            ]
+            self.assertEqual(
+                [
+                    (item["source"], item["name"], item["delivery"], item["cause_id"])
+                    for item in computer_signals
+                ],
+                [
+                    ("Human", "Preset", "drives", None),
+                    ("Human", "Setup", "drives", None),
+                    ("Human", "Enable", "emits", None),
                 ],
             )
             self.assertLess(
@@ -2141,6 +2339,7 @@ class SignalPipelineTests(unittest.TestCase):
                         "BootCpuRegisters",
                         "OpenSBI",
                         "Kernel",
+                        "KernelImage",
                     )
                 },
                 {
@@ -2152,6 +2351,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "BootCpuRegisters": "Online",
                     "OpenSBI": "Online",
                     "Kernel": "Ready",
+                    "KernelImage": "Base",
                 },
             )
             self.assertIn(
@@ -2183,9 +2383,29 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn(
                 "kernel_boot_image_constructed_from_elf(Config,Lds)", boundary_facts
             )
+            self.assertIn("kernel_image_file_constructed", boundary_facts)
             self.assertIn(
-                'kernel_image_physical_load_pmd_aligned("phys_addr(Lds.kernel_start)","Config.pmd_size")',
+                'kernel_image_loaded_for_handoff_at("OpenSBI.kernel_load_pa")',
                 boundary_facts,
+            )
+            self.assertIn(
+                'kernel_image_load_pmd_aligned("OpenSBI.kernel_load_pa","Config.pmd_size")',
+                boundary_facts,
+            )
+            self.assertIn("assert:OpenSBI.kernel_load_pa != 0", boundary_facts)
+            kernel_setup = next(
+                item
+                for item in derivation["signals"]
+                if item["target"] == "Kernel" and item["name"] == "Setup"
+            )
+            kernel_ready_facts = set(kernel_setup["after_snapshot"]["facts"])
+            self.assertIn("kernel_image_file_constructed", kernel_ready_facts)
+            self.assertFalse(
+                any(
+                    fact.startswith("kernel_image_loaded_for_handoff_at(")
+                    or fact.startswith("kernel_image_load_pmd_aligned(")
+                    for fact in kernel_ready_facts
+                )
             )
             self.assertIn("ordered_booting_enabled", boundary_facts)
             self.assertIn("primary_hart_only_at_kernel_entry", boundary_facts)
@@ -2196,9 +2416,16 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(boundary_states["LinuxRiscv64KernelBootSpec"], "Online")
             self.assertEqual(boundary_states["BootInitFlow"], "Base")
             self.assertEqual(boundary_states["KernelInitFlow"], "Base")
+            self.assertEqual(boundary_states["KernelImage"], "Base")
             self.assertFalse(
                 any(
-                    event.get("signal_id") is not None
+                    item["target"] == "Kernel" and item["name"] == "Enable"
+                    for item in derivation["signals"]
+                )
+            )
+            self.assertFalse(
+                any(
+                    event["kind"] != "until_signal_reached"
                     and event.get("target") == "Kernel"
                     and event.get("signal") == "Enable"
                     for event in derivation["events"]

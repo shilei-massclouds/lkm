@@ -706,6 +706,33 @@ def _enum(segment: Segment) -> dict[str, Any]:
     return {"name": match.group(1), "values": values, "span": segment.span()}
 
 
+def _external(segment: Segment, diagnostics: list[dict[str, Any]]) -> dict[str, Any]:
+    match = re.match(rf"^\s*external\s+({_IDENT})\s*\{{", segment.text, re.S)
+    if match is None:
+        raise StructuralFailure("invalid external declaration", segment)
+    body, body_line, _header = _block_body(segment)
+    result = {"name": match.group(1), "drives": [], "emits": [], "span": segment.span()}
+    seen: set[str] = set()
+    for member in _split_members(body, path=segment.path, start_line=body_line):
+        block = _BLOCK_RE.match(member.text)
+        if block is None or block.group(1) not in {"drives", "emits"}:
+            diagnostics.append(
+                _diagnostic("error", "external members must be drives or emits blocks", member)
+            )
+            continue
+        kind = block.group(1)
+        if kind in seen:
+            diagnostics.append(_diagnostic("error", f"duplicate external {kind} block", member))
+            continue
+        seen.add(kind)
+        result[kind] = _plain_block(member, kind)["entries"]
+    if not result["drives"]:
+        diagnostics.append(_diagnostic("error", "external declaration requires drives", segment))
+    if not result["emits"]:
+        diagnostics.append(_diagnostic("error", "external declaration requires emits", segment))
+    return result
+
+
 def _diagnostic(category: str, message: str, segment: Segment) -> dict[str, Any]:
     return {"category": category, "message": message, "span": segment.span()}
 
@@ -722,6 +749,7 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
         "functions": [],
         "locks": [],
         "contexts": [],
+        "externals": [],
         "systems": [],
         "diagnostics": diagnostics,
     }
@@ -767,6 +795,8 @@ def parse_full_spec(path: str | Path) -> dict[str, Any]:
                     document["types"].append(_type(member, diagnostics))
                 elif head in {"object", "system"}:
                     document["systems"].append(_system(member, diagnostics))
+                elif head == "external":
+                    document["externals"].append(_external(member, diagnostics))
                 elif head in {"predicate", "function"}:
                     document[head + "s"].append(_predicate(member, diagnostics))
                 elif head in {"context", "exclusive_context"}:

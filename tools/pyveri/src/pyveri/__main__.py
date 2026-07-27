@@ -93,8 +93,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     derive_parser.add_argument("spec", type=Path, help="path to the .spec input file")
     derive_parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition, default: {DEFAULT_TARGET}",
+        help="derive only this transition instead of the default external orchestration",
     )
     derive_parser.add_argument(
         "--strict",
@@ -108,8 +107,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("spec", type=Path, help="path to the .spec input file")
     check_parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition, default: {DEFAULT_TARGET}",
+        help="check only this transition instead of the default external orchestration",
     )
     _add_work_dir_argument(check_parser)
 
@@ -118,8 +116,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     view_parser.add_argument("view", choices=TEXT_VIEW_CHOICES, help="view name")
     view_parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition for trace view, default: {DEFAULT_TARGET}",
+        help="target transition for trace view; default: external orchestration",
     )
     _add_trace_action_depth_argument(view_parser)
     view_parser.add_argument("-o", "--output", type=Path, help="write the view to a file")
@@ -130,8 +127,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("view", choices=RENDER_VIEW_CHOICES, help="view name")
     render_parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition for trace view, default: {DEFAULT_TARGET}",
+        help="target transition for trace view; default: external orchestration",
     )
     render_parser.add_argument(
         "--format",
@@ -215,8 +211,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition for --derive, default: {DEFAULT_TARGET}",
+        help="target transition for --derive; default: external orchestration",
     )
     parser.add_argument(
         "--strict",
@@ -508,8 +503,11 @@ def _run_model_stage(ast: Path, output: Path) -> int:
     return _run_stage(["-m", "model_tool", str(ast), "-o", str(output)])
 
 
-def _run_derive_stage(model: Path, output: Path, target: str) -> int:
-    return _run_stage(["-m", "derive_tool", str(model), "-o", str(output), "--target", target])
+def _run_derive_stage(model: Path, output: Path, target: str | None) -> int:
+    command = ["-m", "derive_tool", str(model), "-o", str(output)]
+    if target is not None:
+        command.extend(["--target", target])
+    return _run_stage(command)
 
 
 def _run_check_stage(derive: Path, output: Path, *, echo: bool = True) -> int:
@@ -627,7 +625,7 @@ def _render_view_output(
     return output.read_text(encoding=encoding)
 
 
-def _ensure_derivation(paths: dict[str, Path], target: str) -> int:
+def _ensure_derivation(paths: dict[str, Path], target: str | None) -> int:
     if paths["derive"].is_file():
         return 0
     return _run_derive_stage(paths["model"], paths["derive"], target)

@@ -2,6 +2,17 @@
 
 predicate computer_assembled_from<P, F, K>(platform: P, firmware: F, kernel: K) -> bool;
 
+external Human {
+    drives {
+        Computer.Transition::Preset;
+        Computer.Transition::Setup;
+    }
+
+    emits {
+        Computer.Transition::Enable;
+    }
+}
+
 object Computer: ComputerObject {
     initial_state: State::Base;
 
@@ -20,9 +31,6 @@ object Computer: ComputerObject {
                     Kernel.state == State::Prepared;
                 }
 
-                emits {
-                    Transition::Setup;
-                }
             }
         }
     }
@@ -49,9 +57,6 @@ object Computer: ComputerObject {
                     computer_assembled_from(Riscv64Platform, OpenSBI, Kernel);
                 }
 
-                emits {
-                    Transition::Enable;
-                }
             }
         }
     }

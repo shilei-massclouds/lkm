@@ -119,7 +119,10 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  -> Riscv64Platform.Preset", text)
         self.assertIn("  -> OpenSBI.Preset", text)
         self.assertIn("  -> Kernel.Preset", text)
-        self.assertIn("  -> Computer.Setup [emits]", text)
+        self.assertIn("external::Human", text)
+        self.assertIn("  -> Computer.Preset", text)
+        self.assertIn("  -> Computer.Setup", text)
+        self.assertIn("  -> Computer.Enable [emits]", text)
         self.assertIn("Computer.Setup", text)
         self.assertIn("  -> Riscv64Platform.Setup", text)
         self.assertIn("  -> OpenSBI.Setup", text)
@@ -141,7 +144,9 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("MmCoreInitPhase.Setup", text)
         self.assertIn("PayloadPreparePhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
-        self.assertIn('"Computer.Preset" -> "Computer.Setup"', dot)
+        self.assertIn('"external::Human" -> "Computer.Preset"', dot)
+        self.assertIn('"external::Human" -> "Computer.Setup"', dot)
+        self.assertIn('"external::Human" -> "Computer.Enable"', dot)
         self.assertIn('"Computer.Preset" -> "Riscv64Platform.Preset"', dot)
         self.assertIn('"Computer.Enable" -> "Riscv64Platform.Enable"', dot)
         self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Enable"', dot)
@@ -1163,7 +1168,7 @@ class ModelBuilderTests(unittest.TestCase):
         model_result = build_model(document)
         self.assertTrue(model_result.ok, [diag.message for diag in model_result.errors])
 
-        derive_result = derive(model_result.model)
+        derive_result = derive(model_result.model, "Computer.Transition::Preset")
 
         self.assertTrue(derive_result.ok)
         order = [

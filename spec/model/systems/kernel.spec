@@ -15,18 +15,16 @@ predicate linux_riscv64_kernel_pmd_aligned_load_required<S>(pmd_size: S) -> bool
 predicate kernel_elf_linked_from_config_and_lds<C, L>(config: C, lds: L) -> bool;
 predicate kernel_boot_image_constructed_from_elf<C, L>(config: C, lds: L) -> bool;
 
-predicate kernel_image_physical_load_pmd_aligned<A, S>(phys_start: A, pmd_size: S) -> bool {
-    aligned(phys_start, pmd_size);
-}
-
-predicate kernel_image_constructed() -> bool {
+predicate kernel_image_file_constructed() -> bool {
     kernel_elf_linked_from_config_and_lds(Config, Lds);
     kernel_boot_image_constructed_from_elf(Config, Lds);
-    kernel_image_physical_load_pmd_aligned(
-        phys_addr(Lds.kernel_start),
-        Config.pmd_size
-    );
 }
+
+predicate kernel_image_loaded_for_handoff_at<A>(kernel_load_pa: A) -> bool;
+predicate kernel_image_load_pmd_aligned<A, S>(kernel_load_pa: A, pmd_size: S) -> bool {
+    aligned(kernel_load_pa, pmd_size);
+}
+predicate kernel_image_phys_start_observed_at_entry<I, A>(image: I, phys_start: A) -> bool;
 
 object LinuxRiscv64KernelBootSpec: PrepareObject {
     initial_state: State::Online;
@@ -297,11 +295,7 @@ object Kernel: KernelObject {
                     Lds.state == State::Online;
                     kernel_elf_linked_from_config_and_lds(Config, Lds);
                     kernel_boot_image_constructed_from_elf(Config, Lds);
-                    aligned(phys_addr(Lds.kernel_start), Config.pmd_size);
-                    kernel_image_physical_load_pmd_aligned(
-                        phys_addr(Lds.kernel_start),
-                        Config.pmd_size
-                    );
+                    kernel_image_file_constructed();
                     kernel_enable_accept_available(self);
                 }
             }
@@ -317,11 +311,7 @@ object Kernel: KernelObject {
             linux_riscv64_kernel_boot_spec_adopted();
             kernel_elf_linked_from_config_and_lds(Config, Lds);
             kernel_boot_image_constructed_from_elf(Config, Lds);
-            kernel_image_physical_load_pmd_aligned(
-                phys_addr(Lds.kernel_start),
-                Config.pmd_size
-            );
-            kernel_image_constructed();
+            kernel_image_file_constructed();
             kernel_enable_accept_available(self);
         }
 
@@ -353,11 +343,12 @@ object Kernel: KernelObject {
                     Config.state == State::Online;
                     kernel_elf_linked_from_config_and_lds(Config, Lds);
                     kernel_boot_image_constructed_from_elf(Config, Lds);
-                    kernel_image_physical_load_pmd_aligned(
-                        phys_addr(Lds.kernel_start),
+                    kernel_image_file_constructed();
+                    kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa);
+                    kernel_image_load_pmd_aligned(
+                        OpenSBI.kernel_load_pa,
                         Config.pmd_size
                     );
-                    kernel_image_constructed();
                     BootTask.state == State::OnCpu;
                     BootInitFlow.state == State::Base;
                 }
@@ -407,11 +398,12 @@ object Kernel: KernelObject {
             Lds.state == State::Online;
             kernel_elf_linked_from_config_and_lds(Config, Lds);
             kernel_boot_image_constructed_from_elf(Config, Lds);
-            kernel_image_physical_load_pmd_aligned(
-                phys_addr(Lds.kernel_start),
+            kernel_image_file_constructed();
+            kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa);
+            kernel_image_load_pmd_aligned(
+                OpenSBI.kernel_load_pa,
                 Config.pmd_size
             );
-            kernel_image_constructed();
             kernel_enable_accepted(self);
             BootCpuRegisters.a0 == BootArgs.boot_hartid;
             BootCpuRegisters.a1 == BootArgs.dtb_pa;

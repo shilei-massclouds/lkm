@@ -9,7 +9,8 @@ OpenSBI 初态为 Base：
   不构造或改变初态 Online 的只读输入实例。
 - `Setup` 验证规格并构造 OpenSBI 固件，提交 Ready。
 - `Enable` 一次性验证平台 Online、固件、SBI/BootArgs、已采纳的 Linux/RISC-V64 kernel boot 规格、
-  Config/Lds，以及 ELF、boot Image 和物理 PMD 放置三项构造事实。它为本次 handoff 选择 SBI HSM
+  Config/Lds，以及 ELF 与 boot Image 文件构造事实。它为本次 handoff 选择 `kernel_load_pa`，分别
+  建立 boot Image 已装载到该待交接地址、该地址满足 PMD/2 MiB 对齐两个事实；同时选择 SBI HSM
   ordered booting，只释放 primary hart，并精确保证
 `BootCpuRegisters.a0 == BootArgs.boot_hartid` 与
 `BootCpuRegisters.a1 == BootArgs.dtb_pa`、`BootCpuRegisters.satp == 0`，同时保证 DTB 位于入口可访问
@@ -18,8 +19,13 @@ OpenSBI 初态为 Base：
 `sie/sip`：Kernel 在 `BootInitFlow.Preset` 的第一个入口动作中自行完成防御性屏蔽。OpenSBI 不拥有
 Kernel，也不拥有 Kernel 的内部 phase。
 
+装载事实描述 OpenSBI Enable 交接域必须保证的结果，不虚构 OpenSBI 固件内部执行复制。QEMU/loader
+可以完成实际字节放置，但 OpenSBI 只有在观察并保证其结果、选择相同的交接入口地址后才能提交
+Online。
+
 OpenSBI.Ready 只承载规格与 firmware 构造完成事实，不提前承载 ordered boot 已选定、primary hart
 已进入或入口寄存器已经提交等运行期 handoff 事实；这些事实由 Enable 建立并由 Online invariant 保持。
+`kernel_load_pa` 同样只由 Enable 选择，并由 Online 保持；Ready 不含物理装载地址或装载完成事实。
 其中 `satp == 0` 的 live CSR 等式只约束 OpenSBI 提交与 `Kernel.Enable` 接受边界；Kernel 随后会切换
 页表，OpenSBI.Online 保持的是“交接时 satp 为零”的稳定 handoff 记录，不要求 live satp 永远为零。
 

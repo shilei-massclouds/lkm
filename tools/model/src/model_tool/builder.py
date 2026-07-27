@@ -13,6 +13,7 @@ from common.model_types import (
     DeclarationSiteDef,
     TransitionDef,
     ExclusiveContextDef,
+    ExternalDef,
     ObjectDef,
     ObjectModel,
     Severity,
@@ -23,6 +24,7 @@ from common.spec_ast import (
     BodyMember,
     Block,
     ExclusiveContextDecl,
+    ExternalDecl,
     EnumDecl,
     TransitionDecl,
     FunctionDecl,
@@ -187,6 +189,7 @@ def build_model(
     exclusive_contexts = _build_exclusive_contexts(
         document.exclusive_contexts, locks, diagnostics
     )
+    externals = _build_externals(document.externals, diagnostics)
     _check_type_lifecycles(types, diagnostics)
     objects = _build_objects(document.objects, types, diagnostics)
     children = _build_children(objects, diagnostics)
@@ -215,6 +218,7 @@ def build_model(
         types=types,
         locks=locks,
         exclusive_contexts=exclusive_contexts,
+        externals=externals,
         objects=objects,
         children=children,
         boundaries=boundaries,
@@ -224,6 +228,7 @@ def build_model(
 
     _check_initial_states(model, diagnostics)
     _check_event_targets(model, diagnostics)
+    _check_external_orchestrations(model, diagnostics)
     _check_lock_references(model, diagnostics)
     _check_exclusive_context_references(model, diagnostics)
     _check_references(model, diagnostics)
@@ -242,6 +247,7 @@ def summarize_model(result: BuildResult) -> str:
         [
             f"model: {status}",
             f"objects: {len(model.objects)}",
+            f"externals: {len(model.externals)}",
             f"states: {model.state_count}",
             f"transitions: {model.transition_count}",
             f"declaration_sites: {len(model.declaration_sites)}",
@@ -662,6 +668,33 @@ def _build_exclusive_contexts(
             obj_refs=tuple(decl.obj_refs),
         )
     return contexts
+
+
+def _build_externals(
+    declarations: list[ExternalDecl],
+    diagnostics: list[Diagnostic],
+) -> dict[str, ExternalDef]:
+    externals: dict[str, ExternalDef] = {}
+    for decl in declarations:
+        if decl.name in externals:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"duplicate external declaration: {decl.name}",
+                    decl.span,
+                )
+            )
+            continue
+        externals[decl.name] = ExternalDef(name=decl.name, decl=decl)
+    if len(externals) > 1:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "a model may declare only one external orchestration",
+                list(externals.values())[1].decl.span,
+            )
+        )
+    return externals
 
 
 def _build_objects(
@@ -1565,6 +1598,64 @@ def _check_event_targets(model: ObjectModel, diagnostics: list[Diagnostic]) -> N
                             transition.decl.span,
                         )
                     )
+
+
+def _check_external_orchestrations(
+    model: ObjectModel, diagnostics: list[Diagnostic]
+) -> None:
+    for external in model.externals.values():
+        if external.name in model.objects:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"external name conflicts with object: {external.name}",
+                    external.decl.span,
+                )
+            )
+        for delivery, blocks in (
+            ("drives", external.decl.drives),
+            ("emits", external.decl.emits),
+        ):
+            for block in blocks:
+                for entry, span in block.entry_spans:
+                    call = parse_emit_expression(entry)
+                    if call is None or call.receiver is None or call.receiver == "self":
+                        diagnostics.append(
+                            Diagnostic(
+                                Severity.ERROR,
+                                f"external {delivery} entry must be one static process call: {entry}",
+                                span,
+                            )
+                        )
+                        continue
+                    obj = model.objects.get(call.receiver)
+                    if obj is None:
+                        diagnostics.append(
+                            Diagnostic(
+                                Severity.ERROR,
+                                f"external {delivery} has unknown receiver: {call.receiver}",
+                                span,
+                            )
+                        )
+                        continue
+                    transition = (
+                        _transition_def(model, obj.name, call.name)
+                        if call.kind == "Transition"
+                        else None
+                    )
+                    object_process = _object_process_decl(obj, call.kind, call.name)
+                    type_process = _type_process_decl(
+                        model, obj.kind, call.kind, call.name
+                    )
+                    if transition is None and object_process is None and type_process is None:
+                        diagnostics.append(
+                            Diagnostic(
+                                Severity.ERROR,
+                                f"external {delivery} has no handler for "
+                                f"{call.receiver}.{call.kind}::{call.name}",
+                                span,
+                            )
+                        )
 
 
 def _check_exclusive_context_references(

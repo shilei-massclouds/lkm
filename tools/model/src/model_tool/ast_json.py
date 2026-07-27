@@ -13,6 +13,7 @@ from common.spec_ast import (
     EnumDecl,
     TransitionDecl,
     ExclusiveContextDecl,
+    ExternalDecl,
     FunctionDecl,
     LockDecl,
     ObjectDecl,
@@ -42,6 +43,7 @@ def ast_json_to_document(data: dict[str, Any]) -> SpecDocument:
             _exclusive_context_from_json(item)
             for item in _list(document, "exclusive_contexts")
         ],
+        externals=[_external_from_json(item) for item in _list(document, "externals")],
         objects=[_object_from_json(item) for item in _list(document, "objects")],
     )
 
@@ -152,6 +154,16 @@ def _context_guard_from_json(item: Any) -> ContextGuardDecl:
         holds=[_block_from_json(block) for block in data.get("holds", [])],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
         properties={str(key): str(value) for key, value in properties.items()},
+    )
+
+
+def _external_from_json(item: Any) -> ExternalDecl:
+    data = _as_object(item, "external")
+    return ExternalDecl(
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        drives=[_block_from_json(block) for block in _list(data, "drives")],
+        emits=[_block_from_json(block) for block in _list(data, "emits")],
     )
 
 

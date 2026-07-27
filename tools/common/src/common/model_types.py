@@ -11,6 +11,7 @@ from common.spec_ast import (
     EnumDecl,
     TransitionDecl,
     ExclusiveContextDecl,
+    ExternalDecl,
     FunctionDecl,
     LockDecl,
     ObjectDecl,
@@ -99,6 +100,14 @@ class ExclusiveContextDef:
 
 
 @dataclass(frozen=True)
+class ExternalDef:
+    """Validated external orchestration kept outside the object tree."""
+
+    name: str
+    decl: ExternalDecl
+
+
+@dataclass(frozen=True)
 class BoundaryDef:
     """A validated structured deferred or trimmed boundary with inferred owner."""
 
@@ -147,6 +156,7 @@ class ObjectModel:
     exclusive_contexts: dict[str, ExclusiveContextDef]
     objects: dict[str, ObjectDef]
     children: dict[str, list[str]]
+    externals: dict[str, ExternalDef] = field(default_factory=dict)
     boundaries: dict[str, BoundaryDef] = field(default_factory=dict)
     declaration_sites: tuple[DeclarationSiteDef, ...] = ()
     legacy_boundary_count: int = 0

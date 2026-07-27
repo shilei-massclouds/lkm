@@ -100,21 +100,22 @@ Base 尚未完成规格采纳，Prepared 已建立规格，Ready 已构造且可
 
 ### Computer 模型
 
-1. `Preset` 按固定顺序驱动 `Riscv64Platform`、`OpenSBI` 和 `Kernel` 的 `Preset`，分别建立三份规格；
-   提交 Prepared 后异步发送自身 Setup。
+1. `Preset` 按固定顺序驱动 `Riscv64Platform`、`OpenSBI` 和 `Kernel` 的 `Preset`，分别建立三份规格并
+   提交 Prepared；不发送自身 Setup。
 2. `Setup` 按相同顺序驱动三个子 System 的构造；三者均 Ready 后建立 Computer assembly fact，提交
-   Ready 并异步发送自身 Enable。
+   Ready；不发送自身 Enable。
 3. `Enable` 提交 Computer.Online 后异步发送 `Riscv64Platform.Enable`；不等待异步下游全部 Online。
 
 <img src=".\pic\计算机和内核建模.svg" alt="计算机和内核建模" style="zoom:50%;" />
 
-Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使用同步 `drives`。运行交接按
+Human 在模型外部依次同步 drives Computer.Preset、Computer.Setup，二者成功后异步 emits
+Computer.Enable；Computer 的三个 handler 不相互触发。子 System 规格和构造使用同步 `drives`。运行交接按
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable` 异步推进；
 `BootInitFlow`、首次 Scheduler 调度与 `KernelInitFlow` 是 Kernel.Enable 的同步逻辑下层过程。
 
 > MUST[model]：Computer 模型
 >
-> 1. 唯一无需预制条件的完整模型入口是 `Human -> Computer.Preset`
+> 1. 唯一无需预制条件的完整模型入口是 Human 外部编排，其第一个真实 Signal 是 `Human -> Computer.Preset`
 > 2. Preset/Setup 必须按声明顺序驱动 Riscv64Platform/OpenSBI/Kernel
 > 3. Enable 先提交 Computer.Online，再异步驱动 Riscv64Platform.Enable
 
@@ -122,14 +123,15 @@ Computer 的自迁移使用异步 Signal 串联，子 System 规格和构造使�
 
 `Config` 与 `Lds` 是 Kernel 的构建时静态输入，完整模型初态为 Ready。`Kernel.Preset` 建立 Kernel
 系统规格并提交 Prepared；Setup 先驱动 Config.Enable，再驱动依赖 Config.Online 的 Lds.Enable，随后
-构造 kernel image 并提交 Ready。OpenSBI 通过 Kernel.Enable 交接真实入口；Kernel 验证上游和入口 ABI，
+只建立 ELF 与 boot Image 文件构造事实并提交 Ready。OpenSBI.Enable 选择 `kernel_load_pa`，保证 Image
+已装载待交接且地址满足 PMD 对齐，再通过 Kernel.Enable 交接真实入口；Kernel 验证上游和入口 ABI，
 在 Ready 内顺序驱动 BootInitFlow、首次调度和 KernelInitFlow 直至
 `PayloadHandoffPreparePhase.Online`，再提交 Online 并异步发送 `CommitPayloadHandoff`。
 
 > MUST[model]：Kernel 构造与启动模型
 >
 > 1. Kernel.Preset/Setup 只由 Computer 的同名迁移同步驱动
-> 2. Kernel.Setup 按 Config.Enable、Lds.Enable 顺序发布输入，构造 image 后为 Ready
+> 2. Kernel.Setup 按 Config.Enable、Lds.Enable 顺序发布输入，只完成 image 文件构造后为 Ready
 > 3. Kernel.Enable 只接受真实 OpenSBI 交接，应用环境准备完成后提交 Online，并且只由该提交发送 payload handoff
 
 ### 内核系统模型 - 本项目核心模型

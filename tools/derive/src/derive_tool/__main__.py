@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 
 from common import read_json, write_json
-from common.defaults import DEFAULT_TARGET
-
 from .derive_json import derivation_to_json
 from .engine import derive
 from .model_json import model_json_to_object_model
@@ -20,8 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-o", "--output", type=Path, required=True, help="path to derive.json")
     parser.add_argument(
         "--target",
-        default=DEFAULT_TARGET,
-        help=f"target transition, default: {DEFAULT_TARGET}",
+        help="derive only this transition instead of the default external orchestration",
     )
     args = parser.parse_args(argv)
 

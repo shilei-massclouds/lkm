@@ -248,6 +248,16 @@ class ExclusiveContextDecl:
 
 
 @dataclass(frozen=True)
+class ExternalDecl:
+    """A model-external, lifecycle-free Signal orchestration declaration."""
+
+    name: str
+    span: SourceSpan
+    drives: list[Block] = field(default_factory=list)
+    emits: list[Block] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class SpecDocument:
     """Parsed syntax-level spec document."""
 
@@ -257,6 +267,7 @@ class SpecDocument:
     types: list[TypeDecl] = field(default_factory=list)
     locks: list[LockDecl] = field(default_factory=list)
     exclusive_contexts: list[ExclusiveContextDecl] = field(default_factory=list)
+    externals: list[ExternalDecl] = field(default_factory=list)
     objects: list[ObjectDecl] = field(default_factory=list)
 
 

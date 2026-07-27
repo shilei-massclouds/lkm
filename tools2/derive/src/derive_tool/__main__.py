@@ -28,9 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("model", type=Path)
     parser.add_argument(
         "--signal",
-        required=True,
         type=lambda value: normalize_signal_request(value, option="--signal"),
-        help="root Signal as Target.SignalName",
+        help="one root Signal as Target.SignalName; omit to execute the model external orchestration",
     )
     parser.add_argument(
         "-u",

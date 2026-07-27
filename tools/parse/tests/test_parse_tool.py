@@ -39,6 +39,17 @@ class ParseToolTests(unittest.TestCase):
                 item for item in document["objects"] if item["name"] == "Computer"
             )
             self.assertEqual(computer["kind"], "ComputerObject")
+            self.assertEqual(len(document["externals"]), 1)
+            human = document["externals"][0]
+            self.assertEqual(human["name"], "Human")
+            self.assertEqual(
+                [entry["text"] for entry in human["drives"][0]["entries"]],
+                ["Computer.Transition::Preset", "Computer.Transition::Setup"],
+            )
+            self.assertEqual(
+                [entry["text"] for entry in human["emits"][0]["entries"]],
+                ["Computer.Transition::Enable"],
+            )
 
     def test_entry_spans_are_serialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -26,11 +26,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 `tools2` 本轮以完整 `spec/model/main.spec` 和既有最小 fixture 共同验收。独立入口是
 `make -C tools2 test`，不得加入根目录默认 `make test`。测试必须覆盖：
 
-- 每类 schema/version/producer 校验，含 version 4、拒绝 tools2 v1/v2/v3/老工具/旧 snapshot 和老工具不被
+- 每类 schema/version/producer 校验，含 version 5、拒绝 tools2 v1/v2/v3/v4/老工具/旧 snapshot 和老工具不被
   tools2 产物误用的边界；
 - Transition/Action 调用规范化、命名 payload 绑定、受控值/系统引用类型错误和带 span unsupported；
 - self、向下、向上、同级、跨分支坐标，默认 `3/3`、整数、`all`、分支预算独立和 frontier truncation；
 - drives 同步 source order、emits post-commit enqueue 与全局 FIFO 调度记录；
+- `external Human` 解析、重复/非法声明、同步失败短路，以及两次 drives 成功后才异步入队 Enable；
+  显式单 Signal 不得隐式补齐生命周期；
 - drives 有序备选只发送首个当前可接受候选，未选候选不分配 Signal ID，全部不可接受时保留逐候选诊断；
 - 所有 rejected 或 handler failure 都导致 failed，异步失败同样传播，条件不成立永不产生 pending；
 - failed/bounded/until_signal_not_reached 不创建 snapshot-out，complete/reached snapshot 可作为下一 scenario 输入；
@@ -42,7 +44,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `has_slot(instance.field, SlotKind::Member)` 并记录 `model_structure` proof source，未声明成员保持 rejected；主模型默认推导中的
   `FixMap.Preset` 不得再因 `Config.fixmap` 已声明的 FDT 槽位而拒绝。
 - `tools2/bin/pyveri -h` usage 显示 `[-t SIGNAL] [-u SIGNAL]` 和 `--until`，旧 `tools2/pyveri2` 不存在；
-  无参数入口使用 `Human -> Computer.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
+  无参数入口执行唯一 Human 外部编排且第一个真实 Signal 是 `Human -> Computer.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
   参数完整透传，显式 `--source` 覆盖默认 Human。
 - shortcut 只有在显式 `-t` 且没有 `-s` 时按 canonical signal 加载
   `tools2/scenarios/<CanonicalSignal>.snapshot.json`；覆盖 `Startup`/`Preset` 同文件、显式 scenario 优先、
@@ -54,13 +56,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
 - until fixture 覆盖根发送前、同步 drives 发送前、emits 入队前、有序候选选择后、动态 receiver、已有
   FIFO、未提交祖先和重复目标；目标不得拥有 Signal ID、`signal_sent`、enqueue/receive/handler 事件，
   boundary snapshot 必须精确等于发送前稳定状态。
-- reached 返回 0并生成带 provenance 的 v4 snapshot；既有 completed response 保持 completed，未提交
+- reached 返回 0并生成带 provenance 的 v5 snapshot；既有 completed response 保持 completed，未提交
   ancestor 和未处理 FIFO 变为 stopped，summary 不产生 pending；failed/bounded/unreached 返回 1且不
   生成 snapshot。
 - 提交的 `tools2/scenarios/Kernel.Enable.snapshot.json` 必须与从仓库根运行
   `tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json` 得到的 canonical
-  bytes 逐字节一致，并验证 v4、稳定 model fingerprint、发送前 boundary provenance、关键状态、
-  Linux RV64 boot spec 采纳及其 a0/a1/satp/物理 PMD 要求、三项 image 构造叶事实、精确 a0/a1/satp
+  bytes 逐字节一致，并验证 v5、稳定 model fingerprint、发送前 boundary provenance、关键状态、
+  Linux RV64 boot spec 采纳及其 a0/a1/satp/物理 PMD 要求、image 文件构造事实、精确 a0/a1/satp
   交接、ordered boot/DTB 和 BootTaskRef 事实。该边界必须有 `task_concurrency_closed()`，但尚未有
   `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
   `tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive `initial_snapshot` 与 golden
@@ -69,18 +71,20 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须拒绝。显式
   `-s` 仍可覆盖默认 golden。
 - `tools2/bin/pyveri -t Computer.Preset` 在没有对应默认文件时必须返回 2；只有省略 `-t` 的默认
-  `Computer.Preset` 请求从模型初态真实推导。底层 driver/derive 直接请求 `Kernel.Enable` 且不带
+  Human 外部编排从模型初态真实推导。底层 driver/derive 直接请求 `Kernel.Enable` 且不带
   snapshot/scenario 时仍必须因前期状态/事实缺失而 failed，并且不得隐式回溯 emitter 或合成快照。
 - 显式 `--max-depth 0` 返回 bounded/1、frontier 可见且不生成 snapshot；完整运行 snapshot 可由 `-s`
   续跑。
-- 主模型的 `tools2/bin/pyveri -u Kernel.Enable` 必须从默认 `Human -> Computer.Preset` 开始并在
+- 主模型的 `tools2/bin/pyveri -u Kernel.Enable` 必须从默认 Human 外部编排开始并在
   `Kernel.Enable` 发出前 reached；其 snapshot 可用于后续 `-t Kernel.Enable -s SNAPSHOT`，不带 until
   时仍执行完整可达推导。发送前 snapshot 中 `Computer/Riscv64Platform/OpenSBI` 均为 `Online`，
   `Kernel` 为 `Ready`，`Config/Lds` 为 `Online`，`BootInitFlow` 仍为 `Base`；初态即 Online 的
   `BootArgs/BootCpuRegisters` 与 `LinuxRiscv64KernelBootSpec` 仍可访问，snapshot 还必须包含精确的
   a0/a1/satp 交接、物理 PMD 对齐及 image 构造叶事实；不得提前包含 Kernel 入口才建立的中断关闭事实。
-  Signal 创建顺序必须保留三个子 System 的三次 Preset、三次 Setup、Config 先于 Lds Enable，以及
-  `Computer -> Riscv64Platform -> OpenSBI -> Kernel` 的异步 FIFO 交接，且不得出现
+  前 13 个 Signal 的创建顺序必须精确保留三个 Human 创建的 Computer Signal、三个子 System 的三次
+  Preset、三次 Setup、Config 先于 Lds Enable，以及 `Computer -> Riscv64Platform -> OpenSBI` 的异步
+  FIFO 交接；三个 Computer Signal 的 source/delivery 必须分别为 Human/drives、Human/drives、
+  Human/emits，均无共同 cause_id。边界处 Kernel.Enable 不得已有 Signal ID 或收发/handler 事件，且不得出现
   `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
 - 默认文本覆盖 Transition/Action 两种行、`Preset` 到 `Startup` 的显示别名、每层两空格的 hierarchy
   depth 缩进、负 depth 整体平移以及 Signal 创建顺序不被 depth 重排；Transition 状态必须来自 target

@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
             "document": document,
             "summary": {
                 "systems": len(document["systems"]),
+                "externals": len(document["externals"]),
                 "enums": len(document["enums"]),
                 "diagnostics": len(document["diagnostics"]),
             },
