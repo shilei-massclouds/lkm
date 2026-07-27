@@ -20,10 +20,15 @@
   const frameScroll = new Map<number, { left: number; top: number }>();
   const shownIndex = $derived(activeIndex ?? position);
   const frame = $derived(shownIndex < 0 ? animation.initial_frame : animation.frames[shownIndex]);
-  const step = $derived(shownIndex < 0 ? null : animation.steps[shownIndex]);
+  const moment = $derived(shownIndex < 0 ? null : animation.moments[shownIndex]);
   const transitioning = $derived(activeIndex !== null);
   const canPrevious = $derived(position >= 0);
   const canNext = $derived(position < animation.frames.length - 1 && !transitioning);
+  const showBoundary = $derived(
+    !transitioning && position === animation.frames.length - 1
+      ? animation.trace.boundary
+      : null
+  );
 
   function scrollSnapshot() {
     return stageElement
@@ -82,12 +87,12 @@
   }
 
   function updateArrow() {
-    if (!stageElement || !step || (phase !== 'send' && phase !== 'response')) {
+    if (!stageElement || !moment || moment.kind !== 'send' || phase !== 'send') {
       arrowGeometry = null;
       return;
     }
-    const source = endpoint(step.source);
-    const target = endpoint(step.target);
+    const source = endpoint(moment.source);
+    const target = endpoint(moment.target);
     if (!source || !target) {
       arrowGeometry = null;
       return;
@@ -112,7 +117,7 @@
   function trackArrow() {
     arrowFrame = null;
     updateArrow();
-    if (activeIndex !== null && (phase === 'send' || phase === 'response')) {
+    if (activeIndex !== null && moment?.kind === 'send' && phase === 'send') {
       arrowFrame = window.requestAnimationFrame(trackArrow);
     }
   }
@@ -124,8 +129,8 @@
   }
 
   function revealTarget() {
-    if (!stageElement || !step) return;
-    const target = endpoint(step.target);
+    if (!stageElement || !moment) return;
+    const target = endpoint(moment.target);
     if (!target || typeof stageElement.scrollTo !== 'function') return;
     const targetRect = target.getBoundingClientRect();
     const stageRect = stageElement.getBoundingClientRect();
@@ -148,18 +153,31 @@
     if (!canNext) return;
     const snapshot = scrollSnapshot();
     rememberScroll(position);
-    activeIndex = position + 1;
-    phase = 'send';
+    const nextIndex = position + 1;
+    activeIndex = nextIndex;
+    const activeMoment = animation.moments[nextIndex];
+    phase = activeMoment.kind === 'send'
+      ? 'send'
+      : activeMoment.kind === 'complete'
+        ? 'before'
+        : 'response';
     await tick();
     if (!restoreFrameScroll(activeIndex)) {
       restoreBottomAnchor(snapshot);
       revealTarget();
     }
-    updateArrow();
-    scheduleArrowUpdate();
-    await pause(300);
-    phase = 'response';
-    await pause(420);
+    if (activeMoment.kind === 'send') {
+      updateArrow();
+      scheduleArrowUpdate();
+      await pause(480);
+    } else if (activeMoment.kind === 'complete') {
+      await pause(300);
+      phase = 'response';
+      await tick();
+      await pause(420);
+    } else {
+      await pause(420);
+    }
     phase = 'clear';
     arrowGeometry = null;
     await pause(180);
@@ -174,14 +192,18 @@
   }
 
   function responseText() {
-    if (!step) return '初始确定帧：尚未发送 Signal。';
-    if (step.handler.kind === 'Transition') {
-      if (step.response.before_state === null && step.response.after_state === null) {
+    if (!moment) return '初始确定帧：尚未到达因果时刻。';
+    if (moment.kind === 'send') {
+      return `发送：${moment.delivery} · event ${moment.event_sequence}`;
+    }
+    if (moment.kind !== 'complete') return `终止：${moment.kind}，状态保持不变。`;
+    if (moment.handler.kind === 'Transition') {
+      if (moment.response.before_state === null && moment.response.after_state === null) {
         return 'Transition：无 lifecycle state 的响应已完成。';
       }
-      return `Transition：${step.response.before_state} → ${step.response.after_state}`;
+      return `Transition：${moment.response.before_state} → ${moment.response.after_state}`;
     }
-    if (step.handler.kind === 'Action') return 'Action：响应完成，不改变 lifecycle state。';
+    if (moment.handler.kind === 'Action') return 'Action：响应完成，不改变 lifecycle state。';
     return '目标未解析到 handler；保留输入中的确定结果。';
   }
 
@@ -242,7 +264,7 @@
     <dl class="trace-meta">
       <div><dt>Source:</dt><dd>{request.source}</dd></div>
       <div><dt>Verdict:</dt><dd>{animation.trace.verdict}</dd></div>
-      <div><dt>Signals:</dt><dd>{animation.trace.total_steps}</dd></div>
+      <div><dt>Signals:</dt><dd>{animation.trace.total_signals}</dd></div>
       <div title={`Source file: ${animation.source}\nModel fingerprint: ${animation.inputs.model_fingerprint}`}>
         <dt>Protocol:</dt><dd>{animation.schema} v{animation.version}</dd>
       </div>
@@ -256,12 +278,12 @@
     data-animation-phase={phase}
     bind:this={stageElement}
   >
-    <FrameTree {frame} activeStep={transitioning ? step : null} {phase} {reducedMotion} />
-    {#if arrowGeometry && step && (phase === 'send' || phase === 'response')}
+    <FrameTree {frame} activeMoment={transitioning ? moment : null} {phase} {reducedMotion} />
+    {#if arrowGeometry && moment && moment.kind === 'send' && phase === 'send'}
       <SignalArrow
         geometry={arrowGeometry}
-        signal={step.signal}
-        outcome={step.outcome}
+        signal={moment.signal}
+        outcome="completed"
         width={overlayWidth}
         height={overlayHeight}
       />
@@ -270,16 +292,21 @@
   <section class="transport" aria-label="Signal navigation">
     <button type="button" onclick={previous} disabled={!canPrevious}>上一步</button>
     <div class="step-copy">
-      <p class="counter">步骤 {shownIndex + 1} / {animation.trace.total_steps}</p>
-      {#if step}
-        <h2>{step.source} <span>— {step.signal} →</span> {step.target}</h2>
+      <p class="counter">时刻 {shownIndex + 1} / {animation.trace.total_moments}</p>
+      {#if moment}
+        <h2>{moment.source} <span>— {moment.signal} →</span> {moment.target}</h2>
         <p>{responseText()}</p>
-        {#if step.outcome !== 'completed'}
-          <p class="reason"><strong>{step.outcome}</strong>{step.reason ? ` · ${step.reason}` : ''}</p>
+        {#if moment.kind !== 'send' && moment.outcome !== 'completed'}
+          <p class="reason"><strong>{moment.outcome}</strong>{moment.reason ? ` · ${moment.reason}` : ''}</p>
         {/if}
       {:else}
         <h2>初始帧</h2>
         <p>{responseText()}</p>
+      {/if}
+      {#if showBoundary}
+        <p class="boundary">
+          边界：{showBoundary.source} — {showBoundary.signal} → {showBoundary.target}（发送前）
+        </p>
       {/if}
     </div>
     <button type="button" onclick={next} disabled={!canNext}>下一步</button>

@@ -46,84 +46,168 @@ class SignalAnimationTests(unittest.TestCase):
         self.model = read_json(self.work / "model.json")
         self.view = read_json(self.work / "view.json")
 
-    def test_animation_v1_projects_strict_trace_metadata(self) -> None:
+    @staticmethod
+    def _snapshots(view: dict) -> list[dict]:
+        snapshots = [view["initial_snapshot"]]
+        for signal in view["signals"]:
+            snapshots.extend((signal["before_snapshot"], signal["after_snapshot"]))
+        for event in view["events"]:
+            if isinstance(event.get("before"), dict):
+                snapshots.append(event["before"])
+            if isinstance(event.get("after"), dict):
+                snapshots.append(event["after"])
+        boundary = view.get("boundary")
+        if isinstance(boundary, dict) and isinstance(boundary.get("snapshot"), dict):
+            snapshots.append(view["boundary"]["snapshot"])
+        return snapshots
+
+    @staticmethod
+    def _signal_event(view: dict, signal_id: str, kind: str) -> dict:
+        return next(
+            event
+            for event in view["events"]
+            if event["kind"] == kind and event.get("signal_id") == signal_id
+        )
+
+    def _set_endpoints(
+        self, view: dict, signal_index: int, *, source: str | None = None, target: str | None = None
+    ) -> None:
+        signal = view["signals"][signal_index]
+        sent = self._signal_event(view, signal["id"], "signal_sent")
+        if source is not None:
+            signal["source"] = source
+            sent["source"] = source
+        if target is not None:
+            signal["target"] = target
+            sent["target"] = target
+            received = next(
+                (
+                    event
+                    for event in view["events"]
+                    if event["kind"] == "signal_received"
+                    and event.get("signal_id") == signal["id"]
+                ),
+                None,
+            )
+            if received is not None:
+                received["target"] = target
+
+    @staticmethod
+    def _resequence(view: dict) -> None:
+        for sequence, event in enumerate(view["events"], start=1):
+            event["sequence"] = sequence
+
+    def _single_signal_view(self, outcome: str) -> dict:
+        view = deepcopy(self.view)
+        signal = view["signals"][0]
+        signal["outcome"] = outcome
+        signal["reason"] = None if outcome == "completed" else "fixture"
+        if outcome != "completed":
+            signal["after_snapshot"] = deepcopy(signal["before_snapshot"])
+        if outcome in {"rejected", "truncated"}:
+            signal["handler"] = None
+        sent = deepcopy(self._signal_event(view, signal["id"], "signal_sent"))
+        received = deepcopy(self._signal_event(view, signal["id"], "signal_received"))
+        if outcome == "completed":
+            terminal = deepcopy(self._signal_event(view, signal["id"], "response_completed"))
+            terminal["before"] = deepcopy(signal["before_snapshot"])
+            terminal["after"] = deepcopy(signal["after_snapshot"])
+            events = [sent, received, terminal]
+        else:
+            terminal_kinds = {
+                "rejected": "signal_rejected",
+                "failed": "signal_failed",
+                "truncated": "signal_truncated",
+                "stopped": "response_stopped",
+            }
+            terminal = {
+                "kind": terminal_kinds[outcome],
+                "signal_id": signal["id"],
+            }
+            if outcome != "truncated":
+                terminal["reason"] = signal["reason"]
+            events = [sent, terminal] if outcome == "truncated" else [sent, received, terminal]
+        view["signals"] = [signal]
+        view["events"] = events
+        view["initial_snapshot"] = deepcopy(signal["before_snapshot"])
+        view["boundary"] = None
+        self._resequence(view)
+        return view
+
+    def test_animation_v2_projects_strict_causal_moments(self) -> None:
         animation = build_animation(self.model, self.view)
         self.assertEqual(
             (animation["schema"], animation["version"], animation["producer"]),
             (ANIMATION_SCHEMA, ANIMATION_VERSION, "tools2"),
         )
         self.assertEqual(animation["inputs"]["model_fingerprint"], self.model["model_fingerprint"])
-        self.assertEqual(animation["trace"]["total_steps"], 4)
+        self.assertEqual(animation["trace"]["total_signals"], 4)
+        self.assertEqual(animation["trace"]["total_moments"], 8)
         self.assertEqual(
             [
-                (step["id"], step["source"], step["target"], step["handler"]["kind"])
-                for step in animation["steps"]
+                (moment["id"], moment["kind"], moment["event_sequence"])
+                for moment in animation["moments"]
             ],
             [
-                ("sig-0001", "Human", "Root", "Transition"),
-                ("sig-0002", "Root", "Child", "Action"),
-                ("sig-0003", "Root", "Async", "Transition"),
-                ("sig-0004", "Root", "Sink", "Action"),
+                ("sig-0001:send", "send", 1),
+                ("sig-0002:send", "send", 4),
+                ("sig-0002:terminal", "complete", 8),
+                ("sig-0001:terminal", "complete", 11),
+                ("sig-0003:send", "send", 12),
+                ("sig-0004:send", "send", 14),
+                ("sig-0003:terminal", "complete", 21),
+                ("sig-0004:terminal", "complete", 25),
             ],
         )
-        self.assertEqual(
-            animation["initial_frame"]["nodes"],
-            [
-                {
-                    "id": "Human",
-                    "parent": None,
-                    "kind": "external",
-                    "state": None,
-                    "structural": False,
-                    "first_seen": 0,
-                }
-            ],
-        )
-        self.assertEqual(len(animation["frames"]), 4)
+        self.assertEqual(animation["initial_frame"]["nodes"], [])
+        self.assertEqual(len(animation["frames"]), 8)
         self.assertEqual(
             [(node["id"], node["state"]) for node in animation["frames"][0]["nodes"]],
-            [("Human", None), ("Root", "Ready")],
+            [("Human", None), ("Root", "Base")],
         )
-        self.assertNotIn("before_snapshot", animation["steps"][0])
-        self.assertNotIn("after_snapshot", animation["steps"][0])
         self.assertEqual(
-            animation["steps"][0]["response"],
+            next(node for node in animation["frames"][3]["nodes"] if node["id"] == "Root")[
+                "state"
+            ],
+            "Ready",
+        )
+        self.assertNotIn("before_snapshot", animation["moments"][0])
+        self.assertNotIn("after_snapshot", animation["moments"][0])
+        self.assertEqual(
+            animation["moments"][0]["response"],
             {"before_state": "Base", "after_state": "Ready"},
         )
         self.assertEqual(
-            animation["steps"][1]["response"],
+            animation["moments"][1]["response"],
             {"before_state": None, "after_state": None},
         )
 
     def test_frames_reveal_targets_and_keep_first_seen_sibling_order(self) -> None:
         animation = build_animation(self.model, self.view)
-        self.assertEqual(animation["initial_frame"]["sibling_order"]["$root"], ["Human"])
+        self.assertEqual(animation["initial_frame"]["sibling_order"], {})
         self.assertEqual(animation["frames"][0]["sibling_order"]["$root"], ["Human", "Root"])
         child_frame = animation["frames"][1]
         self.assertEqual(child_frame["sibling_order"]["$root"], ["Human", "Root"])
         self.assertEqual(child_frame["sibling_order"]["Root"], ["Child"])
-        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
+        self.assertEqual(animation["frames"][4]["sibling_order"]["Root"], ["Child", "Async"])
         self.assertEqual(
-            animation["frames"][3]["sibling_order"]["Root"], ["Child", "Async", "Sink"]
+            animation["frames"][5]["sibling_order"]["Root"], ["Child", "Async", "Sink"]
         )
         self.assertEqual(animation["frames"][1]["nodes"][2]["state"], "Base")
 
     def test_same_parent_signal_does_not_reorder_existing_siblings(self) -> None:
         view = deepcopy(self.view)
-        view["signals"][1]["source"] = "Child"
-        view["signals"][1]["target"] = "Async"
+        self._set_endpoints(view, 1, source="Child", target="Async")
         animation = build_animation(self.model, view)
         self.assertEqual(animation["frames"][1]["sibling_order"]["Root"], ["Child", "Async"])
 
         later_view = deepcopy(self.view)
-        later_view["signals"][1]["source"] = "Child"
-        later_view["signals"][1]["target"] = "Async"
-        later_view["signals"][2]["target"] = "Sink"
-        later_view["signals"][3]["source"] = "Child"
-        later_view["signals"][3]["target"] = "Async"
+        self._set_endpoints(later_view, 1, source="Child", target="Async")
+        self._set_endpoints(later_view, 2, target="Sink")
+        self._set_endpoints(later_view, 3, source="Child", target="Async")
         later = build_animation(self.model, later_view)
         self.assertEqual(
-            later["frames"][3]["sibling_order"]["Root"],
+            later["frames"][-1]["sibling_order"]["Root"],
             ["Child", "Async", "Sink"],
         )
 
@@ -138,15 +222,10 @@ class SignalAnimationTests(unittest.TestCase):
             **deepcopy(model["model"]["systems"]["Async"]),
             "parent": "Async",
         }
-        for snapshot in [
-            view["initial_snapshot"],
-            *(signal["before_snapshot"] for signal in view["signals"]),
-            *(signal["after_snapshot"] for signal in view["signals"]),
-        ]:
+        for snapshot in self._snapshots(view):
             snapshot["states"]["ChildLeaf"] = snapshot["states"]["Child"]
             snapshot["states"]["AsyncLeaf"] = snapshot["states"]["Async"]
-        view["signals"][1]["source"] = "ChildLeaf"
-        view["signals"][1]["target"] = "AsyncLeaf"
+        self._set_endpoints(view, 1, source="ChildLeaf", target="AsyncLeaf")
         animation = build_animation(model, view)
         frame = animation["frames"][1]
         self.assertEqual(frame["sibling_order"]["Root"], ["Child", "Async"])
@@ -155,20 +234,18 @@ class SignalAnimationTests(unittest.TestCase):
 
     def test_self_and_ancestor_signals_keep_first_seen_order(self) -> None:
         animation = build_animation(self.model, self.view)
-        self.assertEqual(animation["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
+        self.assertEqual(animation["frames"][4]["sibling_order"]["Root"], ["Child", "Async"])
 
         descendant_view = deepcopy(self.view)
-        descendant_view["signals"][2]["source"] = "Async"
-        descendant_view["signals"][2]["target"] = "Root"
+        self._set_endpoints(descendant_view, 2, source="Async", target="Root")
         descendant = build_animation(self.model, descendant_view)
-        self.assertEqual(descendant["frames"][2]["sibling_order"]["Root"], ["Child", "Async"])
+        self.assertEqual(descendant["frames"][4]["sibling_order"]["Root"], ["Child", "Async"])
 
         self_view = deepcopy(self.view)
-        self_view["signals"][3]["source"] = "Sink"
-        self_view["signals"][3]["target"] = "Sink"
+        self._set_endpoints(self_view, 3, source="Sink", target="Sink")
         self_signal = build_animation(self.model, self_view)
         self.assertEqual(
-            self_signal["frames"][3]["sibling_order"]["Root"],
+            self_signal["frames"][5]["sibling_order"]["Root"],
             ["Child", "Async", "Sink"],
         )
 
@@ -188,20 +265,14 @@ class SignalAnimationTests(unittest.TestCase):
                 **deepcopy(model["model"]["systems"]["Child"]),
                 "parent": parent,
             }
-        for snapshot in [
-            view["initial_snapshot"],
-            *(signal["before_snapshot"] for signal in view["signals"]),
-            *(signal["after_snapshot"] for signal in view["signals"]),
-        ]:
+        for snapshot in self._snapshots(view):
             for name in parents:
                 snapshot["states"][name] = "Base"
-        view["signals"][1]["source"] = "Level4First"
-        view["signals"][1]["target"] = "Level4Second"
-        view["signals"][2]["source"] = "Level3Second"
-        view["signals"][2]["target"] = "Level2Second"
+        self._set_endpoints(view, 1, source="Level4First", target="Level4Second")
+        self._set_endpoints(view, 2, source="Level3Second", target="Level2Second")
 
         animation = build_animation(model, view)
-        frame = animation["frames"][2]
+        frame = animation["frames"][4]
         self.assertEqual(frame["sibling_order"]["$root"], ["Human", "Root"])
         self.assertEqual(
             frame["sibling_order"]["Root"], ["Level2First", "Level2Second"]
@@ -221,15 +292,16 @@ class SignalAnimationTests(unittest.TestCase):
             self.assertEqual(siblings, sorted(siblings, key=seen.__getitem__))
         self.assertEqual(animation, build_animation(model, view))
 
-    def test_initial_model_source_has_stateless_ancestors_and_real_source_state(self) -> None:
+    def test_first_send_has_stateless_ancestors_and_real_source_state(self) -> None:
         view = deepcopy(self.view)
         view["root_request"]["source"] = "Child"
-        view["signals"][0]["source"] = "Child"
+        view["root_request"]["target"] = "Child"
+        self._set_endpoints(view, 0, source="Child", target="Child")
         animation = build_animation(self.model, view)
         self.assertEqual(
             [
                 (node["id"], node["state"], node["structural"])
-                for node in animation["initial_frame"]["nodes"]
+                for node in animation["frames"][0]["nodes"]
             ],
             [("Root", None, True), ("Child", "Base", False)],
         )
@@ -239,11 +311,7 @@ class SignalAnimationTests(unittest.TestCase):
         view = deepcopy(self.view)
         model["model"]["systems"]["Child"]["states"] = {}
         model["model"]["systems"]["Child"]["initial_state"] = None
-        for snapshot in [
-            view["initial_snapshot"],
-            *(signal["before_snapshot"] for signal in view["signals"]),
-            *(signal["after_snapshot"] for signal in view["signals"]),
-        ]:
+        for snapshot in self._snapshots(view):
             snapshot["states"]["Child"] = None
         animation = build_animation(model, view)
         child_node = next(
@@ -257,19 +325,15 @@ class SignalAnimationTests(unittest.TestCase):
         view = deepcopy(self.view)
         model["model"]["systems"]["Root"]["states"] = {}
         model["model"]["systems"]["Root"]["initial_state"] = None
-        for snapshot in [
-            view["initial_snapshot"],
-            *(signal["before_snapshot"] for signal in view["signals"]),
-            *(signal["after_snapshot"] for signal in view["signals"]),
-        ]:
+        for snapshot in self._snapshots(view):
             snapshot["states"]["Root"] = None
         animation = build_animation(model, view)
         self.assertEqual(
-            animation["steps"][0]["response"],
+            animation["moments"][0]["response"],
             {"before_state": None, "after_state": None},
         )
         root_node = next(
-            node for node in animation["frames"][0]["nodes"] if node["id"] == "Root"
+            node for node in animation["frames"][3]["nodes"] if node["id"] == "Root"
         )
         self.assertIsNone(root_node["state"])
         self.assertFalse(root_node["structural"])
@@ -425,7 +489,7 @@ class SignalAnimationTests(unittest.TestCase):
         cases.append(("handler", self.model, unknown_handler, "unknown structure"))
         unknown_outcome = deepcopy(self.view)
         unknown_outcome["signals"][0]["outcome"] = "pending"
-        cases.append(("outcome", self.model, unknown_outcome, "not an animation v1 outcome"))
+        cases.append(("outcome", self.model, unknown_outcome, "not an animation v2 outcome"))
         damaged_snapshot = deepcopy(self.view)
         damaged_snapshot["signals"][0]["before_snapshot"]["facts"] = {}
         cases.append(("snapshot", self.model, damaged_snapshot, "facts must be a string list"))
@@ -433,17 +497,133 @@ class SignalAnimationTests(unittest.TestCase):
             with self.subTest(label=label), self.assertRaisesRegex(ProtocolError, message):
                 build_animation(model, view)
 
+    def test_event_protocol_rejects_missing_duplicate_out_of_order_and_snapshot_mismatch(self) -> None:
+        cases: list[tuple[str, dict, str]] = []
+
+        missing = deepcopy(self.view)
+        missing["events"] = [
+            event
+            for event in missing["events"]
+            if not (
+                event["kind"] == "response_completed"
+                and event.get("signal_id") == "sig-0004"
+            )
+        ]
+        self._resequence(missing)
+        cases.append(("missing", missing, "no terminal event"))
+
+        duplicate = deepcopy(self.view)
+        sent = deepcopy(self._signal_event(duplicate, "sig-0001", "signal_sent"))
+        duplicate["events"].insert(1, sent)
+        self._resequence(duplicate)
+        cases.append(("duplicate", duplicate, "duplicate signal_sent"))
+
+        out_of_order = deepcopy(self.view)
+        first = next(i for i, event in enumerate(out_of_order["events"]) if event["kind"] == "signal_sent")
+        second = next(
+            i
+            for i, event in enumerate(out_of_order["events"])
+            if event["kind"] == "signal_sent" and event.get("signal_id") == "sig-0002"
+        )
+        out_of_order["events"][first], out_of_order["events"][second] = (
+            out_of_order["events"][second],
+            out_of_order["events"][first],
+        )
+        self._resequence(out_of_order)
+        cases.append(("order", out_of_order, "creation order"))
+
+        snapshot = deepcopy(self.view)
+        snapshot["signals"][0]["before_snapshot"]["states"]["Root"] = "Ready"
+        cases.append(("snapshot", snapshot, "causal replay state"))
+
+        outcome = deepcopy(self.view)
+        outcome["signals"][0]["outcome"] = "failed"
+        outcome["signals"][0]["reason"] = "fixture"
+        cases.append(("outcome", outcome, "does not match Signal"))
+
+        for label, view, message in cases:
+            with self.subTest(label=label), self.assertRaisesRegex(ProtocolError, message):
+                build_animation(self.model, view)
+
     def test_all_animation_outcomes_and_repeated_generation_are_deterministic(self) -> None:
         for outcome in ("completed", "rejected", "failed", "truncated", "stopped"):
             with self.subTest(outcome=outcome):
-                view = deepcopy(self.view)
-                view["signals"][0]["outcome"] = outcome
-                view["signals"][0]["reason"] = None if outcome == "completed" else "fixture"
+                view = self._single_signal_view(outcome)
                 first = build_animation(self.model, view)
                 second = build_animation(self.model, view)
                 self.assertEqual(first, second)
-                self.assertEqual(first["steps"][0]["outcome"], outcome)
+                self.assertEqual(first["moments"][0]["kind"], "send")
+                self.assertEqual(
+                    first["moments"][-1]["kind"],
+                    "complete" if outcome == "completed" else outcome,
+                )
+                self.assertEqual(first["moments"][-1]["outcome"], outcome)
+                if outcome != "completed":
+                    self.assertEqual(
+                        first["frames"][0]["nodes"], first["frames"][-1]["nodes"]
+                    )
                 self.assertEqual(render_html(first), render_html(second))
+
+    def test_kernel_enable_boundary_has_13_signals_and_26_causal_moments(self) -> None:
+        work = self.root / "kernel-boundary-work"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                driver_main(
+                    [
+                        str(ROOT / "spec" / "model" / "main.spec"),
+                        "--until",
+                        "Kernel.Enable",
+                        "--max-depth",
+                        "all",
+                        "--max-breadth",
+                        "all",
+                        "--work-dir",
+                        str(work),
+                    ]
+                ),
+                0,
+            )
+        animation = build_animation(read_json(work / "model.json"), read_json(work / "view.json"))
+        self.assertEqual(animation["trace"]["total_signals"], 13)
+        self.assertEqual(animation["trace"]["total_moments"], 26)
+        self.assertEqual(animation["trace"]["boundary"]["normalized_signal"], "Kernel.Enable")
+        self.assertFalse(
+            any(
+                moment["target"] == "Kernel" and moment["signal"] == "Enable"
+                for moment in animation["moments"]
+            )
+        )
+
+        frames = {
+            moment["id"]: frame
+            for moment, frame in zip(animation["moments"], animation["frames"], strict=True)
+        }
+
+        def state(moment_id: str, system: str) -> str | None:
+            return next(
+                node["state"] for node in frames[moment_id]["nodes"] if node["id"] == system
+            )
+
+        self.assertEqual(state("sig-0004:terminal", "Computer"), "Base")
+        self.assertEqual(state("sig-0001:terminal", "Computer"), "Prepared")
+        self.assertEqual(state("sig-0010:terminal", "Kernel"), "Prepared")
+        self.assertEqual(state("sig-0008:terminal", "Kernel"), "Ready")
+        self.assertEqual(state("sig-0005:terminal", "Computer"), "Ready")
+        self.assertEqual(state("sig-0011:terminal", "Computer"), "Online")
+        self.assertEqual(state("sig-0012:send", "Computer"), "Online")
+        computer_states = [
+            next(
+                (node["state"] for node in frame["nodes"] if node["id"] == "Computer"),
+                None,
+            )
+            for frame in animation["frames"]
+        ]
+        stable_states = [
+            state
+            for index, state in enumerate(computer_states)
+            if state is not None and (index == 0 or state != computer_states[index - 1])
+        ]
+        self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 ## 目标与边界
 
 在 `tools2/` 从头建立 Signal 驱动的 `parse -> model -> derive -> check -> view -> render/animate` Python
-纵切，并由独立 `pyveri` driver 串联。它不替换 `tools/`，不进入根 `make test`；当前 v4 工具链已经
+纵切，并由独立 `pyveri` driver 串联。它不替换 `tools/`，不进入根 `make test`；当前 v5 工具链已经
 能够消费完整主模型并生成 text 与独立离线 HTML，仍不实现或复用老静态 SVG。
 
 权威设计见 [`../../spec/charter/system-signal.md`](../../spec/charter/system-signal.md)，formal semantics
@@ -22,9 +22,9 @@
    包括歧义、重载和迁移诊断。
 4. pending 与 continuation：定义接受后等待未来 Signal、保存/恢复 continuation、队列所有权、超时、
    取消和 snapshot 可续跑语义；首期条件失败必须保持 rejected。
-5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v4 `model.json` 和 `view.json`，生成内嵌
-   `lkm.spec.signal-animation` v1 数据的自包含 HTML；按 Signal 前进/后退，不扩展 v4 view schema，
-   也不把浏览器变成推导器。完整计划见
+5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v5 `model.json` 和 `view.json`，生成内嵌
+   `lkm.spec.signal-animation` v2 因果时刻的自包含 HTML；按 send/terminal moment 前进/后退，不扩展
+   v5 view schema，也不把浏览器变成推导器。首轮 v1 计划见
    [`interactive-model-animation.md`](interactive-model-animation.md)，老 tools 静态 SVG 保持原责任。
 6. 老工具迁移/退役：只有用户另行明确决定后才能规划。不得以 tools2 覆盖率或版本号自动触发。
 
@@ -57,3 +57,7 @@
 无网络 `file://` 加载、按钮/键盘、确定往返、父子/兄弟布局、普通/自环/异常箭头、自动滚动、
 reduced-motion、截图，以及完整主模型 277 个 Signal 的前后往返。完整证据保存在
 [`interactive-model-animation.md`](interactive-model-animation.md)。
+
+2026-07-27 动画协议升级到 v2：生成器按 v5 event sequence 为每个 Signal 发布 send/terminal 两个
+causal moment，父完成时刻位于同步子响应之后；`-u Kernel.Enable` 固定验证 13 个 Signal、26 个 moment
+且不创建边界 Signal。Python、Svelte/Vitest、确定 bundle 与 Playwright 离线/布局/主模型往返测试闭合。

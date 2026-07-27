@@ -96,11 +96,17 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   选择，并验证两种文本模式不改变 derive/view JSON、snapshot、verdict、Signal 顺序或退出码。
 - animate 必须拒绝错误 model/view schema、producer、version、source/fingerprint 组合、缺失端点、
   parent cycle、未知 handler 结构和损坏 snapshot；输出使用安全 JSON 内嵌与原子写入，失败不留半成品。
-- animation v1 fixture 必须覆盖嵌套 drives/emits 一 Signal 一步、初始最小可见集、外部 Human、祖先
-  补齐、Transition 真实 before/after、Action 无状态变化，以及 completed/rejected/failed/truncated/
-  stopped outcome/reason。虚拟 `$root` 和任意 parent 的 sibling order 必须稳定按 `first_seen` 升序，
-  同一步按 source、target reveal 分配序号；至少四层 parent 树不得因层级方向或当前 Signal 重排。
-  重复生成与任意前后往返必须恢复完全相同的 frame 和 sibling order。
+- animation v2 fixture 必须覆盖同步嵌套、多层嵌套、异步 FIFO、Action 和 completed/rejected/failed/
+  truncated/stopped；每个 Signal 精确产生按 event sequence 排列的 send/terminal 两个 moment，完成时刻
+  必须晚于全部同步子响应。`signal_received`、response before/after、异常稳定 snapshot、缺失/重复/
+  乱序事件与 outcome 不匹配都必须验证。初始 frame 为空，节点只在 send reveal；虚拟 `$root` 和任意
+  parent 的 sibling order 稳定按 `first_seen` 升序，terminal 不得改变首次出现或同级顺序。至少四层
+  parent 树不得因层级方向或当前 Signal 重排；重复生成与任意前后往返必须恢复完全相同的 frame 和
+  sibling order。
+- 主模型 `-u Kernel.Enable` 的 animation v2 必须精确包含 13 个 Signal、26 个 moment。Preset 三个
+  子系统依次 Prepared 后 Computer 才变为 Prepared；Setup 的平台、OpenSBI、Kernel（含 Config/Lds）
+  全部 Ready 后 Computer 才变为 Ready；Computer 在自身 Enable 完成时变为 Online，随后才发送平台
+  Enable，全程不得状态回退。Kernel.Enable 仍没有 Signal/moment，最终说明显示 before-send boundary。
 - frontend 单元测试必须覆盖 parent 包含、一级/三级 row、二级/四级 bottom-to-top column、children 位于
   identity 上方、偶数层左对齐与奇数层底部对齐；普通 system 不显示 `SYSTEM`，名称和裸状态名或
   `Stateless` 使用完全相同字号并正确换行、不重叠，节点及底部响应均不显示 `State::`，External/
@@ -109,7 +115,8 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   顶部净空。组件测试覆盖直接和跨多层 ancestor 到 descendant 不生成 SVG，并确认 self、普通同级、
   跨分支和 descendant 到 ancestor 仍生成；异常线型/reason、状态样式、说明句/footer 不渲染和
   reduced-motion 继续覆盖。
-- 浏览器端到端测试必须覆盖按钮、ArrowLeft/ArrowRight、离线加载和本次主模型 derive 产物的完整步数往返；交替层级 fixture
+- 浏览器端到端测试必须覆盖 send 箭头、complete 不重复箭头、异常终止保持状态、按钮、
+  ArrowLeft/ArrowRight、离线加载和本次主模型 derive 产物的完整时刻往返；交替层级 fixture
   必须验证 Human 固定 stage 左下，后续一级节点只向右，二级向上、三级向右、四级向上。无碰撞时
   已有内容坐标不变；碰撞时只有较晚分支向右或向上，较早锚点不动；父框只随可见子树向上/向右
   膨胀且不覆盖文字。箭头必须跟随四向布局、膨胀、滚动与 resize；Human 到 Root 显示直线，Root 到

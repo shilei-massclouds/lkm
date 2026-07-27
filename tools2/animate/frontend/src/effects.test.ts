@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import FrameTree from './FrameTree.svelte';
 import NodeCard from './NodeCard.svelte';
 import SignalArrow from './SignalArrow.svelte';
-import type { AnimationFrame, AnimationStep } from './types';
+import type { AnimationFrame, AnimationMoment } from './types';
 import { shouldRenderSignalArrow } from './visibility';
 
 let component: ReturnType<typeof mount> | null = null;
@@ -18,26 +18,27 @@ const node = {
   structural: false, first_seen: 0
 };
 const frame: AnimationFrame = {
-  index: 0, step_id: 'sig-0001', nodes: [node], sibling_order: { '$root': ['Root'] }
+  index: 0, moment_id: 'sig-0001:terminal', nodes: [node], sibling_order: { '$root': ['Root'] }
 };
-const transition: AnimationStep = {
-  index: 0, id: 'sig-0001', cause_id: null, source: 'Root', target: 'Root', signal: 'Start',
+const transition: AnimationMoment = {
+  index: 0, id: 'sig-0001:terminal', kind: 'complete', event_sequence: 4,
+  signal_id: 'sig-0001', cause_id: null, source: 'Root', target: 'Root', signal: 'Start',
   delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
   outcome: 'completed', reason: null, response: { before_state: 'Base', after_state: 'Ready' }
 };
 
 describe('Signal response effects', () => {
-  it('shows a Transition before state during send and after state during response', async () => {
+  it('shows a Transition before state before commit and after state during response', async () => {
     component = mount(FrameTree, {
       target: document.body,
-      props: { frame, activeStep: transition, phase: 'send', reducedMotion: true }
+      props: { frame, activeMoment: transition, phase: 'before', reducedMotion: true }
     });
     await tick();
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Base');
     await unmount(component);
     component = mount(FrameTree, {
       target: document.body,
-      props: { frame, activeStep: transition, phase: 'response', reducedMotion: true }
+      props: { frame, activeMoment: transition, phase: 'response', reducedMotion: true }
     });
     await tick();
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
@@ -103,7 +104,7 @@ describe('Signal response effects', () => {
     ];
     const deepFrame: AnimationFrame = {
       index: 0,
-      step_id: 'sig-0001',
+      moment_id: 'sig-0001:terminal',
       nodes,
       sibling_order: {
         '$root': ['Root'],
@@ -148,7 +149,7 @@ describe('Signal response effects', () => {
     ];
     const deepFrame: AnimationFrame = {
       index: 0,
-      step_id: 'sig-0001',
+      moment_id: 'sig-0001:terminal',
       nodes,
       sibling_order: {
         '$root': ['Root'],

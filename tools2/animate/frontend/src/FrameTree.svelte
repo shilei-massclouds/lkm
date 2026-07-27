@@ -1,16 +1,16 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
   import NodeCard from './NodeCard.svelte';
-  import type { AnimationFrame, AnimationPhase, AnimationStep } from './types';
+  import type { AnimationFrame, AnimationMoment, AnimationPhase } from './types';
 
   let {
     frame,
-    activeStep = null,
+    activeMoment = null,
     phase = 'idle',
     reducedMotion = false
   }: {
     frame: AnimationFrame;
-    activeStep?: AnimationStep | null;
+    activeMoment?: AnimationMoment | null;
     phase?: AnimationPhase;
     reducedMotion?: boolean;
   } = $props();
@@ -27,10 +27,10 @@
   function displayNode(id: string) {
     const node = nodes.get(id);
     if (
-      node && activeStep?.target === id && activeStep.handler.kind === 'Transition' &&
-      phase === 'send'
+      node && activeMoment?.kind === 'complete' && activeMoment.target === id &&
+      activeMoment.handler.kind === 'Transition' && phase === 'before'
     ) {
-      return { ...node, state: activeStep.response.before_state };
+      return { ...node, state: activeMoment.response.before_state };
     }
     return node;
   }
@@ -42,10 +42,10 @@
     <NodeCard
       {node}
       {level}
-      activeSource={activeStep?.source === id}
-      activeTarget={activeStep?.target === id}
-      responseKind={activeStep?.handler.kind || null}
-      outcome={activeStep?.outcome || 'completed'}
+      activeSource={activeMoment?.source === id}
+      activeTarget={activeMoment?.target === id}
+      responseKind={activeMoment?.handler.kind || null}
+      outcome={activeMoment?.outcome || 'completed'}
       responsePhase={phase === 'response'}
     >
       {@const childIds = childrenOf(id)}

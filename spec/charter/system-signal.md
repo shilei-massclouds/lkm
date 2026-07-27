@@ -191,8 +191,9 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行 Human 外部编排，
 包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
 version 5，移除 `lossy` 字段与 `discarded` outcome，并拒绝
-version 1、version 2、version 3、version 4、老工具协议和旧 snapshot。动画封装协议继续为 version
-1。受支持的旧 `tools/` parse/model/derive/check/view/render 路径必须解析同一 `external` 声明并遵守
+version 1、version 2、version 3、version 4、老工具协议和旧 snapshot。动画封装协议为 version 2，
+按 v5 event sequence 发布每个 Signal 的发送与终止因果时刻。受支持的旧 `tools/`
+parse/model/derive/check/view/render 路径必须解析同一 `external` 声明并遵守
 同一默认编排与显式单 Signal 边界；它们保留各自现有的中间协议版本，且不得导入 tools2 实现。
 
 主模型的启动创建顺序固定为 Human 同步 drives `Computer.Preset`；该 handler 依次同步驱动三个直接

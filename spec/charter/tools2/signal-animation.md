@@ -7,18 +7,27 @@ Signal 顺序观察发送者、接收者、响应类型、真实状态变化和�
 发布责任，不是新的 model 语义、derive 输入或浏览器 runtime。
 
 动画采用独立 `animate` 阶段，且只消费 tools2 version 5 `model.json` 与 `view.json`。model 提供
-System identity、有效 parent、状态集合和静态结构，view 提供 derive 已经选择的 Signal 顺序、
+System identity、有效 parent、状态集合和静态结构，view 提供 derive 已经确定的 event sequence、Signal、
 source/target、handler、outcome、reason 与 before/after snapshot。animate 不重新求值 guard、选择
 choice、创建 Signal、重跑 handler 或逆向执行 transition。
 
-## 确定步进
+## 因果时刻
 
-- 每个已经发送的 Signal 是一个完整步进单位。同步 `drives`、异步 `emits` 以及它们产生的嵌套
-  Signal 均保持 v5 view 的全局顺序，各占一步。
-- 初始帧只显示第一个 Signal source 和维持 parent 结构所需的祖先；target 及其它 System 在第一次
-  被 trace 需要时出现。
-- 前进播放当前 Signal 的发送、目标响应和结束，并停在该 Signal 的确定 after frame。后退直接恢复
-  前一个预生成 frame，不执行任何模型行为。
+- 每个已经发送的 Signal 恰有一个发送时刻和一个终止时刻。发送时刻对应 `signal_sent`；终止时刻对应
+  最终 outcome 的 `response_completed`、`signal_rejected`、`signal_failed`、`signal_truncated`、
+  `signal_stopped` 或 `response_stopped`。所有时刻严格按 v5 view event `sequence` 排列。
+- 同步 `drives` 子 Signal 的发送与终止位于父 Signal 的完成时刻之前；异步 `emits` 仍保持 derive 的
+  post-commit 与全局 FIFO 顺序。条件、invariant、FIFO、wait、receive 和 handler 事件保留为因果证据，
+  但不生成视觉时刻。
+- 初始帧为空。System 或 external endpoint 只在自身第一次参与发送时刻时出现；必要结构祖先同时补齐。
+  终止时刻不得改变 `first_seen` 或 sibling order。
+- 发送时刻只揭示 source/target 并停在该事件当时的稳定状态，不提交响应。完成时刻采用
+  `response_completed.after`，因此父响应只在全部同步子响应之后提交。异常终止使用该 Signal 的稳定
+  终止 snapshot 且不得改变状态。
+- `signal_received` 必须证明当时重放 snapshot 与 Signal `before_snapshot` 一致；完成事件的 before/after
+  必须与 Signal snapshot 一致。缺失、重复、乱序、snapshot 不一致或 outcome 与终止事件不匹配都是
+  动画协议错误。
+- 前进播放当前因果时刻；后退直接恢复前一个预生成 frame，不执行任何模型行为。
 - 任意前进、后退和重复往返必须恢复相同的可见 System、parent 结构、状态、失败事实与同级顺序。
 
 Transition 响应展示 target 的真实 before/after state；Action 不伪造 lifecycle state 变化。异常
@@ -28,10 +37,13 @@ outcome 必须保持原 outcome 和结构化 reason。没有自身 snapshot stat
 
 ## 发布协议与播放器
 
-animate 输出内嵌 `lkm.spec.signal-animation` version `1` 的自包含 HTML。animation v1 是由 v5 输入
-确定生成的播放协议，至少包含输入身份/fingerprint、稳定步骤、handler/outcome/reason、初始与
-after frames、可见节点、结构祖先和预计算 sibling order。JSON 必须安全内嵌，HTML 必须原子写入；
-协议或 I/O 失败不得留下半成品。
+animate 输出内嵌 `lkm.spec.signal-animation` version `2` 的自包含 HTML。animation v2 是由 v5 输入
+确定生成的播放协议：`moments` 与 `frames` 一一对应；moment ID 固定为 `<signal-id>:send` 或
+`<signal-id>:terminal`，kind 为 `send`、`complete`、`rejected`、`failed`、`truncated` 或 `stopped`。
+每个 moment 保留 event sequence、Signal/cause identity、source/target/name/delivery、handler、
+outcome/reason 和 Transition before/after；每个 frame 以 `moment_id` 关联时刻。trace 同时记录
+`total_signals`、`total_moments` 和 reached boundary。JSON 必须安全内嵌，HTML 必须原子写入；协议或
+I/O 失败不得留下半成品。
 
 播放器只负责把确定 frames 布局并呈现。父子包含高于视觉方向，嵌套节点始终位于父框内；所有
 parent（含虚拟 `$root`）的 sibling order 都按首次出现序稳定升序排列，不得根据当前 Signal 重排。
@@ -45,13 +57,15 @@ parent（含虚拟 `$root`）的 sibling order 都按首次出现序稳定升序
 边，支持左到右、右到左、下到上和上到下，箭头尖必须精确落在 target 边界，Signal 名称位于线段
 中点。source 是 target 任意层祖先时不显示箭头，但 source/target 高亮、Transition/Action 响应、异常
 reason、滚动和导航仍按该 Signal 正常执行；self、后代到祖先、同级和跨分支 Signal 不受此隐藏规则
-影响。祖先关系只从当前 frame 已渲染节点的递归包含关系判定，不进入 animation v1 或 Python frame。
+影响。祖先关系只从当前 frame 已渲染节点的递归包含关系判定，不进入 animation v2 或 Python frame。
 self Signal 从节点右侧中部出发、在左侧中部结束，使用按节点实时宽高缩放的上方半圆弧；Signal 名称
 位于上弧外侧。stage 内容必须提供同样按节点尺寸有界缩放的顶部净空，保证桌面、移动端和深层节点的
 自环及文字不被裁剪。箭头几何必须在布局动画、父框膨胀、stage 滚动或尺寸变化时同步更新。stage 高度
 增长时必须补偿纵向滚动，使左下布局锚点在 viewport 中保持稳定；后退按目标 frame 重算相同布局和
 滚动边界。FLIP 只平滑已经确定的向外推开，reduced-motion 下直接到达确定位置。页面提供前后按钮、
-`ArrowLeft`/`ArrowRight`、步数和当前 Signal 文字说明，并尊重 `prefers-reduced-motion`。首轮不包含
+`ArrowLeft`/`ArrowRight`、时刻数、Signal 总数和当前 Signal 文字说明，并尊重
+`prefers-reduced-motion`。发送时刻显示箭头与发送信息；完成时刻不重复箭头，先显示 target 的真实
+before state，再提交 after state并高亮响应；异常终止保持状态并显示 outcome/reason。首轮不包含
 自动播放、速度、时间线跳转、浏览器 derive 或视频导出。
 
 页面必须使用有上下限的流式尺寸而非绑定某个桌面分辨率。桌面外壳占据可用 viewport，主体按
@@ -67,13 +81,15 @@ header 在一行优先显示小号品牌、请求标题以及 Source/Verdict/Sig
 `Base → Ready`，不显示 `State::`。External 和 Structure 保留类型标签。叶节点和 identity band 使用
 约 `clamp(11rem, 16cqi, 15rem)` 的紧凑宽度，名称允许换行；含子系统的父框不得由 identity 获得固定
 大宽度。控制栏在宽屏优先同行显示
-步数、Signal 路径、响应或 reason，窄屏自然换行。source file 和 model fingerprint 只保留在 Protocol
+时刻数、Signal 路径、响应或 reason，窄屏自然换行。source file 和 model fingerprint 只保留在 Protocol
 项的 tooltip，不显示 footer。
 
 ## 兼容性决定
 
-tools2 v5 model/view 的结构化字段提供上述生成语义；animation 封装协议仍保持 version 1。前端不得
-从显示名称推断 handler/state，也不得复用老 `tools/` 静态 SVG renderer。
+tools2 v5 model/view 的结构化字段提供上述生成语义；animation 封装协议升级为 version 2，model/view
+仍保持 version 5。新生成器和新 bundle 只发布 v2，不提供生成 v1 的兼容开关；已经生成的自包含 v1
+HTML 仍可使用其内嵌播放器独立打开。前端不得从显示名称推断 handler/state，也不得复用老 `tools/`
+静态 SVG renderer。
 独立 CLI 是 `lkm-animate MODEL VIEW -o HTML`；tools2 driver 与便利入口另提供 `--html-out PATH`，并
 保持 text `-o`、scenario、snapshot、work-dir 和 check 的 0/1 结果可组合。animate 协议/I/O 错误
 返回 2。

@@ -1,24 +1,35 @@
 export interface AnimationTrace {
   schema: 'lkm.spec.signal-animation';
-  version: 1;
+  version: 2;
   source: string;
   inputs: { model_fingerprint: string };
   trace: {
     verdict: string;
-    total_steps: number;
+    total_signals: number;
+    total_moments: number;
     root_request: { source: string; target: string; signal: string };
+    boundary: {
+      source: string;
+      target: string;
+      signal: string;
+      normalized_signal: string;
+    } | null;
   };
-  steps: AnimationStep[];
+  moments: AnimationMoment[];
   initial_frame: AnimationFrame;
   frames: AnimationFrame[];
 }
 
 export type HandlerKind = 'Transition' | 'Action' | null;
-export type AnimationPhase = 'idle' | 'send' | 'response' | 'clear';
+export type AnimationPhase = 'idle' | 'send' | 'before' | 'response' | 'clear';
+export type MomentKind = 'send' | 'complete' | 'rejected' | 'failed' | 'truncated' | 'stopped';
 
-export interface AnimationStep {
+export interface AnimationMoment {
   index: number;
   id: string;
+  kind: MomentKind;
+  event_sequence: number;
+  signal_id: string;
   cause_id: string | null;
   source: string;
   target: string;
@@ -41,7 +52,7 @@ export interface AnimationNode {
 
 export interface AnimationFrame {
   index: number;
-  step_id: string | null;
+  moment_id: string | null;
   nodes: AnimationNode[];
   sibling_order: Record<string, string[]>;
 }

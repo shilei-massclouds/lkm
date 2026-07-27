@@ -57,9 +57,11 @@ unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This se
 ## Offline Signal animation
 
 The animation implementation is maintained independently below `tools2/animate/`: its Python package validates
-tools2 v5 `model.json + view.json` and precomputes deterministic animation v1 frames, while the nested Svelte 5 +
-TypeScript frontend only plays those frames. It neither imports the old `tools/` SVG renderer nor derives behavior
-in the browser.
+tools2 v5 `model.json + view.json` and replays the view event sequence into deterministic animation v2 causal
+moments and frames, while the nested Svelte 5 + TypeScript frontend only plays those frames. Every sent Signal has
+one send moment and one terminal moment; synchronous parent completion therefore follows all nested responses.
+It neither imports the old `tools/` SVG renderer nor derives behavior in the browser. Previously generated
+self-contained v1 HTML remains independently openable; the current generator and bundle publish only v2.
 
 `tools2/bin/pyveri --html-out PATH` writes one atomic, self-contained HTML file and can be combined with text `-o`,
 stdout, `-s`, `--snapshot-out`, and `--work-dir`. Successful HTML generation preserves check exit status 0 or 1;
@@ -83,5 +85,5 @@ npm run test:e2e
 From the repository root, the corresponding convenience targets are `make -C tools2 test-frontend`,
 `make -C tools2 bundle-check`, `make -C tools2 test-browser`, and `make -C tools2 test-all`. Browser tests generate
 their model/view/HTML fixtures under a temporary directory, load them through `file://`, reject network requests,
-and exercise every step of the successfully completed full main-model trace. Explicit long-lived demos belong in the ignored `tools2/out/`
+and exercise every causal moment of the main model's `Kernel.Enable` before-send trace. Explicit long-lived demos belong in the ignored `tools2/out/`
 directory; `tools2/out/pipeline-animation.html` is the fixed small visual checkpoint.

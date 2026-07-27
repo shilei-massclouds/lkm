@@ -15,17 +15,22 @@ let pipelineHtml = '';
 let effectsHtml = '';
 let alternatingHtml = '';
 let mainHtml = '';
-let mainSteps = 0;
+let pipelineMoments = 0;
+let effectsMoments = 0;
+let alternatingMoments = 0;
+let alternatingSendMoments: number[] = [];
+let mainSignals = 0;
+let mainMoments = 0;
 
 function generate(
-  name: string, spec: string, signal: string, expectedStatus: number, expectedVerdict: string
+  name: string, spec: string, requestArgs: string[], expectedStatus: number, expectedVerdict: string
 ) {
   const html = join(generated, `${name}.html`);
   const work = join(generated, `${name}-work`);
   const result = spawnSync(
     'python3',
     [
-      '-m', 'pyveri', spec, '--signal', signal, '--max-depth', 'all',
+      '-m', 'pyveri', spec, ...requestArgs, '--max-depth', 'all',
       '--max-breadth', 'all', '--work-dir', work, '--html-out', html,
       '-o', join(generated, `${name}.txt`)
     ],
@@ -38,7 +43,25 @@ function generate(
   if (derivation.verdict !== expectedVerdict) {
     throw new Error(`fixture verdict was ${derivation.verdict}, expected ${expectedVerdict}`);
   }
-  return { html, totalSteps: derivation.signals.length };
+  const terminalKinds = new Set([
+    'response_completed', 'signal_rejected', 'signal_failed', 'signal_truncated',
+    'signal_stopped', 'response_stopped'
+  ]);
+  const visualEvents = derivation.events.filter(
+    (event: { kind: string }) => event.kind === 'signal_sent' || terminalKinds.has(event.kind)
+  );
+  const sendMoments = derivation.signals.map((signal: { id: string }) =>
+    visualEvents.findIndex(
+      (event: { kind: string; signal_id?: string }) =>
+        event.kind === 'signal_sent' && event.signal_id === signal.id
+    ) + 1
+  );
+  return {
+    html,
+    totalSignals: derivation.signals.length,
+    totalMoments: visualEvents.length,
+    sendMoments
+  };
 }
 
 async function openOffline(page: Page, html: string) {
@@ -51,21 +74,31 @@ async function openOffline(page: Page, html: string) {
 
 test.beforeAll(() => {
   generated = mkdtempSync(join(tmpdir(), 'lkm-signal-animation-e2e-'));
-  pipelineHtml = generate(
-    'pipeline', join(repository, 'tools2/tests/fixtures/pipeline.spec'), 'Root.Start', 0, 'complete'
-  ).html;
-  effectsHtml = generate(
-    'effects', join(repository, 'tools2/tests/fixtures/animation-effects.spec'), 'Root.Begin', 1, 'failed'
-  ).html;
-  alternatingHtml = generate(
+  const pipeline = generate(
+    'pipeline', join(repository, 'tools2/tests/fixtures/pipeline.spec'),
+    ['--signal', 'Root.Start'], 0, 'complete'
+  );
+  pipelineHtml = pipeline.html;
+  pipelineMoments = pipeline.totalMoments;
+  const effects = generate(
+    'effects', join(repository, 'tools2/tests/fixtures/animation-effects.spec'),
+    ['--signal', 'Root.Begin'], 1, 'failed'
+  );
+  effectsHtml = effects.html;
+  effectsMoments = effects.totalMoments;
+  const alternating = generate(
     'alternating', join(repository, 'tools2/tests/fixtures/alternating-layout.spec'),
-    'Controller.Begin', 0, 'complete'
-  ).html;
+    ['--signal', 'Controller.Begin'], 0, 'complete'
+  );
+  alternatingHtml = alternating.html;
+  alternatingMoments = alternating.totalMoments;
+  alternatingSendMoments = alternating.sendMoments;
   const main = generate(
-    'main', join(repository, 'spec/model/main.spec'), 'Computer.Preset', 0, 'complete'
+    'main', join(repository, 'spec/model/main.spec'), ['--until', 'Kernel.Enable'], 0, 'reached'
   );
   mainHtml = main.html;
-  mainSteps = main.totalSteps;
+  mainSignals = main.totalSignals;
+  mainMoments = main.totalMoments;
 });
 
 test.afterAll(() => {
@@ -76,31 +109,38 @@ test('offline controls restore exact hierarchy and sibling order', async ({ page
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openOffline(page, pipelineHtml);
   const counter = page.locator('.counter');
-  await expect(counter).toContainText('步骤 0 / 4');
-  await expect(page.locator('[data-node-id]')).toHaveCount(1);
-  await expect(page.locator('[data-node-id="Human"]')).toBeVisible();
+  expect(pipelineMoments).toBe(8);
+  await expect(counter).toContainText('时刻 0 / 8');
+  await expect(page.locator('[data-node-id]')).toHaveCount(0);
 
   await page.keyboard.press('ArrowRight');
-  await expect(counter).toContainText('步骤 1 / 4');
-  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Ready');
+  await expect(counter).toContainText('时刻 1 / 8');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Base');
+  await expect(page.locator('[data-node-id="Human"]')).toBeVisible();
   await page.getByRole('button', { name: '下一步' }).click();
-  await expect(counter).toContainText('步骤 2 / 4');
-  await expect(page.locator('[data-children-of="Root"]')).toBeVisible();
+  await expect(counter).toContainText('时刻 2 / 8');
+  await expect(page.locator('[data-node-id="Child"]')).toBeVisible();
   await page.keyboard.press('ArrowRight');
-  await expect(counter).toContainText('步骤 3 / 4');
+  await expect(counter).toContainText('时刻 3 / 8');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Base');
   await page.keyboard.press('ArrowRight');
-  await expect(counter).toContainText('步骤 4 / 4');
+  await expect(counter).toContainText('时刻 4 / 8');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Ready');
+  for (let index = 5; index <= pipelineMoments; index += 1) {
+    await page.keyboard.press('ArrowRight');
+    await expect(counter).toContainText(`时刻 ${index} / ${pipelineMoments}`);
+  }
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveCount(3);
   await expect(page.locator('[data-children-of="Root"] > .node-slot')).toHaveText([
     /Child/, /Async/, /Sink/
   ]);
 
-  await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('ArrowLeft');
-  await expect(counter).toContainText('步骤 1 / 4');
+  for (let index = pipelineMoments - 1; index >= 1; index -= 1) {
+    await page.keyboard.press('ArrowLeft');
+  }
+  await expect(counter).toContainText(`时刻 1 / ${pipelineMoments}`);
   await expect(page.locator('[data-node-id]')).toHaveCount(2);
-  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Ready');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveAttribute('data-state', 'Base');
 });
 
 test('four levels alternate from the lower-left and inflate only outward', async ({ page }) => {
@@ -120,12 +160,16 @@ test('four levels alternate from the lower-left and inflate only outward', async
       } : null];
     }));
   }, ids);
-  const advanceTo = async (index: number) => {
-    while (!((await counter.textContent()) || '').includes(`步骤 ${index} / 12`)) {
+  const advanceToMoment = async (index: number) => {
+    while (!((await counter.textContent()) || '').includes(`时刻 ${index} / ${alternatingMoments}`)) {
       await page.keyboard.press('ArrowRight');
     }
   };
+  const advanceToSignal = (signalIndex: number) =>
+    advanceToMoment(alternatingSendMoments[signalIndex - 1]);
 
+  expect(alternatingMoments).toBe(24);
+  await advanceToSignal(1);
   const initial = await contentRects(['Human']);
   const initialScroll = await page.locator('.stage').evaluate((stage) => ({
     left: stage.scrollLeft,
@@ -138,24 +182,24 @@ test('four levels alternate from the lower-left and inflate only outward', async
   expect(initial.Human?.left).toBeLessThan(stageSize.width * 0.08);
   expect(initial.Human?.bottom).toBeGreaterThan(stageSize.height * 0.9);
 
-  await advanceTo(3);
+  await advanceToSignal(3);
   const shallow = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot']);
   expect(shallow.Human!.left).toBeLessThan(shallow.Controller!.left);
   expect(shallow.Controller!.left).toBeLessThan(shallow.EarlyRoot!.left);
   expect(shallow.EarlyRoot!.left).toBeLessThan(shallow.LateRoot!.left);
   expect(Math.abs(shallow.Human!.bottom - shallow.LateRoot!.bottom)).toBeLessThan(2);
 
-  await advanceTo(5);
+  await advanceToSignal(5);
   const firstLevel2 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level2First']);
-  await advanceTo(6);
+  await advanceToSignal(6);
   const secondLevel2 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level2First', 'Level2Second']);
   expect(Math.abs(secondLevel2.Level2First!.left - firstLevel2.Level2First!.left)).toBeLessThan(2);
   expect(Math.abs(secondLevel2.Level2First!.bottom - firstLevel2.Level2First!.bottom)).toBeLessThan(2);
   expect(secondLevel2.Level2Second!.bottom).toBeLessThan(secondLevel2.Level2First!.top);
 
-  await advanceTo(8);
+  await advanceToSignal(8);
   const firstLevel3 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level3First']);
-  await advanceTo(9);
+  await advanceToSignal(9);
   const secondLevel3 = await contentRects(['Human', 'Controller', 'EarlyRoot', 'LateRoot', 'Level3First', 'Level3Second']);
   expect(Math.abs(secondLevel3.EarlyRoot!.left - firstLevel3.EarlyRoot!.left)).toBeLessThan(2);
   expect(Math.abs(secondLevel3.EarlyRoot!.bottom - firstLevel3.EarlyRoot!.bottom)).toBeLessThan(2);
@@ -164,9 +208,9 @@ test('four levels alternate from the lower-left and inflate only outward', async
   expect(Math.abs(secondLevel3.Human!.left - shallow.Human!.left)).toBeLessThan(2);
   expect(Math.abs(secondLevel3.Controller!.left - shallow.Controller!.left)).toBeLessThan(2);
 
-  await advanceTo(11);
+  await advanceToSignal(11);
   const firstLevel4 = await contentRects(['Level4First']);
-  await advanceTo(12);
+  await advanceToSignal(12);
   const secondLevel4 = await contentRects(['Level4First', 'Level4Second']);
   const finalScroll = await page.locator('.stage').evaluate((stage) => ({
     left: stage.scrollLeft,
@@ -185,9 +229,10 @@ test('four levels alternate from the lower-left and inflate only outward', async
     ['3', 'row', 'bottom'], ['4', 'up', 'left']
   ]);
 
-  for (let index = 11; index >= 0; index -= 1) {
+  const finalLayoutMoment = alternatingSendMoments[11];
+  for (let index = finalLayoutMoment - 1; index >= 1; index -= 1) {
     await page.keyboard.press('ArrowLeft');
-    await expect(counter).toContainText(`步骤 ${index} / 12`);
+    await expect(counter).toContainText(`时刻 ${index} / ${alternatingMoments}`);
   }
   const restored = await contentRects(['Human']);
   const restoredScroll = await page.locator('.stage').evaluate((stage) => ({
@@ -198,7 +243,7 @@ test('four levels alternate from the lower-left and inflate only outward', async
   expect(Math.abs(restored.Human!.bottom - initial.Human!.bottom)).toBeLessThan(2);
   expect(restoredScroll).toEqual(initialScroll);
 
-  await advanceTo(12);
+  await advanceToMoment(finalLayoutMoment);
   const repeatedScroll = await page.locator('.stage').evaluate((stage) => ({
     left: stage.scrollLeft,
     top: stage.scrollTop
@@ -241,6 +286,9 @@ test('ordinary and exceptional self Signals expose their response phases', async
   await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await expect(page.locator('[data-node-id="Root"]')).toHaveClass(/signal-source/);
   await expect(page.locator('[data-node-id="Child"]')).toHaveClass(/signal-target/);
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await pipelineNext.click();
+  await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await page.waitForFunction(() =>
     document.querySelector('[data-node-id="Child"]')?.classList.contains('action-response')
   );
@@ -250,6 +298,9 @@ test('ordinary and exceptional self Signals expose their response phases', async
   const next = page.getByRole('button', { name: '下一步' });
   await next.click();
   await expect(page.locator('.signal-overlay')).toHaveAttribute('data-arrow-kind', 'ordinary');
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await next.click();
+  await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await page.waitForFunction(() =>
     document.querySelector('[data-node-id="Root"]')?.classList.contains('action-response')
   );
@@ -258,7 +309,7 @@ test('ordinary and exceptional self Signals expose their response phases', async
   await next.click();
   const selfArrow = page.locator('.signal-overlay');
   await expect(selfArrow).toHaveAttribute('data-arrow-kind', 'self');
-  await expect(selfArrow).toHaveAttribute('data-outcome', 'rejected');
+  await expect(selfArrow).toHaveAttribute('data-outcome', 'completed');
   const upperLoop = await page.locator('.stage').evaluate((stage) => {
     const node = stage.querySelector<HTMLElement>('[data-node-id="Root"]');
     const path = stage.querySelector<SVGPathElement>('.signal-path');
@@ -278,6 +329,9 @@ test('ordinary and exceptional self Signals expose their response phases', async
   expect(upperLoop!.controlTop).toBeLessThan(upperLoop!.nodeTop);
   expect(upperLoop!.labelY).toBeLessThan(upperLoop!.nodeTop);
   expect(upperLoop!.labelY).toBeGreaterThanOrEqual(0);
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await next.click();
+  await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await expect(page.locator('.reason')).toContainText('rejected · no_handler');
   await page.waitForFunction(() =>
     document.querySelector('[data-node-id="Root"]')?.classList.contains('error-response')
@@ -289,27 +343,29 @@ test('reduced motion settles immediately and disables response movement', async 
   await openOffline(page, effectsHtml);
   const started = Date.now();
   await page.getByRole('button', { name: '下一步' }).click();
-  await expect(page.locator('.counter')).toContainText('步骤 1 / 2');
+  await expect(page.locator('.counter')).toContainText(`时刻 1 / ${effectsMoments}`);
   expect(Date.now() - started).toBeLessThan(500);
   await expect(page.locator('.stage')).toHaveClass(/reduced-motion/);
   await expect(page.locator('[data-node-id="Root"]')).toHaveCSS('animation-name', 'none');
 });
 
-test('successful full main model loads offline, scrolls targets, and restores every step', async ({ page }) => {
+test('main Kernel boundary trace loads offline, scrolls targets, and restores every moment', async ({ page }) => {
   test.setTimeout(180_000);
-  expect(statSync(mainHtml).size / mainSteps).toBeLessThan(30 * 1024);
+  expect(mainSignals).toBe(13);
+  expect(mainMoments).toBe(26);
+  expect(statSync(mainHtml).size / mainMoments).toBeLessThan(30 * 1024);
+  await page.setViewportSize({ width: 700, height: 520 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const started = Date.now();
   await openOffline(page, mainHtml);
   expect(Date.now() - started).toBeLessThan(5_000);
   const counter = page.locator('.counter');
-  expect(mainSteps).toBeGreaterThan(0);
-  await expect(page.locator('.trace-meta dd').nth(1)).toHaveText('complete');
-  await expect(counter).toContainText(`步骤 0 / ${mainSteps}`);
+  await expect(page.locator('.trace-meta dd').nth(1)).toHaveText('reached');
+  await expect(counter).toContainText(`时刻 0 / ${mainMoments}`);
   let sawScroll = false;
-  for (let index = 1; index <= mainSteps; index += 1) {
+  for (let index = 1; index <= mainMoments; index += 1) {
     await page.keyboard.press('ArrowRight');
-    await expect(counter).toContainText(`步骤 ${index} / ${mainSteps}`);
+    await expect(counter).toContainText(`时刻 ${index} / ${mainMoments}`);
     if (!sawScroll) {
       sawScroll = await page.locator('.stage').evaluate(
         (stage) => stage.scrollTop > 0 || stage.scrollLeft > 0
@@ -317,10 +373,11 @@ test('successful full main model loads offline, scrolls targets, and restores ev
     }
   }
   expect(sawScroll).toBe(true);
+  await expect(page.locator('.boundary')).toContainText('OpenSBI — Enable → Kernel（发送前）');
   const longIdentityTypography = await page.locator('.stage').evaluate((stage) => {
     const identities = Array.from(stage.querySelectorAll<HTMLElement>('.node-identity'));
     const longIdentities = identities.filter((identity) =>
-      (identity.querySelector('strong')?.textContent?.length || 0) >= 16
+      (identity.querySelector('strong')?.textContent?.length || 0) >= 12
     );
     return {
       count: longIdentities.length,
@@ -340,12 +397,11 @@ test('successful full main model loads offline, scrolls targets, and restores ev
   expect(longIdentityTypography.count).toBeGreaterThan(0);
   expect(longIdentityTypography.sameFontSize).toBe(true);
   expect(longIdentityTypography.overlapping).toBe(false);
-  for (let index = mainSteps - 1; index >= 0; index -= 1) {
+  for (let index = mainMoments - 1; index >= 0; index -= 1) {
     await page.keyboard.press('ArrowLeft');
-    await expect(counter).toContainText(`步骤 ${index} / ${mainSteps}`);
+    await expect(counter).toContainText(`时刻 ${index} / ${mainMoments}`);
   }
-  await expect(page.locator('[data-node-id]')).toHaveCount(1);
-  await expect(page.locator('[data-node-id="Human"]')).toBeVisible();
+  await expect(page.locator('[data-node-id]')).toHaveCount(0);
 });
 
 test('desktop viewports devote the page to the stage without outer scrolling', async ({ page }) => {
@@ -379,7 +435,7 @@ test('mobile layout wraps without page-level horizontal overflow', async ({ page
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openOffline(page, pipelineHtml);
-  for (let index = 0; index < 4; index += 1) await page.keyboard.press('ArrowRight');
+  for (let index = 0; index < pipelineMoments; index += 1) await page.keyboard.press('ArrowRight');
   const layout = await page.evaluate(() => {
     const stage = document.querySelector<HTMLElement>('.stage');
     const identities = Array.from(document.querySelectorAll<HTMLElement>('.node-identity'));
