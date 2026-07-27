@@ -1,6 +1,6 @@
 export interface AnimationTrace {
   schema: 'lkm.spec.signal-animation';
-  version: 2;
+  version: 3;
   source: string;
   inputs: { model_fingerprint: string };
   trace: {
@@ -21,8 +21,8 @@ export interface AnimationTrace {
 }
 
 export type HandlerKind = 'Transition' | 'Action' | null;
-export type AnimationPhase = 'idle' | 'send' | 'before' | 'response' | 'clear';
-export type MomentKind = 'send' | 'complete' | 'rejected' | 'failed' | 'truncated' | 'stopped';
+export type AnimationPhase = 'idle' | 'request' | 'before' | 'feedback' | 'settle' | 'terminal' | 'clear';
+export type MomentKind = 'request' | 'feedback' | 'settle' | 'terminal';
 
 export interface AnimationMoment {
   index: number;
@@ -38,6 +38,7 @@ export interface AnimationMoment {
   handler: { id: string | null; kind: HandlerKind };
   outcome: 'completed' | 'rejected' | 'failed' | 'truncated' | 'stopped';
   reason: string | null;
+  transfer: { from: string; to: string } | null;
   response: { before_state: string | null; after_state: string | null };
 }
 

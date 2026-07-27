@@ -96,14 +96,19 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   选择，并验证两种文本模式不改变 derive/view JSON、snapshot、verdict、Signal 顺序或退出码。
 - animate 必须拒绝错误 model/view schema、producer、version、source/fingerprint 组合、缺失端点、
   parent cycle、未知 handler 结构和损坏 snapshot；输出使用安全 JSON 内嵌与原子写入，失败不留半成品。
-- animation v2 fixture 必须覆盖同步嵌套、多层嵌套、异步 FIFO、Action 和 completed/rejected/failed/
-  truncated/stopped；每个 Signal 精确产生按 event sequence 排列的 send/terminal 两个 moment，完成时刻
-  必须晚于全部同步子响应。`signal_received`、response before/after、异常稳定 snapshot、缺失/重复/
-  乱序事件与 outcome 不匹配都必须验证。初始 frame 为空，节点只在 send reveal；虚拟 `$root` 和任意
-  parent 的 sibling order 稳定按 `first_seen` 升序，terminal 不得改变首次出现或同级顺序。至少四层
-  parent 树不得因层级方向或当前 Signal 重排；重复生成与任意前后往返必须恢复完全相同的 frame 和
-  sibling order。
-- 主模型 `-u Kernel.Enable` 的 animation v2 必须精确包含 13 个 Signal、26 个 moment。Preset 三个
+- animation v3 fixture 必须覆盖 drives、同步根请求、emits、同步嵌套、emits 内嵌 drives、异步 FIFO、
+  Transition/Action 和 completed/rejected/failed/truncated/stopped。`signal_sent` 只作证据，receive 生成
+  request；drives/root 终止生成 feedback，emits 终止生成 settle，truncated/stopped 生成 terminal。未
+  receive 的 Signal 只有 terminal，不 reveal target。每个 moment 按 event sequence 排列，同步父 feedback
+  必须晚于全部同步子 feedback。request 的 stable before、feedback/settle 的真实 after、异常 snapshot、
+  reason、缺失/重复/乱序事件、delivery 分类与 outcome 不匹配都必须验证。初始 frame 为空，节点只在
+  request reveal；虚拟 `$root` 和任意 parent 的 sibling order 稳定按 `first_seen` 升序，feedback/settle/
+  terminal 不得改变首次出现或同级顺序。至少四层 parent 树不得因层级方向或当前 Signal 重排；重复生成、
+  sibling 稳定性与任意前后往返必须恢复完全相同的 frame 和 sibling order。
+- 主模型 `-u Kernel.Enable` 的 animation v3 必须精确包含 13 个 Signal、26 个 moment：13 request、
+  10 feedback、3 settle。request 顺序服从实际 receive/FIFO，Preset/Setup 的父 feedback 位于同步子
+  feedback 之后；Computer、Riscv64Platform、OpenSBI 的 Enable 分别在 emits settle 提交且不得伪装成
+  feedback。Preset 三个
   子系统依次 Prepared 后 Computer 才变为 Prepared；Setup 的平台、OpenSBI、Kernel（含 Config/Lds）
   全部 Ready 后 Computer 才变为 Ready；Computer 在自身 Enable 完成时变为 Online，随后才发送平台
   Enable，全程不得状态回退。Kernel.Enable 仍没有 Signal/moment，最终说明显示 before-send boundary。
@@ -113,9 +118,13 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   Structure 标签和紧凑宽度保持。箭头几何测试覆盖四方向单一直线路径、source 边起点、target 边精确
   终点和线段中点 label；自环必须位于节点上方、按节点宽高缩放、label 位于上弧外侧且不越出预留
   顶部净空。组件测试覆盖直接和跨多层 ancestor 到 descendant 不生成 SVG，并确认 self、普通同级、
-  跨分支和 descendant 到 ancestor 仍生成；异常线型/reason、状态样式、说明句/footer 不渲染和
+  跨分支和 descendant 到 ancestor 仍生成；异常线型/reason、request/feedback/settle 状态样式、说明句/footer 不渲染和
   reduced-motion 继续覆盖。
-- 浏览器端到端测试必须覆盖 send 箭头、complete 不重复箭头、异常终止保持状态、按钮、
+- frontend 效果测试必须覆盖 request 箭头和 target 抖动、feedback 不画反向箭头且提交状态并闪烁、
+  Action feedback 闪烁但不伪造状态、settle 不产生反馈闪烁且显示内部完成、异常 settle 的红色效果与
+  reason、祖先箭头隐藏时 target 仍抖动、reduced-motion 取消动画但保留确定高亮，以及普通/错误 SVG
+  marker 都精确缩小到原宽高的 50%。
+- 浏览器端到端测试必须覆盖 request 箭头、feedback/settle 不重复箭头、异常终止保持状态、按钮、
   ArrowLeft/ArrowRight、离线加载和本次主模型 derive 产物的完整时刻往返；交替层级 fixture
   必须验证 Human 固定 stage 左下，后续一级节点只向右，二级向上、三级向右、四级向上。无碰撞时
   已有内容坐标不变；碰撞时只有较晚分支向右或向上，较早锚点不动；父框只随可见子树向上/向右

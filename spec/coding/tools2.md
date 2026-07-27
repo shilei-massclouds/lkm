@@ -158,41 +158,47 @@ renderer 所需字段，因此不得为文本模式升级协议或改写 view。
 frontend 生成，不属于 `lkm-render --format text` 的格式分支。老静态 trace/SVG 任务继续保留，退役
 老工具必须由用户另行决定。
 
-## Animation v2 与确定帧
+## Animation v3 与确定帧
 
-animate 必须按 v5 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `2` 因果时刻。
-每个 Signal 恰有 `<signal-id>:send` 和 `<signal-id>:terminal` 两个 moment；send 对应 `signal_sent`，
-terminal 按最终 outcome 对应 `response_completed`、`signal_rejected`、`signal_failed`、
-`signal_truncated`、`signal_stopped` 或 `response_stopped`。moment kind 分别为 `send`、`complete`、
-`rejected`、`failed`、`truncated` 或 `stopped`，并记录 event sequence、Signal/cause identity、
-source/target/name/delivery、handler kind/name、outcome/reason 和 Transition 的真实 before/after state。
+animate 必须按 v5 view `events[].sequence` 重放并投影 `lkm.spec.signal-animation` version `3` 因果时刻。
+`signal_sent` 只验证 Signal 已发送，不生成 moment；`signal_received` 生成 `<signal-id>:request`。
+completed/rejected/failed 的 `drives` 或同步根请求生成 `<signal-id>:feedback`，`emits` 生成
+`<signal-id>:settle`；truncated/stopped/response_stopped 生成 `<signal-id>:terminal`。moment kind 只取
+`request`、`feedback`、`settle`、`terminal`，最终结果独立记录在 outcome。request 的 transfer 为
+source→target，feedback 为 target→source，settle/terminal 没有 transfer。每个 moment 还记录 event
+sequence、Signal/cause identity、source/target/name/delivery、handler kind/name、reason 和 Transition
+的真实 before/after state。
 `trace` 同时记录 `total_signals` 与 `total_moments`；`moments` 与 `frames` 一一对应，frame 使用
 `moment_id`。条件、invariant、FIFO、wait 和其它 evidence event 不生成 moment。
 
-生成器从 `initial_snapshot` 开始重放。`signal_sent` 只按 source、target 顺序 reveal 节点，不改变当前
-snapshot；`signal_received` 校验当前 snapshot 精确等于 Signal `before_snapshot`；
-`response_completed` 校验事件 before/after 与 Signal snapshot 一致并以事件 after 更新当前 snapshot。
-异常终止事件使用 Signal `after_snapshot`，该 snapshot 必须等于当前重放 snapshot，因而不得改变
-状态。每个 Signal 必须恰有一个 send、一个匹配最终 outcome 的 terminal，且 send 必须先于 receive 与
-terminal；缺失、重复、乱序、未知 Signal、snapshot 不一致或未知 handler/outcome 都以协议错误失败。
+生成器从 `initial_snapshot` 开始重放，并为每个 Signal 验证 send→receive→terminal 的严格序列。
+`signal_sent` 不 reveal 节点或改变 snapshot；`signal_received` 校验当前 snapshot 精确等于 Signal
+`before_snapshot`，以这个稳定快照生成 request 并首次 reveal source/target。`response_completed` 校验
+事件 before/after 与 Signal snapshot 一致并以真实 after 更新当前 snapshot；rejected/failed 的
+feedback/settle 保留真实 reason 和稳定 snapshot。未收到的 truncated/stopped 只生成 terminal，不
+reveal target 或改变状态。缺失、重复、乱序、未知 Signal、snapshot 不一致、delivery 分类冲突或未知
+handler/outcome 都以协议错误失败。
 
-初始 frame 不显示节点。节点只能在 send moment 首次出现；每个 moment frame 累积当前 Signal 的
+初始 frame 不显示节点。节点只能在 request moment 首次出现；每个 request frame 累积当前 Signal 的
 source/target 与必要祖先，外部端点可没有 model node，结构祖先没有 snapshot state 时必须保持
-stateless。生成器以首次 send 的 source、target reveal 顺序分配稳定 `first_seen`；terminal 不 reveal
-节点或改变序号。虚拟 `$root` 和任意 parent 的 `sibling_order` 都按该序号升序生成，且所有 frame 都
-不得根据当前 Signal、层级视觉方向或端点关系重排。浏览器只由 frame 数据和 parent 链计算显示坐标；
-前后导航不得累积顺序。
+stateless。生成器以首次 receive 的 source、target reveal 顺序分配稳定 `first_seen`；feedback、settle
+和 terminal 不 reveal 节点或改变序号。虚拟 `$root` 和任意 parent 的 `sibling_order` 都按该序号升序
+生成，且所有 frame 都不得根据当前 Signal、层级视觉方向或端点关系重排。浏览器只由 frame 数据和
+parent 链计算显示坐标；前后导航不得累积顺序。
 
 reached boundary 复制到 trace 并在最终说明显示，但 before-send target 不得获得 Signal ID、moment、
 可见节点或 `first_seen`；尤其 `-u Kernel.Enable` 不得创建 Kernel.Enable Signal/moment。
 
 自包含 HTML 必须安全编码内嵌 JSON，阻止 `</script>`、`<!--` 等数据提前终止 script 内容；CSS、
-播放器 JS 和 animation v2 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
+播放器 JS 和 animation v3 数据均不得依赖网络。Svelte/TypeScript 源码、lockfile 与编译后的 JS/CSS
 都纳入仓库，并提供确定 rebuild 和 stale-bundle 检查。
 
-播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。send moment 显示 source 到 target 的
-箭头和发送信息并停在发送状态；complete moment 不重复发送箭头，在响应阶段先显示 target 的 before
-state，再提交 frame 的 after state并高亮；异常 terminal 保持 frame 状态并显示 outcome/reason。
+播放器从预生成 frame 恢复前后位置，不重新 derive 或逆执行。request moment 显示 source 到 target
+的箭头和请求信息，并使请求到达的 target 抖动；即使 source 是 target 的祖先、箭头被隐藏，也不得
+跳过 target 抖动。feedback 不画反向箭头，在响应阶段先显示 target 的 before state，再提交 frame 的
+after state并闪烁 target；Action 同样闪烁但不伪造 state。settle 不画箭头或反馈闪烁，提交真实
+after state并显示“目标内部处理完成”；异常 settle 仍显示红色错误效果和 reason。terminal 保持确定
+frame 并显示 outcome/reason。
 前端按 parent 链计算层级，外部根端点
 按一级节点处理；奇数层 sibling 以底部对齐 row 从左向右排列，偶数层 sibling 以左边缘对齐的反向
 column 从下向上排列，任意深度继续交替。stage 的布局原点位于左下角。节点 identity 固定在自身框
@@ -204,17 +210,20 @@ column 从下向上排列，任意深度继续交替。stage 的布局原点位�
 普通箭头比较 source/target 中心差，选择最近的一对水平或垂直相向边，覆盖左到右、右到左、下到上
 和上到下；普通 path 只使用端到端的 `M … L …` 直线，起点位于 source 对应边，终点和箭头尖精确位于
 target 对应边，label 位于两端中点。source DOM 节点递归包含 target DOM 节点且两者不相同时，播放
-send 阶段不构造 SVG 箭头；该判定只使用当前 frame 的 DOM parent 包含关系，不修改 animation
-v2、Python frame、model 或 derive，且不得跳过端点高亮、Transition/Action 响应、异常 reason、滚动或
+request 阶段不构造 SVG 箭头；该判定只使用当前 frame 的 DOM parent 包含关系，不修改 animation
+v3、Python frame、model 或 derive，且不得跳过端点高亮、请求抖动、Transition/Action 响应、异常 reason、滚动或
 导航。self、descendant 到 ancestor、同级和跨分支仍构造箭头。self Signal 从节点右侧中部到左侧中部，
 控制点位于节点上方，弧高和横向 reach 按节点宽高计算；label 位于上弧外侧。`.frame-forest` 顶部
 padding 必须提供有上下限的流式净空，至少容纳实时缩放自环及 label，避免桌面、移动端和深层节点被
 stage 裁剪。播放器使用 animation frame 在 FLIP、父框膨胀、stage 滚动、window/元素尺寸变化期间重测
-CSS pixel 坐标并更新 SVG；这些坐标是浏览器实时测量结果，不是固定布局常量。树高度变化时补偿 stage
+CSS pixel 坐标并更新 SVG；普通和错误 marker 精确使用 `markerWidth="5" markerHeight="4"`、对应
+`refX/refY` 与 `M 0 0 L 5 2 L 0 4 z`，箭头尖仍落在 target 边界。这些坐标是浏览器实时测量结果，不是固定布局常量。树高度变化时补偿 stage
 的 `scrollTop` 以保持左下锚点在 viewport 中稳定，前后 frame 都从目标布局重算相同滚动边界。失败类
-outcome 使用红色虚线并显示 reason。Transition 响应切换真实 state，Action 只高亮/振动。
+outcome 使用红色虚线并显示 reason。Transition feedback 切换真实 state，Action feedback 只闪烁；
+settle 不使用 feedback 闪烁，异常 settle 使用独立红色错误效果。
 新增节点与向外推开使用 FLIP 平滑过渡，活动端点滚入视区；
-`prefers-reduced-motion` 下取消非必要位移、振动与脉冲但保留确定 frame、线型、reason 和导航。
+`prefers-reduced-motion` 下取消非必要位移、抖动、闪烁与脉冲，但立即保留相同确定 frame、活动端点、
+线型、reason 和导航。
 控制面只含前后按钮、ArrowLeft/ArrowRight、时刻数、Signal 总数和当前 Signal 说明，不增加自动播放、
 速度或时间线。存在 reached boundary 时，最后一个 moment 的说明同时显示其 before-send target。
 

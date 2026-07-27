@@ -94,6 +94,13 @@ failed。
 1. `drives` 同步发送信号：源系统阻塞等待目标系统完成对信号的处理过程；
 2. `emits` 异步发送信号：源系统只负责向目标系统发出信号，不等待目标完成处理。
 
+一次 `drives` 或同步根请求包含两次有方向的信息交互：Signal request 从 source 到 target，目标响应
+完成、拒绝或失败后，feedback 从 target 返回 source，解除源的逻辑等待。feedback 属于同一个 Signal
+envelope 的响应，不创建第二个 Signal，也不改变既有 identity、cause、FIFO 或失败传播语义。
+`emits` 只有 source 到 target 的 request；目标 handler 仍会完成并提交自己的状态或事实，但该 settle
+是目标内部处理事实，不是返回发送源的 feedback。全局推导仍必须观察 emits 的拒绝或失败并决定根
+verdict，这种全局严格失败传播不表示发送源等待或接收了反馈。
+
 上述是目标语义；当前 model 中 `drives/emits Object.Transition::X` 仍是有效的兼容写法，不能在
 formal semantics 和工具更新前直接按新语法解释。异步发送的交付、排序、失败和推导链规则也必须
 在 formal semantics 中闭合后才可实施。
@@ -191,8 +198,8 @@ tools2 可以复用老工具的阶段名称和 CLI 外壳，但不导入 `tools/
 目录内时，快捷入口必须在推导前以用户错误退出；省略 `-t` 时仍从模型初态执行 Human 外部编排，
 包括只给出 `-u Kernel.Startup` 的发送前截至命令。tools2 协议统一为
 version 5，移除 `lossy` 字段与 `discarded` outcome，并拒绝
-version 1、version 2、version 3、version 4、老工具协议和旧 snapshot。动画封装协议为 version 2，
-按 v5 event sequence 发布每个 Signal 的发送与终止因果时刻。受支持的旧 `tools/`
+version 1、version 2、version 3、version 4、老工具协议和旧 snapshot。动画封装协议为 version 3，
+按 v5 event sequence 发布每个 Signal 的 request 及其 feedback、settle 或 terminal 因果时刻。受支持的旧 `tools/`
 parse/model/derive/check/view/render 路径必须解析同一 `external` 声明并遵守
 同一默认编排与显式单 Signal 边界；它们保留各自现有的中间协议版本，且不得导入 tools2 实现。
 

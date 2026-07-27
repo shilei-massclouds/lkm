@@ -18,6 +18,7 @@ from tools2_common import ANIMATION_SCHEMA, ANIMATION_VERSION, ProtocolError, re
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
+EMITS_NESTED = TOOLS2 / "tests" / "fixtures" / "animation-emits-nested.spec"
 
 
 class SignalAnimationTests(unittest.TestCase):
@@ -134,7 +135,7 @@ class SignalAnimationTests(unittest.TestCase):
         self._resequence(view)
         return view
 
-    def test_animation_v2_projects_strict_causal_moments(self) -> None:
+    def test_animation_v3_projects_request_feedback_and_settle_moments(self) -> None:
         animation = build_animation(self.model, self.view)
         self.assertEqual(
             (animation["schema"], animation["version"], animation["producer"]),
@@ -149,14 +150,14 @@ class SignalAnimationTests(unittest.TestCase):
                 for moment in animation["moments"]
             ],
             [
-                ("sig-0001:send", "send", 1),
-                ("sig-0002:send", "send", 4),
-                ("sig-0002:terminal", "complete", 8),
-                ("sig-0001:terminal", "complete", 11),
-                ("sig-0003:send", "send", 12),
-                ("sig-0004:send", "send", 14),
-                ("sig-0003:terminal", "complete", 21),
-                ("sig-0004:terminal", "complete", 25),
+                ("sig-0001:request", "request", 2),
+                ("sig-0002:request", "request", 6),
+                ("sig-0002:feedback", "feedback", 8),
+                ("sig-0001:feedback", "feedback", 11),
+                ("sig-0003:request", "request", 17),
+                ("sig-0003:settle", "settle", 21),
+                ("sig-0004:request", "request", 23),
+                ("sig-0004:settle", "settle", 25),
             ],
         )
         self.assertEqual(animation["initial_frame"]["nodes"], [])
@@ -181,6 +182,13 @@ class SignalAnimationTests(unittest.TestCase):
             animation["moments"][1]["response"],
             {"before_state": None, "after_state": None},
         )
+        self.assertEqual(
+            animation["moments"][0]["transfer"], {"from": "Human", "to": "Root"}
+        )
+        self.assertEqual(
+            animation["moments"][3]["transfer"], {"from": "Root", "to": "Human"}
+        )
+        self.assertIsNone(animation["moments"][5]["transfer"])
 
     def test_frames_reveal_targets_and_keep_first_seen_sibling_order(self) -> None:
         animation = build_animation(self.model, self.view)
@@ -191,7 +199,7 @@ class SignalAnimationTests(unittest.TestCase):
         self.assertEqual(child_frame["sibling_order"]["Root"], ["Child"])
         self.assertEqual(animation["frames"][4]["sibling_order"]["Root"], ["Child", "Async"])
         self.assertEqual(
-            animation["frames"][5]["sibling_order"]["Root"], ["Child", "Async", "Sink"]
+            animation["frames"][6]["sibling_order"]["Root"], ["Child", "Async", "Sink"]
         )
         self.assertEqual(animation["frames"][1]["nodes"][2]["state"], "Base")
 
@@ -245,7 +253,7 @@ class SignalAnimationTests(unittest.TestCase):
         self._set_endpoints(self_view, 3, source="Sink", target="Sink")
         self_signal = build_animation(self.model, self_view)
         self.assertEqual(
-            self_signal["frames"][5]["sibling_order"]["Root"],
+            self_signal["frames"][6]["sibling_order"]["Root"],
             ["Child", "Async", "Sink"],
         )
 
@@ -292,7 +300,7 @@ class SignalAnimationTests(unittest.TestCase):
             self.assertEqual(siblings, sorted(siblings, key=seen.__getitem__))
         self.assertEqual(animation, build_animation(model, view))
 
-    def test_first_send_has_stateless_ancestors_and_real_source_state(self) -> None:
+    def test_first_request_has_stateless_ancestors_and_real_source_state(self) -> None:
         view = deepcopy(self.view)
         view["root_request"]["source"] = "Child"
         view["root_request"]["target"] = "Child"
@@ -489,7 +497,7 @@ class SignalAnimationTests(unittest.TestCase):
         cases.append(("handler", self.model, unknown_handler, "unknown structure"))
         unknown_outcome = deepcopy(self.view)
         unknown_outcome["signals"][0]["outcome"] = "pending"
-        cases.append(("outcome", self.model, unknown_outcome, "not an animation v2 outcome"))
+        cases.append(("outcome", self.model, unknown_outcome, "not an animation v3 outcome"))
         damaged_snapshot = deepcopy(self.view)
         damaged_snapshot["signals"][0]["before_snapshot"]["facts"] = {}
         cases.append(("snapshot", self.model, damaged_snapshot, "facts must be a string list"))
@@ -552,17 +560,80 @@ class SignalAnimationTests(unittest.TestCase):
                 first = build_animation(self.model, view)
                 second = build_animation(self.model, view)
                 self.assertEqual(first, second)
-                self.assertEqual(first["moments"][0]["kind"], "send")
-                self.assertEqual(
-                    first["moments"][-1]["kind"],
-                    "complete" if outcome == "completed" else outcome,
-                )
+                if outcome == "truncated":
+                    self.assertEqual([moment["kind"] for moment in first["moments"]], ["terminal"])
+                    self.assertEqual(first["frames"][0]["nodes"], [])
+                else:
+                    self.assertEqual(first["moments"][0]["kind"], "request")
+                    self.assertEqual(
+                        first["moments"][-1]["kind"],
+                        "terminal" if outcome == "stopped" else "feedback",
+                    )
                 self.assertEqual(first["moments"][-1]["outcome"], outcome)
-                if outcome != "completed":
+                if outcome not in {"completed", "truncated"}:
                     self.assertEqual(
                         first["frames"][0]["nodes"], first["frames"][-1]["nodes"]
                     )
                 self.assertEqual(render_html(first), render_html(second))
+
+    def test_unreceived_stopped_signal_has_only_terminal_and_reveals_nothing(self) -> None:
+        view = self._single_signal_view("stopped")
+        signal = view["signals"][0]
+        view["events"] = [
+            deepcopy(self._signal_event(self.view, signal["id"], "signal_sent")),
+            {
+                "kind": "signal_stopped",
+                "signal_id": signal["id"],
+                "reason": signal["reason"],
+            },
+        ]
+        self._resequence(view)
+        animation = build_animation(self.model, view)
+        self.assertEqual([moment["kind"] for moment in animation["moments"]], ["terminal"])
+        self.assertEqual(animation["frames"][0]["nodes"], [])
+
+    def test_emits_settle_follows_nested_drives_feedback(self) -> None:
+        work = self.root / "emits-nested-work"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                driver_main(
+                    [
+                        str(EMITS_NESTED),
+                        "--signal",
+                        "Root.Start",
+                        "--max-depth",
+                        "all",
+                        "--max-breadth",
+                        "all",
+                        "--work-dir",
+                        str(work),
+                    ]
+                ),
+                0,
+            )
+        animation = build_animation(read_json(work / "model.json"), read_json(work / "view.json"))
+        self.assertEqual(
+            [
+                (moment["source"], moment["target"], moment["kind"])
+                for moment in animation["moments"]
+            ],
+            [
+                ("Human", "Root", "request"),
+                ("Human", "Root", "feedback"),
+                ("Root", "Worker", "request"),
+                ("Worker", "Child", "request"),
+                ("Worker", "Child", "feedback"),
+                ("Root", "Worker", "settle"),
+            ],
+        )
+        self.assertEqual(
+            next(
+                node["state"]
+                for node in animation["frames"][-1]["nodes"]
+                if node["id"] == "Worker"
+            ),
+            "Ready",
+        )
 
     def test_kernel_enable_boundary_has_13_signals_and_26_causal_moments(self) -> None:
         work = self.root / "kernel-boundary-work"
@@ -586,6 +657,11 @@ class SignalAnimationTests(unittest.TestCase):
         animation = build_animation(read_json(work / "model.json"), read_json(work / "view.json"))
         self.assertEqual(animation["trace"]["total_signals"], 13)
         self.assertEqual(animation["trace"]["total_moments"], 26)
+        self.assertEqual(
+            {kind: sum(moment["kind"] == kind for moment in animation["moments"])
+             for kind in ("request", "feedback", "settle")},
+            {"request": 13, "feedback": 10, "settle": 3},
+        )
         self.assertEqual(animation["trace"]["boundary"]["normalized_signal"], "Kernel.Enable")
         self.assertFalse(
             any(
@@ -604,13 +680,13 @@ class SignalAnimationTests(unittest.TestCase):
                 node["state"] for node in frames[moment_id]["nodes"] if node["id"] == system
             )
 
-        self.assertEqual(state("sig-0004:terminal", "Computer"), "Base")
-        self.assertEqual(state("sig-0001:terminal", "Computer"), "Prepared")
-        self.assertEqual(state("sig-0010:terminal", "Kernel"), "Prepared")
-        self.assertEqual(state("sig-0008:terminal", "Kernel"), "Ready")
-        self.assertEqual(state("sig-0005:terminal", "Computer"), "Ready")
-        self.assertEqual(state("sig-0011:terminal", "Computer"), "Online")
-        self.assertEqual(state("sig-0012:send", "Computer"), "Online")
+        self.assertEqual(state("sig-0004:feedback", "Computer"), "Base")
+        self.assertEqual(state("sig-0001:feedback", "Computer"), "Prepared")
+        self.assertEqual(state("sig-0010:feedback", "Kernel"), "Prepared")
+        self.assertEqual(state("sig-0008:feedback", "Kernel"), "Ready")
+        self.assertEqual(state("sig-0005:feedback", "Computer"), "Ready")
+        self.assertEqual(state("sig-0011:settle", "Computer"), "Online")
+        self.assertEqual(state("sig-0012:request", "Computer"), "Online")
         computer_states = [
             next(
                 (node["state"] for node in frame["nodes"] if node["id"] == "Computer"),

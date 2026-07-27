@@ -57,11 +57,12 @@ unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This se
 ## Offline Signal animation
 
 The animation implementation is maintained independently below `tools2/animate/`: its Python package validates
-tools2 v5 `model.json + view.json` and replays the view event sequence into deterministic animation v2 causal
-moments and frames, while the nested Svelte 5 + TypeScript frontend only plays those frames. Every sent Signal has
-one send moment and one terminal moment; synchronous parent completion therefore follows all nested responses.
+tools2 v5 `model.json + view.json` and replays the view event sequence into deterministic animation v3 causal
+moments and frames, while the nested Svelte 5 + TypeScript frontend only plays those frames. Receipt produces a
+request moment; synchronous drives/root responses produce feedback, asynchronous emits responses produce settle,
+and truncated/stopped Signals produce terminal moments. Synchronous parent feedback therefore follows all nested responses.
 It neither imports the old `tools/` SVG renderer nor derives behavior in the browser. Previously generated
-self-contained v1 HTML remains independently openable; the current generator and bundle publish only v2.
+self-contained v1/v2 HTML remains independently openable; the current generator and bundle publish only v3.
 
 `tools2/bin/pyveri --html-out PATH` writes one atomic, self-contained HTML file and can be combined with text `-o`,
 stdout, `-s`, `--snapshot-out`, and `--work-dir`. Successful HTML generation preserves check exit status 0 or 1;

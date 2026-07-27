@@ -2,8 +2,9 @@
 
 本目录记录 `Composition Phase` 的补充约束。
 
-2026-07-27 tools2 Signal animation v2 复核：因果时刻只改变独立 Python `animate` 投影、离线 HTML
-协议和 Svelte 播放器；tools2 v5 derive 的同步响应、异步 FIFO 与 event sequence 不变，也不新增或
+2026-07-27 tools2 Signal animation v3 复核：request/feedback/settle 因果时刻只改变独立 Python
+`animate` 投影、离线 HTML 协议和 Svelte 播放器；tools2 v5 derive 的同步响应、异步 FIFO、Signal
+identity/cause、失败传播与 event sequence 不变，也不新增或
 调整内核 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
 组合语义无需修改。
 

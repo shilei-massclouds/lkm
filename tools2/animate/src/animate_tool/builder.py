@@ -1,4 +1,4 @@
-"""Validate tools2 v5 inputs and project causal animation v2 moments."""
+"""Validate tools2 v5 inputs and project causal animation v3 moments."""
 
 from __future__ import annotations
 
@@ -10,13 +10,14 @@ from tools2_common import ANIMATION_SCHEMA, ANIMATION_VERSION, PRODUCER, Protoco
 
 _HANDLER_KINDS = {"Transition", "Action"}
 _OUTCOMES = {"completed", "rejected", "failed", "truncated", "stopped"}
+_DELIVERIES = {"root", "drives", "emits"}
 _TERMINAL_EVENTS = {
-    "response_completed": ("completed", "complete"),
-    "signal_rejected": ("rejected", "rejected"),
-    "signal_failed": ("failed", "failed"),
-    "signal_truncated": ("truncated", "truncated"),
-    "signal_stopped": ("stopped", "stopped"),
-    "response_stopped": ("stopped", "stopped"),
+    "response_completed": "completed",
+    "signal_rejected": "rejected",
+    "signal_failed": "failed",
+    "signal_truncated": "truncated",
+    "signal_stopped": "stopped",
+    "response_stopped": "stopped",
 }
 
 
@@ -98,6 +99,8 @@ def _project_signal(
     target = _required_string(signal, "target", label=label)
     name = _required_string(signal, "name", label=label)
     delivery = _required_string(signal, "delivery", label=label)
+    if delivery not in _DELIVERIES:
+        raise ProtocolError(f"{label}.delivery is not an animation v3 delivery: {delivery!r}")
     if source not in systems and source != external:
         raise ProtocolError(f"{label}.source references unknown endpoint {source!r}")
     if target not in systems:
@@ -116,7 +119,7 @@ def _project_signal(
         handler_kind = None
     outcome = signal.get("outcome")
     if outcome not in _OUTCOMES:
-        raise ProtocolError(f"{label}.outcome is not an animation v2 outcome: {outcome!r}")
+        raise ProtocolError(f"{label}.outcome is not an animation v3 outcome: {outcome!r}")
     reason = signal.get("reason")
     if reason is not None and not isinstance(reason, str):
         raise ProtocolError(f"{label}.reason must be a string or null")
@@ -154,10 +157,15 @@ def _project_signal(
 
 
 def _moment(signal: dict[str, Any], *, kind: str, sequence: int) -> dict[str, Any]:
-    terminal = kind != "send"
+    if kind == "request":
+        transfer = {"from": signal["source"], "to": signal["target"]}
+    elif kind == "feedback":
+        transfer = {"from": signal["target"], "to": signal["source"]}
+    else:
+        transfer = None
     return {
         "index": -1,
-        "id": f"{signal['signal_id']}:{'terminal' if terminal else 'send'}",
+        "id": f"{signal['signal_id']}:{kind}",
         "kind": kind,
         "event_sequence": sequence,
         "signal_id": signal["signal_id"],
@@ -170,6 +178,7 @@ def _moment(signal: dict[str, Any], *, kind: str, sequence: int) -> dict[str, An
         "handler": deepcopy(signal["handler"]),
         "outcome": signal["outcome"],
         "reason": signal["reason"],
+        "transfer": transfer,
         "response": deepcopy(signal["response"]),
     }
 
@@ -224,8 +233,6 @@ def _validate_events(
                 raise ProtocolError(f"{label}.cause_id must reference an earlier sent Signal")
             sent.add(signal_id)
             next_signal_index += 1
-            moments.append(_moment(signal, kind="send", sequence=sequence))
-            moment_snapshots.append(deepcopy(replay))
             continue
 
         if kind == "signal_received":
@@ -243,6 +250,8 @@ def _validate_events(
                 replay, signal["_before_snapshot"], label=f"{label} before"
             )
             received.add(signal_id)
+            moments.append(_moment(signal, kind="request", sequence=sequence))
+            moment_snapshots.append(deepcopy(replay))
             continue
 
         terminal_spec = _TERMINAL_EVENTS.get(kind)
@@ -256,7 +265,7 @@ def _validate_events(
             raise ProtocolError(f"{label} occurs before signal_sent")
         if signal_id in terminal:
             raise ProtocolError(f"Signal {signal_id!r} has duplicate terminal events")
-        expected_outcome, moment_kind = terminal_spec
+        expected_outcome = terminal_spec
         if signal["outcome"] != expected_outcome:
             raise ProtocolError(
                 f"{label} does not match Signal {signal_id!r} outcome {signal['outcome']!r}"
@@ -283,6 +292,12 @@ def _validate_events(
                 replay, signal["_after_snapshot"], label=f"{label} terminal"
             )
         terminal[signal_id] = kind
+        if expected_outcome in {"truncated", "stopped"}:
+            moment_kind = "terminal"
+        elif signal["delivery"] == "emits":
+            moment_kind = "settle"
+        else:
+            moment_kind = "feedback"
         moments.append(_moment(signal, kind=moment_kind, sequence=sequence))
         moment_snapshots.append(deepcopy(replay))
 
@@ -397,7 +412,7 @@ def _build_frames(
     initial = frame(initial_snapshot, index=-1, moment_id=None)
     frames: list[dict[str, Any]] = []
     for moment, snapshot in zip(moments, snapshots, strict=True):
-        if moment["kind"] == "send":
+        if moment["kind"] == "request":
             reveal(moment["source"])
             reveal(moment["target"])
         frames.append(
@@ -407,7 +422,7 @@ def _build_frames(
 
 
 def build_animation(model: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
-    """Build animation v2 moments without deriving any new Signal behavior."""
+    """Build animation v3 moments without deriving any new Signal behavior."""
     systems = _validate_systems(model)
     source, model_fingerprint = _validate_identity(model, view)
     root_request = view.get("root_request")

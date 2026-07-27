@@ -18,13 +18,14 @@ const node = {
   structural: false, first_seen: 0
 };
 const frame: AnimationFrame = {
-  index: 0, moment_id: 'sig-0001:terminal', nodes: [node], sibling_order: { '$root': ['Root'] }
+  index: 0, moment_id: 'sig-0001:feedback', nodes: [node], sibling_order: { '$root': ['Root'] }
 };
 const transition: AnimationMoment = {
-  index: 0, id: 'sig-0001:terminal', kind: 'complete', event_sequence: 4,
+  index: 0, id: 'sig-0001:feedback', kind: 'feedback', event_sequence: 4,
   signal_id: 'sig-0001', cause_id: null, source: 'Root', target: 'Root', signal: 'Start',
   delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
-  outcome: 'completed', reason: null, response: { before_state: 'Base', after_state: 'Ready' }
+  outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Root' },
+  response: { before_state: 'Base', after_state: 'Ready' }
 };
 
 describe('Signal response effects', () => {
@@ -38,13 +39,21 @@ describe('Signal response effects', () => {
     await unmount(component);
     component = mount(FrameTree, {
       target: document.body,
-      props: { frame, activeMoment: transition, phase: 'response', reducedMotion: true }
+      props: { frame, activeMoment: transition, phase: 'feedback', reducedMotion: true }
     });
     await tick();
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
   });
 
-  it('marks Action and exceptional responses without inventing a state', async () => {
+  it('marks request arrival and Action feedback without inventing a state', async () => {
+    component = mount(NodeCard, {
+      target: document.body,
+      props: { node, activeTarget: true, effectPhase: 'request' }
+    });
+    await tick();
+    expect(document.querySelector('[data-node-id="Root"]')?.classList.contains('request-arrival')).toBe(true);
+
+    await unmount(component);
     component = mount(NodeCard, {
       target: document.body,
       props: {
@@ -52,14 +61,38 @@ describe('Signal response effects', () => {
         activeTarget: true,
         responseKind: 'Action',
         outcome: 'rejected',
-        responsePhase: true
+        effectPhase: 'feedback'
       }
     });
     await tick();
     const card = document.querySelector('[data-node-id="Root"]');
+    expect(card?.classList.contains('feedback-response')).toBe(true);
     expect(card?.classList.contains('action-response')).toBe(true);
     expect(card?.classList.contains('error-response')).toBe(true);
     expect(card?.getAttribute('data-state')).toBe('Ready');
+  });
+
+  it('keeps settle distinct from feedback while preserving exceptional effects', async () => {
+    component = mount(NodeCard, {
+      target: document.body,
+      props: { node, activeTarget: true, responseKind: 'Transition', effectPhase: 'settle' }
+    });
+    await tick();
+    let card = document.querySelector('[data-node-id="Root"]');
+    expect(card?.classList.contains('settling')).toBe(true);
+    expect(card?.classList.contains('feedback-response')).toBe(false);
+
+    await unmount(component);
+    component = mount(NodeCard, {
+      target: document.body,
+      props: {
+        node, activeTarget: true, responseKind: 'Transition', outcome: 'failed', effectPhase: 'settle'
+      }
+    });
+    await tick();
+    card = document.querySelector('[data-node-id="Root"]');
+    expect(card?.classList.contains('settling')).toBe(true);
+    expect(card?.classList.contains('error-response')).toBe(true);
   });
 
   it('distinguishes stateless systems from structural and external nodes', async () => {
@@ -169,6 +202,27 @@ describe('Signal response effects', () => {
     expect(shouldRenderSignalArrow(endpoint('Level2First'), endpoint('Level2Second'))).toBe(true);
     expect(shouldRenderSignalArrow(endpoint('Level4First'), endpoint('Level3Second'))).toBe(true);
     expect(shouldRenderSignalArrow(endpoint('Level4First'), endpoint('Root'))).toBe(true);
+
+    await unmount(component);
+    component = mount(FrameTree, {
+      target: document.body,
+      props: {
+        frame: deepFrame,
+        activeMoment: {
+          ...transition,
+          id: 'sig-0001:request',
+          kind: 'request',
+          source: 'Root',
+          target: 'Level4First',
+          transfer: { from: 'Root', to: 'Level4First' }
+        },
+        phase: 'request',
+        reducedMotion: true
+      }
+    });
+    await tick();
+    expect(document.querySelector('[data-node-id="Level4First"]')?.classList.contains('request-arrival'))
+      .toBe(true);
   });
 
   it('renders a red dashed self-loop contract for exceptional self Signals', async () => {
@@ -187,6 +241,13 @@ describe('Signal response effects', () => {
     expect(arrow?.classList.contains('error')).toBe(true);
     expect(arrow?.getAttribute('data-arrow-kind')).toBe('self');
     expect(arrow?.getAttribute('aria-label')).toContain('failed');
-    expect(document.querySelector('#signal-arrowhead-error')?.getAttribute('refX')).toBe('10');
+    for (const id of ['signal-arrowhead', 'signal-arrowhead-error']) {
+      const marker = document.querySelector(`#${id}`);
+      expect(marker?.getAttribute('markerWidth')).toBe('5');
+      expect(marker?.getAttribute('markerHeight')).toBe('4');
+      expect(marker?.getAttribute('refX')).toBe('5');
+      expect(marker?.getAttribute('refY')).toBe('2');
+      expect(marker?.querySelector('path')?.getAttribute('d')).toBe('M 0 0 L 5 2 L 0 4 z');
+    }
   });
 });

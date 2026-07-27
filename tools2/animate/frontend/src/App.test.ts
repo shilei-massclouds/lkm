@@ -17,7 +17,7 @@ const child = {
   structural: false, first_seen: 2
 };
 const animation: AnimationTrace = {
-  schema: 'lkm.spec.signal-animation', version: 2, source: 'fixture.spec',
+  schema: 'lkm.spec.signal-animation', version: 3, source: 'fixture.spec',
   inputs: { model_fingerprint: 'sha256:fixture' },
   trace: {
     verdict: 'complete', total_signals: 2, total_moments: 4,
@@ -26,36 +26,40 @@ const animation: AnimationTrace = {
   },
   moments: [
     {
-      index: 0, id: 'sig-0001:send', kind: 'send', event_sequence: 1,
+      index: 0, id: 'sig-0001:request', kind: 'request', event_sequence: 2,
       signal_id: 'sig-0001', cause_id: null, source: 'Human', target: 'Root',
       signal: 'Start', delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
-      outcome: 'completed', reason: null, response: { before_state: 'Base', after_state: 'Ready' }
+      outcome: 'completed', reason: null, transfer: { from: 'Human', to: 'Root' },
+      response: { before_state: 'Base', after_state: 'Ready' }
     },
     {
-      index: 1, id: 'sig-0001:terminal', kind: 'complete', event_sequence: 4,
+      index: 1, id: 'sig-0001:feedback', kind: 'feedback', event_sequence: 4,
       signal_id: 'sig-0001', cause_id: null, source: 'Human', target: 'Root',
       signal: 'Start', delivery: 'root', handler: { id: 'Root.Transition::Start', kind: 'Transition' },
-      outcome: 'completed', reason: null, response: { before_state: 'Base', after_state: 'Ready' }
+      outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Human' },
+      response: { before_state: 'Base', after_state: 'Ready' }
     },
     {
-      index: 2, id: 'sig-0002:send', kind: 'send', event_sequence: 5,
+      index: 2, id: 'sig-0002:request', kind: 'request', event_sequence: 6,
       signal_id: 'sig-0002', cause_id: 'sig-0001', source: 'Root', target: 'Child',
       signal: 'Inspect', delivery: 'drives', handler: { id: 'Child.Action::Inspect', kind: 'Action' },
-      outcome: 'completed', reason: null, response: { before_state: null, after_state: null }
+      outcome: 'completed', reason: null, transfer: { from: 'Root', to: 'Child' },
+      response: { before_state: null, after_state: null }
     },
     {
-      index: 3, id: 'sig-0002:terminal', kind: 'complete', event_sequence: 8,
+      index: 3, id: 'sig-0002:feedback', kind: 'feedback', event_sequence: 8,
       signal_id: 'sig-0002', cause_id: 'sig-0001', source: 'Root', target: 'Child',
       signal: 'Inspect', delivery: 'drives', handler: { id: 'Child.Action::Inspect', kind: 'Action' },
-      outcome: 'completed', reason: null, response: { before_state: null, after_state: null }
+      outcome: 'completed', reason: null, transfer: { from: 'Child', to: 'Root' },
+      response: { before_state: null, after_state: null }
     }
   ],
   initial_frame: { index: -1, moment_id: null, nodes: [], sibling_order: {} },
   frames: [
-    { index: 0, moment_id: 'sig-0001:send', nodes: [human, rootBase], sibling_order: { '$root': ['Human', 'Root'] } },
-    { index: 1, moment_id: 'sig-0001:terminal', nodes: [human, rootReady], sibling_order: { '$root': ['Human', 'Root'] } },
-    { index: 2, moment_id: 'sig-0002:send', nodes: [human, rootReady, child], sibling_order: { '$root': ['Human', 'Root'], Root: ['Child'] } },
-    { index: 3, moment_id: 'sig-0002:terminal', nodes: [human, rootReady, child], sibling_order: { '$root': ['Human', 'Root'], Root: ['Child'] } }
+    { index: 0, moment_id: 'sig-0001:request', nodes: [human, rootBase], sibling_order: { '$root': ['Human', 'Root'] } },
+    { index: 1, moment_id: 'sig-0001:feedback', nodes: [human, rootReady], sibling_order: { '$root': ['Human', 'Root'] } },
+    { index: 2, moment_id: 'sig-0002:request', nodes: [human, rootReady, child], sibling_order: { '$root': ['Human', 'Root'], Root: ['Child'] } },
+    { index: 3, moment_id: 'sig-0002:feedback', nodes: [human, rootReady, child], sibling_order: { '$root': ['Human', 'Root'], Root: ['Child'] } }
   ]
 };
 
@@ -87,11 +91,12 @@ describe('deterministic moment navigation', () => {
     await settle();
     expect(nodes()).toEqual(['Human', 'Root']);
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Base');
-    expect(document.body.textContent).toContain('发送：root');
+    expect(document.body.textContent).toContain('请求到达：root');
     next.click();
     await settle();
     expect(document.querySelector('[data-node-id="Root"]')?.getAttribute('data-state')).toBe('Ready');
-    expect(document.body.textContent).toContain('Transition：Base → Ready');
+    expect(document.body.textContent).toContain('反馈 Transition：Base → Ready');
+    expect(document.querySelector('.step-copy h2')?.textContent).toContain('Root — Start → Human');
     expect(document.body.textContent).not.toContain('State::');
     next.click();
     await settle();
@@ -101,7 +106,7 @@ describe('deterministic moment navigation', () => {
     expect(Array.from(rootChildren?.children || []).map((slot) => slot.querySelector('[data-node-id]')?.getAttribute('data-node-id'))).toEqual(['Child']);
     next.click();
     await settle();
-    expect(document.body.textContent).toContain('Action：响应完成');
+    expect(document.body.textContent).toContain('反馈 Action：不改变 lifecycle state');
     expect(document.body.textContent).toContain('边界：Root — Run → Next（发送前）');
     previous.click();
     await tick();

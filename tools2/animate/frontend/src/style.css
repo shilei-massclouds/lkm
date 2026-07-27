@@ -164,8 +164,10 @@ dd {
 .node-children > .node-card { box-shadow: 0 .3rem .9rem rgb(24 42 32 / 7%); }
 .node-slot { position: relative; min-inline-size: min-content; flex: 0 0 auto; }
 .node-card.signal-source { box-shadow: 0 0 0 .18rem rgb(67 113 83 / 18%), 0 .6rem 1.5rem rgb(24 42 32 / 10%); }
-.node-card.signal-target.responding { border-color: #2f7650; box-shadow: 0 0 0 .3rem rgb(76 146 99 / 24%), 0 .75rem 1.75rem rgb(24 42 32 / 12%); }
-.node-card.action-response { animation: action-response 420ms ease-in-out; }
+.node-card.signal-target.request-arrival { border-color: #2f7650; box-shadow: 0 0 0 .22rem rgb(76 146 99 / 20%), 0 .75rem 1.75rem rgb(24 42 32 / 12%); animation: request-arrival 480ms ease-in-out; }
+.node-card.signal-target.feedback-response { border-color: #2f7650; animation: feedback-response 420ms ease-out; }
+.node-card.signal-target.settling { border-color: #52705e; box-shadow: 0 0 0 .2rem rgb(82 112 94 / 18%), 0 .75rem 1.75rem rgb(24 42 32 / 10%); }
+.node-card.action-response { animation-name: feedback-response; }
 .node-card.error-response { border-color: #b33636; animation: error-response 420ms ease-out; }
 .signal-overlay { position: absolute; z-index: 10; inset: 0 auto auto 0; overflow: visible; pointer-events: none; }
 .signal-path { fill: none; stroke: #286a48; stroke-width: 3px; stroke-linecap: round; }
@@ -184,11 +186,16 @@ dd {
 .signal-overlay.error marker path { fill: #b3262e; }
 .signal-overlay.error text { fill: #9f1f28; }
 
-@keyframes action-response {
+@keyframes request-arrival {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-.3rem); }
   50% { transform: translateX(.3rem); }
   75% { transform: translateX(-.18rem); }
+}
+
+@keyframes feedback-response {
+  0% { box-shadow: 0 0 0 0 rgb(76 146 99 / 46%); }
+  100% { box-shadow: 0 0 0 .9rem rgb(76 146 99 / 0%); }
 }
 
 @keyframes error-response {
@@ -283,5 +290,5 @@ dd {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
-  .node-card.action-response, .node-card.error-response { animation: none; }
+  .node-card.request-arrival, .node-card.feedback-response, .node-card.action-response, .node-card.error-response { animation: none; }
 }

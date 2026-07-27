@@ -87,7 +87,7 @@
   }
 
   function updateArrow() {
-    if (!stageElement || !moment || moment.kind !== 'send' || phase !== 'send') {
+    if (!stageElement || !moment || moment.kind !== 'request' || phase !== 'request') {
       arrowGeometry = null;
       return;
     }
@@ -117,7 +117,7 @@
   function trackArrow() {
     arrowFrame = null;
     updateArrow();
-    if (activeIndex !== null && moment?.kind === 'send' && phase === 'send') {
+    if (activeIndex !== null && moment?.kind === 'request' && phase === 'request') {
       arrowFrame = window.requestAnimationFrame(trackArrow);
     }
   }
@@ -156,23 +156,23 @@
     const nextIndex = position + 1;
     activeIndex = nextIndex;
     const activeMoment = animation.moments[nextIndex];
-    phase = activeMoment.kind === 'send'
-      ? 'send'
-      : activeMoment.kind === 'complete'
+    phase = activeMoment.kind === 'request'
+      ? 'request'
+      : activeMoment.kind === 'feedback'
         ? 'before'
-        : 'response';
+        : activeMoment.kind;
     await tick();
     if (!restoreFrameScroll(activeIndex)) {
       restoreBottomAnchor(snapshot);
       revealTarget();
     }
-    if (activeMoment.kind === 'send') {
+    if (activeMoment.kind === 'request') {
       updateArrow();
       scheduleArrowUpdate();
       await pause(480);
-    } else if (activeMoment.kind === 'complete') {
+    } else if (activeMoment.kind === 'feedback') {
       await pause(300);
-      phase = 'response';
+      phase = 'feedback';
       await tick();
       await pause(420);
     } else {
@@ -193,18 +193,19 @@
 
   function responseText() {
     if (!moment) return '初始确定帧：尚未到达因果时刻。';
-    if (moment.kind === 'send') {
-      return `发送：${moment.delivery} · event ${moment.event_sequence}`;
+    if (moment.kind === 'request') {
+      return `请求到达：${moment.delivery} · event ${moment.event_sequence}`;
     }
-    if (moment.kind !== 'complete') return `终止：${moment.kind}，状态保持不变。`;
+    if (moment.kind === 'terminal') return `终止：${moment.outcome}，状态保持不变。`;
+    const prefix = moment.kind === 'settle' ? '目标内部处理完成' : '反馈';
     if (moment.handler.kind === 'Transition') {
       if (moment.response.before_state === null && moment.response.after_state === null) {
-        return 'Transition：无 lifecycle state 的响应已完成。';
+        return `${prefix}：无 lifecycle state 的 Transition 已完成。`;
       }
-      return `Transition：${moment.response.before_state} → ${moment.response.after_state}`;
+      return `${prefix} Transition：${moment.response.before_state} → ${moment.response.after_state}`;
     }
-    if (moment.handler.kind === 'Action') return 'Action：响应完成，不改变 lifecycle state。';
-    return '目标未解析到 handler；保留输入中的确定结果。';
+    if (moment.handler.kind === 'Action') return `${prefix} Action：不改变 lifecycle state。`;
+    return `${prefix}：目标未解析到 handler；保留输入中的确定结果。`;
   }
 
   onMount(() => {
@@ -279,7 +280,7 @@
     bind:this={stageElement}
   >
     <FrameTree {frame} activeMoment={transitioning ? moment : null} {phase} {reducedMotion} />
-    {#if arrowGeometry && moment && moment.kind === 'send' && phase === 'send'}
+    {#if arrowGeometry && moment && moment.kind === 'request' && phase === 'request'}
       <SignalArrow
         geometry={arrowGeometry}
         signal={moment.signal}
@@ -294,9 +295,9 @@
     <div class="step-copy">
       <p class="counter">时刻 {shownIndex + 1} / {animation.trace.total_moments}</p>
       {#if moment}
-        <h2>{moment.source} <span>— {moment.signal} →</span> {moment.target}</h2>
+        <h2>{moment.transfer?.from || moment.source} <span>— {moment.signal} →</span> {moment.transfer?.to || moment.target}</h2>
         <p>{responseText()}</p>
-        {#if moment.kind !== 'send' && moment.outcome !== 'completed'}
+        {#if moment.kind !== 'request' && moment.outcome !== 'completed'}
           <p class="reason"><strong>{moment.outcome}</strong>{moment.reason ? ` · ${moment.reason}` : ''}</p>
         {/if}
       {:else}

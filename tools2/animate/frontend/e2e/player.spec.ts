@@ -18,7 +18,7 @@ let mainHtml = '';
 let pipelineMoments = 0;
 let effectsMoments = 0;
 let alternatingMoments = 0;
-let alternatingSendMoments: number[] = [];
+let alternatingRequestMoments: number[] = [];
 let mainSignals = 0;
 let mainMoments = 0;
 
@@ -48,19 +48,19 @@ function generate(
     'signal_stopped', 'response_stopped'
   ]);
   const visualEvents = derivation.events.filter(
-    (event: { kind: string }) => event.kind === 'signal_sent' || terminalKinds.has(event.kind)
+    (event: { kind: string }) => event.kind === 'signal_received' || terminalKinds.has(event.kind)
   );
-  const sendMoments = derivation.signals.map((signal: { id: string }) =>
+  const requestMoments = derivation.signals.map((signal: { id: string }) =>
     visualEvents.findIndex(
       (event: { kind: string; signal_id?: string }) =>
-        event.kind === 'signal_sent' && event.signal_id === signal.id
+        event.kind === 'signal_received' && event.signal_id === signal.id
     ) + 1
   );
   return {
     html,
     totalSignals: derivation.signals.length,
     totalMoments: visualEvents.length,
-    sendMoments
+    requestMoments
   };
 }
 
@@ -92,7 +92,7 @@ test.beforeAll(() => {
   );
   alternatingHtml = alternating.html;
   alternatingMoments = alternating.totalMoments;
-  alternatingSendMoments = alternating.sendMoments;
+  alternatingRequestMoments = alternating.requestMoments;
   const main = generate(
     'main', join(repository, 'spec/model/main.spec'), ['--until', 'Kernel.Enable'], 0, 'reached'
   );
@@ -166,7 +166,7 @@ test('four levels alternate from the lower-left and inflate only outward', async
     }
   };
   const advanceToSignal = (signalIndex: number) =>
-    advanceToMoment(alternatingSendMoments[signalIndex - 1]);
+    advanceToMoment(alternatingRequestMoments[signalIndex - 1]);
 
   expect(alternatingMoments).toBe(24);
   await advanceToSignal(1);
@@ -229,7 +229,7 @@ test('four levels alternate from the lower-left and inflate only outward', async
     ['3', 'row', 'bottom'], ['4', 'up', 'left']
   ]);
 
-  const finalLayoutMoment = alternatingSendMoments[11];
+  const finalLayoutMoment = alternatingRequestMoments[11];
   for (let index = finalLayoutMoment - 1; index >= 1; index -= 1) {
     await page.keyboard.press('ArrowLeft');
     await expect(counter).toContainText(`时刻 ${index} / ${alternatingMoments}`);
@@ -251,13 +251,16 @@ test('four levels alternate from the lower-left and inflate only outward', async
   expect(repeatedScroll).toEqual(finalScroll);
 });
 
-test('ordinary and exceptional self Signals expose their response phases', async ({ page }) => {
+test('request, feedback, settle, and exceptional self effects stay distinct', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await openOffline(page, pipelineHtml);
   const pipelineNext = page.getByRole('button', { name: '下一步' });
   await pipelineNext.click();
   const firstArrow = page.locator('.signal-overlay');
   await expect(firstArrow).toHaveAttribute('data-arrow-kind', 'ordinary');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveClass(/request-arrival/);
+  await expect(firstArrow.locator('#signal-arrowhead')).toHaveAttribute('markerWidth', '5');
+  await expect(firstArrow.locator('#signal-arrowhead')).toHaveAttribute('markerHeight', '4');
   await page.waitForTimeout(250);
   const alignment = await page.locator('.stage').evaluate((stage) => {
     const source = stage.querySelector<HTMLElement>('[data-node-id="Human"]');
@@ -285,7 +288,7 @@ test('ordinary and exceptional self Signals expose their response phases', async
   await pipelineNext.click();
   await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await expect(page.locator('[data-node-id="Root"]')).toHaveClass(/signal-source/);
-  await expect(page.locator('[data-node-id="Child"]')).toHaveClass(/signal-target/);
+  await expect(page.locator('[data-node-id="Child"]')).toHaveClass(/request-arrival/);
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
   await pipelineNext.click();
   await expect(page.locator('.signal-overlay')).toHaveCount(0);
@@ -294,10 +297,26 @@ test('ordinary and exceptional self Signals expose their response phases', async
   );
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
 
+  await pipelineNext.click();
+  await page.waitForFunction(() =>
+    document.querySelector('[data-node-id="Root"]')?.classList.contains('feedback-response')
+  );
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await pipelineNext.click();
+  await expect(page.locator('[data-node-id="Async"]')).toHaveClass(/request-arrival/);
+  await expect(page.locator('.signal-overlay')).toHaveCount(0);
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await pipelineNext.click();
+  await expect(page.locator('[data-node-id="Async"]')).toHaveClass(/settling/);
+  await expect(page.locator('[data-node-id="Async"]')).not.toHaveClass(/feedback-response/);
+  await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
+  await expect(page.locator('.step-copy')).toContainText('目标内部处理完成 Transition');
+
   await openOffline(page, effectsHtml);
   const next = page.getByRole('button', { name: '下一步' });
   await next.click();
   await expect(page.locator('.signal-overlay')).toHaveAttribute('data-arrow-kind', 'ordinary');
+  await expect(page.locator('[data-node-id="Root"]')).toHaveClass(/request-arrival/);
   await expect(page.locator('.stage')).toHaveAttribute('data-animation-phase', 'idle');
   await next.click();
   await expect(page.locator('.signal-overlay')).toHaveCount(0);
@@ -333,8 +352,10 @@ test('ordinary and exceptional self Signals expose their response phases', async
   await next.click();
   await expect(page.locator('.signal-overlay')).toHaveCount(0);
   await expect(page.locator('.reason')).toContainText('rejected · no_handler');
+  await expect(page.locator('.step-copy')).toContainText('目标内部处理完成');
   await page.waitForFunction(() =>
-    document.querySelector('[data-node-id="Root"]')?.classList.contains('error-response')
+    document.querySelector('[data-node-id="Root"]')?.classList.contains('settling') &&
+      document.querySelector('[data-node-id="Root"]')?.classList.contains('error-response')
   );
 });
 

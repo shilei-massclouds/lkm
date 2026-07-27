@@ -27,7 +27,7 @@
   function displayNode(id: string) {
     const node = nodes.get(id);
     if (
-      node && activeMoment?.kind === 'complete' && activeMoment.target === id &&
+      node && activeMoment?.kind === 'feedback' && activeMoment.target === id &&
       activeMoment.handler.kind === 'Transition' && phase === 'before'
     ) {
       return { ...node, state: activeMoment.response.before_state };
@@ -46,7 +46,7 @@
       activeTarget={activeMoment?.target === id}
       responseKind={activeMoment?.handler.kind || null}
       outcome={activeMoment?.outcome || 'completed'}
-      responsePhase={phase === 'response'}
+      effectPhase={phase}
     >
       {@const childIds = childrenOf(id)}
       {#if childIds.length}
