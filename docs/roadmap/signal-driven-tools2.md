@@ -23,8 +23,8 @@
 4. pending 与 continuation：定义接受后等待未来 Signal、保存/恢复 continuation、队列所有权、超时、
    取消和 snapshot 可续跑语义；首期条件失败必须保持 rejected。
 5. 交互 HTML（已完成）：独立 animate 阶段共同消费 tools2 v5 `model.json` 和 `view.json`，生成内嵌
-   `lkm.spec.signal-animation` v2 因果时刻的自包含 HTML；按 send/terminal moment 前进/后退，不扩展
-   v5 view schema，也不把浏览器变成推导器。首轮 v1 计划见
+   `lkm.spec.signal-animation` v3 因果时刻的自包含 HTML；按 request/feedback/settle/terminal moment
+   前进/后退，不扩展 v5 view schema，也不把浏览器变成推导器。首轮 v1 计划见
    [`interactive-model-animation.md`](interactive-model-animation.md)，老 tools 静态 SVG 保持原责任。
 6. 老工具迁移/退役：只有用户另行明确决定后才能规划。不得以 tools2 覆盖率或版本号自动触发。
 
@@ -58,6 +58,39 @@
 reduced-motion、截图，以及完整主模型 277 个 Signal 的前后往返。完整证据保存在
 [`interactive-model-animation.md`](interactive-model-animation.md)。
 
-2026-07-27 动画协议升级到 v2：生成器按 v5 event sequence 为每个 Signal 发布 send/terminal 两个
-causal moment，父完成时刻位于同步子响应之后；`-u Kernel.Enable` 固定验证 13 个 Signal、26 个 moment
-且不创建边界 Signal。Python、Svelte/Vitest、确定 bundle 与 Playwright 离线/布局/主模型往返测试闭合。
+2026-07-27 动画协议升级到 v3：生成器按 v5 event sequence 区分 request、同步 feedback、异步 settle
+和异常 terminal，父 feedback 位于同步子响应之后；`-u Kernel.Enable` 固定验证 13 个 Signal、26 个
+moment（13 request、10 feedback、3 settle），且不创建边界 Signal。Python、Svelte/Vitest、确定 bundle
+与 Playwright 离线/布局/主模型往返测试闭合。
+
+## 启动语义校准证据
+
+2026-07-27 第 1 组“上游构造与交接”完成。校准基线为 `7b0e7ce061fd367084c4a8c6c17f23029fada5fa`，
+开始时工作树干净，编辑前仓库根直接 `make test` 为 182/182。主模型 fingerprint 是
+`sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa`。
+
+- 从仓库根执行 `tools2/bin/pyveri -u Kernel.Enable --snapshot-out
+  /tmp/lkm-tools2-group1-kernel.snapshot.json`，输出与提交的
+  `tools2/scenarios/Kernel.Enable.snapshot.json` 逐字节一致；两者 SHA-256 都是
+  `75e3cb82141d5d5d3d8e9cc7082c6118a0a2ac585d2ccec84505154a85a060d6`。推导精确包含 13 个
+  Signal：10 个同步 drives 和 3 个异步 emits；后者依次入队/出队，Kernel.Enable 尚未创建。
+- 从模型初态执行 `tools2/bin/pyveri -u BootInitFlow.Preset`，确认实际 sender 是 OpenSBI：
+  `sig-0014 OpenSBI -> Kernel.Enable` 被 FIFO 交付、所有入口 guard 通过并开始 handler，
+  `sig-0015 Kernel.AcceptEnable` 完成并建立 `kernel_enable_accepted(Kernel)`。截断点尚未创建
+  BootInitFlow Signal，Kernel 保持 Ready、BootInitFlow 保持 Base；0014 的 stopped 只表示未提交
+  ancestor，不是拒绝。
+- Linux 6.12 `Documentation/arch/riscv/boot.rst` 的 a0/a1、`satp=0`、RV64 PMD/2 MiB 物理对齐和
+  ordered-boot 要求，与 model snapshot、`_start` live SATP guard 和 Rust entry adoption 一致。根回归
+  announce 仍观察到 `R`（Kernel.Started）先于 `I`（InterruptStream.Prepared），结构化 basic result
+  为 schema v2、passed、`qemu.timed_out=false`。
+- charter 已固化 13-Signal 因果账本和第二截断边界。逐层复核 model、coding、compose 和
+  `impl/arceos_ex` 后未发现差异，因此不制造 model 或实现改动；JSON/snapshot 保持 v5，animation
+  保持 v3，也未引入显式 Signal DSL、continuation、旧工具迁移或新协议。
+- 测试固定每个 Signal 的 identity、delivery、cause、handler、target before/after state、FIFO，
+  同源 compact/verbose text 和 animation fingerprint，并新增真实 OpenSBI handoff 与缺失 SATP/
+  AcceptEnable 负例。`make -C tools2 test` 为 71/71；Svelte check 为 0 error/0 warning，Vitest 16/16，
+  bundle stale check 通过，Playwright 8/8；代码修改后的根 `make test` 再次为 182/182。
+
+DF-0004 继续作为独立长期观察项；本轮两次根门禁均未出现 rc-local timeout。若将来复现，保留
+`qemu-timeout-diagnostics.json` 并按该 defect 定位，不以重试掩盖，也不归因于本组 Signal 语义。
+下一校准批次是第 2 组 Kernel 与 BootInit 入口；在单独闭合前不提前修改 BootInit 内部语义。

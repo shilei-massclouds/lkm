@@ -78,6 +78,64 @@ Signal identity、source、target、model fingerprint 和 boundary provenance，
 聚合断言。尤其第 5 组列出的各叶子都必须拥有自己的因果账本和 Linux/checkpoint 对照，只是共享同一
 PID 1 入口基线。若组内发现问题，只缩小到第一个不一致的边界，不从症状直接修改后续 handler。
 
+## 第 1 组确定语义与因果账本
+
+第 1 组只覆盖 Human/Computer 构造和 `Riscv64Platform -> OpenSBI -> Kernel` 交接，不展开
+`BootInitFlow.Preset` 的任何内部动作。canonical `Kernel.Enable` 发送前推导必须从模型初态和唯一
+`external Human` 编排到达；不能以显式 `-t Kernel.Enable` 的 Human 根 source 代替真实发送者证据。
+本组确定的前 13 个 Signal 如下，编号是该 canonical 推导的稳定 identity：
+
+| ID | source -> target.Signal | delivery / cause | handler 与提交边界 |
+| --- | --- | --- | --- |
+| `sig-0001` | `Human -> Computer.Preset` | drives / none | `Computer.Transition::Preset@Base`；等待 0002–0004 后提交 Computer Prepared |
+| `sig-0002` | `Computer -> Riscv64Platform.Preset` | drives / 0001 | 平台 Base -> Prepared，建立 ISA/平台规格事实 |
+| `sig-0003` | `Computer -> OpenSBI.Preset` | drives / 0001 | OpenSBI Base -> Prepared，建立固件系统规格事实 |
+| `sig-0004` | `Computer -> Kernel.Preset` | drives / 0001 | Kernel Base -> Prepared，采纳 Linux/RV64 boot 规格 |
+| `sig-0005` | `Human -> Computer.Setup` | drives / none | `Computer.Transition::Setup@Prepared`；等待 0006–0010 后建立 assembly 并提交 Computer Ready |
+| `sig-0006` | `Computer -> Riscv64Platform.Setup` | drives / 0005 | 平台 Prepared -> Ready，提交平台构造事实 |
+| `sig-0007` | `Computer -> OpenSBI.Setup` | drives / 0005 | OpenSBI Prepared -> Ready，提交固件构造事实 |
+| `sig-0008` | `Computer -> Kernel.Setup` | drives / 0005 | 等待 0009–0010 后建立 ELF/Image 构造与 Enable 可接受事实，Kernel Prepared -> Ready |
+| `sig-0009` | `Kernel -> Config.Enable` | drives / 0008 | Config Ready -> Online，先于 Lds 发布 |
+| `sig-0010` | `Kernel -> Lds.Enable` | drives / 0008 | 验证 Config Online 后 Lds Ready -> Online |
+| `sig-0011` | `Human -> Computer.Enable` | emits / none | FIFO 接收后 Computer Ready -> Online，再 emits 0012 |
+| `sig-0012` | `Computer -> Riscv64Platform.Enable` | emits / 0011 | FIFO 接收后平台 Ready -> Online，再 emits 0013 |
+| `sig-0013` | `Riscv64Platform -> OpenSBI.Enable` | emits / 0012 | FIFO 接收后提交装载、ABI 与 ordered-boot 事实，OpenSBI Ready -> Online |
+
+0001–0010 是十个同步 request/feedback；0011–0013 是三个异步 request/settle。同步父状态只在全部
+子响应成功后提交；三个异步 sender 先提交自身 Online，再把后继放入全局 FIFO，后继失败不回滚已经
+提交的 sender。0009 必须先于 0010；0011–0013 的每次 enqueue position 都是 1，且各自 dequeue 后
+remaining 都是 0。`Kernel.Enable` 在这个发送前边界没有 Signal identity、receive 或 handler 事件。
+
+本组 guards 和事实提交分为四层：Computer Preset/Setup 保证三个直接子系统依次 Prepared/Ready，
+Setup 才发布 `computer_assembled_from`；Kernel Setup 依次发布 Config/Lds 并建立 ELF、boot Image 和
+`kernel_enable_accept_available`；Computer 与平台 Enable 分别验证 assembly 和已构造的平台；
+OpenSBI Enable 验证平台、固件、只读 BootArgs、Linux boot 规格、Config/Lds 与 Image 文件构造，
+然后提交 `kernel_load_pa` 非零且物理 PMD 对齐、Image 已装载、a0/a1、`satp=0`、DTB 可访问且完整、
+ordered boot、primary hart、BootTaskRef 和 task execution facts。此范围没有适用的 Context/Lock
+进入退出，也没有运行期 fresh instance；不能为了填充账本合成二者。
+
+本组结束用第二条真实上游截断证明。从同一模型初态执行 `-u BootInitFlow.Preset` 时，0013 完成后
+必须实际创建 `sig-0014 OpenSBI -> Kernel.Enable`，delivery 为 emits、cause 为 0013。0014 被 FIFO
+dequeue 和 Kernel receive，全部入口 guards 成立并进入 `Kernel.Transition::Enable@Ready`；它随后同步
+驱动 `sig-0015 Kernel -> Kernel.AcceptEnable`。0015 必须解析为 Action、保持 Kernel Ready、完成并提交
+`kernel_enable_accepted(Kernel)`。紧接着在创建 `BootInitFlow.Preset` 之前 reached：边界 snapshot 等于
+0015 的 after snapshot，Kernel 仍为 Ready、BootInitFlow 仍为 Base，且不存在 BootInitFlow Signal
+identity、send/receive 或 handler 事件。因为同步父响应尚未走到最终 Online commit，0014 在该有界
+推导中以 `stopped: until_signal_reached` 结束；这表示 handler 已接受且 ancestor 未提交，不是 rejected
+或 failed，也不能改写成 Kernel Ready -> Online。
+
+Linux 6.12 `Documentation/arch/riscv/boot.rst` 为这一交接固定 a0=hartid、a1=DTB physical address、
+入口 `satp=0`、RV64 Image 物理 2 MiB/PMD 对齐和 ordered boot 约束。真实 `_start` 在任何
+BootInitFlow child checkpoint 前读取 live `satp` 并 fail-stop，保存 a0/a1；announce checkpoint 中
+`Kernel.Started` 的 `R` 必须先于首个 `InterruptStream.Prepared` 的 `I`。Rust 入口随后以同一 a0/a1
+物化 BootArgs 并执行 `accept_enable_at_entry`。设计期 tools2 snapshot、Linux ABI 和这些真实入口观察
+共同确认交接；任一方不能单独替代另外两方。
+
+失败账本保持严格：0001–0010 的同步子失败短路后续 drives/emits 且不提交未完成 ancestor；0011–0013
+的异步失败传播到根结果但保留已提交 sender；缺失 assembly、Image/ABI guard 时不得进入对应 handler；
+0015 失败时 0014 失败且不得创建 BootInit Signal；重复 Kernel.Enable 必须拒绝。所有失败都保留完整
+cause chain 和最后稳定 snapshot。
+
 ## 单阶段因果账本
 
 每个阶段和关键 action 都必须维护并评审下列顺序的因果账本：

@@ -654,13 +654,55 @@ class SignalAnimationTests(unittest.TestCase):
                 ),
                 0,
             )
-        animation = build_animation(read_json(work / "model.json"), read_json(work / "view.json"))
+        model = read_json(work / "model.json")
+        derivation = read_json(work / "derive.json")
+        view = read_json(work / "view.json")
+        self.assertEqual(
+            {
+                model["model_fingerprint"],
+                derivation["model_fingerprint"],
+                view["model_fingerprint"],
+            },
+            {derivation["model_fingerprint"]},
+        )
+        animation = build_animation(model, view)
+        self.assertEqual(
+            animation["inputs"]["model_fingerprint"],
+            derivation["model_fingerprint"],
+        )
         self.assertEqual(animation["trace"]["total_signals"], 13)
         self.assertEqual(animation["trace"]["total_moments"], 26)
         self.assertEqual(
             {kind: sum(moment["kind"] == kind for moment in animation["moments"])
              for kind in ("request", "feedback", "settle")},
             {"request": 13, "feedback": 10, "settle": 3},
+        )
+        self.assertEqual(
+            [moment["id"] for moment in animation["moments"] if moment["kind"] == "feedback"],
+            [
+                f"sig-{index:04d}:feedback"
+                for index in (2, 3, 4, 1, 6, 7, 9, 10, 8, 5)
+            ],
+        )
+        self.assertEqual(
+            [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
+            [f"sig-{index:04d}:settle" for index in range(11, 14)],
+        )
+        self.assertEqual(
+            [
+                (
+                    moment["signal_id"],
+                    moment["source"],
+                    moment["target"],
+                    moment["signal"],
+                )
+                for moment in animation["moments"]
+                if moment["kind"] == "request"
+            ],
+            [
+                (item["id"], item["source"], item["target"], item["name"])
+                for item in derivation["signals"]
+            ],
         )
         self.assertEqual(animation["trace"]["boundary"]["normalized_signal"], "Kernel.Enable")
         self.assertFalse(

@@ -83,9 +83,23 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   a0/a1/satp 交接、物理 PMD 对齐及 image 构造叶事实；不得提前包含 Kernel 入口才建立的中断关闭事实。
   前 13 个 Signal 的创建顺序必须精确保留三个 Human 创建的 Computer Signal、三个子 System 的三次
   Preset、三次 Setup、Config 先于 Lds Enable，以及 `Computer -> Riscv64Platform -> OpenSBI` 的异步
-  FIFO 交接；三个 Computer Signal 的 source/delivery 必须分别为 Human/drives、Human/drives、
-  Human/emits，均无共同 cause_id。边界处 Kernel.Enable 不得已有 Signal ID 或收发/handler 事件，且不得出现
-  `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
+  FIFO 交接；13 个 Signal 的 identity、delivery、cause、handler 和 target before/after state 必须逐项
+  固定。三个 Computer Signal 的 source/delivery 必须分别为 Human/drives、Human/drives、Human/emits，
+  均无共同 cause_id；三个 emits 必须逐个 position=1 入队并以 remaining=0 出队。边界处 Kernel.Enable
+  不得已有 Signal ID 或收发/handler 事件，且不得出现 `BootArgs` 或 `BootCpuRegisters` 生命周期 Signal。
+  同一次 derive 的 model/derive/view fingerprint 必须一致；compact、verbose 和 animation v3 都只能消费
+  该推导，不得各自重建或重排 Signal。
+- 主模型的 `tools2/bin/pyveri -u BootInitFlow.Preset` 必须同样从默认 Human 外部编排开始，并证明实际
+  sender 是 OpenSBI：前 13 个 Signal 后，`sig-0014 OpenSBI -> Kernel.Enable` 必须以 emits/cause 0013
+  入队、出队和 receive，全部 Kernel 入口 guard 成功并开始 `Kernel.Transition::Enable@Ready`；随后
+  `sig-0015 Kernel -> Kernel.AcceptEnable` 必须以 drives/cause 0014 完成 Action 并提交
+  `kernel_enable_accepted(Kernel)`。在下一个 `BootInitFlow.Preset` 创建前 reached 时，0014 因未提交
+  ancestor 显示 stopped 而不是 rejected/failed，Kernel 仍为 Ready、BootInitFlow 仍为 Base；boundary
+  snapshot 必须等于 0015 after snapshot，且不得存在 BootInitFlow Signal identity、send/receive/handler
+  事件。该验收不得用显式 `-t Kernel.Enable` 的 Human 根 source 证明真实 sender。
+- 主模型负例必须继续覆盖缺失 Computer assembly、OpenSBI/Linux boot 前提和 Kernel a0/a1/satp/Image
+  guard、绕过 Kernel.Enable、重复 Enable、`AcceptEnable` 同步子失败，以及 emits 异步失败传播。失败
+  不得创建 BootInitFlow Signal，并须保持 cause chain、未提交 ancestor 和最后稳定 snapshot。
 - 默认文本覆盖 Transition/Action 两种行、`Preset` 到 `Startup` 的显示别名、每层两空格的 hierarchy
   depth 缩进、负 depth 整体平移以及 Signal 创建顺序不被 depth 重排；Transition 状态必须来自 target
   的 before/after snapshot，stopped 未提交时显示相同状态，未解析 handler 不得猜类型或显示状态。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from copy import deepcopy
 import io
 import json
 import os
@@ -2283,23 +2284,56 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(derivation["boundary"]["normalized_signal"], "Kernel.Enable")
             self.assertEqual(
                 [
-                    (item["source"], item["target"], item["name"])
+                    (
+                        item["id"],
+                        item["source"],
+                        item["target"],
+                        item["name"],
+                        item["delivery"],
+                        item["cause_id"],
+                    )
                     for item in derivation["signals"]
                 ],
                 [
-                    ("Human", "Computer", "Preset"),
-                    ("Computer", "Riscv64Platform", "Preset"),
-                    ("Computer", "OpenSBI", "Preset"),
-                    ("Computer", "Kernel", "Preset"),
-                    ("Human", "Computer", "Setup"),
-                    ("Computer", "Riscv64Platform", "Setup"),
-                    ("Computer", "OpenSBI", "Setup"),
-                    ("Computer", "Kernel", "Setup"),
-                    ("Kernel", "Config", "Enable"),
-                    ("Kernel", "Lds", "Enable"),
-                    ("Human", "Computer", "Enable"),
-                    ("Computer", "Riscv64Platform", "Enable"),
-                    ("Riscv64Platform", "OpenSBI", "Enable"),
+                    ("sig-0001", "Human", "Computer", "Preset", "drives", None),
+                    ("sig-0002", "Computer", "Riscv64Platform", "Preset", "drives", "sig-0001"),
+                    ("sig-0003", "Computer", "OpenSBI", "Preset", "drives", "sig-0001"),
+                    ("sig-0004", "Computer", "Kernel", "Preset", "drives", "sig-0001"),
+                    ("sig-0005", "Human", "Computer", "Setup", "drives", None),
+                    ("sig-0006", "Computer", "Riscv64Platform", "Setup", "drives", "sig-0005"),
+                    ("sig-0007", "Computer", "OpenSBI", "Setup", "drives", "sig-0005"),
+                    ("sig-0008", "Computer", "Kernel", "Setup", "drives", "sig-0005"),
+                    ("sig-0009", "Kernel", "Config", "Enable", "drives", "sig-0008"),
+                    ("sig-0010", "Kernel", "Lds", "Enable", "drives", "sig-0008"),
+                    ("sig-0011", "Human", "Computer", "Enable", "emits", None),
+                    ("sig-0012", "Computer", "Riscv64Platform", "Enable", "emits", "sig-0011"),
+                    ("sig-0013", "Riscv64Platform", "OpenSBI", "Enable", "emits", "sig-0012"),
+                ],
+            )
+            self.assertEqual(
+                [
+                    (
+                        item["handler"]["id"],
+                        item["before_snapshot"]["states"][item["target"]],
+                        item["after_snapshot"]["states"][item["target"]],
+                        item["outcome"],
+                    )
+                    for item in derivation["signals"]
+                ],
+                [
+                    ("Computer.Transition::Preset@Base", "Base", "Prepared", "completed"),
+                    ("Riscv64Platform.Transition::Preset@Base", "Base", "Prepared", "completed"),
+                    ("OpenSBI.Transition::Preset@Base", "Base", "Prepared", "completed"),
+                    ("Kernel.Transition::Preset@Base", "Base", "Prepared", "completed"),
+                    ("Computer.Transition::Setup@Prepared", "Prepared", "Ready", "completed"),
+                    ("Riscv64Platform.Transition::Setup@Prepared", "Prepared", "Ready", "completed"),
+                    ("OpenSBI.Transition::Setup@Prepared", "Prepared", "Ready", "completed"),
+                    ("Kernel.Transition::Setup@Prepared", "Prepared", "Ready", "completed"),
+                    ("Config.Transition::Enable@Ready", "Ready", "Online", "completed"),
+                    ("Lds.Transition::Enable@Ready", "Ready", "Online", "completed"),
+                    ("Computer.Transition::Enable@Ready", "Ready", "Online", "completed"),
+                    ("Riscv64Platform.Transition::Enable@Ready", "Ready", "Online", "completed"),
+                    ("OpenSBI.Transition::Enable@Ready", "Ready", "Online", "completed"),
                 ],
             )
             computer_signals = [
@@ -2314,6 +2348,34 @@ class SignalPipelineTests(unittest.TestCase):
                     ("Human", "Preset", "drives", None),
                     ("Human", "Setup", "drives", None),
                     ("Human", "Enable", "emits", None),
+                ],
+            )
+            async_ids = {"sig-0011", "sig-0012", "sig-0013"}
+            self.assertEqual(
+                [
+                    (
+                        event["kind"],
+                        event.get("child_id") or event.get("signal_id"),
+                        event.get("fifo_position"),
+                        event.get("remaining"),
+                    )
+                    for event in derivation["events"]
+                    if (
+                        event["kind"] == "emits_enqueued"
+                        and event.get("child_id") in async_ids
+                    )
+                    or (
+                        event["kind"] == "emits_dequeued"
+                        and event.get("signal_id") in async_ids
+                    )
+                ],
+                [
+                    ("emits_enqueued", "sig-0011", 1, None),
+                    ("emits_dequeued", "sig-0011", None, 0),
+                    ("emits_enqueued", "sig-0012", 1, None),
+                    ("emits_dequeued", "sig-0012", None, 0),
+                    ("emits_enqueued", "sig-0013", 1, None),
+                    ("emits_dequeued", "sig-0013", None, 0),
                 ],
             )
             self.assertLess(
@@ -2439,6 +2501,37 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(saved["producer"], PRODUCER)
             self.assertEqual(saved["source"], "spec/model/main.spec")
             self.assertEqual(saved["model_fingerprint"], derivation["model_fingerprint"])
+            model_data = read_json(work / "model.json")
+            view_data = read_json(work / "view.json")
+            self.assertEqual(
+                {
+                    derivation["model_fingerprint"],
+                    model_data["model_fingerprint"],
+                    view_data["model_fingerprint"],
+                },
+                {saved["model_fingerprint"]},
+            )
+            with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
+                compact_text = render_text(view_data)
+            with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
+                verbose_text = render_text(view_data)
+            self.assertTrue(
+                compact_text.startswith(
+                    "verdict: reached\n"
+                    "boundary: OpenSBI -- Enable --> Kernel (before send)\n"
+                )
+            )
+            self.assertIn(
+                "Riscv64Platform -- Enable --> OpenSBI[Ready:Online]",
+                compact_text,
+            )
+            self.assertIn("Signal derivation: Human -> Computer.Preset", verbose_text)
+            self.assertIn(
+                "reached boundary: OpenSBI -> Kernel.Enable [emits]", verbose_text
+            )
+            self.assertIn(
+                "sig-0013 [emits] Riscv64Platform -> OpenSBI.Enable", verbose_text
+            )
             self.assertEqual(saved["provenance"]["verdict"], "reached")
             self.assertEqual(saved["provenance"]["boundary"], derivation["boundary"])
             self.assertEqual(
@@ -2766,6 +2859,242 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertNotEqual(direct_data["initial_snapshot"], saved["snapshot"])
             self.assertEqual(direct_data["signals"][0]["outcome"], "rejected")
 
+    def test_main_model_real_opensbi_handoff_stops_before_boot_init_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            work = root / "boot-init-boundary"
+            snapshot = root / "boot-init-boundary.snapshot.json"
+            reached = subprocess.run(
+                [
+                    str(shortcut),
+                    "-u",
+                    "BootInitFlow.Preset",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reached.returncode, 0, reached.stderr)
+            derivation = read_json(work / "derive.json")
+            self.assertEqual(derivation["verdict"], "reached")
+            self.assertEqual(
+                (
+                    derivation["root_request"]["source"],
+                    derivation["root_request"]["target"],
+                    derivation["root_request"]["signal"],
+                ),
+                ("Human", "Computer", "Preset"),
+            )
+            boundary = derivation["boundary"]
+            self.assertEqual(
+                (
+                    boundary["normalized_signal"],
+                    boundary["source"],
+                    boundary["target"],
+                    boundary["send_position"]["delivery"],
+                    boundary["send_position"]["cause_id"],
+                ),
+                ("BootInitFlow.Preset", "Kernel", "BootInitFlow", "drives", "sig-0014"),
+            )
+
+            self.assertEqual(len(derivation["signals"]), 15)
+            kernel_enable, accept_enable = derivation["signals"][-2:]
+            self.assertEqual(
+                (
+                    kernel_enable["id"],
+                    kernel_enable["source"],
+                    kernel_enable["target"],
+                    kernel_enable["name"],
+                    kernel_enable["delivery"],
+                    kernel_enable["cause_id"],
+                    kernel_enable["handler"]["id"],
+                    kernel_enable["outcome"],
+                    kernel_enable["reason"],
+                ),
+                (
+                    "sig-0014",
+                    "OpenSBI",
+                    "Kernel",
+                    "Enable",
+                    "emits",
+                    "sig-0013",
+                    "Kernel.Transition::Enable@Ready",
+                    "stopped",
+                    "until_signal_reached",
+                ),
+            )
+            self.assertEqual(
+                (
+                    accept_enable["id"],
+                    accept_enable["source"],
+                    accept_enable["target"],
+                    accept_enable["name"],
+                    accept_enable["delivery"],
+                    accept_enable["cause_id"],
+                    accept_enable["handler"]["id"],
+                    accept_enable["handler"]["kind"],
+                    accept_enable["outcome"],
+                ),
+                (
+                    "sig-0015",
+                    "Kernel",
+                    "Kernel",
+                    "AcceptEnable",
+                    "drives",
+                    "sig-0014",
+                    "Kernel.Action::AcceptEnable@Ready",
+                    "Action",
+                    "completed",
+                ),
+            )
+            self.assertEqual(
+                (
+                    kernel_enable["before_snapshot"]["states"]["Kernel"],
+                    kernel_enable["after_snapshot"]["states"]["Kernel"],
+                    accept_enable["before_snapshot"]["states"]["Kernel"],
+                    accept_enable["after_snapshot"]["states"]["Kernel"],
+                ),
+                ("Ready", "Ready", "Ready", "Ready"),
+            )
+            self.assertEqual(boundary["snapshot"], accept_enable["after_snapshot"])
+            self.assertEqual(boundary["snapshot"], kernel_enable["after_snapshot"])
+            boundary_states = boundary["snapshot"]["states"]
+            self.assertEqual(
+                {
+                    name: boundary_states[name]
+                    for name in (
+                        "Computer",
+                        "Riscv64Platform",
+                        "OpenSBI",
+                        "Kernel",
+                        "BootInitFlow",
+                    )
+                },
+                {
+                    "Computer": "Online",
+                    "Riscv64Platform": "Online",
+                    "OpenSBI": "Online",
+                    "Kernel": "Ready",
+                    "BootInitFlow": "Base",
+                },
+            )
+            boundary_facts = set(boundary["snapshot"]["facts"])
+            for fact in (
+                "computer_assembled_from(Riscv64Platform,OpenSBI,Kernel)",
+                "assert:BootCpuRegisters.a0 == BootArgs.boot_hartid",
+                "assert:BootCpuRegisters.a1 == BootArgs.dtb_pa",
+                "assert:BootCpuRegisters.satp == 0",
+                'kernel_image_loaded_for_handoff_at("OpenSBI.kernel_load_pa")',
+                'kernel_image_load_pmd_aligned("OpenSBI.kernel_load_pa","Config.pmd_size")',
+                "ordered_booting_enabled",
+                "primary_hart_only_at_kernel_entry",
+                "kernel_enable_accepted(Kernel)",
+            ):
+                self.assertIn(fact, boundary_facts)
+            self.assertFalse(
+                any(item["target"] == "BootInitFlow" for item in derivation["signals"])
+            )
+            self.assertFalse(
+                any(
+                    event["kind"] == "signal_sent"
+                    and event.get("target") == "BootInitFlow"
+                    and event.get("signal") == "Preset"
+                    for event in derivation["events"]
+                )
+            )
+
+            kernel_conditions = {
+                event["expression"]: event["result"]
+                for event in derivation["events"]
+                if event["kind"] == "condition_checked"
+                and event.get("signal_id") == "sig-0014"
+            }
+            for expression in (
+                "Riscv64Platform.state == State::Online",
+                "OpenSBI.state == State::Online",
+                "BootCpuRegisters.a0 == BootArgs.boot_hartid",
+                "BootCpuRegisters.a1 == BootArgs.dtb_pa",
+                "BootCpuRegisters.satp == 0",
+                "kernel_image_loaded_for_handoff_at(OpenSBI.kernel_load_pa)",
+                "BootInitFlow.state == State::Base",
+            ):
+                self.assertIs(kernel_conditions[expression], True)
+
+            def event_sequence(kind: str, signal_id: str | None = None) -> int:
+                return next(
+                    event["sequence"]
+                    for event in derivation["events"]
+                    if event["kind"] == kind
+                    and (signal_id is None or event.get("signal_id") == signal_id)
+                )
+
+            self.assertLess(
+                event_sequence("signal_received", "sig-0014"),
+                event_sequence("response_started", "sig-0014"),
+            )
+            self.assertLess(
+                event_sequence("response_started", "sig-0014"),
+                event_sequence("signal_sent", "sig-0015"),
+            )
+            self.assertLess(
+                event_sequence("response_completed", "sig-0015"),
+                event_sequence("until_signal_reached"),
+            )
+            self.assertLess(
+                event_sequence("until_signal_reached"),
+                event_sequence("response_stopped", "sig-0014"),
+            )
+            self.assertFalse(
+                any(
+                    event["kind"] == "response_completed"
+                    and event.get("signal_id") == "sig-0014"
+                    for event in derivation["events"]
+                )
+            )
+
+            saved = read_json(snapshot)
+            self.assertEqual(saved["snapshot"], boundary["snapshot"])
+            self.assertEqual(saved["provenance"]["boundary"], boundary)
+            model_data = read_json(work / "model.json")
+            view_data = read_json(work / "view.json")
+            self.assertEqual(
+                {
+                    derivation["model_fingerprint"],
+                    model_data["model_fingerprint"],
+                    view_data["model_fingerprint"],
+                    saved["model_fingerprint"],
+                },
+                {derivation["model_fingerprint"]},
+            )
+            with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
+                compact_text = render_text(view_data)
+            with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
+                verbose_text = render_text(view_data)
+            self.assertIn(
+                "boundary: Kernel -- Startup --> BootInitFlow (before send)",
+                compact_text,
+            )
+            self.assertIn(
+                "OpenSBI -- Enable --> Kernel[Ready:Ready] !! stopped: until_signal_reached",
+                compact_text,
+            )
+            self.assertIn("Kernel -- AcceptEnable --> Kernel", compact_text)
+            self.assertIn(
+                "reached boundary: Kernel -> BootInitFlow.Preset [drives]", verbose_text
+            )
+            self.assertIn(
+                "sig-0014 [emits] OpenSBI -> Kernel.Enable", verbose_text
+            )
+            self.assertIn(
+                "sig-0015 [drives] Kernel -> Kernel.AcceptEnable", verbose_text
+            )
+
     def test_pyveri_default_scenario_missing_override_and_path_safety(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2904,6 +3233,93 @@ class SignalPipelineTests(unittest.TestCase):
                         data["signals"][0]["reason"],
                         f"condition_not_satisfied: {missing}",
                     )
+
+            def golden_without_fact(fact: str) -> dict:
+                scenario = deepcopy(read_json(KERNEL_ENABLE_SCENARIO))
+                scenario["snapshot"]["facts"].remove(fact)
+                scenario["provenance"]["boundary"]["snapshot"]["facts"].remove(fact)
+                return scenario
+
+            missing_abi_fact = "assert:BootCpuRegisters.satp == 0"
+            missing_abi_scenario = root / "kernel-missing-satp.snapshot.json"
+            missing_abi_scenario.write_text(
+                json.dumps(golden_without_fact(missing_abi_fact)), encoding="utf-8"
+            )
+            missing_abi_work = root / "kernel-missing-satp"
+            missing_abi = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Kernel.Enable",
+                    "-s",
+                    str(missing_abi_scenario),
+                    "--work-dir",
+                    str(missing_abi_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(missing_abi.returncode, 1, missing_abi.stderr)
+            missing_abi_data = read_json(missing_abi_work / "derive.json")
+            self.assertEqual(missing_abi_data["signals"][0]["outcome"], "rejected")
+            self.assertEqual(
+                missing_abi_data["signals"][0]["reason"],
+                "condition_not_satisfied: BootCpuRegisters.satp == 0",
+            )
+            self.assertFalse(
+                any(item["target"] == "BootInitFlow" for item in missing_abi_data["signals"])
+            )
+
+            accept_fact = "kernel_enable_accept_available(Kernel)"
+            missing_accept_scenario = root / "kernel-missing-accept.snapshot.json"
+            missing_accept_scenario.write_text(
+                json.dumps(golden_without_fact(accept_fact)), encoding="utf-8"
+            )
+            missing_accept_work = root / "kernel-missing-accept"
+            missing_accept = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Kernel.Enable",
+                    "-s",
+                    str(missing_accept_scenario),
+                    "--work-dir",
+                    str(missing_accept_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(missing_accept.returncode, 1, missing_accept.stderr)
+            missing_accept_data = read_json(missing_accept_work / "derive.json")
+            self.assertEqual(
+                [
+                    (item["target"], item["name"], item["outcome"])
+                    for item in missing_accept_data["signals"]
+                ],
+                [
+                    ("Kernel", "Enable", "failed"),
+                    ("Kernel", "AcceptEnable", "rejected"),
+                ],
+            )
+            self.assertEqual(
+                missing_accept_data["failure"]["chain"],
+                ["sig-0001", "sig-0002"],
+            )
+            self.assertEqual(
+                missing_accept_data["last_stable_snapshot"]["states"]["Kernel"],
+                "Ready",
+            )
+            self.assertNotIn(
+                "kernel_enable_accepted(Kernel)",
+                missing_accept_data["last_stable_snapshot"]["facts"],
+            )
+            self.assertFalse(
+                any(item["target"] == "BootInitFlow" for item in missing_accept_data["signals"])
+            )
 
             alias_work = root / "startup-alias"
             (root / "empty-scenario.json").write_text("{}\n", encoding="utf-8")
