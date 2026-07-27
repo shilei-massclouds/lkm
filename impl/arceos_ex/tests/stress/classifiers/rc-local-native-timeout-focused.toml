@@ -1,0 +1,27 @@
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "stress-mem-overflow"
+result = "failure"
+contains = ["overflow=1"]
+description = "The checkpoint stress-memory recorder overflowed."
+
+[[rules]]
+id = "unsupported-visible"
+result = "failure"
+regex = ["unsupported syscall|Function not implemented"]
+description = "A visible unsupported syscall or command path blocked rc.local completion."
+
+[[rules]]
+id = "rc-local-success"
+result = "success"
+contains = [
+  "lkm-rc-local: begin",
+  "lost+found",
+  "lkm-rc-local: end status=0",
+]
+description = "The canonical rc.local launcher completed /bin/ls and powered off cleanly."

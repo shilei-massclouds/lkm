@@ -4,6 +4,33 @@
 
 ## 待解决
 
+### DF-0004: `rc-local-native` 间歇性 QEMU timeout
+
+- 状态：2026-07-27 在正式 `rc-local-native` basic acceptance 中观察到一次 180 秒 timeout；根因尚未明确。已补充 timeout 前 QMP 冻结诊断和 opt-in 专项 stress 入口，随后 100 轮与追加 500 轮均未复现，问题继续保持待解决。
+- 首次记录日期：2026-07-27。
+- 调查起点：commit `2249ea0dbc94`；关联范围为 `rc-local-native`、`user-boot`、native PLIC、canonical rootfs、QEMU RISC-V virt、serial8250/PLIC 外部中断、virtio-rng 完成路径及 basic runner 的 180 秒整体 timeout。
+- 原始表现：`impl/arceos_ex/tests/basic/out/20260727T080032.751746Z-rc-local-native-45625/result.json` 记录 QEMU 阶段运行 180.009 秒后 timeout，result 为 `execution_status=failed` / `verdict=inconclusive`，进程组和私有磁盘均完成清理。日志最后完整到达 `Serial8250Console.IrqDrivenReady` 和 `Serial8250RxLoopback.Ready`，之后只出现单字节 `c`，没有到达 `VirtioRng.EntropyReady`、用户态 rc.local marker 或正常关机。该边界是可复核事实，不等同于 UART、PLIC、virtio-rng、SBI 或调度器根因。
+
+已完成检查：
+
+- basic runner 已建立每次启动独占的 QMP control socket。只有整体 timeout 到达后，runner 才暂停 VM，并把 `query-status`、`query-cpus-fast`、全 hart 寄存器和通用 IRQ 视图写入 `qemu-timeout-diagnostics.json`，然后终止进程组；捕获失败不得覆盖原始 timeout verdict。正常成功路径不使用 QMP 改变 guest 行为。
+- 为排除执行环境混淆，使用固定 1 秒 timeout 的 diagnostic case 做了对照：沙箱内 QEMU 在启动 guest 前稳定报 QMP UNIX socket `Operation not permitted`；同一 case 经获准的非沙箱命令运行时成功捕获两个 hart 的完整寄存器快照，artifact 状态为 `captured`、无错误、捕获耗时 0.002857 秒，QMP socket 和进程组均完成清理。正式 stress 也经非沙箱 `make test-stress` 路径执行，日志未出现 `Operation not permitted`、`Permission denied` 或 seccomp 错误；因此其结果没有混入已知的沙箱 QMP bind 失败。
+- 新增 opt-in `rc-local-native-timeout-focused` stress case；它只重复 canonical basic identity，不复制或覆盖 180 秒 timeout、QEMU 参数、probe、rootfs 或 expectation。命令为 `make test-stress STRESS_CASES=impl/arceos_ex/tests/stress/cases/rc-local-native-timeout-focused.toml STRESS_RUNS=<N>`，每轮保留完整 basic artifact，timeout 时额外保留 QMP snapshot。
+- 首批报告 `20260727T085100.986253Z-rc-local-native-timeout-focused` 完成 100/100，失败和 timeout 均为 0，共 8 个成功序列。
+- 追加报告 `20260727T090709.453131Z-rc-local-native-timeout-focused` 完成 500/500，失败和 timeout 均为 0，共 23 个成功序列；复合轮次耗时 min/avg/p95/max 为 2.184/2.320/2.393/2.824 秒，500 轮的私有磁盘、进程组和 QMP socket 清理均为 500/500。两批累计 600/600 未复现，所有成功日志都在 `Serial8250Console.IrqDrivenReady` 前观察到 `VirtioRng.EntropyReady`。
+
+当前判断：
+
+- 当前只有一个未带 QMP snapshot 的原始 timeout 样本；补充诊断后的 600 个样本全部成功，不能计算失败/成功首差异，也不能证明问题已经消失或已找到根因。
+- 原始失败缺少 `VirtioRng.EntropyReady`，而成功样本均先完成该 checkpoint，这是边界差异和后续取证锚点，不是足以修改内核/runtime 行为的因果证据。
+- 沙箱内 QMP bind 失败是可独立稳定复现的 host 权限问题，发生在 guest 启动前；它不能解释非沙箱正式样本中的 guest 运行 180 秒 timeout，也不得与 DF-0004 归为同一失败类。
+
+后续定位要求：
+
+- 继续使用 checked-in focused case 在非沙箱路径复现，不通过改变 timeout、QEMU 参数、probe、rootfs 或 expectation 提高表面通过率；连续成功只能报告本批未复现。
+- 下一次 timeout 首先保留并检查 `qemu-timeout-diagnostics.json`，把各 hart PC/寄存器映射到构建产物符号，并结合 QMP IRQ 视图和成功/失败 checkpoint 首差异定位停机边界；若现有视图仍不足，再先增加长期有用的 checkpoint/diagnostic。
+- 在得到同一失败现场的可复核因果链前，不基于 UART、PLIC、virtio-rng、SBI、调度或沙箱候选做猜测性修复。
+
 ### DF-0003: 非 PTY `/bin/sh` delayed-input 执行 `/bin/ls` 表现不一致
 
 - 状态：单命令历史不一致继续保留回归；2026-07-16 新增的连续两次 `/bin/ls` 确定性 ENOSYS 已定位并修复，双命令 DF-0003 为 30/30 成功，默认完整 stress 同轮为 10/10。

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import socket
 import stat
 import subprocess
 import tempfile
@@ -519,6 +520,9 @@ class BasicRunnerConfigTests(unittest.TestCase):
         self.assertIn("-bios", command)
         self.assertIn("virtio-net-device,netdev=net0", command)
         self.assertIn("hostfwd=tcp::5555-:5555", " ".join(command))
+        self.assertIn("-qmp", command)
+        self.assertIn("server=on,wait=off", " ".join(command))
+        self.assertTrue(manifest["qemu"]["qmp_socket"].startswith("/tmp/lkm-qmp-"))
 
     def test_host_forward_requires_user_network(self) -> None:
         path = self.write_case(
@@ -918,11 +922,71 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(result["stages"]["qemu"]["status"], "timed_out")
         self.assertTrue(result["qemu"]["timed_out"])
+        self.assertEqual(result["qemu"]["timeout_diagnostics"]["status"], "failed")
+        self.assertTrue((output / "qemu-timeout-diagnostics.json").is_file())
         self.assertTrue(result["cleanup"]["process_group_reaped"])
+        self.assertTrue(result["cleanup"]["qmp_socket_removed"])
         self.assertTrue((output / "post-ran").exists())
         pid = int(pid_file.read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
+
+    def test_timeout_diagnostics_capture_fixed_qmp_snapshot(self) -> None:
+        qmp_socket = self.root / "qmp.sock"
+        diagnostic_path = self.root / "qemu-timeout-diagnostics.json"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(qmp_socket))
+        listener.listen(1)
+
+        def serve() -> None:
+            stopped = False
+            connection, _ = listener.accept()
+            with connection, connection.makefile("rb") as stream:
+                connection.sendall(
+                    b'{"QMP":{"version":{"qemu":{"major":9,"minor":0,"micro":0},'
+                    b'"package":""},"capabilities":[]}}\r\n'
+                )
+                while line := stream.readline():
+                    request = json.loads(line)
+                    command = request["execute"]
+                    command_id = request["id"]
+                    if command == "stop":
+                        stopped = True
+                        connection.sendall(b'{"event":"STOP","data":{}}\r\n')
+                        result: object = {}
+                    elif command == "query-status":
+                        result = {"status": "paused" if stopped else "running"}
+                    elif command == "query-cpus-fast":
+                        result = [{"cpu-index": 0, "thread-id": 101}]
+                    elif command == "human-monitor-command":
+                        result = f"snapshot: {request['arguments']['command-line']}"
+                    else:
+                        result = {}
+                    response = {"return": result, "id": command_id}
+                    connection.sendall((json.dumps(response) + "\r\n").encode())
+
+        server = threading.Thread(target=serve)
+        server.start()
+        manifest = {
+            "test": "demo",
+            "kernel": {"image": str(self.root / "kernel.bin")},
+            "qemu": {
+                "qmp_socket": str(qmp_socket),
+                "timeout_diagnostics": str(diagnostic_path),
+            },
+        }
+        try:
+            summary = runner._capture_timeout_diagnostics(manifest)
+        finally:
+            server.join(timeout=3)
+            listener.close()
+        self.assertFalse(server.is_alive())
+        self.assertEqual(summary["status"], "captured")
+        diagnostic = json.loads(diagnostic_path.read_text())
+        self.assertEqual(diagnostic["queries"]["status_before_stop"]["status"], "running")
+        self.assertEqual(diagnostic["queries"]["status_after_stop"]["status"], "paused")
+        self.assertEqual(diagnostic["queries"]["cpus"][0]["cpu-index"], 0)
+        self.assertIn("info registers -a", diagnostic["queries"]["registers"])
 
     def test_marker_exit_policy_terminates_process_group(self) -> None:
         self.environment["FAKE_QEMU_MODE"] = "marker"
@@ -1077,6 +1141,8 @@ class BasicRunnerLifecycleTests(unittest.TestCase):
                 "command": [str(self.fake_qemu)],
                 "exit_policy": "guest-shutdown",
                 "exit_marker": None,
+                "qmp_socket": str(self.root / "terminal-qmp.sock"),
+                "timeout_diagnostics": str(self.root / "terminal-timeout.json"),
             },
         }
         outcome = runner.QemuOutcome(stdin_steps=[])

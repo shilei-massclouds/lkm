@@ -7,6 +7,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import selectors
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import termios
@@ -89,6 +91,7 @@ class QemuOutcome:
     process_group_reaped: bool = True
     stdin_steps: list[dict[str, Any]] | None = None
     terminal_restored: bool | None = None
+    timeout_diagnostics: dict[str, Any] | None = None
 
 
 class _NonTerminalConsolePresentation:
@@ -385,7 +388,10 @@ def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, 
     else:
         disk["runtime_path"] = None
     build_command = kernel_build_command(repo_root, kernel_dir, config["kernel"])
-    qemu_command = qemu_command_for(config, kernel_image, disk)
+    artifact_identity = hashlib.sha256(str(artifact_dir.resolve()).encode()).hexdigest()[:12]
+    qmp_socket = Path("/tmp") / f"lkm-qmp-{os.getpid()}-{artifact_identity}.sock"
+    timeout_diagnostics = (artifact_dir / "qemu-timeout-diagnostics.json").resolve()
+    qemu_command = qemu_command_for(config, kernel_image, disk, qmp_socket)
     return {
         "schema_version": SCHEMA_VERSION,
         "source_schema_version": config["source_schema_version"],
@@ -398,7 +404,12 @@ def freeze_manifest(config: dict[str, Any], config_path: Path, repo_root: Path, 
         "scripts": config["scripts"],
         "kernel": {**config["kernel"], "resolved_probes": sorted_probes, "image": str(kernel_image)},
         "disk": disk,
-        "qemu": {**config["qemu"], "command": qemu_command},
+        "qemu": {
+            **config["qemu"],
+            "command": qemu_command,
+            "qmp_socket": str(qmp_socket),
+            "timeout_diagnostics": str(timeout_diagnostics),
+        },
         "expect": config["expect"],
         "build_command": build_command,
     }
@@ -450,7 +461,9 @@ def kernel_build_command(repo_root: Path, kernel_dir: Path, kernel: dict[str, An
     return command
 
 
-def qemu_command_for(config: dict[str, Any], kernel_image: Path, disk: dict[str, Any]) -> list[str]:
+def qemu_command_for(
+    config: dict[str, Any], kernel_image: Path, disk: dict[str, Any], qmp_socket: Path
+) -> list[str]:
     qemu = config["qemu"]
     command = [
         *_tool_command("QEMU", "qemu-system-riscv64"),
@@ -463,6 +476,8 @@ def qemu_command_for(config: dict[str, Any], kernel_image: Path, disk: dict[str,
         "-nographic",
         "-serial",
         "mon:stdio",
+        "-qmp",
+        f"unix:{qmp_socket},server=on,wait=off",
     ]
     if config["kernel"]["target"] == "arceos_ex":
         command[3:3] = ["-cpu", "rv64"]
@@ -590,6 +605,14 @@ def run_pipeline(
         cleanup_errors: list[str] = []
         cleanup = result["cleanup"]
         cleanup["process_group_reaped"] = qemu_outcome.process_group_reaped
+        if qemu_started and manifest is not None:
+            qmp_socket = Path(manifest["qemu"]["qmp_socket"])
+            try:
+                qmp_socket.unlink(missing_ok=True)
+                cleanup["qmp_socket_removed"] = not qmp_socket.exists()
+            except OSError as error:
+                cleanup_errors.append(f"QMP socket cleanup failed: {error}")
+                cleanup["qmp_socket_removed"] = False
         if private_disk is not None:
             try:
                 private_disk.unlink(missing_ok=True)
@@ -618,6 +641,7 @@ def run_pipeline(
             "terminated_after_marker": qemu_outcome.terminated_after_marker,
             "terminated_after_stress_mem": qemu_outcome.terminated_after_stress_mem,
             "stress_mem": qemu_outcome.stress_mem,
+            "timeout_diagnostics": qemu_outcome.timeout_diagnostics,
             "interaction": manifest["qemu"]["interaction"] if manifest else None,
             "stdin_steps": qemu_outcome.stdin_steps or [],
         }
@@ -732,6 +756,7 @@ def _run_qemu(
         return
     steps = [dict(step, sent=False) for step in manifest["qemu"]["stdin_steps"]]
     outcome.stdin_steps = []
+    _prepare_qmp_socket(manifest)
     process = subprocess.Popen(
         manifest["qemu"]["command"],
         cwd=cwd,
@@ -758,6 +783,8 @@ def _run_qemu(
             while pipe_open or process.poll() is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 and process.poll() is None:
+                    if not timed_out:
+                        outcome.timeout_diagnostics = _capture_timeout_diagnostics(manifest)
                     timed_out = True
                     reaped = _terminate_process_group(process)
                 events = selector.select(max(0.0, min(0.1, remaining))) if pipe_open else []
@@ -848,6 +875,7 @@ def _run_qemu_terminal(
     output_open = True
     try:
         tty.setraw(input_fd)
+        _prepare_qmp_socket(manifest)
         process = subprocess.Popen(
             manifest["qemu"]["command"],
             cwd=cwd,
@@ -865,6 +893,8 @@ def _run_qemu_terminal(
             while output_open or process.poll() is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 and process.poll() is None:
+                    if not timed_out:
+                        outcome.timeout_diagnostics = _capture_timeout_diagnostics(manifest)
                     timed_out = True
                     reaped = _terminate_process_group(process)
                 for key, _ in selector.select(max(0.0, min(0.1, remaining))):
@@ -946,6 +976,122 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> bool:
             return True
         except subprocess.TimeoutExpired:
             return False
+
+
+def _prepare_qmp_socket(manifest: dict[str, Any]) -> None:
+    path = Path(manifest["qemu"]["qmp_socket"])
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        raise RuntimeError(f"cannot prepare QMP socket {path}: {error}") from error
+
+
+def _capture_timeout_diagnostics(manifest: dict[str, Any]) -> dict[str, Any]:
+    path = Path(manifest["qemu"]["timeout_diagnostics"])
+    qmp_socket = Path(manifest["qemu"]["qmp_socket"])
+    started = time.monotonic()
+    diagnostic: dict[str, Any] = {
+        "schema_version": 1,
+        "test": manifest["test"],
+        "captured_at": _now(),
+        "kernel_image": manifest["kernel"]["image"],
+        "qmp_socket": str(qmp_socket),
+        "status": "failed",
+        "queries": {},
+        "errors": [],
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(2.0)
+            client.connect(str(qmp_socket))
+            with client.makefile("rb") as stream:
+                greeting = _qmp_read(stream)
+                if "QMP" not in greeting:
+                    raise RuntimeError("QMP greeting is missing the QMP object")
+                diagnostic["greeting"] = greeting
+                _qmp_execute(client, stream, "qmp_capabilities", command_id="capabilities")
+                fixed_queries = (
+                    ("status_before_stop", "query-status", None),
+                    ("stop", "stop", None),
+                    ("status_after_stop", "query-status", None),
+                    ("cpus", "query-cpus-fast", None),
+                    (
+                        "registers",
+                        "human-monitor-command",
+                        {"command-line": "info registers -a"},
+                    ),
+                    (
+                        "interrupts",
+                        "human-monitor-command",
+                        {"command-line": "info irq"},
+                    ),
+                    (
+                        "interrupt_controllers",
+                        "human-monitor-command",
+                        {"command-line": "info pic"},
+                    ),
+                )
+                for name, command, arguments in fixed_queries:
+                    try:
+                        diagnostic["queries"][name] = _qmp_execute(
+                            client,
+                            stream,
+                            command,
+                            arguments=arguments,
+                            command_id=name,
+                        )
+                    except Exception as error:
+                        diagnostic["errors"].append(f"{name}: {error}")
+                diagnostic["status"] = "partial" if diagnostic["errors"] else "captured"
+    except Exception as error:
+        diagnostic["errors"].append(str(error))
+    diagnostic["duration_seconds"] = round(time.monotonic() - started, 6)
+    try:
+        _write_json(path, diagnostic)
+    except OSError as error:
+        diagnostic["status"] = "failed"
+        diagnostic["errors"].append(f"cannot write timeout diagnostics: {error}")
+    return {
+        "path": str(path),
+        "status": diagnostic["status"],
+        "errors": list(diagnostic["errors"]),
+    }
+
+
+def _qmp_read(stream: Any) -> dict[str, Any]:
+    line = stream.readline()
+    if not line:
+        raise RuntimeError("QMP connection closed before a response")
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid QMP response: {error}") from error
+    if not isinstance(message, dict):
+        raise RuntimeError("QMP response is not an object")
+    return message
+
+
+def _qmp_execute(
+    client: socket.socket,
+    stream: Any,
+    command: str,
+    *,
+    arguments: dict[str, Any] | None = None,
+    command_id: str,
+) -> Any:
+    request: dict[str, Any] = {"execute": command, "id": command_id}
+    if arguments is not None:
+        request["arguments"] = arguments
+    client.sendall((json.dumps(request, separators=(",", ":")) + "\r\n").encode())
+    while True:
+        response = _qmp_read(stream)
+        if response.get("id") != command_id:
+            continue
+        if "error" in response:
+            raise RuntimeError(f"QMP {command} failed: {response['error']}")
+        if "return" not in response:
+            raise RuntimeError(f"QMP {command} response has no return value")
+        return response["return"]
 
 
 def _run_script(script: Path, manifest: dict[str, Any], qemu_log: Path, result_path: Path, log_path: Path) -> None:
@@ -1302,6 +1448,7 @@ def _initial_result(
             "directory": str(artifact),
             "manifest": str(manifest),
             "qemu_log": str(qemu_log),
+            "timeout_diagnostics": str(artifact / "qemu-timeout-diagnostics.json"),
             "result": str(result),
         },
         "started_at": _now(),
@@ -1317,6 +1464,7 @@ def _initial_result(
         "cleanup": {
             "process_group_reaped": True,
             "private_disk_removed": None,
+            "qmp_socket_removed": None,
             "terminal_restored": None,
         },
         "errors": [],

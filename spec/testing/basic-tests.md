@@ -130,7 +130,15 @@ PreScript 失败时 QEMU 不得启动。只要 QEMU 阶段已经开始，PostScr
 PreScript 之前检查真实 stdin/stdout TTY；无 TTY 时结构化失败。`build` 和 `manifest` 不要求 TTY。
 
 runner 以独立进程组启动 QEMU，执行整体 timeout，并实现等待 process exit/guest shutdown、marker
-或完整合法 `stress_mem` record 后终止的退出策略。`stress_mem` 只有在 header、声明长度和完整 hex
+或完整合法 `stress_mem` record 后终止的退出策略。每次 QEMU 启动还必须建立 runner 独占、配置不可注入
+命令的 QMP 控制通道；正常完成时它不参与 guest 行为。整体 timeout 到达后，runner 必须先通过该通道
+暂停 VM，冻结 timeout 前的 `query-status`、`query-cpus-fast`、全 hart 寄存器及通用 IRQ 视图到独立
+`qemu-timeout-diagnostics.json`，再终止进程组。诊断通道不可用、某项 QMP/HMP 查询不受支持或捕获失败
+不得覆盖原始 timeout；必须把 partial/failed 状态与精确错误写入同一 artifact，并继续完成进程组和
+socket 清理。诊断只允许 timeout 后的固定只读查询以及为一致快照所需的 `stop`，不得根据怀疑对象读取
+可能有副作用的 MMIO、恢复 VM、重试 guest 行为或改变 pass/fail 分类。
+
+`stress_mem` 只有在 header、声明长度和完整 hex
 payload 均可解析时才算到达；partial record 不得提前终止。expectation 的观察面是完整
 `qemu.log` 与已解码 `stress_mem` payload 的联合：不得因为存在 record 就丢弃串口上的登录、shell
 或其他 guest 证据，checkpoint 也不得仅作为未解码 hex 存在。timeout、异常、正常退出和 terminal 中断都必须恢复原终端属性、执行适用的
@@ -141,7 +149,9 @@ kernel smoke/checkpoint callback 等没有该事实的测试使用 marker/count�
 
 ## Result schema v2
 
-每次 `build`/`run` 始终创建 `qemu.log` 和 result schema v2。result 至少记录 request/canonical test、
+每次 `build`/`run` 始终创建 `qemu.log` 和 result schema v2。timeout 的 run 另外创建
+`qemu-timeout-diagnostics.json`；result 必须记录其路径、captured/partial/failed 状态以及 QMP socket
+是否清理。result 至少记录 request/canonical test、
 compatibility alias、config/manifest、command、purpose、开始结束时间、七阶段、QEMU/interaction、每项
 expectation、cleanup、`execution_status = "completed" | "failed"` 和
 `verdict = "passed" | "failed" | "inconclusive"`。

@@ -118,8 +118,34 @@ class CompositeConfigTests(unittest.TestCase):
             self.assertNotIn("qemu-system", path.read_text())
             self.assertNotIn("openrc", path.name.lower())
             loaded.append(runner._load_case(path, self.repo_root))
-        self.assertEqual(len(loaded), 9)
+        self.assertEqual(len(loaded), 10)
         self.assertTrue(all(case["mode"] in {"stress", "difftest"} for case in loaded))
+
+    def test_rc_local_timeout_case_is_opt_in_and_uses_canonical_basic(self) -> None:
+        path = (
+            self.repo_root
+            / "impl"
+            / "arceos_ex"
+            / "tests"
+            / "stress"
+            / "cases"
+            / "rc-local-native-timeout-focused.toml"
+        )
+        case = runner._load_case(path, self.repo_root)
+        self.assertEqual(case["test"], "rc-local-native")
+        self.assertEqual(case["runs"], 100)
+        self.assertTrue(case["metadata"]["opt_in_only"])
+        success = next(rule for rule in case["rules"] if rule["result"] == "success")
+        self.assertEqual(success["id"], "rc-local-success")
+        self.assertEqual(
+            runner._classify(
+                "lkm-rc-local: begin\nlost+found\nlkm-rc-local: end status=0\n",
+                0,
+                False,
+                case["rules"],
+            )["id"],
+            "rc-local-success",
+        )
 
     def test_schema_v1_and_arbitrary_command_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

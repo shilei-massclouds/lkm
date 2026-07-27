@@ -31,7 +31,17 @@ make test-stress \
 make test-stress \
   STRESS_CASES=impl/arceos_ex/tests/stress/cases/busybox-init-login-focused.toml \
   STRESS_RUNS=1
+
+make test-stress \
+  STRESS_CASES=impl/arceos_ex/tests/stress/cases/rc-local-native-timeout-focused.toml \
+  STRESS_RUNS=100
 ```
+
+The last case is an opt-in timeout investigation for the canonical
+`rc-local-native` basic test. It keeps every standalone artifact and, on a
+timeout, the basic runner freezes `qemu-timeout-diagnostics.json` before it
+terminates QEMU. A run with no failures reports only that the timeout was not
+observed in that sample; it is not a root-cause verdict.
 
 For one selected stress case, a schema-v2 historical report can be compared
 without changing the current invocation's exit status:
@@ -90,6 +100,8 @@ whole selected suite. Each case report is stored below
 - `manifest.json`: schema-v2 identities, hashes, run count, metadata, and an
   optional frozen historical-baseline hash set.
 - `runs/run-NNNN/basic/`: the complete standalone basic artifact for stress.
+- `runs/run-NNNN/basic/qemu-timeout-diagnostics.json`: the QMP CPU/register/IRQ
+  snapshot captured before terminating a timed-out QEMU, when a timeout occurs.
 - `runs/run-NNNN/{left,right}/`: the two standalone basic artifacts for
   difftest, in strict execution order.
 - `runs/run-NNNN/result.json` and `events.json`: composite analysis only.

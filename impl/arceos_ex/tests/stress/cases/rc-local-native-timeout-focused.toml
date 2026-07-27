@@ -1,0 +1,15 @@
+schema_version = 2
+name = "rc-local-native-timeout-focused"
+description = "Repeat the canonical rc-local-native basic acceptance test to capture an intermittent timeout with frozen QMP diagnostics."
+mode = "stress"
+test = "rc-local-native"
+runs = 100
+classifier = "../classifiers/rc-local-native-timeout-focused.toml"
+
+[metadata]
+observation_mode = "rc-local-native-timeout-forensics"
+ordinary_path_required = true
+opt_in_only = true
+rootfs_profile = "canonical"
+payload = "canonical /opt/lkm/tests/rc-local-init -> /bin/sh rc-local.sh -> /bin/ls and poweroff"
+scope_note = "Locate the intermittent QEMU timeout from frozen basic and QMP artifacts; successful samples do not establish a root cause."
