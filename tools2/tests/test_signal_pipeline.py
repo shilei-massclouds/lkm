@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from copy import deepcopy
+import hashlib
 import io
 import json
 import os
@@ -44,6 +45,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS2 = ROOT / "tools2"
 PIPELINE = TOOLS2 / "tests" / "fixtures" / "pipeline.spec"
 KERNEL_ENABLE_SCENARIO = TOOLS2 / "scenarios" / "Kernel.Enable.snapshot.json"
+BOOT_INIT_SETUP_SCENARIO = TOOLS2 / "scenarios" / "BootInitFlow.Setup.snapshot.json"
 
 
 class SignalPipelineTests(unittest.TestCase):
@@ -3094,6 +3096,443 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn(
                 "sig-0015 [drives] Kernel -> Kernel.AcceptEnable", verbose_text
             )
+
+    def test_main_model_boot_init_preset_reaches_setup_boundary_and_snapshot_resumes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+            work = root / "boot-init-setup-boundary"
+            snapshot = root / "BootInitFlow.Setup.snapshot.json"
+            reached = subprocess.run(
+                [
+                    str(shortcut),
+                    "-u",
+                    "BootInitFlow.Setup",
+                    "--work-dir",
+                    str(work),
+                    "--snapshot-out",
+                    str(snapshot),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reached.returncode, 0, reached.stderr)
+            derivation = read_json(work / "derive.json")
+            self.assertEqual(derivation["verdict"], "reached")
+            self.assertEqual(
+                derivation["summary"],
+                {
+                    "completed": 49,
+                    "failed": 0,
+                    "pending": 0,
+                    "rejected": 0,
+                    "signals": 50,
+                    "stopped": 1,
+                    "truncated": 0,
+                },
+            )
+            self.assertEqual(
+                (
+                    derivation["root_request"]["source"],
+                    derivation["root_request"]["target"],
+                    derivation["root_request"]["signal"],
+                ),
+                ("Human", "Computer", "Preset"),
+            )
+
+            expected = [
+                (14, "OpenSBI", "Kernel", "Enable", "emits", 13, "Transition", "Ready", "Ready", "stopped"),
+                (15, "Kernel", "Kernel", "AcceptEnable", "drives", 14, "Action", "Ready", "Ready", "completed"),
+                (16, "Kernel", "BootInitFlow", "Preset", "drives", 14, "Transition", "Base", "Prepared", "completed"),
+                (17, "BootInitFlow", "InterruptStream", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (18, "BootInitFlow", "KernelImage", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (19, "BootInitFlow", "KernelImage", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (20, "BootInitFlow", "BootCurrentCPU", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (21, "BootCurrentCPU", "BootCPU", "Preset", "drives", 20, "Transition", "Base", "Prepared", "completed"),
+                (22, "BootCurrentCPU", "BootCpuLocalInterrupt", "Setup", "drives", 20, "Transition", "Base", "Ready", "completed"),
+                (23, "BootCurrentCPU", "BootCpuCurrentTask", "Setup", "drives", 20, "Transition", "Base", "Ready", "completed"),
+                (24, "BootInitFlow", "BootCurrentCPU", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (25, "BootInitFlow", "CpuGroup", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (26, "BootInitFlow", "BootCurrentCPU", "Enable", "drives", 16, "Transition", "Ready", "Online", "completed"),
+                (27, "BootInitFlow", "BootTaskEntryBinding", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (28, "BootInitFlow", "BootInitStack", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (29, "BootInitFlow", "EventStream", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (30, "BootInitFlow", "ExceptionStream", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (31, "ExceptionStream", "PageFaultException", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
+                (32, "ExceptionStream", "SyscallException", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
+                (33, "ExceptionStream", "BreakpointException", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
+                (34, "ExceptionStream", "UnexpectedException", "Preset", "drives", 30, "Transition", "Base", "Prepared", "completed"),
+                (35, "BootInitFlow", "Vm", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+                (36, "Vm", "TrampolineVm", "Setup", "drives", 35, "Transition", "Base", "Ready", "completed"),
+                (37, "Vm", "EarlyVm", "Preset", "drives", 35, "Transition", "Base", "Prepared", "completed"),
+                (38, "EarlyVm", "RawDtb", "Preset", "drives", 37, "Transition", "Base", "Prepared", "completed"),
+                (39, "EarlyVm", "RawDtb", "Setup", "drives", 37, "Transition", "Prepared", "Ready", "completed"),
+                (40, "EarlyVm", "FixMap", "Preset", "drives", 37, "Transition", "Base", "Ready", "completed"),
+                (41, "Vm", "EarlyVm", "Setup", "drives", 35, "Transition", "Prepared", "Ready", "completed"),
+                (42, "BootInitFlow", "Vm", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (43, "Vm", "TrampolineVm", "Enable", "drives", 42, "Transition", "Ready", "Online", "completed"),
+                (44, "Vm", "EarlyVm", "Enable", "drives", 42, "Transition", "Ready", "Online", "completed"),
+                (45, "Vm", "TrampolineVm", "Cleanup", "drives", 42, "Transition", "Online", "Destroyed", "completed"),
+                (46, "Vm", "KernelImage", "Enable", "drives", 42, "Transition", "Ready", "Online", "completed"),
+                (47, "BootInitFlow", "EventStream", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (48, "BootInitFlow", "BootTaskEntryBinding", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (49, "BootInitFlow", "BootInitStack", "Setup", "drives", 16, "Transition", "Prepared", "Ready", "completed"),
+                (50, "BootInitFlow", "Soc", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
+            ]
+            actual = []
+            for item in derivation["signals"][13:]:
+                number = int(item["id"].removeprefix("sig-"))
+                cause = int(item["cause_id"].removeprefix("sig-"))
+                actual.append(
+                    (
+                        number,
+                        item["source"],
+                        item["target"],
+                        item["name"],
+                        item["delivery"],
+                        cause,
+                        item["handler"]["kind"],
+                        item["before_snapshot"]["states"][item["target"]],
+                        item["after_snapshot"]["states"][item["target"]],
+                        item["outcome"],
+                    )
+                )
+                handler_member = "Action" if number == 15 else "Transition"
+                self.assertEqual(
+                    item["handler"]["id"],
+                    f"{item['target']}.{handler_member}::{item['name']}@{item['before_snapshot']['states'][item['target']]}",
+                )
+            self.assertEqual(actual, expected)
+            self.assertEqual(derivation["signals"][13]["reason"], "until_signal_reached")
+
+            boundary = derivation["boundary"]
+            self.assertEqual(
+                {
+                    key: boundary[key]
+                    for key in ("kind", "normalized_signal", "source", "target", "signal")
+                },
+                {
+                    "kind": "before_signal_send",
+                    "normalized_signal": "BootInitFlow.Setup",
+                    "source": "Kernel",
+                    "target": "BootInitFlow",
+                    "signal": "Setup",
+                },
+            )
+            self.assertEqual(
+                (boundary["send_position"]["delivery"], boundary["send_position"]["cause_id"]),
+                ("drives", "sig-0014"),
+            )
+            self.assertEqual(
+                boundary["call_span"],
+                {
+                    "end_column": 1,
+                    "end_line": 359,
+                    "source_file": "spec/model/systems/kernel.spec",
+                    "start_column": 1,
+                    "start_line": 358,
+                },
+            )
+            self.assertEqual(boundary["snapshot"], derivation["signals"][15]["after_snapshot"])
+            states = boundary["snapshot"]["states"]
+            self.assertEqual(
+                {
+                    name: states[name]
+                    for name in (
+                        "Kernel", "BootInitFlow", "InterruptStream", "KernelImage",
+                        "BootCurrentCPU", "BootCPU", "BootCpuLocalInterrupt",
+                        "BootCpuCurrentTask", "CpuGroup", "BootTaskEntryBinding",
+                        "BootInitStack", "EventStream", "ExceptionStream", "Vm",
+                        "TrampolineVm", "EarlyVm", "RawDtb", "FixMap", "Soc",
+                    )
+                },
+                {
+                    "Kernel": "Ready", "BootInitFlow": "Prepared",
+                    "InterruptStream": "Prepared", "KernelImage": "Online",
+                    "BootCurrentCPU": "Online", "BootCPU": "Prepared",
+                    "BootCpuLocalInterrupt": "Ready", "BootCpuCurrentTask": "Ready",
+                    "CpuGroup": "Prepared", "BootTaskEntryBinding": "Ready",
+                    "BootInitStack": "Ready", "EventStream": "Ready",
+                    "ExceptionStream": "Prepared", "Vm": "Ready",
+                    "TrampolineVm": "Destroyed", "EarlyVm": "Online",
+                    "RawDtb": "Ready", "FixMap": "Ready", "Soc": "Prepared",
+                },
+            )
+            facts = set(boundary["snapshot"]["facts"])
+            for fact in (
+                "kernel_enable_accepted(Kernel)",
+                "task_flow_started(BootInitFlow)",
+                "interrupt_concurrency_closed",
+                "assert:BootCpuRegisters.sie == 0",
+                "assert:BootCpuRegisters.sip == 0",
+                "assert:BootCpuRegisters.gp == phys_addr(Lds.global_pointer)",
+                "assert:BootCpuRegisters.tp == phys_addr(BootTask.storage)",
+                "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+                "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
+                "assert:BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)",
+                "early_vm_translation_sync_complete(EarlyVm)",
+                "valid_dtb_header(\"RawDtb.header\")",
+                "fixmap_slot_mapping_ready(\"EarlyVm.pg_dir\",\"FixMap.fdt_slot\")",
+                "soc_early_platform_ready",
+            ):
+                self.assertIn(fact, facts)
+            self.assertFalse(
+                any(
+                    item["target"] == "BootInitFlow" and item["name"] == "Setup"
+                    for item in derivation["signals"]
+                )
+            )
+
+            context_events = [
+                event
+                for event in derivation["events"]
+                if event["kind"] in {"context_entered", "context_exited"}
+            ]
+            self.assertEqual(
+                [
+                    (event["kind"], event["signal_id"], event["context"], event["stack"])
+                    for event in context_events
+                ],
+                [
+                    ("context_entered", "sig-0016", "SingleTaskContext", ["SingleTaskContext"]),
+                    ("context_exited", "sig-0016", "SingleTaskContext", ["SingleTaskContext"]),
+                ],
+            )
+
+            def sequence(kind: str, signal_id: str | None = None) -> int:
+                return next(
+                    event["sequence"]
+                    for event in derivation["events"]
+                    if event["kind"] == kind
+                    and (signal_id is None or event.get("signal_id") == signal_id)
+                )
+
+            self.assertLess(context_events[0]["sequence"], sequence("signal_sent", "sig-0017"))
+            self.assertLess(sequence("response_completed", "sig-0050"), context_events[1]["sequence"])
+            self.assertLess(context_events[1]["sequence"], sequence("response_completed", "sig-0016"))
+            self.assertLess(sequence("response_completed", "sig-0016"), sequence("until_signal_reached"))
+            self.assertLess(sequence("until_signal_reached"), sequence("response_stopped", "sig-0014"))
+            self.assertFalse(
+                any(
+                    token in event["kind"]
+                    for event in derivation["events"]
+                    for token in ("lock", "instance", "declare")
+                )
+            )
+
+            saved = read_json(snapshot)
+            model = read_json(work / "model.json")
+            view = read_json(work / "view.json")
+            self.assertEqual(saved["snapshot"], boundary["snapshot"])
+            self.assertEqual(saved["provenance"]["boundary"], boundary)
+            self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
+            self.assertEqual(
+                hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+                "9a321a12075d3d078fa4356ee0a250de6bea74f7389a6f5880dc6701413ff250",
+            )
+            self.assertEqual(
+                {
+                    derivation["model_fingerprint"], model["model_fingerprint"],
+                    view["model_fingerprint"], saved["model_fingerprint"],
+                },
+                {"sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa"},
+            )
+            with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
+                compact_text = render_text(view)
+            with mock.patch.dict(os.environ, {"VERBOSE": "1"}):
+                verbose_text = render_text(view)
+            self.assertTrue(
+                compact_text.startswith(
+                    "verdict: reached\n"
+                    "boundary: Kernel -- Setup --> BootInitFlow (before send)\n"
+                )
+            )
+            self.assertIn(
+                "OpenSBI -- Enable --> Kernel[Ready:Ready] !! stopped: until_signal_reached",
+                compact_text,
+            )
+            self.assertIn("Kernel -- Startup --> BootInitFlow[Base:Prepared]", compact_text)
+            self.assertIn("BootInitFlow -- Startup --> Soc[Base:Prepared]", compact_text)
+            self.assertIn("Signal derivation: Human -> Computer.Preset", verbose_text)
+            self.assertIn("sig-0016 [drives] Kernel -> BootInitFlow.Preset", verbose_text)
+            self.assertIn("handler: BootInitFlow.Transition::Preset@Base", verbose_text)
+            self.assertIn("sig-0050 [drives] BootInitFlow -> Soc.Preset", verbose_text)
+            self.assertIn(
+                "reached boundary: Kernel -> BootInitFlow.Setup [drives]", verbose_text
+            )
+
+            rebuilt = root / "rebuilt.snapshot.json"
+            exact = subprocess.run(
+                [str(shortcut), "-u", "BootInitFlow.Setup", "--snapshot-out", str(rebuilt)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(exact.returncode, 0, exact.stderr)
+            self.assertEqual(rebuilt.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
+
+            default_work = root / "default-setup"
+            default = subprocess.run(
+                [
+                    str(shortcut), "-t", "BootInitFlow.Setup", "--max-depth", "0",
+                    "--work-dir", str(default_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(default.returncode, 1)
+            default_data = read_json(default_work / "derive.json")
+            self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(
+                (
+                    default_data["signals"][0]["target"],
+                    default_data["signals"][0]["name"],
+                    default_data["signals"][0]["outcome"],
+                ),
+                ("BootInitFlow", "Setup", "failed"),
+            )
+            self.assertTrue(
+                any(item["outcome"] == "truncated" for item in default_data["signals"])
+            )
+
+            duplicate_work = root / "duplicate-preset"
+            duplicate = subprocess.run(
+                [
+                    str(shortcut), "-t", "BootInitFlow.Preset", "-s",
+                    str(BOOT_INIT_SETUP_SCENARIO), "--work-dir", str(duplicate_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(duplicate.returncode, 1)
+            self.assertEqual(read_json(duplicate_work / "derive.json")["signals"][0]["outcome"], "rejected")
+
+            stale = subprocess.run(
+                [str(shortcut), "-f", str(PIPELINE), "-t", "BootInitFlow.Setup"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(stale.returncode, 2)
+            self.assertIn("snapshot model fingerprint does not match", stale.stderr)
+
+            missing = subprocess.run(
+                [str(shortcut), "-t", "BootInitFlow.Enable"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("tools2/scenarios/BootInitFlow.Enable.snapshot.json", missing.stderr)
+
+    def test_main_model_boot_init_entry_stops_at_first_missing_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shortcut = TOOLS2 / "bin" / "pyveri"
+
+            def scenario_without(fact: str, name: str) -> Path:
+                scenario = deepcopy(read_json(KERNEL_ENABLE_SCENARIO))
+                scenario["snapshot"]["facts"].remove(fact)
+                path = root / f"{name}.snapshot.json"
+                path.write_text(json.dumps(scenario, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                return path
+
+            def derive_case(name: str, scenario: Path) -> dict:
+                work = root / name
+                result = subprocess.run(
+                    [
+                        str(shortcut), "-t", "Kernel.Enable", "-s", str(scenario),
+                        "--max-depth", "all", "--max-breadth", "all",
+                        "--work-dir", str(work),
+                    ],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                data = read_json(work / "derive.json")
+                self.assertEqual(data["last_stable_snapshot"]["states"]["Kernel"], "Ready")
+                self.assertEqual(data["last_stable_snapshot"]["states"]["BootInitFlow"], "Base")
+                self.assertNotIn("task_flow_started(BootInitFlow)", data["last_stable_snapshot"]["facts"])
+                self.assertFalse(
+                    any(
+                        item["target"] == "BootInitFlow" and item["name"] == "Setup"
+                        for item in data["signals"]
+                    )
+                )
+                return data
+
+            bypass_work = root / "bypass"
+            bypass = subprocess.run(
+                [
+                    str(shortcut), "-t", "BootInitFlow.Preset", "-s",
+                    str(KERNEL_ENABLE_SCENARIO), "--work-dir", str(bypass_work),
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(bypass.returncode, 1)
+            bypass_data = read_json(bypass_work / "derive.json")
+            self.assertEqual(len(bypass_data["signals"]), 1)
+            self.assertEqual(bypass_data["signals"][0]["outcome"], "rejected")
+            self.assertIn("kernel_enable_accepted", bypass_data["signals"][0]["reason"])
+
+            cases = (
+                (
+                    "missing-task-authority",
+                    "task_execution_authority_is(BootTask,TaskExecutionAuthority::Live)",
+                    ("BootInitFlow", "Preset"),
+                    None,
+                ),
+                (
+                    "missing-entry-satp",
+                    "assert:BootCpuRegisters.satp == 0",
+                    ("Kernel", "Enable"),
+                    None,
+                ),
+                (
+                    "missing-raw-dtb-access",
+                    "firmware_dtb_blob_accessible_at_kernel_entry(\"BootArgs.dtb_pa\")",
+                    ("RawDtb", "Preset"),
+                    ("RawDtb", "Setup"),
+                ),
+            )
+            for name, fact, rejected_signal, forbidden_later in cases:
+                with self.subTest(name=name):
+                    data = derive_case(name, scenario_without(fact, name))
+                    rejected = [
+                        item for item in data["signals"] if item["outcome"] == "rejected"
+                    ]
+                    self.assertEqual(len(rejected), 1)
+                    self.assertEqual(
+                        (rejected[0]["target"], rejected[0]["name"]), rejected_signal
+                    )
+                    rejected_index = data["signals"].index(rejected[0])
+                    self.assertTrue(
+                        all(
+                            item["outcome"] == "failed"
+                            for item in data["signals"][rejected_index + 1 :]
+                        )
+                    )
+                    if forbidden_later is not None:
+                        self.assertFalse(
+                            any(
+                                (item["target"], item["name"]) == forbidden_later
+                                for item in data["signals"]
+                            )
+                        )
 
     def test_pyveri_default_scenario_missing_override_and_path_safety(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

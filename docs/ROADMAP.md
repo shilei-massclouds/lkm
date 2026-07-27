@@ -74,7 +74,7 @@
 | `P1` | 待办 | arceos_ex/console | serial8250 runtime 与 TTY 分层 | `irq_time.010`–`irq_time.012` | [InitcallPhase coding](../spec/coding/phases/smp-runtime/initcall.md) |
 | `P2` | 待办 | arceos_ex/console | 用户态标准输入输出机制 | `irq_time.011` | [user boot coding](../spec/coding/objects/user-boot.md) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 改善 depends_on 长线、图高、标签、事实展示和 action 展开深度。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
-| `P1` | 进行中 | charter/model/tools2/signal | tools2 启动语义校准 | 独立工具链的 v5 JSON/text 与 animation v3 已闭合；六组启动校准中第 1 组上游构造与 OpenSBI->Kernel 交接已完成，当前下一批次为第 2 组 Kernel 与 BootInit 入口。显式 DSL、handler 命名、continuation 和老工具迁移仍需独立决策，老 tools/ 与静态 trace/SVG 保持默认责任。 | [专题](roadmap/signal-driven-tools2.md) |
+| `P1` | 进行中 | charter/model/tools2/signal | tools2 启动语义校准 | 独立工具链的 v5 JSON/text 与 animation v3 已闭合；六组启动校准中第 1 组上游构造与 OpenSBI->Kernel 交接、第 2 组 Kernel 与 BootInit 入口均已完成，当前下一批次为第 3 组 `BootInitFlow.Setup`。显式 DSL、handler 命名、continuation 和老工具迁移仍需独立决策，老 tools/ 与静态 trace/SVG 保持默认责任。 | [专题](roadmap/signal-driven-tools2.md) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 优化 context 高度、文本锚定、跨行标签和视觉层级。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P2` | 待办 | validation/stress/arceos_ex | `stress-mem` 共享内存后端 | 先用 host-backed shared memory 与 FDT 描述固定 ABI；doorbell/IRQ/专用设备后置。 | 本文档 |
 | `P2` | 待办 | arceos_ex/checkpoint | 清除 `LOG=trace` 兼容入口 | README、脚本、stress case 与历史命令迁完后删除 alias，把 trace 名称留给 Linux-like trace。 | [checkpoint mapping](../spec/coding/mapping.md) |

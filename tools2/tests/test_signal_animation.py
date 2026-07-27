@@ -743,6 +743,106 @@ class SignalAnimationTests(unittest.TestCase):
         ]
         self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
+    def test_boot_init_setup_boundary_has_50_signals_and_100_causal_moments(self) -> None:
+        work = self.root / "boot-init-setup-boundary-work"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                driver_main(
+                    [
+                        str(ROOT / "spec" / "model" / "main.spec"),
+                        "--until",
+                        "BootInitFlow.Setup",
+                        "--max-depth",
+                        "all",
+                        "--max-breadth",
+                        "all",
+                        "--work-dir",
+                        str(work),
+                    ]
+                ),
+                0,
+            )
+        model = read_json(work / "model.json")
+        derivation = read_json(work / "derive.json")
+        view = read_json(work / "view.json")
+        self.assertEqual(
+            {
+                model["model_fingerprint"],
+                derivation["model_fingerprint"],
+                view["model_fingerprint"],
+            },
+            {"sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa"},
+        )
+        animation = build_animation(model, view)
+        self.assertEqual(animation["trace"]["total_signals"], 50)
+        self.assertEqual(animation["trace"]["total_moments"], 100)
+        self.assertEqual(
+            {
+                kind: sum(moment["kind"] == kind for moment in animation["moments"])
+                for kind in ("request", "feedback", "settle", "terminal")
+            },
+            {"request": 50, "feedback": 46, "settle": 3, "terminal": 1},
+        )
+        self.assertEqual(
+            [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
+            [f"sig-{index:04d}:settle" for index in range(11, 14)],
+        )
+        self.assertEqual(
+            [moment["id"] for moment in animation["moments"] if moment["kind"] == "terminal"],
+            ["sig-0014:terminal"],
+        )
+        terminal = next(
+            moment for moment in animation["moments"] if moment["kind"] == "terminal"
+        )
+        self.assertEqual(
+            (
+                terminal["signal_id"], terminal["source"], terminal["target"],
+                terminal["signal"], terminal["outcome"], terminal["reason"],
+            ),
+            (
+                "sig-0014", "OpenSBI", "Kernel", "Enable", "stopped",
+                "until_signal_reached",
+            ),
+        )
+        self.assertEqual(
+            [
+                (moment["signal_id"], moment["source"], moment["target"], moment["signal"])
+                for moment in animation["moments"]
+                if moment["kind"] == "request"
+            ],
+            [
+                (item["id"], item["source"], item["target"], item["name"])
+                for item in derivation["signals"]
+            ],
+        )
+        moment_index = {
+            moment["id"]: index for index, moment in enumerate(animation["moments"])
+        }
+        self.assertGreater(
+            moment_index["sig-0016:feedback"],
+            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(17, 51)),
+        )
+        self.assertEqual(
+            animation["trace"]["boundary"]["normalized_signal"],
+            "BootInitFlow.Setup",
+        )
+        self.assertFalse(
+            any(
+                moment["target"] == "BootInitFlow" and moment["signal"] == "Setup"
+                for moment in animation["moments"]
+            )
+        )
+        feedback_index = moment_index["sig-0016:feedback"]
+        feedback_frame = animation["frames"][feedback_index]
+        self.assertEqual(
+            next(
+                node["state"]
+                for node in feedback_frame["nodes"]
+                if node["id"] == "BootInitFlow"
+            ),
+            "Prepared",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

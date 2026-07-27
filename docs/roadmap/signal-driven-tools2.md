@@ -98,3 +98,36 @@ checkpoint diff，`first_divergence=None`。DF-0004 继续作为独立长期观�
 复现。若将来复现，保留 `qemu-timeout-diagnostics.json` 并按该 defect 定位，不以重试掩盖，也不
 归因于本组 Signal 语义。下一校准批次是第 2 组 Kernel 与 BootInit 入口；在单独闭合前不提前修改
 BootInit 内部语义。
+
+2026-07-27 第 2 组“Kernel 与 BootInit 入口”完成。校准从提交
+`e60caef5c16d44a8287bda83fff20028d33e3c83` 和干净工作树开始；编辑前仓库根直接 `make test`
+为 182/182，主模型 fingerprint 保持
+`sha256:0c95ef3df8785912443c07f9a30797f31d4ce781878b27b49affc5e49a490faa`。
+
+- 从仓库根与 `/tmp` 分别重建 `Kernel.Enable`、`BootInitFlow.Setup` 发送前 snapshot，四次输出均与
+  对应提交 golden 逐字节一致。Kernel golden SHA-256 保持
+  `75e3cb82141d5d5d3d8e9cc7082c6118a0a2ac585d2ccec84505154a85a060d6`；新增
+  `tools2/scenarios/BootInitFlow.Setup.snapshot.json` 的 SHA-256 为
+  `9a321a12075d3d078fa4356ee0a250de6bea74f7389a6f5880dc6701413ff250`，并成为第 3 组显式 trigger
+  的默认入口。
+- `-u BootInitFlow.Setup` 从真实 Human 编排得到精确 50 个 Signal：`sig-0014` 是已进入 handler、
+  等待子调用后在发送前边界停止的 OpenSBI emits ancestor；`sig-0015..0050` 是 36 个 completed
+  drives。`sig-0016 BootInitFlow.Preset` 只有一对 `SingleTaskContext` enter/exit，没有 Lock 或运行期
+  fresh instance。最后状态为 Kernel Ready、BootInitFlow Prepared；边界 provenance 是
+  `Kernel -> BootInitFlow.Setup`、drives/cause 0014，且未创建 Setup Signal。
+- 测试逐项固定 0014–0050 的 identity、delivery、cause、handler、目标状态、顺序、关键入口事实、
+  compact/verbose text、canonical bytes/default scenario，以及缺失 acceptance、BootTask execution
+  authority、entry `satp` 和 RawDtb guard 的首失败短路。animation v3 精确为 50 request、46 feedback、
+  3 settle、1 terminal，共 100 moments；0016 feedback 位于全部嵌套 child feedback 之后。
+- Linux 6.12 RISC-V `head.S`、`setup_vm()`/`relocate_enable_mmu()` 与现有 model/coding/compose/实现、
+  checkpoint 顺序复核一致，因此本组没有修改 model、coding、compose 或 `impl/arceos_ex`。focused
+  `hello-native` 为 schema v2 passed/completed、exit 0、无 QEMU timeout；入口序列在
+  `BootInitFlow.Prepared` 后才出现 `EntrySuccessorPhase.Started`，没有提前的 Setup 归因。
+- 精确 `make -C tools2 test-all` 通过：Python 74/74、Svelte 0 error/0 warning、Vitest 16/16、bundle
+  stale check 和 Playwright 8/8。默认 `make stress-test` 四组各 10/10、合计 40/40；默认
+  `rc-local-difftest` 与长期 `linux-exact-baseline-difftest` 各 1/1，均为
+  `paired-checkpoint-diff-ok`、`first_divergence=None`。
+
+tools2 JSON/view schema 继续保持 v5，animation 继续保持 v3；本组未引入显式 Signal DSL、continuation、
+旧工具迁移或根门禁接管。下一校准批次是第 3 组 `BootInitFlow.Setup`；在该批次单独 charter-first 闭合前，
+不得把 Setup 的任何叶阶段归入本组。

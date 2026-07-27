@@ -136,6 +136,85 @@ BootInitFlow child checkpoint 前读取 live `satp` 并 fail-stop，保存 a0/a1
 0015 失败时 0014 失败且不得创建 BootInit Signal；重复 Kernel.Enable 必须拒绝。所有失败都保留完整
 cause chain 和最后稳定 snapshot。
 
+## 第 2 组确定语义与因果账本
+
+第 2 组继续使用第 1 组已经核准的 `Kernel.Enable` 发送前 snapshot，但验收必须重新从模型初态和
+唯一 `external Human` 编排到达 `BootInitFlow.Setup` 发送前，不能把提交的 scenario 当作真实 sender
+证据。完整路径恰有 50 个 Signal；`sig-0014 OpenSBI -> Kernel.Enable` 保持已接受但 ancestor 尚未
+提交的 `stopped: until_signal_reached`，其后的 36 个同步 drives 全部完成。本组确定的
+`sig-0014` 至 `sig-0050` 如下：
+
+| ID | source -> target.Signal | delivery / cause | handler 与提交边界 |
+| --- | --- | --- | --- |
+| `sig-0014` | `OpenSBI -> Kernel.Enable` | emits / 0013 | `Kernel.Transition::Enable@Ready`；等待 0015–0050，边界截断时 Kernel 保持 Ready、outcome 为 stopped |
+| `sig-0015` | `Kernel -> Kernel.AcceptEnable` | drives / 0014 | `Kernel.Action::AcceptEnable@Ready`；保持 Ready 并提交 Enable acceptance |
+| `sig-0016` | `Kernel -> BootInitFlow.Preset` | drives / 0014 | `BootInitFlow.Transition::Preset@Base`；在一个 `SingleTaskContext` 内等待 0017–0050 后提交 Prepared |
+| `sig-0017` | `BootInitFlow -> InterruptStream.Preset` | drives / 0016 | Base -> Prepared，关闭 `sie/sip` 并建立中断默认 fallback |
+| `sig-0018` | `BootInitFlow -> KernelImage.Preset` | drives / 0016 | Base -> Prepared，采纳物理 Image、segment 与 `gp` 入口事实 |
+| `sig-0019` | `BootInitFlow -> KernelImage.Setup` | drives / 0016 | Prepared -> Ready，提交 BSS 清零与早期映射适配事实 |
+| `sig-0020` | `BootInitFlow -> BootCurrentCPU.Preset` | drives / 0016 | 等待 0021–0023 后 Base -> Prepared，建立 boot CPU/current 投影 |
+| `sig-0021` | `BootCurrentCPU -> BootCPU.Preset` | drives / 0020 | Base -> Prepared，采纳 hartid 与 bootstrap role |
+| `sig-0022` | `BootCurrentCPU -> BootCpuLocalInterrupt.Setup` | drives / 0020 | Base -> Ready，建立 boot CPU 本地中断关闭事实 |
+| `sig-0023` | `BootCurrentCPU -> BootCpuCurrentTask.Setup` | drives / 0020 | Base -> Ready，建立 current-task slot |
+| `sig-0024` | `BootInitFlow -> BootCurrentCPU.Setup` | drives / 0016 | Prepared -> Ready，提交 logical CPU 0 |
+| `sig-0025` | `BootInitFlow -> CpuGroup.Preset` | drives / 0016 | Base -> Prepared，将 BootCPU 注册为 index 0 |
+| `sig-0026` | `BootInitFlow -> BootCurrentCPU.Enable` | drives / 0016 | Ready -> Online，验证 CpuGroup registration 与 bootstrap identity |
+| `sig-0027` | `BootInitFlow -> BootTaskEntryBinding.Preset` | drives / 0016 | Base -> Prepared，提交物理 `tp`/BootTaskRef 与初始抢占关闭事实 |
+| `sig-0028` | `BootInitFlow -> BootInitStack.Preset` | drives / 0016 | Base -> Prepared，提交物理入口 `sp` 与 init-stack 范围 |
+| `sig-0029` | `BootInitFlow -> EventStream.Preset` | drives / 0016 | Base -> Prepared，安装物理 early event entry |
+| `sig-0030` | `BootInitFlow -> ExceptionStream.Preset` | drives / 0016 | 等待 0031–0034 后 Base -> Prepared，建立完整异常 fallback |
+| `sig-0031` | `ExceptionStream -> PageFaultException.Preset` | drives / 0030 | Base -> Prepared，建立默认 panic fallback |
+| `sig-0032` | `ExceptionStream -> SyscallException.Preset` | drives / 0030 | Base -> Prepared，建立默认 panic fallback |
+| `sig-0033` | `ExceptionStream -> BreakpointException.Preset` | drives / 0030 | Base -> Prepared，建立默认 panic fallback |
+| `sig-0034` | `ExceptionStream -> UnexpectedException.Preset` | drives / 0030 | Base -> Prepared，建立默认 panic fallback |
+| `sig-0035` | `BootInitFlow -> Vm.Preset` | drives / 0016 | 等待 0036–0041 后 Base -> Prepared，建立 trampoline/early VM 与 DTB/fixmap |
+| `sig-0036` | `Vm -> TrampolineVm.Setup` | drives / 0035 | Base -> Ready，建立 trampoline mapping |
+| `sig-0037` | `Vm -> EarlyVm.Preset` | drives / 0035 | 等待 0038–0040 后 Base -> Prepared |
+| `sig-0038` | `EarlyVm -> RawDtb.Preset` | drives / 0037 | Base -> Prepared，验证固件 DTB header 可访问 |
+| `sig-0039` | `EarlyVm -> RawDtb.Setup` | drives / 0037 | Prepared -> Ready，验证完整 DTB 范围 |
+| `sig-0040` | `EarlyVm -> FixMap.Preset` | drives / 0037 | Base -> Ready，将 RawDtb 放入 FDT fixmap slot |
+| `sig-0041` | `Vm -> EarlyVm.Setup` | drives / 0035 | Prepared -> Ready，建立 KernelImage 与 fixmap 的 early page table |
+| `sig-0042` | `BootInitFlow -> Vm.Setup` | drives / 0016 | 等待 0043–0046 后 Prepared -> Ready，完成 trampoline 到 EarlyVm 的 translation continuation |
+| `sig-0043` | `Vm -> TrampolineVm.Enable` | drives / 0042 | Ready -> Online，切入 trampoline 并借用 `stvec` |
+| `sig-0044` | `Vm -> EarlyVm.Enable` | drives / 0042 | Ready -> Online，切入 early page table 并同步 translation |
+| `sig-0045` | `Vm -> TrampolineVm.Cleanup` | drives / 0042 | Online -> Destroyed，释放仅用于切换的 trampoline service |
+| `sig-0046` | `Vm -> KernelImage.Enable` | drives / 0042 | Ready -> Online，提交虚拟 `gp` 与 Image 可访问事实 |
+| `sig-0047` | `BootInitFlow -> EventStream.Setup` | drives / 0016 | Prepared -> Ready，将正式 event entry 交给 EventStream |
+| `sig-0048` | `BootInitFlow -> BootTaskEntryBinding.Setup` | drives / 0016 | Prepared -> Ready，将同一 BootTask carrier 的 `tp` 切到虚拟地址 |
+| `sig-0049` | `BootInitFlow -> BootInitStack.Setup` | drives / 0016 | Prepared -> Ready，将同一 init stack 的 `sp` 切到虚拟地址 |
+| `sig-0050` | `BootInitFlow -> Soc.Preset` | drives / 0016 | Base -> Prepared，提交最小 early-platform 事实，完整 SoC 模型仍 deferred |
+
+`sig-0016` 的 handler 进入前必须逐项验证 Kernel acceptance、RISC-V/SBI/OpenSBI、BootCpuRegisters、
+Config/Lds、BootTask `OnCpu/Live/Invalid`、initial-flow binding、task concurrency 和入口 `satp=0`。
+它只进入和退出一对 `SingleTaskContext`；该 context 覆盖全部同步 child drives，并在 0016 提交前退出。
+本组没有 Lock acquire/release，也没有运行期 fresh instance；不得用最终 `context_is(SystemExclusive)`
+事实虚构第二个 context、Lock 或实例事件。
+
+最后一个 child 0050 完成后，0016 检查 BootTask 仍为 OnCpu 及 `task_flow_started(BootInitFlow)`，再把
+BootInitFlow 从 Base 提交到 Prepared。此时 Kernel.Enable 的同步 drives 列表下一项是
+`BootInitFlow.Setup`；有界推导必须在创建该 Signal 之前 reached。boundary provenance 的 source/target
+必须是 `Kernel -> BootInitFlow`、canonical signal 必须是 `BootInitFlow.Setup`、delivery 必须是 drives、
+cause 必须是 0014，snapshot 必须等于 0016 的 after snapshot。边界处 Kernel 为 Ready、BootInitFlow
+为 Prepared；InterruptStream/ExceptionStream/CpuGroup/Soc 为 Prepared，KernelImage/EarlyVm/
+BootCurrentCPU 为 Online，EventStream/BootTaskEntryBinding/BootInitStack/Vm/RawDtb/FixMap 为 Ready，
+TrampolineVm 为 Destroyed。不得创建 `BootInitFlow.Setup` identity，也不得出现它的 send、receive、
+handler 或 Context 事件。
+
+Linux 6.12 的 RISC-V `head.S` 依次关闭 `sie/sip`、建立 `gp`、禁用 FPU/vector、清 BSS、保存 boot
+hart、建立 `tp/sp/stvec`，再由 `setup_vm()` 建立 trampoline、early kernel mapping 和 FDT fixmap，
+`relocate_enable_mmu()` 完成 trampoline 到 early page table 的切换。现有 entry checkpoint 与实现把
+Rust 前不可延迟的动作作为同一 BootInitFlow.Preset 的 head segment adoption，并在 VM continuation
+返回、EventStream/虚拟 `tp/sp` 与 Soc 完成后提交 `BootInitFlow.Prepared`；`EntrySuccessorPhase.Started`
+只能出现在其后，属于第 3 组 Setup。物理 checkpoint 的观测时点可以早于 Rust 接受
+`BootInitFlow.Started`，但不能被解释为提前提交 child model Signal 或 BootInitFlow.Prepared。
+
+失败账本按首个边界停止：缺失 Kernel acceptance、BootTask `OnCpu/Live/Invalid` 或 initial-flow binding
+时，0016 必须拒绝且不得创建 0017；缺失入口 CSR/VM 条件时必须在消费它的 Kernel/BootInit/child
+handler 处拒绝；任一 child guard 失败都使包含它的同步 ancestor failed，短路该 child 之后的所有
+drives，并保持 BootInitFlow Base、Kernel Ready，不提交 `task_flow_started(BootInitFlow)` 或
+BootInitFlow.Prepared。重复 BootInitFlow.Preset、绕过真实 Kernel.Enable、陈旧 model fingerprint 和
+缺失 canonical scenario 都必须严格拒绝，不能回溯 emitter、合成事实或重试。
+
 ## 单阶段因果账本
 
 每个阶段和关键 action 都必须维护并评审下列顺序的因果账本：
