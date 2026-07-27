@@ -38,6 +38,21 @@ charter -> model -> coding -> applicable compose -> impl -> testing/tests
 7. 每层都必须审查，但只修改实际受影响的层。临时不一致只能存在于未提交工作区，不得形成中间提交或跨轮遗留。
 8. 轮末运行全部适用的专项校验、focused tests、`git diff --check` 和仓库根目录直接 `make test`。全部层级闭合并验证通过后轮次才完成；提交仍需明确授权。
 
+## Charter AI 保护锁
+
+根目录 `charter-locks.json` 是 charter AI 保护锁的正式清单。清单中处于 `locked` 状态的文件优先于
+`charter-first` 的修改顺序：层级顺序只决定规格权威，不构成隐式修改授权。普通功能修改、规格闭合或
+“按 charter-first 执行”的请求都不解除锁；AI 对锁定文件只能提出建议，不得直接修改。
+
+只有用户明确要求解除具体文件的锁定时，AI 才能通过 `python3 tools/charter_lock.py unlock PATH` 解锁。
+授权仅覆盖该次任务；修改完成后，必须在任务结束前通过 `python3 tools/charter_lock.py lock PATH` 刷新
+内容哈希并恢复只读锁定。中断遗留的 `unlocked` 状态是门禁失败，不自动授权下一轮 AI 继续修改。
+
+AI 不得自行对目标执行 `chmod`、编辑清单状态或哈希、删除文件首行的可见锁定标注，或绕过
+`make charter-lock-check`。清单、锁管理工具、可见标注、本 guidance 和构建门禁都属于保护机制；除非
+用户明确要求调整保护机制本身，AI 不得为了绕过锁而削弱或修改它们。`enforce` 只在内容、标注和哈希
+仍可信时恢复新 clone 丢失的只读位；`check` 拒绝未重新锁定、内容漂移、非法清单或仍带写位的目标。
+
 Linux checkpoint 对齐映射任务属于只读 cross-reference 阶段：代理只能消费已有 arceos_ex checkpoint inventory、读取参考
 Linux 源码树并生成可审阅清单，不得把该任务扩展成 Linux 源码插桩、运行时采集、checkpoint handler 修改或行为修改。
 

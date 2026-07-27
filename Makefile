@@ -43,7 +43,7 @@ else
 VERIFY_TEXT_ARGS := --strict
 endif
 
-.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-basic test-composite test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
+.PHONY: build run disk disk-clean fmt fmt-check clippy-check coding-spec-check charter-lock-check verify checkpoints-inventory checkpoints-map-linux checkpoints-coverage checkpoints-instrumentation-plan checkpoints checkpoints-linux-check test test-charter-lock test-basic test-composite test-verify test-checkpoints test-kunit test-smoke test-stress stress-test difftest-preflight difftest clean
 
 build:
 	@if [ -n "$(BASIC_TEST_SELECTION_CONFLICT)" ]; then \
@@ -96,6 +96,10 @@ coding-spec-check:
 		exit 1; \
 	fi
 
+charter-lock-check:
+	$(PYTHON) tools/charter_lock.py enforce
+	$(PYTHON) tools/charter_lock.py check
+
 verify:
 ifeq ($(REPORT),graph)
 	$(PYVERI) $(SPEC) -T --trace-annotations state,transition --trace-hide-contexts "$(TRACE_HIDE_CONTEXTS)"
@@ -125,13 +129,19 @@ checkpoints-linux-check:
 		exit $$status; \
 	}
 
-test: fmt-check
+test:
+	$(MAKE) charter-lock-check
+	$(MAKE) test-charter-lock
+	$(MAKE) fmt-check
 	$(MAKE) clippy-check
 	$(MAKE) coding-spec-check
 	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)" "$(TEST_PLIC_PROVIDERS)"
 
 test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
+
+test-charter-lock:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tools.tests.test_charter_lock
 
 test-basic:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest impl.arceos_ex.tests.basic.test_runner

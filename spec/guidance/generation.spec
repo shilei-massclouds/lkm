@@ -30,6 +30,15 @@ predicate guidance_agent_must_close_model_first_charter_upward_before_downward_l
 predicate guidance_agent_must_preserve_confirmed_model_meaning_during_charter_closure() -> bool;
 predicate guidance_agent_must_return_unclosable_charter_to_model_decision() -> bool;
 predicate guidance_agent_must_finish_model_first_validation() -> bool;
+predicate guidance_agent_must_treat_charter_lock_as_higher_priority_than_change_order() -> bool;
+predicate guidance_agent_must_not_treat_change_request_as_implicit_unlock_authorization() -> bool;
+predicate guidance_agent_must_only_suggest_changes_to_locked_charter() -> bool;
+predicate guidance_agent_must_require_explicit_user_unlock_request() -> bool;
+predicate guidance_agent_must_use_charter_lock_tool_for_authorized_unlock() -> bool;
+predicate guidance_agent_must_not_bypass_charter_lock_protection() -> bool;
+predicate guidance_agent_must_relock_authorized_charter_before_task_completion() -> bool;
+predicate guidance_agent_must_not_reuse_interrupted_unlocked_state_as_authorization() -> bool;
+predicate guidance_agent_must_not_weaken_charter_lock_mechanism_without_explicit_request() -> bool;
 predicate guidance_agent_must_use_structured_boundary_inventory() -> bool;
 predicate guidance_agent_must_not_treat_trimmed_as_unimplemented() -> bool;
 predicate guidance_agent_must_close_boundary_with_facts_tests_and_archive() -> bool;
@@ -200,6 +209,51 @@ type CharterFirstChangeWorkflow {
          * an applicable higher layer.
          */
         guidance_agent_must_resolve_conflicts_by_charter_first_authority();
+    }
+}
+
+type CharterLockWorkflow {
+    invariant {
+        /*
+         * A lock recorded in the root charter lock manifest takes precedence
+         * over the charter-first editing order.  Charter-first establishes
+         * authority between layers; it does not implicitly authorize an agent
+         * to edit a locked charter.  An ordinary request to change behavior or
+         * follow charter-first therefore leaves the lock in force, and the
+         * agent may only propose changes to that charter.
+         */
+        guidance_agent_must_treat_charter_lock_as_higher_priority_than_change_order();
+        guidance_agent_must_not_treat_change_request_as_implicit_unlock_authorization();
+        guidance_agent_must_only_suggest_changes_to_locked_charter();
+
+        /*
+         * Unlock is a task-scoped user authorization.  Only an explicit user
+         * request to unlock the named file permits the agent to invoke the
+         * repository charter-lock tool.  The agent must not chmod the target,
+         * edit the manifest/hash, remove the visible notice, or otherwise
+         * bypass the gate itself.
+         */
+        guidance_agent_must_require_explicit_user_unlock_request();
+        guidance_agent_must_use_charter_lock_tool_for_authorized_unlock();
+        guidance_agent_must_not_bypass_charter_lock_protection();
+
+        /*
+         * An authorized edit must finish by invoking the tool to refresh the
+         * hash and restore the locked, read-only state.  If a prior task was
+         * interrupted while the manifest said unlocked, that residue is a
+         * failing state to repair or report; it is never authorization for a
+         * later agent to continue editing.
+         */
+        guidance_agent_must_relock_authorized_charter_before_task_completion();
+        guidance_agent_must_not_reuse_interrupted_unlocked_state_as_authorization();
+
+        /*
+         * The manifest, lock tool, visible notice, guidance rules and build
+         * gate are part of the protection boundary.  An agent must not weaken
+         * or edit them for the purpose of bypassing a lock unless the user
+         * explicitly asks to change the protection mechanism itself.
+         */
+        guidance_agent_must_not_weaken_charter_lock_mechanism_without_explicit_request();
     }
 }
 

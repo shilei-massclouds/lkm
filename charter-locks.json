@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "locks": [
+    {
+      "path": "spec/charter/systems/computer.md",
+      "state": "locked",
+      "sha256": "b8a17dc1e96ffecdbdf754ecde3919f4cbeb4b7619826614a6b1306057d584f5"
+    }
+  ]
+}
