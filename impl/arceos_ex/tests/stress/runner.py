@@ -25,6 +25,7 @@ DEFAULT_SUITE = (
     STRESS_DIR / "cases" / "df-0001-user-boot.toml",
     STRESS_DIR / "cases" / "df-0002-smoke-initcall.toml",
     STRESS_DIR / "cases" / "df-0003-distro-sh-ls.toml",
+    STRESS_DIR / "cases" / "rc-local-native-timeout-focused.toml",
 )
 DEFAULT_OUT_ROOT = STRESS_DIR / "out"
 BASIC_DIR = STRESS_DIR.parent / "basic"

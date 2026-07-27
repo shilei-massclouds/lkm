@@ -99,7 +99,17 @@ class CompositeConfigTests(unittest.TestCase):
         self.repo_root = Path(__file__).resolve().parents[4]
 
     def test_default_and_explicit_selection(self) -> None:
-        self.assertEqual(runner._selected_case_paths([]), [path.resolve() for path in runner.DEFAULT_SUITE])
+        default_paths = [path.resolve() for path in runner.DEFAULT_SUITE]
+        self.assertEqual(runner._selected_case_paths([]), default_paths)
+        self.assertEqual(
+            [path.stem for path in default_paths],
+            [
+                "df-0001-user-boot",
+                "df-0002-smoke-initcall",
+                "df-0003-distro-sh-ls",
+                "rc-local-native-timeout-focused",
+            ],
+        )
         path = Path("impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml")
         self.assertEqual(runner._selected_case_paths([path]), [path.resolve()])
 
@@ -121,7 +131,7 @@ class CompositeConfigTests(unittest.TestCase):
         self.assertEqual(len(loaded), 10)
         self.assertTrue(all(case["mode"] in {"stress", "difftest"} for case in loaded))
 
-    def test_rc_local_timeout_case_is_opt_in_and_uses_canonical_basic(self) -> None:
+    def test_rc_local_timeout_case_is_default_and_uses_canonical_basic(self) -> None:
         path = (
             self.repo_root
             / "impl"
@@ -134,7 +144,8 @@ class CompositeConfigTests(unittest.TestCase):
         case = runner._load_case(path, self.repo_root)
         self.assertEqual(case["test"], "rc-local-native")
         self.assertEqual(case["runs"], 100)
-        self.assertTrue(case["metadata"]["opt_in_only"])
+        self.assertTrue(case["metadata"]["default_suite"])
+        self.assertIn(path.resolve(), runner._selected_case_paths([]))
         success = next(rule for rule in case["rules"] if rule["result"] == "success")
         self.assertEqual(success["id"], "rc-local-success")
         self.assertEqual(

@@ -91,6 +91,10 @@ moment（13 request、10 feedback、3 settle），且不创建边界 Signal。Py
   AcceptEnable 负例。`make -C tools2 test` 为 71/71；Svelte check 为 0 error/0 warning，Vitest 16/16，
   bundle stale check 通过，Playwright 8/8；代码修改后的根 `make test` 再次为 182/182。
 
-DF-0004 继续作为独立长期观察项；本轮两次根门禁均未出现 rc-local timeout。若将来复现，保留
-`qemu-timeout-diagnostics.json` 并按该 defect 定位，不以重试掩盖，也不归因于本组 Signal 语义。
-下一校准批次是第 2 组 Kernel 与 BootInit 入口；在单独闭合前不提前修改 BootInit 内部语义。
+实际 QEMU 压力与差分验收随后补齐：修改后的默认 `make stress-test` 已包含 DF-0004，四组分别
+10/10、合计 40/40；另对 DF-0004 执行 100 轮深采样，结果 100/100、0 timeout、0 QMP timeout
+artifact。默认 `rc-local-difftest` 与长期 `linux-exact-baseline-difftest` 各 1/1，通过两侧完整执行和
+checkpoint diff，`first_divergence=None`。DF-0004 继续作为独立长期观察项；成功样本只表示本批未
+复现。若将来复现，保留 `qemu-timeout-diagnostics.json` 并按该 defect 定位，不以重试掩盖，也不
+归因于本组 Signal 语义。下一校准批次是第 2 组 Kernel 与 BootInit 入口；在单独闭合前不提前修改
+BootInit 内部语义。

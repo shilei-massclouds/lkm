@@ -33,6 +33,7 @@ make checkpoints-linux-check
 make test-kunit
 make test-smoke
 make test-stress
+make stress-test
 make difftest
 make clean
 ```
@@ -79,6 +80,10 @@ Targets must remain composable:
   the trace SVG behavior and is independent of `VERBOSE`.
 - `test-basic` runs the basic runner/rootfs unit suite without starting real QEMU;
   `test-verify`, `test-kunit` and `test-smoke` remain independently runnable validation stages.
+- `test-stress` and its `stress-test` alias run the default composite suite. That suite includes the
+  DF-0001 user boot, DF-0002 initcall, DF-0003 scripted shell and DF-0004 canonical `rc-local-native`
+  timeout-observation cases; `STRESS_RUNS` uniformly overrides their case-local run counts, while
+  `STRESS_CASES` remains the explicit focused selector. This target is separate from root `make test`.
 - `checkpoints` regenerates tracked checkpoint review artifacts in dependency order: inventory, Linux mapping, Linux mapping coverage and the Linux instrumentation plan.
 - `test-checkpoints` validates those tracked checkpoint review artifacts in read-only check mode and must not rewrite them.
 - `checkpoints-linux-check` validates the tracked instrumentation plan and the sibling Linux marker names, variants and fingerprints in read-only mode. It must report missing, stale and mismatched markers and must not regenerate artifacts, emit a patch or modify the Linux tree.

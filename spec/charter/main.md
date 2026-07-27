@@ -3628,6 +3628,12 @@ test；例如 DF-0001 固定引用非 probe 的 `user-smoke-native` acceptance�
 发行版 shell case 由 basic TOML 声明 scripted stdin；composite runner 只读取固定子目录中的 `result.json` 与
 `qemu.log`，不得再叠加第二套输入或 QEMU 生命周期。
 
+默认 stress suite 必须持续采样已指定为长期观察项、且已经具备 canonical basic identity 与冻结诊断
+artifact 的未闭环间歇性缺陷。DF-0004 的 `rc-local-native` timeout 属于该范围，因此默认 suite 必须
+包含其 focused composite case，并与其它默认 case 一样接受顶层 `STRESS_RUNS` 的统一轮次覆盖；case
+自带的 100 轮仍用于未覆盖时的专项深采样。加入默认 suite 不等于加入根 `make test`，连续成功也只表示
+本批未复现，不能关闭缺陷或替代 timeout 时的 QMP 现场分析。
+
 每次 stress 执行必须记录整体时间统计，用于比较不同观察模式是否显著扰动复现时序。runner 应在 case 开始和结束时记录 UTC wall-clock 时间，并使用单调时钟计算总耗时；summary/report 至少应包含开始时间、结束时间、总耗时、已完成 run 数和按已完成 run 计算的平均单轮耗时。每个独立 run 仍应记录自身开始时间、结束时间和耗时；整体平均值应从这些 run 记录计算，避免只依赖外部日志或人工估算。比较 `stress-mem` 与普通路径时，应优先在构建已就绪的条件下使用同等 run 数、同一 case 和同一超时配置，避免把首次编译或外部准备工作误判为观察模式本身的开销。
 
 压力复现路径的默认观察方式应优先使用 guest 内存输出序列，而不是持续向 console 或文件输出事件。`stress-mem` 是 console/stdout sink 边界上的统一截获器：启用后，所有原本将写向 `printk` console、SBI console、UART/QEMU stdout 的字节流都应先进入同一个 guest 静态 recorder buffer；截获成功后默认不再向后传递到真实 console/stdout。它不能按 checkpoint、smoke、panic、user stdout 或 failure diagnostic 分散打点，也不能要求各业务模块分别理解压力测试事件格式。被测内核可以在编译期启用这个固定容量 recorder，buffer 不依赖 heap 分配，不写文件；当前 runner 每轮启动一个新的 QEMU 进程，因此 recorder 随 kernel image 初始化自然重新开始。若后续支持同一 guest 内多轮循环，必须在每轮边界显式 reset 并复用同一块内存。容量应由被引用的 basic TOML 在实现已声明的离散档位中选择；buffer 满时只置 overflow 标记并继续计数，不得动态扩容或阻塞热路径。

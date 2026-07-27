@@ -12,10 +12,13 @@ From the repository root:
 make test-stress
 ```
 
-The default suite repeats `user-smoke-native`, `kernel-smoke-native`, and
-`scripted-shell`. `STRESS_RUNS=N` overrides the configured run count for each
-selected case. `STRESS_RUNS=0` validates every selected composite TOML,
-classifier, and referenced basic TOML without building a disk or running QEMU.
+The default suite repeats `user-smoke-native`, `kernel-smoke-native`,
+`scripted-shell`, and the DF-0004 `rc-local-native` timeout-observation case.
+The root Make entry defaults to `STRESS_RUNS=10`, so the normal default sample
+is 10 runs per case (40 QEMU runs total). `STRESS_RUNS=N` overrides the
+configured run count for each selected case. `STRESS_RUNS=0` validates every
+selected composite TOML, classifier, and referenced basic TOML without building
+a disk or running QEMU.
 
 Focused cases are selected explicitly:
 
@@ -37,11 +40,12 @@ make test-stress \
   STRESS_RUNS=100
 ```
 
-The last case is an opt-in timeout investigation for the canonical
-`rc-local-native` basic test. It keeps every standalone artifact and, on a
-timeout, the basic runner freezes `qemu-timeout-diagnostics.json` before it
-terminates QEMU. A run with no failures reports only that the timeout was not
-observed in that sample; it is not a root-cause verdict.
+The last command increases the default suite's DF-0004 case to its 100-run
+focused sample for the canonical `rc-local-native` basic test. It keeps every
+standalone artifact and, on a timeout, the basic runner freezes
+`qemu-timeout-diagnostics.json` before it terminates QEMU. A run with no
+failures reports only that the timeout was not observed in that sample; it is
+not a root-cause verdict.
 
 For one selected stress case, a schema-v2 historical report can be compared
 without changing the current invocation's exit status:

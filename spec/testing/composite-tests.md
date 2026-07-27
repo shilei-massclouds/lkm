@@ -14,11 +14,13 @@ basic `test`、`runs`、`classifier` 和 `metadata`。每轮在固定
 nested artifact 目录运行同一个 basic test，之后只读取其 `result.json` 与 `qemu.log`。Stress 保留 defect
 classifier、事件提取、序列聚类和本次 failure-vs-success 分析。
 
-`rc-local-native-timeout-focused` 是 opt-in 的 timeout 定位项：它只重复正式 `rc-local-native` basic
-identity，默认 100 轮，不进入默认 stress suite 或根 `make test`。它不得复制或覆盖 basic 的 180 秒
-timeout、QEMU 参数、probe、rootfs 或期望；每轮必须保留完整 basic artifact，发生 timeout 时连同
-`qemu-timeout-diagnostics.json` 一并冻结。该项的目的首先是取得可复现的停机 PC/寄存器/IRQ 证据；
-连续成功只能报告本次未复现和观测上界，不能证明 UART、PLIC、SBI、sandbox 或其它候选根因。
+`rc-local-native-timeout-focused` 是默认 stress suite 中的 DF-0004 timeout 长期观察项：它只重复正式
+`rc-local-native` basic identity，case-local 深采样轮次为 100；根 Make 入口默认以统一
+`STRESS_RUNS=10` 采样它和其它默认 case，且不把 stress suite 纳入根 `make test`。它不得复制或覆盖
+basic 的 180 秒 timeout、QEMU 参数、probe、rootfs 或期望；每轮必须保留完整 basic artifact，发生
+timeout 时连同 `qemu-timeout-diagnostics.json` 一并冻结。该项的目的首先是取得可复现的停机
+PC/寄存器/IRQ 证据；连续成功只能报告本次未复现和观测上界，不能证明 UART、PLIC、SBI、sandbox
+或其它候选根因。
 
 Difftest case 顶层只允许 `schema_version`、`name`、`description`、`mode = "difftest"`、
 `runs`、`left_test`、`left_label`、`right_test`、`right_label`、`checkpoint_scope`、可选

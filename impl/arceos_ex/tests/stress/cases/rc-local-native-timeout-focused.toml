@@ -9,7 +9,7 @@ classifier = "../classifiers/rc-local-native-timeout-focused.toml"
 [metadata]
 observation_mode = "rc-local-native-timeout-forensics"
 ordinary_path_required = true
-opt_in_only = true
+default_suite = true
 rootfs_profile = "canonical"
 payload = "canonical /opt/lkm/tests/rc-local-init -> /bin/sh rc-local.sh -> /bin/ls and poweroff"
 scope_note = "Locate the intermittent QEMU timeout from frozen basic and QMP artifacts; successful samples do not establish a root cause."
