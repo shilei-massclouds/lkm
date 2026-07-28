@@ -70,7 +70,12 @@ pub fn accept_enable_at_entry(boot_args: &BootArgs) -> EventResult {
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task_ref() != TaskRef::BOOT
         || ctx.boot_task.pid() != 0
-        || ctx.boot_task.task().active_flow().is_valid()
+        || !ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(ctx.boot_init_flow.core().flow_ref())
+        || !ctx.boot_init_flow.core().active()
         || ctx.boot_init_flow.state() != State::Base
         || ctx.cpu_group.state() != State::Prepared
         || ctx.cpu_group.boot_cpu_state() != State::Prepared
@@ -107,7 +112,9 @@ pub fn commit_online_after_application_environment_ready() -> EventResult {
         || ctx.kernel_init_task.entry_started_count() != 1
         || !ctx.kernel_init_task.entry_stack_verified()
         || !ctx.kernel_init_task.current_stack_pointer_in_range()
-        || !ctx.boot_cpu_current_task().current_is_kernel_init()
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
         || ctx.kernel_init_flow.state() != State::Online
         || ctx.kernel_init_flow.released()
         || !ctx.kernel_init_flow.active()

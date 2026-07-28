@@ -1,6 +1,6 @@
 use super::{
     boot_args::BootArgs,
-    cpu_control::{CurrentTaskSlot, LocalInterruptControl},
+    cpu_control::LocalInterruptControl,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
 use crate::checkpoint::Checkpoint;
@@ -90,7 +90,6 @@ pub struct Cpu {
     active: bool,
     online: bool,
     local_interrupt: LocalInterruptControl,
-    current_task: CurrentTaskSlot,
 }
 
 impl Cpu {
@@ -105,7 +104,6 @@ impl Cpu {
             active: false,
             online: false,
             local_interrupt: LocalInterruptControl::new(),
-            current_task: CurrentTaskSlot::new(),
         }
     }
 
@@ -120,7 +118,6 @@ impl Cpu {
             active: false,
             online: false,
             local_interrupt: LocalInterruptControl::new(),
-            current_task: CurrentTaskSlot::new(),
         }
     }
 
@@ -242,18 +239,6 @@ impl Cpu {
 
     pub fn local_interrupt_mut(&mut self) -> &mut LocalInterruptControl {
         &mut self.local_interrupt
-    }
-
-    pub const fn current_task(&self) -> &CurrentTaskSlot {
-        &self.current_task
-    }
-
-    pub fn current_task_mut(&mut self) -> &mut CurrentTaskSlot {
-        &mut self.current_task
-    }
-
-    pub fn controls_mut(&mut self) -> (&mut LocalInterruptControl, &mut CurrentTaskSlot) {
-        (&mut self.local_interrupt, &mut self.current_task)
     }
 }
 

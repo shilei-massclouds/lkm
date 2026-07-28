@@ -59,11 +59,12 @@ TaskFlow slot 常量和 `USER_FLOW_SLOTS_PER_TASK` 属于本 module。通用 non
 
 `TaskFlow` transition/action 在修改状态或执行 body 前，必须通过 owner bridge 解析 parent Task 并检查
 其状态为 `OnCpu` 且 authority 为 Live。`Task.Online` 只表示可被 Scheduler 派发，不等同于执行权或普通 runnable queue
-成员。`CurrentTaskSlot` 保留为 CPU 当前 TaskRef 的投影视图；建立以后必须与唯一 OnCpu Task 一致。
+成员。`CurrentTask := effective_task_flow.parent`，`CurrentTaskRef := ref(CurrentTask)`；解析必须证明
+Flow parent/owner、Task.active_flow、唯一 OnCpu/Live authority 与 TaskRef generation 一致。两者都不保存状态。
 
 Scheduler 切换按 `prepare -> physical save/restore -> next-stack finish` 排序。prepare 只校验双方
-authority/context/FlowRef；finish 原子发布 prev breakpoint、消费 next breakpoint、提交 CurrentTaskSlot
-后处理 strict Continue。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
+authority/context/FlowRef；架构切换建立 next identity，finish 验证该身份后原子发布 prev breakpoint、
+消费 next breakpoint、激活 next Flow 并确认 CurrentTask，再处理 strict Continue。`next.Continue` 不能由旧 Task 栈提前提交 OnCpu。
 
 入口与 scheduler commit 是 `cpu_ref` 的仅有写边界。迁移提交在激活新 Flow 前写入目标 CpuRef；
 同一 Task 的 Flow handoff 在提交 active binding 前复制 predecessor CpuRef。执行中的 Flow 及其同步
@@ -73,7 +74,7 @@ Task 收到严格 Continue 后按当前快照选择：initial Flow 为 Base 时�
 active Flow 发送 `Continue`。两个候选都可接受或都不可接受均为终止错误；不得丢弃、排队重试或降级。
 
 KernelInitTask 首次 switch 的 Signal acceptance 与 Flow body lowering 必须分开：物理 switch 后的
-PID 1 入口提交 `CurrentTaskSlot`/OnCpu 一致事实并接受 KernelInitFlow Startup；叶阶段代码只能在
+PID 1 入口验证 CurrentTask/OnCpu/active-flow 一致并接受 KernelInitFlow Startup；叶阶段代码只能在
 `kernel_init_entry()` 验证实际 SP 属于 PID 1 vmalloc stack 后运行。任何通用
 continuation helper 都不得让 scheduler 在 BootTask 调用栈上同步跑完整 KernelInitFlow。
 

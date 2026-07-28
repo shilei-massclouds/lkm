@@ -123,21 +123,23 @@ enters BootIdleEntryPhase's post-schedule BootIdleStartupContext. It must not be
 implemented as a single Scheduler action and must not introduce a
 KernelInitDispatchGate lifecycle object; the branch point is the
 combination of Scheduler first-schedule and KernelInitTask dispatch
-facts. Scheduler.schedule() must derive the
-current task reference from the current CPU current-task view,
-pick next from CurrentRunQueueRef, then switch through TaskRef-based core
-context save/restore and publish the updated CPU-local current task
-fact. The implementation boundary must pass through the current
-CPU's CurrentTaskSlot; it must not infer or publish the current task
-only from Scheduler counters or BootRunQueue.curr.
+facts. Scheduler.schedule() must resolve the `CurrentTask` capability from the
+effective Flow, validate that Flow's `CpuRef`, and then pick next from
+`CurrentRunQueueRef`. The prepare boundary confirms that the resolved
+`CurrentTaskRef` is `prev_ref`; it must not infer current identity from
+Scheduler counters, `BootRunQueue.curr`, or another stored copy.
 
 SwitchTo must synchronously send `prev.Suspend`, save the old context, commit
-CurrentTaskSlot/context facts and perform the physical stack switch. Only the
+the architecture switch with next's canonical `tp`, and perform the physical
+stack switch. On the new stack, finish first validates the raw implementation
+identity and then atomically commits next's `OnCpu/Live` state, active Flow,
+Flow CPU assignment and the resulting `CurrentTask` selection. Only the
 new Task's entry/resume point may handle `next.Continue`: a Base initial Flow
 accepts strict Startup, otherwise the Online active Flow accepts strict
 Continue. Exactly one handler must accept; rejection or handler failure fails
-the root execution. CurrentTaskSlot must agree with the unique OnCpu Task after
-it has been established.
+the root execution. Resolving `CurrentTask` after finish must yield next; the
+previous Task cannot be reclaimed before that result is established. Identity
+switches preserve the same selector result.
 
 Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
 Scheduler.Online; the real Scheduler.Action::Schedule is driven by Kernel.Enable only after
@@ -181,7 +183,7 @@ path remain deferred.
 
 BootIdleRuntime.schedule_if_need_resched() must now drive a concrete
 Scheduler.schedule_idle() implementation boundary. The wrapper must
-require the current CPU's CurrentTaskSlot to still target BootTask
+resolve `CurrentTask` and require it to still target BootTask
 and the need_resched observation to have been recorded by
 BootIdleRuntime. It must reuse the existing Scheduler.schedule()
 pick-next/switch-to skeleton and must not hand-commit a new Task identity or a second idle carrier when runnable tasks are
@@ -248,21 +250,26 @@ Generated Rust must implement one `CpuGroup` with `[Option<Cpu>; MAX_CPUS]` as t
 
 `CpuRef` lowers to a compact logical ID and dereference must validate that the indexed element exists. `TaskFlow` is the sole owner of CPU assignment; `Task` has no synonymous CPU field. Only entry and scheduler commit boundaries write `TaskFlow.cpu_ref`. A Flow retains its assigned/last CPU when it is not OnCpu; migration changes the ref at commit, and handoff copies it before the successor Flow becomes active.
 
-`CurrentCpu` is a stateless capability created by dereferencing the effective `TaskFlow.cpu_ref` against `CpuGroup`. It is not stored as an object and has no lifecycle. Synchronous helper/drives calls may borrow it; asynchronous emits receive no inherited capability. Trace output must name both canonical target and source Flow/CpuRef. `Context` owns `CpuGroup` only; CPU-local interrupt control, CurrentTaskSlot, registers and scheduler-local state are reached through the selected `Cpu`.
+`CurrentCpu` is a stateless capability created only after resolving `CurrentTask`, reading its validated active Flow and dereferencing that Flow's `cpu_ref` against `CpuGroup`. It is not stored as an object and has no lifecycle. Synchronous helper/drives calls may borrow it; asynchronous emits receive no inherited capability. Trace output must name both canonical target and source Flow/CpuRef. `Context` owns `CpuGroup` only; CPU-local interrupt control, registers and scheduler-local state are reached through the selected `Cpu`.
 
-AP entries may exist as possible/present before bringup, but no AP `CurrentCpu` capability exists until an AP Flow has execution authority and a valid CpuRef. `CurrentTaskSlot` remains CPU-local and task switch commits its value together with the next Flow CpuRef before activation. Smoke and checkpoint coverage must validate CPU0 ownership, AP identity, CpuRef dereference, no parallel identity stores, derived masks, logical-ID/hartid bijection, migration and Flow handoff.
+AP entries may exist as possible/present before bringup, but no AP `CurrentCpu` capability exists until an AP Flow has execution authority and a valid CpuRef. AP entry must establish the idle Task's canonical `tp` before either `CurrentTask` or `CurrentCpu` is resolved. Smoke and checkpoint coverage must validate CPU0 ownership, AP identity, CpuRef dereference, no parallel identity stores, derived masks, logical-ID/hartid bijection, migration and Flow handoff.
 
 #### Current TaskRef scope
 
-The current CPU view must store a generation-checked `TaskRef`; the
-old role enum `CurrentTaskRef` is forbidden and has no compatibility
-alias. The BP path reaches the `CpuGroup.cpus[0]` `CurrentTaskSlot` through its effective Flow and must
-not introduce a descriptive CurrentTask object or a global current
-task singleton. On task switch, next must become the TaskRef stored in
-this CPU-local slot. RISC-V64 code follows the Linux-style `tp`
-implementation reference through `CurrentTaskSlot`; for BootTask the
-resolved Task carrier address and `tp` must both equal linker-visible
-`init_task_storage`.
+`CurrentTask` is a short-lived, read-only capability whose only payload is a
+generation-checked `TaskRef`; `CurrentTaskRef` is the typed reference derived
+from that selector. Neither name is a role enum, object, lifecycle, writable
+slot, or snapshot state, and no compatibility alias or global current-task
+singleton is permitted. Resolution starts from the stable RISC-V64 `tp`
+implementation identity, maps it through one centralized Task carrier
+resolver, then validates that the target is the unique `OnCpu/Live` Task, its
+active Flow is the effective Flow, and the Flow parent/owner points back to the
+same Task. The resolver covers BootTask, kernel tasks, smoke/user dynamic tasks
+and AP idle tasks, rejects unknown addresses and stale generations explicitly,
+and exposes neither raw addresses nor mutable Task borrows to ordinary callers.
+For BootTask the physical and virtual `tp` resolve to linker-visible
+`init_task_storage`. No fallback to BootTask, runqueue state, or Scheduler
+caches is allowed.
 
 #### CurrentRunQueueRef scope
 

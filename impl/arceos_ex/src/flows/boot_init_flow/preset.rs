@@ -10,6 +10,7 @@ use crate::{
         soc::Soc,
         state::{EventResult, LifecycleEvent, State, failed_condition},
         task::TaskRef,
+        task_flow::TaskFlowRef,
     },
 };
 
@@ -368,16 +369,23 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
         );
     };
     local_interrupt.setup()?;
-    let Some(current_task) = ctx.cpu_group.boot_cpu_current_task_mut() else {
+    let Ok(current_task) = ctx.current_task() else {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,
-            State::Base,
+            State::Prepared,
             State::Ready,
         );
     };
-    current_task.setup()?;
-    let Some(current_cpu) = ctx.cpu_group.current_cpu(ctx.boot_init_flow.core()) else {
+    if !current_task.task_ref().same_identity(TaskRef::BOOT) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    }
+    let Ok(current_cpu) = ctx.current_cpu() else {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,
@@ -444,7 +452,12 @@ fn adopt_boot_task_entry_binding_physical(ctx: &Context) -> EventResult {
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
-        || ctx.boot_task.task().active_flow().is_valid()
+        || !ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+        || !ctx.boot_init_flow.core().active()
         || ctx.boot_task.task_ref() != TaskRef::BOOT
         || csr::read_tp() != init_task_phys
     {
@@ -493,7 +506,12 @@ fn setup_boot_task_entry_binding_virtual(ctx: &Context) -> EventResult {
         || ctx.boot_task.state() != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
-        || ctx.boot_task.task().active_flow().is_valid()
+        || !ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+        || !ctx.boot_init_flow.core().active()
         || ctx.vm.state() != State::Ready
         || !ctx.vm.entry_prelude_ready()
         || ctx.kernel_image.state() != State::Online
@@ -536,7 +554,12 @@ fn verify_boot_task_online_virtual(ctx: &Context) -> EventResult {
         || task_state != State::OnCpu
         || ctx.boot_task.task().task_ref() != TaskRef::BOOT
         || ctx.boot_task.task().pid() != 0
-        || ctx.boot_task.task().active_flow().is_valid()
+        || !ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+        || !ctx.boot_init_flow.core().active()
         || ctx.vm.state() != State::Ready
         || ctx.kernel_image.state() != State::Online
         || init_task_virt != carrier_address
@@ -585,7 +608,12 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
         && ctx.boot_task.state() == State::OnCpu
         && ctx.boot_task.task().task_ref() == TaskRef::BOOT
         && ctx.boot_task.task().pid() == 0
-        && !ctx.boot_task.task().active_flow().is_valid()
+        && ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+        && ctx.boot_init_flow.core().active()
         && csr::read_tp() == ctx.boot_task.carrier_address()
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready
@@ -597,10 +625,8 @@ pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
             .map(|control| control.state() == State::Ready && control.disabled())
             .unwrap_or(false)
         && ctx
-            .cpu_group
-            .boot_cpu_current_task()
-            .map(|slot| slot.state() == State::Ready)
-            .unwrap_or(false)
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(TaskRef::BOOT))
         && ctx.cpu_group.state() == State::Prepared
         && ctx.cpu_group.boot_cpu_state() == State::Ready
 }

@@ -644,10 +644,11 @@ predicate tty_n_tty_blocking_read_deferred<T>(buffer: T) -> bool;
 
 context UserModeTrapReturnContext: Context {
     /*
-     * UserAppFlow.Enable is the final RISC-V trap-return handoff. The
-     * kernel writes sscratch/sepc/sstatus/satp, executes sfence.vma after the
-     * satp write, switches to the user stack and executes sret. The user
-     * application beyond this boundary is intentionally opaque.
+     * UserAppFlow.Enable is the final architecture trap-return handoff. The
+     * kernel binds the user-trap entry context and prepared return context,
+     * switches to the user execution context and does not return. The user
+     * application beyond this boundary is intentionally opaque. Register
+     * lowering belongs to the target coding specification.
      */
     guard {
         entered_by {
@@ -2804,7 +2805,7 @@ object SyscallTable: ResourceObject {
                     declare child of Task;
                     declare child_ref of TaskRef;
                     declare fork_flow of UserAppFlow;
-                    child_ref.Action::SetCurrent(task: child);
+                    child_ref.Action::Bind(task: child);
                     fork_flow.Action::Bind(
                         owner_task: child,
                         entry_source: UserAppFlowEntrySource::ForkContinuation

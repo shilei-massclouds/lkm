@@ -243,16 +243,21 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
         );
     }
 
+    let Ok(current_task) = ctx.current_task() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kernel_init_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    };
     let copy_result = ctx
         .task_creation_core
         .copy_process(
             TaskCopyProcessInputs {
                 src_task: ctx.boot_task.task(),
                 src_task_ref: ctx.boot_task.task_ref(),
-                current_task_slot: ctx
-                    .cpu_group
-                    .boot_cpu_current_task()
-                    .expect("boot CPU current-task slot"),
+                current_task,
                 root_pid_namespace: &ctx.root_pid_namespace,
                 credential_core: &ctx.credential_core,
                 signal_core: &ctx.signal_core,
@@ -344,8 +349,9 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
         || ctx.cpu_group.state() != State::Ready
         || ctx.cpu_group.boot_cpu_state() != State::Online
         || ctx.boot_cpu_local_interrupt().state() != State::Ready
-        || ctx.boot_cpu_current_task().state() != State::Ready
-        || !ctx.boot_cpu_current_task().current_is_boot_task()
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
@@ -470,14 +476,19 @@ fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
         );
     }
 
+    let Ok(current_task) = ctx.current_task() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            ctx.kthreadd_task.state(),
+            State::Prepared,
+            State::Ready,
+        );
+    };
     let copy_result = ctx.task_creation_core.copy_process(
         TaskCopyProcessInputs {
             src_task: ctx.boot_task.task(),
             src_task_ref: ctx.boot_task.task_ref(),
-            current_task_slot: ctx
-                .cpu_group
-                .boot_cpu_current_task()
-                .expect("boot CPU current-task slot"),
+            current_task,
             root_pid_namespace: &ctx.root_pid_namespace,
             credential_core: &ctx.credential_core,
             signal_core: &ctx.signal_core,
@@ -551,8 +562,9 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
         || ctx.cpu_group.state() != State::Ready
         || ctx.cpu_group.boot_cpu_state() != State::Online
         || ctx.boot_cpu_local_interrupt().state() != State::Ready
-        || ctx.boot_cpu_current_task().state() != State::Ready
-        || !ctx.boot_cpu_current_task().current_is_boot_task()
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
         || ctx.kthreadd_task.pid() != KTHREADD_PID
@@ -722,8 +734,9 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.scheduler_start_single_online_cpu()
         && ctx.rcu_core.gp_seq_baseline_synced()
         && ctx.rcu_core.gp_threads_deferred()
-        && ctx.boot_cpu_current_task().state() == State::Ready
-        && ctx.boot_cpu_current_task().current_is_boot_task()
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         && ctx.task_creation_core.entry_contract_ready()
         && ctx.task_creation_core.kernel_init_created()
         && ctx.task_creation_core.kthreadd_created()
@@ -798,7 +811,9 @@ pub(super) fn facts_stable(ctx: &Context) -> bool {
         && ctx.rcu_core.scheduler_start_single_online_cpu()
         && ctx.rcu_core.gp_seq_baseline_synced()
         && ctx.rcu_core.gp_threads_deferred()
-        && ctx.boot_cpu_current_task().state() == State::Ready
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
         && ctx.task_creation_core.entry_contract_ready()
         && ctx.task_creation_core.kernel_init_created()
         && ctx.task_creation_core.kthreadd_created()

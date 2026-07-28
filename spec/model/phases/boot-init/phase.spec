@@ -49,8 +49,7 @@ object BootInitFlow: TaskFlow {
                         KernelImage.Transition::Setup;
                         CurrentCPU.Transition::Setup(true);
                         CurrentCPU.BootCpuLocalInterrupt.Transition::Setup;
-                        CurrentCPU.BootCpuCurrentTask.Transition::Setup;
-                        BootTaskEntryBinding.Transition::Preset;
+                        BootTaskEntryBinding.Transition::Preset(CurrentTaskRef);
                         BootInitStack.Transition::Preset;
                         EventStream.Transition::Preset;
                         ExceptionStream.Transition::Preset;
@@ -209,7 +208,7 @@ object BootInitFlow: TaskFlow {
                     scheduler_switch_to_prepared(
                         Scheduler,
                         BootRunQueue,
-                        CurrentTaskRef,
+                        BootTaskRef,
                         KernelInitTaskRef
                     );
                     BootTask.state == State::OnCpu;
@@ -236,7 +235,7 @@ object BootInitFlow: TaskFlow {
             scheduler_switch_to_prepared(
                 Scheduler,
                 BootRunQueue,
-                CurrentTaskRef,
+                BootTaskRef,
                 KernelInitTaskRef
             );
             BootTask.state == State::OnCpu;

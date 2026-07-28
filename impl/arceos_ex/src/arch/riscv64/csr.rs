@@ -59,8 +59,9 @@ arceos_ex_enter_user_mode:
      * a1 = user entry
      * a2 = user stack pointer
      * a3 = user sstatus
-     * a4 = kernel trap stack top for sscratch
+     * a4 = user-trap entry context at the safe kernel-stack boundary
      */
+    sd      tp, 0(a4)
     csrw    sscratch, a4
     csrw    sepc, a1
     csrw    sstatus, a3
@@ -86,7 +87,7 @@ unsafe extern "C" {
         user_entry: usize,
         user_sp: usize,
         user_sstatus: usize,
-        kernel_trap_stack_top: usize,
+        user_trap_entry_context: usize,
     ) -> !;
 }
 
@@ -291,7 +292,7 @@ pub unsafe fn enter_user_mode(
     user_entry: usize,
     user_sp: usize,
     user_sstatus: usize,
-    kernel_trap_stack_top: usize,
+    user_trap_entry_context: usize,
 ) -> ! {
     unsafe {
         arceos_ex_enter_user_mode(
@@ -299,7 +300,7 @@ pub unsafe fn enter_user_mode(
             user_entry,
             user_sp,
             user_sstatus,
-            kernel_trap_stack_top,
+            user_trap_entry_context,
         )
     }
 }

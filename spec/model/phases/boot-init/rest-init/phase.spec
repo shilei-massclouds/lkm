@@ -747,7 +747,7 @@ object BootInitRestInitPhase: PhaseObject {
                         runqueue_ref_ready(BootRunQueueRef);
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
-                        current_task_slot_current(BootCpuCurrentTask, BootTask);
+                        current_task_ref_derived_from_selector(BootTaskRef, BootTask);
                         BootRunQueue.state == State::Ready;
                     }
 
@@ -901,7 +901,7 @@ object BootInitRestInitPhase: PhaseObject {
                         runqueue_ref_ready(BootRunQueueRef);
                         task_state_new(KthreaddTask);
                         task_not_enqueued(KthreaddTask);
-                        current_task_slot_current(BootCpuCurrentTask, BootTask);
+                        current_task_ref_derived_from_selector(BootTaskRef, BootTask);
                         BootRunQueue.state == State::Ready;
                     }
 
@@ -1378,7 +1378,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     kernel_init_entry_reaches_kernel_init_flow(KernelInitTask, KernelInitFlow);
                     scheduler_switch_prepare_validates_prev_live_active_flow(
                         Scheduler,
-                        CurrentTaskRef
+                        BootTaskRef
                     );
                     scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
                         Scheduler,
@@ -1426,7 +1426,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             task_active_flow_is(BootTask, BootIdleFlow);
             scheduler_switch_prepare_validates_prev_live_active_flow(
                 Scheduler,
-                CurrentTaskRef
+                BootTaskRef
             );
             scheduler_switch_prepare_validates_next_breakpoint_flow_ref(
                 Scheduler,

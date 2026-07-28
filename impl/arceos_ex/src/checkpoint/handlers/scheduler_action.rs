@@ -70,7 +70,10 @@ fn check_switch_to_exit(
     let name = "scheduler_action.switch_to_exit";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.switch_to_exit_next_ref();
-    let current_ref = ctx.boot_cpu_current_task().current();
+    let Ok(current_ref) = ctx.current_task_ref() else {
+        sink.fail(total, "", name, "CurrentTask resolution failed");
+        return CheckpointOutcome::FailAndShutdown;
+    };
     let current_is_first_boot_task =
         current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
@@ -81,10 +84,10 @@ fn check_switch_to_exit(
         || ctx.scheduler.switch_to_exit_current_ref() != next_ref
         || current_ref != next_ref
         || !current_is_first_boot_task
-        || ctx.scheduler.switch_to_exit_committed_count()
-            <= ctx.scheduler.switch_to_entry_committed_count()
-        || ctx.boot_cpu_current_task().switch_committed_count()
-            != ctx.scheduler.switch_to_exit_committed_count()
+        || ctx.scheduler.scheduler_finish_task_switch_count()
+            != ctx.scheduler.switch_to_exit_count()
+        || ctx.scheduler.scheduler_prepare_task_switch_count()
+            < ctx.scheduler.scheduler_finish_task_switch_count()
     {
         sink.fail(total, "", name, "SwitchTo exit facts invalid");
         return CheckpointOutcome::FailAndShutdown;
@@ -103,7 +106,10 @@ fn check_schedule_exit(
     let name = "scheduler_action.schedule_exit";
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.schedule_exit_next_ref();
-    let current_ref = ctx.boot_cpu_current_task().current();
+    let Ok(current_ref) = ctx.current_task_ref() else {
+        sink.fail(total, "", name, "CurrentTask resolution failed");
+        return CheckpointOutcome::FailAndShutdown;
+    };
     let current_is_first_boot_task =
         current_ref == TaskRef::KERNEL_INIT || current_ref == TaskRef::KTHREADD;
 
@@ -141,6 +147,40 @@ fn check_switch_to_entry(
     sink.start_case(total, "", name, checkpoint);
     let next_ref = ctx.scheduler.switch_to_entry_next_ref();
     let next_is_first_boot_task = next_ref == TaskRef::KERNEL_INIT || next_ref == TaskRef::KTHREADD;
+    let Ok(current_ref) = ctx.current_task_ref() else {
+        sink.fail(total, "", name, "CurrentTask resolution failed");
+        return CheckpointOutcome::FailAndShutdown;
+    };
+    sink.diag_usize(
+        "switch_to_entry_count",
+        ctx.scheduler.switch_to_entry_count(),
+    );
+    sink.diag_usize(
+        "switch_to_entry_prev_slot",
+        ctx.scheduler.switch_to_entry_prev_ref().slot(),
+    );
+    sink.diag_usize("switch_to_entry_next_slot", next_ref.slot());
+    sink.diag_usize("switch_to_entry_current_slot", current_ref.slot());
+    sink.diag_usize(
+        "switch_to_entry_recorded_current_slot",
+        ctx.scheduler.switch_to_entry_current_ref().slot(),
+    );
+    sink.diag_usize(
+        "switch_to_entry_pick_next_slot",
+        ctx.scheduler.pick_next_task_exit_next_ref().slot(),
+    );
+    sink.diag_usize(
+        "switch_to_entry_scheduler_state",
+        ctx.scheduler.state() as usize,
+    );
+    sink.diag_usize(
+        "switch_to_prepare_count",
+        ctx.scheduler.scheduler_prepare_task_switch_count(),
+    );
+    sink.diag_usize(
+        "switch_to_finish_count",
+        ctx.scheduler.scheduler_finish_task_switch_count(),
+    );
 
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.switch_to_entry_count() != 1
@@ -148,8 +188,12 @@ fn check_switch_to_entry(
         || ctx.scheduler.switch_to_entry_next_ref() != ctx.scheduler.pick_next_task_exit_next_ref()
         || !next_is_first_boot_task
         || ctx.scheduler.switch_to_entry_current_ref() != TaskRef::BOOT
-        || ctx.scheduler.switch_to_entry_committed_count()
-            >= ctx.boot_cpu_current_task().switch_committed_count()
+        || current_ref != next_ref
+        || ctx.scheduler.scheduler_prepare_task_switch_count()
+            != ctx.scheduler.switch_to_entry_count()
+        || ctx.scheduler.scheduler_finish_task_switch_count()
+            != ctx.scheduler.scheduler_prepare_task_switch_count()
+        || ctx.scheduler.task_switch_tp_identity_passes() == 0
     {
         sink.fail(total, "", name, "SwitchTo entry facts invalid");
         return CheckpointOutcome::FailAndShutdown;

@@ -1,7 +1,6 @@
 use super::{
     boot_task::BootTask,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-    task::TaskRef,
 };
 use crate::arch::riscv64::csr;
 use crate::checkpoint::Checkpoint;
@@ -153,102 +152,6 @@ impl LocalInterruptControl {
         self.enabled = csr::supervisor_interrupts_enabled();
         self.restored_count = self.restored_count.wrapping_add(1);
         Ok(())
-    }
-}
-
-pub struct CurrentTaskSlot {
-    lifecycle: Lifecycle,
-    current: TaskRef,
-    switch_committed_count: usize,
-}
-
-impl CurrentTaskSlot {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            current: TaskRef::NONE,
-            switch_committed_count: 0,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn current(&self) -> TaskRef {
-        self.current
-    }
-
-    pub const fn switch_committed_count(&self) -> usize {
-        self.switch_committed_count
-    }
-
-    pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            crate::checkpoint::Checkpoint::BootCpuCurrentTaskReady,
-        )
-    }
-
-    pub fn set_current_boot_task(&mut self) -> EventResult {
-        self.set_current(TaskRef::BOOT)
-    }
-
-    pub fn set_current(&mut self, task_ref: TaskRef) -> EventResult {
-        if self.lifecycle.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        if !task_ref.is_valid() {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        self.current = task_ref;
-        Ok(())
-    }
-
-    pub fn commit_switch_to(&mut self, next_ref: TaskRef) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !next_ref.is_valid() {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        self.current = next_ref;
-        self.switch_committed_count = self.switch_committed_count.wrapping_add(1);
-        Ok(())
-    }
-
-    pub const fn current_is_boot_task(&self) -> bool {
-        self.current.same_identity(TaskRef::BOOT)
-    }
-
-    pub const fn current_is_kernel_init(&self) -> bool {
-        self.current.same_identity(TaskRef::KERNEL_INIT)
     }
 }
 

@@ -15,7 +15,7 @@ pub fn run() -> SmokeResult {
     let ctx = context();
     if ctx
         .kernel_init_flow
-        .start_initial(&ctx.kernel_init_task)
+        .start_initial(&mut ctx.kernel_init_task)
         .is_ok()
         || ctx
             .kthreadd_flow
@@ -225,8 +225,9 @@ pub fn run() -> SmokeResult {
         || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
         || ctx.scheduler.identity_switch_passes() == 0
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || ctx.boot_cpu_current_task().switch_committed_count() == 0
-        || !ctx.boot_cpu_current_task().current_is_kernel_init()
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
         || !boot_idle_setup_state.switch_ctx_initialized()
         || boot_idle_setup_state.core_saved_count() == 0
         || boot_idle_setup_state.core_restored_count() != 0
@@ -296,7 +297,9 @@ pub fn run() -> SmokeResult {
             .kernel_init_task
             .stack_pointer_in_range(ctx.kernel_init_task.entry_stack_pointer())
         || !ctx.kernel_init_task.current_stack_pointer_in_range()
-        || !ctx.boot_cpu_current_task().current_is_kernel_init()
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
         || ctx.workqueue.workers_running()
     {
         printk::write_str("boot idle runtime facts invalid\n");

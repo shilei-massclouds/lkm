@@ -1,10 +1,9 @@
 use super::{
     boot_task::BootTask,
     cpu::{CpuRef, MAX_CPUS},
-    cpu_control::{
-        CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock, RcuReadSide,
-    },
+    cpu_control::{LocalInterruptControl, PreemptionControl, RawSpinLock, RcuReadSide},
     cpu_group::{CpuGroup, CurrentCpu},
+    current_task::CurrentTask,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
@@ -84,12 +83,10 @@ pub struct Scheduler {
     switch_to_entry_prev_ref: TaskRef,
     switch_to_entry_next_ref: TaskRef,
     switch_to_entry_current_ref: TaskRef,
-    switch_to_entry_committed_count: usize,
     switch_to_entry_count: usize,
     switch_to_exit_prev_ref: TaskRef,
     switch_to_exit_next_ref: TaskRef,
     switch_to_exit_current_ref: TaskRef,
-    switch_to_exit_committed_count: usize,
     switch_to_exit_count: usize,
     schedule_exit_prev_ref: TaskRef,
     schedule_exit_next_ref: TaskRef,
@@ -161,12 +158,10 @@ impl Scheduler {
             switch_to_entry_prev_ref: TaskRef::NONE,
             switch_to_entry_next_ref: TaskRef::NONE,
             switch_to_entry_current_ref: TaskRef::NONE,
-            switch_to_entry_committed_count: 0,
             switch_to_entry_count: 0,
             switch_to_exit_prev_ref: TaskRef::NONE,
             switch_to_exit_next_ref: TaskRef::NONE,
             switch_to_exit_current_ref: TaskRef::NONE,
-            switch_to_exit_committed_count: 0,
             switch_to_exit_count: 0,
             schedule_exit_prev_ref: TaskRef::NONE,
             schedule_exit_next_ref: TaskRef::NONE,
@@ -528,11 +523,6 @@ impl Scheduler {
         self.switch_to_entry_current_ref
     }
 
-    #[allow(dead_code)]
-    pub const fn switch_to_entry_committed_count(&self) -> usize {
-        self.switch_to_entry_committed_count
-    }
-
     pub const fn switch_to_entry_count(&self) -> usize {
         self.switch_to_entry_count
     }
@@ -550,11 +540,6 @@ impl Scheduler {
     #[allow(dead_code)]
     pub const fn switch_to_exit_current_ref(&self) -> TaskRef {
         self.switch_to_exit_current_ref
-    }
-
-    #[allow(dead_code)]
-    pub const fn switch_to_exit_committed_count(&self) -> usize {
-        self.switch_to_exit_committed_count
     }
 
     #[allow(dead_code)]
@@ -624,6 +609,39 @@ impl Scheduler {
         &mut self.smoke_rwlock_task
     }
 
+    pub(crate) fn current_task_candidate_by_identity(
+        &self,
+        identity: usize,
+    ) -> Option<super::current_task::CurrentTaskCandidate<'_>> {
+        let candidates = [
+            &self.smoke_scheduler_task,
+            &self.smoke_mutex_task,
+            &self.smoke_rwsem_task,
+            &self.smoke_rwlock_task,
+        ];
+        let mut index = 0usize;
+        while index < candidates.len() {
+            if candidates[index].task_ptr() == identity {
+                return Some(candidates[index].current_task_candidate());
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub(crate) fn current_task_candidate_by_ref(
+        &self,
+        task_ref: TaskRef,
+    ) -> Option<super::current_task::CurrentTaskCandidate<'_>> {
+        match task_ref {
+            TaskRef::SMOKE_SCHEDULER => Some(self.smoke_scheduler_task.current_task_candidate()),
+            TaskRef::SMOKE_MUTEX => Some(self.smoke_mutex_task.current_task_candidate()),
+            TaskRef::SMOKE_RWSEM => Some(self.smoke_rwsem_task.current_task_candidate()),
+            TaskRef::SMOKE_RWLOCK => Some(self.smoke_rwlock_task.current_task_candidate()),
+            _ => None,
+        }
+    }
+
     pub fn preset(
         &mut self,
         cpu_group: &CpuGroup,
@@ -676,10 +694,6 @@ impl Scheduler {
                 .boot_cpu_local_interrupt()
                 .map(|control| control.state() != State::Ready)
                 .unwrap_or(true)
-            || cpu_group
-                .boot_cpu_current_task()
-                .map(|slot| slot.state() != State::Ready)
-                .unwrap_or(true)
         {
             return self.failed_setup();
         }
@@ -700,8 +714,7 @@ impl Scheduler {
         }
         self.setup_cpu_runqueue_metadata(cpu_group)?;
         {
-            let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut()
-            else {
+            let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
                 return self.failed_setup();
             };
             self.boot_idle_setup_state.setup(
@@ -712,7 +725,6 @@ impl Scheduler {
                 boot_cpu_ref,
                 local_interrupt,
                 &mut self.boot_idle_preemption,
-                current_task_slot,
             )?;
         }
         if !self.setup_facts_hold(cpu_group) {
@@ -751,6 +763,7 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub fn schedule(
         &mut self,
+        current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
@@ -760,14 +773,12 @@ impl Scheduler {
         boot_idle_flow: &BootIdleFlow,
         user_task_set: &mut UserTaskSet,
         local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
             || local_interrupt.state() != State::Ready
-            || current_task_slot.state() != State::Ready
-            || !current_task_slot.current().is_boot_scheduler_ref()
+            || !current_task.task_ref().is_boot_scheduler_ref()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -777,7 +788,7 @@ impl Scheduler {
             );
         }
 
-        let prev_ref = current_task_slot.current();
+        let prev_ref = current_task.task_ref();
         let mut next_ref = TaskRef::NONE;
 
         self.boot_idle_preemption.disable()?;
@@ -815,7 +826,7 @@ impl Scheduler {
                 self.switch_to(
                     prev_ref,
                     next_ref,
-                    current_task_slot,
+                    current_task,
                     kernel_init_task,
                     kthreadd_task,
                     user_task_set,
@@ -854,7 +865,6 @@ impl Scheduler {
         if resumed {
             self.continue_task_after_switch(
                 prev_ref,
-                current_task_slot,
                 kernel_init_task,
                 kernel_init_flow,
                 user_app_flow,
@@ -870,6 +880,7 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub fn schedule_idle(
         &mut self,
+        current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
@@ -879,17 +890,16 @@ impl Scheduler {
         boot_idle_flow: &BootIdleFlow,
         user_task_set: &mut UserTaskSet,
         local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
-            || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_task()
+            || !current_task.task_ref().same_identity(TaskRef::BOOT)
         {
             return Err(self.failed_schedule_condition());
         }
 
         self.schedule(
+            current_task,
             current_cpu,
             kernel_init_task,
             kernel_init_flow,
@@ -899,11 +909,13 @@ impl Scheduler {
             boot_idle_flow,
             user_task_set,
             local_interrupt,
-            current_task_slot,
         )?;
         self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
         self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
-        if current_task_slot.current_is_boot_task() {
+        if crate::arch::riscv64::csr::read_tp()
+            == BootTask::canonical_task() as *const Task as usize
+            && BootTask::canonical_task().state() == State::OnCpu
+        {
             self.idle_schedule_identity_passes = self.idle_schedule_identity_passes.wrapping_add(1);
         }
         Ok(())
@@ -1019,7 +1031,7 @@ impl Scheduler {
         &mut self,
         prev_ref: TaskRef,
         next_ref: TaskRef,
-        current_task_slot: &mut CurrentTaskSlot,
+        current_task: CurrentTask,
         kernel_init_task: &mut KernelInitTask,
         kthreadd_task: &mut KthreaddTask,
         user_task_set: &mut UserTaskSet,
@@ -1028,8 +1040,7 @@ impl Scheduler {
             || !next_ref.is_boot_scheduler_ref()
             || self.boot_runqueue.curr_task_id() != self.boot_idle_setup_state.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
-            || current_task_slot.state() != State::Ready
-            || current_task_slot.current() != prev_ref
+            || current_task.task_ref() != prev_ref
         {
             return self.failed_switch_to();
         }
@@ -1047,14 +1058,13 @@ impl Scheduler {
 
         self.switch_to_entry_prev_ref = prev_ref;
         self.switch_to_entry_next_ref = next_ref;
-        self.switch_to_entry_current_ref = current_task_slot.current();
-        self.switch_to_entry_committed_count = current_task_slot.switch_committed_count();
+        self.switch_to_entry_current_ref = current_task.task_ref();
         self.switch_to_entry_count = self.switch_to_entry_count.wrapping_add(1);
         self.scheduler_prepare_task_switch_count =
             self.scheduler_prepare_task_switch_count.wrapping_add(1);
         self.physical_switch_pending = true;
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToEntry);
-        trace_switch_to(prev_ref, next_ref, current_task_slot.current());
+        trace_switch_to(prev_ref, next_ref, current_task.task_ref());
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
         Ok(())
     }
@@ -1110,7 +1120,7 @@ impl Scheduler {
         &mut self,
         prev_ref: TaskRef,
         next_ref: TaskRef,
-        current_task_slot: &CurrentTaskSlot,
+        current_task: CurrentTask,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
         user_task_set: &UserTaskSet,
@@ -1119,8 +1129,7 @@ impl Scheduler {
             self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
             return Ok(());
         }
-        if current_task_slot.state() != State::Ready
-            || current_task_slot.current() != prev_ref
+        if current_task.task_ref() != prev_ref
             || !self.task_switch_out_ready(prev_ref, kernel_init_task, kthreadd_task, user_task_set)
             || !self.task_switch_in_ready(next_ref, kernel_init_task, kthreadd_task, user_task_set)
         {
@@ -1128,8 +1137,7 @@ impl Scheduler {
         }
         self.switch_to_entry_prev_ref = prev_ref;
         self.switch_to_entry_next_ref = next_ref;
-        self.switch_to_entry_current_ref = current_task_slot.current();
-        self.switch_to_entry_committed_count = current_task_slot.switch_committed_count();
+        self.switch_to_entry_current_ref = current_task.task_ref();
         self.switch_to_entry_count = self.switch_to_entry_count.wrapping_add(1);
         self.scheduler_prepare_task_switch_count =
             self.scheduler_prepare_task_switch_count.wrapping_add(1);
@@ -1171,13 +1179,12 @@ impl Scheduler {
     }
 
     /// Finish the Task.Continue signal only after execution is running on the
-    /// selected task's entry/resume stack. This is also the sole commit point
-    /// for the architecture-visible CurrentTaskSlot projection.
+    /// selected task's entry/resume stack. Task and Flow state are committed
+    /// here; the caller must resolve CurrentTask again before observing exit.
     #[allow(clippy::too_many_arguments)]
     pub fn continue_task_after_switch(
         &mut self,
         task_ref: TaskRef,
-        current_task_slot: &mut CurrentTaskSlot,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
         user_app_flow: &UserAppFlow,
@@ -1187,38 +1194,30 @@ impl Scheduler {
         user_task_set: &mut UserTaskSet,
     ) -> EventResult {
         let prev_ref = self.switch_to_entry_prev_ref;
-        if prev_ref == task_ref
-            || self.switch_to_entry_next_ref != task_ref
-            || current_task_slot.current() != prev_ref
-        {
+        if prev_ref == task_ref || self.switch_to_entry_next_ref != task_ref {
             return self.failed_switch_to();
         }
 
-        if self.physical_switch_pending {
-            let Some(expected_task_identity) =
-                self.task_identity_ptr(task_ref, kernel_init_task, kthreadd_task, user_task_set)
-            else {
-                return self.failed_switch_to();
-            };
-            if crate::arch::riscv64::csr::read_tp() != expected_task_identity {
-                return self.failed_switch_to();
-            }
-            self.task_switch_tp_identity_passes =
-                self.task_switch_tp_identity_passes.wrapping_add(1);
-            self.physical_switch_pending = false;
+        let Some(expected_task_identity) =
+            self.task_identity_ptr(task_ref, kernel_init_task, kthreadd_task, user_task_set)
+        else {
+            return self.failed_switch_to();
+        };
+        if crate::arch::riscv64::csr::read_tp() != expected_task_identity {
+            return self.failed_switch_to();
         }
+        self.task_switch_tp_identity_passes = self.task_switch_tp_identity_passes.wrapping_add(1);
+        self.physical_switch_pending = false;
 
         self.suspend_task(prev_ref, kernel_init_task, kthreadd_task, user_task_set)?;
 
         let continue_result = match task_ref {
             TaskRef::BOOT => {
                 BootTask::continue_canonical()?;
-                current_task_slot.commit_switch_to(task_ref)?;
                 boot_idle_flow.continue_active(BootTask::canonical_task())
             }
             TaskRef::KERNEL_INIT => {
                 kernel_init_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)?;
                 if kernel_init_flow.state() == State::Base
                     && !kernel_init_task.task().active_flow().is_valid()
                 {
@@ -1235,7 +1234,6 @@ impl Scheduler {
             }
             TaskRef::KTHREADD => {
                 kthreadd_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)?;
                 if kthreadd_flow.state() == State::Base
                     && !kthreadd_task.task().active_flow().is_valid()
                 {
@@ -1246,38 +1244,46 @@ impl Scheduler {
             }
             TaskRef::SMOKE_SCHEDULER => {
                 self.smoke_scheduler_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)
+                Ok(())
             }
             TaskRef::SMOKE_MUTEX => {
                 self.smoke_mutex_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)
+                Ok(())
             }
             TaskRef::SMOKE_RWSEM => {
                 self.smoke_rwsem_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)
+                Ok(())
             }
             TaskRef::SMOKE_RWLOCK => {
                 self.smoke_rwlock_task.continue_on_cpu()?;
-                current_task_slot.commit_switch_to(task_ref)
+                Ok(())
             }
             _ if task_ref.is_user() => {
                 user_task_set.continue_task(task_ref, self.boot_runqueue.cpu_ref())?;
-                current_task_slot.commit_switch_to(task_ref)
+                Ok(())
             }
             _ => self.failed_switch_to(),
         };
         continue_result?;
 
+        Ok(())
+    }
+
+    pub(crate) fn record_task_switch_finish(&mut self, current_task: CurrentTask) -> EventResult {
+        let task_ref = current_task.task_ref();
+        let prev_ref = self.switch_to_entry_prev_ref;
+        if prev_ref == task_ref || self.switch_to_entry_next_ref != task_ref {
+            return self.failed_switch_to();
+        }
         self.switch_to_exit_prev_ref = prev_ref;
         self.switch_to_exit_next_ref = task_ref;
-        self.switch_to_exit_current_ref = current_task_slot.current();
-        self.switch_to_exit_committed_count = current_task_slot.switch_committed_count();
+        self.switch_to_exit_current_ref = task_ref;
         self.switch_to_exit_count = self.switch_to_exit_count.wrapping_add(1);
         self.scheduler_finish_task_switch_count =
             self.scheduler_finish_task_switch_count.wrapping_add(1);
         crate::checkpoint::checkpoint(Checkpoint::SchedulerSwitchToExit);
 
-        self.schedule_exit_current_ref = current_task_slot.current();
+        self.schedule_exit_current_ref = task_ref;
         self.schedule_exit_count = self.schedule_exit_count.wrapping_add(1);
         crate::checkpoint::checkpoint(Checkpoint::SchedulerScheduleExit);
         Ok(())
@@ -2243,6 +2249,13 @@ impl SmokeSchedulerTask {
         &self.task as *const Task as usize
     }
 
+    fn current_task_candidate(&self) -> super::current_task::CurrentTaskCandidate<'_> {
+        super::current_task::CurrentTaskCandidate {
+            task: &self.task,
+            flow: &self.flow,
+        }
+    }
+
     pub const fn flow_ref(&self) -> TaskFlowRef {
         self.flow.flow_ref()
     }
@@ -3103,7 +3116,6 @@ impl BootIdleSetupState {
         boot_cpu_ref: CpuRef,
         local_interrupt: &mut LocalInterruptControl,
         boot_idle_preemption: &mut PreemptionControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.pi_lock.state() != State::Base
@@ -3116,7 +3128,6 @@ impl BootIdleSetupState {
             || !boot_idle_rcu_read_side.full_semantics_deferred()
             || local_interrupt.state() != State::Ready
             || boot_idle_preemption.state() != State::Base
-            || current_task_slot.state() != State::Ready
             || boot_runqueue.cpu_ref() != boot_cpu_ref
         {
             return failed_condition(
@@ -3156,7 +3167,6 @@ impl BootIdleSetupState {
                 self.uses_current_init_task = true;
                 self.lazy_tlb_mm_ready = true;
                 self.no_set_affinity = true;
-                current_task_slot.set_current_boot_task()?;
                 self.runqueue_current_published_with_rcu = true;
                 self.lifecycle.transition(
                     LifecycleEvent::Setup,

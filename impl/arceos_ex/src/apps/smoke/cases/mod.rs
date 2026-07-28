@@ -6,6 +6,7 @@ pub mod completion;
 pub mod cpu_capabilities;
 pub mod cpu_group;
 pub mod current_runqueue_ref;
+pub mod current_task;
 pub mod default_sched_root_domain;
 pub mod delay_loop;
 pub mod devfs;

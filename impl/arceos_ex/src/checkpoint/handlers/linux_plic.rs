@@ -88,6 +88,15 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts, sink: &mut dyn Sink) {
         "unmapped_irq_exercise_successes",
         facts.unmapped_irq_exercise_successes,
     );
+    sink.diag_usize(
+        "tp_normal_return_successes",
+        facts.tp_normal_return_successes,
+    );
+    sink.diag_usize(
+        "tp_nested_return_successes",
+        facts.tp_nested_return_successes,
+    );
+    sink.diag_usize("tp_error_return_successes", facts.tp_error_return_successes);
     sink.diag_usize("ratelimit_deferred_count", facts.ratelimit_deferred_count);
     sink.diag_usize("chip_enable_count", facts.chip_enable_count);
     sink.diag_usize("chip_disable_count", facts.chip_disable_count);
@@ -274,6 +283,9 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.unmapped_irq_last_source != 0
         && facts.unmapped_irq_last_errno == 22
         && facts.unmapped_irq_exercise_successes != 0
+        && facts.tp_normal_return_successes != 0
+        && facts.tp_nested_return_successes != 0
+        && facts.tp_error_return_successes != 0
         && facts.chip_enable_count >= 2
         && facts.chip_disable_count != 0
         && facts.chip_mask_count != 0

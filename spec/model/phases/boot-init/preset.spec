@@ -23,10 +23,11 @@ object BootTaskEntryBinding: KernelObject {
     state State::Base {
         transitions {
             /* Preset 建立物理地址阶段的 tp 与初始抢占关闭条件。 */
-            on Transition::Preset -> State::Prepared {
+            on Transition::Preset(current_task_ref: TaskRef) -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                     BootTask.state == State::OnCpu;
+                    task_ref_targets(current_task_ref, BootTask);
                 }
 
                 may_change {
@@ -39,6 +40,8 @@ object BootTaskEntryBinding: KernelObject {
                     task_preemption_control_ready(BootTask);
                     task_preempt_count_initialized_to_init_preempt_count(BootTask);
                     task_preemption_disabled(BootTask);
+                    current_task_resolved_target_is(BootInitFlow, current_task_ref, BootTask);
+                    current_task_ref_derived_from_selector(current_task_ref, BootTask);
                 }
             }
         }
@@ -1720,31 +1723,6 @@ object BootCpuLocalInterrupt: LocalInterruptControl {
         invariant {
             cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, CpuGroup.cpus[0]);
             cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
-        }
-    }
-}
-
-/*
- * BootCpuCurrentTask 是 CpuGroup.cpus[0] 的 current task 引用槽。它不拥有任务，只保存
- * 当前 CPU 正在执行的 task 引用。
- */
-object BootCpuCurrentTask: CurrentTaskSlot {
-    initial_state: State::Base;
-    parent: CpuGroup.cpus[0];
-
-    state State::Base {
-        transitions {
-            on Transition::Setup -> State::Ready {
-                ensures {
-                    current_task_slot_ready(BootCpuCurrentTask, CpuGroup.cpus[0]);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            current_task_slot_ready(BootCpuCurrentTask, CpuGroup.cpus[0]);
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::objects::irq_time::{
     Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
     Serial8250ConsoleTxQuiesceProbe, TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe,
 };
-use crate::objects::state::EventResult;
+use crate::objects::state::{EventError, EventErrorCode, EventResult, LifecycleEvent, State};
 use crate::objects::{
     binary_format_registry::BinaryFormatRegistry,
     block_device::BlockDeviceRegistry,
@@ -15,9 +15,13 @@ use crate::objects::{
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
     config::Config,
     cpu_capabilities::CpuCapabilities,
-    cpu_control::{CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
+    cpu_control::{LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
+    current_task::{
+        CurrentTask, CurrentTaskCandidate, CurrentTaskDiagnostic, CurrentTaskError,
+        CurrentTaskErrorCode, validate_candidate,
+    },
     devfs::DevFs,
     device_tree::DeviceTree,
     dma_cache_policy::DmaCachePolicy,
@@ -103,6 +107,8 @@ use crate::objects::{
     softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
+    task::{Task, TaskRef},
+    task_flow::{TaskFlow, TaskFlowRef},
     user_boot::{
         ElfObject, KernelInitTaskUserState, UserAddressSpace, UserAppFlow, UserBootPayload,
         UserCloneDeferredBoundaries, UserTaskSet, UserTrapFrame,
@@ -548,23 +554,214 @@ impl Context {
             .expect("CpuGroup.cpus[0] must exist before local interrupt access")
     }
 
-    pub fn boot_cpu_current_task(&self) -> &CurrentTaskSlot {
-        self.cpu_group
-            .boot_cpu_current_task()
-            .expect("CpuGroup.cpus[0] must exist before current-task access")
+    pub fn current_task(&self) -> Result<CurrentTask, CurrentTaskError> {
+        let tp = crate::arch::riscv64::csr::read_tp();
+        let Some(task_ref) = self.task_ref_from_identity(tp) else {
+            return Err(CurrentTaskError::new(
+                CurrentTaskErrorCode::UnknownIdentity,
+                CurrentTaskDiagnostic::new(
+                    tp,
+                    TaskRef::NONE,
+                    TaskFlowRef::NONE,
+                    crate::objects::cpu::CpuRef::invalid(),
+                ),
+            ));
+        };
+        self.resolve_current_task_identity(tp, task_ref)
     }
 
-    pub fn current_cpu(&self) -> Option<crate::objects::cpu_group::CurrentCpu> {
-        let current_task_ref = self.boot_cpu_current_task().current();
-        let cpu_ref = self.scheduler.effective_cpu_ref(
-            current_task_ref,
-            &self.kernel_init_flow,
-            &self.user_app_flow,
-            &self.kthreadd_flow,
-            &self.boot_idle_flow,
-            &self.user_task_set,
-        )?;
-        self.cpu_group.current_cpu_ref(cpu_ref)
+    pub fn current_task_ref(&self) -> Result<TaskRef, CurrentTaskError> {
+        self.current_task().map(CurrentTask::task_ref)
+    }
+
+    pub fn current_cpu(&self) -> Result<crate::objects::cpu_group::CurrentCpu, CurrentTaskError> {
+        let current = self.current_task()?;
+        let tp = crate::arch::riscv64::csr::read_tp();
+        let candidate = if current.task_ref().same_identity(TaskRef::BOOT) {
+            self.boot_current_task_candidate()
+        } else {
+            self.current_task_candidate(current.task_ref())
+        }
+        .ok_or_else(|| {
+            self.current_task_error(
+                CurrentTaskErrorCode::MissingActiveFlow,
+                tp,
+                current.task_ref(),
+            )
+        })?;
+        let cpu_ref = candidate.flow.cpu_ref().ok_or_else(|| {
+            self.current_task_error(CurrentTaskErrorCode::MissingCpu, tp, current.task_ref())
+        })?;
+        self.cpu_group.current_cpu(candidate.flow).ok_or_else(|| {
+            CurrentTaskError::new(
+                CurrentTaskErrorCode::MissingCpu,
+                CurrentTaskDiagnostic::new(
+                    tp,
+                    current.task_ref(),
+                    candidate.flow.flow_ref(),
+                    cpu_ref,
+                ),
+            )
+        })
+    }
+
+    fn task_ref_from_identity(&self, identity: usize) -> Option<TaskRef> {
+        let boot_address = self.boot_task.carrier_address();
+        let boot_physical = self.kernel_image.runtime_to_phys(boot_address);
+        let boot_virtual = self.kernel_image.runtime_to_link(boot_address);
+        if identity == boot_address
+            || boot_physical == Some(identity)
+            || boot_virtual == Some(identity)
+        {
+            return Some(TaskRef::BOOT);
+        }
+        if identity == self.kernel_init_task.task() as *const Task as usize {
+            return Some(self.kernel_init_task.task_ref());
+        }
+        if identity == self.kthreadd_task.task() as *const Task as usize {
+            return Some(self.kthreadd_task.task_ref());
+        }
+        if let Some(candidate) = self.scheduler.current_task_candidate_by_identity(identity) {
+            return Some(candidate.task.task_ref());
+        }
+        if let Some(candidate) = self
+            .user_task_set
+            .current_task_candidate_by_identity(identity)
+        {
+            return Some(candidate.task.task_ref());
+        }
+        crate::objects::smp_bringup::ap_current_task_candidate_by_identity(identity)
+            .map(|candidate| candidate.task.task_ref())
+    }
+
+    fn current_task_candidate(&self, task_ref: TaskRef) -> Option<CurrentTaskCandidate<'_>> {
+        let candidate = if task_ref.same_identity(TaskRef::BOOT) {
+            self.boot_current_task_candidate()
+        } else if task_ref.same_identity(TaskRef::KERNEL_INIT) {
+            let task = self.kernel_init_task.task();
+            let flow = self.flow_for_kernel_init_task(task.active_flow())?;
+            Some(CurrentTaskCandidate { task, flow })
+        } else if task_ref.same_identity(TaskRef::KTHREADD) {
+            let task = self.kthreadd_task.task();
+            if !task
+                .active_flow()
+                .same_identity(self.kthreadd_flow.flow_ref())
+            {
+                return None;
+            }
+            Some(CurrentTaskCandidate {
+                task,
+                flow: self.kthreadd_flow.core(),
+            })
+        } else if let Some(candidate) = self.scheduler.current_task_candidate_by_ref(task_ref) {
+            Some(candidate)
+        } else if let Some(candidate) = self.user_task_set.current_task_candidate_by_ref(task_ref) {
+            Some(candidate)
+        } else {
+            crate::objects::smp_bringup::ap_current_task_candidate_by_ref(task_ref)
+        }?;
+        Some(candidate)
+    }
+
+    /// Early boot executes through the physical alias with `satp=0`. Keep the
+    /// BootTask selector path out of the general multi-task dispatch so the
+    /// compiler cannot lower it through a virtual-address jump table.
+    #[inline(never)]
+    fn boot_current_task_candidate(&self) -> Option<CurrentTaskCandidate<'_>> {
+        let task = self.boot_task.task();
+        let active_flow = task.active_flow();
+        if active_flow.same_identity(TaskFlowRef::BOOT_INIT) {
+            Some(CurrentTaskCandidate {
+                task,
+                flow: self.boot_init_flow.core(),
+            })
+        } else if active_flow.same_identity(TaskFlowRef::BOOT_IDLE) {
+            Some(CurrentTaskCandidate {
+                task,
+                flow: self.boot_idle_flow.core(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn flow_for_kernel_init_task(&self, flow_ref: TaskFlowRef) -> Option<&TaskFlow> {
+        if flow_ref.same_identity(self.kernel_init_flow.flow_ref()) {
+            Some(self.kernel_init_flow.core())
+        } else if flow_ref.same_identity(self.user_app_flow.flow_ref()) {
+            Some(self.user_app_flow.current_core())
+        } else {
+            None
+        }
+    }
+
+    fn resolve_current_task_identity(
+        &self,
+        tp: usize,
+        requested_ref: TaskRef,
+    ) -> Result<CurrentTask, CurrentTaskError> {
+        let Some(identity_ref) = self.task_ref_from_identity(tp) else {
+            return Err(self.current_task_error(
+                CurrentTaskErrorCode::UnknownIdentity,
+                tp,
+                requested_ref,
+            ));
+        };
+        if identity_ref.same_identity(TaskRef::BOOT) {
+            let Some(candidate) = self.boot_current_task_candidate() else {
+                return Err(self.current_task_error(
+                    CurrentTaskErrorCode::MissingActiveFlow,
+                    tp,
+                    identity_ref,
+                ));
+            };
+            return validate_candidate(tp, requested_ref, candidate);
+        }
+        let Some(candidate) = self.current_task_candidate(identity_ref) else {
+            return Err(self.current_task_error(
+                CurrentTaskErrorCode::MissingActiveFlow,
+                tp,
+                identity_ref,
+            ));
+        };
+        validate_candidate(tp, requested_ref, candidate)
+    }
+
+    fn current_task_error(
+        &self,
+        code: CurrentTaskErrorCode,
+        tp: usize,
+        task_ref: TaskRef,
+    ) -> CurrentTaskError {
+        let candidate = if task_ref.same_identity(TaskRef::BOOT) {
+            self.boot_current_task_candidate()
+        } else {
+            self.current_task_candidate(task_ref)
+        };
+        let (flow_ref, cpu_ref) = candidate
+            .map(|candidate| {
+                (
+                    candidate.task.active_flow(),
+                    candidate
+                        .flow
+                        .cpu_ref()
+                        .unwrap_or(crate::objects::cpu::CpuRef::invalid()),
+                )
+            })
+            .unwrap_or((TaskFlowRef::NONE, crate::objects::cpu::CpuRef::invalid()));
+        CurrentTaskError::new(
+            code,
+            CurrentTaskDiagnostic::new(tp, task_ref, flow_ref, cpu_ref),
+        )
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) fn resolve_current_task_for_test(
+        &self,
+        tp: usize,
+        requested_ref: TaskRef,
+    ) -> Result<CurrentTask, CurrentTaskError> {
+        self.resolve_current_task_identity(tp, requested_ref)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
@@ -623,14 +820,8 @@ impl Context {
     }
 
     pub fn schedule_current(&mut self) -> EventResult {
-        let Some(current_cpu) = self.current_cpu() else {
-            return crate::objects::state::failed_condition(
-                crate::objects::state::LifecycleEvent::Setup,
-                crate::objects::state::State::Online,
-                crate::objects::state::State::Online,
-                crate::objects::state::State::Online,
-            );
-        };
+        let current_task = self.current_task().map_err(current_task_event_error)?;
+        let current_cpu = self.current_cpu().map_err(current_task_event_error)?;
         let Self {
             scheduler,
             cpu_group,
@@ -643,7 +834,7 @@ impl Context {
             user_task_set,
             ..
         } = self;
-        let Some((local_interrupt, current_task_slot)) = cpu_group.boot_cpu_controls_mut() else {
+        let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
             return crate::objects::state::failed_condition(
                 crate::objects::state::LifecycleEvent::Setup,
                 crate::objects::state::State::Base,
@@ -652,6 +843,7 @@ impl Context {
             );
         };
         scheduler.schedule(
+            current_task,
             current_cpu,
             kernel_init_task,
             kernel_init_flow,
@@ -661,8 +853,15 @@ impl Context {
             boot_idle_flow,
             user_task_set,
             local_interrupt,
-            current_task_slot,
-        )
+        )?;
+        let current_task = self.current_task().map_err(current_task_event_error)?;
+        if self.scheduler.switch_to_entry_prev_ref() != current_task.task_ref()
+            && self.scheduler.switch_to_entry_next_ref() == current_task.task_ref()
+            && self.scheduler.switch_to_exit_current_ref() != current_task.task_ref()
+        {
+            self.scheduler.record_task_switch_finish(current_task)?;
+        }
+        Ok(())
     }
 
     pub fn replace_current_user_task(
@@ -671,27 +870,56 @@ impl Context {
         next: crate::objects::task::TaskRef,
         next_pid: usize,
     ) -> EventResult {
+        let current_task = self.current_task().map_err(current_task_event_error)?;
+        self.replace_current_user_task_with_capability(previous, next, next_pid, current_task)
+    }
+
+    /// Commits a terminal user-task switch using the selector proof captured
+    /// synchronously before the exiting Flow was retired. The old Task is not
+    /// reclaimed until `continue_task_after_switch` has established `next`.
+    #[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
+    pub fn replace_terminal_user_task(
+        &mut self,
+        previous: crate::objects::task::TaskRef,
+        next: crate::objects::task::TaskRef,
+        next_pid: usize,
+        current_task: CurrentTask,
+    ) -> EventResult {
+        self.replace_current_user_task_with_capability(previous, next, next_pid, current_task)
+    }
+
+    fn replace_current_user_task_with_capability(
+        &mut self,
+        previous: crate::objects::task::TaskRef,
+        next: crate::objects::task::TaskRef,
+        next_pid: usize,
+        current_task: CurrentTask,
+    ) -> EventResult {
+        if !current_task.task_ref().same_identity(previous) {
+            return crate::objects::state::failed_condition(
+                LifecycleEvent::Continue,
+                State::OnCpu,
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
         self.scheduler
             .replace_user_task_on_runqueue(&self.cpu_group, previous, next, next_pid)?;
-        let current_task_slot = self
-            .cpu_group
-            .boot_cpu_current_task()
-            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            current_task_slot,
+            current_task,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
         )?;
+        self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
 
     pub fn finish_task_switch(&mut self, next: crate::objects::task::TaskRef) -> EventResult {
         let Self {
             scheduler,
-            cpu_group,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -701,12 +929,8 @@ impl Context {
             user_task_set,
             ..
         } = self;
-        let current_task_slot = cpu_group
-            .boot_cpu_current_task_mut()
-            .expect("boot CPU current-task slot");
         scheduler.continue_task_after_switch(
             next,
-            current_task_slot,
             kernel_init_task,
             kernel_init_flow,
             user_app_flow,
@@ -714,24 +938,47 @@ impl Context {
             kthreadd_flow,
             boot_idle_flow,
             user_task_set,
-        )
+        )?;
+        let current_task = self
+            .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)
+            .map_err(current_task_event_error)?;
+        self.scheduler.record_task_switch_finish(current_task)
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub fn smoke_identity_switch(&mut self) -> EventResult {
-        let current = self.boot_cpu_current_task().current();
-        let current_task_slot = self
-            .cpu_group
-            .boot_cpu_current_task()
-            .expect("boot CPU current-task slot");
+        let current_task = self.current_task().map_err(current_task_event_error)?;
+        let current = current_task.task_ref();
         self.scheduler.prepare_simulated_task_switch(
             current,
             current,
-            current_task_slot,
+            current_task,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
         )
+    }
+
+    fn establish_simulated_task_identity(&self, task_ref: TaskRef) -> EventResult {
+        let identity = match task_ref {
+            TaskRef::BOOT => Some(self.boot_task.carrier_address()),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task() as *const Task as usize),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.task() as *const Task as usize),
+            _ if task_ref.is_user() => self.user_task_set.task_identity_ptr(task_ref),
+            _ => self
+                .scheduler
+                .current_task_candidate_by_ref(task_ref)
+                .map(|candidate| candidate.task as *const Task as usize),
+        };
+        let Some(identity) = identity else {
+            return Err(current_task_event_error(self.current_task_error(
+                CurrentTaskErrorCode::UnknownIdentity,
+                crate::arch::riscv64::csr::read_tp(),
+                task_ref,
+            )));
+        };
+        crate::arch::riscv64::csr::write_tp(identity);
+        Ok(())
     }
 
     pub fn cleanup_current_task_for_shutdown(&mut self) -> bool {
@@ -780,44 +1027,49 @@ impl Context {
                 crate::objects::state::State::Online,
             );
         }
-        let previous = self.boot_cpu_current_task().current();
+        let current_task = self.current_task().map_err(current_task_event_error)?;
+        let previous = current_task.task_ref();
         if previous.same_identity(next) {
             return Ok(());
         }
-        let current_task_slot = self
-            .cpu_group
-            .boot_cpu_current_task()
-            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            current_task_slot,
+            current_task,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
         )?;
+        self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
 
     #[cfg_attr(not(app_user_boot), allow(dead_code))]
-    pub fn commit_kernel_init_dispatch(&mut self) -> EventResult {
+    pub fn commit_terminal_kernel_init_dispatch(
+        &mut self,
+        current_task: CurrentTask,
+    ) -> EventResult {
+        self.commit_kernel_init_dispatch_with_capability(current_task)
+    }
+
+    fn commit_kernel_init_dispatch_with_capability(
+        &mut self,
+        current_task: CurrentTask,
+    ) -> EventResult {
         let next = crate::objects::task::TaskRef::KERNEL_INIT;
-        let previous = self.boot_cpu_current_task().current();
+        let previous = current_task.task_ref();
         if previous.same_identity(next) {
             return Ok(());
         }
-        let current_task_slot = self
-            .cpu_group
-            .boot_cpu_current_task()
-            .expect("boot CPU current-task slot");
         self.scheduler.prepare_simulated_task_switch(
             previous,
             next,
-            current_task_slot,
+            current_task,
             &self.kernel_init_task,
             &self.kthreadd_task,
             &self.user_task_set,
         )?;
+        self.establish_simulated_task_identity(next)?;
         self.finish_task_switch(next)
     }
 
@@ -883,6 +1135,30 @@ impl Context {
         self.platform_bus
             .platform_driver_register(driver, &mut probe_context)
     }
+}
+
+fn current_task_event_error(error: CurrentTaskError) -> EventError {
+    let diagnostic = error.diagnostic();
+    let task_ref = diagnostic.task_ref();
+    let flow_ref = diagnostic.flow_ref();
+    let cpu_ref = diagnostic.cpu_ref();
+    crate::objects::printk::write_fmt(format_args!(
+        "CurrentTask resolution failed: code={} tp={:#x} TaskRef={}:{} FlowRef={}:{} CpuRef={}\n",
+        error.code() as usize,
+        diagnostic.tp(),
+        task_ref.slot(),
+        task_ref.generation(),
+        flow_ref.slot(),
+        flow_ref.generation(),
+        cpu_ref.logical_id(),
+    ));
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Continue,
+        State::Online,
+        State::OnCpu,
+        State::OnCpu,
+    )
 }
 
 static mut CONTEXT: Context = Context::new();

@@ -37,7 +37,8 @@ impl SmokeScenario for CooperativeSwitchScenario {
         assertions.assert("scheduler online", ctx.scheduler.state() == State::Online);
         assertions.assert(
             "current kernel init",
-            ctx.boot_cpu_current_task().current_is_kernel_init(),
+            ctx.current_task_ref()
+                .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
         );
         assertions.assert_ok(
             "setup smoke scheduler task",
@@ -63,7 +64,9 @@ impl SmokeScenario for CooperativeSwitchScenario {
             {
                 let ctx = context();
                 if ctx.scheduler.smoke_scheduler_task().yielded_back()
-                    && ctx.boot_cpu_current_task().current_is_kernel_init()
+                    && ctx
+                        .current_task_ref()
+                        .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
                 {
                     break;
                 }
@@ -109,7 +112,8 @@ impl SmokeScenario for CooperativeSwitchScenario {
         );
         assertions.assert(
             "current returned kernel init",
-            ctx.boot_cpu_current_task().current() == TaskRef::KERNEL_INIT,
+            ctx.current_task_ref()
+                .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
         );
         assertions.assert(
             "smoke switch saved",
@@ -160,7 +164,8 @@ impl SmokeScenario for CooperativeSwitchScenario {
             .task()
             .thread_context()
             .core_restored_count();
-        let before_slot_commits = ctx.boot_cpu_current_task().switch_committed_count();
+        let before_prepare = ctx.scheduler.scheduler_prepare_task_switch_count();
+        let before_finish = ctx.scheduler.scheduler_finish_task_switch_count();
         let before_identity = ctx.scheduler.identity_switch_passes();
         assertions.assert_ok("identity switch accepted", ctx.smoke_identity_switch());
         assertions.assert(
@@ -181,7 +186,11 @@ impl SmokeScenario for CooperativeSwitchScenario {
                     .thread_context()
                     .core_restored_count()
                     == before_restored
-                && ctx.boot_cpu_current_task().switch_committed_count() == before_slot_commits,
+                && ctx.scheduler.scheduler_prepare_task_switch_count() == before_prepare
+                && ctx.scheduler.scheduler_finish_task_switch_count() == before_finish
+                && ctx
+                    .current_task_ref()
+                    .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
         );
         assertions.assert(
             "prepared enable continue handoff suspend and terminal contract",

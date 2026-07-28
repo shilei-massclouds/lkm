@@ -1134,7 +1134,7 @@ object SmpBringupPhase: PhaseObject {
 
             deferred smp_bringup.001 {
                 category: DeferredCategory::ModelDetail;
-                summary: "Complete each AP CurrentCPU, LocalInterruptControl and CurrentTaskSlot object chain.";
+                summary: "Complete each AP CurrentTask, CurrentCPU and LocalInterruptControl resolution chain.";
                 evidence { smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase); }
                 close_when: "Every online AP has a complete CPU-local identity/control/task chain with SMP tests.";
             }

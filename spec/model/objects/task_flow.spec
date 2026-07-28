@@ -40,6 +40,20 @@ type TaskFlow: PhaseObject {
                 task_flow_resume_active_continuation(self);
             }
         }
+
+        Action::ConfirmCurrentTask(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.parent.state == State::OnCpu;
+                task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
+                task_active_flow_is(self.parent, self);
+                task_ref_targets(task_ref, self.parent);
+            }
+            ensures {
+                current_task_resolved_target_is(self, task_ref, self.parent);
+                current_task_selector_validates_execution(self, self.parent);
+            }
+        }
     }
 
     lifecycle {
@@ -804,10 +818,11 @@ type BootIdleFlowType: TaskFlow {
             depends_on {
                 self.state == State::Ready;
                 scheduler_first_schedule_committed(Scheduler);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootTask);
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
+            }
+            drives {
+                self.Action::ConfirmCurrentTask(CurrentTaskRef);
             }
             ensures {
                 boot_idle_entry_prepared(self, BootTask);
@@ -914,22 +929,21 @@ type BootIdleFlowType: TaskFlow {
             state_effect: StateEffect::None;
             depends_on {
                 boot_idle_need_resched_set_for_schedule(BootTask);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootTask);
                 self.parent.state == State::OnCpu;
                 task_execution_authority_is(self.parent, TaskExecutionAuthority::Live);
             }
             drives {
+                self.Action::ConfirmCurrentTask(CurrentTaskRef);
                 Scheduler.Action::ScheduleIdle;
             }
             ensures {
                 boot_idle_schedule_requested(self, Scheduler);
                 boot_idle_schedule_returned(self, Scheduler);
-                scheduler_idle_schedule_returned_to_idle(Scheduler, CurrentTaskRef);
+                scheduler_idle_schedule_returned_to_idle(Scheduler, BootTaskRef);
                 boot_idle_need_resched_drained_after_schedule(BootTask);
                 boot_idle_loop_continues(self);
                 boot_idle_livepatch_state_update_deferred(self);
-                task_ref_targets(CurrentTaskRef, BootTask);
+                current_task_ref_derived_from_selector(BootTaskRef, BootTask);
             }
         }
     }
@@ -971,6 +985,9 @@ object BootIdleFlow: BootIdleFlowType {
                     task_active_flow_is(BootTask, BootIdleFlow);
                     task_has_unique_active_flow(BootTask);
                     secondary_cpus_not_started(CpuGroup);
+                }
+                updates {
+                    BootTask.active_flow = BootIdleFlow;
                 }
             }
         }

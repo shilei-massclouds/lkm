@@ -31,9 +31,14 @@ opportunity before falling back to signal/unsupported handling. These are implem
 the model trap boundary, not permission to invent a second exception stream.
 
 The user kernel stack is a VMALLOC mapping with the modeled alignment and unmapped guard gap. Large
-exec/mm objects stay out of trap-stack frames. For `APP=user-boot`, the RISC-V formal entry MUST keep the
-user-origin path on the `sscratch`-provided safe kernel stack and MUST bypass the VMAP bit-test on that
-path. A kernel-origin trap MUST classify the prospective 288-byte frame before saving any general
+exec/mm objects stay out of trap-stack frames. For `APP=user-boot`, the RISC-V formal entry MUST keep a
+fixed-size entry context at the safe stack boundary. `sscratch` points to that context while user code
+runs; the context carries the usable kernel stack boundary and the stable implementation identity of the
+Task that will receive the next synchronous trap. The user-origin prelude MUST preserve user `tp` in the
+ordinary `TrapFrame`, load Task identity into kernel `tp` before entering Rust, and bypass the VMAP
+bit-test. Before returning to user mode, the epilogue MUST refresh the context from the post-dispatch
+kernel `tp`, so a terminal or ordinary scheduling commit cannot leave the previous Task identity armed
+for the next trap. A kernel-origin trap MUST classify the prospective 288-byte frame before saving any general
 register, using only `sp` and `sscratch` and the Linux-shaped `((sp - frame_size) >> THREAD_SHIFT) & 1`
 test (`THREAD_SHIFT=14`). Its normal branch MUST restore the original `sp`, clear `sscratch`, and preserve
 all other registers before entering the common frame-save path.

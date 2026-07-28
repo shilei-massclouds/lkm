@@ -364,6 +364,34 @@ fn ap_idle_task_virt(logical_id: usize) -> Option<usize> {
     Some(unsafe { core::ptr::addr_of!(AP_IDLE_TASKS[logical_id].task) as usize })
 }
 
+pub(crate) fn ap_current_task_candidate_by_identity(
+    identity: usize,
+) -> Option<super::current_task::CurrentTaskCandidate<'static>> {
+    let logical_id = ap_idle_task_target_logical_id(identity)?;
+    let record = unsafe { &*core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) };
+    Some(super::current_task::CurrentTaskCandidate {
+        task: &record.task,
+        flow: &record.flow,
+    })
+}
+
+pub(crate) fn ap_current_task_candidate_by_ref(
+    task_ref: TaskRef,
+) -> Option<super::current_task::CurrentTaskCandidate<'static>> {
+    let mut logical_id = 1usize;
+    while logical_id < MAX_CPUS {
+        let record = unsafe { &*core::ptr::addr_of!(AP_IDLE_TASKS[logical_id]) };
+        if record.task.task_ref().same_identity(task_ref) {
+            return Some(super::current_task::CurrentTaskCandidate {
+                task: &record.task,
+                flow: &record.flow,
+            });
+        }
+        logical_id += 1;
+    }
+    None
+}
+
 pub(crate) fn activate_ap_idle_entry_execution(logical_id: usize) -> EventResult {
     if logical_id == 0 || logical_id >= MAX_CPUS {
         return failed_condition(

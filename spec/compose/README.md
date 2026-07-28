@@ -3,9 +3,14 @@
 本目录记录 `Composition Phase` 的补充约束。
 
 2026-07-27 tools2 Signal animation v3 复核：request/feedback/settle 因果时刻只改变独立 Python
-`animate` 投影、离线 HTML 协议和 Svelte 播放器；tools2 v5 derive 的同步响应、异步 FIFO、Signal
+`animate` 投影、离线 HTML 协议和 Svelte 播放器；tools2 v7 derive 的同步响应、异步 FIFO、Signal
 identity/cause、失败传播与 event sequence 不变，也不新增或
 调整内核 crate、Rust module、facade、feature、公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
+组合语义无需修改。
+
+2026-07-28 CurrentTask 选择器复核：删除 CPU-local writable slot 只改变既有 objects/boot-init 私有实现
+中的执行上下文解析与 RISC-V64 `tp` lowering；无状态 capability、Task/Flow/CPU 一致性检查和调度提交
+仍由既有 crate、module 与 facade 承接，不新增公开 API 或组件依赖。`spec/compose/main.spec` 已复核，
 组合语义无需修改。
 
 2026-07-27 Linux RV64 Kernel 启动契约复核：新增的只读 `LinuxRiscv64KernelBootSpec` 仍由既有
@@ -21,7 +26,7 @@ BootInitFlow、scheduler、KernelInitFlow 与 payload 私有 module 之间的状
 
 2026-07-25 lifecycle 继承与 CopyProcess current-task 投影复核：effective handler 的组成只改变规格
 工具对既有 Type/instance 声明的解释；Rust `copy_process` 在既有 objects/boot-init 私有边界增加只读
-`CurrentTaskSlot` 与 `TaskRef` 输入，不新增 crate、facade、feature、公开 API 或组件依赖。
+`CurrentTask` capability 与 `TaskRef` 输入，不新增 crate、facade、feature、公开 API 或组件依赖。
 `spec/compose/main.spec` 已复核，组合语义无需修改。
 
 2026-07-24 tools2 Signal animation 复核：独立 Python `animate` 包、Svelte/TypeScript 源码、锁定的
@@ -74,7 +79,7 @@ re-export；`spec/compose/main.spec` 已复核，外部 composition 语义无需
 2026-07-23 Task 执行权重构复核：`BootInitFlow` 继续以
 `phases::boot_init::BootInitFlow` 私有 wrapper 内嵌统一 `objects::task_flow::TaskFlow` core，并在既有
 `Context`/scheduler/objects module 内完成 Task OnCpu 与严格 continuation lowering；删除内部
-`DispatchWindow`，保留 CPU-local `CurrentTaskSlot` 投影。该调整不新增 crate、feature、facade 或
+`DispatchWindow`。CurrentTask 由 TaskFlow 执行上下文解析，不新增 crate、feature、facade 或
 public compatibility API，`spec/compose/main.spec` 无需改变。
 
 2026-07-22 TaskFlow 直接子阶段归属复核：Boot/Interrupt/SmpRuntime 目录继续作为 crate 内私有

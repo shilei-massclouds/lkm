@@ -188,17 +188,6 @@
   },
   {
     "checkpoint_index": 17,
-    "checkpoint_name": "BootCpuCurrentTask.Ready",
-    "checkpoint_variant": "BootCpuCurrentTaskReady",
-    "linux_file": null,
-    "linux_symbol": null,
-    "linux_anchor": null,
-    "mapping_kind": "unmapped",
-    "confidence": "none",
-    "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
-  },
-  {
-    "checkpoint_index": 18,
     "checkpoint_name": "CpuGroup.Prepared",
     "checkpoint_variant": "CpuGroupPrepared",
     "linux_file": null,
@@ -209,7 +198,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 19,
+    "checkpoint_index": 18,
     "checkpoint_name": "InitStack.Prepared",
     "checkpoint_variant": "InitStackPrepared",
     "linux_file": null,
@@ -220,7 +209,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 20,
+    "checkpoint_index": 19,
     "checkpoint_name": "EventStream.Prepared",
     "checkpoint_variant": "EventStreamPrepared",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -231,7 +220,7 @@
     "notes": "RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping."
   },
   {
-    "checkpoint_index": 21,
+    "checkpoint_index": 20,
     "checkpoint_name": "ExceptionStream.Prepared",
     "checkpoint_variant": "ExceptionStreamPrepared",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -242,7 +231,7 @@
     "notes": "RISC-V64 early fallback exception path uses the temporary spin trap vector."
   },
   {
-    "checkpoint_index": 22,
+    "checkpoint_index": 21,
     "checkpoint_name": "TrampolineVm.Ready",
     "checkpoint_variant": "TrampolineVmReady",
     "linux_file": "arch/riscv/mm/init.c",
@@ -253,7 +242,7 @@
     "notes": "RISC-V64 setup_vm() trampoline page-table construction interval."
   },
   {
-    "checkpoint_index": 23,
+    "checkpoint_index": 22,
     "checkpoint_name": "TrampolineVm.Online",
     "checkpoint_variant": "TrampolineVmOnline",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -264,7 +253,7 @@
     "notes": "RISC-V64 relocate_enable_mmu loads the trampoline page directory into satp."
   },
   {
-    "checkpoint_index": 24,
+    "checkpoint_index": 23,
     "checkpoint_name": "TrampolineVm.Destroyed",
     "checkpoint_variant": "TrampolineVmDestroyed",
     "linux_file": null,
@@ -275,7 +264,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 25,
+    "checkpoint_index": 24,
     "checkpoint_name": "RawDtb.Prepared",
     "checkpoint_variant": "RawDtbPrepared",
     "linux_file": "arch/riscv/mm/init.c",
@@ -286,7 +275,7 @@
     "notes": "RISC-V64 setup_vm() consumes the boot DTB physical address for early FDT mapping."
   },
   {
-    "checkpoint_index": 26,
+    "checkpoint_index": 25,
     "checkpoint_name": "RawDtb.Ready",
     "checkpoint_variant": "RawDtbReady",
     "linux_file": "arch/riscv/mm/init.c",
@@ -297,7 +286,7 @@
     "notes": "RISC-V64 early FDT helper records dtb_early_pa after creating the fixmap-backed DTB view."
   },
   {
-    "checkpoint_index": 27,
+    "checkpoint_index": 26,
     "checkpoint_name": "FixMap.Ready",
     "checkpoint_variant": "FixMapReady",
     "linux_file": "arch/riscv/mm/init.c",
@@ -308,7 +297,7 @@
     "notes": "RISC-V64 setup_vm() early fixmap page-table construction interval."
   },
   {
-    "checkpoint_index": 28,
+    "checkpoint_index": 27,
     "checkpoint_name": "EarlyVm.Prepared",
     "checkpoint_variant": "EarlyVmPrepared",
     "linux_file": "arch/riscv/mm/init.c",
@@ -319,7 +308,7 @@
     "notes": "RISC-V64 setup_vm() early page-table preparation interval."
   },
   {
-    "checkpoint_index": 29,
+    "checkpoint_index": 28,
     "checkpoint_name": "EarlyVm.Ready",
     "checkpoint_variant": "EarlyVmReady",
     "linux_file": "arch/riscv/mm/init.c",
@@ -330,7 +319,7 @@
     "notes": "RISC-V64 setup_vm() constructs the early kernel page table."
   },
   {
-    "checkpoint_index": 30,
+    "checkpoint_index": 29,
     "checkpoint_name": "EarlyVm.Online",
     "checkpoint_variant": "EarlyVmOnline",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -341,7 +330,7 @@
     "notes": "RISC-V64 relocate_enable_mmu switches from trampoline mappings to the early kernel page table."
   },
   {
-    "checkpoint_index": 31,
+    "checkpoint_index": 30,
     "checkpoint_name": "Vm.Prepared",
     "checkpoint_variant": "VmPrepared",
     "linux_file": null,
@@ -352,7 +341,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 32,
+    "checkpoint_index": 31,
     "checkpoint_name": "Vm.Ready",
     "checkpoint_variant": "VmReady",
     "linux_file": null,
@@ -363,7 +352,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 33,
+    "checkpoint_index": 32,
     "checkpoint_name": "Vm.Online",
     "checkpoint_variant": "VmOnline",
     "linux_file": null,
@@ -374,7 +363,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 34,
+    "checkpoint_index": 33,
     "checkpoint_name": "KernelImage.Online",
     "checkpoint_variant": "KernelImageOnline",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -385,7 +374,7 @@
     "notes": "RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial."
   },
   {
-    "checkpoint_index": 35,
+    "checkpoint_index": 34,
     "checkpoint_name": "EventStream.Ready",
     "checkpoint_variant": "EventStreamReady",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -396,7 +385,7 @@
     "notes": "RISC-V64 formal trap-vector target in .Lsetup_trap_vector."
   },
   {
-    "checkpoint_index": 36,
+    "checkpoint_index": 35,
     "checkpoint_name": "InitStack.Ready",
     "checkpoint_variant": "InitStackReady",
     "linux_file": null,
@@ -407,7 +396,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 37,
+    "checkpoint_index": 36,
     "checkpoint_name": "InitStack.Online",
     "checkpoint_variant": "InitStackOnline",
     "linux_file": null,
@@ -418,7 +407,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 38,
+    "checkpoint_index": 37,
     "checkpoint_name": "Soc.Prepared",
     "checkpoint_variant": "SocPrepared",
     "linux_file": null,
@@ -429,7 +418,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 39,
+    "checkpoint_index": 38,
     "checkpoint_name": "EarlyDtb.Prepared",
     "checkpoint_variant": "EarlyDtbPrepared",
     "linux_file": null,
@@ -440,7 +429,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 40,
+    "checkpoint_index": 39,
     "checkpoint_name": "EarlyDtb.Ready",
     "checkpoint_variant": "EarlyDtbReady",
     "linux_file": null,
@@ -451,7 +440,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 41,
+    "checkpoint_index": 40,
     "checkpoint_name": "EarlyDtb.Destroyed",
     "checkpoint_variant": "EarlyDtbDestroyed",
     "linux_file": null,
@@ -462,7 +451,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 42,
+    "checkpoint_index": 41,
     "checkpoint_name": "PlatformCpuInfo.Ready",
     "checkpoint_variant": "PlatformCpuInfoReady",
     "linux_file": null,
@@ -473,7 +462,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 43,
+    "checkpoint_index": 42,
     "checkpoint_name": "PlatformCpuInfo.Online",
     "checkpoint_variant": "PlatformCpuInfoOnline",
     "linux_file": null,
@@ -484,7 +473,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 44,
+    "checkpoint_index": 43,
     "checkpoint_name": "PhysicalMemory.Ready",
     "checkpoint_variant": "PhysicalMemoryReady",
     "linux_file": null,
@@ -495,7 +484,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 45,
+    "checkpoint_index": 44,
     "checkpoint_name": "PhysicalMemory.Online",
     "checkpoint_variant": "PhysicalMemoryOnline",
     "linux_file": null,
@@ -506,7 +495,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 46,
+    "checkpoint_index": 45,
     "checkpoint_name": "CommandLine.Prepared",
     "checkpoint_variant": "CommandLinePrepared",
     "linux_file": null,
@@ -517,7 +506,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 47,
+    "checkpoint_index": 46,
     "checkpoint_name": "KernelCmdline.Ready",
     "checkpoint_variant": "KernelCmdlineReady",
     "linux_file": null,
@@ -528,7 +517,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 48,
+    "checkpoint_index": 47,
     "checkpoint_name": "InitMM.Ready",
     "checkpoint_variant": "InitMmReady",
     "linux_file": null,
@@ -539,7 +528,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 49,
+    "checkpoint_index": 48,
     "checkpoint_name": "EarlyIoremap.Ready",
     "checkpoint_variant": "EarlyIoremapReady",
     "linux_file": null,
@@ -550,7 +539,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 50,
+    "checkpoint_index": 49,
     "checkpoint_name": "SBI.Ready",
     "checkpoint_variant": "SbiReady",
     "linux_file": null,
@@ -561,7 +550,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 51,
+    "checkpoint_index": 50,
     "checkpoint_name": "EarlyParam.Ready",
     "checkpoint_variant": "EarlyParamReady",
     "linux_file": null,
@@ -572,7 +561,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 52,
+    "checkpoint_index": 51,
     "checkpoint_name": "MemBlock.Prepared",
     "checkpoint_variant": "MemBlockPrepared",
     "linux_file": null,
@@ -583,7 +572,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 53,
+    "checkpoint_index": 52,
     "checkpoint_name": "MemBlock.Ready",
     "checkpoint_variant": "MemBlockReady",
     "linux_file": null,
@@ -594,7 +583,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 54,
+    "checkpoint_index": 53,
     "checkpoint_name": "MemBlock.Online",
     "checkpoint_variant": "MemBlockOnline",
     "linux_file": null,
@@ -605,7 +594,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 55,
+    "checkpoint_index": 54,
     "checkpoint_name": "MemBlock.Offline",
     "checkpoint_variant": "MemBlockOffline",
     "linux_file": null,
@@ -616,7 +605,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 56,
+    "checkpoint_index": 55,
     "checkpoint_name": "SwapperVm.Ready",
     "checkpoint_variant": "SwapperVmReady",
     "linux_file": null,
@@ -627,7 +616,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 57,
+    "checkpoint_index": 56,
     "checkpoint_name": "SwapperVm.Online",
     "checkpoint_variant": "SwapperVmOnline",
     "linux_file": null,
@@ -638,7 +627,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 58,
+    "checkpoint_index": 57,
     "checkpoint_name": "EarlyVm.Destroyed",
     "checkpoint_variant": "EarlyVmDestroyed",
     "linux_file": null,
@@ -649,7 +638,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 59,
+    "checkpoint_index": 58,
     "checkpoint_name": "PrintkBuffer.Prepared",
     "checkpoint_variant": "PrintkBufferPrepared",
     "linux_file": null,
@@ -660,7 +649,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 60,
+    "checkpoint_index": 59,
     "checkpoint_name": "EarlyCon.Prepared",
     "checkpoint_variant": "EarlyConPrepared",
     "linux_file": null,
@@ -671,7 +660,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 61,
+    "checkpoint_index": 60,
     "checkpoint_name": "EarlyCon.Ready",
     "checkpoint_variant": "EarlyConReady",
     "linux_file": null,
@@ -682,7 +671,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 62,
+    "checkpoint_index": 61,
     "checkpoint_name": "EarlyCon.Online",
     "checkpoint_variant": "EarlyConOnline",
     "linux_file": null,
@@ -693,7 +682,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 63,
+    "checkpoint_index": 62,
     "checkpoint_name": "EarlyCon.Offline",
     "checkpoint_variant": "EarlyConOffline",
     "linux_file": null,
@@ -704,7 +693,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 64,
+    "checkpoint_index": 63,
     "checkpoint_name": "Serial8250Console.Online",
     "checkpoint_variant": "Serial8250ConsoleOnline",
     "linux_file": null,
@@ -715,7 +704,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 65,
+    "checkpoint_index": 64,
     "checkpoint_name": "Serial8250Console.IrqDrivenReady",
     "checkpoint_variant": "Serial8250ConsoleIrqDrivenReady",
     "linux_file": null,
@@ -726,7 +715,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 66,
+    "checkpoint_index": 65,
     "checkpoint_name": "Serial8250ConsoleLongBurstIrqTx.Ready",
     "checkpoint_variant": "Serial8250ConsoleLongBurstIrqTxReady",
     "linux_file": null,
@@ -737,7 +726,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 67,
+    "checkpoint_index": 66,
     "checkpoint_name": "Serial8250ConsoleTxQuiesce.Ready",
     "checkpoint_variant": "Serial8250ConsoleTxQuiesceReady",
     "linux_file": null,
@@ -748,7 +737,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 68,
+    "checkpoint_index": 67,
     "checkpoint_name": "Serial8250RxLoopback.Ready",
     "checkpoint_variant": "Serial8250RxLoopbackReady",
     "linux_file": null,
@@ -759,7 +748,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 69,
+    "checkpoint_index": 68,
     "checkpoint_name": "Serial8250RxBatchLoopback.Ready",
     "checkpoint_variant": "Serial8250RxBatchLoopbackReady",
     "linux_file": null,
@@ -770,7 +759,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 70,
+    "checkpoint_index": 69,
     "checkpoint_name": "BootConsole.Offline",
     "checkpoint_variant": "BootConsoleOffline",
     "linux_file": null,
@@ -781,7 +770,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 71,
+    "checkpoint_index": 70,
     "checkpoint_name": "CorePreparePhase.Started",
     "checkpoint_variant": "CorePreparePhaseStarted",
     "linux_file": "init/main.c",
@@ -792,7 +781,7 @@
     "notes": "Linux start_kernel() architecture setup call; RISC-V paging_init is inside setup_arch()."
   },
   {
-    "checkpoint_index": 72,
+    "checkpoint_index": 71,
     "checkpoint_name": "CorePreparePhase.Ready",
     "checkpoint_variant": "CorePreparePhaseReady",
     "linux_file": "init/main.c",
@@ -803,7 +792,7 @@
     "notes": "Linux start_kernel() trap_init() call near the CorePreparePhase ready boundary."
   },
   {
-    "checkpoint_index": 73,
+    "checkpoint_index": 72,
     "checkpoint_name": "CorePreparePhase.Online",
     "checkpoint_variant": "CorePreparePhaseOnline",
     "linux_file": null,
@@ -814,7 +803,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 74,
+    "checkpoint_index": 73,
     "checkpoint_name": "DeviceTree.Ready",
     "checkpoint_variant": "DeviceTreeReady",
     "linux_file": null,
@@ -825,7 +814,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 75,
+    "checkpoint_index": 74,
     "checkpoint_name": "Zones.Ready",
     "checkpoint_variant": "ZonesReady",
     "linux_file": null,
@@ -836,7 +825,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 76,
+    "checkpoint_index": 75,
     "checkpoint_name": "ResourceTree.Ready",
     "checkpoint_variant": "ResourceTreeReady",
     "linux_file": null,
@@ -847,7 +836,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 77,
+    "checkpoint_index": 76,
     "checkpoint_name": "CpuGroup.Ready",
     "checkpoint_variant": "CpuGroupReady",
     "linux_file": null,
@@ -858,7 +847,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 78,
+    "checkpoint_index": 77,
     "checkpoint_name": "CacheBlockInfo.Ready",
     "checkpoint_variant": "CacheBlockInfoReady",
     "linux_file": null,
@@ -869,7 +858,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 79,
+    "checkpoint_index": 78,
     "checkpoint_name": "CpuCapabilities.Ready",
     "checkpoint_variant": "CpuCapabilitiesReady",
     "linux_file": null,
@@ -880,7 +869,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 80,
+    "checkpoint_index": 79,
     "checkpoint_name": "DmaCachePolicy.Ready",
     "checkpoint_variant": "DmaCachePolicyReady",
     "linux_file": null,
@@ -891,7 +880,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 81,
+    "checkpoint_index": 80,
     "checkpoint_name": "StaticBranch.Ready",
     "checkpoint_variant": "StaticBranchReady",
     "linux_file": null,
@@ -902,7 +891,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 82,
+    "checkpoint_index": 81,
     "checkpoint_name": "CommandLine.Ready",
     "checkpoint_variant": "CommandLineReady",
     "linux_file": null,
@@ -913,7 +902,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 83,
+    "checkpoint_index": 82,
     "checkpoint_name": "SavedCommandLine.Ready",
     "checkpoint_variant": "SavedCommandLineReady",
     "linux_file": null,
@@ -924,7 +913,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 84,
+    "checkpoint_index": 83,
     "checkpoint_name": "StaticCommandLine.Ready",
     "checkpoint_variant": "StaticCommandLineReady",
     "linux_file": null,
@@ -935,7 +924,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 85,
+    "checkpoint_index": 84,
     "checkpoint_name": "SetupNrCpuIds.Checkpoint",
     "checkpoint_variant": "SetupNrCpuIdsCheckpoint",
     "linux_file": null,
@@ -946,7 +935,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 86,
+    "checkpoint_index": 85,
     "checkpoint_name": "PerCpuStaticImage.Ready",
     "checkpoint_variant": "PerCpuStaticImageReady",
     "linux_file": null,
@@ -957,7 +946,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 87,
+    "checkpoint_index": 86,
     "checkpoint_name": "PerCpuFirstChunk.Ready",
     "checkpoint_variant": "PerCpuFirstChunkReady",
     "linux_file": null,
@@ -968,7 +957,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 88,
+    "checkpoint_index": 87,
     "checkpoint_name": "PerCpuOffsetTable.Ready",
     "checkpoint_variant": "PerCpuOffsetTableReady",
     "linux_file": null,
@@ -979,7 +968,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 89,
+    "checkpoint_index": 88,
     "checkpoint_name": "PerCpuStorage.Ready",
     "checkpoint_variant": "PerCpuStorageReady",
     "linux_file": null,
@@ -990,7 +979,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 90,
+    "checkpoint_index": 89,
     "checkpoint_name": "CpuHotplugState.Ready",
     "checkpoint_variant": "CpuHotplugStateReady",
     "linux_file": null,
@@ -1001,7 +990,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 91,
+    "checkpoint_index": 90,
     "checkpoint_name": "SecondParseEarlyParam.Checkpoint",
     "checkpoint_variant": "SecondParseEarlyParamCheckpoint",
     "linux_file": null,
@@ -1012,7 +1001,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 92,
+    "checkpoint_index": 91,
     "checkpoint_name": "BootParam.Ready",
     "checkpoint_variant": "BootParamReady",
     "linux_file": null,
@@ -1023,7 +1012,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 93,
+    "checkpoint_index": 92,
     "checkpoint_name": "PrintUnknownBootoptions.Checkpoint",
     "checkpoint_variant": "PrintUnknownBootoptionsCheckpoint",
     "linux_file": null,
@@ -1034,7 +1023,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 94,
+    "checkpoint_index": 93,
     "checkpoint_name": "PayloadParam.Ready",
     "checkpoint_variant": "PayloadParamReady",
     "linux_file": null,
@@ -1045,7 +1034,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 95,
+    "checkpoint_index": 94,
     "checkpoint_name": "Randomness.Prepared",
     "checkpoint_variant": "RandomnessPrepared",
     "linux_file": null,
@@ -1056,7 +1045,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 96,
+    "checkpoint_index": 95,
     "checkpoint_name": "PrintkBuffer.Ready",
     "checkpoint_variant": "PrintkBufferReady",
     "linux_file": null,
@@ -1067,7 +1056,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 97,
+    "checkpoint_index": 96,
     "checkpoint_name": "ExceptionTable.Ready",
     "checkpoint_variant": "ExceptionTableReady",
     "linux_file": null,
@@ -1078,7 +1067,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 98,
+    "checkpoint_index": 97,
     "checkpoint_name": "ExceptionStream.Ready",
     "checkpoint_variant": "ExceptionStreamReady",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -1089,7 +1078,7 @@
     "notes": "RISC-V64 formal exception entry target installed by .Lsetup_trap_vector."
   },
   {
-    "checkpoint_index": 99,
+    "checkpoint_index": 98,
     "checkpoint_name": "MmCoreInitPhase.Started",
     "checkpoint_variant": "MmCoreInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -1100,7 +1089,7 @@
     "notes": "Linux start_kernel() call site for mm_core_init()."
   },
   {
-    "checkpoint_index": 100,
+    "checkpoint_index": 99,
     "checkpoint_name": "MmCoreInitPhase.Ready",
     "checkpoint_variant": "MmCoreInitPhaseReady",
     "linux_file": "mm/mm_init.c",
@@ -1111,7 +1100,7 @@
     "notes": "Linux mm_core_init() function boundary."
   },
   {
-    "checkpoint_index": 101,
+    "checkpoint_index": 100,
     "checkpoint_name": "MmCoreInitPhase.Online",
     "checkpoint_variant": "MmCoreInitPhaseOnline",
     "linux_file": null,
@@ -1122,7 +1111,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 102,
+    "checkpoint_index": 101,
     "checkpoint_name": "MemoryTopology.Ready",
     "checkpoint_variant": "MemoryTopologyReady",
     "linux_file": null,
@@ -1133,7 +1122,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 103,
+    "checkpoint_index": 102,
     "checkpoint_name": "MemoryNode.Ready",
     "checkpoint_variant": "MemoryNodeReady",
     "linux_file": null,
@@ -1144,7 +1133,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 104,
+    "checkpoint_index": 103,
     "checkpoint_name": "ZoneSet.Ready",
     "checkpoint_variant": "ZoneSetReady",
     "linux_file": null,
@@ -1155,7 +1144,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 105,
+    "checkpoint_index": 104,
     "checkpoint_name": "PageMetadataMap.Ready",
     "checkpoint_variant": "PageMetadataMapReady",
     "linux_file": null,
@@ -1166,7 +1155,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 106,
+    "checkpoint_index": 105,
     "checkpoint_name": "ZonelistSet.Ready",
     "checkpoint_variant": "ZonelistSetReady",
     "linux_file": null,
@@ -1177,7 +1166,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 107,
+    "checkpoint_index": 106,
     "checkpoint_name": "PageAllocator.Prepared",
     "checkpoint_variant": "PageAllocatorPrepared",
     "linux_file": null,
@@ -1188,7 +1177,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 108,
+    "checkpoint_index": 107,
     "checkpoint_name": "MemoryDebugHardening.Ready",
     "checkpoint_variant": "MemoryDebugHardeningReady",
     "linux_file": null,
@@ -1199,7 +1188,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 109,
+    "checkpoint_index": 108,
     "checkpoint_name": "StackDepot.Ready",
     "checkpoint_variant": "StackDepotReady",
     "linux_file": null,
@@ -1210,7 +1199,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 110,
+    "checkpoint_index": 109,
     "checkpoint_name": "Swiotlb.Ready",
     "checkpoint_variant": "SwiotlbReady",
     "linux_file": null,
@@ -1221,7 +1210,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 111,
+    "checkpoint_index": 110,
     "checkpoint_name": "PageAllocator.Ready",
     "checkpoint_variant": "PageAllocatorReady",
     "linux_file": null,
@@ -1232,7 +1221,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 112,
+    "checkpoint_index": 111,
     "checkpoint_name": "PageAllocator.MemBlockHandoffReady",
     "checkpoint_variant": "PageAllocatorMemBlockHandoffReady",
     "linux_file": null,
@@ -1243,7 +1232,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 113,
+    "checkpoint_index": 112,
     "checkpoint_name": "SlubSubsystem.Prepared",
     "checkpoint_variant": "SlubSubsystemPrepared",
     "linux_file": null,
@@ -1254,7 +1243,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 114,
+    "checkpoint_index": 113,
     "checkpoint_name": "SlubCacheRegistry.Ready",
     "checkpoint_variant": "SlubCacheRegistryReady",
     "linux_file": null,
@@ -1265,7 +1254,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 115,
+    "checkpoint_index": 114,
     "checkpoint_name": "KmallocCaches.Ready",
     "checkpoint_variant": "KmallocCachesReady",
     "linux_file": null,
@@ -1276,7 +1265,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 116,
+    "checkpoint_index": 115,
     "checkpoint_name": "SlubSubsystem.Ready",
     "checkpoint_variant": "SlubSubsystemReady",
     "linux_file": null,
@@ -1287,7 +1276,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 117,
+    "checkpoint_index": 116,
     "checkpoint_name": "KernelGlobalAllocator.Ready",
     "checkpoint_variant": "KernelGlobalAllocatorReady",
     "linux_file": null,
@@ -1298,7 +1287,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 118,
+    "checkpoint_index": 117,
     "checkpoint_name": "DynamicContainerRuntime.Ready",
     "checkpoint_variant": "DynamicContainerRuntimeReady",
     "linux_file": null,
@@ -1309,7 +1298,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 119,
+    "checkpoint_index": 118,
     "checkpoint_name": "PageTableLockCache.Ready",
     "checkpoint_variant": "PageTableLockCacheReady",
     "linux_file": null,
@@ -1320,7 +1309,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 120,
+    "checkpoint_index": 119,
     "checkpoint_name": "PageTableCaches.Ready",
     "checkpoint_variant": "PageTableCachesReady",
     "linux_file": null,
@@ -1331,7 +1320,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 121,
+    "checkpoint_index": 120,
     "checkpoint_name": "VmapAreaCache.Ready",
     "checkpoint_variant": "VmapAreaCacheReady",
     "linux_file": null,
@@ -1342,7 +1331,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 122,
+    "checkpoint_index": 121,
     "checkpoint_name": "VmapAddressSpace.Ready",
     "checkpoint_variant": "VmapAddressSpaceReady",
     "linux_file": null,
@@ -1353,7 +1342,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 123,
+    "checkpoint_index": 122,
     "checkpoint_name": "VmapNodeSet.Ready",
     "checkpoint_variant": "VmapNodeSetReady",
     "linux_file": null,
@@ -1364,7 +1353,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 124,
+    "checkpoint_index": 123,
     "checkpoint_name": "VmapBlockQueues.Ready",
     "checkpoint_variant": "VmapBlockQueuesReady",
     "linux_file": null,
@@ -1375,7 +1364,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 125,
+    "checkpoint_index": 124,
     "checkpoint_name": "VfreeDeferredSet.Ready",
     "checkpoint_variant": "VfreeDeferredSetReady",
     "linux_file": null,
@@ -1386,7 +1375,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 126,
+    "checkpoint_index": 125,
     "checkpoint_name": "VmallocAllocator.Ready",
     "checkpoint_variant": "VmallocAllocatorReady",
     "linux_file": null,
@@ -1397,7 +1386,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 127,
+    "checkpoint_index": 126,
     "checkpoint_name": "Ioremap.Ready",
     "checkpoint_variant": "IoremapReady",
     "linux_file": null,
@@ -1408,7 +1397,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 128,
+    "checkpoint_index": 127,
     "checkpoint_name": "MmStructCache.Ready",
     "checkpoint_variant": "MmStructCacheReady",
     "linux_file": null,
@@ -1419,7 +1408,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 129,
+    "checkpoint_index": 128,
     "checkpoint_name": "MmCoreTrimmedPaths.Ready",
     "checkpoint_variant": "MmCoreTrimmedPathsReady",
     "linux_file": null,
@@ -1430,7 +1419,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 130,
+    "checkpoint_index": 129,
     "checkpoint_name": "SchedInitPhase.Started",
     "checkpoint_variant": "SchedInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -1441,7 +1430,7 @@
     "notes": "Linux start_kernel() call site for sched_init()."
   },
   {
-    "checkpoint_index": 131,
+    "checkpoint_index": 130,
     "checkpoint_name": "SchedInitPhase.Ready",
     "checkpoint_variant": "SchedInitPhaseReady",
     "linux_file": "kernel/sched/core.c",
@@ -1452,7 +1441,7 @@
     "notes": "Linux sched_init() function boundary."
   },
   {
-    "checkpoint_index": 132,
+    "checkpoint_index": 131,
     "checkpoint_name": "SchedInitPhase.Online",
     "checkpoint_variant": "SchedInitPhaseOnline",
     "linux_file": null,
@@ -1463,7 +1452,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 133,
+    "checkpoint_index": 132,
     "checkpoint_name": "PokingInit.Noop",
     "checkpoint_variant": "PokingInitNoop",
     "linux_file": null,
@@ -1474,7 +1463,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 134,
+    "checkpoint_index": 133,
     "checkpoint_name": "FtraceInit.TrimmedNoop",
     "checkpoint_variant": "FtraceInitTrimmedNoop",
     "linux_file": null,
@@ -1485,7 +1474,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 135,
+    "checkpoint_index": 134,
     "checkpoint_name": "EarlyTraceInit.Deferred",
     "checkpoint_variant": "EarlyTraceInitDeferred",
     "linux_file": null,
@@ -1496,7 +1485,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 136,
+    "checkpoint_index": 135,
     "checkpoint_name": "SchedInitPreludeTrimmedPaths.Ready",
     "checkpoint_variant": "SchedInitPreludeTrimmedPathsReady",
     "linux_file": null,
@@ -1507,7 +1496,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 137,
+    "checkpoint_index": 136,
     "checkpoint_name": "DefaultSchedRootDomain.Ready",
     "checkpoint_variant": "DefaultSchedRootDomainReady",
     "linux_file": null,
@@ -1518,7 +1507,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 138,
+    "checkpoint_index": 137,
     "checkpoint_name": "BitWaitQueueTable.Prepared",
     "checkpoint_variant": "BitWaitQueueTablePrepared",
     "linux_file": null,
@@ -1529,7 +1518,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 139,
+    "checkpoint_index": 138,
     "checkpoint_name": "BootIdleRcuReadSide.Prepared",
     "checkpoint_variant": "BootIdleRcuReadSidePrepared",
     "linux_file": null,
@@ -1540,7 +1529,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 140,
+    "checkpoint_index": 139,
     "checkpoint_name": "Scheduler.Prepared",
     "checkpoint_variant": "SchedulerPrepared",
     "linux_file": null,
@@ -1551,7 +1540,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 141,
+    "checkpoint_index": 140,
     "checkpoint_name": "BootRunQueue.Ready",
     "checkpoint_variant": "BootRunQueueReady",
     "linux_file": null,
@@ -1562,7 +1551,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 142,
+    "checkpoint_index": 141,
     "checkpoint_name": "BootRunQueueLock.Ready",
     "checkpoint_variant": "BootRunQueueLockReady",
     "linux_file": null,
@@ -1573,7 +1562,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 143,
+    "checkpoint_index": 142,
     "checkpoint_name": "BootInitPreemption.Ready",
     "checkpoint_variant": "BootInitPreemptionReady",
     "linux_file": null,
@@ -1584,7 +1573,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 144,
+    "checkpoint_index": 143,
     "checkpoint_name": "BootIdleSetup.Ready",
     "checkpoint_variant": "BootIdleSetupReady",
     "linux_file": null,
@@ -1595,7 +1584,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 145,
+    "checkpoint_index": 144,
     "checkpoint_name": "BootIdlePiLock.Ready",
     "checkpoint_variant": "BootIdlePiLockReady",
     "linux_file": null,
@@ -1606,7 +1595,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 146,
+    "checkpoint_index": 145,
     "checkpoint_name": "BootIdlePreemption.Ready",
     "checkpoint_variant": "BootIdlePreemptionReady",
     "linux_file": null,
@@ -1617,7 +1606,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 147,
+    "checkpoint_index": 146,
     "checkpoint_name": "Scheduler.Ready",
     "checkpoint_variant": "SchedulerReady",
     "linux_file": null,
@@ -1628,7 +1617,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 148,
+    "checkpoint_index": 147,
     "checkpoint_name": "Scheduler.Online",
     "checkpoint_variant": "SchedulerOnline",
     "linux_file": null,
@@ -1639,7 +1628,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 149,
+    "checkpoint_index": 148,
     "checkpoint_name": "SchedInitIrqsDisabled.Checkpoint",
     "checkpoint_variant": "SchedInitIrqsDisabledCheckpoint",
     "linux_file": null,
@@ -1650,7 +1639,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 150,
+    "checkpoint_index": 149,
     "checkpoint_name": "RadixTree.Ready",
     "checkpoint_variant": "RadixTreeReady",
     "linux_file": null,
@@ -1661,7 +1650,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 151,
+    "checkpoint_index": 150,
     "checkpoint_name": "MapleTree.Ready",
     "checkpoint_variant": "MapleTreeReady",
     "linux_file": null,
@@ -1672,7 +1661,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 152,
+    "checkpoint_index": 151,
     "checkpoint_name": "Workqueue.Prepared",
     "checkpoint_variant": "WorkqueuePrepared",
     "linux_file": null,
@@ -1683,7 +1672,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 153,
+    "checkpoint_index": 152,
     "checkpoint_name": "Softirq.Prepared",
     "checkpoint_variant": "SoftirqPrepared",
     "linux_file": null,
@@ -1694,7 +1683,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 154,
+    "checkpoint_index": 153,
     "checkpoint_name": "TasksRcu.Prepared",
     "checkpoint_variant": "TasksRcuPrepared",
     "linux_file": null,
@@ -1705,7 +1694,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 155,
+    "checkpoint_index": 154,
     "checkpoint_name": "RcuCore.Ready",
     "checkpoint_variant": "RcuCoreReady",
     "linux_file": null,
@@ -1716,7 +1705,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 156,
+    "checkpoint_index": 155,
     "checkpoint_name": "TraceInit.Deferred",
     "checkpoint_variant": "TraceInitDeferred",
     "linux_file": null,
@@ -1727,7 +1716,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 157,
+    "checkpoint_index": 156,
     "checkpoint_name": "ContextTrackingInit.TrimmedNoop",
     "checkpoint_variant": "ContextTrackingInitTrimmedNoop",
     "linux_file": null,
@@ -1738,7 +1727,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 158,
+    "checkpoint_index": 157,
     "checkpoint_name": "SchedInitTraceContextBoundaries.Ready",
     "checkpoint_variant": "SchedInitTraceContextBoundariesReady",
     "linux_file": null,
@@ -1749,7 +1738,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 159,
+    "checkpoint_index": 158,
     "checkpoint_name": "Scheduler.PickNextTask.Exit",
     "checkpoint_variant": "SchedulerPickNextTaskExit",
     "linux_file": null,
@@ -1760,7 +1749,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 160,
+    "checkpoint_index": 159,
     "checkpoint_name": "Scheduler.SwitchTo.Entry",
     "checkpoint_variant": "SchedulerSwitchToEntry",
     "linux_file": null,
@@ -1771,7 +1760,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 161,
+    "checkpoint_index": 160,
     "checkpoint_name": "Scheduler.SwitchTo.Exit",
     "checkpoint_variant": "SchedulerSwitchToExit",
     "linux_file": null,
@@ -1782,7 +1771,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 162,
+    "checkpoint_index": 161,
     "checkpoint_name": "Scheduler.Schedule",
     "checkpoint_variant": "SchedulerSchedule",
     "linux_file": null,
@@ -1793,7 +1782,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 163,
+    "checkpoint_index": 162,
     "checkpoint_name": "Scheduler.Schedule.Exit",
     "checkpoint_variant": "SchedulerScheduleExit",
     "linux_file": null,
@@ -1804,7 +1793,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 164,
+    "checkpoint_index": 163,
     "checkpoint_name": "IrqTimeInitPhase.Started",
     "checkpoint_variant": "IrqTimeInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -1815,7 +1804,7 @@
     "notes": "Linux start_kernel() begins the IRQ/time init call interval at early_irq_init()."
   },
   {
-    "checkpoint_index": 165,
+    "checkpoint_index": 164,
     "checkpoint_name": "IrqTimeInitPhase.Ready",
     "checkpoint_variant": "IrqTimeInitPhaseReady",
     "linux_file": "init/main.c",
@@ -1826,7 +1815,7 @@
     "notes": "Linux start_kernel() IRQ/tick/timer/time initialization interval."
   },
   {
-    "checkpoint_index": 166,
+    "checkpoint_index": 165,
     "checkpoint_name": "IrqTimeInitPhase.Online",
     "checkpoint_variant": "IrqTimeInitPhaseOnline",
     "linux_file": null,
@@ -1837,7 +1826,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 167,
+    "checkpoint_index": 166,
     "checkpoint_name": "IrqController.Ready",
     "checkpoint_variant": "IrqControllerReady",
     "linux_file": null,
@@ -1848,7 +1837,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 168,
+    "checkpoint_index": 167,
     "checkpoint_name": "RiscvIntc.Ready",
     "checkpoint_variant": "RiscvIntcReady",
     "linux_file": null,
@@ -1859,7 +1848,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 169,
+    "checkpoint_index": 168,
     "checkpoint_name": "RiscvIrqStackSet.Ready",
     "checkpoint_variant": "RiscvIrqStackSetReady",
     "linux_file": null,
@@ -1870,7 +1859,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 170,
+    "checkpoint_index": 169,
     "checkpoint_name": "IrqChipInitTable.Prepared",
     "checkpoint_variant": "IrqChipInitTablePrepared",
     "linux_file": null,
@@ -1881,7 +1870,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 171,
+    "checkpoint_index": 170,
     "checkpoint_name": "PlicDriver.Prepared",
     "checkpoint_variant": "PlicDriverPrepared",
     "linux_file": null,
@@ -1892,7 +1881,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 172,
+    "checkpoint_index": 171,
     "checkpoint_name": "IrqChipInitTable.Ready",
     "checkpoint_variant": "IrqChipInitTableReady",
     "linux_file": null,
@@ -1903,7 +1892,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 173,
+    "checkpoint_index": 172,
     "checkpoint_name": "IrqDispatchTree.Ready",
     "checkpoint_variant": "IrqDispatchTreeReady",
     "linux_file": null,
@@ -1914,7 +1903,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 174,
+    "checkpoint_index": 173,
     "checkpoint_name": "Plic.Ready",
     "checkpoint_variant": "PlicReady",
     "linux_file": null,
@@ -1925,7 +1914,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 175,
+    "checkpoint_index": 174,
     "checkpoint_name": "PlicIrqDomain.Prepared",
     "checkpoint_variant": "PlicIrqDomainPrepared",
     "linux_file": null,
@@ -1936,7 +1925,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 176,
+    "checkpoint_index": 175,
     "checkpoint_name": "PlicIrqDomain.Ready",
     "checkpoint_variant": "PlicIrqDomainReady",
     "linux_file": null,
@@ -1947,7 +1936,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 177,
+    "checkpoint_index": 176,
     "checkpoint_name": "IrqHandlerRegistry.Ready",
     "checkpoint_variant": "IrqHandlerRegistryReady",
     "linux_file": null,
@@ -1958,7 +1947,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 178,
+    "checkpoint_index": 177,
     "checkpoint_name": "TickBroadcast.Prepared",
     "checkpoint_variant": "TickBroadcastPrepared",
     "linux_file": null,
@@ -1969,7 +1958,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 179,
+    "checkpoint_index": 178,
     "checkpoint_name": "Tick.Prepared",
     "checkpoint_variant": "TickPrepared",
     "linux_file": null,
@@ -1980,7 +1969,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 180,
+    "checkpoint_index": 179,
     "checkpoint_name": "RcuInitNohz.TrimmedNoop",
     "checkpoint_variant": "RcuInitNohzTrimmedNoop",
     "linux_file": null,
@@ -1991,7 +1980,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 181,
+    "checkpoint_index": 180,
     "checkpoint_name": "IrqTimeTrimmedPaths.Prepared",
     "checkpoint_variant": "IrqTimeTrimmedPathsPrepared",
     "linux_file": null,
@@ -2002,7 +1991,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 182,
+    "checkpoint_index": 181,
     "checkpoint_name": "TimerWheel.Ready",
     "checkpoint_variant": "TimerWheelReady",
     "linux_file": null,
@@ -2013,7 +2002,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 183,
+    "checkpoint_index": 182,
     "checkpoint_name": "SrcuCore.Ready",
     "checkpoint_variant": "SrcuCoreReady",
     "linux_file": null,
@@ -2024,7 +2013,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 184,
+    "checkpoint_index": 183,
     "checkpoint_name": "HrtimerCore.Ready",
     "checkpoint_variant": "HrtimerCoreReady",
     "linux_file": null,
@@ -2035,7 +2024,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 185,
+    "checkpoint_index": 184,
     "checkpoint_name": "ClocksourceCore.Prepared",
     "checkpoint_variant": "ClocksourceCorePrepared",
     "linux_file": null,
@@ -2046,7 +2035,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 186,
+    "checkpoint_index": 185,
     "checkpoint_name": "JiffiesClocksource.Prepared",
     "checkpoint_variant": "JiffiesClocksourcePrepared",
     "linux_file": null,
@@ -2057,7 +2046,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 187,
+    "checkpoint_index": 186,
     "checkpoint_name": "Timekeeper.Ready",
     "checkpoint_variant": "TimekeeperReady",
     "linux_file": null,
@@ -2068,7 +2057,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 188,
+    "checkpoint_index": 187,
     "checkpoint_name": "RiscvTimerProvider.Ready",
     "checkpoint_variant": "RiscvTimerProviderReady",
     "linux_file": null,
@@ -2079,7 +2068,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 189,
+    "checkpoint_index": 188,
     "checkpoint_name": "TickBroadcast.Ready",
     "checkpoint_variant": "TickBroadcastReady",
     "linux_file": null,
@@ -2090,7 +2079,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 190,
+    "checkpoint_index": 189,
     "checkpoint_name": "Tick.Ready",
     "checkpoint_variant": "TickReady",
     "linux_file": null,
@@ -2101,7 +2090,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 191,
+    "checkpoint_index": 190,
     "checkpoint_name": "Softirq.Ready",
     "checkpoint_variant": "SoftirqReady",
     "linux_file": null,
@@ -2112,7 +2101,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 192,
+    "checkpoint_index": 191,
     "checkpoint_name": "Randomness.Ready",
     "checkpoint_variant": "RandomnessReady",
     "linux_file": null,
@@ -2123,7 +2112,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 193,
+    "checkpoint_index": 192,
     "checkpoint_name": "KfenceInit.TrimmedNoop",
     "checkpoint_variant": "KfenceInitTrimmedNoop",
     "linux_file": null,
@@ -2134,7 +2123,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 194,
+    "checkpoint_index": 193,
     "checkpoint_name": "IrqTimeTrimmedPaths.Ready",
     "checkpoint_variant": "IrqTimeTrimmedPathsReady",
     "linux_file": null,
@@ -2145,7 +2134,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 195,
+    "checkpoint_index": 194,
     "checkpoint_name": "BootStackCanary.Ready",
     "checkpoint_variant": "BootStackCanaryReady",
     "linux_file": null,
@@ -2156,7 +2145,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 196,
+    "checkpoint_index": 195,
     "checkpoint_name": "PerfEventCore.Ready",
     "checkpoint_variant": "PerfEventCoreReady",
     "linux_file": null,
@@ -2167,7 +2156,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 197,
+    "checkpoint_index": 196,
     "checkpoint_name": "ProfileCore.Ready",
     "checkpoint_variant": "ProfileCoreReady",
     "linux_file": null,
@@ -2178,7 +2167,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 198,
+    "checkpoint_index": 197,
     "checkpoint_name": "IpiMux.Ready",
     "checkpoint_variant": "IpiMuxReady",
     "linux_file": null,
@@ -2189,7 +2178,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 199,
+    "checkpoint_index": 198,
     "checkpoint_name": "SbiIpi.Ready",
     "checkpoint_variant": "SbiIpiReady",
     "linux_file": null,
@@ -2200,7 +2189,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 200,
+    "checkpoint_index": 199,
     "checkpoint_name": "SmpCallFunction.Ready",
     "checkpoint_variant": "SmpCallFunctionReady",
     "linux_file": null,
@@ -2211,7 +2200,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 201,
+    "checkpoint_index": 200,
     "checkpoint_name": "LocalIrqEnablePhase.Started",
     "checkpoint_variant": "LocalIrqEnablePhaseStarted",
     "linux_file": "init/main.c",
@@ -2222,7 +2211,7 @@
     "notes": "Linux start_kernel() clears the early IRQ-disabled guard before enabling local IRQs."
   },
   {
-    "checkpoint_index": 202,
+    "checkpoint_index": 201,
     "checkpoint_name": "LocalIrqEnablePhase.Ready",
     "checkpoint_variant": "LocalIrqEnablePhaseReady",
     "linux_file": "init/main.c",
@@ -2233,7 +2222,7 @@
     "notes": "Linux start_kernel() local_irq_enable() boundary."
   },
   {
-    "checkpoint_index": 203,
+    "checkpoint_index": 202,
     "checkpoint_name": "InterruptStream.Online",
     "checkpoint_variant": "InterruptStreamOnline",
     "linux_file": null,
@@ -2244,7 +2233,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 204,
+    "checkpoint_index": 203,
     "checkpoint_name": "IrqOpenPreparePhase.Started",
     "checkpoint_variant": "IrqOpenPreparePhaseStarted",
     "linux_file": null,
@@ -2255,7 +2244,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 205,
+    "checkpoint_index": 204,
     "checkpoint_name": "IrqOpenPreparePhase.Ready",
     "checkpoint_variant": "IrqOpenPreparePhaseReady",
     "linux_file": null,
@@ -2266,7 +2255,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 206,
+    "checkpoint_index": 205,
     "checkpoint_name": "SlubSubsystem.FlushWorkqueueReady",
     "checkpoint_variant": "SlubFlushWorkqueueReady",
     "linux_file": null,
@@ -2277,7 +2266,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 207,
+    "checkpoint_index": 206,
     "checkpoint_name": "TtyLineDisciplineRegistry.Prepared",
     "checkpoint_variant": "TtyLineDisciplineRegistryPrepared",
     "linux_file": null,
@@ -2288,7 +2277,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 208,
+    "checkpoint_index": 207,
     "checkpoint_name": "ConsoleDriverSet.Prepared",
     "checkpoint_variant": "ConsoleDriverSetPrepared",
     "linux_file": null,
@@ -2299,7 +2288,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 209,
+    "checkpoint_index": 208,
     "checkpoint_name": "Console.Prepared",
     "checkpoint_variant": "ConsolePrepared",
     "linux_file": null,
@@ -2310,7 +2299,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 210,
+    "checkpoint_index": 209,
     "checkpoint_name": "IrqOpenPrepareTrimmedPaths.Prepared",
     "checkpoint_variant": "IrqOpenPrepareTrimmedPathsPrepared",
     "linux_file": null,
@@ -2321,7 +2310,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 211,
+    "checkpoint_index": 210,
     "checkpoint_name": "IrqOpenPrepareTrimmedPaths.Ready",
     "checkpoint_variant": "IrqOpenPrepareTrimmedPathsReady",
     "linux_file": null,
@@ -2332,7 +2321,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 212,
+    "checkpoint_index": 211,
     "checkpoint_name": "PanicLater.Clear",
     "checkpoint_variant": "PanicLaterClearCheckpoint",
     "linux_file": null,
@@ -2343,7 +2332,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 213,
+    "checkpoint_index": 212,
     "checkpoint_name": "LockdepInit.Noop",
     "checkpoint_variant": "LockdepInitNoop",
     "linux_file": null,
@@ -2354,7 +2343,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 214,
+    "checkpoint_index": 213,
     "checkpoint_name": "LockingSelftest.Noop",
     "checkpoint_variant": "LockingSelftestNoop",
     "linux_file": null,
@@ -2365,7 +2354,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 215,
+    "checkpoint_index": 214,
     "checkpoint_name": "InitrdBounds.Trimmed",
     "checkpoint_variant": "InitrdBoundsTrimmed",
     "linux_file": null,
@@ -2376,7 +2365,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 216,
+    "checkpoint_index": 215,
     "checkpoint_name": "PageAllocator.PerCpuPagesetsDeferred",
     "checkpoint_variant": "PageAllocatorPerCpuPagesetsDeferred",
     "linux_file": null,
@@ -2387,7 +2376,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 217,
+    "checkpoint_index": 216,
     "checkpoint_name": "NumaPolicy.Noop",
     "checkpoint_variant": "NumaPolicyNoop",
     "linux_file": null,
@@ -2398,7 +2387,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 218,
+    "checkpoint_index": 217,
     "checkpoint_name": "AcpiEarly.Noop",
     "checkpoint_variant": "AcpiEarlyNoop",
     "linux_file": null,
@@ -2409,7 +2398,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 219,
+    "checkpoint_index": 218,
     "checkpoint_name": "LateTimeInit.Noop",
     "checkpoint_variant": "LateTimeInitNoop",
     "linux_file": null,
@@ -2420,7 +2409,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 220,
+    "checkpoint_index": 219,
     "checkpoint_name": "SchedClock.Ready",
     "checkpoint_variant": "SchedClockReady",
     "linux_file": null,
@@ -2431,7 +2420,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 221,
+    "checkpoint_index": 220,
     "checkpoint_name": "DelayLoop.Ready",
     "checkpoint_variant": "DelayLoopReady",
     "linux_file": null,
@@ -2442,7 +2431,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 222,
+    "checkpoint_index": 221,
     "checkpoint_name": "ArchCpuFinalize.Noop",
     "checkpoint_variant": "ArchCpuFinalizeNoop",
     "linux_file": null,
@@ -2453,7 +2442,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 223,
+    "checkpoint_index": 222,
     "checkpoint_name": "ProcessPreparePhase.Started",
     "checkpoint_variant": "ProcessPreparePhaseStarted",
     "linux_file": "init/main.c",
@@ -2464,7 +2453,7 @@
     "notes": "Linux start_kernel() process/task namespace preparation interval starts at pid_idr_init()."
   },
   {
-    "checkpoint_index": 224,
+    "checkpoint_index": 223,
     "checkpoint_name": "ProcessPreparePhase.Ready",
     "checkpoint_variant": "ProcessPreparePhaseReady",
     "linux_file": "init/main.c",
@@ -2475,7 +2464,7 @@
     "notes": "Linux start_kernel() process/task/credential/cache preparation interval before rest_init()."
   },
   {
-    "checkpoint_index": 225,
+    "checkpoint_index": 224,
     "checkpoint_name": "RootPidNamespace.Ready",
     "checkpoint_variant": "RootPidNamespaceReady",
     "linux_file": null,
@@ -2486,7 +2475,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 226,
+    "checkpoint_index": 225,
     "checkpoint_name": "AnonVmaCore.Ready",
     "checkpoint_variant": "AnonVmaCoreReady",
     "linux_file": null,
@@ -2497,7 +2486,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 227,
+    "checkpoint_index": 226,
     "checkpoint_name": "X86EfiRuntimeSwitch.Trimmed",
     "checkpoint_variant": "X86EfiRuntimeSwitchTrimmed",
     "linux_file": null,
@@ -2508,7 +2497,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 228,
+    "checkpoint_index": 227,
     "checkpoint_name": "TaskCreationCore.Prepared",
     "checkpoint_variant": "TaskCreationCorePrepared",
     "linux_file": null,
@@ -2519,7 +2508,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 229,
+    "checkpoint_index": 228,
     "checkpoint_name": "CredentialCore.Prepared",
     "checkpoint_variant": "CredentialCorePrepared",
     "linux_file": null,
@@ -2530,7 +2519,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 230,
+    "checkpoint_index": 229,
     "checkpoint_name": "VectorContext.Prepared",
     "checkpoint_variant": "VectorContextPrepared",
     "linux_file": null,
@@ -2541,7 +2530,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 231,
+    "checkpoint_index": 230,
     "checkpoint_name": "UprobeCore.Ready",
     "checkpoint_variant": "UprobeCoreReady",
     "linux_file": null,
@@ -2552,7 +2541,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 232,
+    "checkpoint_index": 231,
     "checkpoint_name": "TaskCreationCore.Ready",
     "checkpoint_variant": "TaskCreationCoreReady",
     "linux_file": null,
@@ -2563,7 +2552,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 233,
+    "checkpoint_index": 232,
     "checkpoint_name": "ShadowCallStackInit.Noop",
     "checkpoint_variant": "ShadowCallStackInitNoop",
     "linux_file": null,
@@ -2574,7 +2563,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 234,
+    "checkpoint_index": 233,
     "checkpoint_name": "LockdepInitTask.Noop",
     "checkpoint_variant": "LockdepInitTaskNoop",
     "linux_file": null,
@@ -2585,7 +2574,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 235,
+    "checkpoint_index": 234,
     "checkpoint_name": "SignalCore.Prepared",
     "checkpoint_variant": "SignalCorePrepared",
     "linux_file": null,
@@ -2596,7 +2585,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 236,
+    "checkpoint_index": 235,
     "checkpoint_name": "TaskFileContext.Prepared",
     "checkpoint_variant": "TaskFileContextPrepared",
     "linux_file": null,
@@ -2607,7 +2596,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 237,
+    "checkpoint_index": 236,
     "checkpoint_name": "VmaCore.Prepared",
     "checkpoint_variant": "VmaCorePrepared",
     "linux_file": null,
@@ -2618,7 +2607,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 238,
+    "checkpoint_index": 237,
     "checkpoint_name": "NsProxy.Prepared",
     "checkpoint_variant": "NsProxyPrepared",
     "linux_file": null,
@@ -2629,7 +2618,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 239,
+    "checkpoint_index": 238,
     "checkpoint_name": "UtsNamespace.Prepared",
     "checkpoint_variant": "UtsNamespacePrepared",
     "linux_file": null,
@@ -2640,7 +2629,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 240,
+    "checkpoint_index": 239,
     "checkpoint_name": "KeyringCore.Ready",
     "checkpoint_variant": "KeyringCoreReady",
     "linux_file": null,
@@ -2651,7 +2640,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 241,
+    "checkpoint_index": 240,
     "checkpoint_name": "SecurityCore.Ready",
     "checkpoint_variant": "SecurityCoreReady",
     "linux_file": null,
@@ -2662,7 +2651,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 242,
+    "checkpoint_index": 241,
     "checkpoint_name": "ProcessPrepareTrimmedPaths.Prepared",
     "checkpoint_variant": "ProcessPrepareTrimmedPathsPrepared",
     "linux_file": null,
@@ -2673,7 +2662,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 243,
+    "checkpoint_index": 242,
     "checkpoint_name": "DbgLateInit.Noop",
     "checkpoint_variant": "DbgLateInitNoop",
     "linux_file": null,
@@ -2684,7 +2673,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 244,
+    "checkpoint_index": 243,
     "checkpoint_name": "NetNamespace.Deferred",
     "checkpoint_variant": "NetNamespaceDeferred",
     "linux_file": null,
@@ -2695,7 +2684,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 245,
+    "checkpoint_index": 244,
     "checkpoint_name": "PageCache.Deferred",
     "checkpoint_variant": "PageCacheDeferred",
     "linux_file": null,
@@ -2706,7 +2695,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 246,
+    "checkpoint_index": 245,
     "checkpoint_name": "SignalCore.SetupDeferred",
     "checkpoint_variant": "SignalCoreSetupDeferred",
     "linux_file": null,
@@ -2717,7 +2706,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 247,
+    "checkpoint_index": 246,
     "checkpoint_name": "SeqFileCore.Deferred",
     "checkpoint_variant": "SeqFileCoreDeferred",
     "linux_file": null,
@@ -2728,7 +2717,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 248,
+    "checkpoint_index": 247,
     "checkpoint_name": "Procfs.Deferred",
     "checkpoint_variant": "ProcfsDeferred",
     "linux_file": null,
@@ -2739,7 +2728,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 249,
+    "checkpoint_index": 248,
     "checkpoint_name": "Nsfs.Deferred",
     "checkpoint_variant": "NsfsDeferred",
     "linux_file": null,
@@ -2750,7 +2739,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 250,
+    "checkpoint_index": 249,
     "checkpoint_name": "Pidfs.Deferred",
     "checkpoint_variant": "PidfsDeferred",
     "linux_file": null,
@@ -2761,7 +2750,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 251,
+    "checkpoint_index": 250,
     "checkpoint_name": "Cpuset.Noop",
     "checkpoint_variant": "CpusetNoop",
     "linux_file": null,
@@ -2772,7 +2761,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 252,
+    "checkpoint_index": 251,
     "checkpoint_name": "Cgroup.Noop",
     "checkpoint_variant": "CgroupNoop",
     "linux_file": null,
@@ -2783,7 +2772,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 253,
+    "checkpoint_index": 252,
     "checkpoint_name": "Taskstats.Noop",
     "checkpoint_variant": "TaskstatsNoop",
     "linux_file": null,
@@ -2794,7 +2783,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 254,
+    "checkpoint_index": 253,
     "checkpoint_name": "DelayAccounting.Noop",
     "checkpoint_variant": "DelayAccountingNoop",
     "linux_file": null,
@@ -2805,7 +2794,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 255,
+    "checkpoint_index": 254,
     "checkpoint_name": "AcpiSubsystem.Noop",
     "checkpoint_variant": "AcpiSubsystemNoop",
     "linux_file": null,
@@ -2816,7 +2805,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 256,
+    "checkpoint_index": 255,
     "checkpoint_name": "ArchPostAcpi.Noop",
     "checkpoint_variant": "ArchPostAcpiNoop",
     "linux_file": null,
@@ -2827,7 +2816,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 257,
+    "checkpoint_index": 256,
     "checkpoint_name": "Kcsan.Noop",
     "checkpoint_variant": "KcsanNoop",
     "linux_file": null,
@@ -2838,7 +2827,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 258,
+    "checkpoint_index": 257,
     "checkpoint_name": "BootInitFlow.Prepared",
     "checkpoint_variant": "BootInitFlowPrepared",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -2849,7 +2838,7 @@
     "notes": "RISC-V64 head.S handoff from _start_kernel to Linux start_kernel()."
   },
   {
-    "checkpoint_index": 259,
+    "checkpoint_index": 258,
     "checkpoint_name": "BootInitFlow.Ready",
     "checkpoint_variant": "BootInitFlowReady",
     "linux_file": null,
@@ -2860,7 +2849,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 260,
+    "checkpoint_index": 259,
     "checkpoint_name": "BootInitRestInitPhase.Ready",
     "checkpoint_variant": "BootInitRestInitPhaseReady",
     "linux_file": "init/main.c",
@@ -2871,7 +2860,7 @@
     "notes": "Linux rest_init() creates init/kthreadd and enters boot idle."
   },
   {
-    "checkpoint_index": 261,
+    "checkpoint_index": 260,
     "checkpoint_name": "BootInitScheduleHandoffPhase.Ready",
     "checkpoint_variant": "BootInitScheduleHandoffPhaseReady",
     "linux_file": null,
@@ -2882,7 +2871,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 262,
+    "checkpoint_index": 261,
     "checkpoint_name": "BootIdleEntryPhase.Ready",
     "checkpoint_variant": "BootIdleEntryPhaseReady",
     "linux_file": null,
@@ -2893,7 +2882,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 263,
+    "checkpoint_index": 262,
     "checkpoint_name": "RcuCore.SchedulerStartingReady",
     "checkpoint_variant": "RcuSchedulerStartingReady",
     "linux_file": null,
@@ -2904,7 +2893,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 264,
+    "checkpoint_index": 263,
     "checkpoint_name": "KernelInitTaskPiLock.Ready",
     "checkpoint_variant": "KernelInitTaskPiLockReady",
     "linux_file": null,
@@ -2915,7 +2904,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 265,
+    "checkpoint_index": 264,
     "checkpoint_name": "KthreaddTaskPiLock.Ready",
     "checkpoint_variant": "KthreaddTaskPiLockReady",
     "linux_file": null,
@@ -2926,7 +2915,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 266,
+    "checkpoint_index": 265,
     "checkpoint_name": "KthreaddReadyGateWaitLock.Ready",
     "checkpoint_variant": "KthreaddReadyGateWaitLockReady",
     "linux_file": null,
@@ -2937,7 +2926,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 267,
+    "checkpoint_index": 266,
     "checkpoint_name": "KernelInitTask.Prepared",
     "checkpoint_variant": "KernelInitTaskPrepared",
     "linux_file": null,
@@ -2948,7 +2937,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 268,
+    "checkpoint_index": 267,
     "checkpoint_name": "KernelInitTask.Ready",
     "checkpoint_variant": "KernelInitTaskReady",
     "linux_file": null,
@@ -2959,7 +2948,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 269,
+    "checkpoint_index": 268,
     "checkpoint_name": "KernelInitTask.Online",
     "checkpoint_variant": "KernelInitTaskOnline",
     "linux_file": null,
@@ -2970,7 +2959,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 270,
+    "checkpoint_index": 269,
     "checkpoint_name": "NumaDefaultPolicy.Noop",
     "checkpoint_variant": "NumaDefaultPolicyNoop",
     "linux_file": null,
@@ -2981,7 +2970,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 271,
+    "checkpoint_index": 270,
     "checkpoint_name": "KthreaddTask.Prepared",
     "checkpoint_variant": "KthreaddTaskPrepared",
     "linux_file": null,
@@ -2992,7 +2981,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 272,
+    "checkpoint_index": 271,
     "checkpoint_name": "KthreaddTask.Ready",
     "checkpoint_variant": "KthreaddTaskReady",
     "linux_file": null,
@@ -3003,7 +2992,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 273,
+    "checkpoint_index": 272,
     "checkpoint_name": "KthreaddTask.Online",
     "checkpoint_variant": "KthreaddTaskOnline",
     "linux_file": null,
@@ -3014,7 +3003,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 274,
+    "checkpoint_index": 273,
     "checkpoint_name": "KthreaddTask.GlobalRefBound",
     "checkpoint_variant": "KthreaddTaskGlobalRefBound",
     "linux_file": null,
@@ -3025,7 +3014,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 275,
+    "checkpoint_index": 274,
     "checkpoint_name": "SimpleWaitQueue.Ready",
     "checkpoint_variant": "SimpleWaitQueueReady",
     "linux_file": null,
@@ -3036,7 +3025,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 276,
+    "checkpoint_index": 275,
     "checkpoint_name": "Completion.Prepared",
     "checkpoint_variant": "CompletionPrepared",
     "linux_file": null,
@@ -3047,7 +3036,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 277,
+    "checkpoint_index": 276,
     "checkpoint_name": "Completion.Ready",
     "checkpoint_variant": "CompletionReady",
     "linux_file": null,
@@ -3058,7 +3047,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 278,
+    "checkpoint_index": 277,
     "checkpoint_name": "Completion.Online",
     "checkpoint_variant": "CompletionOnline",
     "linux_file": null,
@@ -3069,7 +3058,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 279,
+    "checkpoint_index": 278,
     "checkpoint_name": "SystemState.Prepared",
     "checkpoint_variant": "SystemStatePrepared",
     "linux_file": null,
@@ -3080,7 +3069,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 280,
+    "checkpoint_index": 279,
     "checkpoint_name": "SystemState.Ready",
     "checkpoint_variant": "SystemStateReady",
     "linux_file": null,
@@ -3091,7 +3080,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 281,
+    "checkpoint_index": 280,
     "checkpoint_name": "KthreaddReadyGate.Ready",
     "checkpoint_variant": "KthreaddReadyGateReady",
     "linux_file": null,
@@ -3102,7 +3091,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 282,
+    "checkpoint_index": 281,
     "checkpoint_name": "KthreaddReadyGate.Online",
     "checkpoint_variant": "KthreaddReadyGateOnline",
     "linux_file": null,
@@ -3113,7 +3102,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 283,
+    "checkpoint_index": 282,
     "checkpoint_name": "BootIdleFlow.Ready",
     "checkpoint_variant": "BootIdleFlowReady",
     "linux_file": null,
@@ -3124,7 +3113,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 284,
+    "checkpoint_index": 283,
     "checkpoint_name": "PreSmpInitPhase.Started",
     "checkpoint_variant": "PreSmpInitPhaseStarted",
     "linux_file": "init/main.c",
@@ -3135,7 +3124,7 @@
     "notes": "Linux kernel_init_freeable() starts pre-SMP preparation at smp_prepare_cpus()."
   },
   {
-    "checkpoint_index": 285,
+    "checkpoint_index": 284,
     "checkpoint_name": "PreSmpInitPhase.Ready",
     "checkpoint_variant": "PreSmpInitPhaseReady",
     "linux_file": "init/main.c",
@@ -3146,7 +3135,7 @@
     "notes": "Linux kernel_init_freeable() pre-SMP preparation interval before smp_init()."
   },
   {
-    "checkpoint_index": 286,
+    "checkpoint_index": 285,
     "checkpoint_name": "PageAllocator.FullGfpMaskOpen",
     "checkpoint_variant": "PageAllocatorFullGfpMaskOpen",
     "linux_file": null,
@@ -3157,7 +3146,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 287,
+    "checkpoint_index": 286,
     "checkpoint_name": "CpuGroup.PreSmpReady",
     "checkpoint_variant": "CpuGroupPreSmpReady",
     "linux_file": null,
@@ -3168,7 +3157,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 288,
+    "checkpoint_index": 287,
     "checkpoint_name": "Workqueue.Ready",
     "checkpoint_variant": "WorkqueueReady",
     "linux_file": null,
@@ -3179,7 +3168,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 289,
+    "checkpoint_index": 288,
     "checkpoint_name": "VmstatCore.Prepared",
     "checkpoint_variant": "VmstatCorePrepared",
     "linux_file": null,
@@ -3190,7 +3179,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 290,
+    "checkpoint_index": 289,
     "checkpoint_name": "TasksRcu.Ready",
     "checkpoint_variant": "TasksRcuReady",
     "linux_file": null,
@@ -3201,7 +3190,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 291,
+    "checkpoint_index": 290,
     "checkpoint_name": "PreSmpInitcalls.Ready",
     "checkpoint_variant": "PreSmpInitcallsReady",
     "linux_file": null,
@@ -3212,7 +3201,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 292,
+    "checkpoint_index": 291,
     "checkpoint_name": "PreSmpBoundary.Ready",
     "checkpoint_variant": "PreSmpBoundaryReady",
     "linux_file": null,
@@ -3223,7 +3212,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 293,
+    "checkpoint_index": 292,
     "checkpoint_name": "SmpBringupPhase.Started",
     "checkpoint_variant": "SmpBringupPhaseStarted",
     "linux_file": "init/main.c",
@@ -3234,7 +3223,7 @@
     "notes": "Linux kernel_init_freeable() SMP bringup call."
   },
   {
-    "checkpoint_index": 294,
+    "checkpoint_index": 293,
     "checkpoint_name": "SmpBringupPhase.Ready",
     "checkpoint_variant": "SmpBringupPhaseReady",
     "linux_file": "init/main.c",
@@ -3245,7 +3234,7 @@
     "notes": "Linux kernel_init_freeable() scheduler SMP completion call after smp_init()."
   },
   {
-    "checkpoint_index": 295,
+    "checkpoint_index": 294,
     "checkpoint_name": "SecondaryIdleTasks.Prepared",
     "checkpoint_variant": "SecondaryIdleTasksPrepared",
     "linux_file": null,
@@ -3256,7 +3245,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 296,
+    "checkpoint_index": 295,
     "checkpoint_name": "SmpbootThreadsLock.Ready",
     "checkpoint_variant": "SmpbootThreadsLockReady",
     "linux_file": null,
@@ -3267,7 +3256,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 297,
+    "checkpoint_index": 296,
     "checkpoint_name": "CpuHotplugSync.Prepared",
     "checkpoint_variant": "CpuHotplugSyncPrepared",
     "linux_file": null,
@@ -3278,7 +3267,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 298,
+    "checkpoint_index": 297,
     "checkpoint_name": "CpuHotplugSync.CpuHotplugReadGuardUsed",
     "checkpoint_variant": "CpuHotplugReadGuardUsed",
     "linux_file": null,
@@ -3289,7 +3278,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 299,
+    "checkpoint_index": 298,
     "checkpoint_name": "CpuHotplugSync.SmpbootThreadsMutexGuardUsed",
     "checkpoint_variant": "SmpbootThreadsMutexGuardUsed",
     "linux_file": null,
@@ -3300,7 +3289,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 300,
+    "checkpoint_index": 299,
     "checkpoint_name": "CpuAddRemoveLock.Ready",
     "checkpoint_variant": "CpuAddRemoveLockReady",
     "linux_file": null,
@@ -3311,7 +3300,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 301,
+    "checkpoint_index": 300,
     "checkpoint_name": "CpuStartProvider.CpuHotplugWriteGuardUsed",
     "checkpoint_variant": "CpuHotplugWriteGuardUsed",
     "linux_file": null,
@@ -3322,7 +3311,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 302,
+    "checkpoint_index": 301,
     "checkpoint_name": "CpuRunningWaitLock.Ready",
     "checkpoint_variant": "CpuRunningWaitLockReady",
     "linux_file": null,
@@ -3333,7 +3322,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 303,
+    "checkpoint_index": 302,
     "checkpoint_name": "CpuDoneUpWaitLock.Ready",
     "checkpoint_variant": "CpuDoneUpWaitLockReady",
     "linux_file": null,
@@ -3344,7 +3333,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 304,
+    "checkpoint_index": 303,
     "checkpoint_name": "CpuStartProvider.Ready",
     "checkpoint_variant": "CpuStartProviderReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3355,7 +3344,7 @@
     "notes": "Linux RISC-V BP-side cpu_start provider call boundary through start_secondary_cpu()."
   },
   {
-    "checkpoint_index": 305,
+    "checkpoint_index": 304,
     "checkpoint_name": "CpuStartProvider.BootDataSelected",
     "checkpoint_variant": "CpuStartProviderBootDataSelected",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -3366,7 +3355,7 @@
     "notes": "Linux RISC-V HSM cpu_start selects per-CPU SBI boot data and binds the target idle task pointer."
   },
   {
-    "checkpoint_index": 306,
+    "checkpoint_index": 305,
     "checkpoint_name": "CpuStartProvider.BootDataPublished",
     "checkpoint_variant": "CpuStartProviderBootDataPublished",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -3377,7 +3366,7 @@
     "notes": "Linux RISC-V HSM cpu_start publishes task_ptr/stack_ptr with the boot-data smp_mb() before hart_start."
   },
   {
-    "checkpoint_index": 307,
+    "checkpoint_index": 306,
     "checkpoint_name": "CpuStartProvider.HsmStartIssued",
     "checkpoint_variant": "CpuStartProviderHsmStartIssued",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -3388,7 +3377,7 @@
     "notes": "Linux RISC-V ordered booting issues SBI HSM HART_START for the target hart."
   },
   {
-    "checkpoint_index": 308,
+    "checkpoint_index": 307,
     "checkpoint_name": "CpuStartProvider.HsmStartReturned",
     "checkpoint_variant": "CpuStartProviderHsmStartReturned",
     "linux_file": "arch/riscv/kernel/cpu_ops_sbi.c",
@@ -3399,7 +3388,7 @@
     "notes": "Linux RISC-V HSM start return handling after the SBI HART_START ecall."
   },
   {
-    "checkpoint_index": 309,
+    "checkpoint_index": 308,
     "checkpoint_name": "ApEntryPreludePhase.Started",
     "checkpoint_variant": "ApEntryPreludePhaseStarted",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -3410,7 +3399,7 @@
     "notes": "RISC-V Linux AP entry symbol for SBI HSM ordered booting; distinct from the BP _start path."
   },
   {
-    "checkpoint_index": 310,
+    "checkpoint_index": 309,
     "checkpoint_name": "ApEntryPreludePhase.BootDataConsumed",
     "checkpoint_variant": "ApEntryPreludeBootDataConsumed",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -3421,7 +3410,7 @@
     "notes": "Linux secondary_start_sbi consumes SBI boot data and loads the AP current task and stack."
   },
   {
-    "checkpoint_index": 311,
+    "checkpoint_index": 310,
     "checkpoint_name": "ApEntryPreludePhase.CurrentStackEstablished",
     "checkpoint_variant": "ApEntryPreludeCurrentStackEstablished",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -3432,7 +3421,7 @@
     "notes": "Linux secondary_start_sbi loads the AP stack pointer from SBI boot data."
   },
   {
-    "checkpoint_index": 312,
+    "checkpoint_index": 311,
     "checkpoint_name": "ApEntryPreludePhase.Ready",
     "checkpoint_variant": "ApEntryPreludePhaseReady",
     "linux_file": "arch/riscv/kernel/head.S",
@@ -3443,7 +3432,7 @@
     "notes": "Linux secondary_start_sbi reaches the AP C bringup handoff after setting the AP task, stack, MMU, trap vector and SCS."
   },
   {
-    "checkpoint_index": 313,
+    "checkpoint_index": 312,
     "checkpoint_name": "ApSmpCallinPhase.Started",
     "checkpoint_variant": "ApSmpCallinPhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3454,7 +3443,7 @@
     "notes": "Linux RISC-V C entry point for a secondary processor."
   },
   {
-    "checkpoint_index": 314,
+    "checkpoint_index": 313,
     "checkpoint_name": "ApSmpCallinPhase.CpuRunningProduced",
     "checkpoint_variant": "ApSmpCallinCpuRunningProduced",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3465,7 +3454,7 @@
     "notes": "Linux RISC-V AP completes cpu_running after online, IPI, cache and TLB setup."
   },
   {
-    "checkpoint_index": 315,
+    "checkpoint_index": 314,
     "checkpoint_name": "ApSmpCallinPhase.Ready",
     "checkpoint_variant": "ApSmpCallinPhaseReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3476,7 +3465,7 @@
     "notes": "Linux RISC-V smp_callin reaches the cpu_running completion boundary before enabling local IRQs."
   },
   {
-    "checkpoint_index": 316,
+    "checkpoint_index": 315,
     "checkpoint_name": "ApOnlineIdlePhase.Started",
     "checkpoint_variant": "ApOnlineIdlePhaseStarted",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3487,7 +3476,7 @@
     "notes": "Linux RISC-V AP online-idle path begins by enabling local interrupts after cpu_running."
   },
   {
-    "checkpoint_index": 317,
+    "checkpoint_index": 316,
     "checkpoint_name": "ApOnlineIdlePhase.DoneUpProduced",
     "checkpoint_variant": "ApOnlineIdleDoneUpProduced",
     "linux_file": "kernel/cpu.c",
@@ -3498,7 +3487,7 @@
     "notes": "Linux generic CPU hotplug online-idle path completes done_up for the BP-side waiter."
   },
   {
-    "checkpoint_index": 318,
+    "checkpoint_index": 317,
     "checkpoint_name": "ApOnlineIdlePhase.Ready",
     "checkpoint_variant": "ApOnlineIdlePhaseReady",
     "linux_file": "kernel/sched/idle.c",
@@ -3509,7 +3498,7 @@
     "notes": "Linux AP enters the idle loop after CPUHP_AP_ONLINE_IDLE handoff."
   },
   {
-    "checkpoint_index": 319,
+    "checkpoint_index": 318,
     "checkpoint_name": "CpuHotplugSync.CpuRunningObserved",
     "checkpoint_variant": "CpuRunningObserved",
     "linux_file": null,
@@ -3520,7 +3509,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 320,
+    "checkpoint_index": 319,
     "checkpoint_name": "CpuHotplugSync.CpuRunningWaitLockGuardUsed",
     "checkpoint_variant": "CpuRunningWaitLockGuardUsed",
     "linux_file": null,
@@ -3531,7 +3520,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 321,
+    "checkpoint_index": 320,
     "checkpoint_name": "SecondaryCpuStartupAck.Ready",
     "checkpoint_variant": "SecondaryCpuStartupAckReady",
     "linux_file": "arch/riscv/kernel/smpboot.c",
@@ -3542,7 +3531,7 @@
     "notes": "Linux RISC-V BP-side __cpu_up waits for the AP cpu_running completion."
   },
   {
-    "checkpoint_index": 322,
+    "checkpoint_index": 321,
     "checkpoint_name": "CpuHotplugSync.DoneUpObserved",
     "checkpoint_variant": "CpuDoneUpObserved",
     "linux_file": null,
@@ -3553,7 +3542,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 323,
+    "checkpoint_index": 322,
     "checkpoint_name": "CpuHotplugSync.DoneUpWaitLockGuardUsed",
     "checkpoint_variant": "CpuDoneUpWaitLockGuardUsed",
     "linux_file": null,
@@ -3564,7 +3553,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 324,
+    "checkpoint_index": 323,
     "checkpoint_name": "CpuGroup.SecondaryCpusOnline",
     "checkpoint_variant": "SecondaryCpusOnline",
     "linux_file": null,
@@ -3575,7 +3564,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 325,
+    "checkpoint_index": 324,
     "checkpoint_name": "SecondaryCpuOnlineAck.ApLocalSyncSummary",
     "checkpoint_variant": "SecondaryCpuApLocalSyncSummary",
     "linux_file": null,
@@ -3586,7 +3575,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 326,
+    "checkpoint_index": 325,
     "checkpoint_name": "SecondaryCpuOnlineAck.Ready",
     "checkpoint_variant": "SecondaryCpuOnlineAckReady",
     "linux_file": "kernel/cpu.c",
@@ -3597,7 +3586,7 @@
     "notes": "Linux generic CPU hotplug waits until the AP reaches CPUHP_AP_ONLINE_IDLE and done_up has completed."
   },
   {
-    "checkpoint_index": 327,
+    "checkpoint_index": 326,
     "checkpoint_name": "SmpBringupBoundary.Ready",
     "checkpoint_variant": "SmpBringupBoundaryReady",
     "linux_file": null,
@@ -3608,7 +3597,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 328,
+    "checkpoint_index": 327,
     "checkpoint_name": "RuntimeCorePhase.Started",
     "checkpoint_variant": "RuntimeCorePhaseStarted",
     "linux_file": "init/main.c",
@@ -3619,7 +3608,7 @@
     "notes": "Linux kernel_init_freeable() RuntimeCorePhase Preset starts at the sched_init_smp() action entry."
   },
   {
-    "checkpoint_index": 329,
+    "checkpoint_index": 328,
     "checkpoint_name": "RuntimeCorePhase.Ready",
     "checkpoint_variant": "RuntimeCorePhaseReady",
     "linux_file": "init/main.c",
@@ -3630,7 +3619,7 @@
     "notes": "Linux kernel_init_freeable() runtime core topology/async/padata/page-alloc-late interval."
   },
   {
-    "checkpoint_index": 330,
+    "checkpoint_index": 329,
     "checkpoint_name": "Scheduler.SmpReady",
     "checkpoint_variant": "SchedulerSmpReady",
     "linux_file": "init/main.c",
@@ -3641,7 +3630,7 @@
     "notes": "Linux kernel_init_freeable() sched_init_smp() call; reuses the SmpBringupPhase.Ready anchor but records the scheduler SMP runtime object fact."
   },
   {
-    "checkpoint_index": 331,
+    "checkpoint_index": 330,
     "checkpoint_name": "Workqueue.TopologyReady",
     "checkpoint_variant": "WorkqueueTopologyReady",
     "linux_file": "init/main.c",
@@ -3652,7 +3641,7 @@
     "notes": "Linux kernel_init_freeable() workqueue_init_topology() call; records the Workqueue topology object fact after SMP scheduler setup."
   },
   {
-    "checkpoint_index": 332,
+    "checkpoint_index": 331,
     "checkpoint_name": "AsyncCore.DeferredReady",
     "checkpoint_variant": "AsyncCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -3663,7 +3652,7 @@
     "notes": "Linux kernel_init_freeable() async_init() call; arceos_ex keeps async internals deferred and maps only the deferred runtime-core boundary."
   },
   {
-    "checkpoint_index": 333,
+    "checkpoint_index": 332,
     "checkpoint_name": "PadataCore.DeferredReady",
     "checkpoint_variant": "PadataCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -3674,7 +3663,7 @@
     "notes": "Linux kernel_init_freeable() padata_init() call; maps the deferred padata boundary without expanding padata object details."
   },
   {
-    "checkpoint_index": 334,
+    "checkpoint_index": 333,
     "checkpoint_name": "PageAllocator.LateReady",
     "checkpoint_variant": "PageAllocatorLateReady",
     "linux_file": "init/main.c",
@@ -3685,7 +3674,7 @@
     "notes": "Linux kernel_init_freeable() page_alloc_init_late() call; records the PageAllocator late object fact without changing the earlier allocator lifecycle view."
   },
   {
-    "checkpoint_index": 335,
+    "checkpoint_index": 334,
     "checkpoint_name": "RuntimeCoreBoundary.Ready",
     "checkpoint_variant": "RuntimeCoreBoundaryReady",
     "linux_file": "init/main.c",
@@ -3696,7 +3685,7 @@
     "notes": "Linux kernel_init_freeable() page_alloc_init_late() call; marks the Runtime Core window end boundary before do_basic_setup(), not an independent Linux object."
   },
   {
-    "checkpoint_index": 336,
+    "checkpoint_index": 335,
     "checkpoint_name": "InitcallPhase.Started",
     "checkpoint_variant": "InitcallPhaseStarted",
     "linux_file": "init/main.c",
@@ -3707,7 +3696,7 @@
     "notes": "Linux kernel_init_freeable() enters do_basic_setup()."
   },
   {
-    "checkpoint_index": 337,
+    "checkpoint_index": 336,
     "checkpoint_name": "InitcallPhase.Ready",
     "checkpoint_variant": "InitcallPhaseReady",
     "linux_file": "init/main.c",
@@ -3718,7 +3707,7 @@
     "notes": "Linux do_basic_setup() initcall execution anchor."
   },
   {
-    "checkpoint_index": 338,
+    "checkpoint_index": 337,
     "checkpoint_name": "CpusetSmp.TrimmedReady",
     "checkpoint_variant": "CpusetSmpTrimmedReady",
     "linux_file": "init/main.c",
@@ -3729,7 +3718,7 @@
     "notes": "Linux do_basic_setup() cpuset_init_smp() call; arceos_ex records the cpuset/cgroup trimmed/no-op object fact at this reserved position."
   },
   {
-    "checkpoint_index": 339,
+    "checkpoint_index": 338,
     "checkpoint_name": "DriverCore.DeferredReady",
     "checkpoint_variant": "DriverCoreDeferredReady",
     "linux_file": "init/main.c",
@@ -3740,7 +3729,7 @@
     "notes": "Linux do_basic_setup() driver_init() call; maps only the driver core base/deferred boundary without expanding driver model subobjects."
   },
   {
-    "checkpoint_index": 340,
+    "checkpoint_index": 339,
     "checkpoint_name": "IrqProcView.DeferredReady",
     "checkpoint_variant": "IrqProcViewDeferredReady",
     "linux_file": "init/main.c",
@@ -3751,7 +3740,7 @@
     "notes": "Linux do_basic_setup() init_irq_proc() call; maps the procfs IRQ view deferred boundary without expanding per-IRQ proc export details."
   },
   {
-    "checkpoint_index": 341,
+    "checkpoint_index": 340,
     "checkpoint_name": "CtorTable.Ready",
     "checkpoint_variant": "CtorTableReady",
     "linux_file": "init/main.c",
@@ -3762,7 +3751,7 @@
     "notes": "Linux do_basic_setup() do_ctors() call; maps the constructor table dispatch boundary and current trimmed/empty constructor-table fact."
   },
   {
-    "checkpoint_index": 342,
+    "checkpoint_index": 341,
     "checkpoint_name": "OfPlatformDefaultPopulate.ScanComplete",
     "checkpoint_variant": "OfPlatformDefaultPopulateScanComplete",
     "linux_file": null,
@@ -3773,7 +3762,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 343,
+    "checkpoint_index": 342,
     "checkpoint_name": "VirtioBus.Ready",
     "checkpoint_variant": "VirtioBusReady",
     "linux_file": null,
@@ -3784,7 +3773,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 344,
+    "checkpoint_index": 343,
     "checkpoint_name": "VirtioBus.DeviceAdded",
     "checkpoint_variant": "VirtioBusDeviceAdded",
     "linux_file": null,
@@ -3795,7 +3784,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 345,
+    "checkpoint_index": 344,
     "checkpoint_name": "VirtioBlk.Ready",
     "checkpoint_variant": "VirtioBlkReady",
     "linux_file": null,
@@ -3806,7 +3795,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 346,
+    "checkpoint_index": 345,
     "checkpoint_name": "VirtioBlk.ReadReady",
     "checkpoint_variant": "VirtioBlkReadReady",
     "linux_file": null,
@@ -3817,7 +3806,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 347,
+    "checkpoint_index": 346,
     "checkpoint_name": "VirtioBlk.LiveReadSubmitted",
     "checkpoint_variant": "VirtioBlkLiveReadSubmitted",
     "linux_file": null,
@@ -3828,7 +3817,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 348,
+    "checkpoint_index": 347,
     "checkpoint_name": "VirtioBlk.LiveReadCompleted",
     "checkpoint_variant": "VirtioBlkLiveReadCompleted",
     "linux_file": null,
@@ -3839,7 +3828,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 349,
+    "checkpoint_index": 348,
     "checkpoint_name": "VirtioRng.EntropyReady",
     "checkpoint_variant": "VirtioRngEntropyReady",
     "linux_file": null,
@@ -3850,7 +3839,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 350,
+    "checkpoint_index": 349,
     "checkpoint_name": "InitcallTable.Ready",
     "checkpoint_variant": "InitcallTableReady",
     "linux_file": "init/main.c",
@@ -3861,7 +3850,7 @@
     "notes": "Linux do_basic_setup() do_initcalls() call; maps the initcall levels dispatcher/table object fact, not any individual initcall entry side effect."
   },
   {
-    "checkpoint_index": 351,
+    "checkpoint_index": 350,
     "checkpoint_name": "Serial8250ConsoleBurstIrqTx.Ready",
     "checkpoint_variant": "Serial8250ConsoleBurstIrqTxReady",
     "linux_file": null,
@@ -3872,7 +3861,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 352,
+    "checkpoint_index": 351,
     "checkpoint_name": "Serial8250ConsoleLongIrqTx.Ready",
     "checkpoint_variant": "Serial8250ConsoleLongIrqTxReady",
     "linux_file": null,
@@ -3883,7 +3872,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 353,
+    "checkpoint_index": 352,
     "checkpoint_name": "TtyXmitFifoProbe.Ready",
     "checkpoint_variant": "TtyXmitFifoProbeReady",
     "linux_file": null,
@@ -3894,7 +3883,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 354,
+    "checkpoint_index": 353,
     "checkpoint_name": "TtyWriteRuntimeTx.Ready",
     "checkpoint_variant": "TtyWriteRuntimeTxReady",
     "linux_file": null,
@@ -3905,7 +3894,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 355,
+    "checkpoint_index": 354,
     "checkpoint_name": "TtyWriteBatchRuntimeTx.Ready",
     "checkpoint_variant": "TtyWriteBatchRuntimeTxReady",
     "linux_file": null,
@@ -3916,7 +3905,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 356,
+    "checkpoint_index": 355,
     "checkpoint_name": "InitcallBoundary.Ready",
     "checkpoint_variant": "InitcallBoundaryReady",
     "linux_file": "init/main.c",
@@ -3927,7 +3916,7 @@
     "notes": "Linux do_basic_setup() do_initcalls() call; marks the do_basic_setup() end boundary before kernel_init_freeable() continues to kunit_run_all_tests(), not an independent Linux object."
   },
   {
-    "checkpoint_index": 357,
+    "checkpoint_index": 356,
     "checkpoint_name": "RootfsPhase.Started",
     "checkpoint_variant": "RootfsPhaseStarted",
     "linux_file": "init/main.c",
@@ -3938,7 +3927,7 @@
     "notes": "Linux kernel_init_freeable() RootfsPhase entry at kunit_run_all_tests(); the later RamdiskExecuteCommand.EaccessCheckpoint preserves the prepare_namespace pre-boundary."
   },
   {
-    "checkpoint_index": 358,
+    "checkpoint_index": 357,
     "checkpoint_name": "RootfsPhase.Ready",
     "checkpoint_variant": "RootfsPhaseReady",
     "linux_file": "init/do_mounts.c",
@@ -3949,7 +3938,7 @@
     "notes": "Linux prepare_namespace() rootfs preparation boundary."
   },
   {
-    "checkpoint_index": 359,
+    "checkpoint_index": 358,
     "checkpoint_name": "KUnitRuntime.TrimmedReady",
     "checkpoint_variant": "KUnitRuntimeTrimmedReady",
     "linux_file": "init/main.c",
@@ -3960,7 +3949,7 @@
     "notes": "Linux kernel_init_freeable() reserves the KUnit run position; arceos_ex records the CONFIG_KUNIT=n trimmed/no-op fact at this call site."
   },
   {
-    "checkpoint_index": 360,
+    "checkpoint_index": 359,
     "checkpoint_name": "InitramfsSync.DeferredReady",
     "checkpoint_variant": "InitramfsSyncDeferredReady",
     "linux_file": "init/main.c",
@@ -3971,7 +3960,7 @@
     "notes": "Linux kernel_init_freeable() waits for initramfs unpacking; arceos_ex maps only the deferred initramfs synchronization boundary."
   },
   {
-    "checkpoint_index": 361,
+    "checkpoint_index": 360,
     "checkpoint_name": "RootfsConsole.DeferredReady",
     "checkpoint_variant": "RootfsConsoleDeferredReady",
     "linux_file": "init/main.c",
@@ -3982,7 +3971,7 @@
     "notes": "Linux kernel_init_freeable() opens /dev/console on rootfs; arceos_ex keeps the rootfs console handoff as a deferred boundary."
   },
   {
-    "checkpoint_index": 362,
+    "checkpoint_index": 361,
     "checkpoint_name": "RootfsPrepareNamespacePaths.Ready",
     "checkpoint_variant": "RootfsPrepareNamespacePathsReady",
     "linux_file": "init/do_mounts.c",
@@ -3993,7 +3982,7 @@
     "notes": "Linux prepare_namespace() path-classification interval from device-probe wait through final chroot; arceos_ex records the rootdelay/rootwait/initrd/md/NFS/CIFS/devtmpfs classifications without expanding each path."
   },
   {
-    "checkpoint_index": 363,
+    "checkpoint_index": 362,
     "checkpoint_name": "RamdiskExecuteCommand.EaccessCheckpoint",
     "checkpoint_variant": "RamdiskExecuteCommandEaccessCheckpoint",
     "linux_file": "init/main.c",
@@ -4004,7 +3993,7 @@
     "notes": "Linux kernel_init_freeable() checks ramdisk_execute_command accessibility before deciding whether to enter prepare_namespace()."
   },
   {
-    "checkpoint_index": 364,
+    "checkpoint_index": 363,
     "checkpoint_name": "RootFS.Online",
     "checkpoint_variant": "RootFSOnline",
     "linux_file": "init/do_mounts.c",
@@ -4015,7 +4004,7 @@
     "notes": "Linux prepare_namespace() completes the visible root switch at init_chroot(\".\"); arceos_ex records the RootFS object online fact at that boundary."
   },
   {
-    "checkpoint_index": 365,
+    "checkpoint_index": 364,
     "checkpoint_name": "IntegrityKeys.DeferredReady",
     "checkpoint_variant": "IntegrityKeysDeferredReady",
     "linux_file": "init/main.c",
@@ -4026,7 +4015,7 @@
     "notes": "Linux kernel_init_freeable() calls integrity_load_keys() after rootfs is available; arceos_ex keeps integrity/IMA/EVM key loading as a deferred/trimmed boundary."
   },
   {
-    "checkpoint_index": 366,
+    "checkpoint_index": 365,
     "checkpoint_name": "RootfsBoundary.Ready",
     "checkpoint_variant": "RootfsBoundaryReady",
     "linux_file": "init/main.c",
@@ -4037,7 +4026,7 @@
     "notes": "Linux kernel_init_freeable() reaches the Rootfs end boundary after integrity_load_keys(), immediately before returning to kernel_init(); this is not an independent Linux object."
   },
   {
-    "checkpoint_index": 367,
+    "checkpoint_index": 366,
     "checkpoint_name": "FinalizePhase.Started",
     "checkpoint_variant": "FinalizePhaseStarted",
     "linux_file": "init/main.c",
@@ -4048,7 +4037,7 @@
     "notes": "Linux kernel_init() begins final async/initmem cleanup after kernel_init_freeable()."
   },
   {
-    "checkpoint_index": 368,
+    "checkpoint_index": 367,
     "checkpoint_name": "FinalizePhase.Ready",
     "checkpoint_variant": "FinalizePhaseReady",
     "linux_file": "init/main.c",
@@ -4059,7 +4048,7 @@
     "notes": "Linux kernel_init() marks SYSTEM_RUNNING before payload selection."
   },
   {
-    "checkpoint_index": 369,
+    "checkpoint_index": 368,
     "checkpoint_name": "AsyncFullSync.DeferredReady",
     "checkpoint_variant": "AsyncFullSyncDeferredReady",
     "linux_file": "init/main.c",
@@ -4070,7 +4059,7 @@
     "notes": "Linux kernel_init() waits for async __init work before initmem cleanup; arceos_ex models this as a deferred finalize boundary."
   },
   {
-    "checkpoint_index": 370,
+    "checkpoint_index": 369,
     "checkpoint_name": "SystemState.FreeingInitmemCheckpoint",
     "checkpoint_variant": "SystemStateFreeingInitmemCheckpoint",
     "linux_file": "init/main.c",
@@ -4081,7 +4070,7 @@
     "notes": "Linux kernel_init() explicitly marks the system_state transition into initmem freeing."
   },
   {
-    "checkpoint_index": 371,
+    "checkpoint_index": 370,
     "checkpoint_name": "InitMemoryCleanup.DeferredReady",
     "checkpoint_variant": "InitMemoryCleanupDeferredReady",
     "linux_file": "init/main.c",
@@ -4092,7 +4081,7 @@
     "notes": "Linux kernel_init() initmem cleanup call site; arceos_ex keeps this as a deferred cleanup boundary rather than a separate Linux object."
   },
   {
-    "checkpoint_index": 372,
+    "checkpoint_index": 371,
     "checkpoint_name": "KernelMappingProtection.DeferredReady",
     "checkpoint_variant": "KernelMappingProtectionDeferredReady",
     "linux_file": "init/main.c",
@@ -4103,7 +4092,7 @@
     "notes": "Linux kernel_init() finalizes kernel mapping permissions at mark_readonly(); arceos_ex records the mapping-protection path as a deferred finalize boundary."
   },
   {
-    "checkpoint_index": 373,
+    "checkpoint_index": 372,
     "checkpoint_name": "PtiFinalize.TrimmedReady",
     "checkpoint_variant": "PtiFinalizeTrimmedReady",
     "linux_file": "init/main.c",
@@ -4114,7 +4103,7 @@
     "notes": "Linux kernel_init() calls pti_finalize() after kernel mappings are finalized; arceos_ex records the PTI path as a trimmed/no-op fact for this configuration."
   },
   {
-    "checkpoint_index": 374,
+    "checkpoint_index": 373,
     "checkpoint_name": "SystemState.Online",
     "checkpoint_variant": "SystemStateOnline",
     "linux_file": "init/main.c",
@@ -4125,7 +4114,7 @@
     "notes": "Linux kernel_init() marks SYSTEM_RUNNING after initmem cleanup and before payload/init selection."
   },
   {
-    "checkpoint_index": 375,
+    "checkpoint_index": 374,
     "checkpoint_name": "RcuCore.InkernelBootEnded",
     "checkpoint_variant": "RcuInkernelBootEnded",
     "linux_file": "init/main.c",
@@ -4136,7 +4125,7 @@
     "notes": "Linux kernel_init() calls rcu_end_inkernel_boot(); arceos_ex records the RcuCore object fact that in-kernel boot has ended without expanding full RCU GP runtime."
   },
   {
-    "checkpoint_index": 376,
+    "checkpoint_index": 375,
     "checkpoint_name": "RcuBootEnd.Ready",
     "checkpoint_variant": "RcuBootEndReady",
     "linux_file": "init/main.c",
@@ -4147,7 +4136,7 @@
     "notes": "Linux kernel_init() rcu_end_inkernel_boot() call marks the RCU boot-end boundary after SYSTEM_RUNNING; this reuses the RcuCore anchor but records the phase boundary fact."
   },
   {
-    "checkpoint_index": 377,
+    "checkpoint_index": 376,
     "checkpoint_name": "SysctlArgs.DeferredReady",
     "checkpoint_variant": "SysctlArgsDeferredReady",
     "linux_file": "init/main.c",
@@ -4158,7 +4147,7 @@
     "notes": "Linux kernel_init() processes boot-time sysctl arguments before init payload selection; arceos_ex keeps sysctl args handling as a deferred finalize boundary."
   },
   {
-    "checkpoint_index": 378,
+    "checkpoint_index": 377,
     "checkpoint_name": "FinalizeBoundary.Ready",
     "checkpoint_variant": "FinalizeBoundaryReady",
     "linux_file": null,
@@ -4169,7 +4158,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 379,
+    "checkpoint_index": 378,
     "checkpoint_name": "BreakpointException.Handled",
     "checkpoint_variant": "BreakpointExceptionHandled",
     "linux_file": null,
@@ -4180,7 +4169,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 380,
+    "checkpoint_index": 379,
     "checkpoint_name": "UserBoot.MainElfReady",
     "checkpoint_variant": "UserBootMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -4191,7 +4180,7 @@
     "notes": "Boot-time init exec view of the main ELF program-header parse; this shares the runtime UserExec.MainElfReady Linux anchor but is reached from kernel_init() via kernel_execve(), so runtime instrumentation must not emit UserExec.MainElfReady for this owner."
   },
   {
-    "checkpoint_index": 381,
+    "checkpoint_index": 380,
     "checkpoint_name": "UserBoot.InterpreterReady",
     "checkpoint_variant": "UserBootInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -4202,7 +4191,7 @@
     "notes": "Boot-time init exec view of the PT_INTERP program-header parse when an interpreter is present; the same Linux loader anchor is used by runtime UserExec, so runtime instrumentation must not emit UserExec.InterpreterReady for this owner."
   },
   {
-    "checkpoint_index": 382,
+    "checkpoint_index": 381,
     "checkpoint_name": "UserBoot.InitAttemptFailed",
     "checkpoint_variant": "UserBootInitAttemptFailed",
     "linux_file": "init/main.c",
@@ -4213,7 +4202,7 @@
     "notes": "Linux folds a default init candidate attempt, non-ENOENT diagnostic and fallback return into try_to_run_init_process(); there is no separate stage/reason checkpoint."
   },
   {
-    "checkpoint_index": 383,
+    "checkpoint_index": 382,
     "checkpoint_name": "UserBoot.AddressSpaceSetupStart",
     "checkpoint_variant": "UserBootAddressSpaceSetupStart",
     "linux_file": "fs/binfmt_elf.c",
@@ -4224,7 +4213,7 @@
     "notes": "Boot-time init exec reaches the first new-exec/address-space handoff in load_elf_binary(); Linux has no UserBoot-specific address-space object boundary, and runtime UserExec records must be guarded out for this owner."
   },
   {
-    "checkpoint_index": 384,
+    "checkpoint_index": 383,
     "checkpoint_name": "UserAppFlow.EnterUserMode",
     "checkpoint_variant": "UserAppFlowEnterUserMode",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -4235,7 +4224,7 @@
     "notes": "RISC-V ret_from_exception final sret is the architecture-scoped boot init return-to-user handoff; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid reporting every later ordinary syscall return as another UserAppFlow entry."
   },
   {
-    "checkpoint_index": 385,
+    "checkpoint_index": 384,
     "checkpoint_name": "UserAddressSpace.Ready",
     "checkpoint_variant": "UserAddressSpaceReady",
     "linux_file": "fs/exec.c",
@@ -4246,7 +4235,7 @@
     "notes": "Linux exec_mmap() installs and activates the new mm; Linux does not expose a separate UserAddressSpace object boundary."
   },
   {
-    "checkpoint_index": 386,
+    "checkpoint_index": 385,
     "checkpoint_name": "SyscallTable.ExecveArgsReady",
     "checkpoint_variant": "SyscallTableExecveArgsReady",
     "linux_file": "fs/exec.c",
@@ -4257,7 +4246,7 @@
     "notes": "Linux do_execveat_common() has copied filename, envp and argv into linux_binprm before bprm_execve()."
   },
   {
-    "checkpoint_index": 387,
+    "checkpoint_index": 386,
     "checkpoint_name": "UserExec.MainElfReady",
     "checkpoint_variant": "UserExecMainElfReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -4268,7 +4257,7 @@
     "notes": "Linux ELF loader has read the runtime exec main executable program headers; instrumentation must guard this shared load_elf_binary() anchor so kernel_execve() boot init records only UserBoot.MainElfReady."
   },
   {
-    "checkpoint_index": 388,
+    "checkpoint_index": 387,
     "checkpoint_name": "UserExec.InterpreterReady",
     "checkpoint_variant": "UserExecInterpreterReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -4279,7 +4268,7 @@
     "notes": "Linux PT_INTERP path has opened and parsed the runtime exec interpreter ELF program headers when an interpreter is present; instrumentation must guard this shared load_elf_binary() anchor so kernel_execve() boot init records only UserBoot.InterpreterReady."
   },
   {
-    "checkpoint_index": 389,
+    "checkpoint_index": 388,
     "checkpoint_name": "UserExec.AddressSpaceReady",
     "checkpoint_variant": "UserExecAddressSpaceReady",
     "linux_file": "fs/binfmt_elf.c",
@@ -4290,7 +4279,7 @@
     "notes": "Linux load_elf_binary() stack setup, PT_LOAD mapping, interpreter load, ELF tables and mm layout interval."
   },
   {
-    "checkpoint_index": 390,
+    "checkpoint_index": 389,
     "checkpoint_name": "UserExec.TrapFrameReady",
     "checkpoint_variant": "UserExecTrapFrameReady",
     "linux_file": "arch/riscv/kernel/process.c",
@@ -4301,7 +4290,7 @@
     "notes": "RISC-V start_thread() installs the user entry PC and stack in pt_regs for runtime exec return; instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
-    "checkpoint_index": 391,
+    "checkpoint_index": 390,
     "checkpoint_name": "UserExec.SatpReady",
     "checkpoint_variant": "UserExecSatpReady",
     "linux_file": "fs/exec.c",
@@ -4312,7 +4301,7 @@
     "notes": "Linux exec_mmap() installs and activates the runtime exec mm; Linux has no separate arceos_ex satp token boundary, and instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
-    "checkpoint_index": 392,
+    "checkpoint_index": 391,
     "checkpoint_name": "UserExec.ContextReplaced",
     "checkpoint_variant": "UserExecContextReplaced",
     "linux_file": "fs/exec.c",
@@ -4323,7 +4312,7 @@
     "notes": "Linux begin_new_exec() crosses the runtime exec point-of-no-return and hands the nascent exec mm to exec_mmap(); instrumentation must guard against boot init kernel_execve() ownership."
   },
   {
-    "checkpoint_index": 393,
+    "checkpoint_index": 392,
     "checkpoint_name": "UserExec.SatpSwitched",
     "checkpoint_variant": "UserExecSatpSwitched",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -4334,7 +4323,7 @@
     "notes": "RISC-V return-to-user path restores trap CSRs before sret; runtime instrumentation must guard on saved SR_SPP == 0, record before restoring temporary registers and avoid treating every ordinary syscall return as a UserExec return."
   },
   {
-    "checkpoint_index": 394,
+    "checkpoint_index": 393,
     "checkpoint_name": "UserExec.ReturnFrameReady",
     "checkpoint_variant": "UserExecReturnFrameReady",
     "linux_file": "arch/riscv/kernel/entry.S",
@@ -4345,7 +4334,7 @@
     "notes": "RISC-V ret_from_exception reaches the final sret return-to-user boundary; runtime instrumentation must guard on saved SR_SPP == 0, record before the final general-register restore and avoid treating every ordinary syscall return as a UserExec return."
   },
   {
-    "checkpoint_index": 395,
+    "checkpoint_index": 394,
     "checkpoint_name": "SyscallTable.OpenAt",
     "checkpoint_variant": "SyscallTableOpenAt",
     "linux_file": "fs/open.c",
@@ -4356,7 +4345,7 @@
     "notes": "Linux openat syscall wrapper dispatches to do_sys_open()."
   },
   {
-    "checkpoint_index": 396,
+    "checkpoint_index": 395,
     "checkpoint_name": "SyscallTable.Read",
     "checkpoint_variant": "SyscallTableRead",
     "linux_file": "fs/read_write.c",
@@ -4367,7 +4356,7 @@
     "notes": "Linux read syscall wrapper dispatches to ksys_read()."
   },
   {
-    "checkpoint_index": 397,
+    "checkpoint_index": 396,
     "checkpoint_name": "SyscallTable.Write",
     "checkpoint_variant": "SyscallTableWrite",
     "linux_file": "fs/read_write.c",
@@ -4378,7 +4367,7 @@
     "notes": "Linux write syscall wrapper dispatches to ksys_write()."
   },
   {
-    "checkpoint_index": 398,
+    "checkpoint_index": 397,
     "checkpoint_name": "SyscallTable.Writev",
     "checkpoint_variant": "SyscallTableWritev",
     "linux_file": "fs/read_write.c",
@@ -4389,7 +4378,7 @@
     "notes": "Linux writev syscall wrapper dispatches to do_writev()."
   },
   {
-    "checkpoint_index": 399,
+    "checkpoint_index": 398,
     "checkpoint_name": "SyscallTable.Close",
     "checkpoint_variant": "SyscallTableClose",
     "linux_file": "fs/open.c",
@@ -4400,7 +4389,7 @@
     "notes": "Linux close syscall wrapper removes the fd entry before flushing and fput handling."
   },
   {
-    "checkpoint_index": 400,
+    "checkpoint_index": 399,
     "checkpoint_name": "SyscallTable.NewFstatAt",
     "checkpoint_variant": "SyscallTableNewFstatAt",
     "linux_file": "fs/stat.c",
@@ -4411,7 +4400,7 @@
     "notes": "Linux newfstatat syscall wrapper dispatches to vfs_fstatat() before stat copyout."
   },
   {
-    "checkpoint_index": 401,
+    "checkpoint_index": 400,
     "checkpoint_name": "SyscallTable.SetTidAddress",
     "checkpoint_variant": "SyscallTableSetTidAddress",
     "linux_file": "kernel/fork.c",
@@ -4422,7 +4411,7 @@
     "notes": "Linux set_tid_address syscall wrapper records current->clear_child_tid and returns task_pid_vnr()."
   },
   {
-    "checkpoint_index": 402,
+    "checkpoint_index": 401,
     "checkpoint_name": "SyscallTable.Clone",
     "checkpoint_variant": "SyscallTableClone",
     "linux_file": "kernel/fork.c",
@@ -4433,7 +4422,7 @@
     "notes": "Mapped to shared kernel_clone() because the legacy clone syscall ABI wrapper is arch/config conditional on CONFIG_CLONE_BACKWARDS variants."
   },
   {
-    "checkpoint_index": 403,
+    "checkpoint_index": 402,
     "checkpoint_name": "SyscallTable.CloneVforkVm",
     "checkpoint_variant": "SyscallTableCloneVforkVm",
     "linux_file": null,
@@ -4444,7 +4433,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 404,
+    "checkpoint_index": 403,
     "checkpoint_name": "SyscallTable.CloneVforkPidfd",
     "checkpoint_variant": "SyscallTableCloneVforkPidfd",
     "linux_file": null,
@@ -4455,7 +4444,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 405,
+    "checkpoint_index": 404,
     "checkpoint_name": "FilesStruct.PidfdInstall",
     "checkpoint_variant": "FilesStructPidfdInstall",
     "linux_file": null,
@@ -4466,7 +4455,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 406,
+    "checkpoint_index": 405,
     "checkpoint_name": "UserClone.VforkChildHandoff",
     "checkpoint_variant": "UserCloneVforkChildHandoff",
     "linux_file": null,
@@ -4477,7 +4466,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 407,
+    "checkpoint_index": 406,
     "checkpoint_name": "UserClone.VforkNextChildAccepted",
     "checkpoint_variant": "UserCloneVforkNextChildAccepted",
     "linux_file": null,
@@ -4488,7 +4477,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 408,
+    "checkpoint_index": 407,
     "checkpoint_name": "SyscallTable.RtSigtimedwait",
     "checkpoint_variant": "SyscallTableRtSigtimedwait",
     "linux_file": null,
@@ -4499,7 +4488,7 @@
     "notes": "Linux anchor for kernel/signal.c::SYSCALL_DEFINE4(rt_sigtimedwait) was not found."
   },
   {
-    "checkpoint_index": 409,
+    "checkpoint_index": 408,
     "checkpoint_name": "UserSignalWait.Sleep",
     "checkpoint_variant": "UserSignalWaitSleep",
     "linux_file": null,
@@ -4510,7 +4499,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 410,
+    "checkpoint_index": 409,
     "checkpoint_name": "UserSignalWait.WakeSigchld",
     "checkpoint_variant": "UserSignalWaitWakeSigchld",
     "linux_file": null,
@@ -4521,7 +4510,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 411,
+    "checkpoint_index": 410,
     "checkpoint_name": "UserPidfd.Ready",
     "checkpoint_variant": "UserPidfdReady",
     "linux_file": null,
@@ -4532,7 +4521,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 412,
+    "checkpoint_index": 411,
     "checkpoint_name": "SyscallTable.RtSigtimedwaitReturnSignal",
     "checkpoint_variant": "SyscallTableRtSigtimedwaitReturnSignal",
     "linux_file": null,
@@ -4543,7 +4532,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 413,
+    "checkpoint_index": 412,
     "checkpoint_name": "SyscallTable.Wait4",
     "checkpoint_variant": "SyscallTableWait4",
     "linux_file": "kernel/exit.c",
@@ -4554,7 +4543,7 @@
     "notes": "Linux wait4 syscall wrapper dispatches to kernel_wait4()."
   },
   {
-    "checkpoint_index": 414,
+    "checkpoint_index": 413,
     "checkpoint_name": "UserChild.ParentWaitResumed",
     "checkpoint_variant": "UserChildParentWaitResumed",
     "linux_file": "kernel/exit.c",
@@ -4565,7 +4554,7 @@
     "notes": "Linux kernel_wait4() wait completion and status copyout boundary before returning the child pid to the parent."
   },
   {
-    "checkpoint_index": 415,
+    "checkpoint_index": 414,
     "checkpoint_name": "UserClone.VforkParentResumed",
     "checkpoint_variant": "UserCloneVforkParentResumed",
     "linux_file": null,
@@ -4576,7 +4565,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 416,
+    "checkpoint_index": 415,
     "checkpoint_name": "UserChildRecord.Archived",
     "checkpoint_variant": "UserChildRecordArchived",
     "linux_file": null,
@@ -4587,7 +4576,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 417,
+    "checkpoint_index": 416,
     "checkpoint_name": "UserTaskRecord.Released",
     "checkpoint_variant": "UserTaskRecordReleased",
     "linux_file": null,
@@ -4598,7 +4587,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 418,
+    "checkpoint_index": 417,
     "checkpoint_name": "UserChildRecord.Reaped",
     "checkpoint_variant": "UserChildRecordReaped",
     "linux_file": null,
@@ -4609,7 +4598,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 419,
+    "checkpoint_index": 418,
     "checkpoint_name": "SyscallTable.Exit",
     "checkpoint_variant": "SyscallTableExit",
     "linux_file": "kernel/exit.c",
@@ -4620,7 +4609,7 @@
     "notes": "Checkpoint covers the first slice of exit/exit_group; this anchor is the shared exit_group path while plain sys_exit reaches adjacent do_exit()."
   },
   {
-    "checkpoint_index": 420,
+    "checkpoint_index": 419,
     "checkpoint_name": "EntrySuccessorPhase.Prepared",
     "checkpoint_variant": "EntrySuccessorPhasePrepared",
     "linux_file": null,
@@ -4631,7 +4620,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 421,
+    "checkpoint_index": 420,
     "checkpoint_name": "CorePreparePhase.Prepared",
     "checkpoint_variant": "CorePreparePhasePrepared",
     "linux_file": null,
@@ -4642,7 +4631,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 422,
+    "checkpoint_index": 421,
     "checkpoint_name": "MmCoreInitPhase.Prepared",
     "checkpoint_variant": "MmCoreInitPhasePrepared",
     "linux_file": null,
@@ -4653,7 +4642,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 423,
+    "checkpoint_index": 422,
     "checkpoint_name": "SchedInitPhase.Prepared",
     "checkpoint_variant": "SchedInitPhasePrepared",
     "linux_file": null,
@@ -4664,7 +4653,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 424,
+    "checkpoint_index": 423,
     "checkpoint_name": "IrqTimeInitPhase.Prepared",
     "checkpoint_variant": "IrqTimeInitPhasePrepared",
     "linux_file": null,
@@ -4675,7 +4664,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 425,
+    "checkpoint_index": 424,
     "checkpoint_name": "LocalIrqEnablePhase.Prepared",
     "checkpoint_variant": "LocalIrqEnablePhasePrepared",
     "linux_file": null,
@@ -4686,7 +4675,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 426,
+    "checkpoint_index": 425,
     "checkpoint_name": "LocalIrqEnablePhase.Online",
     "checkpoint_variant": "LocalIrqEnablePhaseOnline",
     "linux_file": null,
@@ -4697,7 +4686,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 427,
+    "checkpoint_index": 426,
     "checkpoint_name": "IrqOpenPreparePhase.Prepared",
     "checkpoint_variant": "IrqOpenPreparePhasePrepared",
     "linux_file": null,
@@ -4708,7 +4697,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 428,
+    "checkpoint_index": 427,
     "checkpoint_name": "IrqOpenPreparePhase.Online",
     "checkpoint_variant": "IrqOpenPreparePhaseOnline",
     "linux_file": null,
@@ -4719,7 +4708,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 429,
+    "checkpoint_index": 428,
     "checkpoint_name": "ProcessPreparePhase.Prepared",
     "checkpoint_variant": "ProcessPreparePhasePrepared",
     "linux_file": null,
@@ -4730,7 +4719,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 430,
+    "checkpoint_index": 429,
     "checkpoint_name": "ProcessPreparePhase.Online",
     "checkpoint_variant": "ProcessPreparePhaseOnline",
     "linux_file": null,
@@ -4741,7 +4730,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 431,
+    "checkpoint_index": 430,
     "checkpoint_name": "BootInitFlow.Online",
     "checkpoint_variant": "BootInitFlowOnline",
     "linux_file": null,
@@ -4752,7 +4741,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 432,
+    "checkpoint_index": 431,
     "checkpoint_name": "BootInitRestInitPhase.Started",
     "checkpoint_variant": "BootInitRestInitPhaseStarted",
     "linux_file": null,
@@ -4763,7 +4752,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 433,
+    "checkpoint_index": 432,
     "checkpoint_name": "BootInitRestInitPhase.Prepared",
     "checkpoint_variant": "BootInitRestInitPhasePrepared",
     "linux_file": null,
@@ -4774,7 +4763,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 434,
+    "checkpoint_index": 433,
     "checkpoint_name": "BootInitRestInitPhase.Online",
     "checkpoint_variant": "BootInitRestInitPhaseOnline",
     "linux_file": null,
@@ -4785,7 +4774,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 435,
+    "checkpoint_index": 434,
     "checkpoint_name": "BootInitScheduleHandoffPhase.Started",
     "checkpoint_variant": "BootInitScheduleHandoffPhaseStarted",
     "linux_file": null,
@@ -4796,7 +4785,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 436,
+    "checkpoint_index": 435,
     "checkpoint_name": "BootInitScheduleHandoffPhase.Prepared",
     "checkpoint_variant": "BootInitScheduleHandoffPhasePrepared",
     "linux_file": null,
@@ -4807,7 +4796,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 437,
+    "checkpoint_index": 436,
     "checkpoint_name": "BootInitScheduleHandoffPhase.Online",
     "checkpoint_variant": "BootInitScheduleHandoffPhaseOnline",
     "linux_file": null,
@@ -4818,7 +4807,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 438,
+    "checkpoint_index": 437,
     "checkpoint_name": "BootIdleEntryPhase.Started",
     "checkpoint_variant": "BootIdleEntryPhaseStarted",
     "linux_file": null,
@@ -4829,7 +4818,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 439,
+    "checkpoint_index": 438,
     "checkpoint_name": "BootIdleEntryPhase.Prepared",
     "checkpoint_variant": "BootIdleEntryPhasePrepared",
     "linux_file": null,
@@ -4840,7 +4829,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 440,
+    "checkpoint_index": 439,
     "checkpoint_name": "BootIdleEntryPhase.Online",
     "checkpoint_variant": "BootIdleEntryPhaseOnline",
     "linux_file": null,
@@ -4851,7 +4840,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 441,
+    "checkpoint_index": 440,
     "checkpoint_name": "PreSmpInitPhase.Prepared",
     "checkpoint_variant": "PreSmpInitPhasePrepared",
     "linux_file": null,
@@ -4862,7 +4851,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 442,
+    "checkpoint_index": 441,
     "checkpoint_name": "PreSmpInitPhase.Online",
     "checkpoint_variant": "PreSmpInitPhaseOnline",
     "linux_file": null,
@@ -4873,7 +4862,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 443,
+    "checkpoint_index": 442,
     "checkpoint_name": "SmpBringupPhase.Prepared",
     "checkpoint_variant": "SmpBringupPhasePrepared",
     "linux_file": null,
@@ -4884,7 +4873,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 444,
+    "checkpoint_index": 443,
     "checkpoint_name": "SmpBringupPhase.Online",
     "checkpoint_variant": "SmpBringupPhaseOnline",
     "linux_file": null,
@@ -4895,7 +4884,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 445,
+    "checkpoint_index": 444,
     "checkpoint_name": "RuntimeCorePhase.Prepared",
     "checkpoint_variant": "RuntimeCorePhasePrepared",
     "linux_file": null,
@@ -4906,7 +4895,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 446,
+    "checkpoint_index": 445,
     "checkpoint_name": "RuntimeCorePhase.Online",
     "checkpoint_variant": "RuntimeCorePhaseOnline",
     "linux_file": null,
@@ -4917,7 +4906,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 447,
+    "checkpoint_index": 446,
     "checkpoint_name": "InitcallPhase.Prepared",
     "checkpoint_variant": "InitcallPhasePrepared",
     "linux_file": null,
@@ -4928,7 +4917,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 448,
+    "checkpoint_index": 447,
     "checkpoint_name": "InitcallPhase.Online",
     "checkpoint_variant": "InitcallPhaseOnline",
     "linux_file": null,
@@ -4939,7 +4928,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 449,
+    "checkpoint_index": 448,
     "checkpoint_name": "RootfsPhase.Prepared",
     "checkpoint_variant": "RootfsPhasePrepared",
     "linux_file": null,
@@ -4950,7 +4939,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 450,
+    "checkpoint_index": 449,
     "checkpoint_name": "RootfsPhase.Online",
     "checkpoint_variant": "RootfsPhaseOnline",
     "linux_file": null,
@@ -4961,7 +4950,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 451,
+    "checkpoint_index": 450,
     "checkpoint_name": "FinalizePhase.Prepared",
     "checkpoint_variant": "FinalizePhasePrepared",
     "linux_file": null,
@@ -4972,7 +4961,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 452,
+    "checkpoint_index": 451,
     "checkpoint_name": "FinalizePhase.Online",
     "checkpoint_variant": "FinalizePhaseOnline",
     "linux_file": null,
@@ -4983,7 +4972,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 453,
+    "checkpoint_index": 452,
     "checkpoint_name": "ApEntryPreludePhase.Prepared",
     "checkpoint_variant": "ApEntryPreludePhasePrepared",
     "linux_file": null,
@@ -4994,7 +4983,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 454,
+    "checkpoint_index": 453,
     "checkpoint_name": "ApEntryPreludePhase.Online",
     "checkpoint_variant": "ApEntryPreludePhaseOnline",
     "linux_file": null,
@@ -5005,7 +4994,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 455,
+    "checkpoint_index": 454,
     "checkpoint_name": "ApSmpCallinPhase.Prepared",
     "checkpoint_variant": "ApSmpCallinPhasePrepared",
     "linux_file": null,
@@ -5016,7 +5005,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 456,
+    "checkpoint_index": 455,
     "checkpoint_name": "ApSmpCallinPhase.Online",
     "checkpoint_variant": "ApSmpCallinPhaseOnline",
     "linux_file": null,
@@ -5027,7 +5016,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 457,
+    "checkpoint_index": 456,
     "checkpoint_name": "ApOnlineIdlePhase.Prepared",
     "checkpoint_variant": "ApOnlineIdlePhasePrepared",
     "linux_file": null,
@@ -5038,7 +5027,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 458,
+    "checkpoint_index": 457,
     "checkpoint_name": "ApOnlineIdlePhase.Online",
     "checkpoint_variant": "ApOnlineIdlePhaseOnline",
     "linux_file": null,
@@ -5049,7 +5038,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 459,
+    "checkpoint_index": 458,
     "checkpoint_name": "PayloadPreparePhase.Started",
     "checkpoint_variant": "PayloadPreparePhaseStarted",
     "linux_file": null,
@@ -5060,7 +5049,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 460,
+    "checkpoint_index": 459,
     "checkpoint_name": "PayloadPreparePhase.Prepared",
     "checkpoint_variant": "PayloadPreparePhasePrepared",
     "linux_file": null,
@@ -5071,7 +5060,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 461,
+    "checkpoint_index": 460,
     "checkpoint_name": "PayloadPreparePhase.Ready",
     "checkpoint_variant": "PayloadPreparePhaseReady",
     "linux_file": null,
@@ -5082,7 +5071,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 462,
+    "checkpoint_index": 461,
     "checkpoint_name": "PayloadPreparePhase.Online",
     "checkpoint_variant": "PayloadPreparePhaseOnline",
     "linux_file": "init/main.c",
@@ -5093,7 +5082,7 @@
     "notes": "Linux kernel_init() reaches the post-finalize payload preparation boundary."
   },
   {
-    "checkpoint_index": 463,
+    "checkpoint_index": 462,
     "checkpoint_name": "PayloadHandoffPreparePhase.Started",
     "checkpoint_variant": "PayloadHandoffPreparePhaseStarted",
     "linux_file": null,
@@ -5104,7 +5093,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 464,
+    "checkpoint_index": 463,
     "checkpoint_name": "PayloadHandoffPreparePhase.Prepared",
     "checkpoint_variant": "PayloadHandoffPreparePhasePrepared",
     "linux_file": null,
@@ -5115,7 +5104,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 465,
+    "checkpoint_index": 464,
     "checkpoint_name": "PayloadHandoffPreparePhase.Ready",
     "checkpoint_variant": "PayloadHandoffPreparePhaseReady",
     "linux_file": null,
@@ -5126,7 +5115,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 466,
+    "checkpoint_index": 465,
     "checkpoint_name": "PayloadHandoffPreparePhase.Online",
     "checkpoint_variant": "PayloadHandoffPreparePhaseOnline",
     "linux_file": null,
@@ -5137,7 +5126,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 467,
+    "checkpoint_index": 466,
     "checkpoint_name": "KernelInitFlow.PayloadHandoffCommitted",
     "checkpoint_variant": "KernelInitFlowPayloadHandoffCommitted",
     "linux_file": "init/main.c",
@@ -5148,7 +5137,7 @@
     "notes": "Linux run_init_process() is the stable shared init handoff anchor; runtime instrumentation passes the kernel_execve() result through a recorder that emits the KernelInitFlow payload-handoff commit boundary only on success. The shared path covers ramdisk, requested, configured-default, and fallback init variants without recording failed candidates."
   },
   {
-    "checkpoint_index": 468,
+    "checkpoint_index": 467,
     "checkpoint_name": "UserStack.GrowComplete",
     "checkpoint_variant": "UserStackGrowComplete",
     "linux_file": null,
@@ -5159,7 +5148,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 469,
+    "checkpoint_index": 468,
     "checkpoint_name": "UserStack.GrowRejected",
     "checkpoint_variant": "UserStackGrowRejected",
     "linux_file": null,
@@ -5170,7 +5159,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 470,
+    "checkpoint_index": 469,
     "checkpoint_name": "KernelInitFlow.Offline",
     "checkpoint_variant": "KernelInitFlowOffline",
     "linux_file": null,
@@ -5181,7 +5170,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 471,
+    "checkpoint_index": 470,
     "checkpoint_name": "KernelInitFlow.Destroyed",
     "checkpoint_variant": "KernelInitFlowDestroyed",
     "linux_file": null,
@@ -5192,7 +5181,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 472,
+    "checkpoint_index": 471,
     "checkpoint_name": "UserAppFlow.Prepared",
     "checkpoint_variant": "UserAppFlowPrepared",
     "linux_file": null,
@@ -5203,7 +5192,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 473,
+    "checkpoint_index": 472,
     "checkpoint_name": "UserAppFlow.Ready",
     "checkpoint_variant": "UserAppFlowReady",
     "linux_file": null,
@@ -5214,7 +5203,7 @@
     "notes": "No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass."
   },
   {
-    "checkpoint_index": 474,
+    "checkpoint_index": 473,
     "checkpoint_name": "UserAppFlow.Online",
     "checkpoint_variant": "UserAppFlowOnline",
     "linux_file": null,

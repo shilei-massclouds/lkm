@@ -61,11 +61,18 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 ## 当前任务引用
 
-模型层的 `CurrentTaskRef` 是 CPU 视角下只属于本 CPU 的 current-task 引用，不是全局 current task，也不要求用 per-cpu 术语描述其本体。RISC-V64 实现 SHOULD 参考 Linux 的方式，用本 CPU `tp` 寄存器承载 current-task 视图；`CurrentTaskSlot` 是实现层的 current-task 槽位边界，在 RISC-V64 后端 SHOULD 以 `tp` 作为底层承载或快速入口。`switch_to` 完成后必须更新或保持 `tp` 指向 next/current task，并向对象层提交对应的 `task_ref_loaded_into_current_cpu(next_ref, current_cpu)` 事实。`tp` 是该事实在 RISC-V64 上的推荐实现承载，不是模型层谓词名。
+模型层的 `CurrentTask` 是 effective TaskFlow parent 选择器，`CurrentTaskRef` 是其 generation-checked
+类型化引用；两者都没有槽、lifecycle 或 snapshot state。RISC-V64 lowering 参考 Linux，用本 hart 的
+`tp` 承载当前 Task 的稳定实现身份。内核入口、AP HSM entry、真实及模拟调度提交都必须在任何 Rust
+Context、scheduler 或 CurrentTask 路径前建立正确的 `tp`；identity switch 保持原值，普通/terminal
+switch 在 next 栈 finish 前指向 next Task。集中解析器必须把该地址验证为 canonical Task/TaskRef，
+未知地址、错误 storage class 或 stale generation 都显式失败，不回退到 BootTask、runqueue curr 或缓存。
 
 Linux 6.12 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 
-per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把“通过 per-cpu 访问”误写成 `CurrentTaskRef` 的模型定义。BP 的 current-task slot 位于 `CpuGroup.cpus[0]`；AP 路径进入后由其 effective Flow 的 CpuRef 选择自己的 CPU-local slot。
+per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把它变成 CurrentTask 定义或权威副本。
+Linux PLIC shim 对 `tp` 的临时占用只属于 foreign ABI；正常、错误和嵌套返回路径都必须恢复调用前的
+真实 task `tp`，且在恢复前不得进入 Rust Context、调度或 CurrentTask 解析。
 
 ## 地址空间与页表
 
@@ -242,12 +249,20 @@ The minimum acceptable implementation order is:
 
 Rule ID: `riscv64_should_current_task_ref_follow_linux_tp` (SHOULD).
 
-RISC-V64 code should realize the model's CPU-local CurrentTaskRef by
+RISC-V64 code should realize CurrentTask's stable implementation identity by
 following the Linux-style use of the tp register as the current-task
-view. The object-level CurrentTaskSlot is the implementation
-boundary; on RISC-V64 its backend should use tp as the carrier or
-fast entry for the current task pointer. This follows Linux 6.12
+view. There is no object-level current-task slot; the implementation
+boundary is a centralized, generation-checking tp-to-TaskRef resolver.
+This follows Linux 6.12
 arch/riscv/kernel/entry.S::__switch_to, which moves next
 task_struct from a1 into tp. This is an implementation reference for
-this target; the model semantics remain CPU-view based and do not
-require per-cpu storage as the CurrentTaskRef abstraction.
+this target; the model semantics remain Flow-scoped and contain no
+register or per-cpu storage definition.
+
+For a user-origin trap, the architecture entry context at the safe kernel
+stack boundary must preserve user `tp`, establish the receiving Task pointer
+in kernel `tp` before calling any Rust event/CurrentTask path, and restore the
+saved user `tp` only in the final return epilogue. The epilogue must publish
+the post-dispatch kernel `tp` back to that entry context before restoring user
+state; this makes terminal and non-terminal dispatch select the Task committed
+by the scheduler rather than the Task that originally trapped.

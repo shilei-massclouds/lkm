@@ -35,8 +35,9 @@ This file is the testing authority for CPU ownership, references and the
 
 - Kernel-environment smoke observes the production CpuGroup in Context and
   proves CPU0/AP roles, set membership, topology uniqueness, valid CpuRefs and
-  the absence of a second boot/current CPU store. CurrentTaskSlot remains a
-  child of CPU0 for this round.
+  the absence of a second boot/current CPU or current-task store. `current_cpu()`
+  must derive the effective Flow through CurrentTask, dereference that Flow's
+  CpuRef and reject any Task/Flow/CPU disagreement.
 - Focused tool tests cover indexed publication/rollback and selector isolation;
   scheduler and user-flow smoke cover migration and handoff. The final gate
   after implementation changes is the direct repository-root `make test`.

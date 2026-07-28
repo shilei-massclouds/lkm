@@ -9,8 +9,9 @@ use crate::{
     objects::{
         event_stream::{
             KERNEL_TRAP_OVERFLOW_STACK_SIZE, KERNEL_TRAP_THREAD_SHIFT, TRAP_FRAME_SIZE,
-            TrapEntryOrigin, TrapFrame, formal_trap_entry_prelude, kernel_trap_frame_overflows,
-            kernel_trap_overflow_stack_base, kernel_trap_overflow_stack_top,
+            TrapEntryOrigin, TrapFrame, USER_TRAP_ENTRY_CONTEXT_SIZE, formal_trap_entry_prelude,
+            kernel_trap_frame_overflows, kernel_trap_overflow_stack_base,
+            kernel_trap_overflow_stack_top,
         },
         files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
         process_prepare::TaskCopyUserProcessInputs,
@@ -1806,7 +1807,8 @@ fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
 
     let kernel_entry = formal_trap_entry_prelude(lowest_legal_sp, 0);
     let kernel_overflow_entry = formal_trap_entry_prelude(first_guard_sp, 0);
-    let user_entry = formal_trap_entry_prelude(first_guard_sp, stack_top);
+    let user_entry_context = stack_top - USER_TRAP_ENTRY_CONTEXT_SIZE;
+    let user_entry = formal_trap_entry_prelude(first_guard_sp, user_entry_context);
     assertions.assert(
         "kernel trap prelude restores sp and sscratch",
         kernel_entry.origin == TrapEntryOrigin::Kernel
@@ -1824,7 +1826,7 @@ fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
         "user trap prelude bypasses overflow bit test",
         kernel_trap_frame_overflows(first_guard_sp)
             && user_entry.origin == TrapEntryOrigin::User
-            && user_entry.stack_pointer == stack_top
+            && user_entry.stack_pointer == user_entry_context
             && user_entry.scratch == first_guard_sp
             && !user_entry.early_check_performed
             && !user_entry.overflow,
@@ -2490,6 +2492,10 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
 
     let restored_parent_frame = {
         let ctx = context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            assertions.assert("builtin grandchild CurrentTask resolves before exit", false);
+            return;
+        };
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -2511,10 +2517,11 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             return;
         }
         if ctx
-            .replace_current_user_task(
+            .replace_terminal_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 parent_pid,
+                exiting_task,
             )
             .is_err()
         {
@@ -2692,8 +2699,12 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             && context().user_task_set.pid1_plain_fork_child_continuation(),
     );
 
-    let (outer_parent_frame, outer_exit_pid) = {
+    let (outer_parent_frame, outer_exit_pid, exiting_task) = {
         let ctx = context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            assertions.assert("plain child CurrentTask resolves before exit", false);
+            return;
+        };
         let Some((parent_frame, _, child_pid)) = ctx.user_task_set.child_exit_to_parent_wait(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
@@ -2704,7 +2715,7 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
             assertions.assert("pid1 plain child exits to outer parent", false);
             return;
         };
-        (parent_frame, child_pid)
+        (parent_frame, child_pid, exiting_task)
     };
     {
         let ctx = context();
@@ -2728,7 +2739,9 @@ fn exercise_pid1_plain_fork_builtin_grandchild(assertions: &mut SmokeAssertions)
                 .user_task_set
                 .restore_parent_fd_snapshot(&mut ctx.files_struct)
             || !ctx.user_task_set.mark_parent_wait_resumed(true)
-            || ctx.commit_kernel_init_dispatch().is_err()
+            || ctx
+                .commit_terminal_kernel_init_dispatch(exiting_task)
+                .is_err()
             || ctx
                 .scheduler
                 .dequeue_user_child_from_runqueue(
@@ -2832,6 +2845,13 @@ fn exercise_builtin_grandchild_wait4_exec(
     );
     let wait_parent_frame = {
         let ctx = context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            assertions.assert(
+                "builtin grandchild wait4 CurrentTask resolves before exit",
+                false,
+            );
+            return false;
+        };
         let Some((parent_frame, _, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -2853,10 +2873,11 @@ fn exercise_builtin_grandchild_wait4_exec(
             return false;
         }
         if ctx
-            .replace_current_user_task(
+            .replace_terminal_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 parent_pid,
+                exiting_task,
             )
             .is_err()
         {
@@ -3036,8 +3057,9 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
         ctx.commit_user_dispatch(child_task).ok()?;
     }
 
-    let child_pid = {
+    let (child_pid, exiting_task) = {
         let ctx = context();
+        let exiting_task = ctx.current_task().ok()?;
         let (_parent_frame, child_pid) = ctx.user_task_set.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
@@ -3045,12 +3067,15 @@ fn archive_completed_vfork_child(index: usize) -> Option<usize> {
             &ctx.page_metadata_map,
             index,
         )?;
-        child_pid
+        (child_pid, exiting_task)
     };
 
     {
         let ctx = context();
-        if ctx.commit_kernel_init_dispatch().is_err() {
+        if ctx
+            .commit_terminal_kernel_init_dispatch(exiting_task)
+            .is_err()
+        {
             return None;
         }
         if !ctx
@@ -3379,6 +3404,10 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
 
     let (parent_frame, exit_child_pid, exit_parent_pid) = {
         let ctx = context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            assertions.assert("observed child CurrentTask resolves before exit", false);
+            return;
+        };
         let Some((parent_frame, _status_ptr, exit_child_pid, exit_parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -3396,10 +3425,11 @@ fn exercise_observed_child_plain_fork(assertions: &mut SmokeAssertions) {
             return;
         };
         if ctx
-            .replace_current_user_task(
+            .replace_terminal_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 exit_parent_pid,
+                exiting_task,
             )
             .is_err()
         {

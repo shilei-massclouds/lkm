@@ -68,6 +68,9 @@ static LINUX_PLIC_RUNTIME_DISPATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_COMPLETE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_SAVED_RUST_TP: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_TP_NORMAL_RETURN_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_TP_NESTED_RETURN_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_TP_ERROR_RETURN_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_RUNTIME_SOURCE_CLAIM_COUNTS: [AtomicUsize; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
@@ -346,6 +349,9 @@ pub struct LinuxPlicBoundaryFacts {
     pub unmapped_irq_last_source: u32,
     pub unmapped_irq_last_errno: usize,
     pub unmapped_irq_exercise_successes: usize,
+    pub tp_normal_return_successes: usize,
+    pub tp_nested_return_successes: usize,
+    pub tp_error_return_successes: usize,
     pub ratelimit_deferred_count: usize,
     pub chip_enable_count: usize,
     pub chip_disable_count: usize,
@@ -682,6 +688,9 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         unmapped_irq_last_errno: LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.load(Ordering::Acquire),
         unmapped_irq_exercise_successes: LINUX_PLIC_UNMAPPED_IRQ_EXERCISE_SUCCESSES
             .load(Ordering::Acquire),
+        tp_normal_return_successes: LINUX_PLIC_TP_NORMAL_RETURN_SUCCESSES.load(Ordering::Acquire),
+        tp_nested_return_successes: LINUX_PLIC_TP_NESTED_RETURN_SUCCESSES.load(Ordering::Acquire),
+        tp_error_return_successes: LINUX_PLIC_TP_ERROR_RETURN_SUCCESSES.load(Ordering::Acquire),
         ratelimit_deferred_count: LINUX_PLIC_RATELIMIT_DEFERRED_COUNT.load(Ordering::Acquire),
         chip_enable_count: LINUX_PLIC_CHIP_ENABLE_COUNT.load(Ordering::Acquire),
         chip_disable_count: LINUX_PLIC_CHIP_DISABLE_COUNT.load(Ordering::Acquire),
@@ -960,11 +969,9 @@ fn linux_plic_alloc(size: usize, align: usize) -> *mut c_void {
 unsafe fn call_linux_platform_probe(probe: LinuxPlatformProbe, pdev: *mut c_void) -> i32 {
     prepare_linux_thread_info();
     let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
-    let saved_tp = current_rust_tp_for_linux_call();
-    remember_rust_tp(saved_tp);
-    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    let entry_tp = enter_linux_tp_boundary();
     let ret = unsafe { probe(pdev) };
-    crate::arch::riscv64::csr::write_tp(saved_tp);
+    leave_linux_tp_boundary(entry_tp);
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     ret
 }
@@ -975,11 +982,9 @@ unsafe fn call_linux_chained_irq_handler(
 ) {
     prepare_linux_thread_info();
     let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
-    let saved_tp = current_rust_tp_for_linux_call();
-    remember_rust_tp(saved_tp);
-    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    let entry_tp = enter_linux_tp_boundary();
     unsafe { handler(desc) };
-    crate::arch::riscv64::csr::write_tp(saved_tp);
+    leave_linux_tp_boundary(entry_tp);
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     LINUX_PLIC_RUNTIME_ZERO_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT.fetch_add(1, Ordering::AcqRel);
@@ -1572,9 +1577,7 @@ pub fn enable_mapped_source(source: u32, logical_irq: LogicalIrq) -> bool {
 
     prepare_linux_thread_info();
     let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
-    let saved_tp = current_rust_tp_for_linux_call();
-    remember_rust_tp(saved_tp);
-    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    let entry_tp = enter_linux_tp_boundary();
 
     let enabled = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
         let record = linux_leaf_record(index);
@@ -1582,7 +1585,7 @@ pub fn enable_mapped_source(source: u32, logical_irq: LogicalIrq) -> bool {
         unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Enable) }
     });
 
-    crate::arch::riscv64::csr::write_tp(saved_tp);
+    leave_linux_tp_boundary(entry_tp);
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     enabled
 }
@@ -1596,11 +1599,10 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
         return false;
     };
 
+    let nested_tp_ok = exercise_nested_linux_tp_restore();
     prepare_linux_thread_info();
     let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
-    let saved_tp = current_rust_tp_for_linux_call();
-    remember_rust_tp(saved_tp);
-    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    let entry_tp = enter_linux_tp_boundary();
 
     let callbacks_ok = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
         let record = linux_leaf_record(index);
@@ -1636,12 +1638,16 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
             && edge_ack_ok
     });
 
-    crate::arch::riscv64::csr::write_tp(saved_tp);
+    let foreign_tp_restored = crate::arch::riscv64::csr::read_tp() == linux_thread_info_addr();
+    leave_linux_tp_boundary(entry_tp);
+    let entry_tp_restored = crate::arch::riscv64::csr::read_tp() == entry_tp;
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
-    if callbacks_ok {
+    let tp_ok = nested_tp_ok && foreign_tp_restored && entry_tp_restored;
+    if callbacks_ok && tp_ok {
         LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_TP_NORMAL_RETURN_SUCCESSES.fetch_add(1, Ordering::AcqRel);
     }
-    callbacks_ok
+    callbacks_ok && tp_ok
 }
 
 pub fn exercise_unmapped_irq_boundary() -> bool {
@@ -1652,20 +1658,23 @@ pub fn exercise_unmapped_irq_boundary() -> bool {
 
     prepare_linux_thread_info();
     let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
-    let saved_tp = current_rust_tp_for_linux_call();
-    remember_rust_tp(saved_tp);
-    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    let entry_tp = enter_linux_tp_boundary();
 
     let ret = generic_handle_domain_irq_inner(domain, source as usize, false);
 
-    crate::arch::riscv64::csr::write_tp(saved_tp);
+    let foreign_tp_restored = crate::arch::riscv64::csr::read_tp() == linux_thread_info_addr();
+    leave_linux_tp_boundary(entry_tp);
+    let entry_tp_restored = crate::arch::riscv64::csr::read_tp() == entry_tp;
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
 
     let ok = ret == LINUX_EINVAL
+        && foreign_tp_restored
+        && entry_tp_restored
         && LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE.load(Ordering::Acquire) == source
         && LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.load(Ordering::Acquire) == LINUX_EINVAL_ERRNO;
     if ok {
         LINUX_PLIC_UNMAPPED_IRQ_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_TP_ERROR_RETURN_SUCCESSES.fetch_add(1, Ordering::AcqRel);
     }
     ok
 }
@@ -1730,6 +1739,42 @@ fn remember_rust_tp(tp: usize) {
     if tp != 0 && tp != linux_thread_info_addr() {
         LINUX_PLIC_SAVED_RUST_TP.store(tp, Ordering::Release);
     }
+}
+
+fn enter_linux_tp_boundary() -> usize {
+    let entry_tp = crate::arch::riscv64::csr::read_tp();
+    let rust_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(rust_tp);
+    crate::arch::riscv64::csr::write_tp(linux_thread_info_addr());
+    entry_tp
+}
+
+fn leave_linux_tp_boundary(entry_tp: usize) {
+    crate::arch::riscv64::csr::write_tp(entry_tp);
+}
+
+fn exercise_nested_linux_tp_restore() -> bool {
+    let original_tp = crate::arch::riscv64::csr::read_tp();
+    if original_tp == 0 || original_tp == linux_thread_info_addr() {
+        return false;
+    }
+
+    let outer_entry_tp = enter_linux_tp_boundary();
+    let outer_foreign = outer_entry_tp == original_tp
+        && crate::arch::riscv64::csr::read_tp() == linux_thread_info_addr();
+    let inner_entry_tp = enter_linux_tp_boundary();
+    let inner_foreign = inner_entry_tp == linux_thread_info_addr()
+        && crate::arch::riscv64::csr::read_tp() == linux_thread_info_addr();
+    leave_linux_tp_boundary(inner_entry_tp);
+    let inner_restored = crate::arch::riscv64::csr::read_tp() == linux_thread_info_addr();
+    leave_linux_tp_boundary(outer_entry_tp);
+    let outer_restored = crate::arch::riscv64::csr::read_tp() == original_tp;
+
+    let ok = outer_foreign && inner_foreign && inner_restored && outer_restored;
+    if ok {
+        LINUX_PLIC_TP_NESTED_RETURN_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+    }
+    ok
 }
 
 extern "C" fn linux_plic_parent_irq_eoi(_data: *mut c_void) {

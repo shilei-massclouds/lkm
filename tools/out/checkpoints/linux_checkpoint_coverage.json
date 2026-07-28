@@ -1,5 +1,5 @@
 {
-  "total_checkpoints": 475,
+  "total_checkpoints": 474,
   "mapping_kind_counts": [
     {
       "mapping_kind": "exact",
@@ -11,13 +11,13 @@
     },
     {
       "mapping_kind": "unmapped",
-      "count": 358
+      "count": 357
     }
   ],
   "confidence_counts": [
     {
       "confidence": "none",
-      "count": 358
+      "count": 357
     },
     {
       "confidence": "medium",
@@ -409,10 +409,6 @@
     },
     {
       "family": "BootConsole",
-      "count": 1
-    },
-    {
-      "family": "BootCpuCurrentTask",
       "count": 1
     },
     {
@@ -1072,5 +1068,5 @@
       "count": 1
     }
   ],
-  "unmapped_singleton_family_count": 172
+  "unmapped_singleton_family_count": 171
 }

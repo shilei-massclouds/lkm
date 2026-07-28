@@ -20,7 +20,7 @@ pub struct BootInitFlow {
 impl BootInitFlow {
     pub const fn new() -> Self {
         Self {
-            flow: TaskFlow::new_static_bound(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
+            flow: TaskFlow::new_static_bound_active(TaskFlowRef::BOOT_INIT, TaskRef::BOOT),
         }
     }
 
@@ -48,6 +48,8 @@ impl BootInitFlow {
         if self.flow.state() != State::Base
             || !owner.initial_flow().same_identity(self.flow.flow_ref())
             || !owner.owns_flow(self.flow.flow_ref())
+            || !owner.active_flow().same_identity(self.flow.flow_ref())
+            || !self.flow.active()
             || !task_flow_execution_guard_satisfied(&self.flow, owner)
         {
             return failed_condition(
@@ -65,8 +67,15 @@ impl BootInitFlow {
     }
 
     pub fn setup_and_activate(&mut self, owner: &mut Task, checkpoint: Checkpoint) -> EventResult {
-        self.flow.setup(owner, Some(checkpoint))?;
-        owner.activate_initial_flow(&mut self.flow)
+        if !owner.active_flow().same_identity(self.flow.flow_ref()) || !self.flow.active() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.flow.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+        self.flow.setup(owner, Some(checkpoint))
     }
 
     pub fn enable_with_successor(
@@ -90,7 +99,12 @@ pub fn adopt_head_preset_start() -> EventResult {
         || ctx.boot_task.pid() != 0
         || ctx.boot_task.task().entry() != TaskEntry::None
         || ctx.boot_task.task().kind() != TaskKind::None
-        || ctx.boot_task.task().active_flow().is_valid()
+        || !ctx
+            .boot_task
+            .task()
+            .active_flow()
+            .same_identity(TaskFlowRef::BOOT_INIT)
+        || !ctx.boot_init_flow.core().active()
     {
         return failed_condition(LifecycleEvent::Preset, state, State::Base, State::Prepared);
     }
@@ -305,8 +319,10 @@ pub fn dispatch_ready() -> bool {
         && ctx.scheduler.current_runqueue_resolve_passes() != 0
         && ctx.scheduler.pick_next_task_passes() != 0
         && ctx.scheduler.switch_to_passes() != 0
-        && ctx.boot_cpu_current_task().switch_committed_count() != 0
-        && ctx.boot_cpu_current_task().current_is_kernel_init()
+        && ctx.scheduler.scheduler_finish_task_switch_count() != 0
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
 }
 

@@ -336,21 +336,6 @@ object TaskCreationCore: KernelObject {
                     task_ref_targets(src_task_ref, src_task);
                     task_ref_ready(current_task_ref);
                     task_ref_targets(current_task_ref, src_task);
-                    current_task_ref_targets_cpu_task(
-                        current_task_ref,
-                        CurrentCPU,
-                        src_task
-                    );
-                    current_task_ref_from_cpu_view(
-                        current_task_ref,
-                        CurrentCPU,
-                        src_task
-                    );
-                    current_task_slot_current(BootCpuCurrentTask, src_task);
-                    current_task_slot_matches_on_cpu_task(
-                        BootCpuCurrentTask,
-                        src_task
-                    );
                     dst_task.state == State::Prepared;
                     pid_ns.state == State::Ready;
                     creds.state == State::Prepared;
@@ -364,6 +349,7 @@ object TaskCreationCore: KernelObject {
                 }
 
                 ensures {
+                    current_task_ref_derived_from_selector(current_task_ref, src_task);
                     task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
                     task_creation_copy_process_used_current_source(
                         TaskCreationCore,

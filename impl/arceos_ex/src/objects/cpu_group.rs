@@ -1,7 +1,7 @@
 use super::{
     boot_args::BootArgs,
     cpu::{BOOT_CPU_LOGICAL_ID, Cpu, CpuRef, CpuRole, LogicId, MAX_CPUS},
-    cpu_control::{CurrentTaskSlot, LocalInterruptControl},
+    cpu_control::LocalInterruptControl,
     device_tree::DeviceTree,
     fdt_reader::read_cells,
     sbi::Sbi,
@@ -335,20 +335,6 @@ impl CpuGroup {
 
     pub fn boot_cpu_local_interrupt_mut(&mut self) -> Option<&mut LocalInterruptControl> {
         Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.local_interrupt_mut())
-    }
-
-    pub fn boot_cpu_current_task(&self) -> Option<&CurrentTaskSlot> {
-        Some(self.boot_cpu()?.current_task())
-    }
-
-    pub fn boot_cpu_current_task_mut(&mut self) -> Option<&mut CurrentTaskSlot> {
-        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.current_task_mut())
-    }
-
-    pub fn boot_cpu_controls_mut(
-        &mut self,
-    ) -> Option<(&mut LocalInterruptControl, &mut CurrentTaskSlot)> {
-        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.controls_mut())
     }
 
     pub fn possible_cpu_boundary_ready(&self) -> bool {

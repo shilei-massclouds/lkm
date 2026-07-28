@@ -1,7 +1,7 @@
 use crate::{arch::riscv64::task_switch::TaskSwitchContext, checkpoint::Checkpoint};
 
 use super::{
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition},
     task_flow::{TaskFlow, TaskFlowRef},
 };
 
@@ -56,6 +56,11 @@ impl TaskRef {
     #[allow(dead_code)]
     pub const fn slot(self) -> usize {
         self.slot as usize
+    }
+
+    #[cfg(app_smoke)]
+    pub(crate) const fn with_generation_for_test(self, generation: u32) -> Self {
+        Self::new(self.slot, generation)
     }
 
     pub const fn generation(self) -> u32 {
@@ -284,7 +289,7 @@ impl Task {
                 TaskFlowRef::NONE,
                 TaskFlowRef::NONE,
             ],
-            active_flow: TaskFlowRef::NONE,
+            active_flow: TaskFlowRef::BOOT_INIT,
         }
     }
 
@@ -574,20 +579,39 @@ impl Task {
         } else {
             self.initial_flow
         };
-        if self.lifecycle.state() != State::Online
-            || self.on_cpu
-            || self.execution_authority != TaskExecutionAuthority::None
-            || self.thread_context.breakpoint_state() != TaskBreakpointState::Valid
-            || !expected_flow.is_valid()
-            || !self.owns_flow(expected_flow)
-            || !self.thread_context.flow_ref().same_identity(expected_flow)
-        {
+        let first_failed = if self.lifecycle.state() != State::Online {
+            Some("lifecycle_online")
+        } else if self.on_cpu {
+            Some("not_already_on_cpu")
+        } else if self.execution_authority != TaskExecutionAuthority::None {
+            Some("authority_none")
+        } else if self.thread_context.breakpoint_state() != TaskBreakpointState::Valid {
+            Some("breakpoint_valid")
+        } else if !expected_flow.is_valid() {
+            Some("expected_flow_valid")
+        } else if !self.owns_flow(expected_flow) {
+            Some("owns_expected_flow")
+        } else if !self.thread_context.flow_ref().same_identity(expected_flow) {
+            Some("breakpoint_flow_matches")
+        } else {
+            None
+        };
+        if let Some(first_failed) = first_failed {
             return failed_condition(
                 LifecycleEvent::Continue,
                 self.state(),
                 State::Online,
                 State::OnCpu,
-            );
+            )
+            .map_err(|error| {
+                error.with_diagnostic(FailureDiagnostic::new(
+                    "SchedulerTaskSwitch",
+                    "continue_task_after_switch",
+                    "Task",
+                    "Task.Continue prerequisites",
+                    first_failed,
+                ))
+            });
         }
         self.on_cpu = true;
         self.execution_authority = TaskExecutionAuthority::Live;
@@ -854,6 +878,29 @@ impl Task {
         }
         self.active_flow = flow.flow_ref();
         flow.commit_active_binding(self.task_ref)
+    }
+
+    pub(super) fn activate_initial_execution_context(
+        &mut self,
+        flow: &mut TaskFlow,
+    ) -> EventResult {
+        if self.state() != State::OnCpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.active_flow.is_valid()
+            || self.initial_flow != flow.flow_ref()
+            || flow.owner() != self.task_ref
+            || flow.state() != State::Base
+            || !self.owns_flow(flow.flow_ref())
+        {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.state(),
+                State::OnCpu,
+                State::OnCpu,
+            );
+        }
+        self.active_flow = flow.flow_ref();
+        flow.commit_initial_execution_binding(self.task_ref)
     }
 
     pub fn commit_flow_handoff(&mut self, old: &TaskFlow, new: &mut TaskFlow) -> EventResult {

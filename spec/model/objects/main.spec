@@ -414,13 +414,9 @@ predicate zonelist_update_seq_write_irqsave_entered<T, I>(update_seq: T, local_i
 predicate zonelist_update_seq_write_irqrestore_exited<T, I>(update_seq: T, local_interrupt: I) -> bool;
 predicate printk_deferred_section_entered<T>(section: T) -> bool;
 predicate printk_deferred_section_exited<T>(section: T) -> bool;
-predicate current_task_slot_ready<T, U>(slot: T, cpu: U) -> bool;
-predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
-predicate current_task_ref_private_to_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
-predicate current_task_ref_targets_cpu_task<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
-predicate current_task_ref_from_cpu_view<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
-predicate task_ref_loaded_into_current_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
-predicate current_task_ref_updated_by_switch<T, U, V>(current_cpu: T, prev_ref: U, next_ref: V) -> bool;
+predicate current_task_resolved_target_is<F, R, T>(flow: F, task_ref: R, task: T) -> bool;
+predicate current_task_ref_derived_from_selector<R, T>(task_ref: R, task: T) -> bool;
+predicate current_task_selector_validates_execution<F, T>(flow: F, task: T) -> bool;
 predicate task_creation_flow_contract_ready<T>(core: T) -> bool;
 predicate task_clone_args_ready<T>(task: T) -> bool;
 predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
@@ -1000,7 +996,7 @@ type BufferObject {
 /*
  * SchedulerObject is the reusable scheduler service type. Schedule models the
  * minimal schedule()/__schedule() path: derive the prev task ref from the
- * current CPU current-task view, read that task's recorded CPU ownership, resolve
+ * effective TaskFlow's CurrentTask selector, read that Flow's CPU ownership, resolve
  * that CPU view's CurrentRunQueueRef through CpuGroup.Cpu[id].RunQueue, ask the
  * current runqueue to pick next, then switch from prev to next.
  * ScheduleIdle models Linux schedule_idle(): it is only reachable from the
@@ -1015,10 +1011,9 @@ type BufferObject {
  * records execution and calls Schedule/Yield, and the CPU returns to the
  * KernelInitTask continuation. This does not weaken the rest_init first
  * schedule facts below; it is an additional payload-phase schedule use.
- * CurrentTaskRef and CurrentRunQueueRef are private to the current CPU view.
- * CurrentTaskSlot is the CPU's TaskRef projection and must agree with the Task
- * that is OnCpu once the next-task entry processes Continue. The model does not
- * introduce descriptive current-task/current-runqueue
+ * CurrentTask and CurrentTaskRef are Flow-scoped selectors. CurrentRunQueueRef
+ * remains private to the current CPU view. The model does not introduce
+ * descriptive current-task/current-runqueue
  * objects or global current-task/current-runqueue singletons. SelectRunQueue is a pure
  * wake-up selection action: it consumes a TaskRef and returns a RunQueueRef.
  * Linux updates the task's recorded CPU after select_task_rq() and before
@@ -1043,13 +1038,7 @@ type SchedulerObject: KernelObject {
                 within ScheduleLocalInterruptContext {
                     within ScheduleRunQueueContext {
                         depends_on {
-                            task_ref_targets(CurrentTaskRef, BootTask);
                             boot_task_idle_role_ready(BootTask, BootRunQueue);
-                            task_ref_targets(CurrentTaskRef, BootTask);
-                            task_ref_ready(CurrentTaskRef);
-                            current_task_ref_private_to_cpu(CurrentTaskRef, CurrentCPU);
-                            current_task_ref_targets_cpu_task(CurrentTaskRef, CurrentCPU, BootTask);
-                            current_task_ref_from_cpu_view(CurrentTaskRef, CurrentCPU, BootTask);
                             task_flow_cpu_ref_targets(BootInitFlow, CpuGroup.cpus[0]);
                             runqueue_ref_ready(CurrentRunQueueRef);
                             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
@@ -1060,35 +1049,34 @@ type SchedulerObject: KernelObject {
 
                         drives {
                             let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef);
-                            self.Action::SwitchTo(CurrentTaskRef, next);
-                            KernelInitTask.Transition::Continue;
+                            self.Action::SwitchTo(CurrentTaskRef, KernelInitTaskRef);
                             KernelInitTask.Action::DispatchContinuation;
                         }
 
                         ensures {
                             scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                             scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
-                            scheduler_rcu_context_switch_noted(self, CurrentTaskRef, KernelInitTaskRef);
+                            scheduler_rcu_context_switch_noted(self, BootTaskRef, KernelInitTaskRef);
                             scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
                             scheduler_rq_clock_updated_for_schedule(self, BootRunQueue);
                             scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
-                            runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
-                            scheduler_need_resched_cleared(self, CurrentTaskRef);
+                            runqueue_pick_next_task_returns(CurrentRunQueueRef, BootTaskRef, KernelInitTaskRef);
+                            scheduler_need_resched_cleared(self, BootTaskRef);
                             scheduler_rq_curr_published_rcu(self, BootRunQueue, KernelInitTaskRef);
-                            scheduler_trace_sched_switch_emitted(self, CurrentTaskRef, KernelInitTaskRef);
-                            scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
-                            scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
+                            scheduler_trace_sched_switch_emitted(self, BootTaskRef, KernelInitTaskRef);
+                            scheduler_switch_to_committed(self, BootTaskRef, KernelInitTaskRef);
+                            scheduler_switch_to_core_context_saved(self, BootTaskRef);
                             scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
                             scheduler_prepare_task_switch_done(
                                 self,
                                 BootRunQueue,
-                                CurrentTaskRef,
+                                BootTaskRef,
                                 KernelInitTaskRef
                             );
                             scheduler_finish_task_switch_done(
                                 self,
                                 BootRunQueue,
-                                CurrentTaskRef
+                                BootTaskRef
                             );
                             scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
                             scheduler_finish_task_switch_restores_preempt_count(
@@ -1096,9 +1084,8 @@ type SchedulerObject: KernelObject {
                                 KernelInitTaskRef
                             );
                             task_ref_targets(KernelInitTaskRef, KernelInitTask);
-                            task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
-                            current_task_ref_updated_by_switch(CurrentCPU, CurrentTaskRef, KernelInitTaskRef);
-                            current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
+                            current_task_resolved_target_is(KernelInitFlow, KernelInitTaskRef, KernelInitTask);
+                            current_task_ref_derived_from_selector(KernelInitTaskRef, KernelInitTask);
                             BootTask.state == State::Online;
                             KernelInitTask.state == State::OnCpu;
                             task_execution_authority_is(
@@ -1116,32 +1103,31 @@ type SchedulerObject: KernelObject {
                 scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
                 scheduler_schedule_exit_restores_local_interrupts(self, BootCpuLocalInterrupt);
-                scheduler_rcu_context_switch_noted(self, CurrentTaskRef, KernelInitTaskRef);
+                scheduler_rcu_context_switch_noted(self, BootTaskRef, KernelInitTaskRef);
                 scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
                 scheduler_rq_clock_updated_for_schedule(self, BootRunQueue);
                 scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
-                runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
-                scheduler_need_resched_cleared(self, CurrentTaskRef);
+                runqueue_pick_next_task_returns(CurrentRunQueueRef, BootTaskRef, KernelInitTaskRef);
+                scheduler_need_resched_cleared(self, BootTaskRef);
                 scheduler_rq_curr_published_rcu(self, BootRunQueue, KernelInitTaskRef);
-                scheduler_trace_sched_switch_emitted(self, CurrentTaskRef, KernelInitTaskRef);
-                scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
-                scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
+                scheduler_trace_sched_switch_emitted(self, BootTaskRef, KernelInitTaskRef);
+                scheduler_switch_to_committed(self, BootTaskRef, KernelInitTaskRef);
+                scheduler_switch_to_core_context_saved(self, BootTaskRef);
                 scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
                 scheduler_prepare_task_switch_done(
                     self,
                     BootRunQueue,
-                    CurrentTaskRef,
+                    BootTaskRef,
                     KernelInitTaskRef
                 );
-                scheduler_finish_task_switch_done(self, BootRunQueue, CurrentTaskRef);
+                scheduler_finish_task_switch_done(self, BootRunQueue, BootTaskRef);
                 scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
                 scheduler_finish_task_switch_restores_preempt_count(self, KernelInitTaskRef);
                 scheduler_switch_mm_or_lazy_tlb_deferred(self);
                 scheduler_membarrier_switch_barrier_deferred(self);
                 task_ref_targets(KernelInitTaskRef, KernelInitTask);
-                task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
-                current_task_ref_updated_by_switch(CurrentCPU, CurrentTaskRef, KernelInitTaskRef);
-                current_task_slot_current(BootCpuCurrentTask, KernelInitTask);
+                current_task_resolved_target_is(KernelInitFlow, KernelInitTaskRef, KernelInitTask);
+                current_task_ref_derived_from_selector(KernelInitTaskRef, KernelInitTask);
                 BootTask.state == State::Online;
                 KernelInitTask.state == State::OnCpu;
                 task_execution_authority_is(
@@ -1158,20 +1144,18 @@ type SchedulerObject: KernelObject {
             state_effect: StateEffect::None;
             depends_on {
                 scheduler_schedule_event_available(self);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootTask);
                 boot_idle_need_resched_set_for_schedule(BootTask);
             }
             drives {
-                self.Action::Schedule;
+                self.Action::Schedule(BootIdleFlow);
             }
             ensures {
                 scheduler_idle_mode_used(self);
-                scheduler_idle_schedule_committed(self, CurrentTaskRef);
+                scheduler_idle_schedule_committed(self, BootTaskRef);
                 scheduler_idle_schedule_committed_to_runnable(self, KernelInitTaskRef);
                 boot_idle_schedule_idle_loop_until_resched_clear(self);
                 boot_idle_need_resched_drained_after_schedule(BootTask);
-                task_ref_loaded_into_current_cpu(KernelInitTaskRef, CurrentCPU);
+                current_task_resolved_target_is(KernelInitFlow, KernelInitTaskRef, KernelInitTask);
             }
         }
 
@@ -1189,9 +1173,9 @@ type SchedulerObject: KernelObject {
             drives {
                 prev_ref.Action::SaveCoreContext;
                 next_ref.Action::RestoreCoreContext;
-                prev_ref.Transition::Suspend;
-                CurrentTaskRef.Action::SetCurrent(task: next_ref);
-                BootCpuCurrentTask.Action::SetCurrent(task: next_ref);
+                BootTask.Transition::Suspend;
+                KernelInitTask.Transition::Continue;
+                KernelInitFlow.Action::ConfirmCurrentTask(KernelInitTaskRef);
             }
             ensures {
                 scheduler_prepare_task_switch_done(self, BootRunQueue, prev_ref, next_ref);
@@ -1204,8 +1188,6 @@ type SchedulerObject: KernelObject {
                 scheduler_finish_task_switch_restores_preempt_count(self, next_ref);
                 scheduler_switch_mm_or_lazy_tlb_deferred(self);
                 scheduler_membarrier_switch_barrier_deferred(self);
-                task_ref_loaded_into_current_cpu(next_ref, CurrentCPU);
-                current_task_ref_updated_by_switch(CurrentCPU, prev_ref, next_ref);
                 scheduler_continue_signal_pending(self, next_ref);
             }
         }
@@ -1214,7 +1196,6 @@ type SchedulerObject: KernelObject {
             state_effect: StateEffect::None;
             depends_on {
                 task_ref_ready(task_ref);
-                CurrentTaskRef == task_ref;
             }
             ensures {
                 scheduler_switch_to_identity_path(self, task_ref);
@@ -1234,10 +1215,9 @@ type SchedulerObject: KernelObject {
             drives {
                 next_ref.Action::RestoreCoreContext;
                 prev_ref.Transition::Disable;
-                CurrentTaskRef.Action::SetCurrent(task: next_ref);
-                BootCpuCurrentTask.Action::SetCurrent(task: next_ref);
-                prev_ref.Transition::Cleanup;
                 next_ref.Transition::Continue;
+                next_ref.active_flow.Action::ConfirmCurrentTask(next_ref);
+                prev_ref.Transition::Cleanup;
                 next_ref.Action::DispatchContinuation;
             }
             ensures {
@@ -1387,17 +1367,6 @@ type LocalInterruptControl {
     }
 }
 
-type CurrentTaskSlot {
-    processes {
-        Action::SetCurrent(task: Task) {
-            state_effect: StateEffect::None;
-            ensures {
-                current_task_slot_current(self, task);
-            }
-        }
-    }
-}
-
 type PreemptionControl {
     ext_state: PreemptionExtState;
 
@@ -1486,7 +1455,7 @@ type RawSpinLock {
             state_effect: StateEffect::Conditional;
             drives {
                 current_cpu.cpu.LocalInterruptControl.Transition::SaveAndDisable(out flags);
-                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Transition::Disable;
+                CurrentTask.PreemptionControl.Transition::Disable;
                 self.Action::Acquire;
             }
             transitions {
@@ -1508,7 +1477,7 @@ type RawSpinLock {
             drives {
                 self.Action::Release;
                 current_cpu.cpu.LocalInterruptControl.Transition::Restore(flags);
-                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Transition::Enable;
+                CurrentTask.PreemptionControl.Transition::Enable;
             }
             transitions {
                 RawSpinLockExtState::Locked -> RawSpinLockExtState::Unlocked;

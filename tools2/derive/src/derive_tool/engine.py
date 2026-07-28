@@ -591,6 +591,10 @@ class Engine:
         first = parts[0]
         if first == "CurrentCPU":
             value = self._current_cpu_target(signal)
+        elif first == "CurrentTask":
+            value = self._current_task_target(signal)
+        elif first == "CurrentTaskRef":
+            value = self._current_task_ref(signal)
         elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
@@ -638,13 +642,127 @@ class Engine:
             )
         if not _matches_system_type(self.model, str(target), "CPU"):
             raise DerivationProblem(f"CurrentCPU CpuRef {reference} targets non-CPU {target}")
-        signal["_selector_resolution"] = {
+        self._record_selector_resolution(signal, {
             "selector": "CurrentCPU",
             "target": str(target),
             "source_flow": flow,
             "source_cpu_ref": reference,
-        }
+        })
         return str(target)
+
+    @staticmethod
+    def _record_selector_resolution(
+        signal: dict[str, Any], resolution: dict[str, Any]
+    ) -> None:
+        resolutions = signal.setdefault("_selector_resolutions", [])
+        if resolution not in resolutions:
+            resolutions.append(resolution)
+
+    def _fact_targets(self, predicate: str, source: str) -> list[str]:
+        pattern = re.compile(
+            rf"{re.escape(predicate)}\({re.escape(source)},([^,)]+)\)"
+        )
+        return sorted(
+            {
+                match.group(1)
+                for fact in self.current["facts"]
+                if (match := pattern.fullmatch(fact)) is not None
+            }
+        )
+
+    def _current_task_context(self, signal: dict[str, Any]) -> tuple[str, str, str]:
+        flow = self._effective_flow(signal)
+        if flow is None:
+            raise DerivationProblem("CurrentTask requires an effective TaskFlow")
+
+        parents = self._fact_targets("task_flow_parent_is", flow)
+        owners = self._fact_targets("task_flow_owner_is", flow)
+        if len(parents) != 1:
+            raise DerivationProblem(
+                f"CurrentTask source Flow {flow} must have exactly one parent Task"
+            )
+        if len(owners) != 1:
+            raise DerivationProblem(
+                f"CurrentTask source Flow {flow} must have exactly one owner Task"
+            )
+        task = parents[0]
+        if owners[0] != task:
+            raise DerivationProblem(
+                f"CurrentTask source Flow {flow} parent {task} disagrees with owner {owners[0]}"
+            )
+        if task not in self.systems or not _matches_system_type(self.model, task, "Task"):
+            raise DerivationProblem(
+                f"CurrentTask source Flow {flow} parent {task} is not a published Task"
+            )
+        if self.current["states"].get(task) != "OnCpu":
+            raise DerivationProblem(f"CurrentTask target Task {task} is not OnCpu")
+        live_fact = (
+            f"task_execution_authority_is({task},TaskExecutionAuthority::Live)"
+        )
+        if live_fact not in self.current["facts"]:
+            raise DerivationProblem(f"CurrentTask target Task {task} is not Live")
+        active_flow = self.current["references"].get(f"{task}.active_flow")
+        if active_flow != flow:
+            raise DerivationProblem(
+                f"CurrentTask target Task {task} active Flow {active_flow} does not match effective Flow {flow}"
+            )
+
+        live_tasks = sorted(
+            candidate
+            for candidate in self.systems
+            if _matches_system_type(self.model, candidate, "Task")
+            and self.current["states"].get(candidate) == "OnCpu"
+            and (
+                f"task_execution_authority_is({candidate},TaskExecutionAuthority::Live)"
+                in self.current["facts"]
+            )
+        )
+        if live_tasks != [task]:
+            raise DerivationProblem(
+                f"CurrentTask requires one OnCpu/Live Task, found {live_tasks}"
+            )
+
+        references = []
+        for reference in self._fact_sources("task_ref_targets", task):
+            if f"task_ref_ready({reference})" in self.current["facts"]:
+                references.append(reference)
+        references = sorted(set(references))
+        if len(references) != 1:
+            raise DerivationProblem(
+                f"CurrentTask target Task {task} must have exactly one live TaskRef, found {references}"
+            )
+        reference = references[0]
+        if self._deref(reference) != task:
+            raise DerivationProblem(
+                f"CurrentTask TaskRef {reference} does not dereference to {task}"
+            )
+        self._record_selector_resolution(signal, {
+            "selector": "CurrentTask",
+            "source_flow": flow,
+            "source_task_ref": reference,
+            "target": task,
+        })
+        return task, reference, flow
+
+    def _fact_sources(self, predicate: str, target: str) -> list[str]:
+        pattern = re.compile(
+            rf"{re.escape(predicate)}\(([^,)]+),{re.escape(target)}\)"
+        )
+        return sorted(
+            {
+                match.group(1)
+                for fact in self.current["facts"]
+                if (match := pattern.fullmatch(fact)) is not None
+            }
+        )
+
+    def _current_task_target(self, signal: dict[str, Any]) -> str:
+        task, _, _ = self._current_task_context(signal)
+        return task
+
+    def _current_task_ref(self, signal: dict[str, Any]) -> str:
+        _, reference, _ = self._current_task_context(signal)
+        return reference
 
     def _deref(self, value: Any) -> Any:
         if value in self.systems:
@@ -783,6 +901,10 @@ class Engine:
         first = parts[0]
         if first == "CurrentCPU":
             value = self._current_cpu_target(signal)
+        elif first == "CurrentTask":
+            value = self._current_task_target(signal)
+        elif first == "CurrentTaskRef":
+            value = self._current_task_ref(signal)
         elif first == "self":
             value: Any = self.self_value(signal)
         elif first in bindings:
@@ -813,11 +935,11 @@ class Engine:
         if kind == "path":
             path = expression["value"]
             first = path.split(".", 1)[0]
-            if first == "CurrentCPU" or first == "self" or first in bindings:
+            if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef"} or first == "self" or first in bindings:
                 try:
                     return self.resolve_path(path, signal=signal, bindings=bindings)
                 except DerivationProblem:
-                    if first == "CurrentCPU":
+                    if first in {"CurrentCPU", "CurrentTask", "CurrentTaskRef"}:
                         raise
                     base = self.self_value(signal) if first == "self" else bindings[first]
                     suffix = path.split(".", 1)[1] if "." in path else ""
@@ -1563,24 +1685,23 @@ class Engine:
                 f"invalid process call at {call.get('span', {}).get('source_file')}:{call.get('span', {}).get('start_line')}: "
                 f"{call.get('text')}"
             )
-        signal.pop("_selector_resolution", None)
+        signal.pop("_selector_resolutions", None)
         target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
-        selector_resolution = signal.pop("_selector_resolution", None)
         receiver_value = self.value(
             {"kind": "path", "value": call["receiver"]},
             signal=signal,
             bindings=bindings,
         )
-        if selector_resolution is None:
-            selector_resolution = signal.pop("_selector_resolution", None)
-        else:
-            signal.pop("_selector_resolution", None)
+        raw_arguments = self.materialize_arguments(
+            call["arguments"], signal=signal, bindings=bindings
+        )
+        selector_resolutions = signal.pop("_selector_resolutions", [])
         coordinate = self.coordinate(signal["target"], target, signal["coordinate"])
         child = self.new_signal(
             source=signal["target"],
             target=target,
             name=call["name"],
-            raw_arguments=self.materialize_arguments(call["arguments"], signal=signal, bindings=bindings),
+            raw_arguments=raw_arguments,
             delivery="drives",
             cause_id=signal["id"],
             coordinate=coordinate,
@@ -1590,8 +1711,8 @@ class Engine:
         effective_flow = self._effective_flow(signal)
         if effective_flow is not None:
             child["_effective_flow"] = effective_flow
-        if selector_resolution is not None:
-            child["selector_resolution"] = deepcopy(selector_resolution)
+        if selector_resolutions:
+            child["selector_resolutions"] = deepcopy(selector_resolutions)
         child["contexts"] = list(context_stack)
         if receiver_value != target:
             child["_receiver_value"] = receiver_value
@@ -2123,7 +2244,7 @@ class Engine:
             signal.pop("_receiver_value", None)
             signal.pop("_self_value", None)
             signal.pop("_effective_flow", None)
-            signal.pop("_selector_resolution", None)
+            signal.pop("_selector_resolutions", None)
             signal.pop("_indexed_transaction", None)
         return {
             "root_request": {

@@ -63,7 +63,7 @@ shared creation boundary for later rest_init tasks. That boundary
 must bind the caller-provided TaskEntry into the new task's startup
 context; entry is not an after-the-fact descriptive flag. The source
 must be the current OnCpu/Live Task, and its validated TaskRef must equal
-the read-only CurrentTaskSlot projection. Online, Reserved, non-current,
+the read-only CurrentTask capability. Online, Reserved, non-current,
 or mismatched-ref sources are rejected before any mutation; BootTask has
 no name-based exception.
 

@@ -7,7 +7,9 @@ use crate::{context::Context, objects::state::State};
 
 pub(super) fn mainline_ready(ctx: &Context) -> bool {
     ctx.kernel_init_task.state() == State::OnCpu
-        && ctx.boot_cpu_current_task().current_is_kernel_init()
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
         && ctx.scheduler.kernel_init_stack_switch_started_count() == 1
         && ctx.kernel_init_task.entry_started_count() == 1
         && ctx.kernel_init_task.entry_stack_verified()

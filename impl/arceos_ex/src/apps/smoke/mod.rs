@@ -123,6 +123,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::scheduler_schedule::run,
     },
     SmokeCase {
+        name: "current_task",
+        run: cases::current_task::run,
+    },
+    SmokeCase {
         name: "current_runqueue_ref",
         run: cases::current_runqueue_ref::run,
     },

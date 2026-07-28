@@ -7043,6 +7043,9 @@ fn complete_observed_child_exit_to_parent_wait(
     let builtin_restore_expected = child_before_restore.builtin_grandchild_active();
     let (mut parent_frame, status_ptr, child_pid, parent_pid, parent_satp) = {
         let ctx = crate::context::context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            return false;
+        };
         let Some((parent_frame, status_ptr, child_pid, parent_pid)) =
             ctx.user_task_set.child_exit_to_observed_child_parent_wait(
                 &mut ctx.user_address_space,
@@ -7063,10 +7066,11 @@ fn complete_observed_child_exit_to_parent_wait(
             return false;
         };
         if ctx
-            .replace_current_user_task(
+            .replace_terminal_user_task(
                 ctx.user_task_set.last_exited_task_ref(),
                 ctx.user_task_set.active_task_ref(),
                 parent_pid,
+                exiting_task,
             )
             .is_err()
         {
@@ -7269,8 +7273,11 @@ fn complete_observed_child_exit_to_parent_wait(
 
 #[cfg(app_user_boot)]
 fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usize) -> bool {
-    let (mut parent_frame, child_pid, parent_satp) = {
+    let (mut parent_frame, child_pid, parent_satp, exiting_task) = {
         let ctx = crate::context::context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            return false;
+        };
         let Some((parent_frame, child_pid)) = ctx.user_task_set.child_exit_to_vfork_parent(
             &mut ctx.user_address_space,
             &mut ctx.user_stack,
@@ -7280,7 +7287,12 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
         ) else {
             return false;
         };
-        (parent_frame, child_pid, ctx.user_address_space.satp_token())
+        (
+            parent_frame,
+            child_pid,
+            ctx.user_address_space.satp_token(),
+            exiting_task,
+        )
     };
 
     let has_pidfd = crate::context::context_ref().user_task_set.pidfd_fd() != usize::MAX;
@@ -7328,7 +7340,7 @@ fn complete_child_exit_to_vfork_parent_clone(frame: &mut TrapFrame, status: usiz
     }
 
     if crate::context::context()
-        .commit_kernel_init_dispatch()
+        .commit_terminal_kernel_init_dispatch(exiting_task)
         .is_err()
     {
         return false;
@@ -7394,8 +7406,11 @@ fn complete_child_exit_to_vfork_parent_clone(_frame: &mut TrapFrame, _status: us
 #[cfg(app_user_boot)]
 fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> bool {
     let wait_status = ((status & 0xff) << 8) as u32;
-    let (mut parent_frame, status_ptr, child_pid, parent_satp) = {
+    let (mut parent_frame, status_ptr, child_pid, parent_satp, exiting_task) = {
         let ctx = crate::context::context();
+        let Ok(exiting_task) = ctx.current_task() else {
+            return false;
+        };
         let Some((parent_frame, status_ptr, child_pid)) =
             ctx.user_task_set.child_exit_to_parent_wait(
                 &mut ctx.user_address_space,
@@ -7412,6 +7427,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
             status_ptr,
             child_pid,
             ctx.user_address_space.satp_token(),
+            exiting_task,
         )
     };
 
@@ -7546,7 +7562,7 @@ fn complete_child_exit_to_parent_wait(frame: &mut TrapFrame, status: usize) -> b
         writable_pages_first_non_stack_after_checksum,
     );
     if crate::context::context()
-        .commit_kernel_init_dispatch()
+        .commit_terminal_kernel_init_dispatch(exiting_task)
         .is_err()
     {
         return false;

@@ -5,7 +5,7 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        cpu_control::CurrentTaskSlot,
+        current_task::CurrentTask,
         process_prepare::{TaskCopyProcessInputs, TaskCreationCore, TaskCreationSetup},
         state::State,
         task::{Task, TaskEntry, TaskExecutionAuthority, TaskRef},
@@ -71,7 +71,9 @@ impl TaskCreationCoreFixture {
             TaskCopyProcessInputs {
                 src_task: ctx.kernel_init_task.task(),
                 src_task_ref: ctx.kernel_init_task.task_ref(),
-                current_task_slot: ctx.boot_cpu_current_task(),
+                current_task: ctx
+                    .current_task()
+                    .unwrap_or(CurrentTask::new(TaskRef::NONE)),
                 root_pid_namespace: &ctx.root_pid_namespace,
                 credential_core: &ctx.credential_core,
                 signal_core: &ctx.signal_core,
@@ -217,7 +219,9 @@ impl SmokeScenario for RejectMissingEntryScenario {
                 TaskCopyProcessInputs {
                     src_task: ctx.kernel_init_task.task(),
                     src_task_ref: ctx.kernel_init_task.task_ref(),
-                    current_task_slot: ctx.boot_cpu_current_task(),
+                    current_task: ctx
+                        .current_task()
+                        .unwrap_or(CurrentTask::new(TaskRef::NONE)),
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,
@@ -277,7 +281,9 @@ impl SmokeScenario for RejectEntryMismatchScenario {
                 TaskCopyProcessInputs {
                     src_task: ctx.kernel_init_task.task(),
                     src_task_ref: ctx.kernel_init_task.task_ref(),
-                    current_task_slot: ctx.boot_cpu_current_task(),
+                    current_task: ctx
+                        .current_task()
+                        .unwrap_or(CurrentTask::new(TaskRef::NONE)),
                     root_pid_namespace: &ctx.root_pid_namespace,
                     credential_core: &ctx.credential_core,
                     signal_core: &ctx.signal_core,
@@ -331,12 +337,7 @@ impl SmokeScenario for RejectOnlineSourceScenario {
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
-        let mut current = CurrentTaskSlot::new();
-        assertions.assert_ok("current setup", current.setup());
-        assertions.assert_ok(
-            "select online source",
-            current.set_current(TaskRef::KTHREADD),
-        );
+        let current = CurrentTask::new(TaskRef::KTHREADD);
         assertions.assert(
             "online source has no authority",
             ctx.kthreadd_task.task().state() == State::Online
@@ -348,7 +349,7 @@ impl SmokeScenario for RejectOnlineSourceScenario {
                 &mut self.fixture.core,
                 ctx.kthreadd_task.task(),
                 TaskRef::KTHREADD,
-                &current,
+                current,
             ),
         );
         assert_copy_not_committed(&self.fixture.core, assertions);
@@ -360,7 +361,7 @@ impl SmokeScenario for RejectOnlineSourceScenario {
 struct RejectReservedSourceScenario {
     fixture: TaskCreationCoreFixture,
     source: Task,
-    current: CurrentTaskSlot,
+    current: CurrentTask,
 }
 
 impl RejectReservedSourceScenario {
@@ -368,7 +369,7 @@ impl RejectReservedSourceScenario {
         Self {
             fixture: TaskCreationCoreFixture::new(),
             source: Task::new_ap_idle_reserved(TaskRef::ap_idle(0), TaskFlowRef::ap_idle(0), 0),
-            current: CurrentTaskSlot::new(),
+            current: CurrentTask::new(TaskRef::ap_idle(0)),
         }
     }
 }
@@ -380,11 +381,6 @@ impl SmokeScenario for RejectReservedSourceScenario {
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         self.fixture.setup_ready(assertions);
-        assertions.assert_ok("current setup", self.current.setup());
-        assertions.assert_ok(
-            "select reserved source",
-            self.current.set_current(self.source.task_ref()),
-        );
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
@@ -399,7 +395,7 @@ impl SmokeScenario for RejectReservedSourceScenario {
                 &mut self.fixture.core,
                 &self.source,
                 self.source.task_ref(),
-                &self.current,
+                self.current,
             ),
         );
         assert_copy_not_committed(&self.fixture.core, assertions);
@@ -431,16 +427,14 @@ impl SmokeScenario for RejectNonCurrentSourceScenario {
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
-        let mut current = CurrentTaskSlot::new();
-        assertions.assert_ok("current setup", current.setup());
-        assertions.assert_ok("select another task", current.set_current(TaskRef::BOOT));
+        let current = CurrentTask::new(TaskRef::BOOT);
         assertions.assert(
             "copy rejected",
             copy_rejected(
                 &mut self.fixture.core,
                 ctx.kernel_init_task.task(),
                 TaskRef::KERNEL_INIT,
-                &current,
+                current,
             ),
         );
         assert_copy_not_committed(&self.fixture.core, assertions);
@@ -472,16 +466,14 @@ impl SmokeScenario for RejectMismatchedSourceRefScenario {
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
-        let mut current = CurrentTaskSlot::new();
-        assertions.assert_ok("current setup", current.setup());
-        assertions.assert_ok("select supplied ref", current.set_current(TaskRef::BOOT));
+        let current = CurrentTask::new(TaskRef::BOOT);
         assertions.assert(
             "copy rejected",
             copy_rejected(
                 &mut self.fixture.core,
                 ctx.kernel_init_task.task(),
                 TaskRef::BOOT,
-                &current,
+                current,
             ),
         );
         assert_copy_not_committed(&self.fixture.core, assertions);
@@ -494,14 +486,14 @@ fn copy_rejected(
     core: &mut TaskCreationCore,
     source: &Task,
     source_ref: TaskRef,
-    current: &CurrentTaskSlot,
+    current: CurrentTask,
 ) -> bool {
     let ctx = context_ref();
     core.copy_process(
         TaskCopyProcessInputs {
             src_task: source,
             src_task_ref: source_ref,
-            current_task_slot: current,
+            current_task: current,
             root_pid_namespace: &ctx.root_pid_namespace,
             credential_core: &ctx.credential_core,
             signal_core: &ctx.signal_core,

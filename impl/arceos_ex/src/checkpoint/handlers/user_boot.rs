@@ -17,7 +17,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[cfg(app_user_boot)]
 use crate::objects::user_boot::{
     USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_KERNEL_IRQ_STACK_SIZE,
-    USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING, USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY,
+    USER_KERNEL_TRAP_CURRENT_TASK_TP_READY, USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING,
+    USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY, USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE,
     USER_KERNEL_TRAP_FRAME_SIZE, USER_KERNEL_TRAP_GUARD_PAGE_READY, USER_KERNEL_TRAP_GUARD_SIZE,
     USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED, USER_KERNEL_TRAP_IRQ_STACKS,
     USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE, USER_KERNEL_TRAP_OVERFLOW_STACK_READY,
@@ -26,12 +27,13 @@ use crate::objects::user_boot::{
     USER_KERNEL_TRAP_THREAD_INFO_IN_TASK, USER_KERNEL_TRAP_THREAD_SHIFT,
     USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED, USER_KERNEL_TRAP_VMAP_STACK, USER_PAGE_SIZE,
     USER_SIGCHLD_MASK, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
-    user_kernel_trap_overflow_stack_base, user_kernel_trap_overflow_stack_ready,
-    user_kernel_trap_overflow_stack_top, user_kernel_trap_stack_backing_order,
-    user_kernel_trap_stack_backing_phys, user_kernel_trap_stack_base,
-    user_kernel_trap_stack_base_aligned, user_kernel_trap_stack_guard_base,
-    user_kernel_trap_stack_guard_size, user_kernel_trap_stack_guard_unmapped,
-    user_kernel_trap_stack_ready, user_kernel_trap_stack_top, user_kernel_trap_stack_vmapped,
+    user_kernel_trap_entry_context, user_kernel_trap_overflow_stack_base,
+    user_kernel_trap_overflow_stack_ready, user_kernel_trap_overflow_stack_top,
+    user_kernel_trap_stack_backing_order, user_kernel_trap_stack_backing_phys,
+    user_kernel_trap_stack_base, user_kernel_trap_stack_base_aligned,
+    user_kernel_trap_stack_guard_base, user_kernel_trap_stack_guard_size,
+    user_kernel_trap_stack_guard_unmapped, user_kernel_trap_stack_ready,
+    user_kernel_trap_stack_top, user_kernel_trap_stack_vmapped,
 };
 
 #[cfg(app_user_boot)]
@@ -425,7 +427,9 @@ fn run_selected_payload_handoff(
         && handoff.variant_setup_ready()
         && handoff.variant_prepare_ready()
         && handoff.no_return_entry_bound()
-        && ctx.boot_cpu_current_task().current_is_kernel_init()
+        && ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref.same_identity(ctx.kernel_init_task.task_ref()))
         && ctx.kernel_init_task.current_stack_pointer_in_range()
         && selected_variant_state_ready(ctx);
 
@@ -872,6 +876,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     let process = &ctx.kernel_init_user_state;
     let trap_stack_base = user_kernel_trap_stack_base();
     let trap_stack_top = user_kernel_trap_stack_top();
+    let trap_entry_context = user_kernel_trap_entry_context();
     let trap_guard_base = user_kernel_trap_stack_guard_base();
     let overflow_stack_base = user_kernel_trap_overflow_stack_base();
     let overflow_stack_top = user_kernel_trap_overflow_stack_top();
@@ -885,6 +890,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && USER_KERNEL_TRAP_FRAME_SIZE
             == core::mem::size_of::<crate::objects::event_stream::TrapFrame>()
         && USER_KERNEL_TRAP_FRAME_SIZE == 288
+        && USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE == 16
         && USER_KERNEL_TRAP_THREAD_SHIFT == 14
         && USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE == USER_PAGE_SIZE
         && USER_KERNEL_IRQ_STACK_SIZE == USER_KERNEL_TRAP_STACK_SIZE
@@ -893,6 +899,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && USER_KERNEL_TRAP_EARLY_OVERFLOW_CHECK_READY
         && USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING
         && USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED
+        && USER_KERNEL_TRAP_CURRENT_TASK_TP_READY
         && USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE
         && USER_KERNEL_TRAP_OVERFLOW_TERMINAL_PANIC
         && USER_KERNEL_TRAP_IRQ_STACK_SWITCH_DEFERRED
@@ -903,6 +910,8 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && trap_guard_base + USER_KERNEL_TRAP_GUARD_SIZE == trap_stack_base
         && user_kernel_trap_stack_base_aligned()
         && trap_stack_top == trap_stack_base + USER_KERNEL_TRAP_STACK_SIZE
+        && trap_entry_context + USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE == trap_stack_top
+        && trap_entry_context.is_multiple_of(core::mem::align_of::<usize>())
         && user_kernel_trap_stack_backing_phys() != 0
         && user_kernel_trap_stack_backing_order() == USER_KERNEL_TRAP_STACK_ORDER
         && user_kernel_trap_overflow_stack_ready()
@@ -1456,8 +1465,7 @@ fn run_user_clone_vfork_child_handoff(
 
     let child = &ctx.user_task_set;
     let child_task_ref = child.active_task_ref();
-    let current_task_ref = ctx.boot_cpu_current_task().current();
-    let dispatch_task_ref = ctx.boot_cpu_current_task().current();
+    let current_task_ref = ctx.current_task_ref().unwrap_or(TaskRef::NONE);
     let child_flow_ref = child.active_flow_ref();
     let valid = child.vfork_clone()
         && child.vfork_child_handoff()
@@ -1468,7 +1476,6 @@ fn run_user_clone_vfork_child_handoff(
         && child.parent_clone_return() == 0
         && child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)
-        && dispatch_task_ref.same_identity(child_task_ref)
         && child_flow_ref.is_valid();
 
     sink.diag_usize("vfork_child_handoff", child.vfork_child_handoff() as usize);
@@ -1486,15 +1493,10 @@ fn run_user_clone_vfork_child_handoff(
         "vfork_child_task_generation",
         child_task_ref.generation() as usize,
     );
-    sink.diag_usize("vfork_current_task_slot", current_task_ref.slot());
+    sink.diag_usize("vfork_current_task_ref_id", current_task_ref.slot());
     sink.diag_usize(
         "vfork_current_task_generation",
         current_task_ref.generation() as usize,
-    );
-    sink.diag_usize("vfork_dispatch_task_slot", dispatch_task_ref.slot());
-    sink.diag_usize(
-        "vfork_dispatch_task_generation",
-        dispatch_task_ref.generation() as usize,
     );
     sink.diag_usize("vfork_child_task_state", child.active_task_state() as usize);
     sink.diag_usize("vfork_child_flow_slot", child_flow_ref.slot());
@@ -2080,12 +2082,10 @@ fn run_syscall_table_wait4(
     let child = &ctx.user_task_set;
     let obs = wait4_checkpoint_observation();
     let child_task_ref = child.active_task_ref();
-    let current_task_ref = ctx.boot_cpu_current_task().current();
-    let dispatch_task_ref = ctx.boot_cpu_current_task().current();
+    let current_task_ref = ctx.current_task_ref().unwrap_or(TaskRef::NONE);
     let child_flow_ref = child.active_flow_ref();
     let child_dispatch_valid = child.active_task_state() == State::OnCpu
         && current_task_ref.same_identity(child_task_ref)
-        && dispatch_task_ref.same_identity(child_task_ref)
         && child_flow_ref.is_valid();
     let table_ready = table.state() == State::Ready
         && table.wait4_supported()
@@ -2172,15 +2172,10 @@ fn run_syscall_table_wait4(
         "wait4_child_task_generation",
         child_task_ref.generation() as usize,
     );
-    sink.diag_usize("wait4_current_task_slot", current_task_ref.slot());
+    sink.diag_usize("wait4_current_task_ref_id", current_task_ref.slot());
     sink.diag_usize(
         "wait4_current_task_generation",
         current_task_ref.generation() as usize,
-    );
-    sink.diag_usize("wait4_dispatch_task_slot", dispatch_task_ref.slot());
-    sink.diag_usize(
-        "wait4_dispatch_task_generation",
-        dispatch_task_ref.generation() as usize,
     );
     sink.diag_usize("wait4_child_task_state", child.active_task_state() as usize);
     sink.diag_usize("wait4_child_flow_slot", child_flow_ref.slot());

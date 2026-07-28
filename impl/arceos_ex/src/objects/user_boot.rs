@@ -88,6 +88,10 @@ pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize =
 pub const USER_KERNEL_TRAP_FRAME_SIZE: usize = super::event_stream::TRAP_FRAME_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
+pub const USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE: usize =
+    super::event_stream::USER_TRAP_ENTRY_CONTEXT_SIZE;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub const USER_KERNEL_TRAP_THREAD_SHIFT: usize = super::event_stream::KERNEL_TRAP_THREAD_SHIFT;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
@@ -116,6 +120,9 @@ pub const USER_KERNEL_TRAP_EARLY_CHECK_REGISTER_PRESERVING: bool = true;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_TRAP_USER_PATH_BIT_TEST_BYPASSED: bool = true;
+#[cfg(app_user_boot)]
+#[allow(dead_code)]
+pub const USER_KERNEL_TRAP_CURRENT_TASK_TP_READY: bool = true;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_TRAP_OVERFLOW_FRAME_COMPLETE: bool = true;
@@ -2811,6 +2818,10 @@ impl UserAppFlow {
         &mut self.flows[self.staging_flow_slot]
     }
 
+    pub(crate) const fn current_core(&self) -> &super::task_flow::TaskFlow {
+        &self.flows[self.active_flow_slot]
+    }
+
     pub fn commit_runtime_exec_handoff(&mut self, owner: &mut KernelInitTask) -> EventResult {
         if !self.has_active_flow
             || self.staging_declared
@@ -3554,6 +3565,35 @@ impl UserTaskSet {
     pub(crate) fn task_identity_ptr(&self, task_ref: TaskRef) -> Option<usize> {
         self.slot_for_ref(task_ref)
             .map(|slot| &slot.task as *const Task as usize)
+    }
+
+    pub(crate) fn current_task_candidate_by_identity(
+        &self,
+        identity: usize,
+    ) -> Option<super::current_task::CurrentTaskCandidate<'_>> {
+        let mut index = 0usize;
+        while index < USER_TASK_SLOT_COUNT {
+            let slot = &self.task_slots[index];
+            if slot.occupied && (&slot.task as *const Task as usize) == identity {
+                return Some(super::current_task::CurrentTaskCandidate {
+                    task: &slot.task,
+                    flow: &slot.flows[slot.active_flow_slot],
+                });
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub(crate) fn current_task_candidate_by_ref(
+        &self,
+        task_ref: TaskRef,
+    ) -> Option<super::current_task::CurrentTaskCandidate<'_>> {
+        let slot = self.slot_for_ref(task_ref)?;
+        Some(super::current_task::CurrentTaskCandidate {
+            task: &slot.task,
+            flow: &slot.flows[slot.active_flow_slot],
+        })
     }
 
     fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
@@ -9088,7 +9128,7 @@ pub fn enter_first_user_init(
             trap_frame.entry(),
             trap_frame.sp(),
             trap_frame.sstatus(),
-            user_kernel_trap_stack_top(),
+            user_kernel_trap_entry_context(),
         )
     }
 }
@@ -9337,6 +9377,11 @@ pub fn user_kernel_trap_stack_top() -> usize {
     USER_KERNEL_TRAP_STACK_RUNTIME
         .stack_top
         .load(Ordering::Acquire)
+}
+
+#[cfg(app_user_boot)]
+pub fn user_kernel_trap_entry_context() -> usize {
+    user_kernel_trap_stack_top().saturating_sub(USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE)
 }
 
 #[cfg(app_user_boot)]

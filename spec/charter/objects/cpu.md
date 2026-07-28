@@ -35,9 +35,8 @@ possible/present/active/online 集合只能从每个已发布 CPU 的状态或�
 
 ## CPU-local 子对象
 
-`CurrentTaskSlot`、本地中断控制和其它真正 per-CPU 的对象属于相应 `CPU` 实例。当前轮次保留
-CurrentTaskSlot 的既有语义，只把其存储归属迁到 `CpuGroup.cpus[0]`；它仍是唯一 OnCpu Task 的只读
-投影，不是 Task 执行权来源。
+本地中断控制和其它真正 per-CPU 的对象属于相应 `CPU` 实例。CurrentTask 不属于 CPU 子对象；它由
+effective TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威副本。
 
 ## CurrentCPU capability
 

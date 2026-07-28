@@ -138,9 +138,10 @@ Online 后由仍在执行的 Kernel.Enable 驱动 `Scheduler.Action::Schedule`�
 `OpenSBI.kernel_load_pa`。设计期 linker symbol `Lds.kernel_start` 仍描述 ELF 入口和布局，但
 `phys_addr(Lds.kernel_start)` 不得再被当作映像物理装载地址。
 
-首次调度真实切换先同步驱动 BootTask.Suspend，随后提交 CurrentTaskSlot 与 context-switch prepare
-事实并完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点并
-提交 CurrentTaskSlot/OnCpu/Live。PID 1 的真实入口直接启动 `KernelInitFlow.Preset`，不再回调 Kernel
+首次调度真实切换先通过 CurrentTask 选择器确认 BootTask，随后提交 context-switch prepare 事实并
+完成物理栈切换；next 栈上的 finish 原子保存/发布 BootTask 断点、消费 KernelInitTask 断点、提交
+OnCpu/Live 与 active Flow，使 CurrentTask 解析切换到 KernelInitTask。PID 1 的真实入口直接启动
+`KernelInitFlow.Preset`，不再回调 Kernel
 的 Setup 或 Enable。Preset body 必须在 `kernel_init_entry()` 验证 PID 1 vmalloc stack 后执行。
 
 `KernelInitFlow.Preset` 在 Kernel Ready/Enable 执行上下文中直接驱动 `PreSmpInitPhase`、

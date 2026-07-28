@@ -51,6 +51,26 @@ Flow handoff 在激活新 Flow 前必须把旧 Flow 的 CpuRef 复制给新 Flow
 同步 drives 子孙继承这一解析来源，异步 emits 不继承。完整 CPU ownership、别名和解引用规则见
 [`CPU`](cpu.md) 与 [`CpuGroup`](cpu-group.md)。
 
+## CurrentTask 与 CurrentTaskRef
+
+`CurrentTask` 是 TaskFlow 执行上下文中的保留选择器，`CurrentTaskRef` 是同一选择结果的派生类型化
+引用：
+
+```text
+CurrentTask := effective_task_flow.parent
+CurrentTaskRef := ref(CurrentTask)
+```
+
+解析不仅检查 parent/owner binding，还必须证明目标 Task 是唯一 `OnCpu/Live` 执行主体、目标的
+`active_flow` 等于 effective TaskFlow，且 Flow 的 parent 与 owner 均指向该 Task。缺失 effective
+Flow、非活跃 Flow、错误 owner、非 `OnCpu/Live` 或悬空/过期 TaskRef 都必须拒绝。
+
+二者都不是 object、owned child、lifecycle、可写 slot 或 snapshot state，不声明 `SetCurrent` 一类
+动作，也不存在另一份 current-task 权威存储。TaskFlow 及其同步 `drives` 子树继承同一解析；异步
+`emits` 不继承，接收方从自己的 effective TaskFlow 重新解析。trace 必须记录 canonical Task、source
+Flow 和 source TaskRef。Kernel 接管并启动 BootInitFlow 后，逻辑 CurrentTask 即为 BootTask；
+`BootTaskEntryBinding` 只协调入口架构绑定与物理到虚拟 identity 迁移，不承担 CurrentTask lifecycle。
+
 ## TaskFlowRef 与 lifecycle
 
 `TaskFlowRef` 使用 private storage slot 加非零 generation。静态 Flow 使用固定 slot 和固定
@@ -88,7 +108,8 @@ OnCpu，重复启动、绕过 Kernel.Enable 或执行权不匹配立即失败。
 
 PID 1 的首次 dispatch 是跨栈 continuation：scheduler prepare 校验两侧 FlowRef/context，架构 switch
 保存 BootTask 并恢复 PID 1，随后在 `kernel_init_entry()` 的 finish 边界原子提交 BootTask Suspend、
-CurrentTaskSlot、PID 1 Continue 与断点消费，再严格发出 KernelInitFlow Startup。不得在 BootTask 栈上
+PID 1 Continue、active Flow 与断点消费，使 CurrentTask 解析切换到 PID 1，再严格发出
+KernelInitFlow Startup。不得在 BootTask 栈上
 预提交 PID 1 OnCpu，也不得预执行 `PreSmpInitPhase` 或任何后续叶子阶段。
 
 每个 `ApIdleFlow[logical_id]` 与 `ApIdleTask[logical_id]` pointwise 绑定。BP 发出的 HSM Startup 是异步、

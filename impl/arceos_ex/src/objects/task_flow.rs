@@ -115,6 +115,22 @@ impl TaskFlow {
         }
     }
 
+    pub(crate) const fn new_static_bound_active(flow_ref: TaskFlowRef, owner: TaskRef) -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            flow_ref,
+            storage_slot: flow_ref.slot,
+            generation: flow_ref.generation,
+            declared: flow_ref.is_valid(),
+            owner,
+            active: true,
+            predecessor: TaskFlowRef::NONE,
+            disabled: false,
+            cleaned: false,
+            cpu_ref: CpuRef::invalid(),
+        }
+    }
+
     pub const fn new_dynamic(storage_slot: u16) -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -358,6 +374,22 @@ impl TaskFlow {
                 self.lifecycle.state(),
                 State::Ready,
                 State::Ready,
+            );
+        }
+        self.active = true;
+        Ok(())
+    }
+
+    /// Binds an initial Flow as the effective execution context at the
+    /// scheduler commit boundary, before that Flow's own lifecycle children
+    /// advance it from Base. Only the owning Task can request this binding.
+    pub(super) fn commit_initial_execution_binding(&mut self, owner: TaskRef) -> EventResult {
+        if self.lifecycle.state() != State::Base || self.owner != owner || self.active {
+            return failed_condition(
+                LifecycleEvent::Continue,
+                self.lifecycle.state(),
+                State::Base,
+                State::Base,
             );
         }
         self.active = true;

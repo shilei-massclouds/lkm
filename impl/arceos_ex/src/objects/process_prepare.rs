@@ -2,8 +2,8 @@ use super::{
     boot_task::BootTask,
     config::Config,
     cpu_capabilities::CpuCapabilities,
-    cpu_control::CurrentTaskSlot,
     cpu_group::CpuGroup,
+    current_task::CurrentTask,
     exception_stream::ExceptionStream,
     files::FilesStruct,
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
@@ -593,10 +593,9 @@ impl TaskCreationCore {
                 .src_task
                 .task_ref()
                 .same_identity(inputs.src_task_ref)
-            || inputs.current_task_slot.state() != State::Ready
             || !inputs
-                .current_task_slot
-                .current()
+                .current_task
+                .task_ref()
                 .same_identity(inputs.src_task_ref)
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.credential_core.state() != State::Prepared
@@ -713,7 +712,7 @@ impl TaskCreationCore {
 pub struct TaskCopyProcessInputs<'a> {
     pub src_task: &'a Task,
     pub src_task_ref: TaskRef,
-    pub current_task_slot: &'a CurrentTaskSlot,
+    pub current_task: CurrentTask,
     pub root_pid_namespace: &'a RootPidNamespace,
     pub credential_core: &'a CredentialCore,
     pub signal_core: &'a SignalCore,

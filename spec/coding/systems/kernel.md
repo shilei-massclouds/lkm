@@ -70,7 +70,7 @@ Kernel.Enable accepts
 但这些边界在逻辑上都由同一个 Kernel.Enable 驱动，不得另建 pending/continuation lifecycle 状态。
 Scheduler 是 Task Suspend/Continue 的唯一发送者，不得在 BootTask 栈上提前处理 next
 Continue 或运行 KernelInitFlow 叶阶段。`kernel_init_entry()` 验证 PID 1 实际 SP 后调用具名
-continuation，后者验证 Kernel Ready 且 Enable 已接受、BootInitFlow Online、KernelInitTask OnCpu、CurrentTaskSlot
+continuation，后者验证 Kernel Ready 且 Enable 已接受、BootInitFlow Online、KernelInitTask OnCpu、CurrentTask
 identity 和 entry count，再执行 KernelInitFlow 的第一个叶阶段。
 
 UserBoot 的 commit action 完成旧 Flow Disable、active handoff、新 Flow Enable 和旧 Flow Cleanup；

@@ -13,6 +13,10 @@ use super::{
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 pub const TRAP_FRAME_SIZE: usize = 36 * core::mem::size_of::<usize>();
+#[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
+pub const USER_TRAP_ENTRY_CONTEXT_SIZE: usize = 2 * core::mem::size_of::<usize>();
+const USER_TRAP_ENTRY_TASK_IDENTITY_OFFSET: usize = 0;
+const USER_TRAP_ENTRY_SAVED_TP_OFFSET: usize = core::mem::size_of::<usize>();
 pub const KERNEL_TRAP_THREAD_SHIFT: usize = 14;
 pub const KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize = 4096;
 
@@ -34,7 +38,11 @@ formal_event_entry_save_context:
     sd      t0, 40(sp)
     sd      t1, 48(sp)
     csrr    t0, sscratch
-    bnez    t0, 2f
+    beqz    t0, 1f
+    ld      t1, {trap_frame_size_plus_saved_tp_offset}(sp)
+    sd      t1, 32(sp)
+    j       2f
+1:
     addi    t0, sp, {trap_frame_size}
 2:
     sd      t0, 16(sp)
@@ -85,6 +93,7 @@ formal_event_entry_save_context:
     andi    t1, t0, {sstatus_spp}
     bnez    t1, 3f
     addi    t0, sp, {trap_frame_size}
+    sd      tp, {entry_task_identity_offset}(t0)
     csrw    sscratch, t0
     j       4f
 3:
@@ -137,6 +146,10 @@ bss_anchor:
     .space 8
 "#,
     trap_frame_size = const TRAP_FRAME_SIZE,
+    trap_frame_size_plus_saved_tp_offset = const (
+        TRAP_FRAME_SIZE + USER_TRAP_ENTRY_SAVED_TP_OFFSET
+    ),
+    entry_task_identity_offset = const USER_TRAP_ENTRY_TASK_IDENTITY_OFFSET,
     overflow_stack_size = const KERNEL_TRAP_OVERFLOW_STACK_SIZE,
     sstatus_spp = const csr::SSTATUS_SPP,
     sstatus_kernel_trap_clear = const (csr::SSTATUS_SUM | csr::SSTATUS_FS_VS),
@@ -164,7 +177,7 @@ global_asm!(
     .align 2
     .globl formal_event_entry
 formal_event_entry:
-    /* User traps receive the known-safe kernel stack top from sscratch. */
+    /* User traps receive the entry-context boundary from sscratch. */
     csrrw   sp, sscratch, sp
     bnez    sp, .Lformal_event_entry_user
 
@@ -186,6 +199,8 @@ formal_event_entry:
     j       formal_event_entry_save_context
 
 .Lformal_event_entry_user:
+    sd      tp, {entry_saved_tp_offset}(sp)
+    ld      tp, {entry_task_identity_offset}(sp)
     j       formal_event_entry_save_context
 
 .Lformal_event_entry_overflow:
@@ -253,6 +268,8 @@ formal_event_entry:
     trap_frame_size = const TRAP_FRAME_SIZE,
     thread_shift = const KERNEL_TRAP_THREAD_SHIFT,
     sstatus_kernel_trap_clear = const (csr::SSTATUS_SUM | csr::SSTATUS_FS_VS),
+    entry_task_identity_offset = const USER_TRAP_ENTRY_TASK_IDENTITY_OFFSET,
+    entry_saved_tp_offset = const USER_TRAP_ENTRY_SAVED_TP_OFFSET,
 );
 
 unsafe extern "C" {

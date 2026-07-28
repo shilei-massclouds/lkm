@@ -743,7 +743,7 @@ class SignalAnimationTests(unittest.TestCase):
         ]
         self.assertEqual(stable_states, ["Base", "Prepared", "Ready", "Online"])
 
-    def test_boot_init_setup_boundary_has_49_signals_and_98_causal_moments(self) -> None:
+    def test_boot_init_setup_boundary_has_48_signals_and_96_causal_moments(self) -> None:
         work = self.root / "boot-init-setup-boundary-work"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
@@ -771,17 +771,17 @@ class SignalAnimationTests(unittest.TestCase):
                 derivation["model_fingerprint"],
                 view["model_fingerprint"],
             },
-            {"sha256:321ebcd7a70ed559c8c2c61d3f907988b10047e21c56c6048567ea0d3826c8c0"},
+            {"sha256:e105fea5c826b259513194dec4916e1fb61ef37016ed6e66d31ce0fe1b34b6e6"},
         )
         animation = build_animation(model, view)
-        self.assertEqual(animation["trace"]["total_signals"], 49)
-        self.assertEqual(animation["trace"]["total_moments"], 98)
+        self.assertEqual(animation["trace"]["total_signals"], 48)
+        self.assertEqual(animation["trace"]["total_moments"], 96)
         self.assertEqual(
             {
                 kind: sum(moment["kind"] == kind for moment in animation["moments"])
                 for kind in ("request", "feedback", "settle", "terminal")
             },
-            {"request": 49, "feedback": 45, "settle": 3, "terminal": 1},
+            {"request": 48, "feedback": 44, "settle": 3, "terminal": 1},
         )
         self.assertEqual(
             [moment["id"] for moment in animation["moments"] if moment["kind"] == "settle"],
@@ -820,7 +820,7 @@ class SignalAnimationTests(unittest.TestCase):
         }
         self.assertGreater(
             moment_index["sig-0019:feedback"],
-            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(20, 50)),
+            max(moment_index[f"sig-{index:04d}:feedback"] for index in range(20, 49)),
         )
         self.assertEqual(
             animation["trace"]["boundary"]["normalized_signal"],

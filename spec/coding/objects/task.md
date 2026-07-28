@@ -26,7 +26,7 @@ TaskFlow 的独立 lifecycle、generation、owner/binding 与 handoff lowering �
 Rust `Task` 必须是 lifecycle、identity、PID、execution authority、`TaskThreadContext`、typed `initial_flow` 和 Flow ownership 的唯一
 carrier。Boot/KernelInit/Kthreadd/AP/smoke/user-child 角色结构只能保存角色 metadata 或 continuation
 scratch，并委托一个 `Task` core；它们不得另存上述 carrier 字段。linker-visible
-`init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue、current slot 和
+`init_task_storage` 的首地址就是 PID 0 canonical `Task` 地址，`tp`、runqueue 和 CurrentTask 解析
 BootTask API 必须解析到该同一地址。
 
 CPU assignment 不属于 Task carrier。`Task` 不得保存 `cpu_id`、`CpuRef` 或同义字段；可恢复执行路径
@@ -47,24 +47,24 @@ copy-process 结果，建立 PID、stack/thread context 的初始寄存器字节
 entity 和 New/not-enqueued 状态；`Task::enable` 只在调用者已完成 running、runqueue publication 与
 初始 Flow structural binding 后把 context 绑定 initial FlowRef 并原子提交 Online/None/Valid；它不启动
 Flow。Scheduler prepare 必须验证 prev OnCpu/Live/Invalid/active-flow 和 next Online/None/Valid/FlowRef；
-next 栈上的 finish 才调用 context save/restore observation、提交 prev Online/None/Valid、next
-OnCpu/Live/Invalid 和 CurrentTaskSlot，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
+next 栈上的 finish 先验证架构已建立的 next 原始身份，再调用 context save/restore observation，并原子提交 prev
+Online/None/Valid、next OnCpu/Live/Invalid、next active Flow 与 CurrentTask 选择结果，然后严格选择 Base initial Flow 的 `Preset` 或 Online active Flow
 的 `Continue`。stale generation、无效 context、Reserved authority 或候选歧义必须无状态变化失败。
 terminal task 使用 OnCpu 直接 Disable，context 保持 Invalid；identity switch 完全不调用上述方法。
 `disable/cleanup` 必须继续检查 owned Flow 的 inactive/Destroyed 顺序。角色专用 flag、入口、
 provider、CPU pin 或 global reference publication 不得写入这些通用方法。
 
 `TaskCreationCore::copy_process` 的 inputs 必须包含 source `Task`、经 generation 校验的 source
-`TaskRef` 与只读 `CurrentTaskSlot` 投影。它在写入自身 commit record 或 destination metadata 前，
-依次验证 source 为 `OnCpu`、authority 为 `Live`、source ref 解析回同一 carrier，且 current slot
-等于该 ref。调用者不得传入 persistent `Online` 状态代替当前执行权；BootTask 不使用名称特判。
+`TaskRef` 与只读 `CurrentTask` capability。它在写入自身 commit record 或 destination metadata 前，
+依次验证 source 为 `OnCpu`、authority 为 `Live`、source ref 解析回同一 carrier，且 capability
+解析出的 generation-checked ref 等于该 ref。调用者不得传入 persistent `Online` 状态代替当前执行权；BootTask 不使用名称特判。
 上述任一检查失败必须保持 core 和 destination 不变。
 
 `BootTask` 使用 boot-only const initializer 直接构造 OnCpu/Live/Invalid `init_task_storage` 和固定
 `TaskRef::BOOT`；不得复用普通 Task lifecycle 方法，也不得暴露 `preset/setup/enable` 或兼容 alias。
 早期 `tp` 物理/虚拟地址模式与初始 preemption 事实由 EntryPrelude 私有
 `BootTaskEntryBinding` lower；OnCpu 初态只由固件/架构入口执行权事实建立，不依赖尚未建立的 runqueue
-或 current slot。各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
+或 runqueue current。各阶段只能静默验证该 carrier 仍为 OnCpu/canonical。
 
 ## TaskRef 与 storage
 
@@ -74,8 +74,9 @@ slot；每次把已回收 slot 重新声明为 Task 时 generation 单调递增�
 和 generation。只有所有 owned Flow 都 Destroyed、Task 自身 Destroyed 且 wait/reap 已释放 record
 后，slot 才可再分配。stale ref 必须返回失败，不能解析到 slot 的新 occupant。
 
-`CurrentTaskSlot`、runqueue entry、scheduler observation、锁 owner route、completed-child/wait record
-统一保存 `TaskRef`。禁止 `CurrentTaskRef`、`UserChild` 等按角色枚举身份接口，也不保留 alias。
+runqueue entry、scheduler event observation、锁 owner route、completed-child/wait record 可以保存当时的
+`TaskRef`，但不得成为当前任务权威副本。`CurrentTask` 是无状态、只读、短生命周期 capability，内部只携带
+generation 校验后的 `TaskRef`；禁止 `CurrentTaskRef`、`UserChild` 等按角色枚举身份接口，也不保留 alias。
 需要名称或 PID 的诊断必须先通过 owner storage 验证 TaskRef，再读取 Task metadata。
 
 ## 与 TaskFlow 的受控协作
@@ -123,4 +124,6 @@ reservation 与 initial Flow binding；不得经过普通 Task Enable，也不�
 
 `TaskThreadContext` wrapper 必须位于统一 Task core，内部含 `TaskSwitchContext`、breakpoint state、绑定
 FlowRef 与真实 save/restore 计数。scheduler/role wrapper 不得保存测试专用第二套 context carrier。
-RISC-V `TaskSwitchContext` 仅含 `ra/sp/s0..s11`；汇编从独立 next Task pointer 参数建立 `tp`。
+RISC-V `TaskSwitchContext` 仅含 `ra/sp/s0..s11`；汇编从独立 next Task pointer 参数建立 `tp`。对象层必须
+集中提供 `tp` 地址到 canonical Task/TaskRef 的解析，覆盖 Boot、静态内核、动态 smoke/user 与 AP idle
+storage，并拒绝未知地址或 stale generation；通用调用方不得取得裸地址或可变 Task 借用。

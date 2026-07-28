@@ -18,18 +18,17 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
     if ctx.cpu_group.boot_cpu_state() != State::Online
-        || ctx.boot_cpu_current_task().state() != State::Ready
-        || !ctx.boot_cpu_current_task().current_is_kernel_init()
-        || ctx.boot_cpu_current_task().current() != TaskRef::KERNEL_INIT
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
         || ctx.scheduler.boot_idle_preemption().disabled()
     {
         printk::write_fmt(format_args!(
-            "current CPU or idle task control facts invalid: cpu_online={} current_slot_ready={} current_is_kernel_init={} current_ref_is_kernel_init={} idle_preemption_ready={} idle_preemption_disabled={}\n",
+            "current CPU or idle task control facts invalid: cpu_online={} current_is_kernel_init={} idle_preemption_ready={} idle_preemption_disabled={}\n",
             ctx.cpu_group.boot_cpu_state() == State::Online,
-            ctx.boot_cpu_current_task().state() == State::Ready,
-            ctx.boot_cpu_current_task().current_is_kernel_init(),
-            ctx.boot_cpu_current_task().current() == TaskRef::KERNEL_INIT,
+            ctx.current_task_ref()
+                .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT),
             ctx.scheduler.boot_idle_preemption().state() == State::Ready,
             ctx.scheduler.boot_idle_preemption().disabled(),
         ));
@@ -115,9 +114,9 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.boot_runqueue_lock().irqrestore_exited_count() == 0
         || ctx.scheduler.pick_next_task_exit_prev_ref() != TaskRef::BOOT
         || ctx.scheduler.pick_next_task_exit_next_ref() != TaskRef::KERNEL_INIT
-        || ctx.boot_cpu_current_task().switch_committed_count() == 0
-        || !ctx.boot_cpu_current_task().current_is_kernel_init()
-        || ctx.boot_cpu_current_task().current() != TaskRef::KERNEL_INIT
+        || !ctx
+            .current_task_ref()
+            .is_ok_and(|task_ref| task_ref == TaskRef::KERNEL_INIT)
         || !boot_cpu_owned_scheduler_view_matches()
         || !scheduler_possible_runqueues_match_cpu_group()
         || ctx.scheduler.default_root_domain().covered_cpu_count()

@@ -56,15 +56,14 @@ Task lifecycle 之外必须保存两组正交状态：
   active Flow context 并再次发布 Valid。
 
 `TaskThreadContext` 固定物理保存 RISC-V `ra/sp/s0..s11`、breakpoint state、经 slot/generation 校验的
-`TaskFlowRef` 以及真实 save/restore 观察计数。`tp`、由 effective TaskFlow 解析的 CPU identity 和
-`CurrentTaskSlot` 均是独立的
-identity/current 机制，不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
+`TaskFlowRef` 以及真实 save/restore 观察计数。`tp` 及由 effective TaskFlow 解析的 CurrentTask/CPU
+identity 都不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
 FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 
 `BootTask` 是允许的静态 Task lifecycle override。它没有 Preset、Setup 或 Enable，初始状态为
 `OnCpu/Live/Invalid`，并保留 `OnCpu --Suspend--> Online --Continue--> OnCpu`
 往返。入口初态表示固件/架构入口已把 boot CPU 执行权直接交给该 Task；它不由 Scheduler Continue
-建立，也不依赖尚未建立的 BootRunQueue 或 CurrentTaskSlot。该状态同时保证静态 `init_task` storage、
+建立，也不依赖尚未建立的 BootRunQueue。该状态同时保证静态 `init_task` storage、
 固定 PID 0、`TaskRef::BOOT` 和 canonical identity；不得把会变化的 `tp`、entry role、preemption 状态
 或 active TaskFlow 放入 invariant。boot-only const 初始化器直接构造这一状态，不复用普通 Task
 lifecycle 方法。除这一完整 override 外，不存在实例级 Task lifecycle 权威。
@@ -98,15 +97,18 @@ flags、provider
 与 schedule-loop 等角色事实属于创建它们的 Phase，不得成为 `Task` 类型 invariant。
 
 Scheduler 是普通 `Task.Continue` 与 `Task.Suspend` 的唯一发送者。一次真实切换分为 prepare、物理
-switch、finish：prepare 校验 prev `OnCpu/Live/Invalid`、prev active Flow 与 next
-`Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的 `ra/sp/s0..s11` 并从
-next Task identity 单独建立 `tp`；next 栈上的 finish 原子提交 prev `Online/None/Valid`、next
-`OnCpu/Live/Invalid`、next Flow CpuRef、CurrentTaskSlot 与观察事实，然后严格 Startup/Continue
-next Flow。若 prev 是
+switch、finish：prepare 通过 CurrentTask 选择器校验 prev `OnCpu/Live/Invalid`、prev active Flow 与
+next `Online/None/Valid` 的 FlowRef/generation；架构 switch 保存 prev、恢复 next 的
+`ra/sp/s0..s11` 并从 next Task identity 单独建立 `tp`；next 栈上的 finish 原子提交 prev
+`Online/None/Valid`、next `OnCpu/Live/Invalid`、next Flow CpuRef、active Flow 与观察事实，然后严格
+Startup/Continue next Flow。若 prev 是
 终止 Task，finish 提交 `OnCpu --Disable--> Offline`，context 保持 Invalid，并在 next 侧 Cleanup，
 不得先制造不可恢复的 Online。`prev == next` 是无动作路径：不发送 Suspend/Continue，不保存/恢复
-context，也不改变 lifecycle、authority、Flow binding 或计数。CurrentTaskSlot 是唯一 OnCpu Task 的
-投影视图，不是执行权来源。
+context，也不改变 lifecycle、authority、Flow binding、CurrentTask 选择结果或计数。
+
+调度 finish 是普通 Signal 不可观察中间态的原子提交边界：prev 失去执行权、next 获得
+`OnCpu/Live`、next Flow 激活与 CurrentTask 切换必须同时可见。terminal switch 必须在回收 prev 前
+先使 next 的 CurrentTask 可解析；identity switch 不改变解析结果。
 
 Task 接受 Continue 并提交 OnCpu 后必须严格启动恰好一个 execution continuation：若 initial Flow 仍为
 Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Flow 发出 Continue。发送前两条候选
@@ -115,9 +117,9 @@ Base，则向它发出 Startup（canonical Preset）；否则向唯一 active Fl
 ## CopyProcess 的源执行权
 
 `TaskCreationCore.CopyProcess` 从当前正在执行的 Task 复制，而不是从一个仅可调度的 Online Task
-复制。调用时 `src_task` 必须同时满足：lifecycle 为 `OnCpu`、execution authority 为 `Live`，并且
-其 `TaskRef` 与当前 CPU 的 `CurrentTaskSlot` 只读投影一致。`Online`、`Reserved`、非 current 或
-TaskRef 不匹配都必须在任何 destination/copy-process 状态修改前拒绝。
+复制。调用时 `src_task` 必须同时满足：lifecycle 为 `OnCpu`、execution authority 为 `Live`，其
+active Flow 等于 effective TaskFlow，且其 `TaskRef` 与 CurrentTaskRef 的解析结果一致。`Online`、
+`Reserved`、非 current 或 TaskRef 不匹配都必须在任何 destination/copy-process 状态修改前拒绝。
 
 该契约对 BootTask、PID 1 和后续用户 Task 一视同仁；BootTask 只因入口时确实是
 `OnCpu/Live/current` 而可作为 rest-init 的源，不存在按名称放宽或把底层 persistent carrier

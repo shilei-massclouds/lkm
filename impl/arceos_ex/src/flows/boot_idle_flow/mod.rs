@@ -4,8 +4,9 @@ use crate::{
     checkpoint::Checkpoint,
     objects::{
         boot_task::BootTask,
-        cpu_control::{CurrentTaskSlot, LocalInterruptControl},
+        cpu_control::LocalInterruptControl,
         cpu_group::{CpuGroup, CurrentCpu},
+        current_task::CurrentTask,
         rest_init::{
             KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask,
         },
@@ -425,6 +426,10 @@ impl BootIdleFlow {
         &mut self.flow
     }
 
+    pub(crate) const fn core(&self) -> &TaskFlow {
+        &self.flow
+    }
+
     pub fn prepare_idle_entry(
         &mut self,
         boot_task: &BootTask,
@@ -460,6 +465,7 @@ impl BootIdleFlow {
     pub fn run_idle_loop(
         &mut self,
         scheduler: &mut Scheduler,
+        current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
@@ -469,7 +475,6 @@ impl BootIdleFlow {
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -484,6 +489,7 @@ impl BootIdleFlow {
 
         self.do_idle_cycle(
             scheduler,
+            current_task,
             current_cpu,
             kernel_init_task,
             kernel_init_flow,
@@ -493,7 +499,6 @@ impl BootIdleFlow {
             user_task_set,
             boot_task,
             local_interrupt,
-            current_task_slot,
         )?;
         self.idle_loop_entered = true;
         self.idle_loop_continues = true;
@@ -504,6 +509,7 @@ impl BootIdleFlow {
     fn do_idle_cycle(
         &mut self,
         scheduler: &mut Scheduler,
+        current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
@@ -513,7 +519,6 @@ impl BootIdleFlow {
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -531,6 +536,7 @@ impl BootIdleFlow {
         self.observe_need_resched(boot_task)?;
         self.schedule_if_need_resched(
             scheduler,
+            current_task,
             current_cpu,
             kernel_init_task,
             kernel_init_flow,
@@ -540,7 +546,6 @@ impl BootIdleFlow {
             user_task_set,
             boot_task,
             local_interrupt,
-            current_task_slot,
         )?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
@@ -620,6 +625,7 @@ impl BootIdleFlow {
     fn schedule_if_need_resched(
         &mut self,
         scheduler: &mut Scheduler,
+        current_task: CurrentTask,
         current_cpu: CurrentCpu,
         kernel_init_task: &mut KernelInitTask,
         kernel_init_flow: &mut KernelInitFlow,
@@ -629,7 +635,6 @@ impl BootIdleFlow {
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
         local_interrupt: &mut LocalInterruptControl,
-        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -637,8 +642,7 @@ impl BootIdleFlow {
             || !self.observed_need_resched
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
-            || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_task()
+            || !current_task.task_ref().same_identity(TaskRef::BOOT)
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
                 &self.flow,
                 boot_task.task(),
@@ -649,6 +653,7 @@ impl BootIdleFlow {
 
         self.idle_schedule_requested = true;
         scheduler.schedule_idle(
+            current_task,
             current_cpu,
             kernel_init_task,
             kernel_init_flow,
@@ -658,7 +663,6 @@ impl BootIdleFlow {
             self,
             user_task_set,
             local_interrupt,
-            current_task_slot,
         )?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;

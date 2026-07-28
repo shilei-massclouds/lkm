@@ -41,7 +41,9 @@ BSS。handoff fact 只证明清零循环已完成，不改变后续 BSS 的正�
 `BootTaskEntryBinding` 的 Base/Prepared/Ready 状态只保存在本 Flow 子模块的私有静态状态中，不加入
 公共 `Context`。物理 adoption 与虚拟切换 helper 在任何修改前必须一次性验证 binding、BootTask、
 VM/KernelImage、`TaskRef::BOOT` 和预期 `tp` 地址；提交后失败沿既有 shutdown 路径终止，不能返回可继续
-执行的半提交状态。binding 本身不发 checkpoint。
+执行的半提交状态。binding 本身不发 checkpoint，只协调入口架构绑定与物理到虚拟身份迁移，不承担
+CurrentTask lifecycle、accessor 或权威存储职责；BootInitFlow 生效后 `CurrentTask` 必须直接解析为
+BootTask。
 
 `BootTask.OnCpu` 的 `T` 只在 `_start` 观察一次；物理/虚拟 binding 都不得推进 BootTask lifecycle
 或重复该 marker。两次 binding 必须解析到同一 `init_task_storage`/`TaskRef::BOOT` carrier，期间不

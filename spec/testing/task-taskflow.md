@@ -29,10 +29,14 @@ carrier and its independently-lived `TaskFlow` instances.
   that scheduler call later restores BootTask.
 - Execution-boundary coverage must prove that a Flow process proceeds only
   when its parent Task is OnCpu/Live. Reserved authority, stale Flow generation or another mismatch must fail without changing Flow
-  lifecycle state, and CurrentTaskSlot must agree with the OnCpu Task once set.
+  lifecycle state. `CurrentTask := effective_task_flow.parent` must resolve only
+  when parent/owner, active Flow, unique OnCpu/Live authority and TaskRef generation all agree.
 - CopyProcess coverage must accept an OnCpu/Live source whose validated TaskRef
-  equals CurrentTaskSlot, and reject Online, Reserved, non-current and mismatched
+  is the derived `CurrentTaskRef`, and reject Online, Reserved, non-current and mismatched
   TaskRef sources without changing TaskCreationCore or destination state.
+- CurrentTask and CurrentTaskRef tests must prove that neither selector has
+  lifecycle, owned storage, writable state or snapshot entries. Synchronous
+  drives inherit the effective Flow; asynchronous emits resolve independently.
 - Model-tool coverage must exercise multi-level lifecycle inheritance: cumulative
   conditions/facts, base-to-derived drives, post-commit emits, duplicate-side-effect
   rejection and complete override. The legacy and tools2 pipelines must produce the
@@ -71,6 +75,9 @@ carrier and its independently-lived `TaskFlow` instances.
   activates Live authority and starts the matching logical-id Flow without Task Enable/Continue.
 - RISC-V sentinel coverage must save/restore `ra/sp/s0..s11` and prove `tp` is established from next Task
   identity rather than from `TaskSwitchContext`.
+- Linux PLIC foreign-ABI coverage must prove that ordinary completion, an error return through the Rust
+  IRQ-domain bridge, and a nested foreign call each restore the exact entry `tp`; Rust Context and
+  CurrentTask resolution may run only while the saved canonical Task `tp` is active.
 - User entry checkpoints use `UserAppFlow.EnterUserMode`. Old Task,
   persona, and Flow checkpoint names are not compatibility interfaces.
 

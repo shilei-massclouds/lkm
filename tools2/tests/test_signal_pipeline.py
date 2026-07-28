@@ -920,7 +920,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2, 3, 4, 5):
+            for old_version in (1, 2, 3, 4, 5, 6):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -937,7 +937,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=6", stderr.getvalue())
+                self.assertIn("version=7", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -999,7 +999,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v6_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v7_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -1009,7 +1009,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2, 3, 4, 5):
+            for old_version in (1, 2, 3, 4, 5, 6):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -1024,7 +1024,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=6", stderr.getvalue())
+                    self.assertIn("version=7", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1245,7 +1245,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v6_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v7_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -1791,17 +1791,30 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertEqual(checked["verdict"], "failed")
         self.assertIn("unbound system reference", derivation["signals"][0]["reason"])
 
-    def test_current_cpu_inherits_only_through_synchronous_task_flow_drives(self) -> None:
+    def test_current_selectors_inherit_only_through_synchronous_task_flow_drives(self) -> None:
         source = """
             type LogicId { }
             type CpuRef { }
+            type TaskRef { }
+            enum TaskExecutionAuthority { None, Reserved, Live }
+            type Task {
+                associations { mutable active_flow: TaskFlow; }
+                processes {
+                    Action::Touch { state_effect: StateEffect::None; }
+                }
+            }
             type CPU {
                 initial_state: State::Base;
                 state State::Base {
                     transitions { on Transition::Preset -> State::Prepared { } }
                 }
                 state State::Prepared {
-                    actions { on Action::Touch { ensures { cpu_touched(self); } } }
+                    actions {
+                        on Action::Touch(task_ref: TaskRef) {
+                            depends_on { task_ref_ready(task_ref); }
+                            ensures { cpu_touched(self); }
+                        }
+                    }
                 }
             }
             type CpuGroupObject {
@@ -1821,6 +1834,7 @@ class SignalPipelineTests(unittest.TestCase):
                 state State::Prepared { }
             }
             type TaskFlow {
+                parent: Task;
                 associations { mutable cpu_ref: CpuRef; }
                 processes {
                     Action::AssignCpuRef(cpu_ref: CpuRef) {
@@ -1836,9 +1850,25 @@ class SignalPipelineTests(unittest.TestCase):
                 emits { Flow.Action::Run; }
             }
             object CpuGroup: CpuGroupObject { }
+            object BootTask: Task {
+                associations { active_flow = Flow; }
+                initial_state: State::OnCpu;
+                state State::OnCpu {
+                    invariant {
+                        task_execution_authority_is(BootTask, TaskExecutionAuthority::Live);
+                        task_ref_targets(BootTaskRef, BootTask);
+                        task_ref_ready(BootTaskRef);
+                    }
+                }
+            }
             object Flow: TaskFlow {
+                parent: BootTask;
                 initial_state: State::Base;
                 state State::Base {
+                    invariant {
+                        task_flow_parent_is(Flow, BootTask);
+                        task_flow_owner_is(Flow, BootTask);
+                    }
                     actions {
                         on Action::Run {
                             drives { SyncChild.Action::UseCurrent; }
@@ -1852,7 +1882,9 @@ class SignalPipelineTests(unittest.TestCase):
                 initial_state: State::Base;
                 state State::Base {
                     actions {
-                        on Action::UseCurrent { drives { CurrentCPU.Action::Touch; } }
+                        on Action::UseCurrent {
+                            drives { CurrentCPU.Action::Touch(CurrentTaskRef); }
+                        }
                     }
                 }
             }
@@ -1860,7 +1892,7 @@ class SignalPipelineTests(unittest.TestCase):
                 initial_state: State::Base;
                 state State::Base {
                     actions {
-                        on Action::UseCurrent { drives { CurrentCPU.Action::Touch; } }
+                        on Action::UseCurrent { drives { CurrentTask.Action::Touch; } }
                     }
                 }
             }
@@ -1870,22 +1902,174 @@ class SignalPipelineTests(unittest.TestCase):
         )
         self.assertEqual(checked["verdict"], "failed")
         touched = [item for item in derivation["signals"] if item["name"] == "Touch"]
-        self.assertEqual(len(touched), 1)
+        self.assertEqual(
+            len(touched),
+            1,
+            [(item["id"], item["target"], item["name"], item.get("reason")) for item in derivation["signals"]],
+        )
         self.assertEqual(touched[0]["target"], "CpuGroup.cpus[0]")
         self.assertEqual(
-            touched[0]["selector_resolution"],
-            {
-                "selector": "CurrentCPU",
-                "source_cpu_ref": "BootCPURef",
-                "source_flow": "Flow",
-                "target": "CpuGroup.cpus[0]",
-            },
+            touched[0]["selector_resolutions"],
+            [
+                {
+                    "selector": "CurrentCPU",
+                    "source_cpu_ref": "BootCPURef",
+                    "source_flow": "Flow",
+                    "target": "CpuGroup.cpus[0]",
+                },
+                {
+                    "selector": "CurrentTask",
+                    "source_flow": "Flow",
+                    "source_task_ref": "BootTaskRef",
+                    "target": "BootTask",
+                },
+            ],
         )
         async_signal = next(
             item for item in derivation["signals"] if item["target"] == "Async"
         )
         self.assertEqual(async_signal["outcome"], "failed")
-        self.assertIn("CurrentCPU requires an effective TaskFlow", async_signal["reason"])
+        self.assertIn("CurrentTask requires an effective TaskFlow", async_signal["reason"])
+
+    def test_current_task_rejects_inconsistent_execution_contexts(self) -> None:
+        def source(
+            *,
+            task_name: str = "BootTask",
+            flow_name: str = "Flow",
+            state: str = "OnCpu",
+            authority: str = "Live",
+            active_flow: str | None = None,
+            parent: str | None = None,
+            owner: str | None = None,
+            ready_ref: bool = True,
+            second_ref: bool = False,
+        ) -> str:
+            active_flow = active_flow or flow_name
+            parent = parent or task_name
+            owner = owner or task_name
+            ready_fact = f"task_ref_ready({task_name}Ref);" if ready_ref else ""
+            second_facts = (
+                f"task_ref_targets(SecondRef, {task_name}); task_ref_ready(SecondRef);"
+                if second_ref
+                else ""
+            )
+            return f"""
+                enum TaskExecutionAuthority {{ None, Reserved, Live }}
+                type TaskRef {{ }}
+                type Task {{
+                    associations {{ mutable active_flow: TaskFlow; }}
+                    processes {{
+                        Action::Touch(task_ref: TaskRef) {{
+                            state_effect: StateEffect::None;
+                            depends_on {{ task_ref_targets(task_ref, self); }}
+                            ensures {{ current_task_touched(self, task_ref); }}
+                        }}
+                    }}
+                }}
+                type TaskFlow {{ parent: Task; }}
+                external Human {{
+                    drives {{ {flow_name}.Action::Run; }}
+                    emits {{ Async.Action::Noop; }}
+                }}
+                system Async {{
+                    initial_state: State::Base;
+                    state State::Base {{
+                        actions {{ on Action::Noop {{ }} }}
+                    }}
+                }}
+                object {task_name}: Task {{
+                    associations {{ active_flow = {active_flow}; }}
+                    initial_state: State::{state};
+                    state State::{state} {{
+                        invariant {{
+                            task_execution_authority_is({task_name}, TaskExecutionAuthority::{authority});
+                            task_ref_targets({task_name}Ref, {task_name});
+                            {ready_fact}
+                            {second_facts}
+                        }}
+                    }}
+                }}
+                object OtherTask: Task {{
+                    associations {{ active_flow = OtherFlow; }}
+                    initial_state: State::Online;
+                    state State::Online {{ }}
+                }}
+                object {flow_name}: TaskFlow {{
+                    parent: {parent};
+                    initial_state: State::Base;
+                    state State::Base {{
+                        invariant {{
+                            task_flow_parent_is({flow_name}, {parent});
+                            task_flow_owner_is({flow_name}, {owner});
+                        }}
+                        actions {{
+                            on Action::Run {{
+                                drives {{ CurrentTask.Action::Touch(CurrentTaskRef); }}
+                            }}
+                        }}
+                    }}
+                }}
+                object OtherFlow: TaskFlow {{
+                    parent: OtherTask;
+                    initial_state: State::Base;
+                    state State::Base {{
+                        invariant {{
+                            task_flow_parent_is(OtherFlow, OtherTask);
+                            task_flow_owner_is(OtherFlow, OtherTask);
+                        }}
+                    }}
+                }}
+            """
+
+        derivation, checked, _ = self.run_source(
+            source(), None, max_depth="all", max_breadth="all"
+        )
+        self.assertEqual(
+            checked["verdict"],
+            "complete",
+            [(item["id"], item["target"], item["name"], item.get("reason")) for item in derivation["signals"]],
+        )
+        touched = next(item for item in derivation["signals"] if item["name"] == "Touch")
+        self.assertEqual(touched["target"], "BootTask")
+        self.assertEqual(
+            touched["selector_resolutions"],
+            [{
+                "selector": "CurrentTask",
+                "source_flow": "Flow",
+                "source_task_ref": "BootTaskRef",
+                "target": "BootTask",
+            }],
+        )
+
+        cases = [
+            (source(owner="OtherTask"), "disagrees with owner"),
+            (source(active_flow="OtherFlow"), "does not match effective Flow"),
+            (source(state="Online"), "is not OnCpu"),
+            (source(authority="Reserved"), "is not Live"),
+            (source(ready_ref=False), "exactly one live TaskRef"),
+            (source(second_ref=True), "exactly one live TaskRef"),
+        ]
+        for invalid_source, expected in cases:
+            with self.subTest(expected=expected):
+                derivation, checked, _ = self.run_source(
+                    invalid_source, None, max_depth="all", max_breadth="all"
+                )
+                self.assertEqual(checked["verdict"], "failed")
+                failed = next(item for item in derivation["signals"] if item["outcome"] == "failed")
+                self.assertIn(expected, failed["reason"])
+
+        ap_derivation, ap_checked, _ = self.run_source(
+            source(task_name="ApIdleTask", flow_name="ApIdleFlow"),
+            None,
+            max_depth="all",
+            max_breadth="all",
+        )
+        self.assertEqual(ap_checked["verdict"], "complete")
+        ap_touch = next(item for item in ap_derivation["signals"] if item["name"] == "Touch")
+        self.assertEqual(ap_touch["target"], "ApIdleTask")
+        self.assertEqual(
+            ap_touch["selector_resolutions"][0]["source_task_ref"], "ApIdleTaskRef"
+        )
 
     def test_repeated_runs_have_identical_ids_order_and_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2347,7 +2531,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v6_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v7_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -3473,11 +3657,11 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(
                 derivation["summary"],
                 {
-                    "completed": 48,
+                    "completed": 47,
                     "failed": 0,
                     "pending": 0,
                     "rejected": 0,
-                    "signals": 49,
+                    "signals": 48,
                     "stopped": 1,
                     "truncated": 0,
                 },
@@ -3501,31 +3685,30 @@ class SignalPipelineTests(unittest.TestCase):
                 (22, "BootInitFlow", "KernelImage", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (23, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (24, "BootInitFlow", "BootCpuLocalInterrupt", "Setup", "drives", 19, "Transition", "Base", "Ready", "completed"),
-                (25, "BootInitFlow", "BootCpuCurrentTask", "Setup", "drives", 19, "Transition", "Base", "Ready", "completed"),
-                (26, "BootInitFlow", "BootTaskEntryBinding", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (27, "BootInitFlow", "BootInitStack", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (28, "BootInitFlow", "EventStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (29, "BootInitFlow", "ExceptionStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (30, "ExceptionStream", "PageFaultException", "Preset", "drives", 29, "Transition", "Base", "Prepared", "completed"),
-                (31, "ExceptionStream", "SyscallException", "Preset", "drives", 29, "Transition", "Base", "Prepared", "completed"),
-                (32, "ExceptionStream", "BreakpointException", "Preset", "drives", 29, "Transition", "Base", "Prepared", "completed"),
-                (33, "ExceptionStream", "UnexpectedException", "Preset", "drives", 29, "Transition", "Base", "Prepared", "completed"),
-                (34, "BootInitFlow", "Vm", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (35, "Vm", "TrampolineVm", "Setup", "drives", 34, "Transition", "Base", "Ready", "completed"),
-                (36, "Vm", "EarlyVm", "Preset", "drives", 34, "Transition", "Base", "Prepared", "completed"),
-                (37, "EarlyVm", "RawDtb", "Preset", "drives", 36, "Transition", "Base", "Prepared", "completed"),
-                (38, "EarlyVm", "RawDtb", "Setup", "drives", 36, "Transition", "Prepared", "Ready", "completed"),
-                (39, "EarlyVm", "FixMap", "Preset", "drives", 36, "Transition", "Base", "Ready", "completed"),
-                (40, "Vm", "EarlyVm", "Setup", "drives", 34, "Transition", "Prepared", "Ready", "completed"),
-                (41, "BootInitFlow", "Vm", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
-                (42, "Vm", "TrampolineVm", "Enable", "drives", 41, "Transition", "Ready", "Online", "completed"),
-                (43, "Vm", "EarlyVm", "Enable", "drives", 41, "Transition", "Ready", "Online", "completed"),
-                (44, "Vm", "TrampolineVm", "Cleanup", "drives", 41, "Transition", "Online", "Destroyed", "completed"),
-                (45, "Vm", "KernelImage", "Enable", "drives", 41, "Transition", "Ready", "Online", "completed"),
-                (46, "BootInitFlow", "EventStream", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
-                (47, "BootInitFlow", "BootTaskEntryBinding", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
-                (48, "BootInitFlow", "BootInitStack", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
-                (49, "BootInitFlow", "Soc", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (25, "BootInitFlow", "BootTaskEntryBinding", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (26, "BootInitFlow", "BootInitStack", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (27, "BootInitFlow", "EventStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (28, "BootInitFlow", "ExceptionStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (29, "ExceptionStream", "PageFaultException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (30, "ExceptionStream", "SyscallException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (31, "ExceptionStream", "BreakpointException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (32, "ExceptionStream", "UnexpectedException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (33, "BootInitFlow", "Vm", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (34, "Vm", "TrampolineVm", "Setup", "drives", 33, "Transition", "Base", "Ready", "completed"),
+                (35, "Vm", "EarlyVm", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
+                (36, "EarlyVm", "RawDtb", "Preset", "drives", 35, "Transition", "Base", "Prepared", "completed"),
+                (37, "EarlyVm", "RawDtb", "Setup", "drives", 35, "Transition", "Prepared", "Ready", "completed"),
+                (38, "EarlyVm", "FixMap", "Preset", "drives", 35, "Transition", "Base", "Ready", "completed"),
+                (39, "Vm", "EarlyVm", "Setup", "drives", 33, "Transition", "Prepared", "Ready", "completed"),
+                (40, "BootInitFlow", "Vm", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
+                (41, "Vm", "TrampolineVm", "Enable", "drives", 40, "Transition", "Ready", "Online", "completed"),
+                (42, "Vm", "EarlyVm", "Enable", "drives", 40, "Transition", "Ready", "Online", "completed"),
+                (43, "Vm", "TrampolineVm", "Cleanup", "drives", 40, "Transition", "Online", "Destroyed", "completed"),
+                (44, "Vm", "KernelImage", "Enable", "drives", 40, "Transition", "Ready", "Online", "completed"),
+                (45, "BootInitFlow", "EventStream", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
+                (46, "BootInitFlow", "BootTaskEntryBinding", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
+                (47, "BootInitFlow", "BootInitStack", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
+                (48, "BootInitFlow", "Soc", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
             ]
             actual = []
             for item in derivation["signals"][15:]:
@@ -3557,6 +3740,31 @@ class SignalPipelineTests(unittest.TestCase):
                 )
             self.assertEqual(actual, expected)
             self.assertEqual(derivation["signals"][15]["reason"], "until_signal_reached")
+            self.assertEqual(
+                derivation["signals"][22]["selector_resolutions"],
+                [
+                    {
+                        "selector": "CurrentCPU",
+                        "source_cpu_ref": "BootCPURef",
+                        "source_flow": "BootInitFlow",
+                        "target": "CpuGroup.cpus[0]",
+                    }
+                ],
+            )
+            self.assertEqual(
+                derivation["signals"][24]["selector_resolutions"],
+                [
+                    {
+                        "selector": "CurrentTask",
+                        "source_flow": "BootInitFlow",
+                        "source_task_ref": "BootTaskRef",
+                        "target": "BootTask",
+                    }
+                ],
+            )
+            self.assertTrue(
+                all("selector_resolution" not in item for item in derivation["signals"])
+            )
 
             boundary = derivation["boundary"]
             self.assertEqual(
@@ -3594,7 +3802,7 @@ class SignalPipelineTests(unittest.TestCase):
                     for name in (
                         "Kernel", "BootInitFlow", "InterruptStream", "KernelImage",
                         "CpuGroup.cpus[0]", "BootCpuLocalInterrupt",
-                        "BootCpuCurrentTask", "CpuGroup", "BootTaskEntryBinding",
+                        "CpuGroup", "BootTaskEntryBinding",
                         "BootInitStack", "EventStream", "ExceptionStream", "Vm",
                         "TrampolineVm", "EarlyVm", "RawDtb", "FixMap", "Soc",
                     )
@@ -3603,7 +3811,7 @@ class SignalPipelineTests(unittest.TestCase):
                     "Kernel": "Ready", "BootInitFlow": "Prepared",
                     "InterruptStream": "Prepared", "KernelImage": "Online",
                     "CpuGroup.cpus[0]": "Ready",
-                    "BootCpuLocalInterrupt": "Ready", "BootCpuCurrentTask": "Ready",
+                    "BootCpuLocalInterrupt": "Ready",
                     "CpuGroup": "Prepared", "BootTaskEntryBinding": "Ready",
                     "BootInitStack": "Ready", "EventStream": "Ready",
                     "ExceptionStream": "Prepared", "Vm": "Ready",
@@ -3612,6 +3820,8 @@ class SignalPipelineTests(unittest.TestCase):
                 },
             )
             self.assertNotIn("BootCurrentCPU", states)
+            self.assertNotIn("BootCpuCurrentTask", states)
+            self.assertFalse(any("CurrentTaskSlot" in name for name in states))
             self.assertEqual(
                 boundary["snapshot"]["instances"]["CpuGroup.cpus[0]"]["parent"],
                 "CpuGroup",
@@ -3666,7 +3876,7 @@ class SignalPipelineTests(unittest.TestCase):
                 )
 
             self.assertLess(context_events[0]["sequence"], sequence("signal_sent", "sig-0020"))
-            self.assertLess(sequence("response_completed", "sig-0049"), context_events[1]["sequence"])
+            self.assertLess(sequence("response_completed", "sig-0048"), context_events[1]["sequence"])
             self.assertLess(context_events[1]["sequence"], sequence("response_completed", "sig-0019"))
             self.assertLess(sequence("response_completed", "sig-0019"), sequence("until_signal_reached"))
             self.assertLess(sequence("until_signal_reached"), sequence("response_stopped", "sig-0016"))
@@ -3690,14 +3900,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "fb84ff255d720c8844cb467e07432f4fb91582d955c26edcd080101138e21c1f",
+                "4891f5a3c2e39e87ec1a91c50208405ca237325fb434a6d49cccd0810c6b87f9",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:321ebcd7a70ed559c8c2c61d3f907988b10047e21c56c6048567ea0d3826c8c0"},
+                {"sha256:e105fea5c826b259513194dec4916e1fb61ef37016ed6e66d31ce0fe1b34b6e6"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)
@@ -3718,7 +3928,7 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertIn("Signal derivation: Human -> Computer.Preset", verbose_text)
             self.assertIn("sig-0019 [drives] Kernel -> BootInitFlow.Preset", verbose_text)
             self.assertIn("handler: BootInitFlow.Transition::Preset@Base", verbose_text)
-            self.assertIn("sig-0049 [drives] BootInitFlow -> Soc.Preset", verbose_text)
+            self.assertIn("sig-0048 [drives] BootInitFlow -> Soc.Preset", verbose_text)
             self.assertIn(
                 "reached boundary: Kernel -> BootInitFlow.Setup [drives]", verbose_text
             )

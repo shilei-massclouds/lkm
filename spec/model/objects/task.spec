@@ -31,10 +31,11 @@ enum TaskBreakpointState {
 
 type TaskRef {
     processes {
-        Action::SetCurrent(task: Task) {
+        Action::Bind(task: Task) {
             state_effect: StateEffect::None;
             ensures {
                 task_ref_targets(self, task);
+                task_ref_ready(self);
             }
         }
     }
@@ -86,8 +87,7 @@ predicate task_dispatch_continuation_pending<T: Task>(task: T) -> bool;
 predicate task_dispatch_continuation_consumed<T: Task>(task: T) -> bool;
 predicate task_continue_sent_only_by_scheduler<T: Task>(task: T) -> bool;
 predicate task_suspend_sent_only_by_scheduler<T: Task>(task: T) -> bool;
-predicate task_on_cpu_matches_current_slot<T: Task>(task: T) -> bool;
-predicate current_task_slot_matches_on_cpu_task<S, T: Task>(slot: S, task: T) -> bool;
+predicate task_on_cpu_matches_current_task<T: Task>(task: T) -> bool;
 predicate scheduler_continue_signal_pending<S, R: TaskRef>(scheduler: S, task_ref: R) -> bool;
 predicate task_execution_authority_is<T: Task>(task: T, authority: TaskExecutionAuthority) -> bool;
 predicate task_breakpoint_state_is<T: Task>(task: T, state: TaskBreakpointState) -> bool;
@@ -332,7 +332,10 @@ type Task: ResourceObject {
                 }
                 ensures {
                     task_on_cpu(self);
-                    task_on_cpu_matches_current_slot(self);
+                    task_on_cpu_matches_current_task(self);
+                    task_active_flow_is(self, self.active_flow);
+                    task_has_unique_active_flow(self);
+                    task_flow_active_binding_committed(self.active_flow);
                     task_dispatch_continuation_pending(self);
                     task_continue_sent_only_by_scheduler(self);
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
@@ -447,6 +450,20 @@ type Task: ResourceObject {
             }
             ensures {
                 task_dispatch_continuation_consumed(self);
+            }
+        }
+
+        Action::ConfirmCurrentTaskRef(task_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::OnCpu;
+                task_execution_authority_is(self, TaskExecutionAuthority::Live);
+                task_ref_ready(task_ref);
+                task_ref_targets(task_ref, self);
+            }
+            ensures {
+                task_on_cpu_matches_current_task(self);
+                current_task_ref_derived_from_selector(task_ref, self);
             }
         }
 
@@ -633,7 +650,7 @@ object BootTask: Task {
 
     associations {
         initial_flow = BootInitFlow;
-        active_flow = BootIdleFlow;
+        active_flow = BootInitFlow;
     }
 
     attrs {
@@ -671,6 +688,8 @@ object BootTask: Task {
                     task_owns_flow(self, BootInitFlow);
                     task_flow_owner_is(BootInitFlow, self);
                     task_flow_parent_is(BootInitFlow, self);
+                    task_online_schedulable(self);
+                    task_online_does_not_imply_dispatched(self);
                     task_not_on_cpu(self);
                     task_suspend_sent_only_by_scheduler(self);
                     task_execution_authority_is(self, TaskExecutionAuthority::None);
@@ -709,7 +728,7 @@ object BootTask: Task {
                 }
                 ensures {
                     task_on_cpu(self);
-                    task_on_cpu_matches_current_slot(self);
+                    task_on_cpu_matches_current_task(self);
                     task_dispatch_continuation_pending(self);
                     task_continue_sent_only_by_scheduler(self);
                     task_execution_authority_is(self, TaskExecutionAuthority::Live);
