@@ -88,7 +88,7 @@
   <text x="893" y="488" text-anchor="middle" class="small">queues + IPI route</text>
   <rect x="805" y="592" width="389" height="72" rx="8" class="box irq"/>
   <text x="999" y="620" text-anchor="middle" class="label">中断开放动作</text>
-  <text x="999" y="644" text-anchor="middle" class="small">InterruptStream.enable()</text>
+  <text x="999" y="644" text-anchor="middle" class="small">InterruptType.enable()</text>
 
   <path d="M254 222 C286 222, 304 220, 348 220" class="edge"/>
   <path d="M510 220 L548 220" class="edge"/>

@@ -100,7 +100,7 @@
   <text x="848" y="524" text-anchor="middle" class="label">ExceptionTable</text>
   <text x="848" y="548" text-anchor="middle" class="small">sort extable</text>
   <rect x="930" y="496" width="132" height="68" rx="9" class="box trap"/>
-  <text x="996" y="524" text-anchor="middle" class="label">ExceptionStream</text>
+  <text x="996" y="524" text-anchor="middle" class="label">ExceptionType</text>
   <text x="996" y="548" text-anchor="middle" class="small">trap_init</text>
   <rect x="1078" y="496" width="112" height="68" rx="9" class="box trap"/>
   <text x="1134" y="524" text-anchor="middle" class="label">子异常</text>

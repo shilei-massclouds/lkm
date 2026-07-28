@@ -64,15 +64,15 @@
   },
   {
     "index": 9,
-    "variant": "InterruptStreamPrepared",
-    "name": "InterruptStream.Prepared",
+    "variant": "InterruptTypePrepared",
+    "name": "InterruptType.Prepared",
     "early_byte": "I",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 10,
-    "variant": "InterruptStreamReady",
-    "name": "InterruptStream.Ready",
+    "variant": "InterruptTypeReady",
+    "name": "InterruptType.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -134,15 +134,15 @@
   },
   {
     "index": 19,
-    "variant": "EventStreamPrepared",
-    "name": "EventStream.Prepared",
+    "variant": "TrapTypePrepared",
+    "name": "TrapType.Prepared",
     "early_byte": "V",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
   {
     "index": 20,
-    "variant": "ExceptionStreamPrepared",
-    "name": "ExceptionStream.Prepared",
+    "variant": "ExceptionTypePrepared",
+    "name": "ExceptionType.Prepared",
     "early_byte": "9",
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -239,8 +239,8 @@
   },
   {
     "index": 34,
-    "variant": "EventStreamReady",
-    "name": "EventStream.Ready",
+    "variant": "TrapTypeReady",
+    "name": "TrapType.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -680,8 +680,8 @@
   },
   {
     "index": 97,
-    "variant": "ExceptionStreamReady",
-    "name": "ExceptionStream.Ready",
+    "variant": "ExceptionTypeReady",
+    "name": "ExceptionType.Ready",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },
@@ -1415,8 +1415,8 @@
   },
   {
     "index": 202,
-    "variant": "InterruptStreamOnline",
-    "name": "InterruptStream.Online",
+    "variant": "InterruptTypeOnline",
+    "name": "InterruptType.Online",
     "early_byte": null,
     "source_file": "impl/arceos_ex/src/checkpoint/mod.rs"
   },

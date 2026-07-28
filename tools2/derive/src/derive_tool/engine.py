@@ -160,6 +160,8 @@ def load_scenario(
             allowed_states = set(lifecycle.get("states", {})) | {
                 lifecycle.get("initial_state")
             }
+            if lifecycle.get("initial_state") is None:
+                allowed_states.add("Base")
         if state not in allowed_states:
             raise ProtocolError(f"scenario has unknown state {target}.State::{state}")
         result["states"][target] = state
@@ -260,6 +262,14 @@ class Engine:
         self.next_signal = 1
         self.next_event = 1
         self.next_instance = len(self.current.get("instances", {})) + 1
+        self.next_generation = 1 + max(
+            (
+                int(item.get("generation", 0))
+                for item in self.current.get("instances", {}).values()
+                if isinstance(item, dict)
+            ),
+            default=0,
+        )
         self.active_requests: set[tuple[str, str, bytes]] = set()
         self.active_predicates: set[tuple[str, tuple[str, ...]]] = set()
         for fact in self.initial_snapshot["facts"]:
@@ -294,8 +304,13 @@ class Engine:
             raise DerivationProblem(f"unknown runtime declared type {declared_type}")
         lifecycle_name = type_decl.get("effective_lifecycle_type")
         lifecycle = self.model.get("types", {}).get(lifecycle_name)
-        if lifecycle is None or lifecycle.get("initial_state") is None:
-            raise DerivationProblem(f"runtime type {declared_type} has no lifecycle")
+        structural_only = lifecycle is None or lifecycle.get("initial_state") is None
+        if structural_only:
+            lifecycle_name = declared_type
+            lifecycle = {
+                "initial_state": "Base",
+                "states": {"Base": {"handlers": [], "invariant": []}},
+            }
 
         states: dict[str, dict[str, Any]] = {}
         handlers_by_name: dict[str, list[dict[str, Any]]] = {}
@@ -354,6 +369,24 @@ class Engine:
             "runtime_instance": deepcopy(metadata),
         }
         self.systems[identity] = system
+        for field in fields.get("owned", []):
+            if field.get("indexed") or not field.get("type"):
+                continue
+            field_name = field["name"]
+            child_identity = f"{identity}.{field_name}"
+            child_metadata = {
+                "declared_type": field["type"],
+                "parent": identity,
+                "indexed": False,
+                "owned_field": field_name,
+                "resident": True,
+                "span": deepcopy(field.get("span", metadata.get("span", {}))),
+            }
+            self.current["instances"].setdefault(child_identity, child_metadata)
+            self.current["references"][f"{identity}.{field_name}"] = child_identity
+            system["references"][field_name] = child_identity
+            system["reference_types"][field_name] = field["type"]
+            self._install_runtime_system(child_identity, child_metadata)
         return system
 
     def _activate_static_system(self, name: str, *, signal: dict[str, Any]) -> None:
@@ -1163,6 +1196,14 @@ class Engine:
                 return _assertion(rendered) in self.current["facts"]
             if kind == "fact":
                 values = [self.value(item, signal=signal, bindings=bindings) for item in expression["arguments"]]
+                if expression["name"].endswith(("_generation_nonzero", "_occurrence_fresh")):
+                    return self._builtin_fact(expression["name"], values)
+                if (
+                    expression["name"].endswith("_ref_generation_valid")
+                    and len(values) == 1
+                    and self._is_dynamic_reference(values[0])
+                ):
+                    return self._builtin_fact(expression["name"], values)
                 return _fact(expression["name"], values) in self.current["facts"] or self._builtin_fact(
                     expression["name"], values
                 ) or self._predicate_body_value(expression["name"], values, signal=signal)
@@ -1175,6 +1216,17 @@ class Engine:
             raise DerivationProblem(f"unsupported condition kind {kind}")
         finally:
             self.current = saved
+
+    def _is_dynamic_reference(self, value: Any) -> bool:
+        metadata = self.current.get("instances", {}).get(str(value))
+        if metadata is None:
+            return False
+        declared_type = str(metadata.get("declared_type", ""))
+        return (
+            declared_type.endswith("Ref")
+            or "target" in metadata
+            or "target_generation" in metadata
+        )
 
     def _symbolic_reference_comparison(self, expression: str) -> bool | None:
         comparison = re.fullmatch(
@@ -1191,6 +1243,29 @@ class Engine:
         return left == right if operator == "==" else left != right
 
     def _builtin_fact(self, name: str, values: list[Any]) -> bool:
+        if name.endswith("_generation_nonzero") and len(values) == 1:
+            metadata = self.current.get("instances", {}).get(str(values[0]), {})
+            return int(metadata.get("generation", 0)) > 0 and metadata.get("alive", True)
+        if name.endswith("_occurrence_fresh") and len(values) == 1:
+            identity = str(values[0])
+            metadata = self.current.get("instances", {}).get(identity, {})
+            return (
+                int(metadata.get("generation", 0)) > 0
+                and metadata.get("alive", True)
+                and self.current["states"].get(identity) == "Base"
+            )
+        if name.endswith("_ref_generation_valid") and len(values) == 1:
+            metadata = self.current.get("instances", {}).get(str(values[0]), {})
+            target = metadata.get("target")
+            target_metadata = self.current.get("instances", {}).get(str(target), {})
+            return (
+                target is not None
+                and metadata.get("target_generation") == target_metadata.get("generation")
+                and target_metadata.get("alive", True)
+            )
+        if name.endswith("_ref_targets") and len(values) == 2:
+            metadata = self.current.get("instances", {}).get(str(values[0]), {})
+            return metadata.get("target") == values[1]
         if name == "task_flow_cpu_ref_is" and len(values) == 2:
             return self.current["references"].get(f"{values[0]}.cpu_ref") == values[1]
         if name == "task_flow_cpu_ref_targets" and len(values) == 2:
@@ -1654,6 +1729,7 @@ class Engine:
             )
             return
         if call.get("kind") == "declare":
+            signal["_dynamic_transaction"] = True
             identity = (
                 f"dynamic:{signal['id']}:{self.next_instance}:{call['alias']}"
             )
@@ -1663,8 +1739,11 @@ class Engine:
                 "parent": signal["target"],
                 "indexed": False,
                 "alias": call["alias"],
+                "generation": self.next_generation,
+                "alive": True,
                 "span": deepcopy(call["span"]),
             }
+            self.next_generation += 1
             self.current["instances"][identity] = metadata
             self._install_runtime_system(identity, metadata)
             self._activate_static_system(identity, signal=signal)
@@ -1685,6 +1764,7 @@ class Engine:
                 f"invalid process call at {call.get('span', {}).get('source_file')}:{call.get('span', {}).get('start_line')}: "
                 f"{call.get('text')}"
             )
+
         signal.pop("_selector_resolutions", None)
         target = self.resolve_receiver(call["receiver"], signal=signal, bindings=bindings)
         receiver_value = self.value(
@@ -1749,6 +1829,101 @@ class Engine:
                 type=call.get("result_type"),
                 value=result["value"],
             )
+
+    @staticmethod
+    def _handler_property(handler: dict[str, Any], name: str) -> str | None:
+        for member in handler.get("body", []):
+            if member.get("kind") == "property" and member.get("name") == name:
+                return str(member.get("value"))
+        return None
+
+    def _bind_generation_reference(
+        self,
+        *,
+        reference: str,
+        target: str,
+        candidate: dict[str, Any],
+    ) -> None:
+        reference_metadata = candidate.get("instances", {}).get(reference)
+        target_metadata = candidate.get("instances", {}).get(target)
+        if reference_metadata is None or target_metadata is None:
+            raise DerivationProblem("generation binding requires two dynamic instances")
+        existing = reference_metadata.get("target")
+        if existing is not None and existing != target:
+            raise DerivationProblem(f"generation reference {reference} is already bound")
+        generation = int(target_metadata.get("generation", 0))
+        if generation == 0 or not target_metadata.get("alive", True):
+            raise DerivationProblem(f"generation reference target {target} is not live")
+        reference_metadata["target"] = target
+        reference_metadata["target_generation"] = generation
+        candidate["references"][f"{reference}.target"] = target
+
+    def _apply_occurrence_metadata(
+        self,
+        *,
+        handler: dict[str, Any],
+        signal: dict[str, Any],
+        bindings: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> None:
+        identity = signal["target"]
+        metadata = candidate.get("instances", {}).get(identity)
+        if metadata is None:
+            return
+
+        declared_type = str(metadata.get("declared_type", ""))
+        if handler.get("name") == "Bind" and declared_type.endswith("Ref"):
+            target = next(
+                (
+                    bindings.get(parameter["name"])
+                    for parameter in handler.get("parameters", [])
+                    if str(bindings.get(parameter["name"])) in candidate.get("instances", {})
+                    and not parameter["type"].endswith("Ref")
+                ),
+                None,
+            )
+            if target is not None:
+                self._bind_generation_reference(
+                    reference=identity,
+                    target=str(target),
+                    candidate=candidate,
+                )
+
+        if self._handler_property(handler, "structural_binding") == "true":
+            parent = next(
+                (
+                    bindings.get(parameter["name"])
+                    for parameter in handler.get("parameters", [])
+                    if not parameter["type"].endswith("Ref")
+                    and str(bindings.get(parameter["name"])) in self.systems
+                ),
+                None,
+            )
+            if parent is None:
+                raise DerivationProblem(f"structural Bind for {identity} has no parent")
+            bound_parent = metadata.get("bound_parent")
+            if bound_parent is not None and bound_parent != parent:
+                raise DerivationProblem(f"structural parent for {identity} is immutable")
+            metadata["parent"] = str(parent)
+            metadata["bound_parent"] = str(parent)
+            self.systems[identity]["parent"] = str(parent)
+            for parameter in handler.get("parameters", []):
+                if not parameter["type"].endswith("Ref"):
+                    continue
+                reference = bindings.get(parameter["name"])
+                if str(reference) in candidate.get("instances", {}):
+                    self._bind_generation_reference(
+                        reference=str(reference),
+                        target=identity,
+                        candidate=candidate,
+                    )
+
+        if (
+            handler.get("kind") == "Transition"
+            and handler.get("name") == "Cleanup"
+            and handler.get("target_state") == "Destroyed"
+        ):
+            metadata["alive"] = False
 
     def _call_acceptable(
         self,
@@ -2037,6 +2212,10 @@ class Engine:
         transaction_snapshot = _snapshot(self.current)
         transaction_system_names = set(self.systems)
         transaction_next_instance = self.next_instance
+        transaction_next_generation = self.next_generation
+        transaction_parents = {
+            name: system.get("parent") for name, system in self.systems.items()
+        }
         try:
             self._execute_members(
                 handler["body"],
@@ -2059,6 +2238,12 @@ class Engine:
                     candidate=candidate,
                     handler=handler,
                 )
+            self._apply_occurrence_metadata(
+                handler=handler,
+                signal=signal,
+                bindings=bindings,
+                candidate=candidate,
+            )
             self.infer_result(
                 signal=signal,
                 handler=handler,
@@ -2138,13 +2323,19 @@ class Engine:
                 )
             raise
         except DerivationProblem as exc:
-            if signal.get("_indexed_transaction"):
+            if signal.get("_indexed_transaction") or signal.get("_dynamic_transaction"):
                 self.current = transaction_snapshot
                 for name in set(self.systems) - transaction_system_names:
                     del self.systems[name]
+                for name, parent in transaction_parents.items():
+                    if name in self.systems:
+                        self.systems[name]["parent"] = parent
                 self.next_instance = transaction_next_instance
+                self.next_generation = transaction_next_generation
                 self.event(
-                    "indexed_transaction_rolled_back",
+                    "indexed_transaction_rolled_back"
+                    if signal.get("_indexed_transaction")
+                    else "dynamic_transaction_rolled_back",
                     signal_id=signal["id"],
                     reason=str(exc),
                     snapshot=_snapshot(self.current),

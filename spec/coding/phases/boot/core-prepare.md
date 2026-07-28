@@ -4,7 +4,7 @@
 
 核心准备子阶段，对应 model `spec/model/phases/boot/core-prepare/phase.spec` 中 `CorePreparePhase` 对象的 Preset → Online 生命周期。
 
-本阶段从 `EntrySuccessorPhase.Online` 开始，驱动 DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup、PerCpuStorage、StaticBranch、CommandLine、Params、PrintkBuffer、ExceptionStream 等对象的建立，对应 Linux `paging_init()` 之后到 `trap_init()` 之间的核心准备路径。
+本阶段从 `EntrySuccessorPhase.Online` 开始，驱动 DeviceTree、Zones、PageMetadataMap、ResourceTree、CpuGroup、PerCpuStorage、StaticBranch、CommandLine、Params、PrintkBuffer、ExceptionType 等对象的建立，对应 Linux `paging_init()` 之后到 `trap_init()` 之间的核心准备路径。
 
 按[阶段范式代码映射](../../phase-paradigm.md)，每个迁移对应一个概念函数。
 
@@ -20,7 +20,7 @@
 - `CommandLine.state == Prepared`
 - `BootCPU.state == Online`、`BootCpuLocalInterrupt.state == Ready`
 - `PrintkBuffer.state == Prepared`
-- `ExceptionStream.state == Prepared`
+- `ExceptionType.state == Prepared`
 
 `preset()` 还必须先检查 `CORE_PREPARE_PHASE_STATE == Base`；全部检查通过后才发出
 `CorePreparePhase.Started`。
@@ -54,7 +54,10 @@
 | 21 | `Randomness.Transition::Preset` | `ctx.randomness.preset()` |
 | 22 | `PrintkBuffer.Transition::Setup` | `printk::setup()` |
 | 23 | `ExceptionTable.Transition::Setup` | `ctx.exception_table.setup()` |
-| 24 | `ExceptionStream.Transition::Setup` | `ctx.exception_stream.setup()` |
+| 24 | `ExceptionType.Transition::Setup` | `ctx.boot_cpu_exception_mut().setup()` |
+| 25 | `PageFaultExceptionType.Transition::Enable` | `ctx.boot_cpu_exception_mut().enable_non_syscall_children()` |
+| 26 | `BreakpointExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
+| 27 | `UnexpectedExceptionType.Transition::Enable` | 同一 CPU-local child enable 事务 |
 
 ### 3. ensures
 
@@ -155,7 +158,7 @@ preset()  ← 由 BootInitFlow.setup_after_entry_successor() 调用
 | Randomness | Prepared |
 | PrintkBuffer | Ready |
 | ExceptionTable | Ready |
-| ExceptionStream | Ready |
+| ExceptionType | Ready |
 | PageFaultException | Ready |
 | SyscallException | Prepared |
 | BreakpointException | Ready |

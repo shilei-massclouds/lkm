@@ -131,6 +131,25 @@ pub fn run() -> SmokeResult {
             || ctx.cpu_start_provider.hsm_start_task_ref(logical_id) != TaskRef::ap_idle(logical_id)
             || ctx.cpu_start_provider.hsm_start_flow_ref(logical_id)
                 != TaskFlowRef::ap_idle(logical_id)
+            || ctx.cpu_group.cpu(logical_id).is_none_or(|cpu| {
+                let trap = cpu.trap();
+                let entry = trap.entry_context();
+                trap.state() != State::Ready
+                    || trap.service_online()
+                    || trap.interrupt().state() != State::Online
+                    || trap.exception().state() != State::Ready
+                    || trap.exception().service_online()
+                    || trap.exception().page_fault_state() != State::Online
+                    || trap.exception().syscall_state() != State::Prepared
+                    || trap.exception().breakpoint_state() != State::Online
+                    || trap.exception().unexpected_state() != State::Online
+                    || entry.cpu_logical_id() != logical_id
+                    || entry.task_identity() == 0
+                    || entry.kernel_stack_base() == 0
+                    || entry.kernel_stack_top() <= entry.kernel_stack_base()
+                    || entry.emergency_stack_base() != trap.emergency_stack_base()
+                    || entry.emergency_stack_top() != trap.emergency_stack_top()
+            })
         {
             printk::write_str("per-AP keyed Task/Flow state invalid\n");
             return SmokeResult::Failed;

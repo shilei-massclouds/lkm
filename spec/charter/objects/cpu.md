@@ -35,8 +35,20 @@ possible/present/active/online 集合只能从每个已发布 CPU 的状态或�
 
 ## CPU-local 子对象
 
-本地中断控制和其它真正 per-CPU 的对象属于相应 `CPU` 实例。CurrentTask 不属于 CPU 子对象；它由
-effective TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威副本。
+每个已发布 CPU 恰好拥有一个独立 `TrapType` 资源；Trap 再拥有独立 `InterruptType` 与
+`ExceptionType`，Exception 拥有 page-fault、syscall、breakpoint、unexpected 四个具体资源。完整
+结构为：
+
+```text
+CPU.trap: TrapType
+TrapType.interrupt: InterruptType
+TrapType.exception: ExceptionType
+ExceptionType.{page_fault, syscall, breakpoint, unexpected}
+```
+
+这些 resident 资源随 CPU 建立并保持各自 lifecycle、入口容量与 handler/gate 状态，任何一个 CPU 的
+状态都不得由全局对象或其它 CPU 的缓存副本替代。CurrentTask 不属于 CPU 子对象；它由底层 effective
+TaskFlow 的 parent 解析，不存在 per-CPU current-task slot 或同义权威副本。
 
 ## CurrentCPU capability
 

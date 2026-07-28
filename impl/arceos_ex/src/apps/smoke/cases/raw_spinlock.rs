@@ -6,7 +6,8 @@ use crate::{
     arch::riscv64::csr,
     context::context,
     objects::{
-        cpu_control::{LocalInterruptControl, PreemptionControl, RawSpinLock},
+        cpu_control::{PreemptionControl, RawSpinLock},
+        interrupt_type::InterruptType,
         state::State,
     },
 };
@@ -27,7 +28,7 @@ pub fn run() -> SmokeResult {
 }
 
 struct RawSpinLockFixture {
-    local_interrupt: LocalInterruptControl,
+    local_interrupt: InterruptType,
     preemption: PreemptionControl,
     lock: RawSpinLock,
     restore_irq_enabled: bool,
@@ -37,7 +38,7 @@ struct RawSpinLockFixture {
 impl RawSpinLockFixture {
     fn new(restore_irq_enabled: bool) -> Self {
         Self {
-            local_interrupt: LocalInterruptControl::new(),
+            local_interrupt: InterruptType::new(),
             preemption: PreemptionControl::new(),
             lock: RawSpinLock::new(),
             restore_irq_enabled,
@@ -48,7 +49,10 @@ impl RawSpinLockFixture {
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
         assertions.assert("init task online", ctx.boot_task.state() == State::Online);
-        assertions.assert_ok("local interrupt setup", self.local_interrupt.setup());
+        assertions.assert_ok(
+            "local interrupt setup",
+            self.local_interrupt.setup_local_control(),
+        );
         assertions.assert_ok("preemption setup", self.preemption.setup(&ctx.boot_task));
         assertions.assert_ok("lock setup", self.lock.setup());
     }
@@ -80,7 +84,7 @@ impl RawSpinLockFixture {
     }
 
     fn restore_external_irq(&mut self, assertions: &mut SmokeAssertions) {
-        if self.local_interrupt.state() != State::Ready {
+        if self.local_interrupt.local_state() != State::Ready {
             return;
         }
 

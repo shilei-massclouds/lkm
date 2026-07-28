@@ -3,8 +3,9 @@ use core::sync::atomic::Ordering;
 
 use super::{
     cpu::MAX_CPUS,
-    cpu_control::{LocalInterruptControl, RawSpinLock},
+    cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
+    interrupt_type::InterruptType,
     irq_time::SbiIpi,
     kernel_image::KernelImage,
     lds::Lds,
@@ -35,6 +36,8 @@ const AP_BOOT_DATA_GP_OFFSET: usize = 40;
 const AP_BOOT_DATA_RUST_ENTRY_OFFSET: usize = 48;
 const AP_BOOT_DATA_VIRT_OFFSET: usize = 56;
 const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET: usize = 64;
+const AP_BOOT_DATA_ENTRY_CONTEXT_OFFSET: usize = 72;
+const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET: usize = 80;
 
 #[repr(C, align(64))]
 struct SbiHartBootData {
@@ -47,6 +50,8 @@ struct SbiHartBootData {
     rust_entry: usize,
     boot_data_virt: usize,
     kernel_virt_offset: usize,
+    entry_context: usize,
+    formal_entry: usize,
 }
 
 const _: () = {
@@ -59,6 +64,12 @@ const _: () = {
     assert!(
         core::mem::offset_of!(SbiHartBootData, kernel_virt_offset)
             == AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, entry_context) == AP_BOOT_DATA_ENTRY_CONTEXT_OFFSET
+    );
+    assert!(
+        core::mem::offset_of!(SbiHartBootData, formal_entry) == AP_BOOT_DATA_FORMAL_ENTRY_OFFSET
     );
 };
 
@@ -74,6 +85,8 @@ impl SbiHartBootData {
             rust_entry: 0,
             boot_data_virt: 0,
             kernel_virt_offset: 0,
+            entry_context: 0,
+            formal_entry: 0,
         }
     }
 }
@@ -109,6 +122,15 @@ impl ApIdleTaskRecord {
         let task_ref = TaskRef::ap_idle(logical_id);
         let flow_ref = TaskFlowRef::ap_idle(logical_id);
         self.task = Task::new_ap_idle_reserved(task_ref, flow_ref, logical_id);
+        let Some(stack_top) = ap_stack_top_virt(logical_id) else {
+            return false;
+        };
+        if !self
+            .task
+            .set_kernel_stack_bounds(stack_top - AP_STACK_SIZE, stack_top)
+        {
+            return false;
+        }
         self.flow = TaskFlow::new_static_bound(flow_ref, task_ref);
         if !self.flow.bind_cpu_ref(super::cpu::CpuRef::new(logical_id)) {
             return false;
@@ -220,6 +242,8 @@ arceos_ex_secondary_start_sbi:
     ld      t3, {rust_entry_offset}(s0)
     ld      t4, {boot_data_virt_offset}(s0)
     ld      t5, {kernel_virt_offset_offset}(s0)
+    ld      t6, {entry_context_offset}(s0)
+    ld      s1, {formal_entry_offset}(s0)
 
     la      t0, 1f
     add     t0, t0, t5
@@ -229,11 +253,15 @@ arceos_ex_secondary_start_sbi:
     .balign 4
 1:
     mv      gp, t2
+    csrw    sscratch, t6
+    csrw    stvec, s1
     mv      a0, t4
     jr      t3
 "#,
     boot_data_virt_offset = const AP_BOOT_DATA_VIRT_OFFSET,
     gp_offset = const AP_BOOT_DATA_GP_OFFSET,
+    entry_context_offset = const AP_BOOT_DATA_ENTRY_CONTEXT_OFFSET,
+    formal_entry_offset = const AP_BOOT_DATA_FORMAL_ENTRY_OFFSET,
     kernel_virt_offset_offset = const AP_BOOT_DATA_KERNEL_VIRT_OFFSET_OFFSET,
     rust_entry_offset = const AP_BOOT_DATA_RUST_ENTRY_OFFSET,
     satp_offset = const AP_BOOT_DATA_SATP_OFFSET,
@@ -392,6 +420,18 @@ pub(crate) fn ap_current_task_candidate_by_ref(
     None
 }
 
+pub(crate) fn ap_task_mut_by_ref(task_ref: TaskRef) -> Option<&'static mut Task> {
+    let mut logical_id = 1usize;
+    while logical_id < MAX_CPUS {
+        let record = unsafe { &mut *core::ptr::addr_of_mut!(AP_IDLE_TASKS[logical_id]) };
+        if record.task.task_ref().same_identity(task_ref) {
+            return Some(&mut record.task);
+        }
+        logical_id += 1;
+    }
+    None
+}
+
 pub(crate) fn activate_ap_idle_entry_execution(logical_id: usize) -> EventResult {
     if logical_id == 0 || logical_id >= MAX_CPUS {
         return failed_condition(
@@ -479,7 +519,7 @@ impl SecondaryIdleTaskSet {
     pub fn preset(
         &mut self,
         boundary: &PreSmpInitBoundary,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         scheduler: &Scheduler,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
@@ -601,7 +641,7 @@ impl CpuHotplugSyncSet {
 
     pub fn preset(
         &mut self,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         boot_idle_flow: &BootIdleFlow,
         kthreadd_task: &KthreaddTask,
         cpu_hotplug_lock: &mut PerCpuRwSemaphore,
@@ -657,7 +697,7 @@ impl CpuHotplugSyncSet {
     pub fn observe_cpu_running(
         &mut self,
         wait_lock: &mut RawSpinLock,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared || !self.cpu_running_ready {
@@ -681,7 +721,7 @@ impl CpuHotplugSyncSet {
     pub fn observe_done_up(
         &mut self,
         wait_lock: &mut RawSpinLock,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
@@ -833,7 +873,7 @@ impl CpuStartProvider {
     #[allow(clippy::too_many_arguments)]
     pub fn setup(
         &mut self,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         idle_tasks: &SecondaryIdleTaskSet,
         sync: &CpuHotplugSyncSet,
         sbi: &Sbi,
@@ -903,7 +943,7 @@ impl CpuStartProvider {
 
     fn prepare_and_start_secondary_cpus(
         &mut self,
-        cpu_group: &CpuGroup,
+        cpu_group: &mut CpuGroup,
         kernel_image: &KernelImage,
         static_objects: &StaticObjects,
         lds: &Lds,
@@ -918,12 +958,28 @@ impl CpuStartProvider {
         };
         let gp = lds.global_pointer();
         let rust_entry = arceos_ex_secondary_entry_rust as *const () as usize;
+        let boot_trap_ready = cpu_group.boot_cpu_trap().is_some_and(|trap| {
+            trap.state() == State::Ready
+                && !trap.service_online()
+                && trap.interrupt().state() == State::Online
+                && trap.exception().state() == State::Ready
+                && !trap.exception().service_online()
+                && trap.exception().page_fault_state() == State::Online
+                && trap.exception().syscall_state() == State::Prepared
+                && trap.exception().breakpoint_state() == State::Online
+                && trap.exception().unexpected_state() == State::Online
+        });
+        if !boot_trap_ready {
+            return false;
+        }
 
         let mut logical_id = 1usize;
         while logical_id <= cpu_group.secondary_count() && logical_id < MAX_CPUS {
             let Some(cpu) = cpu_group.cpu(logical_id) else {
                 return false;
             };
+            let cpu_ref = cpu.cpu_ref();
+            let hartid = cpu.hartid();
             let Some(task_ptr) = ap_idle_task_virt(logical_id) else {
                 return false;
             };
@@ -937,19 +993,35 @@ impl CpuStartProvider {
                 return false;
             };
             unsafe {
-                if !AP_IDLE_TASKS[logical_id].prepare(logical_id, cpu.hartid()) {
+                if !AP_IDLE_TASKS[logical_id].prepare(logical_id, hartid) {
                     return false;
                 }
+            }
+            let Some(cpu) = cpu_group.cpu_mut(logical_id) else {
+                return false;
+            };
+            if cpu
+                .trap_mut()
+                .prepare_secondary_entry(cpu_ref, task_ptr, stack_ptr - AP_STACK_SIZE, stack_ptr)
+                .is_err()
+            {
+                return false;
+            }
+            let entry_context = cpu.trap().entry_context_address();
+            let formal_entry = super::trap_type::TrapType::formal_entry_address();
+            unsafe {
                 AP_BOOT_DATA[logical_id] = SbiHartBootData {
                     task_ptr,
                     stack_ptr,
                     logical_id,
-                    hartid: cpu.hartid(),
+                    hartid,
                     satp,
                     gp,
                     rust_entry,
                     boot_data_virt,
                     kernel_virt_offset: kernel_image.virt_offset(),
+                    entry_context,
+                    formal_entry,
                 };
                 self.hsm_start_keys[logical_id] = logical_id;
                 self.hsm_start_task_refs[logical_id] = AP_IDLE_TASKS[logical_id].task.task_ref();

@@ -8,7 +8,7 @@ model 来源为 `spec/model/phases/interrupt/irq-open-prepare/phase.spec`，实�
 
 | Transition | depends / drives / ensures | checkpoint 与 continuation |
 | --- | --- | --- |
-| Preset: Base -> Prepared | 在 `SingleTaskInterruptStreamContext` 下精确检查 Base、LocalIrqEnable Online 及对象依赖；按 model 顺序执行现有 SLUB flush、Console、trimmed paths、SchedClock 和 DelayLoop 动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Preset: Base -> Prepared | 在 `SingleTaskInterruptContext` 下精确检查 Base、LocalIrqEnable Online 及对象依赖；按 model 顺序执行现有 SLUB flush、Console、trimmed paths、SchedClock 和 DelayLoop 动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
 | Setup: Prepared -> Ready | 精确检查 Prepared 和完整 `irq_open_prepare_phase_ready()` | 提交后发出 Ready，调用 Enable |
 | Enable: Ready -> Online | 精确检查 Ready 并重新确认 invariant | 提交后发出 Online，返回 `interrupt::preset_after_irq_open_prepare()` |
 
@@ -67,7 +67,7 @@ their current config/no-op reasons.
 
 sched_clock_init() must record the local_irq_disable()/
 local_irq_enable() window around generic_sched_clock_init() through the existing
-BootCpuLocalInterrupt LocalInterruptControl. The surrounding phase
+BootCpuLocalInterrupt InterruptType. The surrounding phase
 context has local interrupts enabled, so this temporary guard must
 remain an explicit protocol fact.
 

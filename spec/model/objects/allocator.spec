@@ -332,10 +332,10 @@ predicate dynamic_container_runtime_sync_inherits_global_allocator_contract<T, A
 
 type ZonelistUpdateSeqType: MemoryObject {
     processes {
-        Transition::WriteSeqLockIrqSave(local_interrupt: LocalInterruptControl) {
+        Transition::WriteSeqLockIrqSave(local_interrupt: InterruptType) {
             state_effect: StateEffect::Conditional;
             drives {
-                local_interrupt.Transition::SaveAndDisable;
+                local_interrupt.Action::SaveAndDisable;
             }
             ensures {
                 zonelist_update_seq_write_irqsave_entered(self, local_interrupt);
@@ -344,10 +344,10 @@ type ZonelistUpdateSeqType: MemoryObject {
             }
         }
 
-        Transition::WriteSeqUnlockIrqRestore(local_interrupt: LocalInterruptControl) {
+        Transition::WriteSeqUnlockIrqRestore(local_interrupt: InterruptType) {
             state_effect: StateEffect::Conditional;
             drives {
-                local_interrupt.Transition::Restore;
+                local_interrupt.Action::Restore;
             }
             ensures {
                 zonelist_update_seq_write_irqrestore_exited(self, local_interrupt);

@@ -43,14 +43,14 @@ fn preset_start() -> EventResult {
 fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.secondary_idle_tasks.preset(
         &ctx.pre_smp_boundary,
-        &ctx.cpu_group,
+        &mut ctx.cpu_group,
         &ctx.scheduler,
         &ctx.per_cpu_storage,
     )?;
     ctx.smpboot_threads_lock.preset_static()?;
     ctx.smpboot_threads_lock.setup()?;
     ctx.cpu_hotplug_sync.preset(
-        &ctx.cpu_group,
+        &mut ctx.cpu_group,
         &ctx.boot_idle_flow,
         &ctx.kthreadd_task,
         &mut ctx.cpu_hotplug_lock,
@@ -65,7 +65,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     reset_ap_phase_families(&ctx.cpu_group);
     publish_ap_prerequisites(ctx)?;
     ctx.cpu_start_provider.setup(
-        &ctx.cpu_group,
+        &mut ctx.cpu_group,
         &ctx.secondary_idle_tasks,
         &ctx.cpu_hotplug_sync,
         &ctx.sbi,
@@ -333,8 +333,8 @@ fn publish_ap_prerequisites(ctx: &Context) -> EventResult {
         && ctx.init_mm.state() == State::Ready
         && ctx.vm.state() == State::Online
         && ctx.vm.swapper_vm().state() == State::Online
-        && ctx.event_stream.state() == State::Ready
-        && ctx.exception_stream.state() == State::Ready;
+        && ctx.boot_cpu_trap().state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Ready;
     if !ready {
         return failed_condition(
             LifecycleEvent::Preset,

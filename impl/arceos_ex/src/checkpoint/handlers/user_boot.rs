@@ -38,7 +38,7 @@ use crate::objects::user_boot::{
 
 #[cfg(app_user_boot)]
 use crate::objects::{
-    exception_stream::{execve_checkpoint_observation, wait4_checkpoint_observation},
+    exception_type::{execve_checkpoint_observation, wait4_checkpoint_observation},
     files::{FdRef, FileBackendKind},
     user_stack::UserStack,
 };
@@ -880,6 +880,8 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
     let trap_guard_base = user_kernel_trap_stack_guard_base();
     let overflow_stack_base = user_kernel_trap_overflow_stack_base();
     let overflow_stack_top = user_kernel_trap_overflow_stack_top();
+    let cpu_trap = ctx.boot_cpu_trap();
+    let entry_context = cpu_trap.entry_context();
     let trap_stack_valid = USER_KERNEL_TRAP_THREAD_INFO_IN_TASK
         && USER_KERNEL_TRAP_VMAP_STACK
         && USER_KERNEL_TRAP_IRQ_STACKS
@@ -888,9 +890,9 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && USER_KERNEL_TRAP_STACK_SIZE == USER_PAGE_SIZE << USER_KERNEL_TRAP_STACK_ORDER
         && USER_KERNEL_TRAP_STACK_ALIGN == USER_KERNEL_TRAP_STACK_SIZE * 2
         && USER_KERNEL_TRAP_FRAME_SIZE
-            == core::mem::size_of::<crate::objects::event_stream::TrapFrame>()
+            == core::mem::size_of::<crate::objects::trap_type::TrapFrame>()
         && USER_KERNEL_TRAP_FRAME_SIZE == 288
-        && USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE == 16
+        && USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE == 128
         && USER_KERNEL_TRAP_THREAD_SHIFT == 14
         && USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE == USER_PAGE_SIZE
         && USER_KERNEL_IRQ_STACK_SIZE == USER_KERNEL_TRAP_STACK_SIZE
@@ -910,8 +912,15 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && trap_guard_base + USER_KERNEL_TRAP_GUARD_SIZE == trap_stack_base
         && user_kernel_trap_stack_base_aligned()
         && trap_stack_top == trap_stack_base + USER_KERNEL_TRAP_STACK_SIZE
-        && trap_entry_context + USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE == trap_stack_top
-        && trap_entry_context.is_multiple_of(core::mem::align_of::<usize>())
+        && trap_entry_context == cpu_trap.entry_context_address()
+        && trap_entry_context.is_multiple_of(16)
+        && entry_context.cpu_logical_id() == 0
+        && entry_context.task_identity() == crate::arch::riscv64::csr::read_tp()
+        && entry_context.kernel_stack_base() == trap_stack_base
+        && entry_context.kernel_stack_top() == trap_stack_top
+        && entry_context.emergency_stack_base() == overflow_stack_base
+        && entry_context.emergency_stack_top() == overflow_stack_top
+        && !entry_context.emergency_active()
         && user_kernel_trap_stack_backing_phys() != 0
         && user_kernel_trap_stack_backing_order() == USER_KERNEL_TRAP_STACK_ORDER
         && user_kernel_trap_overflow_stack_ready()
@@ -1181,7 +1190,7 @@ fn run_syscall_table_set_tid_address(
         && table.set_tid_address_observed()
         && process.clear_child_tid_bound()
         && process.clear_child_tid() != 0
-        && ctx.exception_stream.syscall_state() == State::Online;
+        && ctx.boot_cpu_exception().syscall_state() == State::Online;
 
     sink.diag_usize(
         "syscall_table_set_tid_address_observed",
@@ -1611,7 +1620,7 @@ fn run_syscall_table_read(
         && table.read_routes_to_files_struct()
         && table.openat_observed()
         && table.read_observed()
-        && ctx.exception_stream.syscall_state() == State::Online;
+        && ctx.boot_cpu_exception().syscall_state() == State::Online;
 
     sink.diag_usize(
         "syscall_table_read_observed",
@@ -1688,7 +1697,7 @@ fn run_syscall_table_write(
         && table.write_usercopy_ready()
         && table.write_routes_to_console()
         && table.write_observed()
-        && ctx.exception_stream.syscall_state() == State::Online;
+        && ctx.boot_cpu_exception().syscall_state() == State::Online;
 
     sink.diag_usize(
         "syscall_table_write_observed",
@@ -2569,7 +2578,7 @@ fn run_syscall_table_exit(
         && table.exit_group_pid1_shutdown_child_wait4_split()
         && table.write_observed()
         && table.exit_observed()
-        && ctx.exception_stream.syscall_state() == State::Online;
+        && ctx.boot_cpu_exception().syscall_state() == State::Online;
 
     sink.diag_usize(
         "syscall_table_write_observed",

@@ -417,6 +417,17 @@ object CpuStartProvider: HardwareObject {
                     smpboot_threads_mutex_guard_used(CpuHotplugSyncSet, SmpbootThreadsLock);
                 }
 
+                /*
+                 * Pointwise representative of prepare_secondary_entry(): the
+                 * BP publishes the target CPU's formal trap entry before HSM
+                 * handoff.  The total interrupt gate is then opened for AP
+                 * bringup, while syscall remains Prepared until user service
+                 * activation.
+                 */
+                drives {
+                    CpuGroup.Action::PrepareSecondaryTrapEntry;
+                }
+
                 within CpuAddRemoveMutexContext {
                     within CpuHotplugWriteContext {
                         ensures {
@@ -460,6 +471,7 @@ object CpuStartProvider: HardwareObject {
 
                 emits {
                     ApIdleTask.Action::ActivateHsmAuthority;
+                    ApIdleFlow.Action::AssignCpuRef(ApCPURef);
                     ApIdleFlow.Transition::Preset;
                 }
             }
@@ -523,8 +535,8 @@ object ApEntryPreludePhase: PhaseObject {
                     ap_idle_flow_hsm_startup_keyed(ApIdleFlow);
                     CpuGroup.state == State::Ready;
                     SwapperVm.state == State::Online;
-                    EventStream.state == State::Ready;
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                     sbi_hsm_hart_start_requests_issued(CpuStartProvider, CpuGroup);
                     sbi_hart_boot_data_per_secondary_cpu(CpuStartProvider, CpuGroup);
                     secondary_idle_task_per_secondary_cpu(CpuGroup);
@@ -542,7 +554,7 @@ object ApEntryPreludePhase: PhaseObject {
                     ap_kernel_fpu_vector_disabled(CpuGroup);
                     ap_interrupts_masked_on_entry(CpuGroup);
                     ap_switches_to_swapper_vm(SwapperVm);
-                    ap_formal_event_entry_installed(EventStream, ExceptionStream);
+                    ap_formal_trap_entry_installed(CurrentCPU.trap, CurrentCPU.trap.exception);
                     ap_entry_boot_data_logical_id_matches_target(CpuGroup);
                     ap_entry_boot_data_stack_pointer_matches_target(
                         CpuGroup,
@@ -572,7 +584,7 @@ object ApEntryPreludePhase: PhaseObject {
             ap_stack_is_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
             ap_pt_regs_pointer_established(CpuGroup, SecondaryIdleTaskSet);
             ap_switches_to_swapper_vm(SwapperVm);
-            ap_formal_event_entry_installed(EventStream, ExceptionStream);
+            ap_formal_trap_entry_installed(CurrentCPU.trap, CurrentCPU.trap.exception);
             ap_entry_boot_data_logical_id_matches_target(CpuGroup);
             ap_entry_boot_data_stack_pointer_matches_target(CpuGroup, SecondaryIdleTaskSet);
             ap_entry_real_sp_in_secondary_idle_task_stack(CpuGroup, SecondaryIdleTaskSet);
@@ -1134,7 +1146,7 @@ object SmpBringupPhase: PhaseObject {
 
             deferred smp_bringup.001 {
                 category: DeferredCategory::ModelDetail;
-                summary: "Complete each AP CurrentTask, CurrentCPU and LocalInterruptControl resolution chain.";
+                summary: "Complete each AP CurrentTask, CurrentCPU and InterruptType resolution chain.";
                 evidence { smp_bringup_full_ap_cpu_local_chain_deferred(SmpBringupPhase); }
                 close_when: "Every online AP has a complete CPU-local identity/control/task chain with SMP tests.";
             }

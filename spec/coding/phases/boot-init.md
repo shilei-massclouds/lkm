@@ -12,7 +12,7 @@ bool；每个 transition 都即时检查 parent `BootTask` 为 OnCpu。
 
 | Transition | 直接 drives | completion |
 | --- | --- | --- |
-| Preset: Base -> Prepared | 直接按入口顺序驱动 `InterruptStream` 至 `Soc` 的具体对象 | 完整入口事实成立后提交 `BootInitFlow.Prepared`；不建立入口 wrapper lifecycle |
+| Preset: Base -> Prepared | 直接按入口顺序驱动 `InterruptType` 至 `Soc` 的具体对象 | 完整入口事实成立后提交 `BootInitFlow.Prepared`；不建立入口 wrapper lifecycle |
 | Setup: Prepared -> Ready | 依次驱动 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、`BootInitRestInitPhase` 的 Preset | RestInit Online 后提交 `BootInitFlow.Ready`；此时两个新 Task 已完成 Preset/Setup/Enable，initial Flow 仍为 Base |
 | Enable: Ready -> Online | 只驱动 `BootInitScheduleHandoffPhase.Preset` | 该阶段建立 `BootIdleFlow` owner/active binding 并完成可逆切换预检；随后提交 `BootInitFlow.Online`，再进入真实 schedule |
 

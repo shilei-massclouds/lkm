@@ -110,7 +110,7 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
    Boot.Ready < CorePrepare.Started、SchedInit.Online < Boot.Online < InterruptPhase.Started。
 5. **InterruptPhase（完成）**：charter 固定四个直接子阶段与 Kernel.Setup 入口/continuation
    出口；model、coding 和 impl 统一四态生命周期，IrqTime 使用 SingleTaskContext，LocalIrqEnable
-   不使用外层 context，IrqOpenPrepare/ProcessPrepare 使用 SingleTaskInterruptStreamContext。
+   不使用外层 context，IrqOpenPrepare/ProcessPrepare 使用 SingleTaskInterruptTypeContext。
    叶子对象动作归入 Preset，Setup/Enable 只检查和发布；四个 sibling 直调改为 Interrupt 父
    continuation，查询收敛为精确 Online。四个 legacy coding `.spec` 已迁移删除。五个阶段均完整
    观察 Started/Prepared/Ready/Online，旧 ID 保持，新 Prepared/Online 默认 unmapped。announce
@@ -179,7 +179,7 @@ AP 的 Entry / Callin / OnlineIdle 执行所有权不属于 `KernelInitFlow`；�
 | InterruptPhase | 四子阶段与 Kernel 边界固定 | 父 Preset 顺序和四态完整 | context/continuation/checkpoint 完整映射 | Prepared/Ready/Online 与 Kernel continuation 已验证 | complete |
 | IrqTimeInitPhase | IRQ/time 且 SIE 关闭 | 标准四态、SingleTaskContext | 对象动作归 Preset、父返回已映射 | 四 checkpoint、精确 Online 已验证 | complete |
 | LocalIrqEnablePhase | 只开放 boot CPU 总入口 | 标准四态、无外层 context | early flag/SIE 顺序与负向 gates 已映射 | 四 checkpoint、父返回已验证 | complete |
-| IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptStream context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
+| IrqOpenPreparePhase | late core 准备边界一致 | 标准四态、InterruptType context | depends/drives/invariant 已映射 | 四 checkpoint、父返回已验证 | complete |
 | ProcessPreparePhase | rest_init 前准备边界一致 | 标准四态、下游依赖 Online | 对象覆盖/deferred/父返回已映射 | 四 checkpoint、Interrupt.Prepared 已验证 | complete |
 | BootInitFlow | BootTask 子 Phase，入口到首次 PID 1 切换边界固定 | Preset/Setup/Enable 分担五个子阶段，四态完整 | continuation/checkpoint/跨栈完整映射 | 精确 Online、父 continuation、Kernel continuation 已验证 | complete |
 | BootInitRestInitPhase | BootTask 的 rest_init 前半段 | 标准四态、wait-lock context 保持 | 对象动作归 Preset、父返回已映射 | 四 checkpoint、RestInit.Online 已验证 | complete |

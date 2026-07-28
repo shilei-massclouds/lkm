@@ -42,10 +42,10 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.early_param.state() == State::Ready
         && ctx.command_line.state() == State::Prepared
         && ctx.cpu_group.boot_cpu_state() == State::Online
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().disabled()
         && printk::is_prepared()
-        && ctx.exception_stream.state() == State::Prepared
+        && ctx.boot_cpu_exception().state() == State::Prepared
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -122,13 +122,23 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     }
     crate::checkpoint::dispatch(Checkpoint::PrintkBufferReady, ctx);
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
-    ctx.exception_stream.setup(&ctx.event_stream)
+    let Some(trap) = ctx.cpu_group.boot_cpu_trap_mut() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    };
+    let trap_state = trap.state();
+    trap.exception_mut().setup(trap_state)?;
+    trap.exception_mut().enable_non_syscall_children()
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
     let state = crate::phases::state::load(&CORE_PREPARE_PHASE_STATE);
     if state != State::Base
-        || !ctx.interrupt_stream.early_boot_irqs_disabled()
+        || !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
         || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         || ctx.cpu_group.smp_concurrency_open()
     {
@@ -244,12 +254,12 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && printk::setup_local_irq_save_restore_used()
         && printk::setup_local_irq_guard_used_by(ctx.boot_cpu_local_interrupt())
         && ctx.exception_table.state() == State::Ready
-        && ctx.exception_stream.state() == State::Ready
-        && ctx.exception_stream.page_fault_state() == State::Ready
-        && ctx.exception_stream.syscall_state() == State::Prepared
-        && ctx.exception_stream.breakpoint_state() == State::Ready
-        && ctx.exception_stream.unexpected_state() == State::Ready
-        && ctx.interrupt_stream.early_boot_irqs_disabled()
+        && ctx.boot_cpu_exception().state() == State::Ready
+        && ctx.boot_cpu_exception().page_fault_state() == State::Online
+        && ctx.boot_cpu_exception().syscall_state() == State::Prepared
+        && ctx.boot_cpu_exception().breakpoint_state() == State::Online
+        && ctx.boot_cpu_exception().unexpected_state() == State::Online
+        && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
         && (earlycon::is_online() || printk::console_handoff_complete())
 }
 

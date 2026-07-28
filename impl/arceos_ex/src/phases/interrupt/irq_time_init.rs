@@ -40,9 +40,9 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.workqueue.state() == State::Prepared
         && ctx.softirq.state() == State::Prepared
         && ctx.randomness.state() == State::Prepared
-        && ctx.interrupt_stream.state() == State::Ready
-        && ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().disabled()
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         && !ctx.cpu_group.smp_concurrency_open()
@@ -86,11 +86,20 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     ctx.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller)?;
     ctx.irq_handler_registry
         .setup(&ctx.irq_controller, &ctx.plic_irq_domain)?;
+    let cpu_group_state = ctx.cpu_group.state();
+    let Some(boot_cpu_interrupt) = ctx.cpu_group.boot_cpu_interrupt_mut() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Online,
+        );
+    };
     ctx.irq_dispatch_tree.setup(
         &ctx.irq_controller,
         &ctx.riscv_intc,
-        &mut ctx.interrupt_stream,
-        &ctx.cpu_group,
+        boot_cpu_interrupt,
+        cpu_group_state,
         &ctx.plic,
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
@@ -366,14 +375,16 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_timer_provider.clockevent_registered()
         && ctx.riscv_timer_provider.irq_mapping_ready()
         && ctx.riscv_timer_provider.sbi_programming_ready()
-        && ctx.interrupt_stream.timer_handler_ready()
-        && ctx.interrupt_stream.external_handler_ready()
+        && ctx.boot_cpu_interrupt().timer_handler_ready()
+        && ctx.boot_cpu_interrupt().external_handler_ready()
         && ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
             .supervisor_external_input_gate_defined()
-        && ctx.interrupt_stream.supervisor_external_input_gate_closed()
         && ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
+            .supervisor_external_input_gate_closed()
+        && ctx
+            .boot_cpu_interrupt()
             .supervisor_external_input_enable_deferred()
         && ctx.softirq.state() == State::Ready
         && ctx.softirq.action_table_ready()
@@ -428,10 +439,10 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.smp_call_function.ipi_mux_ready()
         && ctx.smp_call_function.runtime_ipi_delivery_deferred()
         && ctx.smp_call_function.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
-        && ctx.interrupt_stream.state() == State::Ready
-        && !ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Ready
+        && !ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().disabled()
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         && printk::is_ready()

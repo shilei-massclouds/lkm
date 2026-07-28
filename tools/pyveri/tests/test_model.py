@@ -141,7 +141,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("OpenSBI.Enable", text)
         self.assertIn("  -> Kernel.Enable [emits]", text)
         self.assertIn("Kernel.Preset", text)
-        self.assertIn("  -> InterruptStream.Preset", text)
+        self.assertIn("  -> InterruptType.Preset", text)
         self.assertIn("Kernel.Setup", text)
         self.assertNotIn("\nEntryPreludePhase.", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
@@ -157,7 +157,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"Riscv64Platform.Enable" -> "OpenSBI.Enable"', dot)
         self.assertIn('"OpenSBI.Enable" -> "Kernel.Enable"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Preset"', dot)
-        self.assertIn('"BootInitFlow.Preset" -> "InterruptStream.Preset"', dot)
+        self.assertIn('"BootInitFlow.Preset" -> "InterruptType.Preset"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Setup"', dot)
         self.assertIn('"Kernel.Enable" -> "BootInitFlow.Enable"', dot)
         self.assertIn('"Kernel.Enable" -> "Scheduler.Action.Schedule"', dot)
@@ -471,9 +471,9 @@ class ModelBuilderTests(unittest.TestCase):
     def test_rejects_context_guard_unpaired_enter_boundary(self) -> None:
         document = parse_text(
             """
-            type LocalInterruptControl {
+            type InterruptType {
                 processes {
-                    Transition::Enable {
+                    Action::EnableLocal {
                     }
                 }
             }
@@ -481,16 +481,16 @@ class ModelBuilderTests(unittest.TestCase):
             context BadContext: Context {
                 guard {
                     entered_by {
-                        BootCpuLocalInterrupt.Transition::Enable;
+                        BootCpuInterrupt.Action::EnableLocal;
                     }
                 }
 
                 obj_refs {
-                    BootCpuLocalInterrupt;
+                    BootCpuInterrupt;
                 }
             }
 
-            object BootCpuLocalInterrupt: LocalInterruptControl {
+            object BootCpuInterrupt: InterruptType {
                 initial_state: State::Ready;
 
                 state State::Ready {

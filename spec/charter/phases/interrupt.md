@@ -6,7 +6,7 @@
 1. `IrqTimeInitPhase`：在 `SingleTaskContext` 内建立 IRQ、timer、timekeeping、random、IPI 和
    call-function 基础，并保持 boot CPU 本地中断关闭。
 2. `LocalIrqEnablePhase`：清除 early IRQ flag 并打开 boot CPU 的 `sstatus.SIE`。
-3. `IrqOpenPreparePhase`：在 `SingleTaskInterruptStreamContext` 内完成中断开放后的 late core 准备。
+3. `IrqOpenPreparePhase`：在允许普通中断进入的单任务上下文内完成中断开放后的 late core 准备。
 4. `ProcessPreparePhase`：在同一 context 内准备 PID、task、cred、VMA、namespace、key、security
    和初始 ramfs rootfs，但不创建 PID 1 或 kthreadd。
 

@@ -15,8 +15,8 @@
 | 6 | EntrySuccessorPhase.Started | EntrySuccessorPhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 7 | EntrySuccessorPhase.Ready | EntrySuccessorPhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 8 | EntrySuccessorPhase.Online | EntrySuccessorPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 9 | InterruptStream.Prepared | InterruptStreamPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 10 | InterruptStream.Ready | InterruptStreamReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 9 | InterruptType.Prepared | InterruptTypePrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 10 | InterruptType.Ready | InterruptTypeReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 11 | KernelImage.Prepared | KernelImagePrepared | range | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel lines 286-290: .Lclear_bss: .. .Lclear_bss_done: | RISC-V64 head.S BSS clear interval; not a portable Linux kernel-image object boundary. |
 | 12 | KernelImage.Ready | KernelImageReady | range | medium | arch/riscv/mm/init.c | setup_vm | setup_vm() lines 1092-1207: kernel_map.virt_addr = KERNEL_LINK_ADDR + kernel_map.virt_offset; .. create_kernel_page_table(early_pg_dir, true); | RISC-V64 setup_vm() kernel_map initialization through early kernel mapping construction. |
 | 13 | BootCPU.Prepared | BootCpuPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -25,8 +25,8 @@
 | 16 | BootCpuLocalInterrupt.Ready | BootCpuLocalInterruptReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 17 | CpuGroup.Prepared | CpuGroupPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 18 | InitStack.Prepared | InitStackPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 19 | EventStream.Prepared | EventStreamPrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping. |
-| 20 | ExceptionStream.Prepared | ExceptionStreamPrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback exception path uses the temporary spin trap vector. |
+| 19 | TrapType.Prepared | TrapTypePrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping. |
+| 20 | ExceptionType.Prepared | ExceptionTypePrepared | exact | medium | arch/riscv/kernel/head.S | _start_kernel | _start_kernel line 310: csrw CSR_TVEC, a3 | RISC-V64 early fallback exception path uses the temporary spin trap vector. |
 | 21 | TrampolineVm.Ready | TrampolineVmReady | range | medium | arch/riscv/mm/init.c | setup_vm | setup_vm() lines 1180-1190: /* Setup trampoline PGD and PMD */ .. create_pmd_mapping(trampoline_pmd, kernel_map.virt_addr, | RISC-V64 setup_vm() trampoline page-table construction interval. |
 | 22 | TrampolineVm.Online | TrampolineVmOnline | exact | high | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 106: csrw CSR_SATP, a0 | RISC-V64 relocate_enable_mmu loads the trampoline page directory into satp. |
 | 23 | TrampolineVm.Destroyed | TrampolineVmDestroyed | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -40,7 +40,7 @@
 | 31 | Vm.Ready | VmReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 32 | Vm.Online | VmOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 33 | KernelImage.Online | KernelImageOnline | exact | medium | arch/riscv/kernel/head.S | relocate_enable_mmu | relocate_enable_mmu line 114: load_global_pointer | RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial. |
-| 34 | EventStream.Ready | EventStreamReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal trap-vector target in .Lsetup_trap_vector. |
+| 34 | TrapType.Ready | TrapTypeReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal trap-vector target in .Lsetup_trap_vector. |
 | 35 | InitStack.Ready | InitStackReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 36 | InitStack.Online | InitStackOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 37 | Soc.Prepared | SocPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -103,7 +103,7 @@
 | 94 | Randomness.Prepared | RandomnessPrepared | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 95 | PrintkBuffer.Ready | PrintkBufferReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 96 | ExceptionTable.Ready | ExceptionTableReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
-| 97 | ExceptionStream.Ready | ExceptionStreamReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal exception entry target installed by .Lsetup_trap_vector. |
+| 97 | ExceptionType.Ready | ExceptionTypeReady | exact | high | arch/riscv/kernel/head.S | _start | _start line 185: la a0, handle_exception | RISC-V64 formal exception entry target installed by .Lsetup_trap_vector. |
 | 98 | MmCoreInitPhase.Started | MmCoreInitPhaseStarted | exact | high | init/main.c | start_kernel | start_kernel() line 964: mm_core_init(); | Linux start_kernel() call site for mm_core_init(). |
 | 99 | MmCoreInitPhase.Ready | MmCoreInitPhaseReady | exact | high | mm/mm_init.c | mm_core_init | mm_core_init() definition line 2636 | Linux mm_core_init() function boundary. |
 | 100 | MmCoreInitPhase.Online | MmCoreInitPhaseOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
@@ -208,7 +208,7 @@
 | 199 | SmpCallFunction.Ready | SmpCallFunctionReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 200 | LocalIrqEnablePhase.Started | LocalIrqEnablePhaseStarted | exact | high | init/main.c | start_kernel | start_kernel() line 1030: early_boot_irqs_disabled = false; | Linux start_kernel() clears the early IRQ-disabled guard before enabling local IRQs. |
 | 201 | LocalIrqEnablePhase.Ready | LocalIrqEnablePhaseReady | exact | high | init/main.c | start_kernel | start_kernel() line 1031: local_irq_enable(); | Linux start_kernel() local_irq_enable() boundary. |
-| 202 | InterruptStream.Online | InterruptStreamOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
+| 202 | InterruptType.Online | InterruptTypeOnline | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 203 | IrqOpenPreparePhase.Started | IrqOpenPreparePhaseStarted | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 204 | IrqOpenPreparePhase.Ready | IrqOpenPreparePhaseReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |
 | 205 | SlubSubsystem.FlushWorkqueueReady | SlubFlushWorkqueueReady | unmapped | none | null | null | null | No reliable Linux alignment rule is defined for this checkpoint in this mapping-only pass. |

@@ -1,10 +1,10 @@
 use super::{
     config::Config,
-    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
     dma_cache_policy::DmaCachePolicy,
     early_param::EarlyParam,
+    interrupt_type::InterruptType,
     kernel_image::KernelImage,
     memblock::MemBlock,
     page_table::{
@@ -1414,11 +1414,8 @@ impl ZonelistUpdateSeq {
         self.irqrestore_exited_count
     }
 
-    pub fn write_seqlock_irqsave(
-        &mut self,
-        local_interrupt: &mut LocalInterruptControl,
-    ) -> EventResult {
-        if self.writer_active || local_interrupt.state() != State::Ready {
+    pub fn write_seqlock_irqsave(&mut self, local_interrupt: &mut InterruptType) -> EventResult {
+        if self.writer_active || local_interrupt.local_state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Disable,
                 State::Ready,
@@ -1436,9 +1433,9 @@ impl ZonelistUpdateSeq {
 
     pub fn write_sequnlock_irqrestore(
         &mut self,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
-        if !self.writer_active || local_interrupt.state() != State::Ready {
+        if !self.writer_active || local_interrupt.local_state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Enable,
                 State::Ready,
@@ -1825,7 +1822,7 @@ impl PageAllocator {
         page_metadata_map: &PageMetadataMap,
         cpu_hotplug_state: &CpuHotplugState,
         per_cpu_storage: &PerCpuStorage,
-        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || topology.state() != State::Ready
@@ -1834,7 +1831,7 @@ impl PageAllocator {
             || page_metadata_map.metadata_count() == 0
             || cpu_hotplug_state.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
-            || boot_cpu_local_interrupt.state() != State::Ready
+            || boot_cpu_local_interrupt.local_state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -1865,7 +1862,7 @@ impl PageAllocator {
     fn build_zonelists_with_boot_guards(
         &mut self,
         topology: &MemoryTopology,
-        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut InterruptType,
     ) -> EventResult {
         self.zonelist_printk_deferred_section.enter()?;
         let result = self.build_zonelists_with_irqsave(topology, boot_cpu_local_interrupt);
@@ -1879,7 +1876,7 @@ impl PageAllocator {
     fn build_zonelists_with_irqsave(
         &mut self,
         topology: &MemoryTopology,
-        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut InterruptType,
     ) -> EventResult {
         self.zonelist_update_seq
             .write_seqlock_irqsave(boot_cpu_local_interrupt)?;

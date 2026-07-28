@@ -60,7 +60,7 @@ impl TaskCreationCoreFixture {
                 cpu_capabilities: &ctx.cpu_capabilities,
                 slub_subsystem: &ctx.slub_subsystem,
                 boot_task: &ctx.boot_task,
-                exception_stream: &ctx.exception_stream,
+                exception_type: ctx.boot_cpu_exception(),
             }),
         );
     }

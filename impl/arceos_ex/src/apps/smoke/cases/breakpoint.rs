@@ -6,9 +6,9 @@ use core::{
 use crate::{
     apps::smoke::SmokeResult,
     objects::{
-        event_stream::TrapFrame,
-        exception_stream::{self, BreakpointHookResult},
-        printk,
+        exception_type::{self, BreakpointHookResult},
+        printk, trap_flow_type,
+        trap_type::TrapFrame,
     },
 };
 
@@ -47,7 +47,12 @@ pub fn run() -> SmokeResult {
     BREAKPOINT_PROGRESS.store(0, Ordering::Relaxed);
     BREAKPOINT_EXPECTED_SEPC.store(0, Ordering::Relaxed);
 
-    if !exception_stream::register_breakpoint_hook(smoke_breakpoint_hook) {
+    if !trap_flow_type::smoke_occurrence_contract() {
+        printk::write_str("trap occurrence lifecycle contract failed\n");
+        return SmokeResult::Failed;
+    }
+
+    if !exception_type::register_breakpoint_hook(smoke_breakpoint_hook) {
         printk::write_str("failed to register breakpoint smoke hook\n");
         return SmokeResult::Failed;
     }
@@ -98,6 +103,6 @@ fn smoke_breakpoint_hook(frame: &mut TrapFrame) -> BreakpointHookResult {
     } else {
         printk::write_str("  hook handled c.ebreak\n");
     }
-    exception_stream::resume_after_breakpoint(frame);
+    exception_type::resume_after_breakpoint(frame);
     BreakpointHookResult::Resume
 }

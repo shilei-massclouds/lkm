@@ -72,7 +72,7 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   交接、ordered boot/DTB 和 BootTaskRef 事实。该边界必须有 `task_concurrency_closed()`，但尚未有
   `interrupt_concurrency_closed()`、`context_is(SystemExclusive)` 或旧的 firmware SIE 事实。
   `tools2/bin/pyveri -t Kernel.Enable` 必须自动使用该 snapshot，derive `initial_snapshot` 与 golden
-  完全一致且 Kernel.Enable 被 handler 接受；其后第一个 `InterruptStream.Preset` 必须建立
+  完全一致且 Kernel.Enable 被 handler 接受；其后第一个 `InterruptType.Preset` 必须建立
   `sie/sip == 0` 与 `interrupt_concurrency_closed()`，完整闭包再成功到达 payload
   handoff/application 分支。不同 cwd 输出必须一致，陈旧或其它模型 fingerprint 必须拒绝。显式
   `-s` 仍可覆盖默认 golden。

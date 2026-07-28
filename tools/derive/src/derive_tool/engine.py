@@ -119,7 +119,7 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "Riscv64": ("architecture_capabilities", "riscv_isa_spec_candidate"),
     "BootCpuRegisters": ("architecture_register_file", "boot_cpu_register_subset"),
     "BootTask": ("static_object_binding", "linker_symbol_candidate"),
-    "EventStream": ("static_entry_symbol_binding", "linker_symbol_candidate"),
+    "TrapType": ("static_entry_symbol_binding", "linker_symbol_candidate"),
     "TrampolineVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "EarlyVm": ("static_page_table_binding", "linker_symbol_candidate"),
     "SwapperVm": ("static_page_table_binding", "linker_symbol_candidate"),
@@ -245,7 +245,7 @@ _STATIC_SOURCE_PROOFS = {
             "linux_static_object_binding",
         ),
     },
-    "EventStream": {
+    "TrapType": {
         "attrs_accessible(self)": (
             "static_entry_symbol_binding",
             "linux_static_object_binding",
@@ -714,11 +714,11 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.stvec == phys_addr(EventStream.early_event_entry)": (
+    "BootCpuRegisters.stvec == phys_addr(TrapType.early_event_entry)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
+    "BootCpuRegisters.stvec == virt_addr(TrapType.formal_event_entry, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -1328,6 +1328,48 @@ class _Deriver:
         )
         self.proved_expressions = set(snapshot["proved_expressions"])
 
+    def _materialize_runtime_owned_instances(
+        self,
+        owner: str,
+        owner_type: str,
+        *,
+        root_call_path: str,
+        owner_process: str,
+        source_ordinal: int,
+    ) -> None:
+        """Install non-indexed Type-owned children of a runtime instance."""
+
+        queue: list[tuple[str, str]] = [(owner, owner_type)]
+        index = 0
+        while index < len(queue):
+            current_owner, current_type = queue[index]
+            index += 1
+            for field_name, field_type in _type_owned_fields(self.model, current_type):
+                child = f"{current_owner}.{field_name}"
+                self.association_values.setdefault(current_owner, {})[field_name] = child
+                if child in self.runtime_instances:
+                    continue
+                lifecycle = _type_lifecycle_decl(self.model, field_type)
+                initial_state = (
+                    lifecycle.initial_state
+                    if lifecycle is not None and lifecycle.initial_state is not None
+                    else "Base"
+                )
+                self.states[child] = initial_state
+                self.runtime_instances[child] = {
+                    "declaration_site": f"{current_owner}.owned::{field_name}",
+                    "alias": field_name,
+                    "declared_type": field_type,
+                    "state": initial_state,
+                    "occurrence": 1,
+                    "root_call_path": root_call_path,
+                    "owner_process": owner_process,
+                    "source_ordinal": source_ordinal,
+                    "static_object": current_owner,
+                    "owner_object": current_owner,
+                }
+                queue.append((child, field_type))
+
 
     def _drive_blocks(
         self,
@@ -1420,6 +1462,65 @@ class _Deriver:
                     entry_span,
                     transition,
                 )
+            if resolved in self.runtime_instances and process_kind == "Action":
+                runtime = self.runtime_instances[resolved]
+                declared_type = str(runtime["declared_type"])
+                expression = _process_call_expression(
+                    f"{resolved}.Action::{process_name}", args
+                )
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"runtime action committed: {resolved}.Action::{process_name}",
+                    entry_span,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
+                    expression=expression,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="action_commit",
+                    proof_provider=action_provider,
+                    process_parent=process_parent,
+                )
+                if not self._execute_type_process_drives(
+                    declared_type,
+                    resolved,
+                    "Action",
+                    process_name,
+                    args,
+                    entry_span,
+                    transition,
+                    action_provider=action_provider,
+                    process_parent=expression,
+                    bindings=bindings,
+                    result_hints=result_hints,
+                ):
+                    return False
+                receiver = {
+                    "type": declared_type,
+                    "value": resolved,
+                    "runtime_instance_id": resolved,
+                }
+                if not self._apply_runtime_action_effect(
+                    receiver,
+                    process_name,
+                    args,
+                    bindings,
+                    entry_span,
+                    transition,
+                ):
+                    return False
+                self._record_type_process_ensures(
+                    declared_type,
+                    resolved,
+                    "Action",
+                    process_name,
+                    args,
+                    entry_span,
+                    transition,
+                    action_provider=action_provider,
+                    bindings=bindings,
+                )
+                return True
             if resolved is not None and resolved != receiver:
                 call = f"{resolved}.{process_kind}::{process_name}"
                 if args is not None:
@@ -1502,6 +1603,13 @@ class _Deriver:
                 "owner_process": owner_process,
                 "source_ordinal": source_ordinal,
             }
+            self._materialize_runtime_owned_instances(
+                runtime_id,
+                declared_type,
+                root_call_path=root_call_path,
+                owner_process=owner_process,
+                source_ordinal=source_ordinal,
+            )
             bindings[alias] = {
                 "type": declared_type,
                 "value": runtime_id,
@@ -2351,6 +2459,12 @@ class _Deriver:
                 transition=bound_transition,
             ):
                 return False
+            if not self._drive_blocks(
+                bound_decl.drives,
+                bound_transition,
+                bindings=bindings,
+            ):
+                return False
         if _type_is_or_inherits(self.model, declared_type, "Task"):
             owned = self.runtime_owned_flows.get(runtime_id, set())
             if transition_name == "Disable" and any(
@@ -2976,12 +3090,22 @@ class _Deriver:
             for entry, entry_span in block.entry_spans:
                 if entry.strip() == "Never":
                     continue
-                match = _TRANSITION_EXPR_RE.match(entry)
+                association_match = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
+                if association_match is not None:
+                    object_name, process_kind, process_name, _args = association_match.groups()
+                    proof_class = (
+                        "context_guard_transition"
+                        if process_kind == "Transition"
+                        else "context_guard_action"
+                    )
+                    match = None
+                else:
+                    match = _TRANSITION_EXPR_RE.match(entry)
                 if match is not None:
                     object_name, process_name = match.group(1), match.group(2)
                     process_kind = "Transition"
                     proof_class = "context_guard_transition"
-                else:
+                elif association_match is None:
                     match = _ACTION_EXPR_RE.match(entry)
                     if match is None:
                         self._record(

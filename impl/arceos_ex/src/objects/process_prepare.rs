@@ -4,7 +4,7 @@ use super::{
     cpu_capabilities::CpuCapabilities,
     cpu_group::CpuGroup,
     current_task::CurrentTask,
-    exception_stream::ExceptionStream,
+    exception_type::ExceptionType,
     files::FilesStruct,
     mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
@@ -342,11 +342,11 @@ impl UprobeCore {
 
     fn setup(
         &mut self,
-        exception_stream: &ExceptionStream,
+        exception_type: &ExceptionType,
         slub_subsystem: &SlubSubsystem,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || exception_stream.state() != State::Ready
+            || exception_type.state() != State::Ready
             || slub_subsystem.state() != State::Ready
         {
             return failed_condition(
@@ -527,7 +527,7 @@ impl TaskCreationCore {
             || inputs.cpu_capabilities.state() != State::Ready
             || inputs.slub_subsystem.state() != State::Ready
             || !inputs.boot_task.online()
-            || inputs.exception_stream.state() != State::Ready
+            || inputs.exception_type.state() != State::Ready
         {
             return self.failed_setup();
         }
@@ -535,7 +535,7 @@ impl TaskCreationCore {
         self.vector_context
             .preset(inputs.cpu_capabilities, inputs.slub_subsystem)?;
         self.uprobe_core
-            .setup(inputs.exception_stream, inputs.slub_subsystem)?;
+            .setup(inputs.exception_type, inputs.slub_subsystem)?;
 
         self.task_struct_cache_ready = true;
         self.task_struct_cache_bytes = TASK_STRUCT_CACHE_BYTES;
@@ -780,7 +780,7 @@ pub struct TaskCreationSetup<'a> {
     pub cpu_capabilities: &'a CpuCapabilities,
     pub slub_subsystem: &'a SlubSubsystem,
     pub boot_task: &'a BootTask,
-    pub exception_stream: &'a ExceptionStream,
+    pub exception_type: &'a ExceptionType,
 }
 
 pub struct SignalCore {

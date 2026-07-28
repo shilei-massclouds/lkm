@@ -10,7 +10,7 @@ use super::{
     device_tree::{DeviceNodeRef, DevicePropertyRef, DeviceTree},
     fdt_reader::{read_be_u32, read_cells},
     init_stack::InitStack,
-    interrupt_stream::InterruptStream,
+    interrupt_type::InterruptType,
     ioremap::Ioremap,
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, VmallocAllocator},
     per_cpu_storage::PerCpuStorage,
@@ -1343,8 +1343,8 @@ impl IrqDispatchTree {
         &mut self,
         irq_controller: &IrqController,
         riscv_intc: &RiscvIntc,
-        interrupt_stream: &mut InterruptStream,
-        cpu_group: &CpuGroup,
+        interrupt_type: &mut InterruptType,
+        cpu_group_state: State,
         plic: &Plic,
         plic_irq_domain: &PlicIrqDomain,
         irq_handler_registry: &IrqHandlerRegistry,
@@ -1352,8 +1352,8 @@ impl IrqDispatchTree {
         if self.lifecycle.state() != State::Base
             || irq_controller.state() != State::Ready
             || riscv_intc.state() != State::Ready
-            || interrupt_stream.state() != State::Ready
-            || cpu_group.state() != State::Ready
+            || interrupt_type.state() != State::Ready
+            || cpu_group_state != State::Ready
             || !riscv_intc.boot_cpu_timer_irq_ready()
             || !riscv_intc.boot_cpu_external_irq_reserved()
             || plic.state() != State::Ready
@@ -1374,8 +1374,8 @@ impl IrqDispatchTree {
             );
         }
 
-        interrupt_stream.bind_timer_handler()?;
-        interrupt_stream.bind_external_handler()?;
+        interrupt_type.bind_timer_handler()?;
+        interrupt_type.bind_external_handler()?;
         self.fallback_route_ready = true;
         self.timer_route_ready = true;
         self.software_route_reserved = true;
@@ -3621,7 +3621,7 @@ impl UartExternalIrqEnable {
         plic: &Plic,
         plic_irq_domain: &mut PlicIrqDomain,
         irq_handler_registry: &IrqHandlerRegistry,
-        interrupt_stream: &mut InterruptStream,
+        interrupt_type: &mut InterruptType,
     ) -> EventResult {
         let source = super::ns16550a::uart8250_port_irq_source();
         let logical_irq = super::ns16550a::uart8250_port_logical_irq();
@@ -3637,11 +3637,11 @@ impl UartExternalIrqEnable {
                 .mapping_for_source(source)
                 .is_none_or(|mapping| mapping.logical_irq() != logical_irq)
             || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
-            || interrupt_stream.state() != State::Online
-            || !interrupt_stream.external_handler_ready()
-            || !interrupt_stream.supervisor_external_input_gate_defined()
-            || !interrupt_stream.supervisor_external_input_gate_closed()
-            || !interrupt_stream.supervisor_external_input_enable_deferred()
+            || interrupt_type.state() != State::Online
+            || !interrupt_type.external_handler_ready()
+            || !interrupt_type.supervisor_external_input_gate_defined()
+            || !interrupt_type.supervisor_external_input_gate_closed()
+            || !interrupt_type.supervisor_external_input_enable_deferred()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -3652,7 +3652,7 @@ impl UartExternalIrqEnable {
         }
 
         plic_irq_domain.enable_source_gate(plic, source)?;
-        interrupt_stream.enable_supervisor_external_input()?;
+        interrupt_type.enable_supervisor_external_input()?;
         let Some(mapping) = plic_irq_domain.mapping_for_source(source) else {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -3661,7 +3661,7 @@ impl UartExternalIrqEnable {
                 State::Ready,
             );
         };
-        if !mapping.source_gate_open() || !interrupt_stream.supervisor_external_input_gate_open() {
+        if !mapping.source_gate_open() || !interrupt_type.supervisor_external_input_gate_open() {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

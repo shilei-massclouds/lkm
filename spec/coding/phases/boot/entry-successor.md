@@ -9,10 +9,10 @@ continuation，不拥有 CorePrepare sibling 的启动权。
 ### Preset: Base -> Prepared
 
 `preset()` 先检查自身精确 Base 和全部 model `depends_on`：EntryPrelude Online，Vm/BootTask/
-KernelImage 状态，EarlyVm、BootInitStack、InterruptStream、RawDtb 和 FixMap 状态。检查通过后才
+KernelImage 状态，EarlyVm、BootInitStack、InterruptType、RawDtb 和 FixMap 状态。检查通过后才
 发出 `EntrySuccessorPhase.Started`。
 
-随后严格按 model 顺序驱动 BootInitStack.Enable、EarlyDtb.Preset、InterruptStream.Setup、
+随后严格按 model 顺序驱动 BootInitStack.Enable、EarlyDtb.Preset、InterruptType.Setup、
 BootCPU.Setup/Enable、PrintkBuffer.Preset、EarlyDtb.Setup、InitMM.Setup、EarlyIoremap.Setup、
 SBI.Setup、Params.Preset、MemBlock.Setup、Vm.Enable、MemBlock.Enable 和 EarlyDtb.Cleanup。
 驱动完成后检查 start_kernel deferred facts，提交 Prepared，读回并发出

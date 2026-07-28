@@ -727,7 +727,7 @@ key 上前一 sibling Online 后才能推进后一 sibling，不同 key 之间�
 `Scheduler.Action::Schedule`，最后进入新的 boot-idle preempt-disabled
 上下文。`Schedule` 自身内部则建模 `schedule()`/`__schedule()` 的最小边界：
 先由 `PreemptionControl.Disable` 边界建立 schedule-owned 不可抢占上下文，再由
-`LocalInterruptControl.SaveAndDisable` 边界关闭本 CPU 本地中断，然后在 runqueue lock context 中
+`InterruptType.SaveAndDisable` 边界关闭本 CPU 本地中断，然后在 runqueue lock context 中
 先从 effective TaskFlow 解析 `CurrentTaskRef`，再执行
 `let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)`，
 最后进入 `SchedulerObject.Action::SwitchTo(CurrentTaskRef, next)`。
@@ -762,7 +762,7 @@ guard 定义退出。对于没有独立运行时 enter/exit 动作的天然 guar
 guard 再命名一个 kind。差异来自 guard 引用的对象、进入/退出边界事件、
 guard 明确保持的属性以及上下文引用集合：RawSpinLock 边界产生资源互斥效果，
 PreemptionControl guard 产生不可被普通抢占打断的原子上下文效果，
-LocalInterruptControl guard 产生本 CPU 本地中断关闭效果。嵌套检查和上下文强度
+InterruptType guard 产生本 CPU 本地中断关闭效果。嵌套检查和上下文强度
 叠加也应基于 guard 推导出的上下文贡献，而不是基于 context 名称。
 
 对于当前 wake-up 试验对象，guard 引用一个 `RawSpinLock` 实例，并通过该锁实例的
@@ -817,7 +817,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   `local_interrupts: enabled|disabled`、`preemption: enabled|disabled`、
   `voluntary_switching: enabled|disabled`、`cpu_concurrency: single|multi`、
   `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
-- 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`RawSpinLock.Action::Acquire` / `Release` 可作为普通 raw spin lock 的 guard 边界，只贡献该 `ResourceExclusiveContext` 的锁保护和 `obj_refs` 独占范围，不额外推导 irqsave、抢占关闭或主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`LocalInterruptControl.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
+- 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`RawSpinLock.Action::Acquire` / `Release` 可作为普通 raw spin lock 的 guard 边界，只贡献该 `ResourceExclusiveContext` 的锁保护和 `obj_refs` 独占范围，不额外推导 irqsave、抢占关闭或主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`InterruptType.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - ResourceExclusiveContext 的锁 guard 如果边界事件带有 owner/current-task
   实参，例如 `Mutex.Transition::Lock(TaskRef)` / `Unlock(TaskRef)`，则同一个

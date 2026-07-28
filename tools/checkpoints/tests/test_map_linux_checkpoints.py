@@ -771,23 +771,23 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=43,
-                variant="EventStreamReady",
-                name="EventStream.Ready",
+                variant="TrapTypeReady",
+                name="TrapType.Ready",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=80,
-                variant="ExceptionStreamReady",
-                name="ExceptionStream.Ready",
+                variant="ExceptionTypeReady",
+                name="ExceptionType.Ready",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=28,
-                variant="EventStreamPrepared",
-                name="EventStream.Prepared",
+                variant="TrapTypePrepared",
+                name="TrapType.Prepared",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=29,
-                variant="ExceptionStreamPrepared",
-                name="ExceptionStream.Prepared",
+                variant="ExceptionTypePrepared",
+                name="ExceptionType.Prepared",
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=80,
@@ -853,8 +853,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
             head_text = head_text.replace(
                 "    la a0, handle_exception\n",
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EVENT_STREAM_READY\n"
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_STREAM_READY\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_TRAP_TYPE_READY\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_TYPE_READY\n"
                 "    la a0, handle_exception\n",
             )
             head_text = head_text.replace(
@@ -864,8 +864,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             )
             head_text = head_text.replace(
                 "    csrw CSR_TVEC, a3\n",
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EVENT_STREAM_PREPARED\n"
-                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_STREAM_PREPARED\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_TRAP_TYPE_PREPARED\n"
+                "    LKM_RUNTIME_CHECKPOINT LKM_CHECKPOINT_EXCEPTION_TYPE_PREPARED\n"
                 "    csrw CSR_TVEC, a3\n",
             )
             head_text = head_text.replace(
@@ -988,8 +988,8 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
             ),
             map_linux_checkpoints.CheckpointInventoryRecord(
                 index=43,
-                variant="EventStreamReady",
-                name="EventStream.Ready",
+                variant="TrapTypeReady",
+                name="TrapType.Ready",
             ),
         ]
 
@@ -1007,7 +1007,7 @@ class MapLinuxCheckpointsTests(unittest.TestCase):
         self.assertIn("csrw CSR_SATP, a0", by_name["TrampolineVm.Online"].linux_anchor)
         self.assertIn("create_kernel_page_table", by_name["EarlyVm.Ready"].linux_anchor)
         self.assertIn("csrw CSR_SATP, a2", by_name["EarlyVm.Online"].linux_anchor)
-        self.assertIn("handle_exception", by_name["EventStream.Ready"].linux_anchor)
+        self.assertIn("handle_exception", by_name["TrapType.Ready"].linux_anchor)
 
     def test_syscall_macro_parser_handles_wrappers_and_rejects_conditional_clone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

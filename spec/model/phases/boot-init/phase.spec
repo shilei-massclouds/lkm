@@ -44,18 +44,18 @@ object BootInitFlow: TaskFlow {
 
                 within SingleTaskContext {
                     drives {
-                        InterruptStream.Transition::Preset;
+                        CurrentCPU.trap.interrupt.Transition::Preset;
                         KernelImage.Transition::Preset;
                         KernelImage.Transition::Setup;
                         CurrentCPU.Transition::Setup(true);
-                        CurrentCPU.BootCpuLocalInterrupt.Transition::Setup;
+                        CurrentCPU.trap.interrupt.Transition::Setup;
                         BootTaskEntryBinding.Transition::Preset(CurrentTaskRef);
                         BootInitStack.Transition::Preset;
-                        EventStream.Transition::Preset;
-                        ExceptionStream.Transition::Preset;
+                        CurrentCPU.trap.Transition::Preset;
+                        CurrentCPU.trap.exception.Transition::Preset;
                         Vm.Transition::Preset;
                         Vm.Transition::Setup;
-                        EventStream.Transition::Setup;
+                        CurrentCPU.trap.Transition::Setup;
                         BootTaskEntryBinding.Transition::Setup;
                         BootInitStack.Transition::Setup;
                         Soc.Transition::Preset;
@@ -68,13 +68,13 @@ object BootInitFlow: TaskFlow {
                     context_is(SystemExclusive);
                     kernel_fpu_disabled(BootCpuRegisters.sstatus);
                     kernel_vector_disabled(BootCpuRegisters.sstatus);
-                    InterruptStream.state == State::Prepared;
-                    EventStream.state == State::Ready;
-                    ExceptionStream.state == State::Prepared;
-                    PageFaultException.state == State::Prepared;
-                    SyscallException.state == State::Prepared;
-                    BreakpointException.state == State::Prepared;
-                    UnexpectedException.state == State::Prepared;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    CurrentCPU.trap.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Prepared;
+                    CurrentCPU.trap.exception.page_fault.state == State::Prepared;
+                    CurrentCPU.trap.exception.syscall.state == State::Prepared;
+                    CurrentCPU.trap.exception.breakpoint.state == State::Prepared;
+                    CurrentCPU.trap.exception.unexpected.state == State::Prepared;
                     KernelImage.state == State::Online;
                     RawDtb.state == State::Ready;
                     BootTaskEntryBinding.state == State::Ready;
@@ -133,7 +133,7 @@ object BootInitFlow: TaskFlow {
                     LocalIrqEnablePhase.Transition::Preset;
                 }
 
-                within SingleTaskInterruptStreamContext {
+                within SingleTaskInterruptContext {
                     drives {
                         IrqOpenPreparePhase.Transition::Preset;
                         ProcessPreparePhase.Transition::Preset;

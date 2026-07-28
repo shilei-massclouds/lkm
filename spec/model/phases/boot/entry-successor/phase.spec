@@ -718,17 +718,17 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+            CurrentCPU.trap.interrupt.Action::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Restore;
+            CurrentCPU.trap.interrupt.Action::Restore;
         }
     }
 
     obj_refs {
         PrintkBuffer;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
     }
 }
 
@@ -775,8 +775,8 @@ object PrintkBuffer: BufferObject {
                     MemBlock.state == State::Online;
                     PerCpuStorage.state == State::Ready;
                     BootParam.state == State::Ready;
-                    BootCpuLocalInterrupt.state == State::Ready;
-                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
                 }
 
                 drives {
@@ -789,7 +789,7 @@ object PrintkBuffer: BufferObject {
                     }
 
                     ensures {
-                        printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                        printk_buffer_setup_local_irq_guard_used(PrintkBuffer, CurrentCPU.trap.interrupt);
                     }
                 }
 
@@ -819,7 +819,7 @@ object PrintkBuffer: BufferObject {
             printk_buffer_runtime_ready(PrintkBuffer);
             printk_buffer_records_preserved(PrintkBuffer);
             printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
-            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, CurrentCPU.trap.interrupt);
             printk_buffer_setup_prepared_dynamic_buffer(PrintkBuffer);
             printk_buffer_setup_switched_active_buffer(PrintkBuffer);
             printk_buffer_setup_copied_remaining_records(PrintkBuffer);
@@ -1051,7 +1051,7 @@ object EntrySuccessorPhase: PhaseObject {
                     EarlyVm.state == State::Online;
                     BootTask.state == State::OnCpu;
                     BootInitStack.state == State::Ready;
-                    InterruptStream.state == State::Prepared;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
                     KernelImage.state == State::Online;
@@ -1063,7 +1063,6 @@ object EntrySuccessorPhase: PhaseObject {
                 drives {
                     BootInitStack.Transition::Enable;
                     EarlyDtb.Transition::Preset;
-                    InterruptStream.Transition::Setup;
                     CurrentCPU.Transition::Enable;
                     PrintkBuffer.Transition::Preset;
                     EarlyDtb.Transition::Setup;
@@ -1124,7 +1123,7 @@ object EntrySuccessorPhase: PhaseObject {
                     BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
                     CpuGroup.cpus[0].state == State::Online;
-                    InterruptStream.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     EarlyDtb.state == State::Destroyed;
                     KernelCmdline.state == State::Ready;
@@ -1164,7 +1163,7 @@ object EntrySuccessorPhase: PhaseObject {
                     BootInitFlow.state == State::Prepared;
                     BootInitStack.state == State::Online;
                     CpuGroup.cpus[0].state == State::Online;
-                    InterruptStream.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                     EarlyDtb.state == State::Destroyed;
                     KernelCmdline.state == State::Ready;

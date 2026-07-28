@@ -83,12 +83,12 @@ _start:
      * BootInitFlow.Preset head segment.
      *
      * This code performs only the model
-     * events that must happen before Rust can run: close the interrupt stream,
+     * events that must happen before Rust can run: close the interrupt gates,
      * establish gp, disable kernel FPU/vector use, zero BSS, record the boot
      * CPU group input, install the init task pointer, and create the initial
      * stack.  The Rust segment below continues the same Preset event.
      */
-    # InterruptStream.Preset: S-mode interrupt pending/enabled state is closed.
+    # InterruptType.Preset: S-mode interrupt pending/enabled state is closed.
     csrw sie, zero
     csrw sip, zero
     li a0, {trace_interrupt_preset}
@@ -302,7 +302,7 @@ fn adopt_preset_dependencies(boot_args: &BootArgs) -> EventResult {
 /// The head segment above has already performed and checkpointed the pre-Rust
 /// lifecycle events:
 ///
-/// - `InterruptStream.Preset`
+/// - `InterruptType.Preset`
 /// - `KernelImage.Preset`
 /// - BootInitFlow.Preset private FPU/vector disable action
 /// - `KernelImage.Setup`
@@ -331,9 +331,25 @@ fn preset_flow(boot_args: &BootArgs) -> ! {
 
 fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
-    ctx.event_stream.preset(&ctx.kernel_image)?;
-    ctx.exception_stream
-        .preset(&ctx.event_stream, &ctx.init_stack)?;
+    {
+        let Context {
+            cpu_group,
+            kernel_image,
+            init_stack,
+            ..
+        } = ctx;
+        let Some(trap) = cpu_group.boot_cpu_trap_mut() else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                State::Base,
+                State::Base,
+                State::Prepared,
+            );
+        };
+        trap.preset(kernel_image)?;
+        let trap_state = trap.state();
+        trap.exception_mut().preset(trap_state, init_stack)?;
+    }
     ctx.vm.preset(
         &ctx.config,
         &mut ctx.static_objects,
@@ -346,7 +362,15 @@ fn preset_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResul
 }
 
 fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
-    ctx.interrupt_stream.adopt_head_preset()?;
+    let Some(interrupt) = ctx.cpu_group.boot_cpu_interrupt_mut() else {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Base,
+            State::Prepared,
+        );
+    };
+    interrupt.adopt_head_preset()?;
     ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds)?;
     if !csr::kernel_fpu_vector_disabled() {
         return failed_condition(
@@ -368,6 +392,7 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
             State::Ready,
         );
     };
+    local_interrupt.setup_local_control()?;
     local_interrupt.setup()?;
     let Ok(current_task) = ctx.current_task() else {
         return failed_condition(
@@ -421,13 +446,52 @@ extern "C" fn after_vm_setup_continuation() -> ! {
 /// Finishes `BootInitFlow.Preset` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
 fn after_vm_setup(ctx: &mut Context) -> EventResult {
-    ctx.event_stream.setup(
-        &ctx.vm,
-        &ctx.static_objects,
-        &ctx.exception_stream,
-        &ctx.interrupt_stream,
+    let Some(boot_cpu_ref) = ctx.cpu_group.boot_cpu_ref() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    };
+    let boot_task_identity = ctx.boot_task.carrier_address();
+    let boot_stack_base = ctx.lds.init_stack_start();
+    let boot_stack_top = ctx.lds.init_stack_end();
+    let Context {
+        cpu_group,
+        vm,
+        static_objects,
+        ..
+    } = ctx;
+    let Some(trap) = cpu_group.boot_cpu_trap_mut() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    };
+    trap.setup(
+        vm,
+        static_objects,
+        boot_cpu_ref,
+        boot_task_identity,
+        boot_stack_base,
+        boot_stack_top,
     )?;
     setup_boot_task_entry_binding_virtual(ctx)?;
+    if !ctx
+        .boot_task
+        .task_mut()
+        .set_kernel_stack_bounds(ctx.lds.init_stack_start(), ctx.lds.init_stack_end())
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Prepared,
+            State::Ready,
+        );
+    }
     verify_boot_task_online_virtual(ctx)?;
     ctx.init_stack.setup(&ctx.vm)?;
     Soc::preset()
@@ -594,13 +658,13 @@ fn head_bss_clear_completed() -> bool {
 
 pub(super) fn entry_objects_ready(ctx: &Context) -> bool {
     csr::kernel_fpu_vector_disabled()
-        && ctx.interrupt_stream.state() == State::Prepared
-        && ctx.event_stream.state() == State::Ready
-        && ctx.exception_stream.state() == State::Prepared
-        && ctx.exception_stream.page_fault_state() == State::Prepared
-        && ctx.exception_stream.syscall_state() == State::Prepared
-        && ctx.exception_stream.breakpoint_state() == State::Prepared
-        && ctx.exception_stream.unexpected_state() == State::Prepared
+        && ctx.boot_cpu_interrupt().state() == State::Ready
+        && ctx.boot_cpu_trap().state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Prepared
+        && ctx.boot_cpu_exception().page_fault_state() == State::Prepared
+        && ctx.boot_cpu_exception().syscall_state() == State::Prepared
+        && ctx.boot_cpu_exception().breakpoint_state() == State::Prepared
+        && ctx.boot_cpu_exception().unexpected_state() == State::Prepared
         && ctx.kernel_image.state() == State::Online
         && ctx.raw_dtb.state() == State::Ready
         && boot_task_entry_binding_state() == State::Ready

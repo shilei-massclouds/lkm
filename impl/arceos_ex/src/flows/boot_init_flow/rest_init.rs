@@ -315,9 +315,11 @@ fn copy_kernel_init_task(ctx: &mut Context) -> EventResult {
         copy_result.sched_entity_ready(),
         stack_top,
     )?;
-    ctx.kernel_init_task
-        .task_mut()
-        .init_switch_context(kernel_init_entry, stack_top);
+    ctx.kernel_init_task.task_mut().init_switch_context(
+        kernel_init_entry,
+        stack_top - crate::objects::rest_init::KERNEL_TASK_STACK_SIZE,
+        stack_top,
+    );
     Ok(())
 }
 
@@ -348,7 +350,7 @@ fn wake_and_enable_kernel_init_task(ctx: &mut Context) -> EventResult {
             .is_none()
         || ctx.cpu_group.state() != State::Ready
         || ctx.cpu_group.boot_cpu_state() != State::Online
-        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || ctx.boot_cpu_local_interrupt().local_state() != State::Ready
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))
@@ -528,9 +530,11 @@ fn copy_kthreadd_task(ctx: &mut Context) -> EventResult {
         copy_result.sched_entity_ready(),
         stack_top,
     )?;
-    ctx.kthreadd_task
-        .task_mut()
-        .init_switch_context(kthreadd_entry, stack_top);
+    ctx.kthreadd_task.task_mut().init_switch_context(
+        kthreadd_entry,
+        stack_top - crate::objects::rest_init::KERNEL_TASK_STACK_SIZE,
+        stack_top,
+    );
     Ok(())
 }
 
@@ -561,7 +565,7 @@ fn wake_and_enable_kthreadd_task(ctx: &mut Context) -> EventResult {
             .is_none()
         || ctx.cpu_group.state() != State::Ready
         || ctx.cpu_group.boot_cpu_state() != State::Online
-        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || ctx.boot_cpu_local_interrupt().local_state() != State::Ready
         || !ctx
             .current_task_ref()
             .is_ok_and(|task_ref| task_ref.same_identity(ctx.boot_task.task_ref()))

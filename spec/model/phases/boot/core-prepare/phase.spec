@@ -1347,7 +1347,7 @@ object ExceptionTable: ResourceObject {
 
 /*
  * CorePreparePhase 表示从 paging_init() 完成后到 trap_init() 完成的核心准备子阶段。
- * 它补齐正式异常分发之前的核心机制准备，并以 ExceptionStream.Setup 作为阶段末尾边界。
+ * 它补齐正式异常分发之前的核心机制准备，并以 CurrentCPU.trap.exception.Setup 作为阶段末尾边界。
  */
 object CorePreparePhase: PhaseObject {
     initial_state: State::Base;
@@ -1371,9 +1371,9 @@ object CorePreparePhase: PhaseObject {
                     EarlyParam.state == State::Ready;
                     CommandLine.state == State::Prepared;
                     CpuGroup.cpus[0].state == State::Online;
-                    BootCpuLocalInterrupt.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
-                    ExceptionStream.state == State::Prepared;
+                    CurrentCPU.trap.exception.state == State::Prepared;
                 }
 
                 drives {
@@ -1400,7 +1400,10 @@ object CorePreparePhase: PhaseObject {
                     Randomness.Transition::Preset;
                     PrintkBuffer.Transition::Setup;
                     ExceptionTable.Transition::Setup;
-                    ExceptionStream.Transition::Setup;
+                    CurrentCPU.trap.exception.Transition::Setup;
+                    CurrentCPU.trap.exception.page_fault.Transition::Enable;
+                    CurrentCPU.trap.exception.breakpoint.Transition::Enable;
+                    CurrentCPU.trap.exception.unexpected.Transition::Enable;
                 }
 
                 ensures {
@@ -1580,13 +1583,13 @@ object CorePreparePhase: PhaseObject {
                     PayloadParam.state == State::Ready;
                     Randomness.state == State::Prepared;
                     PrintkBuffer.state == State::Ready;
-                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, CurrentCPU.trap.interrupt);
                     ExceptionTable.state == State::Ready;
-                    ExceptionStream.state == State::Ready;
-                    PageFaultException.state == State::Ready;
-                    SyscallException.state == State::Prepared;
-                    BreakpointException.state == State::Ready;
-                    UnexpectedException.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
+                    CurrentCPU.trap.exception.page_fault.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Prepared;
+                    CurrentCPU.trap.exception.breakpoint.state == State::Online;
+                    CurrentCPU.trap.exception.unexpected.state == State::Online;
                 }
 
                 emits {
@@ -1632,13 +1635,13 @@ object CorePreparePhase: PhaseObject {
             PayloadParam.state == State::Ready;
             Randomness.state == State::Prepared;
             PrintkBuffer.state == State::Ready;
-            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, CurrentCPU.trap.interrupt);
             ExceptionTable.state == State::Ready;
-            ExceptionStream.state == State::Ready;
-            PageFaultException.state == State::Ready;
-            SyscallException.state == State::Prepared;
-            BreakpointException.state == State::Ready;
-            UnexpectedException.state == State::Ready;
+            CurrentCPU.trap.exception.state == State::Ready;
+            CurrentCPU.trap.exception.page_fault.state == State::Online;
+            CurrentCPU.trap.exception.syscall.state == State::Prepared;
+            CurrentCPU.trap.exception.breakpoint.state == State::Online;
+            CurrentCPU.trap.exception.unexpected.state == State::Online;
         }
 
         transitions {
@@ -1675,13 +1678,13 @@ object CorePreparePhase: PhaseObject {
                     PayloadParam.state == State::Ready;
                     Randomness.state == State::Prepared;
                     PrintkBuffer.state == State::Ready;
-                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                    printk_buffer_setup_local_irq_guard_used(PrintkBuffer, CurrentCPU.trap.interrupt);
                     ExceptionTable.state == State::Ready;
-                    ExceptionStream.state == State::Ready;
-                    PageFaultException.state == State::Ready;
-                    SyscallException.state == State::Prepared;
-                    BreakpointException.state == State::Ready;
-                    UnexpectedException.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
+                    CurrentCPU.trap.exception.page_fault.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Prepared;
+                    CurrentCPU.trap.exception.breakpoint.state == State::Online;
+                    CurrentCPU.trap.exception.unexpected.state == State::Online;
                 }
             }
         }

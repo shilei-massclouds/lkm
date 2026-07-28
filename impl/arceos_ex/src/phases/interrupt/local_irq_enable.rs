@@ -30,9 +30,9 @@ fn preset_start(ctx: &Context) -> EventResult {
     let state = crate::phases::state::load(&LOCAL_IRQ_ENABLE_PHASE_STATE);
     if state != State::Base
         || !crate::phases::interrupt::irq_time_init::is_online()
-        || ctx.interrupt_stream.state() != State::Ready
-        || !ctx.interrupt_stream.early_boot_irqs_disabled()
-        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || ctx.boot_cpu_interrupt().state() != State::Ready
+        || !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        || ctx.boot_cpu_local_interrupt().local_state() != State::Ready
         || !ctx.boot_cpu_local_interrupt().disabled()
         || csr::supervisor_interrupts_enabled()
         || ctx.cpu_group.smp_concurrency_open()
@@ -44,12 +44,7 @@ fn preset_start(ctx: &Context) -> EventResult {
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
-    let Context {
-        interrupt_stream,
-        cpu_group,
-        ..
-    } = ctx;
-    let Some(local_interrupt) = cpu_group.boot_cpu_local_interrupt_mut() else {
+    let Some(interrupt) = ctx.cpu_group.boot_cpu_interrupt_mut() else {
         return failed_condition(
             LifecycleEvent::Enable,
             State::Base,
@@ -57,7 +52,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
             State::Online,
         );
     };
-    interrupt_stream.enable(local_interrupt)
+    interrupt.enable_service()
 }
 
 fn adopt_prepared_with_check(ctx: &Context) -> EventResult {
@@ -144,19 +139,21 @@ fn local_irq_enable_phase_ready(ctx: &Context) -> bool {
         && ctx.ipi_mux.secondary_enable_deferred()
         && ctx.smp_call_function.state() == State::Ready
         && ctx.smp_call_function.runtime_ipi_delivery_deferred()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.timer_handler_ready()
-        && ctx.interrupt_stream.external_handler_ready()
+        && ctx.boot_cpu_interrupt().state() == State::Online
+        && ctx.boot_cpu_interrupt().timer_handler_ready()
+        && ctx.boot_cpu_interrupt().external_handler_ready()
         && ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
             .supervisor_external_input_gate_defined()
-        && ctx.interrupt_stream.supervisor_external_input_gate_closed()
         && ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
+            .supervisor_external_input_gate_closed()
+        && ctx
+            .boot_cpu_interrupt()
             .supervisor_external_input_enable_deferred()
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.plic_irq_domain.state() == State::Ready

@@ -1,7 +1,7 @@
 use super::{
     boot_param::BootParam,
-    cpu_control::LocalInterruptControl,
     earlycon,
+    interrupt_type::InterruptType,
     memblock::MemBlock,
     ns16550a,
     per_cpu_storage::PerCpuStorage,
@@ -156,13 +156,13 @@ impl PrintkBuffer {
         memblock: &MemBlock,
         per_cpu_storage: &PerCpuStorage,
         boot_param: &BootParam,
-        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || memblock.state() != State::Online
             || per_cpu_storage.state() != State::Ready
             || boot_param.state() != State::Ready
-            || boot_cpu_local_interrupt.state() != State::Ready
+            || boot_cpu_local_interrupt.local_state() != State::Ready
             || !boot_cpu_local_interrupt.disabled()
         {
             return failed_condition(
@@ -256,14 +256,11 @@ impl PrintkBuffer {
         self.setup_local_irq_save_restore_used
     }
 
-    pub fn setup_local_irq_guard_used_by(
-        &self,
-        boot_cpu_local_interrupt: &LocalInterruptControl,
-    ) -> bool {
+    pub fn setup_local_irq_guard_used_by(&self, boot_cpu_local_interrupt: &InterruptType) -> bool {
         self.lifecycle.state() == State::Ready
             && self.setup_local_irq_save_restore_used
             && self.setup_local_irq_guard_bound_to_boot_cpu
-            && boot_cpu_local_interrupt.state() == State::Ready
+            && boot_cpu_local_interrupt.local_state() == State::Ready
             && boot_cpu_local_interrupt.disabled()
     }
 }
@@ -506,7 +503,7 @@ pub fn setup(
     memblock: &MemBlock,
     per_cpu_storage: &PerCpuStorage,
     boot_param: &BootParam,
-    boot_cpu_local_interrupt: &mut LocalInterruptControl,
+    boot_cpu_local_interrupt: &mut InterruptType,
 ) -> EventResult {
     unsafe {
         (&raw mut PRINTK_BUFFER).as_mut().unwrap().setup(
@@ -545,7 +542,7 @@ pub fn setup_local_irq_save_restore_used() -> bool {
     }
 }
 
-pub fn setup_local_irq_guard_used_by(boot_cpu_local_interrupt: &LocalInterruptControl) -> bool {
+pub fn setup_local_irq_guard_used_by(boot_cpu_local_interrupt: &InterruptType) -> bool {
     unsafe {
         (&raw const PRINTK_BUFFER)
             .as_ref()

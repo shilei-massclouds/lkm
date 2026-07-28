@@ -107,6 +107,20 @@ enum RunQueueRuntimeState {
 
 include "cpu.spec";
 include "cpu_group.spec";
+include "trap_type.spec";
+include "interrupt_type.spec";
+include "exception_type.spec";
+include "page_fault_exception_type.spec";
+include "syscall_exception_type.spec";
+include "breakpoint_exception_type.spec";
+include "unexpected_exception_type.spec";
+include "trap_flow_type.spec";
+include "interrupt_flow_type.spec";
+include "exception_flow_type.spec";
+include "page_fault_exception_flow_type.spec";
+include "syscall_exception_flow_type.spec";
+include "breakpoint_exception_flow_type.spec";
+include "unexpected_exception_flow_type.spec";
 
 /* Build-time selected payload. Exactly one value is bound by Config. */
 enum SelectedPayloadKind {
@@ -298,7 +312,7 @@ predicate ap_pt_regs_pointer_established<T, U>(cpu_group: T, idle_tasks: U) -> b
 predicate ap_kernel_fpu_vector_disabled<T>(cpu_group: T) -> bool;
 predicate ap_interrupts_masked_on_entry<T>(cpu_group: T) -> bool;
 predicate ap_switches_to_swapper_vm<T>(vm: T) -> bool;
-predicate ap_formal_event_entry_installed<T, U>(event_stream: T, exception_stream: U) -> bool;
+predicate ap_formal_trap_entry_installed<T, U>(trap: T, exception: U) -> bool;
 predicate ap_smp_callin_reached<T>(cpu_group: T) -> bool;
 predicate ap_current_active_mm_is_init_mm<T, U>(cpu_group: T, init_mm: U) -> bool;
 predicate ap_topology_recorded<T>(cpu_group: T) -> bool;
@@ -402,10 +416,10 @@ predicate cpu_group_online_set_ready<T>(cpu_group: T) -> bool;
 predicate cpu_group_possible_contains<T, U>(cpu_group: T, cpu_ref: U) -> bool;
 predicate cpu_group_present_contains<T, U>(cpu_group: T, cpu_ref: U) -> bool;
 predicate cpu_group_online_contains<T, U>(cpu_group: T, cpu_ref: U) -> bool;
-predicate cpu_event_stream_ready<T, U>(cpu: T, event_stream: U) -> bool;
-predicate cpu_exception_stream_ready<T, U>(cpu: T, exception_stream: U) -> bool;
-predicate cpu_interrupt_stream_ready<T, U>(cpu: T, interrupt_stream: U) -> bool;
-predicate cpu_local_interrupt_control_ready<T, U>(control: T, cpu: U) -> bool;
+predicate cpu_trap_resource_ready<T, U>(cpu: T, trap: U) -> bool;
+predicate cpu_exception_resource_ready<T, U>(cpu: T, exception: U) -> bool;
+predicate cpu_interrupt_resource_ready<T, U>(cpu: T, interrupt: U) -> bool;
+predicate cpu_local_interrupt_resource_ready<T, U>(interrupt: T, cpu: U) -> bool;
 predicate cpu_local_interrupts_disabled<T>(control: T) -> bool;
 predicate cpu_local_interrupts_enabled<T>(control: T) -> bool;
 predicate cpu_local_interrupts_saved_and_disabled<T>(control: T) -> bool;
@@ -1054,7 +1068,7 @@ type SchedulerObject: KernelObject {
                         }
 
                         ensures {
-                            scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
+                            scheduler_schedule_local_interrupts_closed(self, CurrentCPU.trap.interrupt);
                             scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
                             scheduler_rcu_context_switch_noted(self, BootTaskRef, KernelInitTaskRef);
                             scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
@@ -1100,9 +1114,9 @@ type SchedulerObject: KernelObject {
                 }
             }
             ensures {
-                scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
+                scheduler_schedule_local_interrupts_closed(self, CurrentCPU.trap.interrupt);
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
-                scheduler_schedule_exit_restores_local_interrupts(self, BootCpuLocalInterrupt);
+                scheduler_schedule_exit_restores_local_interrupts(self, CurrentCPU.trap.interrupt);
                 scheduler_rcu_context_switch_noted(self, BootTaskRef, KernelInitTaskRef);
                 scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
                 scheduler_rq_clock_updated_for_schedule(self, BootRunQueue);
@@ -1300,73 +1314,6 @@ type RunQueue: ResourceObject {
     }
 }
 
-type LocalInterruptControl {
-    ext_state: LocalInterruptExtState;
-
-    processes {
-        Transition::Disable {
-            state_effect: StateEffect::Conditional;
-            transitions {
-                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
-                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Disabled;
-            }
-            ensures {
-                cpu_local_interrupts_disabled(self);
-            }
-            result {
-                Enabled: Success(disabled);
-                Disabled: Success(no_change);
-            }
-        }
-
-        Transition::Enable {
-            state_effect: StateEffect::Conditional;
-            transitions {
-                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Enabled;
-                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Enabled;
-            }
-            ensures {
-                cpu_local_interrupts_enabled(self);
-            }
-            result {
-                Disabled: Success(enabled);
-                Enabled: Success(no_change);
-            }
-        }
-
-        Transition::SaveAndDisable {
-            state_effect: StateEffect::Conditional;
-            transitions {
-                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
-                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Disabled;
-            }
-            ensures {
-                cpu_local_interrupts_saved_and_disabled(self);
-                cpu_local_interrupts_disabled(self);
-            }
-            result {
-                Enabled: Success(saved_enabled_then_disabled);
-                Disabled: Success(saved_disabled);
-            }
-        }
-
-        Transition::Restore {
-            state_effect: StateEffect::Conditional;
-            transitions {
-                SavedInterruptState::Enabled -> LocalInterruptExtState::Enabled;
-                SavedInterruptState::Disabled -> LocalInterruptExtState::Disabled;
-            }
-            ensures {
-                cpu_local_interrupts_restored(self);
-            }
-            result {
-                SavedEnabled: Success(restored_enabled);
-                SavedDisabled: Success(restored_disabled);
-            }
-        }
-    }
-}
-
 type PreemptionControl {
     ext_state: PreemptionExtState;
 
@@ -1454,7 +1401,7 @@ type RawSpinLock {
         Transition::LockIrqSave {
             state_effect: StateEffect::Conditional;
             drives {
-                current_cpu.cpu.LocalInterruptControl.Transition::SaveAndDisable(out flags);
+                CurrentCPU.trap.interrupt.Action::SaveAndDisable(out flags);
                 CurrentTask.PreemptionControl.Transition::Disable;
                 self.Action::Acquire;
             }
@@ -1476,7 +1423,7 @@ type RawSpinLock {
             state_effect: StateEffect::Conditional;
             drives {
                 self.Action::Release;
-                current_cpu.cpu.LocalInterruptControl.Transition::Restore(flags);
+                CurrentCPU.trap.interrupt.Action::Restore(flags);
                 CurrentTask.PreemptionControl.Transition::Enable;
             }
             transitions {

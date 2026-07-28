@@ -486,9 +486,9 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
 
     ctx.plic.state() == State::Ready
         && ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
             .supervisor_external_input_gate_defined()
-        && ctx.interrupt_stream.supervisor_external_input_gate_open()
+        && ctx.boot_cpu_interrupt().supervisor_external_input_gate_open()
         && ctx.uart_external_irq_enable.state() == State::Ready
         && ctx.uart_external_irq_enable.plic_source_gate_open()
         && ctx.uart_external_irq_enable.root_external_input_gate_open()

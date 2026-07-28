@@ -48,8 +48,8 @@ object LocalIrqEnablePhase: PhaseObject {
                     SbiIpi.state == State::Ready;
                     IpiMux.state == State::Ready;
                     SmpCallFunction.state == State::Ready;
-                    InterruptStream.state == State::Ready;
-                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
                     early_boot_irqs_disabled_true();
                     irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
                     plic_irq_domain_enable_deferred(PlicIrqDomain);
@@ -57,7 +57,7 @@ object LocalIrqEnablePhase: PhaseObject {
                 }
 
                 drives {
-                    InterruptStream.Transition::Enable;
+                    CurrentCPU.trap.interrupt.Transition::Enable;
                 }
 
                 ensures {
@@ -98,7 +98,7 @@ object LocalIrqEnablePhase: PhaseObject {
                     local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
                     early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
                     interrupt_concurrency_open_for_boot_cpu();
-                    InterruptStream.state == State::Online;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
                     task_concurrency_closed();
@@ -117,7 +117,7 @@ object LocalIrqEnablePhase: PhaseObject {
         invariant {
             LocalIrqEnablePhase.state == State::Ready;
             IrqTimeInitPhase.state == State::Online;
-            InterruptStream.state == State::Online;
+            CurrentCPU.trap.interrupt.state == State::Online;
             PlicIrqDomain.state == State::Ready;
             IrqHandlerRegistry.state == State::Ready;
             Softirq.state == State::Ready;
@@ -156,7 +156,7 @@ object LocalIrqEnablePhase: PhaseObject {
                     local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
                     early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
                     interrupt_concurrency_open_for_boot_cpu();
-                    InterruptStream.state == State::Online;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
                     task_concurrency_closed();

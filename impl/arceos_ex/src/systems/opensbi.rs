@@ -2,7 +2,7 @@
 //!
 //! Its formal handoff determines `BootCpuRegisters.a0/a1`, requires entry
 //! `satp == 0`, and records ordered-boot/DTB facts. It intentionally does not
-//! require `sie/sip == 0`; the kernel's first InterruptStream action clears
+//! require `sie/sip == 0`; the kernel's first InterruptType action clears
 //! those registers.
 
 use super::{MappingStatus, SpecPath, SystemMapping};

@@ -124,17 +124,17 @@ context SchedClockLocalInterruptContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::Disable;
+            CurrentCPU.trap.interrupt.Action::DisableLocal;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Enable;
+            CurrentCPU.trap.interrupt.Action::EnableLocal;
         }
     }
 
     obj_refs {
         SchedClock;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
     }
 }
 
@@ -149,13 +149,13 @@ object SchedClock: KernelObject {
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     StaticBranch.state == State::Ready;
-                    BootCpuLocalInterrupt.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     boot_cpu_local_irq_enabled();
                 }
 
                 within SchedClockLocalInterruptContext {
                     ensures {
-                        sched_clock_setup_local_irq_guard_used(SchedClock, BootCpuLocalInterrupt);
+                        sched_clock_setup_local_irq_guard_used(SchedClock, CurrentCPU.trap.interrupt);
                     }
                 }
 
@@ -177,7 +177,7 @@ object SchedClock: KernelObject {
             sched_clock_reader_ready(SchedClock);
             sched_clock_timer_ready(SchedClock, HrtimerCore);
             sched_clock_setup_local_irq_disable_enable_used(SchedClock);
-            sched_clock_setup_local_irq_guard_used(SchedClock, BootCpuLocalInterrupt);
+            sched_clock_setup_local_irq_guard_used(SchedClock, CurrentCPU.trap.interrupt);
         }
     }
 }
@@ -332,7 +332,7 @@ object IrqOpenPreparePhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     LocalIrqEnablePhase.state == State::Online;
-                    InterruptStream.state == State::Online;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     IrqDispatchTree.state == State::Ready;
                     SbiIpi.state == State::Ready;
                     Tick.state == State::Ready;
@@ -481,7 +481,7 @@ object IrqOpenPreparePhase: PhaseObject {
         invariant {
             IrqTimeInitPhase.state == State::Online;
             LocalIrqEnablePhase.state == State::Online;
-            InterruptStream.state == State::Online;
+            CurrentCPU.trap.interrupt.state == State::Online;
             SbiIpi.state == State::Ready;
             Softirq.state == State::Ready;
             SmpCallFunction.state == State::Ready;

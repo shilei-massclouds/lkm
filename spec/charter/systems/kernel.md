@@ -126,8 +126,8 @@ Linux 6.12 `Documentation/arch/riscv/boot.rst` 与当前 RV64 Image contract 提
 
 `BootTask.OnCpu` 是固件/架构入口交接的初态事实，在 `_start` 紧随 Kernel Enable 接受点观察且只观察
 一次。`BootInitFlow` 是 `BootTask.initial_flow` 指向的 TaskFlow；Kernel.Enable 顺序驱动其
-Preset/Setup/Enable：Preset 的第一个入口动作由 `InterruptStream.Preset` 直接清零启动 CPU 的
-`sie/sip`，建立 `interrupt_concurrency_closed`，再编排其余入口对象并提交 Prepared。该动作对应
+Preset/Setup/Enable：Preset 的第一个入口动作由启动 CPU 自有的 `InterruptType.Preset` 直接关闭
+总门控和分类门控、清除 pending，建立 `interrupt_concurrency_closed`，再编排其余入口对象并提交 Prepared。该动作对应
 Linux `_start_kernel` 的防御性中断屏蔽，也是 Kernel 而非 OpenSBI 的责任。Setup 直接顺序驱动
 `EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、
 `IrqTimeInitPhase`、`LocalIrqEnablePhase`、`IrqOpenPreparePhase`、`ProcessPreparePhase`、
@@ -164,8 +164,8 @@ UserBoot 执行 Flow replacement，Hello/Smoke 保持 KernelInitFlow 并进入�
 内核直接接收的唯一运行时信号是中断信号，代表内核处理中断的边界是`中断子系统`。
 
 `任务子系统`和`中断子系统`目前是 charter 层的候选系统边界，model 映射暂时 deferred。后续需要
-先确定它们是新的聚合系统对象，还是由现有 Task、Scheduler、BootInitFlow 直接 interrupt 叶阶段、EventStream、
-InterruptStream 和 IRQ 对象改造形成；在决定前，不把任一现有 phase 或 stream 直接等同于这两个
+先确定它们是新的聚合系统对象，还是由现有 Task、Scheduler、BootInitFlow 直接 interrupt 叶阶段、
+CPU-owned Trap/Interrupt/Exception 资源和 IRQ 对象形成；在决定前，不把任一现有 phase 或资源直接等同于这两个
 子系统。
 
 ## 引用

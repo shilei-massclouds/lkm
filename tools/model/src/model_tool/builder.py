@@ -1698,7 +1698,9 @@ def _check_exclusive_context_references(
                 context, derived=contribution, legacy=legacy_effects, diagnostics=diagnostics
             )
         for object_name in context.obj_refs:
-            if object_name not in model.objects:
+            if object_name not in model.objects and _resolve_association_receiver_type(
+                model, object_name, {}
+            ) is None:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
@@ -1970,7 +1972,7 @@ def _schema_context_contribution(
             preemption=False,
             voluntary_switching=False,
         )
-    if any(receiver_kind == "LocalInterruptControl" and process_kind == "Transition" and process_name in {"Disable", "SaveAndDisable"}
+    if any(receiver_kind == "InterruptType" and process_kind == "Action" and process_name in {"DisableLocal", "SaveAndDisable"}
            for receiver_kind, process_kind, process_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
@@ -2744,9 +2746,12 @@ def _resolve_association_receiver_type(
     if receiver == "CurrentCPU":
         return "CPU"
     if receiver.startswith("CurrentCPU."):
-        child = receiver.removeprefix("CurrentCPU.")
-        obj = model.objects.get(child)
-        return obj.kind if obj is not None else None
+        current_type = "CPU"
+        for member in receiver.removeprefix("CurrentCPU.").split("."):
+            current_type = _association_type(model, current_type, member)
+            if current_type is None:
+                return None
+        return _REF_TARGET_PROCESS_TYPES.get(current_type, current_type)
     if receiver in bindings:
         return _REF_TARGET_PROCESS_TYPES.get(bindings[receiver], bindings[receiver])
     parts = receiver.split(".")
@@ -3175,33 +3180,6 @@ def _check_drive_transition_entry(
     bindings: dict[str, str],
 ) -> bool:
     association_process = _ASSOCIATION_PROCESS_EXPR_RE.match(entry)
-    if association_process is not None and association_process.group(1).startswith(
-        "CurrentCPU."
-    ):
-        receiver, process_kind, process_name, args = association_process.groups()
-        if process_kind != "Transition":
-            return False
-        child_name = receiver.removeprefix("CurrentCPU.")
-        child_transition = _transition_def(model, child_name, process_name)
-        if child_transition is None:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"unsupported CurrentCPU child transition: {receiver}.Transition::{process_name}",
-                    span,
-                )
-            )
-            return True
-        _check_signature_arguments(
-            model,
-            child_transition.decl.parameters,
-            f"{receiver}.Transition::{process_name}",
-            args,
-            diagnostics,
-            span,
-            bindings=bindings,
-        )
-        return True
     if association_process is not None and (
         "." in association_process.group(1)
         or association_process.group(1) == "CurrentCPU"

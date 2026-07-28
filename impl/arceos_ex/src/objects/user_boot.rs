@@ -21,8 +21,7 @@ pub use super::elf_object::{
     USER_INTERPRETER_LOAD_BIAS, USER_MAIN_PIE_LOAD_BIAS, contains_bytes,
 };
 use super::{
-    event_stream::TrapFrame,
-    exception_stream::{ExceptionStream, SyscallTable},
+    exception_type::{ExceptionType, SyscallTable},
     files::{FilesStruct, FilesStructSnapshot},
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
@@ -37,6 +36,7 @@ use super::{
     swapper_vm::SwapperVm,
     task::{Task, TaskEntry, TaskKind, TaskRef, USER_TASK_SLOT_COUNT},
     task_flow::{TaskFlow, TaskFlowRef, USER_FLOW_SLOTS_PER_TASK},
+    trap_type::TrapFrame,
     vfs::{FsStruct, FsStructSnapshot},
 };
 
@@ -82,17 +82,17 @@ pub const USER_KERNEL_TRAP_GUARD_SIZE: usize = USER_PAGE_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_TRAP_OVERFLOW_STACK_SIZE: usize =
-    super::event_stream::KERNEL_TRAP_OVERFLOW_STACK_SIZE;
+    super::trap_type::KERNEL_TRAP_OVERFLOW_STACK_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
-pub const USER_KERNEL_TRAP_FRAME_SIZE: usize = super::event_stream::TRAP_FRAME_SIZE;
+pub const USER_KERNEL_TRAP_FRAME_SIZE: usize = super::trap_type::TRAP_FRAME_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE: usize =
-    super::event_stream::USER_TRAP_ENTRY_CONTEXT_SIZE;
+    super::trap_type::USER_TRAP_ENTRY_CONTEXT_SIZE;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
-pub const USER_KERNEL_TRAP_THREAD_SHIFT: usize = super::event_stream::KERNEL_TRAP_THREAD_SHIFT;
+pub const USER_KERNEL_TRAP_THREAD_SHIFT: usize = super::trap_type::KERNEL_TRAP_THREAD_SHIFT;
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub const USER_KERNEL_IRQ_STACK_SIZE: usize = USER_KERNEL_TRAP_STACK_SIZE;
@@ -3594,6 +3594,16 @@ impl UserTaskSet {
             task: &slot.task,
             flow: &slot.flows[slot.active_flow_slot],
         })
+    }
+
+    pub(crate) fn task_mut_by_ref(&mut self, task_ref: TaskRef) -> Option<&mut Task> {
+        let index = task_ref.user_slot()?;
+        let slot = &mut self.task_slots[index];
+        if slot.occupied && slot.task_ref().same_identity(task_ref) {
+            Some(&mut slot.task)
+        } else {
+            None
+        }
     }
 
     fn allocate_user_task(&mut self, pid: usize, parent_ref: TaskRef) -> Option<TaskRef> {
@@ -7729,12 +7739,12 @@ impl KernelInitTaskUserState {
     pub fn bind_syscall_context(
         &mut self,
         trap_frame: &UserTrapFrame,
-        exception_stream: &ExceptionStream,
+        exception_type: &ExceptionType,
         syscall_table: &SyscallTable,
     ) -> EventResult {
         if !self.resources_bound
             || trap_frame.state() != State::Ready
-            || exception_stream.syscall_state() != State::Online
+            || exception_type.syscall_state() != State::Online
             || syscall_table.state() != State::Ready
             || !syscall_table.bound_to_exception()
         {
@@ -8908,7 +8918,7 @@ impl UserBootPayload {
         trap_frame: &UserTrapFrame,
         user_app_flow: &UserAppFlow,
         kernel_init_user_state: &KernelInitTaskUserState,
-        exception_stream: &ExceptionStream,
+        exception_type: &ExceptionType,
         syscall_table: &SyscallTable,
     ) -> EventResult {
         if self.payload_lifecycle.state() != State::Ready
@@ -8921,7 +8931,7 @@ impl UserBootPayload {
             || !kernel_init_user_state.user_entry_ready()
             || !kernel_init_user_state.runtime_entered()
             || syscall_table.state() != State::Ready
-            || exception_stream.syscall_state() != State::Online
+            || exception_type.syscall_state() != State::Online
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -8964,18 +8974,40 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
     let selected_path = ctx.user_boot_payload.selected_path();
 
     if ctx
-        .exception_stream
+        .cpu_group
+        .boot_cpu_exception_mut()
+        .expect("boot CPU exception resource must exist after CPU discovery")
         .syscall_setup(&mut ctx.syscall_table)
         .is_err()
     {
         user_boot_panic("user syscall setup failed\n");
     }
     if ctx
-        .exception_stream
+        .cpu_group
+        .boot_cpu_exception_mut()
+        .expect("boot CPU exception resource must exist after CPU discovery")
         .syscall_enable(&ctx.syscall_table)
         .is_err()
     {
         user_boot_panic("user syscall enable failed\n");
+    }
+    let trap = ctx
+        .cpu_group
+        .boot_cpu_trap_mut()
+        .expect("boot CPU trap resource must exist after CPU discovery");
+    if trap.exception_mut().enable().is_err()
+        || trap.enable().is_err()
+        || !trap.exception().service_online()
+        || !trap.service_online()
+    {
+        user_boot_panic("user trap service enable failed\n");
+    }
+    if ctx
+        .cpu_group
+        .enable_secondary_trap_services(&ctx.syscall_table)
+        .is_err()
+    {
+        user_boot_panic("secondary CPU trap service enable failed\n");
     }
     if ctx.files_struct.setup(&ctx.kernel_init_task).is_err() {
         user_boot_panic("user files struct setup failed\n");
@@ -9009,13 +9041,13 @@ pub fn prepare_first_user_init_handoff(ctx: &mut crate::context::Context) -> Eve
     {
         user_boot_panic("user init process setup failed\n");
     }
+    let boot_cpu_exception = ctx
+        .cpu_group
+        .boot_cpu_exception()
+        .expect("boot CPU exception resource must exist after CPU discovery");
     if ctx
         .kernel_init_user_state
-        .bind_syscall_context(
-            &ctx.user_trap_frame,
-            &ctx.exception_stream,
-            &ctx.syscall_table,
-        )
+        .bind_syscall_context(&ctx.user_trap_frame, boot_cpu_exception, &ctx.syscall_table)
         .is_err()
     {
         user_boot_panic("PID 1 syscall context bind failed\n");
@@ -9078,6 +9110,10 @@ pub fn commit_first_user_init_handoff(ctx: &mut crate::context::Context) -> Even
     {
         user_boot_panic("user init process enter failed\n");
     }
+    let boot_cpu_exception = ctx
+        .cpu_group
+        .boot_cpu_exception()
+        .expect("boot CPU exception resource must exist after CPU discovery");
     if ctx
         .user_boot_payload
         .enable_for_user_entry(
@@ -9086,7 +9122,7 @@ pub fn commit_first_user_init_handoff(ctx: &mut crate::context::Context) -> Even
             &ctx.user_trap_frame,
             &ctx.user_app_flow,
             &ctx.kernel_init_user_state,
-            &ctx.exception_stream,
+            boot_cpu_exception,
             &ctx.syscall_table,
         )
         .is_err()
@@ -9104,6 +9140,7 @@ pub fn enter_first_user_init(
     trap_frame: &UserTrapFrame,
     user_app_flow: &UserAppFlow,
     kernel_init_user_state: &KernelInitTaskUserState,
+    trap_entry_context: usize,
 ) -> ! {
     if payload.state() != State::Online
         || !payload.enters_user_mode()
@@ -9128,7 +9165,7 @@ pub fn enter_first_user_init(
             trap_frame.entry(),
             trap_frame.sp(),
             trap_frame.sstatus(),
-            user_kernel_trap_entry_context(),
+            trap_entry_context,
         )
     }
 }
@@ -9380,8 +9417,13 @@ pub fn user_kernel_trap_stack_top() -> usize {
 }
 
 #[cfg(app_user_boot)]
+#[allow(dead_code)]
 pub fn user_kernel_trap_entry_context() -> usize {
-    user_kernel_trap_stack_top().saturating_sub(USER_KERNEL_TRAP_ENTRY_CONTEXT_SIZE)
+    crate::context::context_ref()
+        .cpu_group
+        .boot_cpu_trap()
+        .map(super::trap_type::TrapType::entry_context_address)
+        .unwrap_or(0)
 }
 
 #[cfg(app_user_boot)]
@@ -9448,13 +9490,13 @@ pub fn user_kernel_trap_stack_backing_order() -> usize {
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_base() -> usize {
-    super::event_stream::kernel_trap_overflow_stack_base()
+    super::trap_type::kernel_trap_overflow_stack_base()
 }
 
 #[cfg(app_user_boot)]
 #[allow(dead_code)]
 pub fn user_kernel_trap_overflow_stack_top() -> usize {
-    super::event_stream::kernel_trap_overflow_stack_top()
+    super::trap_type::kernel_trap_overflow_stack_top()
 }
 
 #[cfg(app_user_boot)]

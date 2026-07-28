@@ -36,10 +36,10 @@ fn preset_start(ctx: &Context) -> EventResult {
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::local_irq_enable::is_online()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Online
+        && ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready
@@ -167,10 +167,10 @@ pub fn is_online() -> bool {
 
 fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::local_irq_enable::is_online()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Online
+        && ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready

@@ -15,7 +15,7 @@ use crate::objects::{
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
     config::Config,
     cpu_capabilities::CpuCapabilities,
-    cpu_control::{LocalInterruptControl, RawSpinLock},
+    cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
     current_task::{
@@ -29,9 +29,8 @@ use crate::objects::{
     early_dtb::EarlyDtb,
     early_ioremap::EarlyIoremap,
     early_param::EarlyParam,
-    event_stream::EventStream,
-    exception_stream::{ExceptionStream, SyscallTable},
     exception_table::ExceptionTable,
+    exception_type::SyscallTable,
     exec_sync_boundaries::ExecSyncBoundaries,
     exec_transaction::ExecTransaction,
     ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
@@ -49,7 +48,7 @@ use crate::objects::{
         CpusetSmpTrimmed, CtorTable, DriverCoreBase, DriverCoreDeferred, InitcallBoundary,
         InitcallReturn, InitcallTable, IrqProcViewDeferred, PlatformBus, PlatformBusRootDevice,
     },
-    interrupt_stream::InterruptStream,
+    interrupt_type::InterruptType,
     ioremap::Ioremap,
     irq_open::{Console, DelayLoop, IrqOpenPrepareTrimmedPaths, SchedClock},
     irq_time::{
@@ -128,14 +127,11 @@ pub struct Context {
     pub static_objects: StaticObjects,
     pub lds: Lds,
 
-    pub interrupt_stream: InterruptStream,
     pub kernel_image: KernelImage,
     pub cpu_group: CpuGroup,
     pub boot_task: BootTask,
     pub boot_init_flow: BootInitFlow,
     pub init_stack: InitStack,
-    pub event_stream: EventStream,
-    pub exception_stream: ExceptionStream,
     pub syscall_table: SyscallTable,
     pub vm: Vm,
     pub raw_dtb: RawDtb,
@@ -348,14 +344,11 @@ impl Context {
             config: Config::new(),
             static_objects: StaticObjects::new(),
             lds: Lds::new(),
-            interrupt_stream: InterruptStream::new(),
             kernel_image: KernelImage::new(),
             cpu_group: CpuGroup::new(),
             boot_task: BootTask::new(),
             boot_init_flow: BootInitFlow::new(),
             init_stack: InitStack::new(),
-            event_stream: EventStream::new(),
-            exception_stream: ExceptionStream::new(),
             syscall_table: SyscallTable::new(),
             vm: Vm::new(),
             raw_dtb: RawDtb::new(),
@@ -548,10 +541,28 @@ impl Context {
         }
     }
 
-    pub fn boot_cpu_local_interrupt(&self) -> &LocalInterruptControl {
+    pub fn boot_cpu_local_interrupt(&self) -> &InterruptType {
         self.cpu_group
             .boot_cpu_local_interrupt()
             .expect("CpuGroup.cpus[0] must exist before local interrupt access")
+    }
+
+    pub fn boot_cpu_interrupt(&self) -> &InterruptType {
+        self.cpu_group
+            .boot_cpu_interrupt()
+            .expect("CpuGroup.cpus[0].trap.interrupt must exist before access")
+    }
+
+    pub fn boot_cpu_exception(&self) -> &crate::objects::exception_type::ExceptionType {
+        self.cpu_group
+            .boot_cpu_exception()
+            .expect("CpuGroup.cpus[0].trap.exception must exist before access")
+    }
+
+    pub fn boot_cpu_trap(&self) -> &crate::objects::trap_type::TrapType {
+        self.cpu_group
+            .boot_cpu_trap()
+            .expect("CpuGroup.cpus[0].trap must exist before access")
     }
 
     pub fn current_task(&self) -> Result<CurrentTask, CurrentTaskError> {
@@ -572,6 +583,121 @@ impl Context {
 
     pub fn current_task_ref(&self) -> Result<TaskRef, CurrentTaskError> {
         self.current_task().map(CurrentTask::task_ref)
+    }
+
+    pub fn current_task_flow_ref(&self) -> Result<TaskFlowRef, CurrentTaskError> {
+        let current = self.current_task()?;
+        let tp = crate::arch::riscv64::csr::read_tp();
+        let candidate = if current.task_ref().same_identity(TaskRef::BOOT) {
+            self.boot_current_task_candidate()
+        } else {
+            self.current_task_candidate(current.task_ref())
+        }
+        .ok_or_else(|| {
+            self.current_task_error(
+                CurrentTaskErrorCode::MissingActiveFlow,
+                tp,
+                current.task_ref(),
+            )
+        })?;
+        Ok(candidate.flow.flow_ref())
+    }
+
+    pub(crate) fn committed_exec_flow_handoff_matches(
+        &self,
+        task_ref: TaskRef,
+        predecessor: TaskFlowRef,
+        successor: TaskFlowRef,
+        entry_commit_count: usize,
+    ) -> bool {
+        if !task_ref.is_valid()
+            || !predecessor.is_valid()
+            || !successor.is_valid()
+            || predecessor.same_identity(successor)
+            || self.exec_transaction.active()
+            || self.exec_transaction.point_of_no_return()
+            || entry_commit_count.checked_add(1) != Some(self.exec_transaction.commit_count())
+        {
+            return false;
+        }
+        let Some(candidate) = self.current_task_candidate(task_ref) else {
+            return false;
+        };
+        candidate.task.task_ref().same_identity(task_ref)
+            && candidate.task.active_flow().same_identity(successor)
+            && candidate.flow.flow_ref().same_identity(successor)
+            && candidate.flow.predecessor().same_identity(predecessor)
+    }
+
+    pub(crate) fn bind_task_root_trap_flow(
+        &mut self,
+        task_ref: TaskRef,
+        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
+    ) -> Option<bool> {
+        let cpu_ref = self.current_task_candidate(task_ref)?.flow.cpu_ref()?;
+        let task_identity = crate::arch::riscv64::csr::read_tp();
+        let installed = self
+            .task_mut_for_ref(task_ref)
+            .map(|task| task.bind_root_trap_flow(root_ref))
+            .unwrap_or(None)?;
+        if installed
+            && !self
+                .cpu_group
+                .cpu_mut(cpu_ref.logical_id())?
+                .trap_mut()
+                .refresh_entry_task_root(task_identity, root_ref)
+        {
+            return None;
+        }
+        Some(installed)
+    }
+
+    pub(crate) fn task_root_trap_flow_resolves(&mut self, task_ref: TaskRef) -> Option<bool> {
+        self.task_mut_for_ref(task_ref)
+            .map(|task| task.root_trap_flow_resolves())
+    }
+
+    pub(crate) fn task_root_trap_flow_ref(
+        &mut self,
+        task_ref: TaskRef,
+    ) -> crate::objects::trap_flow_type::TrapFlowRef {
+        self.task_mut_for_ref(task_ref)
+            .map(|task| task.root_trap_flow_ref())
+            .unwrap_or(crate::objects::trap_flow_type::TrapFlowRef::NONE)
+    }
+
+    pub(crate) fn task_root_trap_flow_ref_raw(
+        &self,
+        task_ref: TaskRef,
+    ) -> crate::objects::trap_flow_type::TrapFlowRef {
+        self.current_task_candidate(task_ref)
+            .map(|candidate| candidate.task.root_trap_flow_ref())
+            .unwrap_or(crate::objects::trap_flow_type::TrapFlowRef::NONE)
+    }
+
+    pub(crate) fn clear_task_root_trap_flow(
+        &mut self,
+        task_ref: TaskRef,
+        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
+    ) -> Option<bool> {
+        let cpu_ref = self.current_task_candidate(task_ref)?.flow.cpu_ref()?;
+        let task_identity = crate::arch::riscv64::csr::read_tp();
+        let cleared = self
+            .task_mut_for_ref(task_ref)
+            .map(|task| task.clear_root_trap_flow(root_ref))?;
+        if cleared
+            && !self
+                .cpu_group
+                .cpu_mut(cpu_ref.logical_id())?
+                .trap_mut()
+                .refresh_entry_task_root(
+                    task_identity,
+                    crate::objects::trap_flow_type::TrapFlowRef::NONE,
+                )
+        {
+            return None;
+        }
+        Some(cleared)
     }
 
     pub fn current_cpu(&self) -> Result<crate::objects::cpu_group::CurrentCpu, CurrentTaskError> {
@@ -632,6 +758,20 @@ impl Context {
         }
         crate::objects::smp_bringup::ap_current_task_candidate_by_identity(identity)
             .map(|candidate| candidate.task.task_ref())
+    }
+
+    fn task_mut_for_ref(&mut self, task_ref: TaskRef) -> Option<&mut Task> {
+        match task_ref {
+            TaskRef::BOOT => Some(self.boot_task.task_mut()),
+            TaskRef::KERNEL_INIT => Some(self.kernel_init_task.task_mut()),
+            TaskRef::KTHREADD => Some(self.kthreadd_task.task_mut()),
+            TaskRef::SMOKE_SCHEDULER => Some(self.scheduler.smoke_scheduler_task_mut().task_mut()),
+            TaskRef::SMOKE_MUTEX => Some(self.scheduler.smoke_mutex_task_mut().task_mut()),
+            TaskRef::SMOKE_RWSEM => Some(self.scheduler.smoke_rwsem_task_mut().task_mut()),
+            TaskRef::SMOKE_RWLOCK => Some(self.scheduler.smoke_rwlock_task_mut().task_mut()),
+            _ if task_ref.is_user() => self.user_task_set.task_mut_by_ref(task_ref),
+            _ => crate::objects::smp_bringup::ap_task_mut_by_ref(task_ref),
+        }
     }
 
     fn current_task_candidate(&self, task_ref: TaskRef) -> Option<CurrentTaskCandidate<'_>> {
@@ -939,10 +1079,45 @@ impl Context {
             boot_idle_flow,
             user_task_set,
         )?;
+        self.refresh_current_cpu_trap_entry_task(next)?;
         let current_task = self
             .resolve_current_task_identity(crate::arch::riscv64::csr::read_tp(), next)
             .map_err(current_task_event_error)?;
         self.scheduler.record_task_switch_finish(current_task)
+    }
+
+    fn refresh_current_cpu_trap_entry_task(&mut self, task_ref: TaskRef) -> EventResult {
+        let task_identity = crate::arch::riscv64::csr::read_tp();
+        let Some(candidate) = self.current_task_candidate(task_ref) else {
+            return Err(current_task_event_error(self.current_task_error(
+                CurrentTaskErrorCode::UnknownIdentity,
+                task_identity,
+                task_ref,
+            )));
+        };
+        let Some(cpu_ref) = candidate.flow.cpu_ref() else {
+            return Err(current_task_event_error(self.current_task_error(
+                CurrentTaskErrorCode::MissingCpu,
+                task_identity,
+                task_ref,
+            )));
+        };
+        let root_ref = candidate.task.root_trap_flow_ref();
+        if !self
+            .cpu_group
+            .cpu_mut(cpu_ref.logical_id())
+            .is_some_and(|cpu| {
+                cpu.trap_mut()
+                    .refresh_entry_task_root(task_identity, root_ref)
+            })
+        {
+            return Err(current_task_event_error(self.current_task_error(
+                CurrentTaskErrorCode::UnknownIdentity,
+                task_identity,
+                task_ref,
+            )));
+        }
+        Ok(())
     }
 
     #[cfg_attr(not(app_smoke), allow(dead_code))]

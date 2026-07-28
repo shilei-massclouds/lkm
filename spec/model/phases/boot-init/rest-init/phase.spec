@@ -186,25 +186,25 @@ context SchedulePreemptionContext: Context {
         BootTask;
         Scheduler;
         BootRunQueue;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
     }
 }
 
 context ScheduleLocalInterruptContext: Context {
     /*
      * This context models __schedule() disabling local interrupts before
-     * taking rq->lock. The guard is backed by BootCpuLocalInterrupt, not by a
+     * taking rq->lock. The guard is backed by CurrentCPU.trap.interrupt, not by a
      * lock; it establishes only a CPU-local interrupt-disabled boundary. The
      * preemption-disabled and voluntary-switching-disabled facts are inherited
      * from the outer SchedulePreemptionContext.
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+            CurrentCPU.trap.interrupt.Action::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Restore;
+            CurrentCPU.trap.interrupt.Action::Restore;
         }
     }
 
@@ -212,7 +212,7 @@ context ScheduleLocalInterruptContext: Context {
         BootTask;
         Scheduler;
         BootRunQueue;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
     }
 }
 
@@ -308,18 +308,18 @@ context BootIdleWaitLocalInterruptContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+            CurrentCPU.trap.interrupt.Action::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Restore;
+            CurrentCPU.trap.interrupt.Action::Restore;
         }
     }
 
     obj_refs {
         BootTask;
         BootIdleFlow;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
     }
 }
 
@@ -698,7 +698,7 @@ object BootInitRestInitPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     ProcessPreparePhase.state == State::Online;
-                    InterruptStream.state == State::Online;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
                     CredentialCore.state == State::Prepared;
@@ -770,7 +770,7 @@ object BootInitRestInitPhase: PhaseObject {
                                 selected_rq,
                                 BootCPURef
                             );
-                            task_flow_cpu_ref_targets(KernelInitFlow, CpuGroup.cpus[0]);
+                            task_flow_cpu_ref_is(KernelInitFlow, BootCPURef);
                         }
 
                         drives {
@@ -921,7 +921,7 @@ object BootInitRestInitPhase: PhaseObject {
                                 BootRunQueue
                             );
                             runqueue_ref_cpu_is(selected_rq, BootCPURef);
-                            task_flow_cpu_ref_targets(KthreaddFlow, CpuGroup.cpus[0]);
+                            task_flow_cpu_ref_is(KthreaddFlow, BootCPURef);
                         }
 
                         drives {
@@ -1051,7 +1051,7 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_single_online_cpu_at_scheduler_start(RcuCore, CpuGroup);
                     rcu_gp_seq_baseline_synced(RcuCore);
-                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, CurrentCPU.trap.interrupt);
                     rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
@@ -1141,7 +1141,7 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_scheduler_starting_ready(RcuCore);
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_gp_seq_baseline_synced(RcuCore);
-                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, CurrentCPU.trap.interrupt);
                     rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
@@ -1217,7 +1217,7 @@ object BootInitRestInitPhase: PhaseObject {
             rcu_scheduler_starting_ready(RcuCore);
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
-            rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+            rcu_scheduler_starting_local_irq_guard_used(RcuCore, CurrentCPU.trap.interrupt);
             rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
             KernelInitTask.state == State::Online;
             kernel_init_spawn_spec_ready(KernelInitTask);
@@ -1285,7 +1285,7 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_scheduler_starting_ready(RcuCore);
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_gp_seq_baseline_synced(RcuCore);
-                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, CurrentCPU.trap.interrupt);
                     rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
@@ -1505,7 +1505,7 @@ object BootIdleEntryPhase: PhaseObject {
                         boot_idle_polling_rmb_before_sleep_check(BootTask);
                         boot_idle_local_irq_disabled_for_sleep(
                             BootIdleFlow,
-                            BootCpuLocalInterrupt
+                            CurrentCPU.trap.interrupt
                         );
                         boot_idle_arch_cpu_idle_enter_done(BootIdleFlow, CpuGroup.cpus[0]);
                         boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleFlow);
@@ -1537,7 +1537,7 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_polling_rmb_before_sleep_check(BootTask);
                     boot_idle_local_irq_disabled_for_sleep(
                         BootIdleFlow,
-                        BootCpuLocalInterrupt
+                        CurrentCPU.trap.interrupt
                     );
                     boot_idle_arch_cpu_idle_enter_done(BootIdleFlow, CpuGroup.cpus[0]);
                     boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleFlow);
@@ -1614,7 +1614,7 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
                     boot_idle_local_irq_disabled_for_sleep(
                         BootIdleFlow,
-                        BootCpuLocalInterrupt
+                        CurrentCPU.trap.interrupt
                     );
                     boot_idle_preempt_need_resched_set(BootTask);
                     boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
@@ -1651,7 +1651,7 @@ object BootIdleEntryPhase: PhaseObject {
             boot_task_idle_flow_entered(BootTask, BootIdleFlow);
             boot_idle_runtime_loop_entered(BootIdleFlow, BootTask);
             boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
-            boot_idle_local_irq_disabled_for_sleep(BootIdleFlow, BootCpuLocalInterrupt);
+            boot_idle_local_irq_disabled_for_sleep(BootIdleFlow, CurrentCPU.trap.interrupt);
             boot_idle_preempt_need_resched_set(BootTask);
             boot_idle_smp_call_function_queue_flushed(BootIdleFlow);
             boot_idle_loop_continues(BootIdleFlow);
@@ -1678,7 +1678,7 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_nohz_run_idle_balance_done(BootIdleFlow, CpuGroup.cpus[0]);
                     boot_idle_local_irq_disabled_for_sleep(
                         BootIdleFlow,
-                        BootCpuLocalInterrupt
+                        CurrentCPU.trap.interrupt
                     );
                     boot_idle_preempt_need_resched_set(BootTask);
                     boot_idle_smp_call_function_queue_flushed(BootIdleFlow);

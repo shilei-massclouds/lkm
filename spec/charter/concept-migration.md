@@ -91,7 +91,7 @@ eventual delivery 要求，以及异步响应是否建立新推导链。上述�
    表达；工具不得在没有新硬语义时自动改变其执行方式。
 5. 不进行无边界的全仓机械替换。每次迁移必须先确认术语所在层级、信号源和目标、同步方式、响应
    过程以及父子系统关系。
-6. `EventStream` 等既有正式对象名的更名属于模型接口变更，默认必须按 `charter-first` 单独处理；
+6. `TrapType` 等既有正式对象名的更名属于模型接口变更，默认必须按 `charter-first` 单独处理；
    用户显式触发 `model-first` 时适用 [`spec/guidance`](../guidance/README.md) 的确认门禁，但不改变
    最终权威层级。
 7. 通用交互概念 `Signal` 与 Linux/POSIX 进程信号机制必须保持可区分。`SignalCore`、
@@ -141,9 +141,9 @@ eventual delivery 要求，以及异步响应是否建立新推导链。上述�
 2. 同一个 Signal 类型是否允许在不同调用点选择同步或异步发送，以及该属性属于类型还是发送实例。
 3. 异步 Signal 的队列、优先级、并发、失败反馈、取消和 eventual delivery 语义。
 4. DSL 是否保留 `object` 作为 System 实例声明关键字，是否需要通用 `System` type。
-5. `任务子系统`、`中断子系统` 与现有 `Task`、`Scheduler`、interrupt leaf phases、`EventStream`、
-   `InterruptStream` 和 IRQ 对象的最终映射。
-6. `EventStream`、event checkpoint、trace event 等既有名称迁移后的正式命名。
+5. `任务子系统`、`中断子系统` 与现有 `Task`、`Scheduler`、interrupt leaf phases、`TrapType`、
+   `InterruptType` 和 IRQ 对象的最终映射。
+6. `TrapType`、event checkpoint、trace event 等既有名称迁移后的正式命名。
 
 ## 完成条件
 

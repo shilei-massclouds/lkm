@@ -8,8 +8,8 @@ left_label = "arceos_ex"
 right_test = "rc-local-linux"
 right_label = "linux"
 checkpoint_scope = [
-  "EventStream.Prepared",
-  "ExceptionStream.Prepared",
+  "TrapType.Prepared",
+  "ExceptionType.Prepared",
   "CorePreparePhase.Started",
   "CorePreparePhase.Ready",
   "MmCoreInitPhase.Started",
@@ -101,8 +101,8 @@ mode = "explicit-accounting"
 "EarlyVm.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "EarlyVm.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "KernelImage.Online" = "outside_stable_rc_local_hard_scope_pending_expansion"
-"EventStream.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
-"ExceptionStream.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"TrapType.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
+"ExceptionType.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "CpuStartProvider.Ready" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "CpuStartProvider.BootDataSelected" = "outside_stable_rc_local_hard_scope_pending_expansion"
 "CpuStartProvider.BootDataPublished" = "outside_stable_rc_local_hard_scope_pending_expansion"

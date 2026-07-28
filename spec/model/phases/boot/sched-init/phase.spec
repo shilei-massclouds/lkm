@@ -125,17 +125,17 @@ context RcuSchedulerStartingLocalIrqContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+            CurrentCPU.trap.interrupt.Action::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Restore;
+            CurrentCPU.trap.interrupt.Action::Restore;
         }
     }
 
     obj_refs {
         RcuCore;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
         CpuGroup;
     }
 }
@@ -1402,14 +1402,15 @@ object RcuCore: KernelObject {
         /*
          * SchedulerStarting 对应 rest_init() 开头的
          * rcu_scheduler_starting()。它是 RcuCore.Ready 内的运行期 action，
-         * 不推进 RcuCore lifecycle；Linux 在 local_irq_save/restore 区内
-         * 设置 RCU_SCHEDULER_INIT 并同步 GP 序号基线。
+         * 不推进 RcuCore lifecycle；调用点位于 LocalIrqEnablePhase 之后，
+         * InterruptType 已为 Online。Linux 在 local_irq_save/restore 区内
+         * 临时关闭并恢复总入口，同时设置 RCU_SCHEDULER_INIT 并同步 GP 序号基线。
          */
         Action::SchedulerStarting {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
-                BootCpuLocalInterrupt.state == State::Ready;
+                CurrentCPU.trap.interrupt.state == State::Online;
                 CpuGroup.state == State::Ready;
                 rcu_core_ready(self, CpuGroup);
                 rcu_boot_cpu_online_ready(self, CpuGroup.cpus[0]);
@@ -1417,9 +1418,9 @@ object RcuCore: KernelObject {
 
             within RcuSchedulerStartingLocalIrqContext {
                 ensures {
-                    cpu_local_interrupts_saved_and_disabled(BootCpuLocalInterrupt);
-                    cpu_local_interrupts_restored(BootCpuLocalInterrupt);
-                    rcu_scheduler_starting_local_irq_guard_used(self, BootCpuLocalInterrupt);
+                    cpu_local_interrupts_saved_and_disabled(CurrentCPU.trap.interrupt);
+                    cpu_local_interrupts_restored(CurrentCPU.trap.interrupt);
+                    rcu_scheduler_starting_local_irq_guard_used(self, CurrentCPU.trap.interrupt);
                     rcu_scheduler_starting_gp_seq_update_guarded(self);
                     rcu_scheduler_starting_ready(self);
                     rcu_scheduler_active_level_init(self);
@@ -1433,7 +1434,7 @@ object RcuCore: KernelObject {
                 rcu_scheduler_active_level_init(self);
                 rcu_single_online_cpu_at_scheduler_start(self, CpuGroup);
                 rcu_gp_seq_baseline_synced(self);
-                rcu_scheduler_starting_local_irq_guard_used(self, BootCpuLocalInterrupt);
+                rcu_scheduler_starting_local_irq_guard_used(self, CurrentCPU.trap.interrupt);
                 rcu_scheduler_starting_gp_seq_update_guarded(self);
                 rcu_gp_threads_deferred(self);
             }

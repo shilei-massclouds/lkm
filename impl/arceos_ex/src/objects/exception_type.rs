@@ -12,13 +12,17 @@ use super::files::OpenFileDescriptionRef;
 #[cfg(app_user_boot)]
 use super::user_boot::{ElfError, ElfObject, UserAddressSpace, UserTrapFrame};
 use super::{
-    event_stream::{EventStream, TrapFrame},
+    breakpoint_exception_type::BreakpointExceptionType,
     files::{CloseOnExecReport, FILE_POLLIN, FileError, TERMIOS_SIZE, is_null_path, is_tty_path},
     hwrng::HwRngError,
     init_stack::InitStack,
+    page_fault_exception_type::PageFaultExceptionType,
     process_prepare::TaskCopyUserProcessInputs,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    syscall_exception_type::SyscallExceptionType,
     task::TaskEntry,
+    trap_type::TrapFrame,
+    unexpected_exception_type::UnexpectedExceptionType,
     user_boot::{
         USER_SIGNAL_COUNT, USER_SIGNAL_WAIT_REASON_RT_SIGTIMEDWAIT_SIGCHLD_INFINITE,
         USER_SUPPLEMENTARY_GROUP_MAX, USER_WAIT4_ALL_CHILDREN, USER_WAIT4_WUNTRACED,
@@ -3210,30 +3214,32 @@ impl SyscallTable {
     }
 }
 
-pub struct ExceptionStream {
+pub struct ExceptionType {
     lifecycle: Lifecycle,
-    page_fault: ExceptionKind,
-    syscall: ExceptionKind,
-    breakpoint: ExceptionKind,
-    unexpected: ExceptionKind,
+    page_fault: PageFaultExceptionType,
+    syscall: SyscallExceptionType,
+    breakpoint: BreakpointExceptionType,
+    unexpected: UnexpectedExceptionType,
     dispatch_ready: bool,
+    service_online: bool,
 }
 
-impl ExceptionStream {
+impl ExceptionType {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            page_fault: ExceptionKind::new(),
-            syscall: ExceptionKind::new(),
-            breakpoint: ExceptionKind::new(),
-            unexpected: ExceptionKind::new(),
+            page_fault: PageFaultExceptionType::new(),
+            syscall: SyscallExceptionType::new(),
+            breakpoint: BreakpointExceptionType::new(),
+            unexpected: UnexpectedExceptionType::new(),
             dispatch_ready: false,
+            service_online: false,
         }
     }
 
-    pub fn preset(&mut self, event_stream: &EventStream, init_stack: &InitStack) -> EventResult {
+    pub fn preset(&mut self, trap_state: State, init_stack: &InitStack) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || event_stream.state() != State::Prepared
+            || trap_state != State::Prepared
             || init_stack.state() != State::Prepared
         {
             return failed_condition(
@@ -3244,21 +3250,29 @@ impl ExceptionStream {
             );
         }
 
+        reset_exception_handlers();
         self.page_fault.preset()?;
         self.syscall.preset()?;
         self.breakpoint.preset()?;
         self.unexpected.preset()?;
-        reset_exception_handlers();
-        bind_exception_policy(
-            ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
-            SYSCALL_DISABLED_POLICY,
-        );
+        if !self.page_fault().fallback_ready()
+            || !self.syscall().fallback_ready()
+            || !self.breakpoint().fallback_ready()
+            || !self.unexpected().fallback_ready()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
             State::Prepared,
-            Checkpoint::ExceptionStreamPrepared,
+            Checkpoint::ExceptionTypePrepared,
         )
     }
 
@@ -3266,8 +3280,8 @@ impl ExceptionStream {
         self.lifecycle.state()
     }
 
-    pub fn setup(&mut self, event_stream: &EventStream) -> EventResult {
-        if self.lifecycle.state() != State::Prepared || event_stream.state() != State::Ready {
+    pub fn setup(&mut self, trap_state: State) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || trap_state != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -3279,106 +3293,11 @@ impl ExceptionStream {
         self.page_fault_setup()?;
         self.breakpoint_setup()?;
         self.unexpected_setup()?;
-        self.dispatch_ready = true;
-        DISPATCH_READY.store(1, Ordering::Relaxed);
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            Checkpoint::ExceptionStreamReady,
-        )
-    }
-
-    pub fn page_fault_setup(&mut self) -> EventResult {
-        self.page_fault.setup(
-            self.lifecycle.state(),
-            ExceptionHandlerBinding::Causes(&PAGE_FAULT_CAUSES),
-            PAGE_FAULT_POLICY,
-        )
-    }
-
-    pub fn breakpoint_setup(&mut self) -> EventResult {
-        self.breakpoint.setup(
-            self.lifecycle.state(),
-            ExceptionHandlerBinding::Causes(&BREAKPOINT_CAUSES),
-            BREAKPOINT_POLICY,
-        )
-    }
-
-    pub fn unexpected_setup(&mut self) -> EventResult {
-        self.unexpected.setup(
-            self.lifecycle.state(),
-            ExceptionHandlerBinding::RemainingKnown,
-            UNEXPECTED_POLICY,
-        )
-    }
-
-    #[cfg_attr(not(app_user_boot), allow(dead_code))]
-    pub fn syscall_setup(&mut self, table: &mut SyscallTable) -> EventResult {
-        self.syscall.setup(
-            self.lifecycle.state(),
-            ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
-            SYSCALL_POLICY,
-        )?;
-        table.setup(self.syscall.state())
-    }
-
-    #[cfg_attr(not(app_user_boot), allow(dead_code))]
-    pub fn syscall_enable(&mut self, table: &SyscallTable) -> EventResult {
-        self.syscall.enable(self.lifecycle.state(), table)
-    }
-
-    pub fn page_fault_state(&self) -> State {
-        self.page_fault.state()
-    }
-
-    pub fn syscall_state(&self) -> State {
-        self.syscall.state()
-    }
-
-    pub fn breakpoint_state(&self) -> State {
-        self.breakpoint.state()
-    }
-
-    pub fn unexpected_state(&self) -> State {
-        self.unexpected.state()
-    }
-
-    #[allow(dead_code)]
-    pub const fn dispatch_ready(&self) -> bool {
-        self.dispatch_ready
-    }
-}
-
-struct ExceptionKind {
-    lifecycle: Lifecycle,
-}
-
-enum ExceptionHandlerBinding {
-    Causes(&'static [usize]),
-    RemainingKnown,
-}
-
-impl ExceptionKind {
-    const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-        }
-    }
-
-    fn preset(&mut self) -> EventResult {
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
-    }
-
-    fn setup(
-        &mut self,
-        exception_stream_state: State,
-        binding: ExceptionHandlerBinding,
-        policy: ExceptionPolicy,
-    ) -> EventResult {
-        if !matches!(exception_stream_state, State::Prepared | State::Ready)
-            || self.lifecycle.state() != State::Prepared
+        if !self.page_fault().handler_ready()
+            || !self.page_fault().context_matrix_ready()
+            || !self.breakpoint().handler_ready()
+            || !self.breakpoint().explicit_nesting_required()
+            || !self.unexpected().handler_ready()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -3387,22 +3306,36 @@ impl ExceptionKind {
                 State::Ready,
             );
         }
-
-        bind_exception_policy(binding, policy);
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+        self.dispatch_ready = true;
+        DISPATCH_READY.store(1, Ordering::Relaxed);
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::ExceptionTypeReady,
+        )
     }
 
-    #[cfg_attr(not(app_user_boot), allow(dead_code))]
-    fn enable(
-        &mut self,
-        exception_stream_state: State,
-        syscall_table: &SyscallTable,
-    ) -> EventResult {
-        if exception_stream_state != State::Ready
-            || self.lifecycle.state() != State::Ready
-            || syscall_table.state() != State::Ready
-            || !syscall_table.bound_to_exception()
+    pub fn page_fault_setup(&mut self) -> EventResult {
+        self.page_fault.setup(self.lifecycle.state())
+    }
+
+    pub fn breakpoint_setup(&mut self) -> EventResult {
+        self.breakpoint.setup(self.lifecycle.state())
+    }
+
+    pub fn unexpected_setup(&mut self) -> EventResult {
+        self.unexpected.setup(self.lifecycle.state())
+    }
+
+    pub fn enable_non_syscall_children(&mut self) -> EventResult {
+        let state = self.lifecycle.state();
+        self.page_fault.enable(state)?;
+        self.breakpoint.enable(state)?;
+        self.unexpected.enable(state)?;
+        if !self.page_fault().recovery_online()
+            || !self.breakpoint().service_online()
+            || !self.unexpected().fail_shutdown_online()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -3411,19 +3344,152 @@ impl ExceptionKind {
                 State::Online,
             );
         }
+        Ok(())
+    }
 
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub fn syscall_setup(&mut self, table: &mut SyscallTable) -> EventResult {
+        self.syscall.setup(self.lifecycle.state(), table)?;
+        if !self.syscall().handler_ready() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.syscall().state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub fn syscall_enable(&mut self, table: &SyscallTable) -> EventResult {
+        self.syscall.enable(self.lifecycle.state(), table)?;
+        if !self.syscall().service_online() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.syscall().state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub fn enable(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.dispatch_ready
+            || self.page_fault().state() != State::Online
+            || !self.page_fault().recovery_online()
+            || self.syscall().state() != State::Online
+            || !self.syscall().service_online()
+            || self.breakpoint().state() != State::Online
+            || !self.breakpoint().service_online()
+            || self.unexpected().state() != State::Online
+            || !self.unexpected().fail_shutdown_online()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.service_online = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 
-    fn state(&self) -> State {
-        self.lifecycle.state()
+    pub fn page_fault_state(&self) -> State {
+        self.page_fault().state()
     }
+
+    pub fn syscall_state(&self) -> State {
+        self.syscall().state()
+    }
+
+    pub fn breakpoint_state(&self) -> State {
+        self.breakpoint().state()
+    }
+
+    pub fn unexpected_state(&self) -> State {
+        self.unexpected().state()
+    }
+
+    pub const fn page_fault(&self) -> &PageFaultExceptionType {
+        &self.page_fault
+    }
+
+    pub const fn syscall(&self) -> &SyscallExceptionType {
+        &self.syscall
+    }
+
+    pub const fn breakpoint(&self) -> &BreakpointExceptionType {
+        &self.breakpoint
+    }
+
+    pub const fn unexpected(&self) -> &UnexpectedExceptionType {
+        &self.unexpected
+    }
+
+    #[allow(dead_code)]
+    pub const fn dispatch_ready(&self) -> bool {
+        self.dispatch_ready
+    }
+
+    #[cfg_attr(not(app_user_boot), allow(dead_code))]
+    pub const fn service_online(&self) -> bool {
+        self.service_online
+    }
+
+    pub(crate) fn adopt_secondary_ready(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)?;
+        self.page_fault.adopt_secondary_online()?;
+        self.syscall.adopt_secondary_prepared()?;
+        self.breakpoint.adopt_secondary_online()?;
+        self.unexpected.adopt_secondary_online()?;
+        self.dispatch_ready = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    }
+
+    #[cfg(app_user_boot)]
+    pub(crate) fn enable_secondary(&mut self, syscall_table: &SyscallTable) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.dispatch_ready
+            || self.page_fault.state() != State::Online
+            || self.breakpoint.state() != State::Online
+            || self.unexpected.state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+        self.syscall.enable_secondary(syscall_table)?;
+        self.enable()
+    }
+}
+
+enum ExceptionHandlerBinding {
+    Causes(&'static [usize]),
+    RemainingKnown,
 }
 
 pub fn dispatch_trap(frame: &mut TrapFrame) {
     if frame.scause & SCAUSE_INTERRUPT_BIT != 0 {
-        panic_dispatch("interrupt reached exception stream\n");
+        panic_dispatch("interrupt reached exception dispatch\n");
     }
 
     if DISPATCH_READY.load(Ordering::Relaxed) == 0 {
@@ -3437,6 +3503,38 @@ fn reset_exception_handlers() {
     for cause in 0..EXCEPTION_HANDLER_COUNT {
         set_exception_policy(cause, FALLBACK_POLICY);
     }
+}
+
+pub(crate) fn install_page_fault_policy() {
+    bind_exception_policy(
+        ExceptionHandlerBinding::Causes(&PAGE_FAULT_CAUSES),
+        PAGE_FAULT_POLICY,
+    );
+}
+
+pub(crate) fn install_syscall_disabled_policy() {
+    bind_exception_policy(
+        ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
+        SYSCALL_DISABLED_POLICY,
+    );
+}
+
+pub(crate) fn install_syscall_policy() {
+    bind_exception_policy(
+        ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
+        SYSCALL_POLICY,
+    );
+}
+
+pub(crate) fn install_breakpoint_policy() {
+    bind_exception_policy(
+        ExceptionHandlerBinding::Causes(&BREAKPOINT_CAUSES),
+        BREAKPOINT_POLICY,
+    );
+}
+
+pub(crate) fn install_unexpected_policy() {
+    bind_exception_policy(ExceptionHandlerBinding::RemainingKnown, UNEXPECTED_POLICY);
 }
 
 fn bind_exception_policy(binding: ExceptionHandlerBinding, policy: ExceptionPolicy) {

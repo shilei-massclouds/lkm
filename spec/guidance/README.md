@@ -94,7 +94,7 @@ tracked artifacts 或生成/apply marker patch。
 `../coding/arceos_ex.md` 是 coding 权威索引；按其中链接进入具体 system、phase 或 object
 映射。正式生命周期和对象语义直接读取上方 model 文件。
 
-该路径使用已经确认的对象名和边界：`UserBootPayload`、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame`、`SyscallException` 和 `SyscallTable`。不要重新引入 `SyscallDispatcher`、`ElfLoader`、`ExecCore` 或把 `MmStruct` 作为首轮用户态 hello 的主对象名。syscall 必须走既有 `ExceptionStream -> SyscallException` 分支；当前 whole-disk ext2 rootfs 不生成分区对象。
+该路径使用已经确认的对象名和边界：`UserBootPayload`、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame`、`SyscallException` 和 `SyscallTable`。不要重新引入 `SyscallDispatcher`、`ElfLoader`、`ExecCore` 或把 `MmStruct` 作为首轮用户态 hello 的主对象名。syscall 必须走既有 `ExceptionType -> SyscallException` 分支；当前 whole-disk ext2 rootfs 不生成分区对象。
 
 ## CPU/CpuGroup 代码生成
 

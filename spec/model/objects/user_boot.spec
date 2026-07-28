@@ -18,7 +18,7 @@
  * treated as an
  * ElfObject, mapped into a UserAddressSpace, paired with a UserStack and
  * UserTrapFrame, then entered in U-mode. Syscalls remain under the existing
- * SyscallException branch of ExceptionStream. SyscallException owns syscall
+ * CurrentCPU.trap.exception.syscall branch of CurrentCPU.trap.exception. CurrentCPU.trap.exception.syscall owns syscall
  * entry validation, argument extraction and dispatch selection; this slice only
  * adds SyscallTable as the minimal action table consumed by that branch.
  *
@@ -1100,12 +1100,12 @@ object SyscallTable: ResourceObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
-                    SyscallException.state == State::Ready;
+                    CurrentCPU.trap.exception.syscall.state == State::Ready;
                 }
 
                 ensures {
                     syscall_table_ready(self);
-                    syscall_table_bound_to_exception(self, SyscallException);
+                    syscall_table_bound_to_exception(self, CurrentCPU.trap.exception.syscall);
                     syscall_table_write_supported(self);
                     syscall_table_writev_supported(self);
                     syscall_table_openat_supported(self);
@@ -1290,7 +1290,7 @@ object SyscallTable: ResourceObject {
     state State::Ready {
         invariant {
             syscall_table_ready(self);
-            syscall_table_bound_to_exception(self, SyscallException);
+            syscall_table_bound_to_exception(self, CurrentCPU.trap.exception.syscall);
             syscall_table_write_supported(self);
             syscall_table_writev_supported(self);
             syscall_table_openat_supported(self);
@@ -1390,7 +1390,7 @@ object SyscallTable: ResourceObject {
         actions {
             on Action::Write {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                 }
@@ -1416,7 +1416,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Writev {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                     syscall_writev_usercopy_ready(self);
@@ -1469,7 +1469,7 @@ object SyscallTable: ResourceObject {
                  * and full errno detail remain trimmed.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
@@ -1516,7 +1516,7 @@ object SyscallTable: ResourceObject {
                  * Linux chdir(2).
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
                     syscall_path_usercopy_ready(self);
@@ -1566,7 +1566,7 @@ object SyscallTable: ResourceObject {
                  * value, errno path, checkpoint ordering or smoke policy.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                     syscall_read_usercopy_ready(self);
@@ -1637,7 +1637,7 @@ object SyscallTable: ResourceObject {
                  * full N_TTY wait queues remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                     syscall_ppoll_pollfd_usercopy_ready(self);
@@ -1675,7 +1675,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Close {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                     fd_table_fd_bound(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
@@ -1695,7 +1695,7 @@ object SyscallTable: ResourceObject {
 
             on Action::NewFstatAt {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
@@ -1719,7 +1719,7 @@ object SyscallTable: ResourceObject {
 
             on Action::ReadlinkAt {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
@@ -1750,7 +1750,7 @@ object SyscallTable: ResourceObject {
                  * expand_files(), EBUSY, locking and file lifecycle details.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                 }
@@ -1778,7 +1778,7 @@ object SyscallTable: ResourceObject {
                  * refcount and signal semantics stay deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                     syscall_fixed_usercopy_checks_mapping_permissions(self, UserAddressSpace);
@@ -1813,7 +1813,7 @@ object SyscallTable: ResourceObject {
                  * group credential semantics remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                 }
@@ -1845,7 +1845,7 @@ object SyscallTable: ResourceObject {
                  * authorization.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                 }
@@ -1876,7 +1876,7 @@ object SyscallTable: ResourceObject {
                  * FileDescriptorTable state, not in struct file status flags.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     FilesStruct.state == State::Ready;
                     FileDescriptorTable.state == State::Ready;
                 }
@@ -1923,7 +1923,7 @@ object SyscallTable: ResourceObject {
                  * deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
                     FilesStruct.state == State::Ready;
@@ -1978,7 +1978,7 @@ object SyscallTable: ResourceObject {
                  * GRND_NONBLOCK/EAGAIN and large iov iteration are deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     HwRngCore.state == State::Ready;
                     syscall_getrandom_usercopy_ready(self);
                 }
@@ -2006,7 +2006,7 @@ object SyscallTable: ResourceObject {
                  * current task credentials.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     task_execution_authority_is(
                         KernelInitTask,
@@ -2029,7 +2029,7 @@ object SyscallTable: ResourceObject {
                  * task credentials.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2050,7 +2050,7 @@ object SyscallTable: ResourceObject {
                  * returns that Task's own pid.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2071,7 +2071,7 @@ object SyscallTable: ResourceObject {
                  * visible-PID0 parent fact without modeling the full task tree.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2094,7 +2094,7 @@ object SyscallTable: ResourceObject {
                  * for BusyBox job-control probing.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2115,7 +2115,7 @@ object SyscallTable: ResourceObject {
                  * only that bounded child SID.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2145,7 +2145,7 @@ object SyscallTable: ResourceObject {
                  * deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
@@ -2175,7 +2175,7 @@ object SyscallTable: ResourceObject {
                  * detach remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
@@ -2199,7 +2199,7 @@ object SyscallTable: ResourceObject {
                  * root credentials substate.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2218,7 +2218,7 @@ object SyscallTable: ResourceObject {
                  * root credentials substate.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2240,7 +2240,7 @@ object SyscallTable: ResourceObject {
                  * values.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
@@ -2260,7 +2260,7 @@ object SyscallTable: ResourceObject {
                  * three root gid_t values from KernelInitTask.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
@@ -2291,7 +2291,7 @@ object SyscallTable: ResourceObject {
                  * ownership semantics.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
@@ -2318,7 +2318,7 @@ object SyscallTable: ResourceObject {
                  * release override handling.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     syscall_utsname_usercopy_ready(self);
                 }
 
@@ -2342,7 +2342,7 @@ object SyscallTable: ResourceObject {
                  * mount-namespace or concurrent fs_struct semantics.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     FsStruct.state == State::Ready;
                     VfsCore.state == State::Ready;
@@ -2376,7 +2376,7 @@ object SyscallTable: ResourceObject {
                  * deferred to a later slice.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2401,7 +2401,7 @@ object SyscallTable: ResourceObject {
                  * setuid(146) uid=1000 boundary that the SetUid slice closes.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2440,7 +2440,7 @@ object SyscallTable: ResourceObject {
                  * closed by the bounded SetUid slice.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_credentials_usercopy_ready(self);
                 }
@@ -2474,7 +2474,7 @@ object SyscallTable: ResourceObject {
                  * siglock/IRQ locking are deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_signal_mask_usercopy_ready(self);
                 }
@@ -2513,7 +2513,7 @@ object SyscallTable: ResourceObject {
                  * frame construction and rt_sigreturn remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_signal_action_usercopy_ready(self);
                 }
@@ -2563,7 +2563,7 @@ object SyscallTable: ResourceObject {
                  * delivery remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     syscall_signal_mask_usercopy_ready(self);
                 }
@@ -2606,7 +2606,7 @@ object SyscallTable: ResourceObject {
                  * calibration are deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     syscall_time_usercopy_ready(self);
@@ -2639,7 +2639,7 @@ object SyscallTable: ResourceObject {
                  * deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     syscall_time_usercopy_ready(self);
@@ -2676,7 +2676,7 @@ object SyscallTable: ResourceObject {
                  * remain deferred.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     syscall_nanosleep_usercopy_ready(self);
@@ -2697,7 +2697,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Brk {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserAddressSpace.state == State::Online;
                 }
 
@@ -2713,7 +2713,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Mmap {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserAddressSpace.state == State::Online;
                 }
 
@@ -2731,7 +2731,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Mprotect {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserAddressSpace.state == State::Online;
                 }
 
@@ -2747,7 +2747,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Munmap {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserAddressSpace.state == State::Online;
                 }
 
@@ -2763,7 +2763,7 @@ object SyscallTable: ResourceObject {
 
             on Action::SetTidAddress {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                 }
 
@@ -2787,7 +2787,7 @@ object SyscallTable: ResourceObject {
                  * contracts here.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     TaskCreationCore.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     UserTaskSet.state == State::Ready;
@@ -2894,7 +2894,7 @@ object SyscallTable: ResourceObject {
                  * Executable-specific application behavior is opaque.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     UserBootPayload.state == State::Online;
                     task.state == State::Online;
                     old_flow.state == State::Online;
@@ -2981,7 +2981,7 @@ object SyscallTable: ResourceObject {
                  * application control flow part of UserAppFlow.
                  */
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     child.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
@@ -3023,7 +3023,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Exit(current_flow: UserAppFlow) {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::Online;
                     KernelInitFlow.state == State::Destroyed;
                     current_flow.state == State::Online;
@@ -3056,7 +3056,7 @@ object SyscallTable: ResourceObject {
 
             on Action::Sync {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     RootFS.state == State::Online;
                 }
 
@@ -3067,7 +3067,7 @@ object SyscallTable: ResourceObject {
 
             on Action::RebootPowerOff {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                 }
 
                 ensures {
@@ -3077,7 +3077,7 @@ object SyscallTable: ResourceObject {
 
             on Action::ExitGroup(child: Task, current_flow: UserAppFlow) {
                 depends_on {
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     child.state == State::Online;
                     current_flow.state == State::Online;
                     user_task_set_contains(UserTaskSet, child);
@@ -3223,8 +3223,8 @@ object UserBootPayload: ResourceObject {
                 depends_on {
                     KernelInitFlow.state == State::Ready;
                     KernelInitTask.state == State::OnCpu;
-                    ExceptionStream.state == State::Ready;
-                    SyscallException.state == State::Prepared;
+                    CurrentCPU.trap.exception.state == State::Ready;
+                    CurrentCPU.trap.exception.syscall.state == State::Prepared;
                     ExecSyncBoundaries.state == State::Ready;
                 }
 
@@ -3240,9 +3240,11 @@ object UserBootPayload: ResourceObject {
                     UserTrapFrame.Transition::Setup;
                     ElfObject.Transition::Enable;
                     UserAddressSpace.Transition::Enable;
-                    SyscallException.Transition::Setup;
+                    CurrentCPU.trap.exception.syscall.Transition::Setup;
                     SyscallTable.Transition::Setup;
-                    SyscallException.Transition::Enable;
+                    CurrentCPU.trap.exception.syscall.Transition::Enable;
+                    CurrentCPU.trap.exception.Transition::Enable;
+                    CurrentCPU.trap.Transition::Enable;
                     FilesStruct.Transition::Setup;
                     FilesStruct.Action::ClearStdinReadyData;
                     FilesStruct.Action::PrepareDefaultStdinReadyData;
@@ -3259,7 +3261,9 @@ object UserBootPayload: ResourceObject {
                     UserAddressSpace.state == State::Online;
                     UserTrapFrame.state == State::Ready;
                     SyscallTable.state == State::Ready;
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    CurrentCPU.trap.exception.state == State::Online;
+                    CurrentCPU.trap.state == State::Online;
                     Pid1UserAppFlow.state == State::Ready;
                     user_app_flow_instance_fresh(Pid1UserAppFlow);
                     task_active_flow_is(KernelInitTask, KernelInitFlow);
@@ -3383,8 +3387,9 @@ object UserBootPayload: ResourceObject {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     KernelInitTask.state == State::OnCpu;
-                    ExceptionStream.state == State::Ready;
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
+                    CurrentCPU.trap.state == State::Online;
                     ExecSyncBoundaries.state == State::Ready;
                     KernelInitFlow.state == State::Online;
                     Pid1UserAppFlow.state == State::Ready;
@@ -3408,7 +3413,7 @@ object UserBootPayload: ResourceObject {
                     UserAddressSpace.state == State::Online;
                     UserTrapFrame.state == State::Ready;
                     SyscallTable.state == State::Ready;
-                    SyscallException.state == State::Online;
+                    CurrentCPU.trap.exception.syscall.state == State::Online;
                     KernelInitTask.state == State::OnCpu;
                     task_execution_authority_is(
                         KernelInitTask,
@@ -3438,7 +3443,7 @@ object UserBootPayload: ResourceObject {
                     user_task_credentials_inherited(KernelInitTask, KernelInitTask);
                     user_task_syscall_context_bound(
                         KernelInitTask,
-                        SyscallException,
+                        CurrentCPU.trap.exception.syscall,
                         SyscallTable
                     );
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);

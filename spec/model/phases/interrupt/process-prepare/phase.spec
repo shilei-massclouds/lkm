@@ -155,14 +155,14 @@ object UprobeCore: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
                     uprobe_core_ready(UprobeCore);
                     uprobes_hash_mutex_ready(UprobeCore);
-                    uprobes_die_notifier_registered(UprobeCore, ExceptionStream);
+                    uprobes_die_notifier_registered(UprobeCore, CurrentCPU.trap.exception);
                 }
             }
         }
@@ -172,7 +172,7 @@ object UprobeCore: KernelObject {
         invariant {
             uprobe_core_ready(UprobeCore);
             uprobes_hash_mutex_ready(UprobeCore);
-            uprobes_die_notifier_registered(UprobeCore, ExceptionStream);
+            uprobes_die_notifier_registered(UprobeCore, CurrentCPU.trap.exception);
         }
     }
 }
@@ -996,7 +996,7 @@ object ProcessPreparePhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     IrqOpenPreparePhase.state == State::Online;
-                    InterruptStream.state == State::Online;
+                    CurrentCPU.trap.interrupt.state == State::Online;
                     Console.state == State::Prepared;
                     SchedClock.state == State::Ready;
                     DelayLoop.state == State::Ready;
@@ -1010,7 +1010,7 @@ object ProcessPreparePhase: PhaseObject {
                     PerCpuStorage.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
                     BootTask.state == State::OnCpu;
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                 }
 
                 drives {

@@ -38,7 +38,7 @@ fn preset_start(ctx: &Context) -> EventResult {
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::boot::core_prepare::is_online()
-        && ctx.exception_stream.state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Ready
         && ctx.memblock.state() == State::Online
         && ctx.zones.state() == State::Ready
         && ctx.page_metadata_map.state() == State::Ready
@@ -200,7 +200,7 @@ pub fn is_online() -> bool {
 
 fn mm_core_init_phase_ready(ctx: &Context) -> bool {
     crate::phases::boot::core_prepare::is_online()
-        && ctx.exception_stream.state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Ready
         && ctx.memblock.state() == State::Offline
         && ctx.memory_topology.state() == State::Ready
         && ctx.memory_topology.node_count() == 1

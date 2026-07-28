@@ -980,7 +980,7 @@ class ViewToolTests(unittest.TestCase):
                                 "target_state": "Ready",
                                 "children": [
                                     {
-                                        "object": "InterruptStream",
+                                        "object": "InterruptType",
                                         "transition": "Enable",
                                         "source_state": "Ready",
                                         "target_state": "Online",
@@ -1035,7 +1035,7 @@ class ViewToolTests(unittest.TestCase):
                                 ]
                             }
                         },
-                        "SingleTaskInterruptStreamContext": {
+                        "SingleTaskInterruptTypeContext": {
                             "guard": {
                                 "holds": [
                                     {
@@ -1087,7 +1087,7 @@ class ViewToolTests(unittest.TestCase):
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within SingleTaskInterruptStreamContext",
+                        "expression": "within SingleTaskInterruptTypeContext",
                     },
                     {
                         "status": "proved",
@@ -1112,7 +1112,7 @@ class ViewToolTests(unittest.TestCase):
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within SingleTaskInterruptStreamContext exited",
+                        "expression": "within SingleTaskInterruptTypeContext exited",
                     },
                 ],
             }
@@ -1134,7 +1134,7 @@ class ViewToolTests(unittest.TestCase):
             cell
             for cell in cells
             if cell.kind == "context_span"
-            and cell.label == "SingleTaskInterruptStreamContext"
+            and cell.label == "SingleTaskInterruptTypeContext"
         )
         irq_time_phase = next(
             cell
@@ -1162,7 +1162,7 @@ class ViewToolTests(unittest.TestCase):
         )
 
         self.assertIn("SingleTaskContext", context_labels)
-        self.assertIn("SingleTaskInterruptStreamContext", context_labels)
+        self.assertIn("SingleTaskInterruptTypeContext", context_labels)
         self.assertNotIn("", context_action_labels)
         self.assertLessEqual(single_task_context.row, irq_time_phase.row)
         self.assertGreaterEqual(

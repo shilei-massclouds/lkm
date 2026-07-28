@@ -59,9 +59,9 @@ arceos_ex_enter_user_mode:
      * a1 = user entry
      * a2 = user stack pointer
      * a3 = user sstatus
-     * a4 = user-trap entry context at the safe kernel-stack boundary
+     * a4 = current CPU TrapEntryContext
      */
-    sd      tp, 0(a4)
+    sd      tp, {trap_context_task_offset}(a4)
     csrw    sscratch, a4
     csrw    sepc, a1
     csrw    sstatus, a3
@@ -69,7 +69,8 @@ arceos_ex_enter_user_mode:
     sfence.vma
     mv      sp, a2
     sret
-"#
+"#,
+    trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
 );
 
 unsafe extern "C" {
@@ -261,6 +262,21 @@ pub fn clear_sscratch() {
     unsafe {
         core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
     }
+}
+
+pub fn write_sscratch(value: usize) {
+    unsafe {
+        core::arch::asm!("csrw sscratch, {value}", value = in(reg) value, options(nostack, nomem));
+    }
+}
+
+#[allow(dead_code)]
+pub fn read_sscratch() -> usize {
+    let value: usize;
+    unsafe {
+        core::arch::asm!("csrr {value}, sscratch", value = out(reg) value, options(nostack, nomem));
+    }
+    value
 }
 
 pub unsafe fn switch_to_early_vm(

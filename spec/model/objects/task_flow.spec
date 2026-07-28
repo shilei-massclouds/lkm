@@ -881,7 +881,7 @@ type BootIdleFlowType: TaskFlow {
             }
             within BootIdleWaitLocalInterruptContext {
                 ensures {
-                    boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
+                    boot_idle_local_irq_disabled_for_sleep(self, CurrentCPU.trap.interrupt);
                     boot_idle_arch_cpu_idle_enter_done(self, CpuGroup.cpus[0]);
                     boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
                     boot_idle_cpu_offline_dead_path_not_taken(self, CpuGroup.cpus[0]);
@@ -896,7 +896,7 @@ type BootIdleFlowType: TaskFlow {
                 boot_idle_polling_set(BootTask);
                 boot_idle_polling_rmb_before_sleep_check(BootTask);
                 boot_idle_nohz_entered(self);
-                boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
+                boot_idle_local_irq_disabled_for_sleep(self, CurrentCPU.trap.interrupt);
                 boot_idle_arch_cpu_idle_enter_done(self, CpuGroup.cpus[0]);
                 boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
                 boot_idle_cpu_offline_dead_path_not_taken(self, CpuGroup.cpus[0]);

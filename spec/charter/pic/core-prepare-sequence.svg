@@ -198,7 +198,7 @@
   <g transform="translate(0 2592)">
     <circle cx="153" cy="320" r="15" class="dot"/><text x="153" y="320" class="num">22</text>
     <rect x="290" y="205" width="870" height="318" rx="12" class="box trap"/>
-    <text x="318" y="234" class="line1">ExceptionStream.setup() / trap_init()</text>
+    <text x="318" y="234" class="line1">ExceptionType.setup() / trap_init()</text>
     <text x="318" y="265" class="line2">建立正式异常分类、分发和 handler 注册框架；作为阶段终点</text>
 
     <rect x="340" y="312" width="760" height="48" rx="8" class="box trap"/>
@@ -219,5 +219,5 @@
   </g>
 
   <rect x="290" y="3410" width="870" height="50" rx="10" class="stage"/>
-  <text x="318" y="3435" class="boundary">终点边界：trap_init() 完成，ExceptionStream.Ready，异常分发框架就绪</text>
+  <text x="318" y="3435" class="boundary">终点边界：trap_init() 完成，ExceptionType.Ready，异常分发框架就绪</text>
 </svg>

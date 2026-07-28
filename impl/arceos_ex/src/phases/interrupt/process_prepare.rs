@@ -37,10 +37,10 @@ fn preset_start(ctx: &Context) -> EventResult {
 
 fn preset_dependencies_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::irq_open_prepare::is_online()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Online
+        && ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && !ctx.cpu_group.smp_concurrency_open()
@@ -61,7 +61,7 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.per_cpu_storage.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.boot_task.state() == State::OnCpu
-        && ctx.exception_stream.state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Ready
 }
 
 fn preset_objects(ctx: &mut Context) -> EventResult {
@@ -79,6 +79,10 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.credential_core
         .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
+    let exception_type = ctx
+        .cpu_group
+        .boot_cpu_exception()
+        .expect("boot CPU exception resource must exist after CPU discovery");
     ctx.task_creation_core.setup(TaskCreationSetup {
         root_pid_namespace: &ctx.root_pid_namespace,
         credential_core: &ctx.credential_core,
@@ -86,7 +90,7 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         cpu_capabilities: &ctx.cpu_capabilities,
         slub_subsystem: &ctx.slub_subsystem,
         boot_task: &ctx.boot_task,
-        exception_stream: &ctx.exception_stream,
+        exception_type,
     })?;
     ctx.signal_core
         .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
@@ -206,10 +210,10 @@ pub fn is_online() -> bool {
 
 fn process_prepare_phase_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::irq_open_prepare::is_online()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
-        && ctx.boot_cpu_local_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().state() == State::Online
+        && ctx.boot_cpu_interrupt().boot_cpu_local_interrupts_enabled()
+        && !ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
+        && ctx.boot_cpu_local_interrupt().local_state() == State::Ready
         && ctx.boot_cpu_local_interrupt().enabled()
         && csr::supervisor_interrupts_enabled()
         && !ctx.cpu_group.smp_concurrency_open()
@@ -230,7 +234,7 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.per_cpu_storage.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.boot_task.state() == State::OnCpu
-        && ctx.exception_stream.state() == State::Ready
+        && ctx.boot_cpu_exception().state() == State::Ready
         && ctx.root_pid_namespace.state() == State::Ready
         && ctx.root_pid_namespace.idr_ready()
         && ctx.root_pid_namespace.compiletime_limit_checked()

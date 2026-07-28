@@ -8,8 +8,8 @@ left_label = "arceos_ex"
 right_test = "distro-sh-checkpoints-linux"
 right_label = "linux"
 checkpoint_scope = [
-  "EventStream.Prepared",
-  "ExceptionStream.Prepared",
+  "TrapType.Prepared",
+  "ExceptionType.Prepared",
   "CorePreparePhase.Started",
   "CorePreparePhase.Ready",
   "MmCoreInitPhase.Started",

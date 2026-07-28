@@ -37,7 +37,7 @@
   <line x1="155" y1="224" x2="155" y2="2578" class="timeline"/>
 
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="142" class="boundary">起点：trap_init() 完成，ExceptionStream.Ready，仍处于 SystemExclusive</text>
+  <text x="320" y="142" class="boundary">起点：trap_init() 完成，ExceptionType.Ready，仍处于 SystemExclusive</text>
 
   <g transform="translate(0 -60)">
   <g transform="translate(0 68)">

@@ -601,7 +601,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="RISC-V64 relocation boundary after virtual addressing is active; object equivalence is partial.",
         ),
-        "EventStream.Prepared": MappingRule(
+        "TrapType.Prepared": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start_kernel",
@@ -609,7 +609,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="RISC-V64 early fallback trap-vector setup before setup_vm(); architecture-scoped mapping.",
         ),
-        "EventStream.Ready": MappingRule(
+        "TrapType.Ready": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start",
@@ -617,7 +617,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="high",
             notes="RISC-V64 formal trap-vector target in .Lsetup_trap_vector.",
         ),
-        "ExceptionStream.Prepared": MappingRule(
+        "ExceptionType.Prepared": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start_kernel",
@@ -625,7 +625,7 @@ def default_mapping_rules() -> dict[str, MappingRule]:
             confidence="medium",
             notes="RISC-V64 early fallback exception path uses the temporary spin trap vector.",
         ),
-        "ExceptionStream.Ready": MappingRule(
+        "ExceptionType.Ready": MappingRule(
             mapping_kind="exact",
             linux_file="arch/riscv/kernel/head.S",
             linux_symbol="_start",

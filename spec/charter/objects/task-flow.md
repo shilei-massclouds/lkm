@@ -71,6 +71,20 @@ Flow、非活跃 Flow、错误 owner、非 `OnCpu/Live` 或悬空/过期 TaskRef
 Flow 和 source TaskRef。Kernel 接管并启动 BootInitFlow 后，逻辑 CurrentTask 即为 BootTask；
 `BootTaskEntryBinding` 只协调入口架构绑定与物理到虚拟 identity 迁移，不承担 CurrentTask lifecycle。
 
+## 陷入期间的底层执行权
+
+短期 Trap/Interrupt/Exception Flow 不替换 Task 的长期 continuation。陷入期间
+`Task.active_flow` 与其 `TaskFlowRef` 保持绑定但暂停推进；effective TaskFlow 仍是 CurrentTask、
+CurrentTaskRef 与 CurrentCPU 的唯一解析来源。活动执行上下文只在其上叠加：
+
+```text
+TaskFlow -> TrapFlow -> InterruptFlow/ExceptionFlow -> concrete exception Flow
+```
+
+Trap 清理完成且架构返回检查点被一次性消费后，底层 TaskFlow 才从保存断点恢复。可调度异常携带整条
+短期链迁移时，只更新底层 TaskFlow 的 CpuRef 和入口上下文；root TrapFlow 的正式 parent 始终是最初
+接收陷入的 CPU Trap 资源。
+
 ## TaskFlowRef 与 lifecycle
 
 `TaskFlowRef` 使用 private storage slot 加非零 generation。静态 Flow 使用固定 slot 和固定

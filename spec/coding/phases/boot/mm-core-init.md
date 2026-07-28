@@ -14,7 +14,7 @@
 
 由 `BootInitFlow.setup_after_core_prepare()` 启动，并在 `preset()` 中逐项检查：
 - `CorePreparePhase.state == Online`
-- `ExceptionStream.state == Ready`
+- `ExceptionType.state == Ready`
 - `MemBlock.state == Online`、`Zones.state == Ready`
 - `PageMetadataMap.state == Ready`
 - `CpuGroup.state == Ready`、`DmaCachePolicy.state == Ready`
@@ -122,7 +122,7 @@ preset()  ← 由 BootInitFlow.setup_after_core_prepare() 调用
 | Object | Required State |
 |---|---|
 | CorePreparePhase | Online |
-| ExceptionStream | Ready |
+| ExceptionType | Ready |
 | MemoryTopology | Ready |
 | MemoryNode | Ready |
 | ZoneSet | Ready |

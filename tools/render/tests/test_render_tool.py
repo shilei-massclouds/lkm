@@ -345,7 +345,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_span",
                         row=1,
                         column=1,
-                        label="SingleTaskInterruptStreamContext",
+                        label="SingleTaskInterruptTypeContext",
                         row_span=2,
                         column_span=2,
                     ),
@@ -394,14 +394,14 @@ class RenderToolTests(unittest.TestCase):
             view,
             trace_hidden_contexts=(
                 "SingleTaskContext",
-                "SingleTaskInterruptStreamContext",
+                "SingleTaskInterruptTypeContext",
             ),
         )
 
         self.assertIn("SingleTaskContext", unfiltered)
-        self.assertIn("SingleTaskInterruptStreamContext", unfiltered)
+        self.assertIn("SingleTaskInterruptTypeContext", unfiltered)
         self.assertNotIn("SingleTaskContext", text)
-        self.assertNotIn("SingleTaskInterruptStreamContext", text)
+        self.assertNotIn("SingleTaskInterruptTypeContext", text)
         self.assertIn("ResourceLockContext", text)
         self.assertIn("BootRunQueueLock.Transition::LockIrqSave", text)
         self.assertIn("local_interrupts = enabled", text)

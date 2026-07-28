@@ -23,24 +23,24 @@
   },
   {
     "checkpoint_index": 19,
-    "checkpoint_name": "EventStream.Prepared",
-    "checkpoint_variant": "EventStreamPrepared",
+    "checkpoint_name": "TrapType.Prepared",
+    "checkpoint_variant": "TrapTypePrepared",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "_start_kernel",
     "linux_anchor": "_start_kernel line 310: csrw CSR_TVEC, a3",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=EventStream.Prepared variant=EventStreamPrepared fingerprint=sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e */",
+    "marker": "/* LKM_CHECKPOINT name=TrapType.Prepared variant=TrapTypePrepared fingerprint=sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e */",
     "anchor_fingerprint": "sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e"
   },
   {
     "checkpoint_index": 20,
-    "checkpoint_name": "ExceptionStream.Prepared",
-    "checkpoint_variant": "ExceptionStreamPrepared",
+    "checkpoint_name": "ExceptionType.Prepared",
+    "checkpoint_variant": "ExceptionTypePrepared",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "_start_kernel",
     "linux_anchor": "_start_kernel line 310: csrw CSR_TVEC, a3",
     "confidence": "medium",
-    "marker": "/* LKM_CHECKPOINT name=ExceptionStream.Prepared variant=ExceptionStreamPrepared fingerprint=sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e */",
+    "marker": "/* LKM_CHECKPOINT name=ExceptionType.Prepared variant=ExceptionTypePrepared fingerprint=sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e */",
     "anchor_fingerprint": "sha256:863decfd3ccdff59528c0003641e490518ba33adbb26efb777ec3fb97406ef6e"
   },
   {
@@ -111,13 +111,13 @@
   },
   {
     "checkpoint_index": 34,
-    "checkpoint_name": "EventStream.Ready",
-    "checkpoint_variant": "EventStreamReady",
+    "checkpoint_name": "TrapType.Ready",
+    "checkpoint_variant": "TrapTypeReady",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "_start",
     "linux_anchor": "_start line 185: la a0, handle_exception",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=EventStream.Ready variant=EventStreamReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */",
+    "marker": "/* LKM_CHECKPOINT name=TrapType.Ready variant=TrapTypeReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */",
     "anchor_fingerprint": "sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3"
   },
   {
@@ -144,13 +144,13 @@
   },
   {
     "checkpoint_index": 97,
-    "checkpoint_name": "ExceptionStream.Ready",
-    "checkpoint_variant": "ExceptionStreamReady",
+    "checkpoint_name": "ExceptionType.Ready",
+    "checkpoint_variant": "ExceptionTypeReady",
     "linux_file": "arch/riscv/kernel/head.S",
     "linux_symbol": "_start",
     "linux_anchor": "_start line 185: la a0, handle_exception",
     "confidence": "high",
-    "marker": "/* LKM_CHECKPOINT name=ExceptionStream.Ready variant=ExceptionStreamReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */",
+    "marker": "/* LKM_CHECKPOINT name=ExceptionType.Ready variant=ExceptionTypeReady fingerprint=sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3 */",
     "anchor_fingerprint": "sha256:73984e9dbc51a745cb111d4e6cf9494f4485104d99407371c2eac30db61239e3"
   },
   {

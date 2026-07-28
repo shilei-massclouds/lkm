@@ -5,13 +5,21 @@ pub struct TaskSwitchContext {
     ra: usize,
     sp: usize,
     s: [usize; 12],
+    kernel_stack_base: usize,
+    kernel_stack_top: usize,
+    root_trap_flow_address: usize,
+    root_trap_flow_generation: usize,
 }
 
 const _: () = {
-    assert!(core::mem::size_of::<TaskSwitchContext>() == 14 * core::mem::size_of::<usize>());
+    assert!(core::mem::size_of::<TaskSwitchContext>() == 18 * core::mem::size_of::<usize>());
     assert!(core::mem::offset_of!(TaskSwitchContext, ra) == 0);
     assert!(core::mem::offset_of!(TaskSwitchContext, sp) == core::mem::size_of::<usize>());
     assert!(core::mem::offset_of!(TaskSwitchContext, s) == 2 * core::mem::size_of::<usize>());
+    assert!(core::mem::offset_of!(TaskSwitchContext, kernel_stack_base) == 112);
+    assert!(core::mem::offset_of!(TaskSwitchContext, kernel_stack_top) == 120);
+    assert!(core::mem::offset_of!(TaskSwitchContext, root_trap_flow_address) == 128);
+    assert!(core::mem::offset_of!(TaskSwitchContext, root_trap_flow_generation) == 136);
 };
 
 impl TaskSwitchContext {
@@ -20,6 +28,10 @@ impl TaskSwitchContext {
             ra: 0,
             sp: 0,
             s: [0; 12],
+            kernel_stack_base: 0,
+            kernel_stack_top: 0,
+            root_trap_flow_address: 0,
+            root_trap_flow_generation: 0,
         }
     }
 
@@ -29,6 +41,14 @@ impl TaskSwitchContext {
 
     pub const fn initialized(&self) -> bool {
         self.ra != 0 && self.sp != 0
+    }
+
+    pub const fn physical_switch_ready(&self) -> bool {
+        self.initialized()
+            && self.kernel_stack_base() != 0
+            && self.kernel_stack_top() > self.kernel_stack_base()
+            && self.sp >= self.kernel_stack_base()
+            && self.sp <= self.kernel_stack_top()
     }
 
     #[cfg(app_smoke)]
@@ -45,10 +65,42 @@ impl TaskSwitchContext {
         }
     }
 
-    pub fn init(&mut self, entry: extern "C" fn() -> !, stack_top: usize) {
+    pub const fn kernel_stack_base(&self) -> usize {
+        self.kernel_stack_base
+    }
+
+    pub const fn kernel_stack_top(&self) -> usize {
+        self.kernel_stack_top
+    }
+
+    pub const fn root_trap_flow_ref(&self) -> crate::objects::trap_flow_type::TrapFlowRef {
+        crate::objects::trap_flow_type::TrapFlowRef::new(
+            self.root_trap_flow_address,
+            self.root_trap_flow_generation as u32,
+        )
+    }
+
+    pub fn set_root_trap_flow_ref(
+        &mut self,
+        root_ref: crate::objects::trap_flow_type::TrapFlowRef,
+    ) {
+        self.root_trap_flow_address = root_ref.address();
+        self.root_trap_flow_generation = root_ref.generation() as usize;
+    }
+
+    pub fn init(
+        &mut self,
+        entry: extern "C" fn() -> !,
+        kernel_stack_base: usize,
+        kernel_stack_top: usize,
+    ) {
         self.ra = entry as usize;
-        self.sp = stack_top & !0xf;
+        self.sp = kernel_stack_top & !0xf;
         self.s = [0; 12];
+        self.kernel_stack_base = kernel_stack_base;
+        self.kernel_stack_top = kernel_stack_top;
+        self.root_trap_flow_address = 0;
+        self.root_trap_flow_generation = 0;
     }
 
     /// Mark the context as initialized without providing real register values.
@@ -58,6 +110,20 @@ impl TaskSwitchContext {
         self.ra = 1;
         self.sp = 1;
         self.s = [0; 12];
+        self.root_trap_flow_address = 0;
+        self.root_trap_flow_generation = 0;
+    }
+
+    pub fn set_kernel_stack_bounds(&mut self, base: usize, top: usize) -> bool {
+        if base == 0 || top <= base {
+            return false;
+        }
+        self.kernel_stack_base = base;
+        self.kernel_stack_top = top;
+        if self.sp == 1 {
+            self.sp = top & !0xf;
+        }
+        true
     }
 }
 
@@ -107,9 +173,38 @@ arceos_ex_task_switch:
     ld      s9, 88(a1)
     ld      s10, 96(a1)
     ld      s11, 104(a1)
+
+    /* Commit the selected Task's CPU-local formal trap-entry authority. */
+    csrr    t0, sscratch
+    beqz    t0, .Ltask_switch_entry_context_rejected
+    sd      a2, {trap_context_task_offset}(t0)
+    ld      t1, 112(a1)
+    sd      t1, {trap_context_stack_base_offset}(t0)
+    ld      t1, 120(a1)
+    sd      t1, {trap_context_stack_top_offset}(t0)
+    ld      t1, 128(a1)
+    sd      t1, {trap_context_root_address_offset}(t0)
+    ld      t1, 136(a1)
+    sd      t1, {trap_context_root_generation_offset}(t0)
     mv      tp, a2
     ret
+
+.Ltask_switch_entry_context_rejected:
+    li      a7, 0x53525354
+    li      a6, 0
+    li      a0, 0
+    li      a1, 1
+    ecall
+1:
+    wfi
+    j       1b
 "#
+    ,
+    trap_context_task_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_TASK_OFFSET,
+    trap_context_stack_base_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_STACK_BASE_OFFSET,
+    trap_context_stack_top_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_STACK_TOP_OFFSET,
+    trap_context_root_address_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_ROOT_ADDRESS_OFFSET,
+    trap_context_root_generation_offset = const crate::objects::trap_type::TRAP_ENTRY_CONTEXT_ROOT_GENERATION_OFFSET,
 );
 
 #[allow(dead_code)] // The smoke sentinel reaches this symbol from assembly.

@@ -3,6 +3,7 @@ use crate::{arch::riscv64::task_switch::TaskSwitchContext, checkpoint::Checkpoin
 use super::{
     state::{EventResult, FailureDiagnostic, Lifecycle, LifecycleEvent, State, failed_condition},
     task_flow::{TaskFlow, TaskFlowRef},
+    trap_flow_type::{TrapFlowRef, TrapFlowType},
 };
 
 pub const USER_TASK_SLOT_COUNT: usize = 8;
@@ -184,6 +185,10 @@ impl TaskThreadContext {
         self.flow_ref
     }
 
+    pub const fn root_trap_flow_ref(&self) -> TrapFlowRef {
+        self.arch.root_trap_flow_ref()
+    }
+
     pub const fn core_register_set(&self) -> bool {
         self.arch.initialized()
     }
@@ -214,6 +219,48 @@ impl TaskThreadContext {
 
     fn record_save(&mut self) {
         self.core_saved_count = self.core_saved_count.wrapping_add(1);
+    }
+
+    fn root_trap_flow_resolves(&self) -> bool {
+        let root_ref = self.root_trap_flow_ref();
+        if !root_ref.is_valid()
+            || !root_ref
+                .address()
+                .is_multiple_of(core::mem::align_of::<TrapFlowType>())
+        {
+            return false;
+        }
+
+        // A root ref is installed before the stack-local occurrence becomes
+        // reachable from a scheduling point and is cleared before that stack
+        // object is released. Therefore a still-installed ref may be
+        // generation-checked while its Task is suspended or handling a
+        // nested trap.
+        let root = unsafe { &*(root_ref.address() as *const TrapFlowType) };
+        root.resolves(root_ref)
+    }
+
+    /// Returns `Some(true)` when this occurrence installed the Task root and
+    /// `Some(false)` when it is nested beneath an already-live root.
+    fn bind_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> Option<bool> {
+        if !root_ref.is_valid() {
+            return None;
+        }
+        if self.root_trap_flow_ref().is_valid() {
+            return (!self.root_trap_flow_ref().same_identity(root_ref)
+                && self.root_trap_flow_resolves())
+            .then_some(false);
+        }
+        self.arch.set_root_trap_flow_ref(root_ref);
+        Some(true)
+    }
+
+    fn clear_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> bool {
+        if !root_ref.is_valid() || !self.root_trap_flow_ref().same_identity(root_ref) {
+            return false;
+        }
+        self.arch.set_root_trap_flow_ref(TrapFlowRef::NONE);
+        true
     }
 }
 
@@ -359,6 +406,31 @@ impl Task {
 
     pub const fn thread_context(&self) -> &TaskThreadContext {
         &self.thread_context
+    }
+
+    pub const fn root_trap_flow_ref(&self) -> TrapFlowRef {
+        self.thread_context.root_trap_flow_ref()
+    }
+
+    pub(crate) fn bind_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> Option<bool> {
+        if self.lifecycle.state() != State::Online
+            || !self.on_cpu
+            || self.execution_authority != TaskExecutionAuthority::Live
+            || self.thread_context.breakpoint_state() != TaskBreakpointState::Invalid
+            || !self.active_flow.is_valid()
+            || !self.owns_flow(self.active_flow)
+        {
+            return None;
+        }
+        self.thread_context.bind_root_trap_flow(root_ref)
+    }
+
+    pub(crate) fn root_trap_flow_resolves(&self) -> bool {
+        self.root_trap_flow_ref().is_valid() && self.thread_context.root_trap_flow_resolves()
+    }
+
+    pub(crate) fn clear_root_trap_flow(&mut self, root_ref: TrapFlowRef) -> bool {
+        self.thread_context.clear_root_trap_flow(root_ref)
     }
 
     pub const fn task_ref(&self) -> TaskRef {
@@ -752,8 +824,15 @@ impl Task {
         self.kind = kind;
     }
 
-    pub fn init_switch_context(&mut self, entry: extern "C" fn() -> !, stack_top: usize) {
-        self.thread_context.arch_mut().init(entry, stack_top);
+    pub fn init_switch_context(
+        &mut self,
+        entry: extern "C" fn() -> !,
+        stack_base: usize,
+        stack_top: usize,
+    ) {
+        self.thread_context
+            .arch_mut()
+            .init(entry, stack_base, stack_top);
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
         }
@@ -764,6 +843,22 @@ impl Task {
         if !self.on_cpu && self.lifecycle.state() == State::Prepared {
             self.thread_context.prepare();
         }
+    }
+
+    pub fn set_kernel_stack_bounds(&mut self, base: usize, top: usize) -> bool {
+        let installed = self
+            .thread_context
+            .arch_mut()
+            .set_kernel_stack_bounds(base, top);
+        installed && self.kernel_stack_base() == base && self.kernel_stack_top() == top
+    }
+
+    pub const fn kernel_stack_base(&self) -> usize {
+        self.thread_context.arch().kernel_stack_base()
+    }
+
+    pub const fn kernel_stack_top(&self) -> usize {
+        self.thread_context.arch().kernel_stack_top()
     }
 
     pub const fn switch_context(&self) -> &TaskSwitchContext {

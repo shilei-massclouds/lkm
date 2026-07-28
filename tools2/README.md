@@ -37,7 +37,7 @@ The shortcut defaults to the external Human orchestration, whose first real Sign
 there is no `Human.Startup` envelope. Explicit `-t` sends only that one root Signal and does not add lifecycle
 successors. `Startup` is accepted as the external alias for `Preset`. Use `-u/--until SIGNAL` to stop immediately
 before that canonical Signal is sent and export the stable pre-send snapshot. All tools2 JSON and snapshots use
-protocol version 7. Every
+protocol version 8. Every
 sent Signal is strict: rejection or handler failure makes the root result fail.
 Repository source paths in tools2 JSON are checkout-relative, so model fingerprints and snapshots remain stable
 across working directories and equivalent checkout locations.
@@ -51,7 +51,7 @@ Kernel.Preset adopts the external Linux RV64 boot contract without asserting art
 `Computer.Enable -> Riscv64Platform.Enable -> OpenSBI.Enable -> Kernel.Enable`. Synchronous drives retain source
 order and asynchronous sends retain FIFO creation order. OpenSBI.Enable establishes a0/a1, live `satp == 0`, DTB,
 ordered-boot and primary-hart facts; it does not establish the interrupt-closed fact, which first appears after the
-Kernel-owned `InterruptStream.Preset`. `Startup` remains only the external alias for `Preset`, never for `Enable`.
+Kernel-owned `InterruptType.Preset`. `Startup` remains only the external alias for `Preset`, never for `Enable`.
 
 Text output defaults to a compact, hierarchy-indented Signal propagation view. In that view `Preset` is displayed
 as `Startup`, while JSON and snapshots remain canonical. Set `VERBOSE=1` exactly to restore the detailed text view;
@@ -60,7 +60,7 @@ unset `VERBOSE`, `VERBOSE=0`, and every other value keep compact output. This se
 ## Offline Signal animation
 
 The animation implementation is maintained independently below `tools2/animate/`: its Python package validates
-tools2 v7 `model.json + view.json` and replays the view event sequence into deterministic animation v3 causal
+tools2 v8 `model.json + view.json` and replays the view event sequence into deterministic animation v3 causal
 moments and frames, while the nested Svelte 5 + TypeScript frontend only plays those frames. Receipt produces a
 request moment; synchronous drives/root responses produce feedback, asynchronous emits responses produce settle,
 and truncated/stopped Signals produce terminal moments. Synchronous parent feedback therefore follows all nested responses.
@@ -70,7 +70,7 @@ self-contained v1/v2 HTML remains independently openable; the current generator 
 `tools2/bin/pyveri --html-out PATH` writes one atomic, self-contained HTML file and can be combined with text `-o`,
 stdout, `-s`, `--snapshot-out`, and `--work-dir`. Successful HTML generation preserves check exit status 0 or 1;
 animation protocol or I/O failure returns 2. The independently installable stage package exposes
-`lkm-animate MODEL VIEW -o HTML` for already-produced v7 files.
+`lkm-animate MODEL VIEW -o HTML` for already-produced v8 files.
 
 The committed JavaScript/CSS in `tools2/animate/frontend/dist/` is the bundle used by Python. Rebuild and verify it
 with the pinned lockfile:

@@ -920,7 +920,7 @@ class SignalPipelineTests(unittest.TestCase):
             data = read_json(ast)
             self.assertEqual((data["schema"], data["version"], data["producer"]), (AST_SCHEMA, AST_VERSION, PRODUCER))
 
-            for old_version in (1, 2, 3, 4, 5, 6):
+            for old_version in (1, 2, 3, 4, 5, 6, 7):
                 old = root / f"old-v{old_version}.ast.json"
                 old.write_text(
                     json.dumps(
@@ -937,7 +937,7 @@ class SignalPipelineTests(unittest.TestCase):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
                     self.assertEqual(model_main([str(old), "-o", str(root / "no.json")]), 2)
-                self.assertIn("version=7", stderr.getvalue())
+                self.assertIn("version=8", stderr.getvalue())
 
                 old_snapshot = root / f"old-v{old_version}.snapshot.json"
                 old_snapshot.write_text(
@@ -999,7 +999,7 @@ class SignalPipelineTests(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn("producer='tools2'", stderr.getvalue())
 
-    def test_every_tools2_consumer_rejects_pre_v7_protocols(self) -> None:
+    def test_every_tools2_consumer_rejects_pre_v8_protocols(self) -> None:
         cases = [
             (model_main, AST_SCHEMA, []),
             (derive_main, MODEL_SCHEMA, ["--signal", "Root.Go"]),
@@ -1009,7 +1009,7 @@ class SignalPipelineTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for old_version in (1, 2, 3, 4, 5, 6):
+            for old_version in (1, 2, 3, 4, 5, 6, 7):
                 for index, (entry, schema, extra) in enumerate(cases):
                     source = root / f"input-v{old_version}-{index}.json"
                     source.write_text(
@@ -1024,7 +1024,7 @@ class SignalPipelineTests(unittest.TestCase):
                             [str(source), *extra, "-o", str(root / f"out-v{old_version}-{index}")]
                         )
                     self.assertEqual(exit_code, 2)
-                    self.assertIn("version=7", stderr.getvalue())
+                    self.assertIn("version=8", stderr.getvalue())
 
     def test_include_is_resolved_and_retains_child_source_span(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1245,7 +1245,7 @@ class SignalPipelineTests(unittest.TestCase):
         self.assertNotIn("pending", {item["outcome"] for item in derivation["signals"]})
         self.assertIn("!! rejected: condition_not_satisfied", text)
 
-    def test_lossy_signal_syntax_is_rejected_by_v7_model(self) -> None:
+    def test_lossy_signal_syntax_is_rejected_by_v8_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             spec = root / "input.spec"
@@ -1714,6 +1714,197 @@ class SignalPipelineTests(unittest.TestCase):
             resumed_data = read_json(resumed)
             self.assertEqual(resumed_data["verdict"], "complete")
             self.assertEqual(resumed_data["signals"][0]["target"], "CpuGroup.cpus[0]")
+
+    def test_dynamic_occurrence_generation_parent_and_stale_reference_are_enforced(self) -> None:
+        source = """
+            type TrapResourceType: ResourceObject {
+                initial_state: State::Online;
+                state State::Online { }
+            }
+            type TrapFlowRef {
+                processes {
+                    Action::Bind(flow: TrapFlowType) {
+                        state_effect: StateEffect::None;
+                        ensures {
+                            trap_flow_ref_targets(self, flow);
+                            trap_flow_ref_generation_valid(self);
+                        }
+                    }
+                    Action::Inspect {
+                        state_effect: StateEffect::None;
+                        depends_on { trap_flow_ref_generation_valid(self); }
+                    }
+                }
+            }
+            type TrapFlowType: FlowObject {
+                parent: TrapResourceType;
+                initial_state: State::Base;
+                processes {
+                    Action::Bind(parent_trap: TrapResourceType, root_ref: TrapFlowRef) {
+                        state_effect: StateEffect::None;
+                        structural_binding: true;
+                        ensures {
+                            trap_flow_parent_is(self, parent_trap);
+                            trap_flow_ref_targets(root_ref, self);
+                            trap_flow_ref_generation_valid(root_ref);
+                        }
+                    }
+                }
+                state State::Base {
+                    transitions {
+                        on Transition::Preset -> State::Prepared {
+                            depends_on {
+                                trap_flow_occurrence_fresh(self);
+                                trap_flow_generation_nonzero(self);
+                            }
+                        }
+                    }
+                }
+                state State::Prepared {
+                    transitions { on Transition::Setup -> State::Ready { } }
+                }
+                state State::Ready {
+                    transitions { on Transition::Enable -> State::Online { } }
+                }
+                state State::Online {
+                    transitions { on Transition::Disable -> State::Offline { } }
+                }
+                state State::Offline {
+                    transitions { on Transition::Cleanup -> State::Destroyed { } }
+                }
+                state State::Destroyed { }
+            }
+            type HarnessType: FlowObject {
+                associations { mutable saved_ref: TrapFlowRef; }
+                initial_state: State::Base;
+                state State::Base {
+                    transitions {
+                        on Transition::Create -> State::Ready {
+                            drives {
+                                declare root_flow of TrapFlowType;
+                                declare root_ref of TrapFlowRef;
+                                root_flow.Action::Bind(
+                                    parent_trap: TrapResource,
+                                    root_ref: root_ref
+                                );
+                                root_ref.Action::Bind(flow: root_flow);
+                                root_flow.Transition::Preset;
+                                root_flow.Transition::Setup;
+                                root_flow.Transition::Enable;
+                                root_flow.Transition::Disable;
+                                root_flow.Transition::Cleanup;
+                            }
+                            updates { self.saved_ref = root_ref; }
+                            ensures {
+                                task_breakpoint_flow_ref_generation_valid(self);
+                            }
+                        }
+                    }
+                }
+                state State::Ready {
+                    actions {
+                        on Action::InspectAggregate {
+                            depends_on {
+                                task_breakpoint_flow_ref_generation_valid(self);
+                            }
+                        }
+                        on Action::InspectStale {
+                            drives { self.saved_ref.Action::Inspect; }
+                        }
+                    }
+                }
+            }
+            object TrapResource: TrapResourceType { }
+            object Harness: HarnessType { }
+
+            predicate trap_flow_ref_targets<R: TrapFlowRef, F: TrapFlowType>(reference: R, flow: F) -> bool;
+            predicate trap_flow_ref_generation_valid<R: TrapFlowRef>(reference: R) -> bool;
+            predicate trap_flow_parent_is<F: TrapFlowType, T: TrapResourceType>(flow: F, trap: T) -> bool;
+            predicate trap_flow_occurrence_fresh<F: TrapFlowType>(flow: F) -> bool;
+            predicate trap_flow_generation_nonzero<F: TrapFlowType>(flow: F) -> bool;
+            predicate task_breakpoint_flow_ref_generation_valid<T: HarnessType>(task: T) -> bool;
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "occurrence.spec"
+            ast = root / "ast.json"
+            model = root / "model.json"
+            created = root / "created.json"
+            scenario = root / "created.snapshot.json"
+            aggregate = root / "aggregate.json"
+            stale = root / "stale.json"
+            spec.write_text(textwrap.dedent(source), encoding="utf-8")
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
+            self.assertEqual(
+                derive_main(
+                    [
+                        str(model), "--signal", "Harness.Create", "--max-depth", "all",
+                        "--max-breadth", "all", "-o", str(created),
+                    ]
+                ),
+                0,
+            )
+            data = read_json(created)
+            self.assertEqual(data["verdict"], "complete", data["failure"])
+            declared = {
+                event["alias"]: event["identity"]
+                for event in data["events"]
+                if event["kind"] == "dynamic_declared"
+            }
+            flow = declared["root_flow"]
+            reference = declared["root_ref"]
+            stable = data["last_stable_snapshot"]
+            self.assertGreater(stable["instances"][flow]["generation"], 0)
+            self.assertEqual(stable["instances"][flow]["parent"], "TrapResource")
+            self.assertEqual(stable["instances"][flow]["bound_parent"], "TrapResource")
+            self.assertFalse(stable["instances"][flow]["alive"])
+            self.assertEqual(stable["instances"][reference]["target"], flow)
+            self.assertEqual(
+                stable["instances"][reference]["target_generation"],
+                stable["instances"][flow]["generation"],
+            )
+            model_data = read_json(model)
+            scenario.write_text(
+                json.dumps(
+                    {
+                        "schema": SNAPSHOT_SCHEMA,
+                        "version": SNAPSHOT_VERSION,
+                        "producer": PRODUCER,
+                        "source": str(spec),
+                        "model_fingerprint": model_data["model_fingerprint"],
+                        "snapshot": stable,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                derive_main(
+                    [
+                        str(model), "--signal", "Harness.InspectAggregate",
+                        "--scenario", str(scenario), "-o", str(aggregate),
+                    ]
+                ),
+                0,
+            )
+            aggregate_data = read_json(aggregate)
+            self.assertEqual(aggregate_data["verdict"], "complete", aggregate_data["signals"])
+            self.assertEqual(
+                derive_main(
+                    [
+                        str(model), "--signal", "Harness.InspectStale",
+                        "--scenario", str(scenario), "-o", str(stale),
+                    ]
+                ),
+                0,
+            )
+            stale_data = read_json(stale)
+            self.assertEqual(stale_data["verdict"], "failed", stale_data["signals"])
+            self.assertEqual(stale_data["signals"][1]["outcome"], "rejected")
+            self.assertIn(
+                "trap_flow_ref_generation_valid",
+                stale_data["signals"][1]["reason"],
+            )
 
     def test_indexed_owned_rejects_bad_publish_and_rolls_back_atomically(self) -> None:
         prefix = """
@@ -2531,7 +2722,7 @@ class SignalPipelineTests(unittest.TestCase):
             unreached_check = read_json(root / "work-2" / "check.json")
             self.assertIn("until_signal_not_reached", unreached_check["reasons"][0])
 
-    def test_reached_snapshot_is_v7_with_boundary_provenance_and_resumes(self) -> None:
+    def test_reached_snapshot_is_v8_with_boundary_provenance_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / "work"
@@ -3243,11 +3434,17 @@ class SignalPipelineTests(unittest.TestCase):
                 item
                 for item in resumed_data["signals"]
                 if (item["source"], item["target"], item["name"])
-                == ("BootInitFlow", "InterruptStream", "Preset")
+                == ("BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Preset")
             )
             interrupt_facts = set(interrupt_preset["after_snapshot"]["facts"])
-            self.assertIn("assert:BootCpuRegisters.sie == 0", interrupt_facts)
-            self.assertIn("assert:BootCpuRegisters.sip == 0", interrupt_facts)
+            self.assertIn(
+                "interrupt_class_gates_closed(CpuGroup.cpus[0].trap.interrupt)",
+                interrupt_facts,
+            )
+            self.assertIn(
+                "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
+                interrupt_facts,
+            )
             self.assertIn("interrupt_concurrency_closed", interrupt_facts)
 
             bypass_work = root / "kernel-bypass-lower-flow"
@@ -3680,19 +3877,19 @@ class SignalPipelineTests(unittest.TestCase):
                 (17, "Kernel", "Kernel", "AcceptEnable", "drives", 16, "Action", "Ready", "Ready", "completed"),
                 (18, "Kernel", "BootInitFlow", "AssignCpuRef", "drives", 16, "Action", "Base", "Base", "completed"),
                 (19, "Kernel", "BootInitFlow", "Preset", "drives", 16, "Transition", "Base", "Prepared", "completed"),
-                (20, "BootInitFlow", "InterruptStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (20, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
                 (21, "BootInitFlow", "KernelImage", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
                 (22, "BootInitFlow", "KernelImage", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (23, "BootInitFlow", "CpuGroup.cpus[0]", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
-                (24, "BootInitFlow", "BootCpuLocalInterrupt", "Setup", "drives", 19, "Transition", "Base", "Ready", "completed"),
+                (24, "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (25, "BootInitFlow", "BootTaskEntryBinding", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
                 (26, "BootInitFlow", "BootInitStack", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (27, "BootInitFlow", "EventStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (28, "BootInitFlow", "ExceptionStream", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
-                (29, "ExceptionStream", "PageFaultException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
-                (30, "ExceptionStream", "SyscallException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
-                (31, "ExceptionStream", "BreakpointException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
-                (32, "ExceptionStream", "UnexpectedException", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (27, "BootInitFlow", "CpuGroup.cpus[0].trap", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (28, "BootInitFlow", "CpuGroup.cpus[0].trap.exception", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
+                (29, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.page_fault", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (30, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.syscall", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (31, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.breakpoint", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
+                (32, "CpuGroup.cpus[0].trap.exception", "CpuGroup.cpus[0].trap.exception.unexpected", "Preset", "drives", 28, "Transition", "Base", "Prepared", "completed"),
                 (33, "BootInitFlow", "Vm", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
                 (34, "Vm", "TrampolineVm", "Setup", "drives", 33, "Transition", "Base", "Ready", "completed"),
                 (35, "Vm", "EarlyVm", "Preset", "drives", 33, "Transition", "Base", "Prepared", "completed"),
@@ -3705,7 +3902,7 @@ class SignalPipelineTests(unittest.TestCase):
                 (42, "Vm", "EarlyVm", "Enable", "drives", 40, "Transition", "Ready", "Online", "completed"),
                 (43, "Vm", "TrampolineVm", "Cleanup", "drives", 40, "Transition", "Online", "Destroyed", "completed"),
                 (44, "Vm", "KernelImage", "Enable", "drives", 40, "Transition", "Ready", "Online", "completed"),
-                (45, "BootInitFlow", "EventStream", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
+                (45, "BootInitFlow", "CpuGroup.cpus[0].trap", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (46, "BootInitFlow", "BootTaskEntryBinding", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (47, "BootInitFlow", "BootInitStack", "Setup", "drives", 19, "Transition", "Prepared", "Ready", "completed"),
                 (48, "BootInitFlow", "Soc", "Preset", "drives", 19, "Transition", "Base", "Prepared", "completed"),
@@ -3800,23 +3997,30 @@ class SignalPipelineTests(unittest.TestCase):
                 {
                     name: states[name]
                     for name in (
-                        "Kernel", "BootInitFlow", "InterruptStream", "KernelImage",
-                        "CpuGroup.cpus[0]", "BootCpuLocalInterrupt",
+                        "Kernel", "BootInitFlow", "CpuGroup.cpus[0].trap.interrupt", "KernelImage",
+                        "CpuGroup.cpus[0]",
                         "CpuGroup", "BootTaskEntryBinding",
-                        "BootInitStack", "EventStream", "ExceptionStream", "Vm",
+                        "BootInitStack", "CpuGroup.cpus[0].trap", "CpuGroup.cpus[0].trap.exception", "Vm",
                         "TrampolineVm", "EarlyVm", "RawDtb", "FixMap", "Soc",
+                        "CpuGroup.cpus[0].trap.exception.page_fault",
+                        "CpuGroup.cpus[0].trap.exception.syscall",
+                        "CpuGroup.cpus[0].trap.exception.breakpoint",
+                        "CpuGroup.cpus[0].trap.exception.unexpected",
                     )
                 },
                 {
                     "Kernel": "Ready", "BootInitFlow": "Prepared",
-                    "InterruptStream": "Prepared", "KernelImage": "Online",
+                    "CpuGroup.cpus[0].trap.interrupt": "Ready", "KernelImage": "Online",
                     "CpuGroup.cpus[0]": "Ready",
-                    "BootCpuLocalInterrupt": "Ready",
                     "CpuGroup": "Prepared", "BootTaskEntryBinding": "Ready",
-                    "BootInitStack": "Ready", "EventStream": "Ready",
-                    "ExceptionStream": "Prepared", "Vm": "Ready",
+                    "BootInitStack": "Ready", "CpuGroup.cpus[0].trap": "Ready",
+                    "CpuGroup.cpus[0].trap.exception": "Prepared", "Vm": "Ready",
                     "TrampolineVm": "Destroyed", "EarlyVm": "Online",
                     "RawDtb": "Ready", "FixMap": "Ready", "Soc": "Prepared",
+                    "CpuGroup.cpus[0].trap.exception.page_fault": "Prepared",
+                    "CpuGroup.cpus[0].trap.exception.syscall": "Prepared",
+                    "CpuGroup.cpus[0].trap.exception.breakpoint": "Prepared",
+                    "CpuGroup.cpus[0].trap.exception.unexpected": "Prepared",
                 },
             )
             self.assertNotIn("BootCurrentCPU", states)
@@ -3826,18 +4030,46 @@ class SignalPipelineTests(unittest.TestCase):
                 boundary["snapshot"]["instances"]["CpuGroup.cpus[0]"]["parent"],
                 "CpuGroup",
             )
+            resident_parents = {
+                name: boundary["snapshot"]["instances"][name]["parent"]
+                for name in (
+                    "CpuGroup.cpus[0].trap",
+                    "CpuGroup.cpus[0].trap.interrupt",
+                    "CpuGroup.cpus[0].trap.exception",
+                    "CpuGroup.cpus[0].trap.exception.page_fault",
+                    "CpuGroup.cpus[0].trap.exception.syscall",
+                    "CpuGroup.cpus[0].trap.exception.breakpoint",
+                    "CpuGroup.cpus[0].trap.exception.unexpected",
+                )
+            }
+            self.assertEqual(
+                resident_parents,
+                {
+                    "CpuGroup.cpus[0].trap": "CpuGroup.cpus[0]",
+                    "CpuGroup.cpus[0].trap.interrupt": "CpuGroup.cpus[0].trap",
+                    "CpuGroup.cpus[0].trap.exception": "CpuGroup.cpus[0].trap",
+                    "CpuGroup.cpus[0].trap.exception.page_fault":
+                        "CpuGroup.cpus[0].trap.exception",
+                    "CpuGroup.cpus[0].trap.exception.syscall":
+                        "CpuGroup.cpus[0].trap.exception",
+                    "CpuGroup.cpus[0].trap.exception.breakpoint":
+                        "CpuGroup.cpus[0].trap.exception",
+                    "CpuGroup.cpus[0].trap.exception.unexpected":
+                        "CpuGroup.cpus[0].trap.exception",
+                },
+            )
             facts = set(boundary["snapshot"]["facts"])
             for fact in (
                 "kernel_enable_accepted(Kernel)",
                 "task_flow_started(BootInitFlow)",
                 "interrupt_concurrency_closed",
-                "assert:BootCpuRegisters.sie == 0",
-                "assert:BootCpuRegisters.sip == 0",
+                "interrupt_class_gates_closed(CpuGroup.cpus[0].trap.interrupt)",
+                "interrupt_pending_cleared(CpuGroup.cpus[0].trap.interrupt)",
                 "assert:BootCpuRegisters.gp == phys_addr(Lds.global_pointer)",
                 "assert:BootCpuRegisters.tp == phys_addr(BootTask.storage)",
                 "assert:BootCpuRegisters.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
                 "assert:BootCpuRegisters.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)",
-                "assert:BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)",
+                "trap_formal_entry_ready(CpuGroup.cpus[0].trap)",
                 "early_vm_translation_sync_complete(EarlyVm)",
                 "valid_dtb_header(RawDtb.header)",
                 "fixmap_slot_mapping_ready(EarlyVm.pg_dir,FixMap.fdt_slot)",
@@ -3900,14 +4132,14 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(snapshot.read_bytes(), BOOT_INIT_SETUP_SCENARIO.read_bytes())
             self.assertEqual(
                 hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-                "4891f5a3c2e39e87ec1a91c50208405ca237325fb434a6d49cccd0810c6b87f9",
+                "e5c1de778611b24ff8b99b0c4598f0253b63f0772d66fb2487aa4793de9916d0",
             )
             self.assertEqual(
                 {
                     derivation["model_fingerprint"], model["model_fingerprint"],
                     view["model_fingerprint"], saved["model_fingerprint"],
                 },
-                {"sha256:e105fea5c826b259513194dec4916e1fb61ef37016ed6e66d31ce0fe1b34b6e6"},
+                {"sha256:1f32e8114fb887125633bdc5278b3ab58556c0f1a6f192a27c6915c51c2063d3"},
             )
             with mock.patch.dict(os.environ, {"VERBOSE": "0"}):
                 compact_text = render_text(view)

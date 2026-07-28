@@ -1,8 +1,8 @@
 use super::{
     config::Config,
-    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     earlycon,
+    interrupt_type::InterruptType,
     irq_time::{HrtimerCore, RiscvTimerProvider, Timekeeper},
     mm_core::{KmallocCaches, PageAllocator, SlubSubsystem},
     printk,
@@ -300,14 +300,11 @@ impl SchedClock {
         self.setup_local_irq_disable_enable_used
     }
 
-    pub fn setup_local_irq_guard_used_by(
-        &self,
-        boot_cpu_local_interrupt: &LocalInterruptControl,
-    ) -> bool {
+    pub fn setup_local_irq_guard_used_by(&self, boot_cpu_local_interrupt: &InterruptType) -> bool {
         self.lifecycle.state() == State::Ready
             && self.setup_local_irq_disable_enable_used
             && self.setup_local_irq_guard_bound_to_boot_cpu
-            && boot_cpu_local_interrupt.state() == State::Ready
+            && boot_cpu_local_interrupt.local_state() == State::Ready
             && boot_cpu_local_interrupt.enabled()
     }
 
@@ -317,7 +314,7 @@ impl SchedClock {
         timekeeper: &Timekeeper,
         timer_provider: &RiscvTimerProvider,
         static_branch: &StaticBranch,
-        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || hrtimer_core.state() != State::Ready
@@ -325,7 +322,7 @@ impl SchedClock {
             || timer_provider.state() != State::Ready
             || timer_provider.timebase_hz() == 0
             || static_branch.state() != State::Ready
-            || boot_cpu_local_interrupt.state() != State::Ready
+            || boot_cpu_local_interrupt.local_state() != State::Ready
             || !boot_cpu_local_interrupt.enabled()
         {
             return failed_condition(

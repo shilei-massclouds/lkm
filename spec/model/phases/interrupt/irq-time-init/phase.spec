@@ -387,7 +387,7 @@ object IrqChipInitTable: InterruptObject {
  *
  * SupervisorExternalIrq 必须能作为 root entry 转交给 PLIC chained
  * handler，不能在 root INTC 内直接知道 UART 等叶子设备。它的输入
- * gate 独立于 sstatus.SIE 总开关：只有 root INTC/InterruptStream 的
+ * gate 独立于 sstatus.SIE 总开关：只有 root INTC/CurrentCPU.trap.interrupt 的
  * supervisor external enable gate 打开后，PLIC 输出才可能进入 CPU。
  */
 object RiscvIntc: InterruptObject {
@@ -498,7 +498,7 @@ object IrqDispatchTree: InterruptObject {
                     Plic.state == State::Ready;
                     PlicIrqDomain.state == State::Ready;
                     IrqHandlerRegistry.state == State::Ready;
-                    InterruptStream.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
@@ -2310,7 +2310,7 @@ object IrqTimeInitPhase: PhaseObject {
                     Workqueue.state == State::Prepared;
                     Softirq.state == State::Prepared;
                     Randomness.state == State::Prepared;
-                    InterruptStream.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                 }
 
                 drives {
@@ -2345,7 +2345,7 @@ object IrqTimeInitPhase: PhaseObject {
 
                 ensures {
                     irq_time_init_ready(IrqTimeInitPhase);
-                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     smp_concurrency_closed();
@@ -2478,8 +2478,8 @@ object IrqTimeInitPhase: PhaseObject {
                     IpiMux.state == State::Ready;
                     SbiIpi.state == State::Ready;
                     SmpCallFunction.state == State::Ready;
-                    InterruptStream.state == State::Ready;
-                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     smp_concurrency_closed();
@@ -2524,8 +2524,8 @@ object IrqTimeInitPhase: PhaseObject {
             IpiMux.state == State::Ready;
             SbiIpi.state == State::Ready;
             SmpCallFunction.state == State::Ready;
-            InterruptStream.state == State::Ready;
-            cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+            CurrentCPU.trap.interrupt.state == State::Ready;
+            cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
             interrupt_concurrency_closed();
             task_concurrency_closed();
             smp_concurrency_closed();
@@ -2564,8 +2564,8 @@ object IrqTimeInitPhase: PhaseObject {
                     IpiMux.state == State::Ready;
                     SbiIpi.state == State::Ready;
                     SmpCallFunction.state == State::Ready;
-                    InterruptStream.state == State::Ready;
-                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                    CurrentCPU.trap.interrupt.state == State::Ready;
+                    cpu_local_interrupts_disabled(CurrentCPU.trap.interrupt);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     smp_concurrency_closed();

@@ -205,18 +205,18 @@ context ZonelistUpdateSeqWriteContext: Context {
      */
     guard {
         entered_by {
-            ZonelistUpdateSeq.Transition::WriteSeqLockIrqSave(BootCpuLocalInterrupt);
+            ZonelistUpdateSeq.Transition::WriteSeqLockIrqSave(CurrentCPU.trap.interrupt);
         }
 
         exited_by {
-            ZonelistUpdateSeq.Transition::WriteSeqUnlockIrqRestore(BootCpuLocalInterrupt);
+            ZonelistUpdateSeq.Transition::WriteSeqUnlockIrqRestore(CurrentCPU.trap.interrupt);
         }
     }
 
     obj_refs {
         PageAllocator;
         ZonelistUpdateSeq;
-        BootCpuLocalInterrupt;
+        CurrentCPU.trap.interrupt;
         ZonelistSet;
     }
 }
@@ -288,7 +288,7 @@ object PageAllocator: PageAllocatorType {
                     PageMetadataMap.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
-                    BootCpuLocalInterrupt.state == State::Ready;
+                    CurrentCPU.trap.interrupt.state == State::Ready;
                 }
 
                 within ZonelistPrintkDeferredContext {
@@ -306,7 +306,7 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_zonelist_update_seq_guard_used(
                         PageAllocator,
                         ZonelistUpdateSeq,
-                        BootCpuLocalInterrupt
+                        CurrentCPU.trap.interrupt
                     );
                     page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
@@ -335,7 +335,7 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelist_update_seq_guard_used(
                 PageAllocator,
                 ZonelistUpdateSeq,
-                BootCpuLocalInterrupt
+                CurrentCPU.trap.interrupt
             );
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
@@ -411,7 +411,7 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelist_update_seq_guard_used(
                 PageAllocator,
                 ZonelistUpdateSeq,
-                BootCpuLocalInterrupt
+                CurrentCPU.trap.interrupt
             );
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
@@ -1741,7 +1741,7 @@ object MmCoreInitPhase: PhaseObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     CorePreparePhase.state == State::Online;
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
@@ -1854,7 +1854,7 @@ object MmCoreInitPhase: PhaseObject {
                     task_concurrency_closed();
                     context_is(SystemExclusive);
                     CorePreparePhase.state == State::Online;
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                     MemoryTopology.state == State::Ready;
                     MemoryNode.state == State::Ready;
                     ZoneSet.state == State::Ready;
@@ -1898,7 +1898,7 @@ object MmCoreInitPhase: PhaseObject {
             task_concurrency_closed();
             context_is(SystemExclusive);
             CorePreparePhase.state == State::Online;
-            ExceptionStream.state == State::Ready;
+            CurrentCPU.trap.exception.state == State::Ready;
             MemoryTopology.state == State::Ready;
             MemoryNode.state == State::Ready;
             ZoneSet.state == State::Ready;
@@ -1936,7 +1936,7 @@ object MmCoreInitPhase: PhaseObject {
                     task_concurrency_closed();
                     context_is(SystemExclusive);
                     CorePreparePhase.state == State::Online;
-                    ExceptionStream.state == State::Ready;
+                    CurrentCPU.trap.exception.state == State::Ready;
                     MemoryTopology.state == State::Ready;
                     MemoryNode.state == State::Ready;
                     ZoneSet.state == State::Ready;

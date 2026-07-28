@@ -1,7 +1,9 @@
 use super::{
     boot_args::BootArgs,
-    cpu_control::LocalInterruptControl,
+    exception_type::ExceptionType,
+    interrupt_type::InterruptType,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    trap_type::TrapType,
 };
 use crate::checkpoint::Checkpoint;
 
@@ -89,7 +91,7 @@ pub struct Cpu {
     present: bool,
     active: bool,
     online: bool,
-    local_interrupt: LocalInterruptControl,
+    trap: TrapType,
 }
 
 impl Cpu {
@@ -103,7 +105,7 @@ impl Cpu {
             present: false,
             active: false,
             online: false,
-            local_interrupt: LocalInterruptControl::new(),
+            trap: TrapType::new(),
         }
     }
 
@@ -117,7 +119,7 @@ impl Cpu {
             present: true,
             active: false,
             online: false,
-            local_interrupt: LocalInterruptControl::new(),
+            trap: TrapType::new(),
         }
     }
 
@@ -233,12 +235,37 @@ impl Cpu {
         self.lifecycle.state()
     }
 
-    pub const fn local_interrupt(&self) -> &LocalInterruptControl {
-        &self.local_interrupt
+    pub const fn trap(&self) -> &TrapType {
+        &self.trap
     }
 
-    pub fn local_interrupt_mut(&mut self) -> &mut LocalInterruptControl {
-        &mut self.local_interrupt
+    pub fn trap_mut(&mut self) -> &mut TrapType {
+        &mut self.trap
+    }
+
+    pub const fn interrupt(&self) -> &InterruptType {
+        self.trap.interrupt()
+    }
+
+    pub fn interrupt_mut(&mut self) -> &mut InterruptType {
+        self.trap.interrupt_mut()
+    }
+
+    pub const fn exception(&self) -> &ExceptionType {
+        self.trap.exception()
+    }
+
+    #[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
+    pub fn exception_mut(&mut self) -> &mut ExceptionType {
+        self.trap.exception_mut()
+    }
+
+    pub const fn local_interrupt(&self) -> &InterruptType {
+        self.interrupt()
+    }
+
+    pub fn local_interrupt_mut(&mut self) -> &mut InterruptType {
+        self.interrupt_mut()
     }
 }
 

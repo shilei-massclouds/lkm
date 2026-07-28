@@ -1,12 +1,13 @@
 use super::{
     completion::Completion,
     config::Config,
-    cpu_control::{LocalInterruptControl, RawSpinLock},
+    cpu_control::RawSpinLock,
     cpu_group::CpuGroup,
     finalize::{
         AsyncFullSyncDeferred, InitMemoryCleanupDeferred, KernelMappingProtectionDeferred,
         PtiFinalizeTrimmed,
     },
+    interrupt_type::InterruptType,
     mm_core::{
         GfpFlags, PageAllocator, PageMetadataMap, PageProtection, PageTableCaches,
         VmallocAllocator, VmapAreaFlags,
@@ -1275,7 +1276,7 @@ impl KthreaddReadyGate {
         system_state: &SystemState,
         kthreadd_task: &KthreaddTask,
         wait_lock: &mut RawSpinLock,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
@@ -1283,7 +1284,7 @@ impl KthreaddReadyGate {
             || system_state.value() != SystemStateValue::Scheduling
             || kthreadd_task.state() != State::Online
             || wait_lock.state() != State::Ready
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
             || scheduler.boot_idle_preemption().state() != State::Ready
         {
             return failed_condition(

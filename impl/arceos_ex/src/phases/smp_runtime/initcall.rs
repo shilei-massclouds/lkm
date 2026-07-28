@@ -188,12 +188,16 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         "DevFs",
         "devfs.setup",
     )?;
+    let boot_cpu_interrupt = ctx
+        .cpu_group
+        .boot_cpu_interrupt_mut()
+        .expect("boot CPU interrupt resource must exist after CPU discovery");
     with_initcall_diagnostic(
         ctx.uart_external_irq_enable.setup(
             &ctx.plic,
             &mut ctx.plic_irq_domain,
             &ctx.irq_handler_registry,
-            &mut ctx.interrupt_stream,
+            boot_cpu_interrupt,
         ),
         "preset_objects.uart_external_irq_enable.setup",
         "UartExternalIrqEnable",

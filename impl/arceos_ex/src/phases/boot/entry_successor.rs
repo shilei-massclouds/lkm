@@ -45,7 +45,7 @@ fn preset_dependencies_ready(ctx: &Context) -> bool {
         && ctx.vm.entry_prelude_ready()
         && ctx.boot_task.state() == State::OnCpu
         && ctx.init_stack.state() == State::Ready
-        && ctx.interrupt_stream.state() == State::Prepared
+        && ctx.boot_cpu_interrupt().state() == State::Ready
         && ctx.raw_dtb.state() == State::Ready
         && ctx.fix_map.state() == State::Ready
         && ctx.kernel_image.state() == State::Online
@@ -70,15 +70,6 @@ fn preset_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.platform_cpu_info,
         &mut ctx.physical_memory,
     )?;
-    let Some(local_interrupt) = ctx.cpu_group.boot_cpu_local_interrupt_mut() else {
-        return failed_condition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Base,
-            State::Prepared,
-        );
-    };
-    ctx.interrupt_stream.setup(local_interrupt)?;
     if !ctx.platform_cpu_info.contains(boot_hartid) {
         return failed_condition(
             LifecycleEvent::Enable,
@@ -198,8 +189,8 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
             .boot_cpu_local_interrupt()
             .map(|control| control.state() == State::Ready && control.disabled())
             .unwrap_or(false)
-        && ctx.interrupt_stream.state() == State::Ready
-        && ctx.interrupt_stream.early_boot_irqs_disabled()
+        && ctx.boot_cpu_interrupt().state() == State::Ready
+        && ctx.boot_cpu_interrupt().early_boot_irqs_disabled()
         && ctx.vm.state() == State::Online
         && ctx.vm.entry_successor_ready()
         && printk::is_prepared()

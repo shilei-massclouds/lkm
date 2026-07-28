@@ -8,7 +8,7 @@ model 来源为 `spec/model/phases/interrupt/process-prepare/phase.spec`，实�
 
 | Transition | depends / drives / ensures | checkpoint 与 continuation |
 | --- | --- | --- |
-| Preset: Base -> Prepared | 在 `SingleTaskInterruptStreamContext` 下精确检查 Base、IrqOpenPrepare Online 及对象依赖；按 model 顺序执行现有 PID/task/cred/VMA/namespace/key/security/VFS/trimmed 对象动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Preset: Base -> Prepared | 在 `SingleTaskInterruptContext` 下精确检查 Base、IrqOpenPrepare Online 及对象依赖；按 model 顺序执行现有 PID/task/cred/VMA/namespace/key/security/VFS/trimmed 对象动作 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
 | Setup: Prepared -> Ready | 精确检查 Prepared 和完整 `process_prepare_phase_ready()` | 提交后发出 Ready，调用 Enable |
 | Enable: Ready -> Online | 精确检查 Ready，重新确认未创建 PID 1/kthreadd 且 task/SMP 门关闭 | 提交后发出 Online，返回 `interrupt::preset_after_process_prepare()` |
 

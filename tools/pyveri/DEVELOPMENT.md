@@ -245,7 +245,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transi
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`Config`、`PhysicalMemory`。
-- 入口步骤对象来自 `BootInitFlow.Preset` 直接驱动出的状态推进结果，例如 `BootTaskEntryBinding`、`InterruptStream`、`Vm`、`BootTask`、`BootInitStack`、`EventStream` 等。
+- 入口步骤对象来自 `BootInitFlow.Preset` 直接驱动出的状态推进结果，例如 `BootTaskEntryBinding`、`InterruptType`、`Vm`、`BootTask`、`BootInitStack`、`TrapType` 等。
 - `Computer` 是唯一顶层系统；`Kernel` 承载内核系统阶段树。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -463,8 +463,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 已确认的分类调整：
 
 - `attrs_accessible(self)` 不能只按谓词名分类，应结合对象来源决定证明来源，例如配置源、链接脚本、静态对象布局、FDT/平台描述或启动 ABI。
-- `context_is(SystemExclusive)` 表达当前启动上下文。`SystemExclusive` 本身不能只是标签，当前用两条显式支撑事实表达其可验证语义：OpenSBI.Enable 的 ordered boot/primary-hart 交接建立 `task_concurrency_closed()`；Kernel.Enable 接受后，`BootInitFlow.Preset` 首先驱动 `InterruptStream.Preset` 清零 `sie/sip` 并建立 `interrupt_concurrency_closed()`。两条事实齐备后 BootInitFlow 才建立 `context_is(SystemExclusive)`，后续阶段只消费并维持它们。
-- `interrupt_concurrency_closed()` 不再由固件入口状态或 `primary_hart_sie_clear_at_kernel_entry()` 推出。Linux RISC-V boot contract 没有把 `sie/sip == 0` 列为固件交接条件，而 Linux `_start_kernel` 自己执行 `csrw CSR_IE, zero` 与 `csrw CSR_IP, zero`。因此 `.spec` 中 `InterruptStream.Preset` 的 `ensures` 是该事实的首次证明边界；OpenSBI.Online snapshot 不得提前含有它。
+- `context_is(SystemExclusive)` 表达当前启动上下文。`SystemExclusive` 本身不能只是标签，当前用两条显式支撑事实表达其可验证语义：OpenSBI.Enable 的 ordered boot/primary-hart 交接建立 `task_concurrency_closed()`；Kernel.Enable 接受后，`BootInitFlow.Preset` 首先驱动 `InterruptType.Preset` 清零 `sie/sip` 并建立 `interrupt_concurrency_closed()`。两条事实齐备后 BootInitFlow 才建立 `context_is(SystemExclusive)`，后续阶段只消费并维持它们。
+- `interrupt_concurrency_closed()` 不再由固件入口状态或 `primary_hart_sie_clear_at_kernel_entry()` 推出。Linux RISC-V boot contract 没有把 `sie/sip == 0` 列为固件交接条件，而 Linux `_start_kernel` 自己执行 `csrw CSR_IE, zero` 与 `csrw CSR_IP, zero`。因此 `.spec` 中 `InterruptType.Preset` 的 `ensures` 是该事实的首次证明边界；OpenSBI.Online snapshot 不得提前含有它。
 - `task_concurrency_closed()` 的来源不只是当前 `.spec` 尚未建模其它任务，而是 RISC-V Linux ordered booting 的上一级交接语义。已核对本地 Linux 源码 `../linux-6.12`：`Documentation/arch/riscv/boot.rst` 说明 ordered booting 下固件只释放一个 hart 执行初始化，随后由该 hart 通过 SBI HSM 启动其它 harts；`arch/riscv/kernel/cpu_ops.c` 在检测到 `SBI_EXT_HSM` 后选择 `cpu_ops_sbi`；`arch/riscv/kernel/cpu_ops_sbi.c` 的 `sbi_cpu_start()` 通过 `SBI_EXT_HSM_HART_START` 启动 secondary hart；`arch/riscv/kernel/smpboot.c` 的 `__cpu_up()` 后续才调用 `cpu_start`。因此在支持 HSM 的 OpenSBI/ordered booting 路径下，入口前导期开始时只有 boot hart/root task 在运行，其它 hart/任务必须由当前根执行路径后续主动启动。推导中该事实由 `sbi_hsm_available()`、`ordered_booting_enabled()` 和 `primary_hart_only_at_kernel_entry()` 三条前序事实共同推出。`RISCV_BOOT_SPINWAIT` 只作为旧固件兼容路径记录，不作为当前规格默认路径。
 - `valid_hart_id(...)` 已被更具体的 `platform_hart_id_valid(...)` 取代。当前已引入 `PlatformCpuInfo` 准备期对象，表示从 FDT/platform CPU 描述中提取出的有效 hart id 集合；FDT 不决定谁是 boot hart，boot hart 身份仍来自 `BootArgs.boot_hartid`。`platform_hart_id_valid(BootArgs.boot_hartid)` 归入 `platform_cpu_description / fdt_cpu_description`，表示启动 ABI 给出的 boot hart id 属于 FDT 列举的有效 hart 集合；`BootCPU.preset()` 再把该身份收口为 `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`。
 - `BootCPU.hartid` 不是可选值，而是 `BootCPU.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。`CpuGroup` 不再长期保存 `boot_cpu_hartid`，只负责组织 `BootCPU` 和后续 secondary CPU 的引用、logical-id 索引与 possible/present/online 集合视图。
@@ -492,9 +492,9 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `phys_to_virt_transition_completed(...)` 已参数化为 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`，表示第一次地址空间过渡完成应由跳板页表、跳板映射和 `TrampolineVm.Enable` 的 satp 切换共同推出。
 - `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 已由 `KernelImage.Setup` 的transition 后置事实证明，对应 Linux `head.S` 中 `__bss_start` 到 `__bss_stop` 的清零循环；`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
 - `TrampolineVm.pg_dir`、`EarlyVm.pg_dir` 和 `SwapperVm.pg_dir` 各自承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明裸 `page_aligned(...)`；各 VM 阶段在自身 `Setup` 中绑定静态页表存储并声明映射语义。
-- `EventStream.early_event_entry` 和 `EventStream.formal_event_entry` 各自承担事件入口符号的存在性与稳定性约束。`EventStream.Preset` 和 `EventStream.Setup` 在绑定符号后设置对应入口，不再依赖准备期的统一静态对象集合。
+- `TrapType.early_event_entry` 和 `TrapType.formal_event_entry` 各自承担事件入口符号的存在性与稳定性约束。`TrapType.Preset` 和 `TrapType.Setup` 在绑定符号后设置对应入口，不再依赖准备期的统一静态对象集合。
 - `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；`valid_trampoline_map(...)` 已由 `Lds` 链接布局和 `Config` 地址配置共同证明，对应 Linux `setup_vm()` 中从 `_start`、`KERNEL_LINK_ADDR/kernel_map.virt_addr` 和 `PMD_SIZE` 建立 trampoline 映射。
-- `BootTask`、`EventStream`、`TrampolineVm`、`EarlyVm` 和 `SwapperVm` 已分别标注 `source: static::linux_6_12`。`BootTask.storage` 来自 `init/init_task.c` 中的静态 `init_task` 定义，事件入口符号来自 RISC-V 汇编入口符号，页表存储来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实由对象自身 Preset/Setup 后置条件收口，并按 `linux_static_object_binding` 归类。
+- `BootTask`、`TrapType`、`TrampolineVm`、`EarlyVm` 和 `SwapperVm` 已分别标注 `source: static::linux_6_12`。`BootTask.storage` 来自 `init/init_task.c` 中的静态 `init_task` 定义，事件入口符号来自 RISC-V 汇编入口符号，页表存储来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实由对象自身 Preset/Setup 后置条件收口，并按 `linux_static_object_binding` 归类。
 - `PhysicalMemory` 已标注 `source: fdt::memory`。`attrs_accessible(self)`、`valid_phys_range_set(ram)`、`valid_phys_range_set(iomap)` 和 `disjoint(ram, iomap)` 归入 `fdt_memory_layout` 直接证明，表示平台内存布局来自 FDT/platform memory description。具体 DTB 地址/范围落入 RAM 不由该来源自动证明，避免用 DTB 自身的 `/memory` 描述证明 DTB 自身位置；当前由 OpenSBI 固件交接事实与 RawDtb 边界派生共同收口。
 - 剩余泛化 provider 已继续细化：`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`Soc.Preset` 用transition 后置条件证明 `soc_early_platform_ready()`；对应 Linux `head.S` 在进入 `start_kernel` 前调用 `soc_early_init()`，而 `soc.c` 根据 `dtb_early_va` 的 compatible 匹配执行 SoC 早期函数。
 - 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。

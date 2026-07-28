@@ -15,12 +15,14 @@ pub fn run() -> SmokeResult {
     let ctx = context();
 
     if !phases::interrupt::irq_time_init::is_online()
-        || ctx.interrupt_stream.state() != State::Online
+        || ctx.boot_cpu_interrupt().state() != State::Online
         || !ctx
-            .interrupt_stream
+            .boot_cpu_interrupt()
             .supervisor_external_input_gate_defined()
-        || !ctx.interrupt_stream.supervisor_external_input_gate_open()
-        || ctx.boot_cpu_local_interrupt().state() != State::Ready
+        || !ctx
+            .boot_cpu_interrupt()
+            .supervisor_external_input_gate_open()
+        || ctx.boot_cpu_local_interrupt().local_state() != State::Ready
         || !ctx.boot_cpu_local_interrupt().enabled()
         || !csr::supervisor_interrupts_enabled()
     {

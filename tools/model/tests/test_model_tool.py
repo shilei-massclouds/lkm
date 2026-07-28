@@ -663,7 +663,7 @@ class ModelToolTests(unittest.TestCase):
             opensbi = objects["OpenSBI"]
             preset = computer["states"]["Base"]["transitions"]["Preset"]
             enable = computer["states"]["Ready"]["transitions"]["Enable"]
-            event_stream = objects["EventStream"]
+            event_stream = objects["TrapType"]
             event_preset = event_stream["states"]["Base"]["transitions"]["Preset"]
             completion_type = data["model"]["types"]["Completion"]
 
@@ -962,7 +962,7 @@ class ModelToolTests(unittest.TestCase):
                     for entry in boot_init_preset_within["drives"][0]["entries"]
                 ],
                 [
-                    "InterruptStream.Transition::Preset",
+                    "InterruptType.Transition::Preset",
                     "KernelImage.Transition::Preset",
                     "KernelImage.Transition::Setup",
                     "CurrentCPU.Transition::Setup(true)",
@@ -970,11 +970,11 @@ class ModelToolTests(unittest.TestCase):
                     "CurrentCPU.BootCpuCurrentTask.Transition::Setup",
                     "BootTaskEntryBinding.Transition::Preset",
                     "BootInitStack.Transition::Preset",
-                    "EventStream.Transition::Preset",
-                    "ExceptionStream.Transition::Preset",
+                    "TrapType.Transition::Preset",
+                    "ExceptionType.Transition::Preset",
                     "Vm.Transition::Preset",
                     "Vm.Transition::Setup",
-                    "EventStream.Transition::Setup",
+                    "TrapType.Transition::Setup",
                     "BootTaskEntryBinding.Transition::Setup",
                     "BootInitStack.Transition::Setup",
                     "Soc.Transition::Preset",
@@ -1061,7 +1061,7 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertEqual(preset["emits"], [])
             self.assertIn(
-                "BootCpuRegisters.stvec == phys_addr(EventStream.early_event_entry)",
+                "BootCpuRegisters.stvec == phys_addr(TrapType.early_event_entry)",
                 [
                     entry["text"]
                     for block in event_preset["ensures"]
@@ -2186,12 +2186,12 @@ class ModelToolTests(unittest.TestCase):
 
     def test_local_interrupt_guard_context_is_valid(self) -> None:
         source = """
-            type LocalInterruptControl {
+            type InterruptType {
                 processes {
-                    Transition::SaveAndDisable {
+                    Action::SaveAndDisable {
                     }
 
-                    Transition::Restore {
+                    Action::Restore {
                     }
                 }
             }
@@ -2199,21 +2199,21 @@ class ModelToolTests(unittest.TestCase):
             context LocalIrqContext: Context {
                 guard {
                     entered_by {
-                        BootCpuLocalInterrupt.Transition::SaveAndDisable;
+                        BootCpuInterrupt.Action::SaveAndDisable;
                     }
 
                     exited_by {
-                        BootCpuLocalInterrupt.Transition::Restore;
+                        BootCpuInterrupt.Action::Restore;
                     }
                 }
 
                 obj_refs {
-                    BootCpuLocalInterrupt;
+                    BootCpuInterrupt;
                     A;
                 }
             }
 
-            object BootCpuLocalInterrupt: LocalInterruptControl {
+            object BootCpuInterrupt: InterruptType {
                 initial_state: State::Base;
 
                 state State::Base {
@@ -2252,9 +2252,9 @@ class ModelToolTests(unittest.TestCase):
 
     def test_context_guard_rejects_unpaired_enter_boundary(self) -> None:
         source = """
-            type LocalInterruptControl {
+            type InterruptType {
                 processes {
-                    Transition::Enable {
+                    Action::EnableLocal {
                     }
                 }
             }
@@ -2262,16 +2262,16 @@ class ModelToolTests(unittest.TestCase):
             context BadContext: Context {
                 guard {
                     entered_by {
-                        BootCpuLocalInterrupt.Transition::Enable;
+                        BootCpuInterrupt.Action::EnableLocal;
                     }
                 }
 
                 obj_refs {
-                    BootCpuLocalInterrupt;
+                    BootCpuInterrupt;
                 }
             }
 
-            object BootCpuLocalInterrupt: LocalInterruptControl {
+            object BootCpuInterrupt: InterruptType {
                 initial_state: State::Base;
 
                 state State::Base {

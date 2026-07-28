@@ -7,16 +7,16 @@ use crate::{
     },
     context::context,
     objects::{
-        event_stream::{
-            KERNEL_TRAP_OVERFLOW_STACK_SIZE, KERNEL_TRAP_THREAD_SHIFT, TRAP_FRAME_SIZE,
-            TrapEntryOrigin, TrapFrame, USER_TRAP_ENTRY_CONTEXT_SIZE, formal_trap_entry_prelude,
-            kernel_trap_frame_overflows, kernel_trap_overflow_stack_base,
-            kernel_trap_overflow_stack_top,
-        },
         files::{FdRef, FileBackendKind, FileError, OpenFileDescriptionRef},
         process_prepare::TaskCopyUserProcessInputs,
         state::State,
         task::TaskEntry,
+        trap_type::{
+            KERNEL_TRAP_OVERFLOW_STACK_SIZE, KERNEL_TRAP_THREAD_SHIFT, TRAP_FRAME_SIZE,
+            TRAP_STACK_RECORD_SIZE, TrapEntryOrigin, TrapFrame, formal_trap_entry_prelude,
+            kernel_trap_frame_overflows, kernel_trap_overflow_stack_base,
+            kernel_trap_overflow_stack_top,
+        },
         user_boot::{
             ElfObjectRole, USER_BOOT_READ_MAX, USER_CHILD_PID, USER_CLONE_SIGCHLD,
             USER_COMPLETED_CHILD_RECORD_CAPACITY, USER_HEAP_BASE, USER_HEAP_SIZE,
@@ -753,18 +753,20 @@ impl SmokeScenario for UserBootElfScenario {
         );
         exercise_kernel_trap_overflow_contract(assertions);
         exercise_user_stack_growth(assertions, ctx);
-        assertions.assert(
-            "syscall setup",
-            ctx.exception_stream
-                .syscall_setup(&mut ctx.syscall_table)
-                .is_ok(),
-        );
-        assertions.assert(
-            "syscall enable",
-            ctx.exception_stream
-                .syscall_enable(&ctx.syscall_table)
-                .is_ok(),
-        );
+        let syscall_setup_ok = ctx
+            .cpu_group
+            .boot_cpu_exception_mut()
+            .expect("boot CPU exception resource must exist after CPU discovery")
+            .syscall_setup(&mut ctx.syscall_table)
+            .is_ok();
+        assertions.assert("syscall setup", syscall_setup_ok);
+        let syscall_enable_ok = ctx
+            .cpu_group
+            .boot_cpu_exception_mut()
+            .expect("boot CPU exception resource must exist after CPU discovery")
+            .syscall_enable(&ctx.syscall_table)
+            .is_ok();
+        assertions.assert("syscall enable", syscall_enable_ok);
         assertions.assert(
             "dynamic memory syscalls",
             ctx.syscall_table.brk_supported()
@@ -1426,14 +1428,14 @@ impl SmokeScenario for UserBootElfScenario {
                 )
                 .is_ok(),
         );
+        let exception_type = ctx
+            .cpu_group
+            .boot_cpu_exception()
+            .expect("boot CPU exception resource must exist after CPU discovery");
         assertions.assert(
             "KernelInitTask syscall context bind",
             ctx.kernel_init_user_state
-                .bind_syscall_context(
-                    &ctx.user_trap_frame,
-                    &ctx.exception_stream,
-                    &ctx.syscall_table,
-                )
+                .bind_syscall_context(&ctx.user_trap_frame, exception_type, &ctx.syscall_table)
                 .is_ok(),
         );
         assertions.assert("user flow declared", ctx.user_app_flow.declare().is_ok());
@@ -1785,13 +1787,14 @@ fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
     const THREAD_SIZE: usize = 1 << KERNEL_TRAP_THREAD_SHIFT;
 
     let stack_top = ALIGNED_STACK_BASE + THREAD_SIZE;
-    let lowest_legal_sp = ALIGNED_STACK_BASE + TRAP_FRAME_SIZE;
+    let lowest_legal_sp = ALIGNED_STACK_BASE + TRAP_STACK_RECORD_SIZE;
     let first_guard_sp = lowest_legal_sp - 1;
-    let adjacent_half_sp = stack_top + TRAP_FRAME_SIZE;
+    let adjacent_half_sp = stack_top + TRAP_STACK_RECORD_SIZE;
     assertions.assert(
         "kernel trap frame size and overflow stack layout",
         core::mem::size_of::<TrapFrame>() == TRAP_FRAME_SIZE
             && TRAP_FRAME_SIZE == 288
+            && TRAP_STACK_RECORD_SIZE > TRAP_FRAME_SIZE
             && KERNEL_TRAP_THREAD_SHIFT == 14
             && kernel_trap_overflow_stack_base().is_multiple_of(16)
             && kernel_trap_overflow_stack_top()
@@ -1799,36 +1802,54 @@ fn exercise_kernel_trap_overflow_contract(assertions: &mut SmokeAssertions) {
     );
     assertions.assert(
         "kernel trap VMAP overflow classification endpoints",
-        !kernel_trap_frame_overflows(stack_top)
-            && !kernel_trap_frame_overflows(lowest_legal_sp)
-            && kernel_trap_frame_overflows(first_guard_sp)
-            && kernel_trap_frame_overflows(adjacent_half_sp),
+        !kernel_trap_frame_overflows(stack_top, ALIGNED_STACK_BASE, stack_top)
+            && !kernel_trap_frame_overflows(lowest_legal_sp, ALIGNED_STACK_BASE, stack_top)
+            && kernel_trap_frame_overflows(first_guard_sp, ALIGNED_STACK_BASE, stack_top)
+            && kernel_trap_frame_overflows(adjacent_half_sp, ALIGNED_STACK_BASE, stack_top),
     );
 
-    let kernel_entry = formal_trap_entry_prelude(lowest_legal_sp, 0);
-    let kernel_overflow_entry = formal_trap_entry_prelude(first_guard_sp, 0);
-    let user_entry_context = stack_top - USER_TRAP_ENTRY_CONTEXT_SIZE;
-    let user_entry = formal_trap_entry_prelude(first_guard_sp, user_entry_context);
+    let entry_context = 0x9000_0000;
+    let kernel_entry = formal_trap_entry_prelude(
+        TrapEntryOrigin::Kernel,
+        lowest_legal_sp,
+        entry_context,
+        ALIGNED_STACK_BASE,
+        stack_top,
+    );
+    let kernel_overflow_entry = formal_trap_entry_prelude(
+        TrapEntryOrigin::Kernel,
+        first_guard_sp,
+        entry_context,
+        ALIGNED_STACK_BASE,
+        stack_top,
+    );
+    let user_entry = formal_trap_entry_prelude(
+        TrapEntryOrigin::User,
+        first_guard_sp,
+        entry_context,
+        ALIGNED_STACK_BASE,
+        stack_top,
+    );
     assertions.assert(
-        "kernel trap prelude restores sp and sscratch",
+        "kernel trap prelude checks complete record capacity",
         kernel_entry.origin == TrapEntryOrigin::Kernel
             && kernel_entry.stack_pointer == lowest_legal_sp
-            && kernel_entry.scratch == 0
-            && kernel_entry.early_check_performed
+            && kernel_entry.entry_context == entry_context
+            && kernel_entry.capacity_check_performed
             && !kernel_entry.overflow
             && kernel_overflow_entry.origin == TrapEntryOrigin::Kernel
             && kernel_overflow_entry.stack_pointer == first_guard_sp
-            && kernel_overflow_entry.scratch == 0
-            && kernel_overflow_entry.early_check_performed
+            && kernel_overflow_entry.entry_context == entry_context
+            && kernel_overflow_entry.capacity_check_performed
             && kernel_overflow_entry.overflow,
     );
     assertions.assert(
-        "user trap prelude bypasses overflow bit test",
-        kernel_trap_frame_overflows(first_guard_sp)
+        "user trap prelude selects the installed kernel stack and checks capacity",
+        kernel_trap_frame_overflows(first_guard_sp, ALIGNED_STACK_BASE, stack_top)
             && user_entry.origin == TrapEntryOrigin::User
-            && user_entry.stack_pointer == user_entry_context
-            && user_entry.scratch == first_guard_sp
-            && !user_entry.early_check_performed
+            && user_entry.stack_pointer == stack_top
+            && user_entry.entry_context == entry_context
+            && user_entry.capacity_check_performed
             && !user_entry.overflow,
     );
 

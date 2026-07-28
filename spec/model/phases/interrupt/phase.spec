@@ -10,7 +10,7 @@ include "local-irq-enable/main.spec";
 include "irq-open-prepare/main.spec";
 include "process-prepare/main.spec";
 
-context SingleTaskInterruptStreamContext: Context {
+context SingleTaskInterruptContext: Context {
     guard {
         holds {
             cpu_concurrency: single_cpu;

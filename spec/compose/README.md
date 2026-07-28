@@ -15,7 +15,7 @@ identity/cause、失败传播与 event sequence 不变，也不新增或
 
 2026-07-27 Linux RV64 Kernel 启动契约复核：新增的只读 `LinuxRiscv64KernelBootSpec` 仍由既有
 `systems::kernel` metadata 和入口验证承接；物理 PMD 对齐及 `satp=0` 检查使用既有 Config/Lds、CSR
-与 Kernel.Enable 接受边界，`sie/sip` 清零继续位于既有 BootInitFlow/InterruptStream 入口汇编路径。
+与 Kernel.Enable 接受边界，`sie/sip` 清零继续位于既有 BootInitFlow/InterruptType 入口汇编路径。
 不新增 crate、module、facade、feature、公开 API 或组件依赖；`spec/compose/main.spec` 已复核，组合
 语义无需修改。
 

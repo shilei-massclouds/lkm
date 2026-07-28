@@ -11,8 +11,8 @@
 | 6 | EntrySuccessorPhaseStarted | EntrySuccessorPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 7 | EntrySuccessorPhaseReady | EntrySuccessorPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 8 | EntrySuccessorPhaseOnline | EntrySuccessorPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 9 | InterruptStreamPrepared | InterruptStream.Prepared | I | impl/arceos_ex/src/checkpoint/mod.rs |
-| 10 | InterruptStreamReady | InterruptStream.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 9 | InterruptTypePrepared | InterruptType.Prepared | I | impl/arceos_ex/src/checkpoint/mod.rs |
+| 10 | InterruptTypeReady | InterruptType.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 11 | KernelImagePrepared | KernelImage.Prepared | K | impl/arceos_ex/src/checkpoint/mod.rs |
 | 12 | KernelImageReady | KernelImage.Ready | Z | impl/arceos_ex/src/checkpoint/mod.rs |
 | 13 | BootCpuPrepared | BootCPU.Prepared | H | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -21,8 +21,8 @@
 | 16 | BootCpuLocalInterruptReady | BootCpuLocalInterrupt.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 17 | CpuGroupPrepared | CpuGroup.Prepared | G | impl/arceos_ex/src/checkpoint/mod.rs |
 | 18 | InitStackPrepared | InitStack.Prepared | S | impl/arceos_ex/src/checkpoint/mod.rs |
-| 19 | EventStreamPrepared | EventStream.Prepared | V | impl/arceos_ex/src/checkpoint/mod.rs |
-| 20 | ExceptionStreamPrepared | ExceptionStream.Prepared | 9 | impl/arceos_ex/src/checkpoint/mod.rs |
+| 19 | TrapTypePrepared | TrapType.Prepared | V | impl/arceos_ex/src/checkpoint/mod.rs |
+| 20 | ExceptionTypePrepared | ExceptionType.Prepared | 9 | impl/arceos_ex/src/checkpoint/mod.rs |
 | 21 | TrampolineVmReady | TrampolineVm.Ready | Q | impl/arceos_ex/src/checkpoint/mod.rs |
 | 22 | TrampolineVmOnline | TrampolineVm.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 23 | TrampolineVmDestroyed | TrampolineVm.Destroyed | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -36,7 +36,7 @@
 | 31 | VmReady | Vm.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 32 | VmOnline | Vm.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 33 | KernelImageOnline | KernelImage.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 34 | EventStreamReady | EventStream.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 34 | TrapTypeReady | TrapType.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 35 | InitStackReady | InitStack.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 36 | InitStackOnline | InitStack.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 37 | SocPrepared | Soc.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -99,7 +99,7 @@
 | 94 | RandomnessPrepared | Randomness.Prepared | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 95 | PrintkBufferReady | PrintkBuffer.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 96 | ExceptionTableReady | ExceptionTable.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 97 | ExceptionStreamReady | ExceptionStream.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 97 | ExceptionTypeReady | ExceptionType.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 98 | MmCoreInitPhaseStarted | MmCoreInitPhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 99 | MmCoreInitPhaseReady | MmCoreInitPhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 100 | MmCoreInitPhaseOnline | MmCoreInitPhase.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
@@ -204,7 +204,7 @@
 | 199 | SmpCallFunctionReady | SmpCallFunction.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 200 | LocalIrqEnablePhaseStarted | LocalIrqEnablePhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 201 | LocalIrqEnablePhaseReady | LocalIrqEnablePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
-| 202 | InterruptStreamOnline | InterruptStream.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
+| 202 | InterruptTypeOnline | InterruptType.Online | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 203 | IrqOpenPreparePhaseStarted | IrqOpenPreparePhase.Started | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 204 | IrqOpenPreparePhaseReady | IrqOpenPreparePhase.Ready | null | impl/arceos_ex/src/checkpoint/mod.rs |
 | 205 | SlubFlushWorkqueueReady | SlubSubsystem.FlushWorkqueueReady | null | impl/arceos_ex/src/checkpoint/mod.rs |

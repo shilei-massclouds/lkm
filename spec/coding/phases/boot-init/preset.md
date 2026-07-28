@@ -24,9 +24,9 @@ Preset 横跨三个物理实现段，但仍是 BootInitFlow 的一个 model tran
 
 | 段 | model drives 与实现 |
 | --- | --- |
-| `_start` head | `InterruptStream.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；Preset 私有入口动作禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart；建立 `BootTaskEntryBinding` 物理 binding，并静默验证 BootTask OnCpu；adopt init stack |
-| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，并驱动 `EventStream.Preset`、`ExceptionStream.Preset` 和 `Vm.Preset` |
-| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `EventStream.Setup`、`BootTaskEntryBinding.Setup` 虚拟 binding、静默验证 BootTask OnCpu、`BootInitStack.Setup` 和 `Soc.Preset` |
+| `_start` head | `InterruptType.Preset` 清 `sie/sip`；`KernelImage.Preset` 建立 `gp`；Preset 私有入口动作禁用 FPU/vector；`KernelImage.Setup` 清 BSS；adopt boot hart；建立 `BootTaskEntryBinding` 物理 binding，并静默验证 BootTask OnCpu；adopt init stack |
+| `preset_until_vm_switch()` | 读取 Kernel Enable 前已发布的 `CpuGroup.cpus[0]`；通过 BootInitFlow 的 CpuRef 解析 `CurrentCPU.Setup`，并驱动 `TrapType.Preset`、`ExceptionType.Preset` 和 `Vm.Preset` |
+| `after_vm_setup()` | `Vm.Setup` 地址空间 continuation 返回后驱动 `TrapType.Setup`、`BootTaskEntryBinding.Setup` 虚拟 binding、静默验证 BootTask OnCpu、`BootInitStack.Setup` 和 `Soc.Preset` |
 
 `Vm.Setup` 必须在同一个 Preset 内完成 TrampolineVm 到 EarlyVm 的切换，并通过
 `after_vm_setup_continuation()` 回到 BootInitFlow owner。全部 drives 成功后直接检查原入口 Phase

@@ -55,8 +55,10 @@ Task lifecycle 之外必须保存两组正交状态：
   `initial_flow` 并发布 Valid；Continue 校验并消费 Valid context，OnCpu 期间为 Invalid；Suspend 保存
   active Flow context 并再次发布 Valid。
 
-`TaskThreadContext` 固定物理保存 RISC-V `ra/sp/s0..s11`、breakpoint state、经 slot/generation 校验的
-`TaskFlowRef` 以及真实 save/restore 观察计数。`tp` 及由 effective TaskFlow 解析的 CurrentTask/CPU
+`TaskThreadContext` 固定物理保存长期 Task continuation 的核心寄存器集合、breakpoint state、经
+slot/generation 校验的 `TaskFlowRef`、可选且同样校验 generation 的 root `TrapFlowRef`，以及真实
+save/restore 观察计数。root 引用通过活动 child FlowRef 链定位当前叶 Flow；不存在活动陷入时必须为
+空。`tp` 及由 effective TaskFlow 解析的 CurrentTask/CPU
 identity 都不属于可恢复寄存器现场。Valid context 必须绑定恰好一个仍由该 Task 拥有的
 FlowRef；Prepared/Invalid context 不得被 Scheduler 恢复。
 

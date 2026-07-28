@@ -35,11 +35,11 @@ operations is valid only when the model does not introduce a nested
 preemption-control guard and instead relies solely on an outer context
 contribution.
 
-#### LocalInterruptControl guard boundary
+#### InterruptType guard boundary
 
 Rule ID: `arceos_ex_must_local_interrupt_guard_preserve_saved_flags` (MUST).
 
-A guard whose entered_by/exited_by use LocalInterruptControl
+A guard whose entered_by/exited_by use InterruptType
 irqsave/irqrestore must lower to
 operations that save the incoming local interrupt state and restore
 exactly that saved state on exit by default. It must not be reduced

@@ -170,7 +170,7 @@
 
 后续回归建议：
 
-- 按 `spec/charter/main.md` 中“内部可见性与 checkpoint 规格化”的分工，继续把 VFS/ext2/block/virtio 读链路的长期观察点写入 `spec/model` 和 coding 规格，再由实现生成结构化 trace/checkpoint。DF-0001 后续回归观察重点是：`read_user_path_image()` 或其下层 VFS/block provider 的错误分类，以及 KernelInitTask 发起 block I/O、进入等待、观察 completion 继续执行，与 InterruptStream 开始/结束处理 completion 之间的同步关系。
+- 按 `spec/charter/main.md` 中“内部可见性与 checkpoint 规格化”的分工，继续把 VFS/ext2/block/virtio 读链路的长期观察点写入 `spec/model` 和 coding 规格，再由实现生成结构化 trace/checkpoint。DF-0001 后续回归观察重点是：`read_user_path_image()` 或其下层 VFS/block provider 的错误分类，以及 KernelInitTask 发起 block I/O、进入等待、观察 completion 继续执行，与 InterruptType 开始/结束处理 completion 之间的同步关系。
 - 已完成修复并转入回归：initcall 首读收束、live read inherited pending 主动收束、IRQ/task-poll 单 owner 和 virtqueue release/acquire 顺序边界已经纳入规格和实现。
 - 若后续 stress 再出现失败，应优先补充 virtio-blk live read 的失败分支诊断或独立 debug counter，重点观察 request submitted、notify、used idx、pending 状态、completion count、completion source，以及同步等待超时前的 pending sector。
 - 在继续补齐 ext2/VFS 与 virtio-blk/IRQ 相关锁、guard、memory ordering、IRQ/task context 约束时，把本缺陷作为固定回归问题重新验证。

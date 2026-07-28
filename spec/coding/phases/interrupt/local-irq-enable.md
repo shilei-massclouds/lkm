@@ -8,7 +8,7 @@ model 来源为 `spec/model/phases/interrupt/local-irq-enable/phase.spec`，实�
 
 | Transition | depends / drives / ensures | checkpoint 与 continuation |
 | --- | --- | --- |
-| Preset: Base -> Prepared | 精确检查 Base、IrqTimeInit Online、本地中断关闭与 early flag；无外层 context；依次清除 early flag并执行 `InterruptStream.Enable`/SIE 开启；检查只有 boot CPU 总入口开放 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
+| Preset: Base -> Prepared | 精确检查 Base、IrqTimeInit Online、本地中断关闭与 early flag；无外层 context；依次清除 early flag并执行 `InterruptType.Enable`/SIE 开启；检查只有 boot CPU 总入口开放 | 接受后发出 Started；提交后发出 Prepared，调用 Setup |
 | Setup: Prepared -> Ready | 精确检查 Prepared 和完整 `local_irq_enable_phase_ready()` | 提交后发出 Ready，调用 Enable |
 | Enable: Ready -> Online | 精确检查 Ready 并重新确认外部 IRQ、softirq、IPI、worker、RCU、task 和 SMP 门仍关闭或 deferred | 提交后发出 Online，返回 `interrupt::preset_after_local_irq_enable()` |
 

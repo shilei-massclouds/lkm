@@ -7,6 +7,28 @@ type CpuGroupObject {
 
     initial_state: State::Base;
 
+    processes {
+        Action::PrepareSecondaryTrapEntry {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                self.cpus[1].state == State::Ready;
+            }
+            drives {
+                self.cpus[1].Action::PrepareSecondaryTrapEntry;
+            }
+            ensures {
+                cpu_group_cpu_ref_at(self, 1, ApCPURef);
+                cpu_group_cpu_ref_targets(self, ApCPURef, self.cpus[1]);
+                cpu_ref_targets(ApCPURef, self.cpus[1]);
+                cpu_ref_ready(ApCPURef);
+                self.cpus[1].trap.state == State::Ready;
+                self.cpus[1].trap.interrupt.state == State::Online;
+                self.cpus[1].trap.exception.state == State::Ready;
+            }
+        }
+    }
+
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {

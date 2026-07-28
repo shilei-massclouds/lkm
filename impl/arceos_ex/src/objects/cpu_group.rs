@@ -1,12 +1,14 @@
 use super::{
     boot_args::BootArgs,
     cpu::{BOOT_CPU_LOGICAL_ID, Cpu, CpuRef, CpuRole, LogicId, MAX_CPUS},
-    cpu_control::LocalInterruptControl,
     device_tree::DeviceTree,
+    exception_type::ExceptionType,
     fdt_reader::read_cells,
+    interrupt_type::InterruptType,
     sbi::Sbi,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
     task_flow::TaskFlow,
+    trap_type::TrapType,
 };
 use crate::checkpoint::Checkpoint;
 
@@ -329,12 +331,58 @@ impl CpuGroup {
         self.boot_cpu().map(Cpu::hartid)
     }
 
-    pub fn boot_cpu_local_interrupt(&self) -> Option<&LocalInterruptControl> {
+    pub fn boot_cpu_local_interrupt(&self) -> Option<&InterruptType> {
         Some(self.boot_cpu()?.local_interrupt())
     }
 
-    pub fn boot_cpu_local_interrupt_mut(&mut self) -> Option<&mut LocalInterruptControl> {
+    pub fn boot_cpu_local_interrupt_mut(&mut self) -> Option<&mut InterruptType> {
         Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.local_interrupt_mut())
+    }
+
+    pub fn boot_cpu_trap(&self) -> Option<&TrapType> {
+        Some(self.boot_cpu()?.trap())
+    }
+
+    pub fn boot_cpu_trap_mut(&mut self) -> Option<&mut TrapType> {
+        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.trap_mut())
+    }
+
+    #[cfg(app_user_boot)]
+    pub fn enable_secondary_trap_services(
+        &mut self,
+        syscall_table: &super::exception_type::SyscallTable,
+    ) -> EventResult {
+        let mut logical_id = 1usize;
+        while logical_id < self.cpu_count {
+            let Some(cpu) = self.cpu_mut(logical_id) else {
+                return failed_condition(
+                    LifecycleEvent::Enable,
+                    self.lifecycle.state(),
+                    State::Ready,
+                    State::Ready,
+                );
+            };
+            cpu.trap_mut().enable_secondary_service(syscall_table)?;
+            logical_id += 1;
+        }
+        Ok(())
+    }
+
+    pub fn boot_cpu_interrupt(&self) -> Option<&InterruptType> {
+        Some(self.boot_cpu()?.interrupt())
+    }
+
+    pub fn boot_cpu_interrupt_mut(&mut self) -> Option<&mut InterruptType> {
+        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.interrupt_mut())
+    }
+
+    pub fn boot_cpu_exception(&self) -> Option<&ExceptionType> {
+        Some(self.boot_cpu()?.exception())
+    }
+
+    #[cfg_attr(not(any(app_smoke, app_user_boot)), allow(dead_code))]
+    pub fn boot_cpu_exception_mut(&mut self) -> Option<&mut ExceptionType> {
+        Some(self.cpu_mut(BOOT_CPU_LOGICAL_ID)?.exception_mut())
     }
 
     pub fn possible_cpu_boundary_ready(&self) -> bool {

@@ -1,11 +1,12 @@
 use super::{
     boot_task::BootTask,
     cpu::{CpuRef, MAX_CPUS},
-    cpu_control::{LocalInterruptControl, PreemptionControl, RawSpinLock, RcuReadSide},
+    cpu_control::{PreemptionControl, RawSpinLock, RcuReadSide},
     cpu_group::{CpuGroup, CurrentCpu},
     current_task::CurrentTask,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
+    interrupt_type::InterruptType,
     mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
     rest_init::{KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddTask},
@@ -772,12 +773,12 @@ impl Scheduler {
         kthreadd_flow: &mut KthreaddFlow,
         boot_idle_flow: &BootIdleFlow,
         user_task_set: &mut UserTaskSet,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.idle_task_id() != self.boot_idle_setup_state.task_id()
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
             || !current_task.task_ref().is_boot_scheduler_ref()
         {
             return failed_condition(
@@ -889,7 +890,7 @@ impl Scheduler {
         kthreadd_flow: &mut KthreaddFlow,
         boot_idle_flow: &BootIdleFlow,
         user_task_set: &mut UserTaskSet,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
@@ -1356,7 +1357,7 @@ impl Scheduler {
             TaskRef::SMOKE_RWLOCK => self.smoke_rwlock_task.switch_context(),
             _ => return Ok(false),
         };
-        if !next.initialized() {
+        if !next.physical_switch_ready() {
             self.failed_switch_to()?;
         }
         let next_task_identity = match next_ref {
@@ -2249,6 +2250,10 @@ impl SmokeSchedulerTask {
         &self.task as *const Task as usize
     }
 
+    pub(crate) fn task_mut(&mut self) -> &mut Task {
+        &mut self.task
+    }
+
     fn current_task_candidate(&self) -> super::current_task::CurrentTaskCandidate<'_> {
         super::current_task::CurrentTaskCandidate {
             task: &self.task,
@@ -2297,7 +2302,8 @@ impl SmokeSchedulerTask {
         {
             return false;
         }
-        self.task.init_switch_context(entry, stack_top);
+        self.task
+            .init_switch_context(entry, self.stack.as_ptr() as usize, stack_top);
         if self.task.adopt_setup().is_err() {
             return false;
         }
@@ -2653,14 +2659,14 @@ impl BootRunQueue {
         _per_cpu_storage: &PerCpuStorage,
         root_domain: &DefaultSchedRootDomain,
         boot_task: &BootTask,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         boot_init_preemption: &mut PreemptionControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.lock.state() != State::Base
             || root_domain.state() != State::Ready
             || boot_task.state() != State::OnCpu
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
             || boot_init_preemption.state() != State::Base
         {
             return self.failed_setup();
@@ -3114,7 +3120,7 @@ impl BootIdleSetupState {
         boot_runqueue: &mut BootRunQueue,
         boot_idle_rcu_read_side: &mut RcuReadSide,
         boot_cpu_ref: CpuRef,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         boot_idle_preemption: &mut PreemptionControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -3126,7 +3132,7 @@ impl BootIdleSetupState {
             || boot_idle_rcu_read_side.state() != State::Prepared
             || !boot_idle_rcu_read_side.incomplete_first_slice()
             || !boot_idle_rcu_read_side.full_semantics_deferred()
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
             || boot_idle_preemption.state() != State::Base
             || boot_runqueue.cpu_ref() != boot_cpu_ref
         {

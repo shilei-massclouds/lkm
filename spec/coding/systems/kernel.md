@@ -39,7 +39,7 @@ Kernel.Online。入口 `_start` 必须在 `KernelStarted` 和任何 BootInitFlow
 都在 Kernel Ready/Enable 执行上下文中运行。
 
 OpenSBI 不负责保证 `sie/sip` 已清零。`BootInitFlow.Preset` 的第一个被驱动叶迁移是
-`InterruptStream.Preset`；入口汇编在该边界清零 `sie/sip`，由此首次建立
+`InterruptType.Preset`；入口汇编在该边界清零 `sie/sip`，由此首次建立
 `interrupt_concurrency_closed()`。这发生在 Kernel.Enable 已接受之后、其余入口前导动作之前。
 
 `PayloadHandoffPreparePhase.Online` 表示应用环境的全部可逆准备已经完成。KernelInitFlow 随后先提交

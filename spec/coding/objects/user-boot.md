@@ -12,7 +12,7 @@ fd/OFD/backend dispatch、Task 用户资源以及当前 bounded user-task 集合
 `KernelInitTask` 的执行线。PID 1 的 files、credentials、signal、process-group 和 user trap 状态
 直接保存在 `KernelInitTask` 的 user-state lowering 中，不建立 exec 后 persona carrier。
 首次 exec 声明的 fresh `UserAppFlow` 独立保存用户应用 continuation lifecycle；它不是第二个 Task，
-也不拥有上述 Task 资源。`SyscallException` 继续属于 `ExceptionStream`；`SyscallTable` 是独立表对象，
+也不拥有上述 Task 资源。`SyscallException` 继续属于 `ExceptionType`；`SyscallTable` 是独立表对象，
 不增加 `SyscallDispatcher`。
 
 用户栈 backing、initial stack 与增长语义由独立 [`UserStack`](user-stack.md) coding contract 承载；
@@ -23,35 +23,32 @@ arguments and invokes the shared transaction; ELF handler search, parser, stagin
 implemented in `user_boot.rs`. User entry writes the prepared satp, performs the required fence and returns
 through the modeled trap frame.
 
+The first-user handoff completes `SyscallExceptionType.Setup/Enable`, then enables the owning CPU-local
+`ExceptionType` and `TrapType` before committing user entry. These parent enables do not create global
+exception/trap objects and do not alter the persistent `Task.active_flow`.
+
 ## Trap and exception mapping
 
 The RISC-V user trap frame records `scause`, `sepc`, `sstatus`, `stval` and the integer register state
 needed for transparent return. Breakpoint dispatch gives architecture single-step/probe hooks an
 opportunity before falling back to signal/unsupported handling. These are implementation mappings of
-the model trap boundary, not permission to invent a second exception stream.
+the model trap boundary, not permission to invent a second exception resource or Flow chain.
 
 The user kernel stack is a VMALLOC mapping with the modeled alignment and unmapped guard gap. Large
-exec/mm objects stay out of trap-stack frames. For `APP=user-boot`, the RISC-V formal entry MUST keep a
-fixed-size entry context at the safe stack boundary. `sscratch` points to that context while user code
-runs; the context carries the usable kernel stack boundary and the stable implementation identity of the
-Task that will receive the next synchronous trap. The user-origin prelude MUST preserve user `tp` in the
-ordinary `TrapFrame`, load Task identity into kernel `tp` before entering Rust, and bypass the VMAP
-bit-test. Before returning to user mode, the epilogue MUST refresh the context from the post-dispatch
-kernel `tp`, so a terminal or ordinary scheduling commit cannot leave the previous Task identity armed
-for the next trap. A kernel-origin trap MUST classify the prospective 288-byte frame before saving any general
-register, using only `sp` and `sscratch` and the Linux-shaped `((sp - frame_size) >> THREAD_SHIFT) & 1`
-test (`THREAD_SHIFT=14`). Its normal branch MUST restore the original `sp`, clear `sscratch`, and preserve
-all other registers before entering the common frame-save path.
+exec/mm objects stay out of trap-stack frames. `sscratch` always points to the owning CPU's
+`TrapEntryContext`; the context carries the usable kernel-stack bounds, current Task identity, optional root
+TrapFlowRef and that CPU's emergency-stack state. The user-origin prelude preserves user `tp` in the ordinary
+`TrapFrame`, selects the installed kernel-stack top and loads Task identity into kernel `tp`. Kernel-origin
+entry keeps its interrupted `sp`, but uses the same context and capacity check. Both paths compare the complete
+aligned `TrapFrame + TrapExecutionRecord` range against the installed bounds before saving the ordinary frame.
 
-The overflow stack MUST be a linker-visible 4 KiB static region aligned to 16 bytes. The overflow branch
-MUST preserve the bad stack pointer and original `t6` through the `t6`/`sscratch` exchange, switch before
-constructing a complete `TrapFrame`, and save all integer registers plus `sepc`, `scause`, `stval` and
-`sstatus`. The non-returning handler MUST use only the SBI console to report stable bad-SP, task-stack,
-overflow-stack and CSR diagnostics before terminal shutdown; it MUST NOT use ordinary checkpoints,
-allocation, printk locking or user-signal delivery. The shared classification constants and frame
-construction contract MUST have object smoke coverage, while an ordinary user `ecall` with callee-saved
-sentinels covers transparent register return. Per-task stack ownership, per-CPU overflow stacks and IRQ
-hardirq stack switching remain explicit follow-up boundaries in the active roadmap.
+Insufficient capacity switches to the context's CPU-local, 16-byte-aligned 4 KiB emergency stack before
+constructing a complete `TrapFrame`. Emergency reentry requests shutdown directly without reusing the active
+emergency stack. The non-returning handler uses only the SBI console to report stable CPU, Task, bad-SP,
+task-stack, emergency-stack and CSR diagnostics before terminal shutdown; it does not use ordinary checkpoints,
+allocation, printk locking or user-signal delivery. Object smoke covers normal, boundary, overflow and reentry
+classification, while an ordinary user `ecall` with callee-saved sentinels covers transparent register return.
+Per-task stack ownership is supplied by `TaskThreadContext`; IRQ hardirq stack switching remains deferred.
 
 ## Files and syscall dispatch
 

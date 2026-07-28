@@ -118,7 +118,7 @@ control-flow logic or prose.
 The two UART external propagation gates must be modeled as named
 gates with observable Closed state before any runtime source-enable
 work. The root supervisor external input gate is defined when the
-RiscvIntc/InterruptStream external route is installed. The PLIC
+RiscvIntc/InterruptType external route is installed. The PLIC
 UART source gate is defined by the PlicIrqMapping that binds
 HwirqRef::PlicUart0 to the UART logical IRQ. Mapping,
 request_irq(), and chained-handler setup may define these facts,
@@ -529,6 +529,6 @@ workers, RCU GP kthreads or secondary CPU execution to Online.
 #### Smoke actions
 
 RiscvTimerProvider.setup() must expose enough action surface for two
-smoke checks after InterruptStream.enable(): a monotonic time read
+smoke checks after InterruptType.enable(): a monotonic time read
 check and a one-shot clockevent callback check through the timer IRQ
 route. These checks do not imply full periodic tick service.

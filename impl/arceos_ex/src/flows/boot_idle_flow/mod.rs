@@ -4,9 +4,9 @@ use crate::{
     checkpoint::Checkpoint,
     objects::{
         boot_task::BootTask,
-        cpu_control::LocalInterruptControl,
         cpu_group::{CpuGroup, CurrentCpu},
         current_task::CurrentTask,
+        interrupt_type::InterruptType,
         rest_init::{
             KernelInitFlow, KernelInitTask, KthreaddFlow, KthreaddReadyGate, KthreaddTask,
         },
@@ -474,7 +474,7 @@ impl BootIdleFlow {
         kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -518,7 +518,7 @@ impl BootIdleFlow {
         kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
@@ -556,11 +556,11 @@ impl BootIdleFlow {
     fn wait_while_no_need_resched(
         &mut self,
         boot_task: &BootTask,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
             || !crate::objects::task_flow::task_flow_execution_guard_satisfied(
                 &self.flow,
                 boot_task.task(),
@@ -634,7 +634,7 @@ impl BootIdleFlow {
         kthreadd_flow: &mut KthreaddFlow,
         user_task_set: &mut UserTaskSet,
         boot_task: &BootTask,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.flow.state() != State::Ready
             || !self.idle_entry_prepared

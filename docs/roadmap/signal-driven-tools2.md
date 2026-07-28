@@ -81,7 +81,7 @@ moment（13 request、10 feedback、3 settle），且不创建边界 Signal。Py
   ancestor，不是拒绝。
 - Linux 6.12 `Documentation/arch/riscv/boot.rst` 的 a0/a1、`satp=0`、RV64 PMD/2 MiB 物理对齐和
   ordered-boot 要求，与 model snapshot、`_start` live SATP guard 和 Rust entry adoption 一致。根回归
-  announce 仍观察到 `R`（Kernel.Started）先于 `I`（InterruptStream.Prepared），结构化 basic result
+  announce 仍观察到 `R`（Kernel.Started）先于 `I`（InterruptType.Prepared），结构化 basic result
   为 schema v2、passed、`qemu.timed_out=false`。
 - charter 已固化 13-Signal 因果账本和第二截断边界。逐层复核 model、coding、compose 和
   `impl/arceos_ex` 后未发现差异，因此不制造 model 或实现改动；JSON/snapshot 保持 v5，animation

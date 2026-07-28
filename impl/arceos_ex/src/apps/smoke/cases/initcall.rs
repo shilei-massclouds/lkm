@@ -161,7 +161,9 @@ pub fn run() -> SmokeResult {
         || crate::objects::ns16550a::uart8250_rx_interrupt_request_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_handled_count() == 0
         || crate::objects::ns16550a::serial8250_tx_queue_len() != 0
-        || !ctx.interrupt_stream.supervisor_external_input_gate_open()
+        || !ctx
+            .boot_cpu_interrupt()
+            .supervisor_external_input_gate_open()
         || !ctx
             .irq_handler_registry
             .has_handler_for_logical_irq(crate::objects::ns16550a::uart8250_port_logical_irq())

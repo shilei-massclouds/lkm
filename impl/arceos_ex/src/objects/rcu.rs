@@ -1,6 +1,6 @@
 use super::{
-    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
+    interrupt_type::InterruptType,
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
     softirq::Softirq,
@@ -259,12 +259,12 @@ impl RcuCore {
         scheduler: &Scheduler,
         cpu_group_ready: bool,
         boot_cpu_online: bool,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || !cpu_group_ready
-            || local_interrupt.state() != State::Ready
+            || local_interrupt.local_state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,

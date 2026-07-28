@@ -225,6 +225,55 @@ class DeriveToolTests(unittest.TestCase):
                 for item in data["records"]
             )
         )
+
+    def test_indexed_runtime_child_action_receiver_is_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._derive_source(
+                Path(tmp),
+                """
+                type LogicId { }
+                type Child {
+                    processes {
+                        Action::Prepare {
+                            ensures { child_prepared(self); }
+                        }
+                    }
+                }
+                type Group {
+                    owned { indexed children[key: LogicId]: Child; }
+                    processes {
+                        Action::PrepareChild {
+                            drives { self.children[1].Action::Prepare; }
+                        }
+                    }
+                }
+                object Computer: Group {
+                    initial_state: State::Base;
+                    state State::Base {
+                        transitions {
+                            on Transition::Preset -> State::Prepared {
+                                drives {
+                                    declare self.children[1] of Child;
+                                    Computer.Action::PrepareChild;
+                                }
+                            }
+                        }
+                    }
+                    state State::Prepared { }
+                }
+                predicate child_prepared<C: Child>(child: C) -> bool;
+                """,
+            )
+
+        self.assertTrue(data["summary"]["ok"], data["records"])
+        self.assertTrue(
+            any(
+                item.get("expression") == "child_prepared(Computer.children[1])"
+                and item["status"] == "proved"
+                for item in data["records"]
+            )
+        )
+
     def test_derive_json_has_separate_structured_boundary_counts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)
@@ -672,7 +721,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "BootCpuRegisters.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
+                    == "BootCpuRegisters.stvec == virt_addr(TrapType.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved

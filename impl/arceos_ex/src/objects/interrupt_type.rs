@@ -5,13 +5,11 @@ use crate::{
     checkpoint::Checkpoint,
 };
 
-use super::{
-    cpu_control::LocalInterruptControl,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
-};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition};
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 const INTERRUPT_HANDLER_COUNT: usize = 16;
+const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 
 const HANDLER_FALLBACK: u8 = 0;
 const HANDLER_TIMER: u8 = 1;
@@ -25,8 +23,14 @@ struct InterruptPolicy(u8);
 
 const FALLBACK_POLICY: InterruptPolicy = InterruptPolicy(HANDLER_FALLBACK);
 
-pub struct InterruptStream {
+pub struct InterruptType {
     lifecycle: Lifecycle,
+    local_lifecycle: Lifecycle,
+    local_enabled: bool,
+    saved_enabled_stack: [bool; LOCAL_INTERRUPT_SAVE_STACK],
+    save_depth: usize,
+    saved_and_disabled_count: usize,
+    restored_count: usize,
     timer_handler_ready: bool,
     external_handler_ready: bool,
     supervisor_external_input_gate_defined: bool,
@@ -37,10 +41,16 @@ pub struct InterruptStream {
     early_boot_irqs_disabled: bool,
 }
 
-impl InterruptStream {
+impl InterruptType {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            local_lifecycle: Lifecycle::new(State::Base),
+            local_enabled: false,
+            saved_enabled_stack: [false; LOCAL_INTERRUPT_SAVE_STACK],
+            save_depth: 0,
+            saved_and_disabled_count: 0,
+            restored_count: 0,
             timer_handler_ready: false,
             external_handler_ready: false,
             supervisor_external_input_gate_defined: false,
@@ -104,8 +114,8 @@ impl InterruptStream {
         self.early_boot_irqs_disabled
     }
 
-    pub fn setup(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
-        if self.lifecycle.state() != State::Prepared || local_interrupt.state() != State::Ready {
+    pub fn setup(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || self.local_state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -114,14 +124,14 @@ impl InterruptStream {
             );
         }
 
-        local_interrupt.disable()?;
+        self.disable()?;
         self.boot_cpu_local_interrupts_enabled = false;
         self.early_boot_irqs_disabled = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
-            Checkpoint::InterruptStreamReady,
+            Checkpoint::InterruptTypeReady,
         )
     }
 
@@ -188,7 +198,7 @@ impl InterruptStream {
         Ok(())
     }
 
-    pub fn enable(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
+    pub fn enable_service(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.timer_handler_ready
             || !self.external_handler_ready
@@ -202,11 +212,11 @@ impl InterruptStream {
         }
 
         self.early_boot_irqs_disabled = false;
-        if let Err(err) = local_interrupt.enable() {
+        if let Err(err) = self.enable() {
             self.early_boot_irqs_disabled = true;
             return Err(err);
         }
-        if !local_interrupt.enabled() || !csr::supervisor_interrupts_enabled() {
+        if !self.enabled() || !csr::supervisor_interrupts_enabled() {
             self.early_boot_irqs_disabled = true;
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -216,13 +226,158 @@ impl InterruptStream {
             );
         }
 
-        self.boot_cpu_local_interrupts_enabled = local_interrupt.enabled();
+        self.boot_cpu_local_interrupts_enabled = self.enabled();
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
             State::Online,
-            Checkpoint::InterruptStreamOnline,
+            Checkpoint::InterruptTypeOnline,
         )
+    }
+
+    pub const fn local_state(&self) -> State {
+        self.local_lifecycle.state()
+    }
+
+    pub const fn enabled(&self) -> bool {
+        self.local_enabled
+    }
+
+    pub const fn disabled(&self) -> bool {
+        !self.local_enabled
+    }
+
+    pub const fn saved_and_disabled_count(&self) -> usize {
+        self.saved_and_disabled_count
+    }
+
+    pub const fn restored_count(&self) -> usize {
+        self.restored_count
+    }
+
+    pub fn setup_local_control(&mut self) -> EventResult {
+        if self.local_lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.local_lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        csr::disable_supervisor_interrupts();
+        self.local_enabled = false;
+        self.local_lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::BootCpuLocalInterruptReady,
+        )
+    }
+
+    pub fn disable(&mut self) -> EventResult {
+        if self.local_lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.local_lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        csr::disable_supervisor_interrupts();
+        self.local_enabled = false;
+        Ok(())
+    }
+
+    pub fn enable(&mut self) -> EventResult {
+        if self.local_lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.local_lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        csr::enable_supervisor_interrupts();
+        self.local_enabled = csr::supervisor_interrupts_enabled();
+        if !self.local_enabled {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.local_lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn save_and_disable(&mut self) -> EventResult {
+        if self.local_lifecycle.state() != State::Ready
+            || self.save_depth == self.saved_enabled_stack.len()
+        {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.local_lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.saved_enabled_stack[self.save_depth] = csr::supervisor_interrupts_enabled();
+        self.save_depth += 1;
+        csr::disable_supervisor_interrupts();
+        self.local_enabled = false;
+        self.saved_and_disabled_count = self.saved_and_disabled_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn restore(&mut self) -> EventResult {
+        if self.local_lifecycle.state() != State::Ready || self.save_depth == 0 {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.local_lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.save_depth -= 1;
+        if self.saved_enabled_stack[self.save_depth] {
+            csr::enable_supervisor_interrupts();
+        } else {
+            csr::disable_supervisor_interrupts();
+        }
+        self.local_enabled = csr::supervisor_interrupts_enabled();
+        self.restored_count = self.restored_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub(crate) fn adopt_secondary_online(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Base || self.local_lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Base,
+                State::Online,
+            );
+        }
+        self.timer_handler_ready = true;
+        self.external_handler_ready = true;
+        self.supervisor_external_input_gate_defined = true;
+        self.supervisor_external_input_gate_closed = true;
+        self.supervisor_external_input_enable_deferred = true;
+        self.local_enabled = false;
+        self.early_boot_irqs_disabled = false;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)?;
+        self.local_lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)?;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)?;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 }
 

@@ -65,7 +65,7 @@
 | Completion | 3 |
 | EarlyDtb | 3 |
 | InitStack | 3 |
-| InterruptStream | 3 |
+| InterruptType | 3 |
 | KernelInitTask | 3 |
 | PayloadPreparePhase | 3 |
 | SlubSubsystem | 3 |

@@ -379,7 +379,7 @@ pub fn execute(
     ctx: &mut crate::context::Context,
     arguments: ExecArguments,
     owner: ExecOwner,
-    runtime_frame: Option<&mut super::event_stream::TrapFrame>,
+    runtime_frame: Option<&mut super::trap_type::TrapFrame>,
 ) -> Result<ExecSuccess, ExecError> {
     ctx.exec_transaction.begin(owner, arguments)?;
     let result = prepare_and_commit(ctx, runtime_frame);
@@ -400,7 +400,7 @@ pub fn execute_slices(
     argv: &[&[u8]],
     envp: &[&[u8]],
     owner: ExecOwner,
-    runtime_frame: Option<&mut super::event_stream::TrapFrame>,
+    runtime_frame: Option<&mut super::trap_type::TrapFrame>,
 ) -> Result<ExecSuccess, ExecError> {
     let limits = ctx.config.exec_argument_limits();
     ctx.exec_transaction
@@ -853,9 +853,9 @@ pub fn smoke_commit_builtin_grandchild_exec_image(
 #[cfg(app_user_boot)]
 fn prepare_and_commit(
     ctx: &mut crate::context::Context,
-    runtime_frame: Option<&mut super::event_stream::TrapFrame>,
+    runtime_frame: Option<&mut super::trap_type::TrapFrame>,
 ) -> Result<ExecSuccess, ExecError> {
-    use super::exception_stream as observation;
+    use super::exception_type as observation;
     use crate::checkpoint::Checkpoint;
 
     let owner = ctx.exec_transaction.owner;
@@ -1193,10 +1193,10 @@ fn validate_exec_entropy_len(len: usize) -> Result<(), ExecError> {
 fn commit_prepared(
     ctx: &mut crate::context::Context,
     owner: ExecOwner,
-    runtime_frame: Option<&mut super::event_stream::TrapFrame>,
+    runtime_frame: Option<&mut super::trap_type::TrapFrame>,
     main_image: &[u8],
 ) -> Result<ExecSuccess, ExecError> {
-    use super::exception_stream as observation;
+    use super::exception_type as observation;
     use crate::checkpoint::Checkpoint;
 
     let retention = classify_retired_image_retention(ctx, owner).inspect_err(|_| {
@@ -1469,7 +1469,7 @@ fn read_main_exec_image(ctx: &mut crate::context::Context) -> Result<&'static [u
 
 #[cfg(app_user_boot)]
 fn format_error(error: BinaryFormatError, main: bool) -> (ExecError, usize, usize) {
-    use super::exception_stream as observation;
+    use super::exception_type as observation;
     match error {
         BinaryFormatError::NoExecutableFormat => (
             ExecError::NoExecutableFormat(None),
@@ -1516,7 +1516,7 @@ fn observe_failure(
     ctx: &crate::context::Context,
 ) {
     if owner == ExecOwner::Runtime {
-        super::exception_stream::record_execve_failure_detail(
+        super::exception_type::record_execve_failure_detail(
             stage,
             reason,
             detail,
@@ -1528,7 +1528,7 @@ fn observe_failure(
 
 #[cfg(app_user_boot)]
 fn reset_frame_for_exec_start(
-    frame: &mut super::event_stream::TrapFrame,
+    frame: &mut super::trap_type::TrapFrame,
     entry: usize,
     sp: usize,
     sstatus: usize,

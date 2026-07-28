@@ -134,6 +134,7 @@ type TaskThreadContext {
     s11: RegisterValue;
     breakpoint_state: TaskBreakpointState;
     flow_ref: TaskFlowRef;
+    root_trap_flow_ref: OptionalTrapFlowRef;
     save_count: usize;
     restore_count: usize;
 }

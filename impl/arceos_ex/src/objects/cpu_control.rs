@@ -1,159 +1,9 @@
 use super::{
     boot_task::BootTask,
+    interrupt_type::InterruptType,
     state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
 };
-use crate::arch::riscv64::csr;
 use crate::checkpoint::Checkpoint;
-
-const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
-
-pub struct LocalInterruptControl {
-    lifecycle: Lifecycle,
-    enabled: bool,
-    saved_enabled_stack: [bool; LOCAL_INTERRUPT_SAVE_STACK],
-    save_depth: usize,
-    saved_and_disabled_count: usize,
-    restored_count: usize,
-}
-
-impl LocalInterruptControl {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            enabled: false,
-            saved_enabled_stack: [false; LOCAL_INTERRUPT_SAVE_STACK],
-            save_depth: 0,
-            saved_and_disabled_count: 0,
-            restored_count: 0,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn enabled(&self) -> bool {
-        self.enabled
-    }
-
-    pub const fn disabled(&self) -> bool {
-        !self.enabled
-    }
-
-    pub const fn saved_and_disabled_count(&self) -> usize {
-        self.saved_and_disabled_count
-    }
-
-    pub const fn restored_count(&self) -> usize {
-        self.restored_count
-    }
-
-    pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-
-        csr::disable_supervisor_interrupts();
-        self.enabled = false;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            crate::checkpoint::Checkpoint::BootCpuLocalInterruptReady,
-        )
-    }
-
-    pub fn disable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Disable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        csr::disable_supervisor_interrupts();
-        self.enabled = false;
-        Ok(())
-    }
-
-    pub fn enable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        csr::enable_supervisor_interrupts();
-        self.enabled = csr::supervisor_interrupts_enabled();
-        if !self.enabled {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-        Ok(())
-    }
-
-    pub fn save_and_disable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Disable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        if self.save_depth == self.saved_enabled_stack.len() {
-            return failed_condition(
-                LifecycleEvent::Disable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        self.saved_enabled_stack[self.save_depth] = csr::supervisor_interrupts_enabled();
-        self.save_depth += 1;
-        csr::disable_supervisor_interrupts();
-        self.enabled = false;
-        self.saved_and_disabled_count = self.saved_and_disabled_count.wrapping_add(1);
-        Ok(())
-    }
-
-    pub fn restore(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || self.save_depth == 0 {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Ready,
-            );
-        }
-
-        self.save_depth -= 1;
-        if self.saved_enabled_stack[self.save_depth] {
-            csr::enable_supervisor_interrupts();
-        } else {
-            csr::disable_supervisor_interrupts();
-        }
-        self.enabled = csr::supervisor_interrupts_enabled();
-        self.restored_count = self.restored_count.wrapping_add(1);
-        Ok(())
-    }
-}
 
 pub struct PreemptionControl {
     lifecycle: Lifecycle,
@@ -360,7 +210,7 @@ impl RawSpinLock {
 
     pub fn lock_irqsave(
         &mut self,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         preemption: &mut PreemptionControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready || self.locked {
@@ -381,7 +231,7 @@ impl RawSpinLock {
 
     pub fn unlock_irqrestore(
         &mut self,
-        local_interrupt: &mut LocalInterruptControl,
+        local_interrupt: &mut InterruptType,
         preemption: &mut PreemptionControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready || !self.locked {

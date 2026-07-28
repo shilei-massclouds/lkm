@@ -177,7 +177,7 @@
   <text x="282" y="1490" class="small">init_mm metadata</text>
 
   <rect x="366" y="1428" width="244" height="74" rx="10" class="box carry"/>
-  <text x="488" y="1454" class="label">InterruptStream</text>
+  <text x="488" y="1454" class="label">InterruptType</text>
   <text x="488" y="1480" class="small">Prepared -> Ready</text>
 
   <rect x="650" y="1402" width="536" height="126" rx="10" class="box carry"/>
