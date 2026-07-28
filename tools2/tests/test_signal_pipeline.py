@@ -2827,7 +2827,32 @@ class SignalPipelineTests(unittest.TestCase):
             self.assertEqual(default_result.returncode, 0, default_result.stderr)
             default_data = read_json(default_work / "derive.json")
             self.assertEqual(default_data["initial_snapshot"], saved["snapshot"])
+            self.assertEqual(default_data["root_request"]["source"], "OpenSBI")
             self.assertEqual(default_data["signals"][0]["name"], "Enable")
+
+            explicit_source_work = root / "kernel-explicit-source"
+            explicit_source = subprocess.run(
+                [
+                    str(shortcut),
+                    "-t",
+                    "Kernel.Enable",
+                    "-u",
+                    "BootInitFlow.Preset",
+                    "--source",
+                    "Human",
+                    "--work-dir",
+                    str(explicit_source_work),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(explicit_source.returncode, 0, explicit_source.stderr)
+            self.assertEqual(
+                read_json(explicit_source_work / "derive.json")["root_request"]["source"],
+                "Human",
+            )
 
             stale = subprocess.run(
                 [str(shortcut), "-f", str(PIPELINE), "-t", "Kernel.Enable"],
@@ -3580,6 +3605,68 @@ class SignalPipelineTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(override.returncode, 0, override.stderr)
+            self.assertEqual(
+                read_json(override_work / "derive.json")["root_request"]["source"],
+                "Human",
+            )
+
+            malformed = TOOLS2 / "scenarios" / "Malformed.Start.snapshot.json"
+            self.addCleanup(malformed.unlink, missing_ok=True)
+            malformed_cases = (
+                ("missing boundary provenance", {}),
+                (
+                    "boundary signal does not match",
+                    {
+                        "provenance": {
+                            "boundary": {
+                                "normalized_signal": "Other.Start",
+                                "source": "Harness",
+                            }
+                        }
+                    },
+                ),
+                (
+                    "boundary source is missing or invalid",
+                    {
+                        "provenance": {
+                            "boundary": {
+                                "normalized_signal": "Malformed.Start",
+                                "source": "",
+                            }
+                        }
+                    },
+                ),
+            )
+            for expected, extra in malformed_cases:
+                with self.subTest(default_snapshot=expected):
+                    value = {
+                        "schema": SNAPSHOT_SCHEMA,
+                        "version": SNAPSHOT_VERSION,
+                        "producer": PRODUCER,
+                        "model_fingerprint": "sha256:not-reached",
+                        "snapshot": {},
+                        **extra,
+                    }
+                    malformed.write_text(json.dumps(value), encoding="utf-8")
+                    malformed_work = root / expected.replace(" ", "-")
+                    result = subprocess.run(
+                        [
+                            str(shortcut),
+                            "-f",
+                            str(PIPELINE),
+                            "-t",
+                            "Malformed.Start",
+                            "--work-dir",
+                            str(malformed_work),
+                        ],
+                        cwd=root,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn(expected, result.stderr)
+                    self.assertFalse(malformed_work.exists())
 
             outside = root / "outside.snapshot.json"
             outside.write_text("{}\n", encoding="utf-8")

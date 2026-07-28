@@ -58,6 +58,12 @@ Signal identity、source、target、model fingerprint 和 boundary provenance，
 入口 snapshot 不是可恢复 continuation，也不允许把未提交 ancestor 或尚未处理的 FIFO Signal 当作
 已经完成。
 
+便利入口以显式 `-t` 自动选择该 Signal 的已提交 canonical snapshot 时，新根 Signal 的默认
+sender 必须恢复为 snapshot `provenance.boundary.source`；不得回退到 `Human`，也不得回溯
+或重放产生该 snapshot 的上游 Signal。调用者显式给出 `--source` 时才覆盖该 provenance；
+省略 `-t` 的默认外部编排和显式 `-s` 非自动场景仍使用原有 sender 规则。canonical
+snapshot 缺失、损坏或其 boundary source 不可用时必须在 derive 前拒绝，不能猜测 sender。
+
 ## 六组启动校准批次
 
 下表中的“入口 snapshot”是每组必须建立和复核的 canonical boundary snapshot。名称用于标识边界，

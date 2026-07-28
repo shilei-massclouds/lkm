@@ -45,11 +45,14 @@ Stress/difftest 复合测试的 v2-only 配置、basic-test 编排和历史报�
   `FixMap.Preset` 不得再因 `Config.fixmap` 已声明的 FDT 槽位而拒绝。
 - `tools2/bin/pyveri -h` usage 显示 `[-t SIGNAL] [-u SIGNAL]` 和 `--until`，旧 `tools2/pyveri2` 不存在；
   无参数入口执行唯一 Human 外部编排且第一个真实 Signal 是 `Human -> Computer.Preset`，新入口能从仓库根和其它 cwd 启动，scenario 与高级
-  参数完整透传，显式 `--source` 覆盖默认 Human。
+  参数完整透传，显式 `--source` 覆盖自动 snapshot provenance 或默认 Human。
 - shortcut 只有在显式 `-t` 且没有 `-s` 时按 canonical signal 加载
   `tools2/scenarios/<CanonicalSignal>.snapshot.json`；覆盖 `Startup`/`Preset` 同文件、显式 scenario 优先、
+  省略 `--source` 时从自动 snapshot 的 matching boundary provenance 恢复真实 sender、显式
+  `--source` 覆盖 provenance，而显式 `-s` 不隐式恢复 sender；
   缺失文件在 derive 前返回 2 并报告 canonical signal/预期路径，以及 target/name、绝对路径、`..`、
-  symlink 均不能越出 scenarios 目录。省略 `-t` 的默认入口和 `-u Kernel.Enable` 必须继续从模型初态
+  symlink 均不能越出 scenarios 目录，自动 snapshot 的协议、JSON/I/O、boundary identity 或
+  source 错误也必须在 derive 前返回 2。省略 `-t` 的默认入口和 `-u Kernel.Enable` 必须继续从模型初态
   推导；driver/derive 无 scenario 时也继续使用模型初态。
 - shortcut、driver、derive API/CLI 都验证 `Target.Startup` 与 `Target.Preset` 规范化后的 request、Signal
   ID、事件序列和 canonical JSON 完全相同；正式 model transition 仍只有 `Preset`。

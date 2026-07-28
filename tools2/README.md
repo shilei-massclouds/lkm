@@ -10,6 +10,7 @@ make -C tools2 test
 tools2/bin/pyveri
 tools2/bin/pyveri -u Kernel.Enable --snapshot-out /tmp/kernel-enable-presend.snapshot.json
 tools2/bin/pyveri -u Kernel.Enable --html-out tools2/out/main-animation.html
+tools2/bin/pyveri -t Kernel.Enable -u BootInitFlow.Setup --html-out tools2/out/group2-animation.html
 VERBOSE=1 tools2/bin/pyveri -f tools2/tests/fixtures/pipeline.spec -t Root.Start
 ```
 
@@ -22,6 +23,8 @@ When `-t/--trigger` is explicit and `-s/--scenario` is omitted, the shortcut loa
 `Preset`, so both spellings share one file. A missing or unsafe default path is a usage error; omit `-t` to run the
 unique `external Human` orchestration from the model initial state. The committed `Kernel.Enable` scenario is the
 canonical output of the pre-send command shown above, not an implicit derive rollback or synthesized state.
+When that canonical snapshot is selected automatically, its boundary provenance restores the real Signal source;
+an explicit `--source` overrides it. Explicit `-s` scenarios retain the ordinary explicit-or-`Human` source rule.
 
 Snapshot continuation experiment:
 

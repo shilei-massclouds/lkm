@@ -131,3 +131,9 @@ BootInit 内部语义。
 tools2 JSON/view schema 继续保持 v5，animation 继续保持 v3；本组未引入显式 Signal DSL、continuation、
 旧工具迁移或根门禁接管。下一校准批次是第 3 组 `BootInitFlow.Setup`；在该批次单独 charter-first 闭合前，
 不得把 Setup 的任何叶阶段归入本组。
+
+2026-07-28 补齐分组动画的 canonical sender 恢复：shortcut 在显式 `-t` 自动加载已提交
+snapshot 时，从 matching boundary provenance 取得真实 source。因此第 2 组可直接用
+`-t Kernel.Enable -u BootInitFlow.Setup` 得到 `OpenSBI -> Kernel.Enable` 根 Signal，无需重复
+`--source OpenSBI`；显式 `--source` 仍覆盖 provenance，损坏或不匹配的 canonical snapshot 在
+derive 前拒绝。该校正不改变 model fingerprint、Signal 因果账本或各组边界。

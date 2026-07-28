@@ -59,7 +59,10 @@ def _parser(normalize_signal_request) -> argparse.ArgumentParser:
         default=DEFAULT_SPEC,
         help="input .spec file; default: spec/model/main.spec",
     )
-    parser.add_argument("--source", default="Human", help="Signal source; default: Human")
+    parser.add_argument(
+        "--source",
+        help="Signal source; default: canonical snapshot boundary source, otherwise Human",
+    )
     parser.add_argument("--max-depth", default="all", metavar="N|all")
     parser.add_argument("--max-breadth", default="all", metavar="N|all")
     parser.add_argument("--work-dir", type=Path, help="retain stage JSON in this directory")
@@ -73,11 +76,18 @@ def _parser(normalize_signal_request) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     _bootstrap()
-    from tools2_common import normalize_signal_request
+    from tools2_common import (
+        SNAPSHOT_SCHEMA,
+        SNAPSHOT_VERSION,
+        normalize_signal_request,
+        read_json,
+        require_protocol,
+    )
 
     args = _parser(normalize_signal_request).parse_args(argv)
     trigger = args.trigger
     scenario = args.scenario
+    canonical_snapshot = None
     if args.trigger is not None and scenario is None:
         scenario_root = SCENARIOS_ROOT.resolve()
         assert trigger is not None
@@ -100,12 +110,57 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         scenario = candidate
+        try:
+            canonical_snapshot = require_protocol(
+                read_json(candidate),
+                schema=SNAPSHOT_SCHEMA,
+                version=SNAPSHOT_VERSION,
+                label="snapshot",
+            )
+        except (OSError, ValueError) as error:
+            print(
+                f"tools2/bin/pyveri: invalid default scenario for canonical signal "
+                f"{trigger}: {error}",
+                file=sys.stderr,
+            )
+            return 2
+        provenance = canonical_snapshot.get("provenance")
+        boundary = provenance.get("boundary") if isinstance(provenance, dict) else None
+        if not isinstance(boundary, dict):
+            print(
+                f"tools2/bin/pyveri: invalid default scenario for canonical signal "
+                f"{trigger}: missing boundary provenance",
+                file=sys.stderr,
+            )
+            return 2
+        if boundary.get("normalized_signal") != trigger:
+            print(
+                f"tools2/bin/pyveri: invalid default scenario for canonical signal "
+                f"{trigger}: boundary signal does not match",
+                file=sys.stderr,
+            )
+            return 2
+        boundary_source = boundary.get("source")
+        if not isinstance(boundary_source, str) or not boundary_source.strip():
+            print(
+                f"tools2/bin/pyveri: invalid default scenario for canonical signal "
+                f"{trigger}: boundary source is missing or invalid",
+                file=sys.stderr,
+            )
+            return 2
+    source = args.source
+    if source is None:
+        source = (
+            canonical_snapshot["provenance"]["boundary"]["source"]
+            if canonical_snapshot is not None
+            else "Human"
+        )
     from pyveri.__main__ import main as driver_main
 
     driver_args = [
         str(args.spec),
         "--source",
-        args.source,
+        source,
         "--max-depth",
         args.max_depth,
         "--max-breadth",
